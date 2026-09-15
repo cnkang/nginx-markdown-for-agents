@@ -506,6 +506,14 @@ def _append_critical_results(
                 passed=summary.line_pct >= threshold,
             )
         )
+    if records and not any(
+        result.label.startswith("Critical: ") for result in results
+    ):
+        # Reports exist but no critical-path category contributed a measured
+        # result, so the gate would pass without ever checking a critical path.
+        errors.append(
+            "no critical-path category has measured lines in the lcov reports"
+        )
 
 
 def _finish_gate(

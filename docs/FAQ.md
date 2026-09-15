@@ -149,9 +149,11 @@ See [Performance Tuning](guides/PERFORMANCE_TUNING.md) for details.
 
 ### Does it support streaming?
 
-Yes, the current `markdown_streaming auto` policy can select the bounded
-streaming engine for eligible large or chunked responses and retains
-full-buffer conversion for small responses and hard-blocked cases. Use
+Yes, the current `markdown_streaming auto` policy prefers the bounded
+streaming engine for every eligible response, independent of response size. A
+response that is eligible for conversion but blocked from streaming, the module
+converts it with the full-buffer engine. A response that is not eligible for
+conversion passes through unchanged. Use
 `markdown_streaming off` to require full-buffer processing or
 `markdown_streaming force` to prefer streaming for every eligible response
 **when no hard blocker applies** — `markdown_cache_validation full` is a

@@ -53,7 +53,7 @@ release metadata and is not a substitute for this ABI identifier.
 
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
-| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration, while Rust exposes only production APIs consumed by C — explicitly including dynamic-configuration parsing and request-path decisions |
+| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration, while Rust exposes only production APIs consumed by C, covering request-path decisions only: the runtime dynamic-configuration parser was removed in 0.9.2 |
 
 ## Shared struct policy
 

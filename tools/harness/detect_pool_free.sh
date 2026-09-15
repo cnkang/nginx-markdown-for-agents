@@ -47,7 +47,17 @@ SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
 
+# Exit convention: 0 = the scan completed and found nothing, 1 = violations
+# found, 2 = the scan could not be completed.  A missing directory is not a clean
+# result, and a file that cannot be read is not a file without violations.
+if [[ ! -d "$SRC_DIR" ]]; then
+    echo "ERROR: cannot scan '${SRC_DIR}': not a directory" >&2
+    exit 2
+fi
+
 violations=0
+scanned=0
+unreadable=0
 
 echo "=== Pool-Free Mismatch Detection (Rule 43) ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
@@ -77,12 +87,35 @@ is_allowlisted() {
 }
 
 # ── Main scan loop ──
-while IFS= read -r src_file; do
+# Enumerate first, and stop when the listing itself fails: an empty list from a
+# failed find is not a clean tree.
+# A private directory holds both temporary files; the trap removes it on any
+# exit, so an interrupted run leaves nothing behind and no fixed name to collide
+# with or to follow as a symlink.
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/markdown-pool-free.XXXXXX")" || {
+    echo "ERROR: cannot create a private work directory" >&2
+    exit 2
+}
+file_list="${work_dir}/files.list"
+awk_out="${work_dir}/awk.out"
+trap 'rm -rf "${work_dir}"' EXIT
+if ! find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z >"$file_list"; then
+    echo "ERROR: cannot enumerate ${SRC_DIR}; the scan did not run" >&2
+    exit 2
+fi
+
+while IFS= read -r -d '' src_file; do
     [[ -z "$src_file" ]] && continue
 
+    # An empty file has nothing to scan and is not an unreadable file.
+    [[ -s "$src_file" ]] || continue
+
     if ! grep -qI '' "$src_file" 2>/dev/null; then
+        echo "ERROR: cannot read ${src_file} as text; it was not scanned" >&2
+        unreadable=$((unreadable + 1))
         continue
     fi
+    scanned=$((scanned + 1))
 
     # awk function-scoped analysis.  The key normalization is:
     #   - pool allocation LHS: capture the full lvalue expression to the
@@ -93,17 +126,10 @@ while IFS= read -r src_file; do
     #   - Both sides are reduced to a canonical token form so that
     #     "ctx->buffer.data" on the alloc side matches the same string
     #     on the free side.
-    while IFS=: read -r free_line free_var; do
-        [[ -z "$free_line" ]] && continue
-
-        if is_allowlisted "$src_file" "$free_line"; then
-            echo "  ALLOWED ${src_file}:${free_line} — ngx_free(${free_var}) on pool-allocated pointer (allow-pool-free)" >&2
-            continue
-        fi
-
-        echo "  ERROR   ${src_file}:${free_line} — ngx_free(${free_var}) called on pointer allocated with ngx_palloc/ngx_pcalloc/ngx_pnalloc (Rule 43: do not explicitly free pool memory; if a resizable heap buffer is intended, use ngx_alloc/ngx_free consistently)" >&2
-        violations=$((violations + 1))
-    done < <(awk '
+    # The parser runs to a file so its exit status can be checked: a
+    # process substitution would hide the failure and the loop would read
+    # nothing, which reads as a clean tree.
+    if ! awk '
         function normalize_lvalue(s,   parts, lhs, t, ch, out, i, n, depth, start, n2) {
             # s is a line like "    ctx->buffer.data = ngx_palloc(...);"
             # or "    ngx_free(ctx->buffer.data);"
@@ -254,14 +280,35 @@ while IFS= read -r src_file; do
                 func_start = NR
             }
         }
-    ' "$src_file" 2>/dev/null || true)
+    ' "$src_file" >"$awk_out" 2>/dev/null; then
+        echo "ERROR: cannot parse ${src_file}; it was not scanned" >&2
+        unreadable=$((unreadable + 1))
+        continue
+    fi
+    while IFS=: read -r free_line free_var; do
+        [[ -z "$free_line" ]] && continue
 
-done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null | sort)
+        if is_allowlisted "$src_file" "$free_line"; then
+            echo "  ALLOWED ${src_file}:${free_line} — ngx_free(${free_var}) on pool-allocated pointer (allow-pool-free)" >&2
+            continue
+        fi
+
+        echo "  ERROR   ${src_file}:${free_line} — ngx_free(${free_var}) called on pointer allocated with ngx_palloc/ngx_pcalloc/ngx_pnalloc (Rule 43: do not explicitly free pool memory; if a resizable heap buffer is intended, use ngx_alloc/ngx_free consistently)" >&2
+        violations=$((violations + 1))
+    done < "$awk_out"
+
+done < "$file_list"
 
 echo "" >&2
 echo "=== Summary ===" >&2
+echo "  Files scanned: ${scanned}" >&2
 echo "  Violations: ${violations}" >&2
 echo "" >&2
+
+if [[ "$unreadable" -gt 0 ]]; then
+    echo "FAIL: ${unreadable} file(s) could not be read, so the scan is incomplete." >&2
+    exit 2
+fi
 
 if [[ "$violations" -gt 0 ]]; then
     echo "FAIL: ${violations} pool-free mismatch(es) found — do not explicitly free pool memory with ngx_free; if a resizable heap buffer is intended, allocate with ngx_alloc and free with ngx_free consistently (Rule 43)." >&2

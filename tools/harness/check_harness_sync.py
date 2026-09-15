@@ -13,6 +13,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# The repository root has to be importable before any `tools.*` import below, so
+# the script runs the same way whether it is started by a Makefile target or by
+# hand.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
 try:
     from tools.harness.constants import (
         FAIL,
@@ -28,9 +34,6 @@ except ModuleNotFoundError:
         WARN_NEEDS_AUTHOR_REVIEW,
     )
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
 
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
@@ -602,6 +605,8 @@ def _missing_manifest_segment(
             missing.extend(_missing_make_targets(command, segment, targets))
             break
         if token == "pytest":
+            # A collecting run names paths that still have to exist; only the
+            # claim that it executes them is what the option rules out.
             missing.extend(_missing_command_paths(command, segment, index + 1))
             break
         if token in {"python", "python3", "bash", "sh"}:
@@ -777,6 +782,435 @@ def _check_harness_docs(manifest: dict) -> CheckResult:
             f"harness docs are missing required references or phrases: {unique_missing}",
         )
     return _result("harness-docs", PASS, "README, core, and summary expose the manifest contract")
+
+
+RULE_CHECK_STAGES = {"save", "commit", "push", "ci"}
+
+
+PRECOMMIT_CONFIG = ".pre-commit-config.yaml"
+PUSH_PROFILE = "tools/ci/pre_push_profile.py"
+
+WIRING_FILES = (
+    "Makefile",
+    PRECOMMIT_CONFIG,
+    PUSH_PROFILE,
+)
+
+
+INTERPRETERS = ("python3", "python", "bash", "sh")
+
+
+# Options that make a test runner list work instead of doing it.
+NON_RUNNING_TEST_OPTIONS = {"--collect-only", "--co"}
+
+# Options whose value is the following word, which is not a path to run.
+VALUE_TAKING_TEST_OPTIONS = {
+    "-k", "-m", "-n", "-o", "-p", "-W", "-c", "--confcutdir", "--deselect",
+    "--ignore", "--ignore-glob", "--junitxml", "--maxfail", "--rootdir", "--tb",
+}
+
+
+def _invocation_target(parts: list[str]) -> str | None:
+    """Return the path an entry line runs, if the line runs a path at all."""
+    while parts and "=" in parts[0] and not parts[0].startswith("-"):
+        parts = parts[1:]
+    if not parts or parts[0] not in INTERPRETERS:
+        return None
+    rest = parts[1:]
+    while rest:
+        token = rest[0]
+        if token in {"-m", "-c"}:
+            # These take code, not a path.
+            return None
+        if not token.startswith("-"):
+            return token.rstrip("/")
+        # An option may carry a value in the next word: `bash -o pipefail` and
+        # the combined form `bash -euo pipefail` both do.
+        flags = token.lstrip("-")
+        if set(flags) & set("ocIF") and token not in {"-O"}:
+            rest = rest[2:]
+            continue
+        rest = rest[1:]
+    return None
+
+
+def _discovery_target(parts: list[str]) -> str | None:
+    """Return the directory a test runner discovers, when one is named.
+
+    Only a runner with a discovery mechanism covers the files under a directory;
+    running an interpreter against a directory executes nothing.
+    """
+    while parts and "=" in parts[0] and not parts[0].startswith("-"):
+        parts = parts[1:]
+    if len(parts) < 3 or parts[0] not in INTERPRETERS or parts[1] != "-m":
+        return None
+    if parts[2] not in {"pytest", "unittest"}:
+        return None
+    if any(token in NON_RUNNING_TEST_OPTIONS for token in parts[3:]):
+        # Collection lists tests instead of running them.
+        return None
+    index = 3
+    while index < len(parts):
+        token = parts[index]
+        if token in VALUE_TAKING_TEST_OPTIONS:
+            # The next word belongs to the option, not to the run.
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token.rstrip("/")
+    return None
+
+
+def _is_invoked(path: str, wiring: str) -> bool:
+    """True when an entry point runs a path, rather than only mentioning it.
+
+    A file listed as an argument, named in a comment or kept in a variable is
+    not a gate.  The mapping has to name something an entry point executes, or a
+    directory whose run covers it.
+    """
+    stripped = path.removeprefix("./")
+    parent = str(Path(stripped).parent)
+    for line in wiring.splitlines():
+        if _line_runs(line, stripped, parent):
+            return True
+    return False
+
+
+def _line_runs(line: str, stripped: str, parent: str) -> bool:
+    """True when one entry line runs the path, directly or by discovery."""
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return False
+    if text.startswith(("entry:", "entry :")):
+        value = text.split(":", 1)[1].strip()
+        if value == stripped:
+            return True
+        # An entry that names an interpreter runs the path it passes on, so it
+        # goes through the same analysis as any other line.
+        text = value
+    from tools.harness.stage_reachability import command_words
+
+    parts = command_words(text)
+    if parts and parts[0] == stripped:
+        return True
+    # A plain interpreter run reaches the file it names and nothing else: a
+    # directory argument executes no file from that directory.
+    if _invocation_target(parts) == stripped:
+        return True
+    discovered = _discovery_target(parts)
+    if discovered is not None and _is_collected(stripped) and (
+        discovered == stripped
+        or discovered == parent
+        or stripped.startswith(discovered + "/")
+    ):
+        return True
+    return False
+
+
+def _is_collected(path: str) -> bool:
+    """True when pytest's default collection would run this file.
+
+    A directory argument hands the runner a directory; only the test files under
+    it are executed, so a detector living there is not reached by that run.
+    """
+    name = path.rsplit("/", 1)[-1]
+    return name.endswith(".py") and (
+        name.startswith("test_") or name.endswith("_test.py")
+    )
+
+
+def _makefile_text() -> str:
+    """Return the root Makefile without evaluating its recipes."""
+    return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+
+def _precommit_hook_entries() -> list[str]:
+    """Return the `entry` values of the configured hooks.
+
+    Parsed, not searched: a comment that mentions a command is not a hook, and a
+    hook with no step is not an entry point.
+    """
+    import yaml
+
+    try:
+        config = yaml.safe_load(_stage_config_text()) or {}
+    except yaml.YAMLError:
+        return []
+    if not isinstance(config, dict):
+        return []
+    return _enabled_hook_entries(config)
+
+
+def _enabled_hook_entries(config: dict) -> list[str]:
+    """Select only hooks enabled for the commit adapter."""
+    entries: list[str] = []
+    repos = config.get("repos", [])
+    if not isinstance(repos, list):
+        return entries
+    for repo in repos:
+        if not isinstance(repo, dict) or not isinstance(repo.get("hooks"), list):
+            continue
+        for hook in repo["hooks"]:
+            entry = _commit_hook_entry(hook, config.get("default_stages", ["pre-commit"]))
+            if entry is not None:
+                entries.append(entry)
+    return entries
+
+
+def _commit_hook_entry(hook: object, default_stages: object) -> str | None:
+    """Return a well-formed commit hook command, or no evidence."""
+    if not isinstance(hook, dict) or not isinstance(hook.get("entry"), str):
+        return None
+    stages = hook.get("stages", default_stages)
+    if isinstance(stages, list) and "pre-commit" in stages:
+        return hook["entry"]
+    return None
+
+
+def _workflow_run_text() -> str:
+    """Return the shell commands the workflows actually run.
+
+    Only `run` values are collected, so a comment that names a target is not an
+    invocation.
+    """
+    import yaml
+
+    commands: list[str] = []
+    for path in _workflow_files():
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        commands.extend(_document_run_commands(document))
+    return "\n".join(commands)
+
+
+def _defaults_directory(scope: object) -> object:
+    """Read `defaults.run.working-directory` from a workflow or a job."""
+    if not isinstance(scope, dict):
+        return None
+    defaults = scope.get("defaults")
+    if not isinstance(defaults, dict):
+        return None
+    run = defaults.get("run")
+    return run.get("working-directory") if isinstance(run, dict) else None
+
+
+def _document_run_commands(document: object) -> list[str]:
+    """Return the `run` values of one workflow document."""
+    if not isinstance(document, dict):
+        return []
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    workflow_directory = _defaults_directory(document)
+    commands: list[str] = []
+    for job in jobs.values():
+        if not isinstance(job, dict) or job.get("if") is False:
+            continue
+        directory = job.get("working-directory", _defaults_directory(job))
+        if directory is None:
+            directory = workflow_directory
+        commands.extend(_enabled_step_commands(job.get("steps", []), directory))
+    return commands
+
+
+def _runs_elsewhere(directory: object) -> bool:
+    """A working directory this cannot establish as the root is not evidence."""
+    if directory is None:
+        return False
+    if not isinstance(directory, str):
+        return True
+    return directory.strip() not in {"", ".", "./"}
+
+
+def _enabled_step_commands(steps: object, job_directory: object = None) -> list[str]:
+    """Extract enabled run steps; unsupported structures provide no evidence."""
+    if not isinstance(steps, list):
+        return []
+    commands: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict) or step.get("if") is False:
+            continue
+        if not isinstance(step.get("run"), str):
+            continue
+        # A step that runs elsewhere does not execute a repository-root gate.
+        if _runs_elsewhere(job_directory) or _runs_elsewhere(
+            step.get("working-directory")
+        ):
+            continue
+        from tools.harness.stage_reachability import literal_script_lines
+
+        commands.extend(literal_script_lines(step["run"]))
+    return commands
+
+
+def _profile_gate_text() -> str:
+    """Read validated shared data without executing the declaration module."""
+    from tools.ci.pre_push_gates import load_gates
+
+    gates = load_gates(REPO_ROOT / "tools/ci/pre_push_gates.json")
+    return "\n".join(shlex.join(gate["command"]) for gate in gates)
+
+
+def _stage_config_text() -> str:
+    """Return the pre-commit configuration."""
+    return (REPO_ROOT / PRECOMMIT_CONFIG).read_text(encoding="utf-8")
+
+
+def _workflow_files() -> list[Path]:
+    """Return the workflow files."""
+    return sorted((REPO_ROOT / ".github" / "workflows").glob("*.y*ml"))
+
+
+def _stage_wiring(stage: str) -> str:
+    """Resolve actual stage entries, never inserting expected targets as edges.
+
+    Save denotes the optional editor adapter for the same quick hooks. This
+    proves configured commands, not installation of an editor or Git hook.
+    CI edges may be conditional; trigger coverage is checked separately.
+    """
+    from tools.harness.stage_reachability import reachable_commands
+
+    gates: list[str] = []
+    if stage in {"save", "commit"}:
+        entries = _precommit_hook_entries()
+    elif stage == "ci":
+        entries = _workflow_run_text().splitlines()
+    elif stage == "push":
+        entries = ["make pre-push-check"]
+        gates = _profile_gate_text().splitlines()
+    else:
+        return ""
+    return reachable_commands(_makefile_text(), entries, PUSH_PROFILE, gates)
+
+
+def _wiring_text() -> str:
+    """Return the text of the files that invoke checks and tests."""
+    return "\n".join(
+        (REPO_ROOT / name).read_text(encoding="utf-8")
+        for name in WIRING_FILES
+        if (REPO_ROOT / name).exists()
+    )
+
+
+def _stage_problems(stages: object, rule: str) -> list[str]:
+    """Return the problems with an entry's stage list."""
+    if (
+        not isinstance(stages, list)
+        or not stages
+        or not all(isinstance(stage, str) and stage for stage in stages)
+    ):
+        return [f"rule {rule}: stage must be a non-empty list of names"]
+    if not set(stages) <= RULE_CHECK_STAGES:
+        return [f"rule {rule}: unknown stage {stages!r}"]
+    return []
+
+
+def _mapping_shape_problems(entry: dict, rule: str) -> list[str]:
+    """Return the problems with an entry's field types and emptiness."""
+    problems = _stage_problems(entry["stage"], rule)
+    files = entry["files"]
+    if (
+        not isinstance(files, list)
+        or not files
+        or not all(isinstance(item, str) and item for item in files)
+    ):
+        problems.append(f"rule {rule}: files must be a non-empty list of patterns")
+    if not isinstance(entry["blocking"], bool):
+        problems.append(f"rule {rule}: blocking must be a boolean")
+    for key in ("check", "summary", "not_covered"):
+        if not isinstance(entry[key], str) or not entry[key].strip():
+            problems.append(f"rule {rule}: {key} must be a non-empty string")
+    if entry["test"] is not None and not isinstance(entry["test"], str):
+        problems.append(f"rule {rule}: test must be a path or null")
+    return problems
+
+
+def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[str]:
+    """Return the problems with one mapping entry, empty when it is sound.
+
+    A path that merely exists is not wiring: the entry has to name a check that
+    an entry point actually invokes, and a test that something runs.  That is the
+    drift this mapping exists to catch.
+    """
+    required = {
+        "rule", "summary", "check", "files", "stage", "blocking", "test", "not_covered",
+    }
+    rule = str(entry.get("rule", "?"))
+    missing = sorted(required - set(entry))
+    if missing:
+        return [f"rule {rule}: missing {', '.join(missing)}"]
+
+    problems = _mapping_shape_problems(entry, rule)
+    if f"| {rule} |" not in agents:
+        problems.append(f"rule {rule}: not in the AGENTS.md rule table")
+
+    check = entry["check"]
+    if isinstance(check, str) and check.strip():
+        if not (REPO_ROOT / check).is_file():
+            problems.append(f"rule {rule}: check {check} is not a repository file")
+        elif not _is_invoked(check, wiring):
+            problems.append(
+                f"rule {rule}: nothing invokes {check}; the mapping would claim a "
+                f"gate that never runs"
+            )
+    test = entry["test"]
+    if isinstance(test, str) and test.strip() and not (REPO_ROOT / test).is_file():
+        problems.append(f"rule {rule}: test {test} does not exist")
+    elif isinstance(test, str) and test.strip() and not _is_invoked(test, wiring):
+        problems.append(f"rule {rule}: nothing runs {test}")
+
+    problems.extend(_stage_wiring_problems(entry["stage"], rule, check))
+    return problems
+
+
+def _stage_wiring_problems(stages: object, rule: str, check: object) -> list[str]:
+    """Return the stages whose entry points do not reach the check.
+
+    The declared stages have to reach the check, not just the tree: a check
+    named under a target nobody calls would never gate anything.
+    """
+    if not isinstance(check, str) or not check.strip() or not isinstance(stages, list):
+        return []
+    problems: list[str] = []
+    for stage in stages:
+        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGES:
+            continue
+        try:
+            wiring = _stage_wiring(stage)
+        except (OSError, ValueError, SyntaxError) as exc:
+            problems.append(f"rule {rule}: cannot verify {stage}: {exc}")
+            continue
+        if not _is_invoked(check, wiring):
+            problems.append(f"rule {rule}: no {stage} entry point runs {check}")
+    return problems
+
+
+def _check_rule_checks(manifest: dict) -> CheckResult:
+    """Verify that every rule-to-check mapping names something that exists.
+
+    An entry that points at a missing script, a stage nobody runs, or a rule
+    number that AGENTS.md no longer lists claims a rule is wired when it is not.
+    """
+    entries = manifest.get("rule_checks")
+    if not isinstance(entries, list) or not entries:
+        return _result("rule-checks", FAIL, "rule_checks missing from the manifest")
+
+    agents = AGENTS_PATH.read_text(encoding="utf-8") if AGENTS_PATH.exists() else ""
+    wiring = _wiring_text()
+    problems: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            problems.append("an entry is not an object")
+            continue
+        problems.extend(_rule_check_entry_problems(entry, agents, wiring))
+
+    if problems:
+        return _result("rule-checks", FAIL, "; ".join(problems[:4]))
+    return _result("rule-checks", PASS, f"{len(entries)} rule(s) mapped to an existing check")
 
 
 def _check_agents_map() -> CheckResult:
@@ -1295,10 +1729,20 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
 
 
 def _dockerfile_final_user(content: str) -> str | None:
-    """Return the final Dockerfile USER principal, excluding any group."""
+    """Return the final Dockerfile stage's USER principal, excluding any group.
+
+    The scan stops at the FROM instruction that opens the final stage, so a
+    USER instruction belonging to an earlier stage is never attributed to the
+    image that is actually built.
+    """
     for raw_line in reversed(content.splitlines()):
         parts = raw_line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].upper() == "USER":
+        if not parts:
+            continue
+        keyword = parts[0].upper()
+        if keyword == "FROM":
+            return None
+        if len(parts) == 2 and keyword == "USER":
             return parts[1].split()[0].split(":", 1)[0].lower()
     return None
 
@@ -1607,6 +2051,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),
         _check_agents_map(),
+        _check_rule_checks(manifest),
         _check_e2e_harness_contract(),
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),

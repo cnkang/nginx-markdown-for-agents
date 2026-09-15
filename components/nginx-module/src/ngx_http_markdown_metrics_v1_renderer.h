@@ -4,7 +4,7 @@
 /*
  * Metrics v1 Prometheus text 0.0.4 renderer.
  *
- * Emits exactly the 11 frozen metric families defined in the checked-in
+ * Emits exactly the 10 frozen metric families defined in the checked-in
  * 0.9.2 metrics registry.
  *
  * JSON and multi-format support are not part of the 0.9.2 boundary; the only
@@ -22,7 +22,7 @@
  *   4. nginx_markdown_conversion_duration_seconds (histogram)
  *   5. nginx_markdown_input_bytes_total (counter)
  *   6. nginx_markdown_output_bytes_total (counter)
- *   7. nginx_markdown_streaming_peak_memory_bytes (gauge)
+ *   7. nginx_markdown_conversion_peak_memory_bytes (gauge)
  *   8. nginx_markdown_streaming_events_total (counter)
  *   9. nginx_markdown_decompression_events_total (counter)
  *  10. nginx_markdown_build_info (gauge)
@@ -44,7 +44,7 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
  * v1 metrics snapshot structure.
  *
  * This is the reduced metrics structure that carries exactly the
- * data needed to render the 11 frozen families. The existing
+ * data needed to render the 10 frozen families. The existing
  * ngx_http_markdown_metrics_snapshot_t remains as an internal storage
  * shape for counter aggregation; it is not a public renderer or wire
  * contract. The v1 renderer reads from this v1 snapshot.
@@ -86,7 +86,7 @@ typedef struct {
 
     ngx_atomic_uint_t output_bytes;
 
-    ngx_atomic_uint_t streaming_peak_memory_bytes;
+    ngx_atomic_uint_t conversion_peak_memory_bytes;
 
     struct {
         ngx_atomic_uint_t commit;
@@ -341,13 +341,13 @@ ngx_http_markdown_metrics_v1_render_families_4_to_7(
     }
 
     p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_streaming_peak_memory_bytes "
-        "Last streaming conversion peak working-set estimate; "
-        "not process RSS.\n"
-        "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
-        "nginx_markdown_streaming_peak_memory_bytes %uA\n"
+        "# HELP nginx_markdown_conversion_peak_memory_bytes "
+        "Run-wide high-water mark of the conversion peak working-set "
+        "estimate (streaming and full-buffer); not process RSS.\n"
+        "# TYPE nginx_markdown_conversion_peak_memory_bytes gauge\n"
+        "nginx_markdown_conversion_peak_memory_bytes %uA\n"
         "\n",
-        snapshot->streaming_peak_memory_bytes);
+        snapshot->conversion_peak_memory_bytes);
     if (p >= end) {
         return NULL;
     }
@@ -446,7 +446,7 @@ ngx_http_markdown_metrics_v1_render_families_8_to_9(
 }
 
 static u_char *
-ngx_http_markdown_metrics_v1_render_families_10_to_11(
+ngx_http_markdown_metrics_v1_render_build_info(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
@@ -485,16 +485,17 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
 }
 
 /*
- * Render the 11 frozen metric families in Prometheus text 0.0.4 format.
+ * Render the 10 frozen metric families in Prometheus text 0.0.4 format.
  *
- * Writes HELP, TYPE, and metric lines for all 11 families into the
+ * Writes HELP, TYPE, and metric lines for all 10 families into the
  * buffer between p and end. Returns a pointer past the last byte
  * written, or NULL if the buffer is exhausted.
  *
  * Parameters:
  *   p        - Start of writable buffer region
  *   end      - One past the end of the buffer
- *   snapshot - v1 metrics snapshot (exactly 11 families)
+ *   snapshot - v1 metrics snapshot (11 fields, 10 families: the two
+ *              conversion durations share one histogram)
  *
  * Returns:
  *   Pointer past the last byte written, or NULL on buffer overflow
@@ -527,7 +528,7 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    return ngx_http_markdown_metrics_v1_render_families_10_to_11(
+    return ngx_http_markdown_metrics_v1_render_build_info(
         p, end, snapshot);
 }
 

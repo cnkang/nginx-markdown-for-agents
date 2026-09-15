@@ -1,8 +1,9 @@
 # Configuration Reference (0.9.2)
 
 This is the frozen configuration reference. The command table has 20
-active `markdown_*` directives plus five retained reject-only migration
-entries. Resource limits use one `markdown_limits`
+active `markdown_*` directives. The module no longer registers the five names
+removed by the convergence, so `nginx -t` fails them with NGINX's standard
+`unknown directive` error. Resource limits use one `markdown_limits`
 directive with bounded key/value entries. Configuration is static in 0.9.2.
 Validate changes with `nginx -t` before a controlled reload.
 
@@ -11,15 +12,15 @@ Validate changes with `nginx -t` before a controlled reload.
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
-# Minimal upstream used by the example proxy_pass below.
-# Replace with your actual origin service (or proxy to a socket/port).
-# The upstream MUST NOT be the port this server itself listens on,
-# otherwise NGINX proxies each request back to itself.
-upstream backend {
-    server 127.0.0.1:8081;
-}
-
 http {
+    # Minimal upstream used by the example proxy_pass below.
+    # Replace with your actual origin service (or proxy to a socket/port).
+    # The upstream MUST NOT be the port this server itself listens on,
+    # otherwise NGINX proxies each request back to itself.
+    upstream backend {
+        server 127.0.0.1:8081;
+    }
+
     markdown_filter on;
     markdown_streaming auto;
     markdown_auto_decompress on;
@@ -253,10 +254,9 @@ mapping rows below cover only removals that appeared after that table
 (`markdown_streaming_auto_threshold`, `markdown_decompress_max_size`,
 `markdown_parse_timeout`, `markdown_parser_budget`,
 `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
-`markdown_stream_flush_min`).  `nginx -t` rejects removed directives
-with either the explicit 0.9.2 migration message for the five retained
-reject-only names or NGINX's standard "unknown directive" error for names no
-longer registered. The migration-guide pointer in the error message exists
+`markdown_stream_flush_min`).  `nginx -t` rejects every removed directive with
+NGINX's standard "unknown directive" error, because the module registers no
+removed name any more. The migration-guide pointer in the error message exists
 only for the 0.9.0 and 0.9.1 removals.
 
 ## Removed directives
@@ -300,6 +300,10 @@ longer watched.
 
 `markdown_dynconf_dry_run` — REMOVED. Validate candidate static configuration
 with `nginx -t` before reloading.
+
+The module no longer registers these five names, so a configuration that still uses
+one fails `nginx -t` with NGINX's standard `unknown directive` error. There is
+no module-specific migration hint.
 
 For the complete 0.9.2 before/after removal table, see
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md#removed-active-directives--beforeafter).

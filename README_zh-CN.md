@@ -78,8 +78,9 @@ HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](
 
 ## 0.9.2 配置要点
 
-0.9.2 将公共配置冻结为 20 条有效指令（另保留 5 个仅拒绝的迁移名称）。请显式配置行为，使 `nginx -T`
-能展示运维人员选择的设置。
+0.9.2 将公共配置冻结为 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以
+NGINX 标准的 `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
+请显式配置行为，使 `nginx -T` 能展示运维人员选择的设置。
 
 ```nginx
 http {
@@ -100,8 +101,9 @@ http {
 }
 ```
 
-- `markdown_streaming off` 选择全缓冲转换。`auto` 使用有界的响应形态判断。
-  `force` 会在缓存和准入检查通过后请求流式转换。
+- `markdown_streaming off` 选择全缓冲转换。`auto` 对所有通过准入检查的响应优先流式转换；
+  **可转换但不具备流式资格**的响应用全缓冲转换，**不具备转换资格**的响应原样透传。
+  `force` 会在同样的检查通过后请求流式转换。
 - `markdown_limits` 限制转换内存、处理时间、解压、流式缓冲区和并发工作量。
 - `markdown_accept strict` 适合分阶段上线。只有在明确需要时才使用
   `wildcard` 或 `force`。
@@ -149,7 +151,8 @@ curl -sS -D - -o /dev/null \
 
 0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-- 0.9.2 冻结 20 条有效指令，并保留 5 个已移除名称作为仅拒绝的迁移入口。
+- 0.9.2 冻结 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以 NGINX 标准的
+  `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
   profile、OTel、按路径指标、shadow mode 和其他旧指令不再是有效配置。
   迁移后运行 `nginx -t`。
 - 运行时动态配置文件、watcher、dry-run 提升和 last-known-good 快照已移除。
@@ -195,28 +198,28 @@ curl -sS -D - -o /dev/null \
 | 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | No |
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | No |
 | 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.28.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
-| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
@@ -228,14 +231,14 @@ curl -sS -D - -o /dev/null \
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | No |
-| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | No |
-| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | No |
-| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | No |
-| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | No |
+| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## 文档导航

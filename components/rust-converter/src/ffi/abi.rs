@@ -56,7 +56,7 @@ pub const MARKDOWN_ABI_VERSION: u32 = 3;
 /// Regenerated for ABI 3 (dynconf/selector removal, 0.9.2) from the
 /// cbindgen-generated header via
 /// `tools/release/gates/compute_abi_fingerprints.py`.
-pub const MARKDOWN_HEADER_HASH: u64 = 0x6a9422edb868dfb3;
+pub const MARKDOWN_HEADER_HASH: u64 = 0xb90cec86ef6a0306;
 
 /// SHA-256 truncated hash of the sorted exported symbol name set.
 ///
@@ -317,12 +317,17 @@ pub struct MarkdownResult {
     pub error_message: *mut u8,
     /// Length in bytes of [`MarkdownResult::error_message`].
     pub error_len: usize,
-    /// Peak working-set memory estimate during streaming conversion (bytes).
+    /// Peak working-set memory estimate during conversion (bytes).
     ///
-    /// This is derived from converter-owned resident state and is not
-    /// a process RSS/high-water-mark measurement.
-    /// Populated by `markdown_streaming_finalize` from
-    /// `StreamingStats.peak_memory_estimate`.
+    /// This is the peak of the converter-tracked working set (retained
+    /// output capacity plus transient scratch), NOT a total conversion
+    /// memory peak: parser/DOM allocations and process RSS are not
+    /// included.  The field is populated by both the streaming path
+    /// (`markdown_streaming_finalize` from
+    /// `StreamingStats.peak_memory_estimate`) and the full-buffer path.
+    /// Metric publication of the run-wide high-water gauge
+    /// (`nginx_markdown_conversion_peak_memory_bytes`) is recorded in every
+    /// build, streaming or not.
     pub peak_memory_estimate: usize,
 }
 
@@ -375,6 +380,9 @@ pub(crate) struct ConversionOutput {
     pub(crate) etag: Option<Box<[u8]>>,
     /// Heuristic token count estimate for LLM context-window budgeting.
     pub(crate) token_estimate: u32,
+    /// High-water mark of the converter-tracked working set during this
+    /// conversion (bytes): retained output capacity plus transient scratch.
+    pub(crate) peak_working_set_bytes: usize,
 }
 
 /// Result of Accept header content negotiation.

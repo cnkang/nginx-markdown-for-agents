@@ -67,39 +67,6 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     return NULL;
 }
 
-/* Find a header by name inside an arbitrary header list (not necessarily
- * r->headers_in.headers).  Used to reconcile shadow-list modifications back
- * onto the original entries during restoration. */
-static ngx_table_elt_t *
-ngx_http_markdown_find_header_in_list(
-    ngx_list_t *list, u_char *name, size_t name_len)
-{
-    if (list == NULL || name == NULL || name_len == 0) {
-        return NULL;
-    }
-
-    for (ngx_list_part_t *part = &list->part;
-         part != NULL;
-         part = part->next)
-    {
-        ngx_table_elt_t  *headers;
-
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NULL;
-        }
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
-            {
-                return &headers[i];
-            }
-        }
-    }
-
-    return NULL;
-}
-
 /*
  * Request-pool side state for captured validators.  The module context is
  * cleared by an internal redirect, but the request pool and its cleanups are
@@ -113,6 +80,17 @@ typedef struct ngx_http_markdown_conditional_side_state_s {
     struct ngx_http_markdown_conditional_side_state_s *next;
 } ngx_http_markdown_conditional_side_state_t;
 
+/*
+ * Identity mapping between a shadow-list entry and its original
+ * request-header entry.  Restore reconciles by pointer identity, never
+ * by header name, so duplicate same-name headers keep their exact
+ * per-entry mutations (value/hash) on the correct original entry.
+ */
+typedef struct {
+    ngx_table_elt_t  *shadow;
+    ngx_table_elt_t  *original;
+} ngx_http_markdown_shadow_map_entry_t;
+
 typedef struct {
     ngx_http_request_t                          *request;
     ngx_http_markdown_conditional_side_state_t  *entries;
@@ -120,6 +98,9 @@ typedef struct {
     ngx_list_part_t                            *shadow_tail;
     ngx_uint_t                                  shadow_tail_count;
     ngx_list_part_t                            *appended_headers;
+    ngx_http_markdown_shadow_map_entry_t        *shadow_map;
+    ngx_uint_t                                  shadow_map_count;
+    ngx_uint_t                                  shadow_map_capacity;
     ngx_flag_t                                  headers_shadowed;
 } ngx_http_markdown_conditional_side_table_t;
 
@@ -272,6 +253,101 @@ ngx_http_markdown_conditional_header_is_captured(
 }
 
 /*
+ * Count the request headers that must be shadowed: every entry the
+ * conditional validator logic did NOT capture (captured entries stay in
+ * the original list for conversion and later restoration).  The shadow
+ * list can span multiple parts, so the source per-part capacity is not a
+ * bound on the total entry count.
+ *
+ * Returns NGX_OK, or NGX_ERROR when a source part is malformed.
+ */
+static ngx_int_t
+ngx_http_markdown_shadow_count_headers(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
+    ngx_uint_t *count)
+{
+    ngx_uint_t  shadow_entries;
+
+    shadow_entries = 0;
+
+    for (const ngx_list_part_t *part = &source->part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_conditional_header_is_captured(
+                    ctx, &headers[i]))
+            {
+                shadow_entries++;
+            }
+        }
+    }
+
+    *count = shadow_entries;
+    return NGX_OK;
+}
+
+/*
+ * Push a shadow copy of every non-captured request header and record the
+ * shadow/original pointer identity in the side table's map, so later
+ * restoration pairs entries by identity instead of by name lookup (which
+ * cannot distinguish duplicate header names).
+ *
+ * Returns NGX_OK, or NGX_ERROR on a malformed part, allocation failure,
+ * or an undersized map.
+ */
+static ngx_int_t
+ngx_http_markdown_shadow_copy_headers(
+    const ngx_http_markdown_ctx_t *ctx, const ngx_list_t *source,
+    ngx_list_t *shadow,
+    ngx_http_markdown_conditional_side_table_t *table)
+{
+    for (const ngx_list_part_t *part = &source->part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
+
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            ngx_table_elt_t  *copy;
+
+            if (ngx_http_markdown_conditional_header_is_captured(
+                    ctx, &headers[i]))
+            {
+                continue;
+            }
+
+            copy = ngx_list_push(shadow);
+            if (copy == NULL) {
+                return NGX_ERROR;
+            }
+            *copy = headers[i];
+
+            if (table->shadow_map_count >= table->shadow_map_capacity) {
+                return NGX_ERROR;
+            }
+            table->shadow_map[table->shadow_map_count].shadow = copy;
+            table->shadow_map[table->shadow_map_count].original = &headers[i];
+            table->shadow_map_count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+/*
  * Keep captured validators out of NGINX's generic upstream-header iterator.
  * The proxy module deliberately copies every request-header list entry that
  * is not in its configured hash, including entries whose hash was cleared by
@@ -284,8 +360,9 @@ ngx_http_markdown_shadow_captured_conditional_headers(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_conditional_side_table_t  *table;
-    ngx_list_t                                  *source;
+    const ngx_list_t                            *source;
     ngx_list_t                                  *shadow;
+    ngx_uint_t                                   shadow_entries;
 
     if (r == NULL || ctx == NULL || !ctx->conditional.captured
         || !ctx->conditional.suppressed)
@@ -320,32 +397,25 @@ ngx_http_markdown_shadow_captured_conditional_headers(
         return NGX_ERROR;
     }
 
-    for (ngx_list_part_t *part = &source->part;
-         part != NULL;
-         part = part->next)
+    if (ngx_http_markdown_shadow_count_headers(ctx, source,
+            &shadow_entries)
+        != NGX_OK)
     {
-        const ngx_table_elt_t  *headers;
+        return NGX_ERROR;
+    }
 
-        headers = part->elts;
-        if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
-        }
+    table->shadow_map_capacity = shadow_entries;
+    table->shadow_map = ngx_pcalloc(r->pool,
+        shadow_entries * sizeof(ngx_http_markdown_shadow_map_entry_t));
+    if (table->shadow_map == NULL) {
+        return NGX_ERROR;
+    }
+    table->shadow_map_count = 0;
 
-        for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            ngx_table_elt_t  *copy;
-
-            if (ngx_http_markdown_conditional_header_is_captured(
-                    ctx, &headers[i]))
-            {
-                continue;
-            }
-
-            copy = ngx_list_push(shadow);
-            if (copy == NULL) {
-                return NGX_ERROR;
-            }
-            *copy = headers[i];
-        }
+    if (ngx_http_markdown_shadow_copy_headers(ctx, source, shadow, table)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
     }
 
     table->original_headers = *source;
@@ -410,32 +480,34 @@ ngx_http_markdown_restore_shadowed_conditional_headers(
      * before restoring the original list: a downstream module may have
      * replaced a value or invalidated a hash on the shadow copy, and the
      * original entries must reflect those changes while keeping their
-     * address identity (typed header pointers reference the originals). */
+     * address identity (typed header pointers reference the originals).
+     *
+     * Reconciliation uses the shadow->original identity map recorded at
+     * capture time.  Name-based lookup is deliberately NOT used: with
+     * duplicate same-name request headers, a name lookup would fold every
+     * shadow entry onto the FIRST original entry and deterministically
+     * lose the earlier values.  Entries appended to the shadow list after
+     * capture have no map entry and are spliced back below. */
     {
-        ngx_list_t  *shadow = &r->headers_in.headers;
+        const ngx_list_t  *shadow = &r->headers_in.headers;
 
-        for (ngx_list_part_t *part = &shadow->part;
-             part != NULL;
-             part = part->next)
-        {
-            ngx_table_elt_t  *headers;
+        for (ngx_uint_t i = 0; i < table->shadow_map_count; i++) {
+            const ngx_table_elt_t  *shadow_elt;
+            ngx_table_elt_t        *orig;
 
-            headers = part->elts;
-            if (headers == NULL && part->nelts != 0) {
-                return;
+            shadow_elt = table->shadow_map[i].shadow;
+            orig = table->shadow_map[i].original;
+            if (shadow_elt == NULL || orig == NULL) {
+                continue;
             }
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                ngx_table_elt_t  *orig;
-
-                orig = ngx_http_markdown_find_header_in_list(
-                    &table->original_headers,
-                    headers[i].key.data, headers[i].key.len);
-                if (orig != NULL) {
-                    orig->hash = headers[i].hash;
-                    orig->value = headers[i].value;
-                }
-            }
+            orig->hash = shadow_elt->hash;
+            orig->value = shadow_elt->value;
         }
+
+        /* Entries appended after capture are not in the identity map;
+         * they are spliced back into the restored list below.  Nothing
+         * else needs reconciliation. */
+        (void) shadow;
     }
 
     r->headers_in.headers = table->original_headers;
@@ -980,6 +1052,76 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
     return 0;
 }
 
+/* Advance past the separators that precede a cache directive. */
+static void
+ngx_http_markdown_skip_cache_separators(const u_char **cursor,
+    const u_char *end)
+{
+    while (*cursor < end
+           && (**cursor == ' ' || **cursor == '\t' || **cursor == ','))
+    {
+        (*cursor)++;
+    }
+}
+
+
+/* Advance past a quoted string, honoring backslash escapes (RFC 9111). */
+static void
+ngx_http_markdown_skip_quoted_string(const u_char **cursor, const u_char *end)
+{
+    const u_char  *p;
+
+    p = *cursor + 1;                       /* opening quote */
+
+    while (p < end) {
+        if (*p == '\\' && p + 1 < end) {
+            p += 2;
+            continue;
+        }
+        if (*p == '"') {
+            p++;
+            break;
+        }
+        p++;
+    }
+
+    *cursor = p;
+}
+
+
+/* Advance to the next comma; commas inside a quoted string are data. */
+static void
+ngx_http_markdown_skip_to_next_comma(const u_char **cursor, const u_char *end)
+{
+    while (*cursor < end && **cursor != ',') {
+        if (**cursor == '"') {
+            ngx_http_markdown_skip_quoted_string(cursor, end);
+            continue;
+        }
+        (*cursor)++;
+    }
+}
+
+
+/* True when the value at ``p`` is the directive and ends at a boundary. */
+static ngx_flag_t
+ngx_http_markdown_cache_directive_matches(const u_char *p, const u_char *end,
+    const u_char *directive, size_t directive_len)
+{
+    const u_char  *after;
+
+    if ((size_t) (end - p) < directive_len
+        || ngx_http_markdown_strncasecmp_const(p, directive, directive_len) != 0)
+    {
+        return 0;
+    }
+
+    after = p + directive_len;
+
+    return after == end || *after == ',' || *after == ' ' || *after == '\t';
+}
+
+
 static ngx_flag_t
 ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
     const u_char *directive, size_t directive_len)
@@ -997,26 +1139,15 @@ ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
     end = p + header->value.len;
 
     while (p < end) {
-        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-            p++;
-        }
+        ngx_http_markdown_skip_cache_separators(&p, end);
 
-        if ((size_t)(end - p) >= directive_len
-            && ngx_http_markdown_strncasecmp_const(
-                   p, directive, directive_len) == 0)
+        if (ngx_http_markdown_cache_directive_matches(p, end, directive,
+                                                      directive_len))
         {
-            const u_char *after = p + directive_len;
-
-            if (after == end || *after == ',' || *after == ' '
-                || *after == '\t')
-            {
-                return 1;
-            }
+            return 1;
         }
 
-        while (p < end && *p != ',') {
-            p++;
-        }
+        ngx_http_markdown_skip_to_next_comma(&p, end);
     }
 
     return 0;
@@ -2146,6 +2277,21 @@ typedef struct {
     const ngx_table_elt_t  *last_modified_header;
 } ngx_http_markdown_conditional_validators_t;
 
+/*
+ * Message length to log for a failed conversion.
+ *
+ * The converter reports the message length as a size, so clamp it to the range
+ * of a precision argument and report nothing when the message is absent.  A
+ * macro keeps the expression at the call site, where the logging helpers may be
+ * compiled out.
+ */
+#define ngx_http_markdown_loggable_error_len(result)                          \
+    (((result)->error_message == NULL)                                        \
+         ? 0                                                                  \
+         : (((result)->error_len > (size_t) INT_MAX) ? INT_MAX                \
+                                                     : (int) (result)->error_len))
+
+
 static ngx_int_t
 ngx_http_markdown_generate_conditional_result(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
@@ -2156,7 +2302,6 @@ ngx_http_markdown_generate_conditional_result(
 {
     struct MarkdownOptions  options;
     struct MarkdownResult   *conv_result;
-    int                     error_len;
 
     *result = NULL;
 
@@ -2198,14 +2343,11 @@ ngx_http_markdown_generate_conditional_result(
     }
 
     if (conv_result->error_code != 0) {
-        error_len = (conv_result->error_len > (size_t) INT_MAX)
-            ? INT_MAX
-            : (int) conv_result->error_len;
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: conversion failed during conditional check: "
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
-                     (conv_result->error_message != NULL) ? error_len : 0,
+                     ngx_http_markdown_loggable_error_len(conv_result),
                      (conv_result->error_message != NULL) ? conv_result->error_message : (u_char *) "");
 
         markdown_result_free(conv_result);
@@ -2767,6 +2909,12 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * representation must not declare them. */
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+    /* Content-Location: the source HTML representation's location is
+     * stale once the representation is converted to Markdown; clear it
+     * so the 304 never advertises the source representation. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Location",
+        sizeof("Content-Location") - 1);
     /* Clear the actual trailer entries too: headers_out.trailers is an
      * independent list emitted by HTTP/2/3 and chunked encodings without
      * an HTTP/1.1 Trailer declaration.  Suppress source-HTML trailers. */
@@ -2873,6 +3021,12 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
         r, (const u_char *) "X-Markdown-Tokens", sizeof("X-Markdown-Tokens") - 1);
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+    /* Content-Location: the source HTML representation's location is
+     * stale once the representation is converted to Markdown; clear it
+     * so the 412 never advertises the source representation. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Location",
+        sizeof("Content-Location") - 1);
     ngx_http_markdown_clear_trailers(r);
 
     /*

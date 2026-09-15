@@ -7,6 +7,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -658,3 +659,1384 @@ class TestReleaseGateSnippetExpectations:
         assert "markdown_incremental_finalize" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_incremental_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS
         assert "markdown_streaming_free" in validator.RETIRED_RELEASE_FFI_SYMBOLS
+
+
+# ---------------------------------------------------------------------------
+# Module snippet best practices (NGINX dynamic-module loading)
+# ---------------------------------------------------------------------------
+
+
+class TestModuleSnippetBestPractices:
+    """The shipped module snippets follow NGINX dynamic-module practice.
+
+    NGINX loads dynamic modules only through a main-context ``load_module``
+    directive, and a relative path there resolves against the NGINX *prefix*
+    (not ``--modules-path``).  Each snippet must therefore use the form that
+    actually resolves on its package family, must keep loading an explicit
+    operator decision, and must not carry configuration directives.
+    """
+
+    def test_shipped_snippets_use_resolvable_form_and_document_main_context(
+        self,
+    ) -> None:
+        for path in (validator.DEB_MODULE_SNIPPET, validator.RPM_MODULE_SNIPPET):
+            content = path.read_text(encoding="utf-8")
+            lowered = content.lower()
+            assert "main context" in lowered, path
+            assert "top level" in lowered, path
+            assert "prefix" in lowered, path
+
+        deb = validator.DEB_MODULE_SNIPPET.read_text(encoding="utf-8")
+        rpm = validator.RPM_MODULE_SNIPPET.read_text(encoding="utf-8")
+        # DEB ships the module only in /usr/lib/nginx/modules, so a relative
+        # path would resolve under the prefix and miss the file.
+        assert validator.MODULE_SNIPPET_DEB_LOAD_LINE in deb
+        # nginx.org RPM packages ship /etc/nginx/modules -> modules-path, so the
+        # relative form resolves.
+        assert validator.MODULE_SNIPPET_RPM_LOAD_LINE in rpm
+
+    def test_deb_snippet_is_active_while_rpm_snippet_stays_opt_in(self) -> None:
+        deb = validator.DEB_MODULE_SNIPPET.read_text(encoding="utf-8")
+        rpm = validator.RPM_MODULE_SNIPPET.read_text(encoding="utf-8")
+
+        assert re.search(
+            rf"^(?!#){re.escape(validator.MODULE_SNIPPET_DEB_LOAD_LINE)}",
+            deb,
+            re.MULTILINE,
+        )
+        assert validator.MODULE_SNIPPET_INACTIVE_LOAD_LINE in rpm
+        assert not re.search(
+            rf"^(?!#){re.escape(validator.MODULE_SNIPPET_RPM_LOAD_LINE)}",
+            rpm,
+            re.MULTILINE,
+        )
+
+    def test_validator_flags_active_rpm_directive(self, monkeypatch) -> None:
+        """An auto-loaded RPM snippet must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_MODULE_SNIPPET:
+                return (
+                    "# main context / top level, prefix-relative form\n"
+                    "load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            return (
+                "# main context / top level, prefix-relative notes\n"
+                "load_module /usr/lib/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:rpm:opt-in-loading"
+            for status, check_id, _message in result.results
+        )
+
+    def test_validator_flags_unresolvable_module_path(self, monkeypatch) -> None:
+        """A path form that cannot resolve on the family must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.DEB_MODULE_SNIPPET:
+                # Relative path: resolves under the prefix, where this package
+                # installs nothing.
+                return (
+                    "# main context, top level of nginx.conf, prefix notes\n"
+                    "load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            # Absolute RPM-family path: valid everywhere but not the form the
+            # RPM snippet is specified to ship.
+            return (
+                "# main context, top level of nginx.conf, prefix notes\n"
+                "load_module /usr/lib64/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "snippet:deb:load-module-form" in failures
+        assert "snippet:rpm:load-module-form" in failures
+
+    def test_validator_flags_conversion_directive_in_snippet(
+        self, monkeypatch
+    ) -> None:
+        """Loader snippets must not carry response-conversion directives."""
+
+        def fake_read_safe(_path: Path) -> str:
+            return (
+                "# main context, top level of nginx.conf, prefix notes\n"
+                "load_module /usr/lib/nginx/modules/"
+                "ngx_http_markdown_filter_module.so;\n"
+                "markdown_filter on;\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL"
+            and check_id.endswith(":only-load-module-directive")
+            for status, check_id, _message in result.results
+        )
+
+    def test_nfpm_ships_rpm_snippet_at_nginxorg_reference_path(self) -> None:
+        """The RPM snippet is packaged for the RPM family only."""
+        content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
+        assert re.search(validator.NFPM_RPM_ONLY_MODULES_PATTERN, content)
+
+        without_entry = content.replace(
+            '  - src: "./packaging/nfpm/modules/mod-markdown.conf"\n'
+            '    dst: "/usr/share/nginx/modules/mod-markdown.conf"\n'
+            "    type: config|noreplace\n"
+            "    packager: rpm\n",
+            "",
+        )
+        assert without_entry != content
+        assert not re.search(validator.NFPM_RPM_ONLY_MODULES_PATTERN, without_entry)
+
+class TestModuleBuildCompat:
+    """Release modules must be configured with --with-compat."""
+
+    def test_release_surfaces_keep_the_compat_flag(self) -> None:
+        assert validator.WITH_COMPAT_FLAG == "--with-compat"
+        assert validator.RELEASE_PACKAGES_WORKFLOW in validator.WITH_COMPAT_BUILD_SURFACES
+        assert validator.RELEASE_RPM_WORKFLOW in validator.WITH_COMPAT_BUILD_SURFACES
+
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+        assert not result.has_failures
+
+    def test_validator_flags_a_surface_without_the_compat_flag(
+        self, monkeypatch
+    ) -> None:
+        """A build surface that drops --with-compat must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RELEASE_PACKAGES_WORKFLOW:
+                # A configure line without the compat flag still builds and
+                # packages, so only this guard catches it.
+                return "./configure --add-dynamic-module=components/nginx-module"
+            return "--with-compat --add-dynamic-module=components/nginx-module"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+
+        assert any(
+            status == "FAIL" and "build-compat" in check_id
+            for status, check_id, _message in result.results
+        )
+
+class TestRpmSpecSourcesAreStaged:
+    """Every RPM spec install source must reach the rpmbuild tarball."""
+
+    def test_repository_spec_sources_are_all_staged(self) -> None:
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+        assert not result.has_failures, [
+            msg for status, _cid, msg in result.results if status == "FAIL"
+        ]
+
+    def test_validator_flags_a_source_missing_from_the_tarball(
+        self, monkeypatch
+    ) -> None:
+        """A spec install line the workflow never stages must fail the gate."""
+
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 README.md \\\n"
+                    "    %{buildroot}/usr/share/doc/nginx-markdown-for-agents/README.md\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            # The workflow stages README.md only: the snippet is missing.
+            return (
+                'mkdir -p "/tmp/${TARBALL_DIR}"\n'
+                'cp README.md "/tmp/${TARBALL_DIR}/"\n'
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "rpm-spec-sources:mod-markdown.conf" in failures
+        assert not any("README" in cid for cid in failures)
+
+class TestModuleSnippetEdgeCases:
+    """Edge cases codex flagged in the snippet/compat gate rules."""
+
+    def test_compat_flag_inside_a_comment_does_not_satisfy_the_gate(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(_path: Path) -> str:
+            return (
+                "# remember to add --with-compat here\n"
+                "./configure --add-dynamic-module=components/nginx-module\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_build_compat(result)
+
+        assert any(
+            status == "FAIL" and check_id.startswith("build-compat:")
+            for status, check_id, _message in result.results
+        )
+
+    def test_indented_active_loader_directive_defeats_opt_in(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                # Commented form plus an indented live directive.
+                return (
+                    body
+                    + "#load_module modules/ngx_http_markdown_filter_module.so;\n"
+                    + "  load_module modules/ngx_http_markdown_filter_module.so;\n"
+                )
+            return body + validator.MODULE_SNIPPET_DEB_LOAD_LINE + "\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:rpm:opt-in-loading"
+            for status, check_id, _message in result.results
+        )
+
+    def test_comment_ending_in_a_backslash_does_not_hide_the_next_line(self) -> None:
+        content = "# note: this comment ends with a backslash \\\nload_module y;\n"
+        lines = validator._logical_lines(content)
+        # The comment keeps the backslash and its own line, so the directive
+        # that follows stays a separate logical line.
+        assert lines[0] == "# note: this comment ends with a backslash \\"
+        assert lines[1] == "load_module y;"
+
+    def test_removal_command_referencing_the_tree_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return 'rm -f "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/mod-markdown.conf"\n'
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_comment_destination_does_not_satisfy_the_install_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The packaged path appears only inside a trailing comment, and
+                # the real destination is a different directory.
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/tmp/ # %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_directory_qualified_look_alike_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "vendor/packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_bare_spec_name_accepts_the_built_artifact(self) -> None:
+        tokens = [
+            "cp",
+            "build/ngx_http_markdown_filter_module.so",
+            "/tmp/${TARBALL_DIR}/",
+        ]
+        assert validator._is_staging_command(tokens, "ngx_http_markdown_filter_module.so")
+
+    def test_commented_staging_destination_does_not_prove_staging(self) -> None:
+        workflow = (
+            "cp packaging/nfpm/modules/mod-markdown.conf /tmp/elsewhere "
+            '# "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_commented_source_does_not_prove_staging(self) -> None:
+        workflow = (
+            "cp /tmp/elsewhere/mod-markdown.conf "
+            '# packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_staging_under_another_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/renamed.conf",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_symlink_does_not_prove_staging(self) -> None:
+        tokens = ["ln", "-s", "packaging/nfpm/modules/mod-markdown.conf", "${TARBALL_DIR}/"]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_function_body_is_conservatively_guarded(self) -> None:
+        """A body that a check cannot prove runs stays guarded on purpose."""
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_function_with_spaced_parentheses_stays_guarded(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage () {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_escaped_brace_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  printf \\}\n"
+            "  { :; }\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_commands_after_a_definition_stay_conservatively_guarded(self) -> None:
+        """The rule trades a loud rejection for never trusting an unproven body."""
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            f"install -m 0644 {source} {destination}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_quoted_brace_does_not_end_the_function_body(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  printf '%s' 'a } b'\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_folded_scalar_is_not_proven(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        # YAML rejoins a folded block, so the step is not proven either way.
+        workflow = (
+            "run: >\n"
+            "  echo before\n"
+            "  if false; then\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_staging_root_must_be_the_one_the_step_creates(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/elsewhere/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+        accepted = (
+            "run: |\n"
+            '  mkdir -p "/elsewhere/${TARBALL_DIR}"\n'
+            f'  cp {source} "/elsewhere/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(accepted, source)
+
+    def test_staging_root_created_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_staging_root_inside_a_false_branch_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            "  if false; then\n"
+            '    mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            "  fi\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_tree_copied_without_creating_it_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_plain_mkdir_of_a_child_does_not_create_the_tree(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_recursive_mkdir_of_a_child_creates_the_tree(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_removed_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_removed_parent_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_unrelated_removal_keeps_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp/other"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_plain_rm_of_a_file_keeps_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm "/tmp/${TARBALL_DIR}/stale"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_moved_away_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  mv "/tmp/${TARBALL_DIR}" "/tmp/gone"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_bundled_parents_flag_records_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -pv "${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_equivalent_variable_forms_compare_equal(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "${HOME}/t/${TARBALL_DIR}"\n'
+            f'  cp {source} "$HOME/t/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_install_directory_creates_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  install -d "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_move_into_the_tree_still_proves_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  mv {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_removal_inside_the_tree_keeps_the_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}/sub"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_file_removed_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/mod-markdown.conf"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_tree_removed_after_the_copy_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_single_quoted_reference_is_not_a_staging_root(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            "  mkdir -p '/tmp/${TARBALL_DIR}'\n"
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_quoted_source_operand_still_proves_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp "{source}" "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_glob_removal_of_the_tree_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            '  rm -rf "/tmp/${TARBALL_DIR}/"*\n'
+        )
+        assert not validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_function_definition_pattern_stays_ascii(self) -> None:
+        # The shortened class must keep the ASCII meaning of the pattern it
+        # replaced, so a non-ASCII letter is not a function identifier.
+        assert validator._FUNCTION_DEFINITION.match("stage()")
+        assert not validator._FUNCTION_DEFINITION.match("caf\u00e9()")
+
+    def test_block_scalar_is_scanned_line_by_line(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        workflow = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            f'  cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(workflow, source)
+
+    def test_brace_on_the_next_line_still_closes_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage()\n"
+            "{\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_quoted_brace_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() { printf '%s' 'literal } brace'; "
+            f"install -m 0644 {source} {destination}; }}\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_superseded_definition_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage() { echo replacement; }\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_case_branch_install_is_guarded(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            '  case "$1" in\n'
+            "    run)\n"
+            f"      install -m 0644 {source} {destination}\n"
+            "      ;;\n"
+            "  esac\n"
+            "}\n"
+            "stage skip\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_recursive_body_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = (
+            "stage() {\n"
+            "  stage\n"
+            f"  install -m 0644 {source} {destination}\n"
+            "}\n"
+            "stage\n"
+        )
+        assert not validator._spec_installs_snippet(body)
+
+    def test_workflow_function_body_requires_a_call(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        body = (
+            "run: |\n"
+            "  stage() {\n"
+            f'    cp {source} "/tmp/${{TARBALL_DIR}}/packaging/nfpm/modules/"\n'
+            "  }\n"
+        )
+        called = body + "  stage\n"
+        assert not validator._workflow_stages_into_tarball(body, source)
+        # A body stays unproven even when the step calls it.
+        assert not validator._workflow_stages_into_tarball(called, source)
+
+    def test_single_line_uncalled_function_is_not_live(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        body = f"stage() {{ install -m 0644 {source} {destination}; }}\n"
+        assert not validator._spec_installs_snippet(body)
+
+    def test_nested_group_does_not_close_the_function(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        called = (
+            "stage() {\n"
+            f"  {{ install -m 0644 {source} {destination}; }}\n"
+            "}\n"
+            "stage\n"
+        )
+        uncalled = (
+            "stage() {\n"
+            f"  {{ install -m 0644 {source} {destination}; }}\n"
+            "}\n"
+        )
+        assert not validator._spec_installs_snippet(called)
+        assert not validator._spec_installs_snippet(uncalled)
+
+    def test_leading_list_marker_does_not_prove_staging(self) -> None:
+        workflow = (
+            "run: |\n"
+            '  - cp packaging/nfpm/modules/mod-markdown.conf '
+            '"/tmp/${TARBALL_DIR}/packaging/nfpm/modules/" || true\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_guarded_directory_change_still_counts(self) -> None:
+        workflow = (
+            "run: |\n"
+            "  if true; then cd components/rust-converter; fi\n"
+            '  cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_tar_extraction_does_not_prove_staging(self) -> None:
+        workflow = (
+            "run: |\n"
+            '  tar -xf input.tar packaging/nfpm/modules/mod-markdown.conf '
+            '-C "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_subshell_guard_is_detected(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # A subshell prefix must not hide the guard inside it.
+                return (
+                    "%install\n"
+                    "( if false; then install -m 0644 "
+                    "packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi )\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_brace_and_negation_prefixes_are_detected(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        destination = "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf"
+        assert not validator._spec_installs_snippet(
+            f"{{ if false; then install -m 0644 {source} {destination}; fi; }}"
+        )
+        assert not validator._spec_installs_snippet(
+            f"! if false; then install -m 0644 {source} {destination}; fi"
+        )
+
+    def test_closer_keyword_as_an_argument_keeps_the_guard_open(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # `echo fi` must not close the guard opened by `if false`.
+                return (
+                    "%install\n"
+                    "if false; then\n"
+                    "    echo fi\n"
+                    "    install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "        %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_function_body_install_does_not_satisfy_the_snippet_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install sits in a function that is never called.
+                return (
+                    "%install\n"
+                    "stage_snippet() {\n"
+                    "  install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "}\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_foreign_staging_root_does_not_prove_staging(self) -> None:
+        source = "packaging/nfpm/modules/mod-markdown.conf"
+        for destination in (
+            "$STAGE_ROOT/${TARBALL_DIR}/packaging/nfpm/modules/",
+            "./wrong/../${TARBALL_DIR}/packaging/nfpm/modules/",
+            "/tmp/../../outside/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ):
+            assert not validator._is_staging_command(
+                ["cp", source, destination], source
+            )
+
+    def test_relative_source_after_a_directory_change_does_not_prove_staging(self) -> None:
+        workflow = (
+            "      - name: stage\n"
+            "        run: |\n"
+            "          cd /tmp\n"
+            '          mkdir -p "/tmp/${TARBALL_DIR}"\n          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert not validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_directory_state_resets_at_a_new_step(self) -> None:
+        workflow = (
+            "      - name: build\n"
+            "        run: |\n"
+            "          cd components/rust-converter\n"
+            "      - name: stage\n"
+            "        run: |\n"
+            '          mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '          cp packaging/nfpm/modules/mod-markdown.conf "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/"\n'
+        )
+        assert validator._workflow_stages_into_tarball(
+            workflow, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_guard_inside_a_function_group_is_tracked(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The guard opens inside a group on the same line.
+                return (
+                    "%install\n"
+                    "f() { if false; then install -m 0644 "
+                    "packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi; }\n"
+                    "f\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_separator_inside_a_comment_stays_inactive(self) -> None:
+        spec = (
+            "%install\n"
+            "echo ok # disabled; install -m 0644 "
+            "packaging/nfpm/modules/mod-markdown.conf "
+            "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+        )
+        assert validator._spec_install_sources(spec) == []
+
+    def test_marker_without_a_path_boundary_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_commented_install_after_a_separator_stays_inactive(self) -> None:
+        spec = (
+            "%install\n"
+            "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+            "%{buildroot}/usr/share/nginx/modules/ # note; "
+            "install -m 0644 other.conf %{buildroot}/tmp/\n"
+        )
+        sources = validator._spec_install_sources(spec)
+        assert sources == ["packaging/nfpm/modules/mod-markdown.conf"]
+
+    def test_marker_prefixed_by_text_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/prefix${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_parent_relative_source_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "../vendored/packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_single_dot_prefix_is_accepted(self) -> None:
+        tokens = [
+            "cp",
+            "./packaging/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_multiline_guarded_install_fails_the_snippet_check(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The guard opens on one line and closes on another.
+                return (
+                    "%install\n"
+                    "if true; then\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_guarded_snippet_install_fails_the_check(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install sits inside a branch that never runs.
+                return (
+                    "%install\n"
+                    "if false; then install -m 0644 packaging/nfpm/modules/mod-markdown.conf "
+                    "%{buildroot}/usr/share/nginx/modules/mod-markdown.conf; fi\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_temporary_directory_does_not_prove_final_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/scripts/preremove.sh",
+            "/tmp/${TARBALL_DIR}/.render/preremove.sh",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/scripts/preremove.sh"
+        )
+
+    def test_single_quoted_staging_path_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "'${TARBALL_DIR}/packaging/nfpm/modules/'",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_escaped_variable_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "\\${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_rendered_copy_into_the_root_proves_staging(self) -> None:
+        tokens = [
+            "cp",
+            "${RUNNER_TEMP:-/tmp}/markdown-render/preremove.sh",
+            "/tmp/${TARBALL_DIR}/preremove.sh",
+        ]
+        assert validator._is_staging_command(tokens, "preremove.sh")
+
+    def test_install_after_a_logical_and_is_parsed(self) -> None:
+        spec = (
+            "%install\n"
+            "test -f present.conf && install -m 0644 present.conf %{buildroot}/etc/\n"
+            "install -m 0644 missing.conf %{buildroot}/etc/ || exit 1\n"
+        )
+        assert validator._spec_install_sources(spec) == ["present.conf", "missing.conf"]
+
+    def test_guarded_install_is_parsed(self) -> None:
+        spec = (
+            "%install\n"
+            "install -m 0644 present.conf %{buildroot}/etc/\n"
+            "if true; then install -m 0644 missing.conf %{buildroot}/etc/; fi\n"
+        )
+        assert validator._spec_install_sources(spec) == ["present.conf", "missing.conf"]
+
+    def test_look_alike_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf.bak",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_copy_from_another_directory_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "vendor/nfpm/modules/mod-markdown.conf",
+            "/tmp/${TARBALL_DIR}/packaging/nfpm/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_echo_of_the_tarball_path_does_not_prove_staging(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return (
+                'echo "copied packaging/nfpm/modules/mod-markdown.conf into'
+                ' ${TARBALL_DIR}/"\n'
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_multi_source_install_checks_every_source(self) -> None:
+        spec = "%install\ninstall -m 0644 a.conf b.conf %{buildroot}/etc/nginx/modules/\n"
+        assert validator._spec_install_sources(spec) == ["a.conf", "b.conf"]
+
+    def test_source_and_destination_must_share_one_install_command(
+        self, monkeypatch
+    ) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The packaged path appears on a non-install line, which the
+                # independent-substring check accepted.
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf %{buildroot}/tmp/\n"
+                    "echo %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_swapped_install_operands_fail_the_install_check(self, monkeypatch) -> None:
+        def fake_read(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # Source and destination are swapped: rpmbuild would look for the
+                # buildroot path as its input.
+                return (
+                    "%install\n"
+                    "install -m 0644 %{buildroot}/usr/share/nginx/modules/mod-markdown.conf "
+                    "packaging/nfpm/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )
+
+    def test_target_directory_equals_form_keeps_every_operand_a_source(self) -> None:
+        spec = (
+            "%install\n"
+            "install --target-directory=%{buildroot}/usr/share/doc "
+            "packaging/nfpm/modules/not-staged.conf\n"
+        )
+        assert validator._spec_install_sources(spec) == [
+            "packaging/nfpm/modules/not-staged.conf"
+        ]
+
+    def test_similar_variable_name_does_not_prove_staging(self) -> None:
+        tokens = [
+            "cp",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "$NOT_TARBALL_DIR/modules/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_touch_does_not_prove_staging(self) -> None:
+        tokens = [
+            "touch",
+            "packaging/nfpm/modules/mod-markdown.conf",
+            "${TARBALL_DIR}/",
+        ]
+        assert not validator._is_staging_command(
+            tokens, "packaging/nfpm/modules/mod-markdown.conf"
+        )
+
+    def test_prose_mentioning_the_loader_directive_defeats_the_contract(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                return body + "#" + validator.MODULE_SNIPPET_RPM_LOAD_LINE + "\n"
+            # The DEB snippet mentions the directive only inside a sentence: a
+            # substring hit must not satisfy the loader contract.
+            return (
+                body
+                + "# Enable conversion with "
+                + validator.MODULE_SNIPPET_DEB_LOAD_LINE
+                + "\n"
+            )
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL" and check_id == "snippet:deb:load-module-form"
+            for status, check_id, _message in result.results
+        )
+
+    def test_block_form_directive_defeats_the_loader_only_rule(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            body = "# main context, top level of nginx.conf, prefix notes\n"
+            if path == validator.RPM_MODULE_SNIPPET:
+                return (
+                    body
+                    + "http {\n"
+                    + validator.MODULE_SNIPPET_RPM_LOAD_LINE
+                    + "\n}\n"
+                )
+            return body + validator.MODULE_SNIPPET_DEB_LOAD_LINE + "\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_module_snippet_best_practices(result)
+
+        assert any(
+            status == "FAIL"
+            and check_id.endswith(":only-load-module-directive")
+            for status, check_id, _message in result.results
+        )
+
+    def test_rpm_spec_must_install_and_ship_the_snippet(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                # The install line and the %files entry are both missing.
+                return "Name: nginx-module-markdown-for-agents\n"
+            if path == validator.NFPM_CONFIG:
+                return (
+                    '  - src: "./packaging/nfpm/modules/mod-markdown.conf"\n'
+                    '    dst: "/usr/share/nginx/modules/mod-markdown.conf"\n'
+                    "    type: config|noreplace\n"
+                    "    packager: rpm\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        failures = [
+            check_id
+            for status, check_id, _message in result.results
+            if status == "FAIL"
+        ]
+        assert "rpm:modules:install" in failures
+        assert "rpm:modules:files" in failures
+
+class TestStagingProofAndSectionScoping:
+    """Tightened rules: staging proof inside the tarball tree, section scoping."""
+
+    def test_source_only_mentioned_in_a_comment_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            # The path appears in a comment only.
+            return '# TODO: copy packaging/nfpm/modules/mod-markdown.conf later\n'
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(
+            status == "FAIL" and check_id.endswith("mod-markdown.conf")
+            for status, check_id, _message in result.results
+        )
+
+    def test_source_copied_outside_the_tarball_does_not_prove_staging(
+        self, monkeypatch
+    ) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return "cp packaging/nfpm/modules/mod-markdown.conf /somewhere/else/\n"
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_sources_are_staged(result)
+
+        assert any(status == "FAIL" for status, _cid, _msg in result.results)
+
+    def test_files_entry_outside_the_files_section_fails(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%install\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so\n"
+                    "%changelog\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:files"
+            for status, check_id, _message in result.results
+        )
+
+    def test_install_line_outside_the_install_section_fails(self, monkeypatch) -> None:
+        def fake_read_safe(path: Path) -> str:
+            if path == validator.RPM_SPEC:
+                return (
+                    "%prep\n"
+                    "install -m 0644 packaging/nfpm/modules/mod-markdown.conf \\\n"
+                    "    %{buildroot}/usr/share/nginx/modules/mod-markdown.conf\n"
+                    "%files\n"
+                    "%config(noreplace) /usr/share/nginx/modules/mod-markdown.conf\n"
+                )
+            return ""
+
+        monkeypatch.setattr(validator, "read_safe", fake_read_safe)
+        result = validator.ValidationResult()
+        validator.validate_rpm_spec_snippet(result)
+
+        assert any(
+            status == "FAIL" and check_id == "rpm:modules:install"
+            for status, check_id, _message in result.results
+        )

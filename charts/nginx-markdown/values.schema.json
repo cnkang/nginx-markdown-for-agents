@@ -38,7 +38,7 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["off", "auto", "force"],
+              "enum": ["", "off", "auto", "force"],
               "description": "Processing-path policy; see the markdown_streaming directive values."
             }
           }

@@ -3,6 +3,9 @@ kind: ConfigMap
 metadata:
   name: nginx-markdown-config
 data:
+  # Do NOT mount this entry into /etc/nginx/nginx.conf's include tree or any
+  # conf.d directory: a second load_module for the same module fails nginx -t.
+  # Mount it only where the module path must be declared once.
   markdown-snippet.conf: |
     load_module modules/ngx_http_markdown_filter_module.so;
   markdown-filter.conf: |

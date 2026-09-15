@@ -1285,8 +1285,8 @@ fn test_parser_memory_budget_allows_small_input() {
 /// Regression (TEST-2): a parse that overruns `parse_timeout` must fail with
 /// `ERROR_PARSE_TIMEOUT` rather than returning partial output.
 ///
-/// Uses a 1 ms parser deadline against a 15,000-paragraph document
-/// (1 MiB capacity).  The parser timer starts after FFI option
+/// Uses a 1 ms parser deadline against a 60,000-paragraph document
+/// (4 MiB capacity).  The parser timer starts after FFI option
 /// decoding and input-budget setup, so total FFI call time can exceed the
 /// parser budget even when parsing itself finishes in time.  Every run must
 /// report `ERROR_PARSE_TIMEOUT`; a parser that ignored the deadline would
@@ -1298,9 +1298,9 @@ fn test_parse_timeout_enforced_when_overrun() {
     let converter = markdown_converter_new();
     assert!(!converter.is_null(), "Converter should not be NULL");
 
-    let mut large_html = Vec::with_capacity(1024 * 1024);
+    let mut large_html = Vec::with_capacity(4 * 1024 * 1024);
     large_html.extend_from_slice(b"<html><body>");
-    for i in 0..15000 {
+    for i in 0..60000 {
         large_html.extend_from_slice(
             format!("<p>paragraph number {i} with enough text to ensure parsing cost</p>")
                 .as_bytes(),
@@ -1323,7 +1323,8 @@ fn test_parse_timeout_enforced_when_overrun() {
     );
     let elapsed = start.elapsed();
 
-    // The approximately 1 MiB fixture cannot parse within a 1 ms parser sub-deadline,
+    // The approximately 4 MiB fixture (60,000 paragraphs) cannot parse
+    // within a 1 ms parser sub-deadline,
     // so this overrun conversion must report ERROR_PARSE_TIMEOUT
     // deterministically.  A parser that ignored parse_timeout_ms would
     // return ERROR_SUCCESS here and fail the assertion.

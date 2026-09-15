@@ -56,10 +56,13 @@ therefore never forces the full-buffer path, and it never produces a 304 for
 converted content.
 
 **Known constraint (user-confirmed):** the same URL can therefore
-yield an ETag for small responses (full-buffer path) and no ETag for large
-responses (streaming path). Clients and caches lose strong validation for
-large pages. This is an accepted trade-off of streaming header commitment.
-A deferred header commit is out of scope for 0.9.2.
+yield an ETag when the full-buffer path serves it and no ETag when the
+streaming path does, because a streaming response commits its headers before
+the converted body exists. The trigger is the selected path, not a response
+size: `markdown_streaming off`, a hard blocker, or an ineligible response keeps
+strong validation, while `auto` or `force` that actually streams gives it up.
+This is an accepted trade-off of streaming header commitment. A deferred
+header commit is out of scope for 0.9.2.
 
 ### Fail-open behavior
 
@@ -101,6 +104,43 @@ Use **auto** to prefer streaming for eligible responses. The module selects
 the processing path from the policy and hard compatibility constraints, not
 a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
 `auto` must be written explicitly to opt in.
+
+### Frozen 0.9.2 selection contract
+
+| Policy | Selection |
+|--------|-----------|
+| `markdown_streaming off` (default) | Always bounded full-buffer conversion. No response streams. |
+| `markdown_streaming auto` | Prefer streaming for every response that clears the hard gates. A response that stays eligible for conversion but cannot stream falls back to bounded full-buffer conversion; a response that is not eligible for conversion is forwarded unchanged. Response size takes no part in the decision. |
+| `markdown_streaming force` | Require streaming for every compatible response. A combination that can never satisfy it, such as `markdown_streaming force` with `markdown_front_matter on`, is rejected at `nginx -t` time. |
+
+The hard gates apply to every policy: HEAD requests, 304 responses, full
+conditional validation, excluded content types, and front matter
+(`markdown_front_matter on` routes to full-buffer). The streaming memory budget
+is not a selection gate: the module enforces it while streaming runs, and a response
+that exceeds it follows the configured error handling rather than being
+re-routed. No size threshold and no internal candidate boundary takes part in
+path selection.
+
+### GFM constructs and the streaming path
+
+`markdown_flavor gfm` selects GitHub Flavored Markdown. Both engines emit the
+same representation for the constructs below. The streaming engine falls back to
+the full-buffer engine for the ones it cannot stream, instead of producing a
+different Markdown document.
+
+| Construct | Streaming | Full buffer |
+|-----------|-----------|-------------|
+| Tables (`<table>`) | Falls back before commit | GFM table |
+| Strikethrough (`<del>`, `<s>`, `<strike>`) | `~~text~~` | `~~text~~` |
+| Task list (`<input type="checkbox">`) | `- [x]` / `- [ ]` | `- [x]` / `- [ ]` |
+| Embedded content (`<svg>`, `<math>`, `<canvas>`) | Falls back before commit | Converted or skipped |
+
+A fallback before commit is transparent: the client receives the full-buffer
+result. After a streaming response has committed its headers, a construct that
+requires fallback raises a post-commit error as described above. Under the
+default `commonmark` flavor the two strikethrough and task-list constructs
+contribute their text without markers, and both engines agree without a
+fallback.
 
 ## Related Documentation
 

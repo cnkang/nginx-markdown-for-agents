@@ -1,0 +1,47 @@
+[
+  {
+    "name": "local gate set (test-all)",
+    "command": [
+      "make",
+      "test-all"
+    ],
+    "needs_c_change": false,
+    "requires_nginx": false
+  },
+  {
+    "name": "real GCC C unit suite",
+    "command": [
+      "make",
+      "test-c-unit-gcc"
+    ],
+    "needs_c_change": true,
+    "requires_nginx": false
+  },
+  {
+    "name": "security static analysis",
+    "command": [
+      "make",
+      "security-static"
+    ],
+    "needs_c_change": false,
+    "requires_nginx": false
+  },
+  {
+    "name": "module end-to-end checks",
+    "command": [
+      "make",
+      "test-all-e2e"
+    ],
+    "needs_c_change": false,
+    "requires_nginx": true
+  },
+  {
+    "name": "coverage gate",
+    "command": [
+      "make",
+      "test-all-coverage"
+    ],
+    "needs_c_change": false,
+    "requires_nginx": true
+  }
+]

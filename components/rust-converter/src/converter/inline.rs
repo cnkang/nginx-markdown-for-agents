@@ -271,6 +271,33 @@ impl MarkdownConverter {
     }
 
     /// Handle bold/strong elements with optional timeout context.
+    /// Emit GFM strikethrough for `<del>`, `<s>`, and `<strike>`.
+    ///
+    /// CommonMark has no strikethrough, so those elements contribute their text
+    /// without markers unless the configured flavor is GitHub Flavored
+    /// Markdown.
+    pub(super) fn handle_strikethrough_with_context(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        let mut ctx = ctx;
+        let gfm = matches!(
+            self.options.flavor,
+            crate::converter::MarkdownFlavor::GitHubFlavoredMarkdown
+        );
+        if gfm {
+            append_str_with_context(output, "~~", &mut ctx)?;
+        }
+        self.traverse_children(node, output, depth + 1, ctx.as_deref_mut())?;
+        if gfm {
+            append_str_with_context(output, "~~", &mut ctx)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn handle_bold_with_context(
         &self,
         node: &Handle,

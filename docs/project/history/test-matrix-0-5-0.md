@@ -10,7 +10,7 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 |-----------|--------|
 | Platform | Ubuntu (primary), macOS (secondary) |
 | NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
-| Response Size Tier | Small ([0, 10KB)), Medium ([10KB, 1MB)), Large ([1MB, 64MB)), Extra-Large ([64MB, ∞)) — half-open disjoint boundaries: exactly 10KB maps to Medium, exactly 1MB maps to Large, exactly 64MB maps to Extra-Large |
+| Response Size Tier | Small ([0, 10KiB)), Medium ([10KiB, 1MiB)), Large ([1MiB, 64MiB)), Extra-Large ([64MiB, ∞)) — half-open disjoint boundaries: exactly 10KiB maps to Medium, exactly 1MiB maps to Large, exactly 64MiB maps to Extra-Large, which is the conversion ceiling the implementation enforces |
 | Conversion Engine | full-buffer, streaming — the engine column records the **initial** engine selected for the request; a streaming request that falls back to full-buffer is classified under the fallback path, not double-counted as a full-buffer conversion |
 | Conversion Path | convert (successful conversion), skip (ineligible skip), fallback (pre-commit conversion fallback to full-buffer), fail-open (pre-commit fail-open serving the original HTML), fail-closed (controlled reject before headers), post-commit failure (stream terminated after headers) |
 
@@ -71,7 +71,7 @@ process records a covering sub-spec:
 |---------------|----------|---------------|--------------------|-------------------|-----------------|------------------|--------|
 | TM-001 | Ubuntu | 1.24.x | Small | full-buffer | convert | — | Pending |
 | TM-002 | Ubuntu | 1.24.x | Small | full-buffer | skip | — | Pending |
-| TM-003 | Ubuntu | 1.24.x | Small | full-buffer | fallback | — | Pending |
+| TM-003 | Ubuntu | 1.24.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-004 | Ubuntu | 1.24.x | Small | full-buffer | fail-open | — | Pending |
 | TM-005 | Ubuntu | 1.24.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-006 | Ubuntu | 1.24.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -83,7 +83,7 @@ process records a covering sub-spec:
 | TM-012 | Ubuntu | 1.24.x | Small | streaming | post-commit failure | — | Pending |
 | TM-013 | Ubuntu | 1.24.x | Medium | full-buffer | convert | — | Pending |
 | TM-014 | Ubuntu | 1.24.x | Medium | full-buffer | skip | — | Pending |
-| TM-015 | Ubuntu | 1.24.x | Medium | full-buffer | fallback | — | Pending |
+| TM-015 | Ubuntu | 1.24.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-016 | Ubuntu | 1.24.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-017 | Ubuntu | 1.24.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-018 | Ubuntu | 1.24.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -95,7 +95,7 @@ process records a covering sub-spec:
 | TM-024 | Ubuntu | 1.24.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-025 | Ubuntu | 1.24.x | Large | full-buffer | convert | — | Pending |
 | TM-026 | Ubuntu | 1.24.x | Large | full-buffer | skip | — | Pending |
-| TM-027 | Ubuntu | 1.24.x | Large | full-buffer | fallback | — | Pending |
+| TM-027 | Ubuntu | 1.24.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-028 | Ubuntu | 1.24.x | Large | full-buffer | fail-open | — | Pending |
 | TM-029 | Ubuntu | 1.24.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-030 | Ubuntu | 1.24.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -107,7 +107,7 @@ process records a covering sub-spec:
 | TM-036 | Ubuntu | 1.24.x | Large | streaming | post-commit failure | — | Pending |
 | TM-037 | Ubuntu | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-038 | Ubuntu | 1.24.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-039 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-039 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-040 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-041 | Ubuntu | 1.24.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-042 | Ubuntu | 1.24.x | Extra-Large | full-buffer | post-commit failure | — | Pending |
@@ -119,7 +119,7 @@ process records a covering sub-spec:
 | TM-048 | Ubuntu | 1.24.x | Extra-Large | streaming | post-commit failure | — | Pending |
 | TM-049 | Ubuntu | 1.26.x | Small | full-buffer | convert | — | Pending |
 | TM-050 | Ubuntu | 1.26.x | Small | full-buffer | skip | — | Pending |
-| TM-051 | Ubuntu | 1.26.x | Small | full-buffer | fallback | — | Pending |
+| TM-051 | Ubuntu | 1.26.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-052 | Ubuntu | 1.26.x | Small | full-buffer | fail-open | — | Pending |
 | TM-053 | Ubuntu | 1.26.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-054 | Ubuntu | 1.26.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -131,7 +131,7 @@ process records a covering sub-spec:
 | TM-060 | Ubuntu | 1.26.x | Small | streaming | post-commit failure | — | Pending |
 | TM-061 | Ubuntu | 1.26.x | Medium | full-buffer | convert | — | Pending |
 | TM-062 | Ubuntu | 1.26.x | Medium | full-buffer | skip | — | Pending |
-| TM-063 | Ubuntu | 1.26.x | Medium | full-buffer | fallback | — | Pending |
+| TM-063 | Ubuntu | 1.26.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-064 | Ubuntu | 1.26.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-065 | Ubuntu | 1.26.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-066 | Ubuntu | 1.26.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -143,7 +143,7 @@ process records a covering sub-spec:
 | TM-072 | Ubuntu | 1.26.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-073 | Ubuntu | 1.26.x | Large | full-buffer | convert | — | Pending |
 | TM-074 | Ubuntu | 1.26.x | Large | full-buffer | skip | — | Pending |
-| TM-075 | Ubuntu | 1.26.x | Large | full-buffer | fallback | — | Pending |
+| TM-075 | Ubuntu | 1.26.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-076 | Ubuntu | 1.26.x | Large | full-buffer | fail-open | — | Pending |
 | TM-077 | Ubuntu | 1.26.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-078 | Ubuntu | 1.26.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -155,7 +155,7 @@ process records a covering sub-spec:
 | TM-084 | Ubuntu | 1.26.x | Large | streaming | post-commit failure | — | Pending |
 | TM-085 | Ubuntu | 1.26.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-086 | Ubuntu | 1.26.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-087 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-087 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-088 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-089 | Ubuntu | 1.26.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-090 | Ubuntu | 1.26.x | Extra-Large | full-buffer | post-commit failure | — | Pending |
@@ -167,7 +167,7 @@ process records a covering sub-spec:
 | TM-096 | Ubuntu | 1.26.x | Extra-Large | streaming | post-commit failure | — | Pending |
 | TM-097 | Ubuntu | 1.27.x | Small | full-buffer | convert | — | Pending |
 | TM-098 | Ubuntu | 1.27.x | Small | full-buffer | skip | — | Pending |
-| TM-099 | Ubuntu | 1.27.x | Small | full-buffer | fallback | — | Pending |
+| TM-099 | Ubuntu | 1.27.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-100 | Ubuntu | 1.27.x | Small | full-buffer | fail-open | — | Pending |
 | TM-101 | Ubuntu | 1.27.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-102 | Ubuntu | 1.27.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -179,7 +179,7 @@ process records a covering sub-spec:
 | TM-108 | Ubuntu | 1.27.x | Small | streaming | post-commit failure | — | Pending |
 | TM-109 | Ubuntu | 1.27.x | Medium | full-buffer | convert | — | Pending |
 | TM-110 | Ubuntu | 1.27.x | Medium | full-buffer | skip | — | Pending |
-| TM-111 | Ubuntu | 1.27.x | Medium | full-buffer | fallback | — | Pending |
+| TM-111 | Ubuntu | 1.27.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-112 | Ubuntu | 1.27.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-113 | Ubuntu | 1.27.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-114 | Ubuntu | 1.27.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -191,7 +191,7 @@ process records a covering sub-spec:
 | TM-120 | Ubuntu | 1.27.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-121 | Ubuntu | 1.27.x | Large | full-buffer | convert | — | Pending |
 | TM-122 | Ubuntu | 1.27.x | Large | full-buffer | skip | — | Pending |
-| TM-123 | Ubuntu | 1.27.x | Large | full-buffer | fallback | — | Pending |
+| TM-123 | Ubuntu | 1.27.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-124 | Ubuntu | 1.27.x | Large | full-buffer | fail-open | — | Pending |
 | TM-125 | Ubuntu | 1.27.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-126 | Ubuntu | 1.27.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -203,7 +203,7 @@ process records a covering sub-spec:
 | TM-132 | Ubuntu | 1.27.x | Large | streaming | post-commit failure | — | Pending |
 | TM-133 | Ubuntu | 1.27.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-134 | Ubuntu | 1.27.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-135 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-135 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-136 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-137 | Ubuntu | 1.27.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-138 | Ubuntu | 1.27.x | Extra-Large | full-buffer | post-commit failure | — | Pending |
@@ -215,7 +215,7 @@ process records a covering sub-spec:
 | TM-144 | Ubuntu | 1.27.x | Extra-Large | streaming | post-commit failure | — | Pending |
 | TM-145 | macOS | 1.24.x | Small | full-buffer | convert | — | Pending |
 | TM-146 | macOS | 1.24.x | Small | full-buffer | skip | — | Pending |
-| TM-147 | macOS | 1.24.x | Small | full-buffer | fallback | — | Pending |
+| TM-147 | macOS | 1.24.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-148 | macOS | 1.24.x | Small | full-buffer | fail-open | — | Pending |
 | TM-149 | macOS | 1.24.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-150 | macOS | 1.24.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -227,7 +227,7 @@ process records a covering sub-spec:
 | TM-156 | macOS | 1.24.x | Small | streaming | post-commit failure | — | Pending |
 | TM-157 | macOS | 1.24.x | Medium | full-buffer | convert | — | Pending |
 | TM-158 | macOS | 1.24.x | Medium | full-buffer | skip | — | Pending |
-| TM-159 | macOS | 1.24.x | Medium | full-buffer | fallback | — | Pending |
+| TM-159 | macOS | 1.24.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-160 | macOS | 1.24.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-161 | macOS | 1.24.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-162 | macOS | 1.24.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -239,7 +239,7 @@ process records a covering sub-spec:
 | TM-168 | macOS | 1.24.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-169 | macOS | 1.24.x | Large | full-buffer | convert | — | Pending |
 | TM-170 | macOS | 1.24.x | Large | full-buffer | skip | — | Pending |
-| TM-171 | macOS | 1.24.x | Large | full-buffer | fallback | — | Pending |
+| TM-171 | macOS | 1.24.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-172 | macOS | 1.24.x | Large | full-buffer | fail-open | — | Pending |
 | TM-173 | macOS | 1.24.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-174 | macOS | 1.24.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -251,7 +251,7 @@ process records a covering sub-spec:
 | TM-180 | macOS | 1.24.x | Large | streaming | post-commit failure | — | Pending |
 | TM-181 | macOS | 1.24.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-182 | macOS | 1.24.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-183 | macOS | 1.24.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-183 | macOS | 1.24.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-184 | macOS | 1.24.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-185 | macOS | 1.24.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-186 | macOS | 1.24.x | Extra-Large | full-buffer | post-commit failure | — | Pending |
@@ -263,7 +263,7 @@ process records a covering sub-spec:
 | TM-192 | macOS | 1.24.x | Extra-Large | streaming | post-commit failure | — | Pending |
 | TM-193 | macOS | 1.26.x | Small | full-buffer | convert | — | Pending |
 | TM-194 | macOS | 1.26.x | Small | full-buffer | skip | — | Pending |
-| TM-195 | macOS | 1.26.x | Small | full-buffer | fallback | — | Pending |
+| TM-195 | macOS | 1.26.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-196 | macOS | 1.26.x | Small | full-buffer | fail-open | — | Pending |
 | TM-197 | macOS | 1.26.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-198 | macOS | 1.26.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -275,7 +275,7 @@ process records a covering sub-spec:
 | TM-204 | macOS | 1.26.x | Small | streaming | post-commit failure | — | Pending |
 | TM-205 | macOS | 1.26.x | Medium | full-buffer | convert | — | Pending |
 | TM-206 | macOS | 1.26.x | Medium | full-buffer | skip | — | Pending |
-| TM-207 | macOS | 1.26.x | Medium | full-buffer | fallback | — | Pending |
+| TM-207 | macOS | 1.26.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-208 | macOS | 1.26.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-209 | macOS | 1.26.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-210 | macOS | 1.26.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -287,7 +287,7 @@ process records a covering sub-spec:
 | TM-216 | macOS | 1.26.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-217 | macOS | 1.26.x | Large | full-buffer | convert | — | Pending |
 | TM-218 | macOS | 1.26.x | Large | full-buffer | skip | — | Pending |
-| TM-219 | macOS | 1.26.x | Large | full-buffer | fallback | — | Pending |
+| TM-219 | macOS | 1.26.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-220 | macOS | 1.26.x | Large | full-buffer | fail-open | — | Pending |
 | TM-221 | macOS | 1.26.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-222 | macOS | 1.26.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -299,7 +299,7 @@ process records a covering sub-spec:
 | TM-228 | macOS | 1.26.x | Large | streaming | post-commit failure | — | Pending |
 | TM-229 | macOS | 1.26.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-230 | macOS | 1.26.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-231 | macOS | 1.26.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-231 | macOS | 1.26.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-232 | macOS | 1.26.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-233 | macOS | 1.26.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-234 | macOS | 1.26.x | Extra-Large | full-buffer | post-commit failure | — | Pending |
@@ -311,7 +311,7 @@ process records a covering sub-spec:
 | TM-240 | macOS | 1.26.x | Extra-Large | streaming | post-commit failure | — | Pending |
 | TM-241 | macOS | 1.27.x | Small | full-buffer | convert | — | Pending |
 | TM-242 | macOS | 1.27.x | Small | full-buffer | skip | — | Pending |
-| TM-243 | macOS | 1.27.x | Small | full-buffer | fallback | — | Pending |
+| TM-243 | macOS | 1.27.x | Small | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-244 | macOS | 1.27.x | Small | full-buffer | fail-open | — | Pending |
 | TM-245 | macOS | 1.27.x | Small | full-buffer | fail-closed | — | Pending |
 | TM-246 | macOS | 1.27.x | Small | full-buffer | post-commit failure | — | Pending |
@@ -323,7 +323,7 @@ process records a covering sub-spec:
 | TM-252 | macOS | 1.27.x | Small | streaming | post-commit failure | — | Pending |
 | TM-253 | macOS | 1.27.x | Medium | full-buffer | convert | — | Pending |
 | TM-254 | macOS | 1.27.x | Medium | full-buffer | skip | — | Pending |
-| TM-255 | macOS | 1.27.x | Medium | full-buffer | fallback | — | Pending |
+| TM-255 | macOS | 1.27.x | Medium | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-256 | macOS | 1.27.x | Medium | full-buffer | fail-open | — | Pending |
 | TM-257 | macOS | 1.27.x | Medium | full-buffer | fail-closed | — | Pending |
 | TM-258 | macOS | 1.27.x | Medium | full-buffer | post-commit failure | — | Pending |
@@ -335,7 +335,7 @@ process records a covering sub-spec:
 | TM-264 | macOS | 1.27.x | Medium | streaming | post-commit failure | — | Pending |
 | TM-265 | macOS | 1.27.x | Large | full-buffer | convert | — | Pending |
 | TM-266 | macOS | 1.27.x | Large | full-buffer | skip | — | Pending |
-| TM-267 | macOS | 1.27.x | Large | full-buffer | fallback | — | Pending |
+| TM-267 | macOS | 1.27.x | Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-268 | macOS | 1.27.x | Large | full-buffer | fail-open | — | Pending |
 | TM-269 | macOS | 1.27.x | Large | full-buffer | fail-closed | — | Pending |
 | TM-270 | macOS | 1.27.x | Large | full-buffer | post-commit failure | — | Pending |
@@ -347,7 +347,7 @@ process records a covering sub-spec:
 | TM-276 | macOS | 1.27.x | Large | streaming | post-commit failure | — | Pending |
 | TM-277 | macOS | 1.27.x | Extra-Large | full-buffer | convert | size-limit rejection by design (excluded from required set; see coverage-set note above) | Expected-Rejection |
 | TM-278 | macOS | 1.27.x | Extra-Large | full-buffer | skip | — | Pending |
-| TM-279 | macOS | 1.27.x | Extra-Large | full-buffer | fallback | — | Pending |
+| TM-279 | macOS | 1.27.x | Extra-Large | full-buffer | fallback | — | Unreachable (dimension-invalid: fallback is only reachable after an initial streaming selection; full-buffer/fallback is not a valid combination) |
 | TM-280 | macOS | 1.27.x | Extra-Large | full-buffer | fail-open | — | Pending |
 | TM-281 | macOS | 1.27.x | Extra-Large | full-buffer | fail-closed | — | Pending |
 | TM-282 | macOS | 1.27.x | Extra-Large | full-buffer | post-commit failure | — | Pending |

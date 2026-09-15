@@ -116,7 +116,8 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     live_directives = detector.extract_directive_contract_from_c()
 
     # Post-convergence target contract (pre-LTS 0.9.2): 20 active directives,
-    # 5 reject-only migration handlers, and no OTel surface.
+    # no reject-only migration handlers left in the command table, and no OTel
+    # surface.
     assert len(inventory["directives"]) == detector.FINAL_DIRECTIVE_COUNT
     assert len(inventory["reject_only_directives"]) == \
         detector.FINAL_REJECT_ONLY_COUNT
@@ -290,12 +291,20 @@ def test_invalid_inventory_schema_reports_contract_fields() -> None:
     assert "inventory missing top-level keys: contract_version, directive_count, directives, ffi_abi_version, ffi_exports, otel, reason_codes, registry_count, reject_only_directives" in errors
 
 
-def test_reject_only_migration_directives_are_required() -> None:
-    """The target contract retains the 5 removed-directive migration handlers."""
+def test_reject_only_migration_directives_are_rejected() -> None:
+    """No directive name may be declared as a reject-only migration entry."""
     inventory = copy.deepcopy(detector.load_inventory())
-    # Dropping the migration directives must fail: the target contract keeps
-    # exactly FINAL_REJECT_ONLY_COUNT reject-only entries.
-    inventory["reject_only_directives"] = []
+    assert inventory["reject_only_directives"] == []
+    # Declaring a migration entry must fail: the removals dropped those names
+    # from the command table entirely, so the inventory must stay empty.
+    inventory["reject_only_directives"] = [{
+        "name": "markdown_dynamic_config",
+        "status": "reject_only",
+        "classification": "reject_only",
+        "handler": detector.REMOVED_DIRECTIVE_HANDLER,
+        "migration_target": "markdown_filter",
+        "default": "(not applicable)",
+    }]
 
     errors = detector.validate_inventory_schema(inventory)
 
@@ -304,14 +313,38 @@ def test_reject_only_migration_directives_are_required() -> None:
         "migration directives".format(detector.FINAL_REJECT_ONLY_COUNT)
         in errors
     )
+    assert "reject_only_directives contains unexpected names" in "\n".join(errors)
 
 
 def test_reject_only_migration_directive_shape_is_validated() -> None:
-    """Reject-only entries must be reject_only status wired to the handler."""
+    """A declared migration entry must still be shaped as reject-only."""
     inventory = copy.deepcopy(detector.load_inventory())
-    inventory["reject_only_directives"][0]["status"] = "active"
-    inventory["reject_only_directives"][1]["handler"] = "ngx_other_handler"
-    inventory["reject_only_directives"][2]["classification"] = "active"
+    inventory["reject_only_directives"] = [
+        {
+            "name": "markdown_dynamic_config",
+            "status": "active",
+            "classification": "reject_only",
+            "handler": detector.REMOVED_DIRECTIVE_HANDLER,
+            "migration_target": "markdown_filter",
+            "default": "(not applicable)",
+        },
+        {
+            "name": "markdown_dynamic_config_path",
+            "status": "reject_only",
+            "classification": "reject_only",
+            "handler": "ngx_other_handler",
+            "migration_target": "markdown_filter",
+            "default": "(not applicable)",
+        },
+        {
+            "name": "markdown_dynconf_dry_run",
+            "status": "reject_only",
+            "classification": "active",
+            "handler": detector.REMOVED_DIRECTIVE_HANDLER,
+            "migration_target": "markdown_filter",
+            "default": "(not applicable)",
+        },
+    ]
 
     errors = detector.validate_inventory_schema(inventory)
 

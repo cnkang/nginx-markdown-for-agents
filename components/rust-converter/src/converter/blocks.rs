@@ -554,7 +554,6 @@ impl MarkdownConverter {
         depth: usize,
         ordered: bool,
         ctx: &mut Option<&mut ConversionContext>,
-        output_charge_released: &mut bool,
     ) -> Result<(), ConversionError> {
         let Some(context) = ctx.as_deref_mut() else {
             let result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
@@ -571,10 +570,7 @@ impl MarkdownConverter {
         context.check_output_budget(projected_len)?;
 
         let item_capacity = item_output.capacity();
-        let output_capacity = output.capacity();
         context.reserve_working_set(item_capacity)?;
-        context.release_working_set(output_capacity);
-        *output_charge_released = true;
 
         let format_result = self.format_list_item_lines(output, &item_output, depth, ordered, ctx);
         drop(item_output);
@@ -603,39 +599,39 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
-        let output_capacity = output.capacity();
-        let mut output_charge_active = false;
+        // The outer output stays live while item_output is built; charge
+        // its capacity for the RENDER phase only so try_reserve's budget
+        // check (item_output.capacity() + working_set_bytes) accounts for
+        // BOTH live buffers while item_output grows.  The charge is
+        // released before the format phase: item_output is fully built by
+        // then (no longer growing), and output growth during formatting is
+        // checked by try_reserve itself — keeping the outer charge would
+        // double-count the output's own capacity against the target.
+        let outer_capacity = output.capacity();
         if let Some(context) = ctx.as_deref_mut() {
-            context.reserve_working_set(output_capacity)?;
-            output_charge_active = true;
+            context.reserve_working_set(outer_capacity)?;
         }
-
-        let mut output_charge_released = false;
-        let result = (|| {
-            let (item_output, _) =
-                self.render_list_item_content(node, output, depth, ordered, &mut ctx)?;
-            self.format_list_item_with_context(
-                output,
-                item_output,
-                depth,
-                ordered,
-                &mut ctx,
-                &mut output_charge_released,
-            )?;
-
-            if let Some(context) = ctx.as_deref_mut() {
-                context.check_output_budget(output.len())?;
-            }
-            Ok(())
-        })();
-
-        if output_charge_active
-            && !output_charge_released
-            && let Some(context) = ctx
-        {
-            context.release_working_set(output_capacity);
+        let render_result = self.render_list_item_content(node, output, depth, ordered, &mut ctx);
+        // Release the outer charge on EVERY path (render success or
+        // error): a render failure must not leave working_set_bytes
+        // inflated for the rest of the conversion.
+        if let Some(context) = ctx.as_deref_mut() {
+            context.release_working_set(outer_capacity);
         }
-        result
+        let item_output = match render_result {
+            Ok((item_output, _)) => item_output,
+            Err(error) => return Err(error),
+        };
+        /* The format phase runs only after the outer charge was released
+         * above; the budget check runs on the fully formatted item.  A
+         * formatting error propagates immediately, so no closure is
+         * needed to guard the check. */
+        self.format_list_item_with_context(output, item_output, depth, ordered, &mut ctx)?;
+
+        if let Some(context) = ctx {
+            context.check_output_budget(output.len())?;
+        }
+        Ok(())
     }
 
     /// Handle code block elements (pre/code) with optional timeout context.

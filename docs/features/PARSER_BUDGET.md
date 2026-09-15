@@ -163,7 +163,7 @@ parser-working-set ceiling. It does not accumulate all bytes ever received.
 - **Default**: 10 seconds
 - **Enforcement**: Cooperative timeout via `ConversionContext`
 - **Error code**: `ERROR_PARSE_TIMEOUT` (10)
-- **Reason code**: `PARSE_TIMEOUT`
+- **Reason code**: `timeout` (the public lowercase value shared by the metric label)
 - **Fail-open behavior**: Pass-through original content
 
 #### How It Works
@@ -199,8 +199,12 @@ check. If elapsed time exceeds both deadlines at the same checkpoint, the
 converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
 call-order precedence, not a minimum or an "earlier of" calculation. When
 operators leave `conversion_timeout` unset, the NGINX merge fills the
-30-second default, so the overall deadline stays active. Only an explicit
-nonzero `parser_timeout` adds the parser checkpoints. (An explicit
+30-second default, so the overall deadline stays active. The NGINX merge
+also fills `parser_timeout` from its 10-second default
+(NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT), so parser checkpoints
+are ACTIVE whenever the merged value is nonzero — whether it came from the
+default or from an explicit `parser_timeout`. An explicit nonzero
+`parser_timeout` overrides the default. (An explicit
 `conversion_timeout=0` fails config validation. The handler rejects zero.
 Operators cannot disable the deadline through configuration.)
 

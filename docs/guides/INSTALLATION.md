@@ -1514,7 +1514,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.98.0+)
+# Check Rust version (must be 1.98.1, the pinned toolchain; MSRV 1.98)
 rustc --version
 
 # Clean and rebuild
@@ -1636,7 +1636,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 3. Use fail-open strategy:
    ```nginx
-   markdown_error_policy pass;  # Return original HTML on timeout
+   markdown_error_policy pass;  # Return original HTML on timeout (pre-commit / full-buffer only; post-commit streaming timeouts terminate the response).  Pre-commit pass also fails closed when the replay buffer can no longer reproduce the consumed upstream bytes.
    ```
 
 ---

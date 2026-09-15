@@ -468,5 +468,9 @@ fn streaming_chunk_boundary_preserves_line_prefix_escape() {
     )
     .expect("chunked streaming conversion should succeed");
 
+    assert!(
+        !single.markdown.trim().is_empty(),
+        "the single-shot conversion must produce Markdown"
+    );
     assert_eq!(single.markdown, chunked.markdown);
 }

@@ -59,7 +59,8 @@ RENDERER_RE = re.compile(r"ngx_http_markdown_metrics_to_v1\s*\(")
 # v1->requests.aborted assignment must source from terminal_aborted_total.
 # Capture the full RHS expression up to ';' then check its final field.
 ABORTED_ASSIGN_RE = re.compile(
-    r"v1->requests\.aborted[ \t]*=([^;]*);"
+    # The negative lookahead keeps an equality comparison out of the match.
+    r"v1->requests\.aborted[ \t]*=(?!=)([^;]*);"
 )
 # The per-path postcommit abort counter is stale for v1 terminal outcome.
 STALE_ABORT_SRC = "streaming_failure_postcommit_abort"

@@ -26,7 +26,7 @@ codes or Prometheus label values. The logger emits them in the bounded
 The single source of truth for the reason code list is
 `components/rust-converter/reason_registry.toml`. The Rust, C, diagnostics, and
 the generator consume that registry. The generator creates release projections
-and mirrors them in [Observability Schema v3](../architecture/observability-schema-v2.md).
+and mirrors them in [Observability Schema v3](../architecture/observability-schema-v3.md).
 This document describes the check order, what each check evaluates, and how the
 module determines outcomes.
 Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
@@ -119,7 +119,11 @@ This behavior matters for operators diagnosing why the module skipped a request.
 
 ## Outcome Determination
 
-When all eligibility checks pass (checks 1–9), the module attempts conversion. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_error_policy` configuration:
+When all eligibility checks pass (checks 1–8), the module attempts conversion. Check 9 records that attempt rather than gating it. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_error_policy` configuration. One exception governs the pre-commit pass policy. Fail-open replay needs the
+consumed upstream bytes, and the module keeps them in the replay buffer. When
+it can no longer reproduce them, the module MUST fail closed (configured error
+status) even under `pass`. The module cannot honor a pass policy without the
+original content.
 
 ### Success: converted
 
@@ -136,6 +140,16 @@ reason code is `failed_open` and the request state becomes FAILED.
 
 This is the recommended configuration for production rollouts. Conversion
 failures before commit do not break client responses.
+
+**Replay-exhaustion exception**: fail-open replay needs the consumed
+upstream bytes, and the module keeps them in its replay buffer. When it
+can no longer reproduce them before commit (replay-buffer limit exceeded
+or data no longer available), the module MUST fail closed — returning the
+configured error status (429/503/502 via `markdown_error_policy status
+<code>`, or the `fail_closed` policy value) and recording the
+`failed_closed` outcome. The module cannot honor a pass policy without the
+original content. This exception GOVERNS over the `pass` policy (see
+ADR-0012).
 
 If a streaming conversion fails after downstream filters have already accepted
 headers or Markdown bytes, the original HTML is no longer available for replay
@@ -192,9 +206,9 @@ The registry declares the complete set of 25 reason codes in
 `components/rust-converter/reason_registry.toml`. The generator projects it
 into `reason_code.rs`, C metadata, diagnostics lookup, and release artifacts.
 The projections mirror the
-[Observability Schema v3](../architecture/observability-schema-v2.md)
-description (the diagnostics schema document is `schema_version 3` on the
-wire, while its repository filename keeps the historical v2 label).
+[Observability Schema v3](../architecture/observability-schema-v3.md)
+description. The diagnostics schema document carries `schema_version 3` on the
+wire.
 All `as_str()` values are lowercase snake_case. The table below maps the
 high-level decision outcomes described in this document to their reason codes.
 The size gate is an eligibility decision: it emits `not_eligible` (request
@@ -264,7 +278,7 @@ strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-sid
 canonical reason data comes from generated discriminant and metadata macros.
 The accessor converts each discriminant into the canonical lowercase string.
 Streaming transitions remain a separate bounded event surface. See
-[Observability Schema v3](../architecture/observability-schema-v2.md)
+[Observability Schema v3](../architecture/observability-schema-v3.md)
 for the full registry and FFI accessor list.
 
 ## Related Documentation
@@ -273,7 +287,7 @@ for the full registry and FFI accessor list.
 - [Rollback Guide](../guides/OPERATIONAL_ROLLBACK.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
-- [Observability Schema v3](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
+- [Observability Schema v3](../architecture/observability-schema-v3.md) — authoritative reason code registry, metric families, label whitelist
 - [Operations Guide](../guides/OPERATIONS.md) — monitoring and troubleshooting
 
 ## Document Updates

@@ -8,6 +8,7 @@ adapter drift detection under both quick and full modes.
 from __future__ import annotations
 
 import json
+
 import subprocess
 from pathlib import Path
 
@@ -734,3 +735,215 @@ def _write_docker_runtime_fixture(repo: Path) -> None:
         path = repo / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+
+def test_final_dockerfile_user_ignores_earlier_stages() -> None:
+    """Only the final stage's USER describes the image that is built."""
+    builder_only = (
+        "FROM debian:bookworm AS builder\n"
+        "USER builder\n"
+        "RUN make\n"
+        "\n"
+        "FROM debian:bookworm\n"
+        "COPY --from=builder /out /out\n"
+    )
+    assert sync._dockerfile_final_user(builder_only) is None
+
+    assert sync._dockerfile_final_user(
+        builder_only.replace("COPY --from=builder /out /out\n", "USER app\n")
+    ) == "app"
+
+    assert sync._dockerfile_final_user(
+        "FROM debian:bookworm\nUSER app:app\n"
+    ) == "app"
+
+
+def test_final_dockerfile_user_returns_none_without_any_user() -> None:
+    assert sync._dockerfile_final_user("FROM debian:bookworm\nRUN true\n") is None
+
+
+def _rule_check_entry(**overrides: object) -> dict:
+    """Return one manifest entry, with the fields a valid one carries."""
+    entry = {
+        "rule": "56",
+        "summary": "orphan comment closers",
+        "check": "tools/harness/detect_orphan_comment_close.py",
+        "files": ["components/nginx-module/src/**"],
+        "stage": ["save", "commit"],
+        "blocking": True,
+        "test": None,
+        "not_covered": "a closer built by a macro expansion is not judged",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_rule_checks_accept_a_complete_mapping() -> None:
+    """A mapping that names an existing check passes."""
+    result = sync._check_rule_checks({"rule_checks": [_rule_check_entry()]})
+
+    assert result.status == sync.PASS
+
+
+def test_rule_checks_reject_a_missing_check_script() -> None:
+    """A mapping that points at a script nobody wrote is not wired."""
+    entry = _rule_check_entry(check="tools/harness/does_not_exist.sh")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+    assert "not a repository file" in result.detail
+
+
+def test_rule_checks_reject_a_missing_test_entry() -> None:
+    """A test path that does not exist is not evidence."""
+    entry = _rule_check_entry(test="tools/harness/tests/test_nope.py")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_an_unknown_stage() -> None:
+    """A stage nobody runs would never gate anything."""
+    entry = _rule_check_entry(stage=["whenever"])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_a_rule_absent_from_agents_md() -> None:
+    """A rule number that AGENTS.md dropped cannot be routed to a check."""
+    entry = _rule_check_entry(rule="9999")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+
+
+def test_rule_checks_reject_a_mapping_without_not_covered() -> None:
+    """The mapping has to say what it does not cover."""
+    entry = _rule_check_entry()
+    del entry["not_covered"]
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == sync.FAIL
+    assert "not_covered" in result.detail
+
+
+def test_rule_checks_require_the_check_to_be_invoked() -> None:
+    """A path that merely exists is not wiring."""
+    entry = _rule_check_entry(check="README.md")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+    assert "nothing invokes" in result.detail
+
+
+def test_rule_checks_reject_a_non_string_stage_entry() -> None:
+    """A malformed stage entry is a structured failure, not a traceback."""
+    entry = _rule_check_entry(stage=[{}])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+
+
+def test_rule_checks_reject_an_empty_files_list() -> None:
+    """The mapping has to say which files the rule covers."""
+    entry = _rule_check_entry(files=[])
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+
+
+def test_profile_cannot_pass_when_the_change_set_is_unknown(monkeypatch) -> None:
+    """A failed diff must not be read as "no C changes"."""
+    repo_root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(repo_root / "tools/ci"))
+    import pre_push_profile as profile
+
+    monkeypatch.setattr(profile, "_git", lambda args: (128, ""))
+    assert profile._changed_files("origin/main") is None
+
+    monkeypatch.setattr(profile, "_merge_base", lambda base: "deadbeef")
+    assert profile.main(["prog"]) == 2
+
+
+def test_running_an_interpreter_against_a_directory_is_not_an_invocation() -> None:
+    """`python3 tools/harness` executes nothing from the directory."""
+    wiring = "check:\n\tpython3 tools/harness\n"
+
+    detector = "tools/harness/detect_pool_free.sh"
+
+    assert sync._is_invoked(detector, wiring) is False
+
+
+def test_a_test_runner_directory_does_cover_the_files_under_it() -> None:
+    """A discovery runner reaches the tests it names by directory."""
+    wiring = "check:\n\tpython3 -m pytest tools/harness/tests/ -q\n"
+
+    assert sync._is_invoked("tools/harness/tests/test_harness_wiring.py", wiring)
+
+
+def test_a_check_only_passed_as_an_argument_is_not_invoked() -> None:
+    """A path read as data by another tool is not a gate."""
+    wiring = "docs:\n\tpython3 tools/docs/check_docs.py tools/harness/detect_pool_free.sh\n"
+
+    assert sync._is_invoked("tools/harness/detect_pool_free.sh", wiring) is False
+
+
+def test_every_declared_stage_in_the_manifest_is_reachable() -> None:
+    """The mapping the repository ships reaches its checks, stage by stage."""
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[3] / "docs/harness/routing-manifest.json")
+        .read_text(encoding="utf-8")
+    )
+
+    result = sync._check_rule_checks(manifest)
+
+    assert result.status == sync.PASS, result.detail
+
+
+def test_collection_is_not_execution() -> None:
+    """A runner that only lists tests has not run the check."""
+    assert sync._discovery_target(["python3", "-m", "pytest", "--collect-only", "tests/"]) is None
+    assert sync._discovery_target(["python3", "-m", "pytest", "tests/"]) == "tests"
+
+
+def test_a_step_running_elsewhere_does_not_certify() -> None:
+    """`working-directory` decides which Makefile a step's commands reach."""
+    steps = [{"run": "make root"}]
+
+    assert sync._enabled_step_commands(steps) == ["make root"]
+    assert sync._enabled_step_commands(steps, "packaging") == []
+    assert sync._enabled_step_commands([{"run": "make root", "working-directory": "tools"}]) == []
+
+
+def test_default_working_directories_are_read() -> None:
+    """`defaults.run.working-directory` decides where a step's commands reach."""
+    steps = [{"run": "make root"}]
+    workflow_default = {
+        "defaults": {"run": {"working-directory": "packaging"}},
+        "jobs": {"j": {"steps": steps}},
+    }
+    job_default = {
+        "jobs": {"j": {"defaults": {"run": {"working-directory": "tools"}}, "steps": steps}}
+    }
+    plain = {"jobs": {"j": {"steps": steps}}}
+
+    assert sync._document_run_commands(plain) == ["make root"]
+    assert sync._document_run_commands(workflow_default) == []
+    assert sync._document_run_commands(job_default) == []
+
+
+def test_an_option_value_is_not_a_test_path() -> None:
+    """The word after `-o` belongs to the option, not to the run."""
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-o", "tools/harness/tests/test_fake.py"]
+    ) is None
+    assert sync._discovery_target(["python3", "-m", "pytest", "-q", "tests/"]) == "tests"

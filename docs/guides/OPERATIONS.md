@@ -59,7 +59,7 @@ The endpoint emits exactly the ten bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
 histogram, byte counters, streaming and decompression events, the
-`nginx_markdown_streaming_peak_memory_bytes` streaming memory gauge, and
+`nginx_markdown_conversion_peak_memory_bytes` run-wide conversion peak-memory gauge (streaming + full-buffer), and
 `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
 additionally exposes the per-worker in-flight counter. Do not derive
 dashboards from removed JSON fields or legacy family names.
@@ -147,16 +147,22 @@ Configure alerts based on these thresholds:
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 10% for 5 minutes | Page on-call engineer |
-| System error rate (nginx_markdown_requests_total{reason="ffi_panic"}) | > 1% for 5 minutes | Page on-call engineer |
+| System error rate — aborted delivery only (sum(rate(nginx_markdown_requests_total{outcome="aborted",reason="streaming_mid_flight_error"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10)) | > 1% for 5 minutes | Page on-call engineer |
 | Conversion time (p95) | > 500ms for 10 minutes | Page on-call engineer |
 | Module crash | Worker restart detected | Page on-call engineer |
+
+The system-error alert pins the shipped reason label
+(`outcome="aborted",reason="streaming_mid_flight_error"`): the aborted family
+covers delivery aborts, and matching on `outcome="aborted"` alone would silently
+widen the alert if another abort reason is ever published. Use the filtered
+expression when you add or rename alert rules.
 
 #### Warning Alerts
 
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Failure rate | > 5% for 10 minutes | Notify team channel |
-| Resource limit rate (nginx_markdown_requests_total{reason=~"memory_budget_exceeded|timeout|budget_exceeded"}) | > 5% for 10 minutes | Notify team channel |
+| Failed-closed request rate (nginx_markdown_requests_total{outcome="failed_closed"}) | > 5% for 10 minutes | Notify team channel |
 | Conversion time (p95) | > 200ms for 15 minutes | Notify team channel |
 | Memory usage | > 80% of limit | Notify team channel |
 
@@ -1343,7 +1349,7 @@ tail -f /var/log/nginx/error.log | grep "markdown:"
 | `nginx_markdown_conversion_duration_seconds` | Histogram | Conversion duration by engine |
 | `nginx_markdown_input_bytes_total` | Counter | Input bytes read for conversion |
 | `nginx_markdown_output_bytes_total` | Counter | Converted bytes delivered downstream |
-| `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Peak streaming working-memory high-water mark |
+| `nginx_markdown_conversion_peak_memory_bytes` | Gauge | Run-wide conversion peak working-memory high-water mark (streaming + full-buffer) |
 | `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
 | `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |
 | `nginx_markdown_build_info` | Gauge | Build identity; value is always `1` |
@@ -1360,7 +1366,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 | 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_budget maps to budget_exceeded |
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
-| 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |
+| 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_conversion_peak_memory_bytes metric row |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation). Retire the large-response threshold directive. |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

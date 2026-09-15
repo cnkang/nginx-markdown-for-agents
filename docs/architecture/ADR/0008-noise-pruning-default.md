@@ -63,6 +63,11 @@ the normal `converted` outcome. The delivered zero-length body and the
 conversion metrics make the emptied output observable, but the reason
 registry defines no prune-specific reason code.
 
+> **Future behavior (deferred)**: a future implementation MUST compare the
+> pruned output with the unpruned result before commit and preserve the
+> unpruned result when pruning removes all meaningful content, so an empty
+> result is never committed as a successful converted response.
+
 The fallback design below stays deferred because it needs all three of the
 following, and none fits the 0.9.2 freeze:
 

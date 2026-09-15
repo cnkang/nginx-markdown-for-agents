@@ -638,37 +638,6 @@ static const context_negative_entry_t context_negative_cases[] = {
         0           /* no discrepancy */
     },
     /*
-     * markdown_dynamic_config: Design=H, Impl=H (MATCH)
-     * Req 15.10: dynconf SHALL only be accepted in http context
-     */
-    {
-        "markdown_dynamic_config",
-        1, 0, 0,    /* design: H only */
-        1, 0, 0,    /* impl: H only */
-        0           /* no discrepancy */
-    },
-    /*
-     * markdown_dynamic_config_path: Design=H, Impl=H (MATCH)
-     * Req 15.10: dynconf SHALL only be accepted in http context
-     */
-    {
-        "markdown_dynamic_config_path",
-        1, 0, 0,    /* design: H only */
-        1, 0, 0,    /* impl: H only */
-        0           /* no discrepancy */
-    },
-
-    /*
-     * markdown_dynconf_dry_run: Design=H, Impl=H (MATCH)
-     * Req 15.10: dynconf SHALL only be accepted in http context
-     */
-    {
-        "markdown_dynconf_dry_run",
-        1, 0, 0,    /* design: H only */
-        1, 0, 0,    /* impl: H only */
-        0           /* no discrepancy */
-    },
-    /*
      * markdown_metrics: Design=L, Impl=L (MATCH)
      */
     {
@@ -961,42 +930,6 @@ test_trusted_proxies_http_only(void)
     TEST_PASS("Req 15.1: trusted_proxies is http-only");
 }
 
-/* ================================================================
- * Test 5: Req 15.10 — removed directive context enforcement
- *
- * Removed directives remain registered as HTTP-only migration entries. They
- * reject every use through the error handler, and the command context keeps
- * the old HTTP-only boundary for deterministic migration diagnostics.
- * ================================================================ */
-static void
-test_dynconf_context_finding(void)
-{
-    static const char *dynconf_names[] = {
-        "markdown_dynamic_config",
-        "markdown_dynamic_config_path",
-        "markdown_dynconf_dry_run"
-    };
-    ngx_command_t *cmd;
-    size_t         i;
-
-    TEST_SECTION("Req 15.10: Removed directive context verification");
-
-    for (i = 0; i < 3; i++) {
-        cmd = find_directive(dynconf_names[i]);
-        TEST_ASSERT(cmd != NULL,
-            "dynconf directive must be registered");
-
-        /* Removed entries are an http-only migration surface. */
-        TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
-            "dynconf directive must allow http context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
-            "dynconf directive must reject server context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
-            "dynconf directive must reject location context");
-    }
-
-    TEST_PASS("Removed directives are http-only migration entries");
-}
 
 /* ================================================================
  * Test 6: metrics location-only enforcement
@@ -1048,7 +981,7 @@ test_metrics_shm_http_only(void)
 }
 
 /* ================================================================
- * Test 8: Command table count = exactly 25
+ * Test 8: Command table count = exactly 20
  * ================================================================ */
 static void
 test_command_table_count(void)
@@ -1064,11 +997,11 @@ test_command_table_count(void)
         count++;
     }
 
-    TEST_ASSERT(count == 25,
-        "command table must have exactly 25 entries "
+    TEST_ASSERT(count == 20,
+        "command table must have exactly 20 entries "
         "(0.9.2 frozen target)");
 
-    TEST_PASS("Command table count = 25");
+    TEST_PASS("Command table count = 20");
 }
 
 /* ================================================================
@@ -1085,7 +1018,6 @@ main(void)
     test_positive_context_all();
     test_duplicate_rejection();
     test_trusted_proxies_http_only();
-    test_dynconf_context_finding();
     test_metrics_location_only();
     test_metrics_shm_http_only();
     test_command_table_count();

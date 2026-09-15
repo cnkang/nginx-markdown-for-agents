@@ -27,10 +27,10 @@ documentation. Split them.
 > threshold and the configured policy permits incremental delivery, which
 > requires the cache validation mode not to be `full`.
 
-**After (2 sentences, 13 + 13 words):**
-> The module selects the streaming engine when the response exceeds the buffer
-> threshold. The policy must permit incremental delivery, and cache
-> validation must not be `full`.
+**After (2 sentences, 14 + 13 words):**
+> The module streams when the policy allows and the response clears the
+> eligibility gates. Size never selects streaming, though an oversized known
+> length can make conversion ineligible.
 
 ## 2. Rules at a Glance
 

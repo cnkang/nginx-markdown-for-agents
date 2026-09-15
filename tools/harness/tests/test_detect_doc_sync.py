@@ -86,8 +86,8 @@ conversion budget; `markdown_limits streaming_buffer=2m` bounds streaming.
         root,
         detector.PUBLIC_INVENTORY_PATH,
         """
-There are 1 `markdown_*` command-table entries: 1 active parser entries and
-0 reject-only migration entries.
+There are 1 `markdown_*` command-table entries and every one of them is an
+active parser entry.
 
 ### Reject-only migration directives
 
@@ -203,7 +203,7 @@ def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> N
 
     errors = detector.check_public_config_contract(tmp_path)
 
-    assert any("directive counts" in error for error in errors)
+    assert any("directive count" in error for error in errors)
 
 
 def test_reject_only_otel_directive_requires_reject_only_docs(tmp_path: Path) -> None:
@@ -349,3 +349,40 @@ def test_retired_failure_label_is_blocked_in_active_docs(tmp_path: Path) -> None
     errors = detector.check_public_config_contract(tmp_path)
 
     assert any("retired production metric" in error for error in errors)
+
+
+def test_streaming_mode_scan_keeps_the_previous_accepted_language() -> None:
+    """The line scan replaced a pattern; the accepted language must not grow.
+
+    The old pattern allowed at most one optional quote on each side of the
+    value, so `mode: "off"` passed and `mode: off''` did not. Values are also
+    accepted only while the scan is inside the `streaming:` mapping, so a
+    `mode:` belonging to a sibling block cannot satisfy the contract.
+    """
+    accepted = (
+        "markdown:\n  streaming:\n    mode: auto\n",
+        "markdown:\n  streaming:\n    mode:\n",
+        'markdown:\n  streaming:\n    mode: "off"\n',
+        "markdown:\n  streaming:\n    mode: 'force'\n",
+        'markdown:\n  streaming:\n    mode: "off' + "'\n",
+        # A comment or a blank line between the block and its mode must not be
+        # mistaken for the end of the mapping.
+        "markdown:\n  streaming:\n    # pick a policy\n    mode: auto\n",
+        "markdown:\n  streaming:\n\n    mode: force\n",
+        # The replaced pattern searched the whole block, so a valid mode later
+        # in it still counts even when an earlier value was not one.
+        "markdown:\n  streaming:\n    mode: bogus\n    mode: auto\n",
+    )
+    rejected = (
+        "markdown:\n  streaming:\n    mode: off''\n",
+        "markdown:\n  streaming:\n    mode: bogus\n",
+        "markdown:\n  other:\n    mode: auto\n",
+        "markdown:\n  streaming:\n    enabled: true\n  other:\n    mode: auto\n",
+        # A lone CR is not a line boundary for the pattern this replaced, so it
+        # must not become one here either.
+        "markdown:\r  streaming:\r    mode: auto\r",
+    )
+    for values in accepted:
+        assert detector._values_streaming_mode_is_valid(values), values
+    for values in rejected:
+        assert not detector._values_streaming_mode_is_valid(values), values

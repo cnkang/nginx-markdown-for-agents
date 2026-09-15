@@ -62,6 +62,7 @@ usage() {
   echo >&2 ""
   echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first, brotli-streaming-first"
   exit "$exit_code"
+  return 0
 }
 
 ###############################################################################
@@ -316,7 +317,7 @@ cleanup() {
   # when run_scenario executed in a command substitution subshell.
   local nginx_pid="$NGINX_PID"
   if [[ -z "$nginx_pid" && -f "$PID_FILE" ]]; then
-    nginx_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    nginx_pid="$("$RESOLVED_CAT" "$PID_FILE" 2>/dev/null || true)"
   fi
   # The PID file initially holds the script's own PID (written during
   # setup); never kill ourselves when NGINX never started.
@@ -1581,9 +1582,39 @@ PYEOF
 
 # Output report
 if [[ -n "$OUTPUT_PATH" ]]; then
+  PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
+  # A retained probe set may share identical payloads through symlinks, and the
+  # copy would write through one of them and overwrite the stored payload
+  # instead of adding a file, so the previous artifacts are replaced.  Only a
+  # directory that already holds this tool's probe artifacts is touched: any
+  # other entry means the derived path was not produced by this tool.
+  if [[ -L "${PROBE_OUTPUT_DIR}" ]]; then
+    "$RESOLVED_RM" -f "${PROBE_OUTPUT_DIR}"
+  fi
+  if [[ -d "${PROBE_OUTPUT_DIR}" ]]; then
+    # Include hidden entries so an unexpected one is refused as well; the glob
+    # option is restored so the rest of the script keeps its default behaviour.
+    PROBE_DOTGLOB_OFF=0
+    shopt -q dotglob || PROBE_DOTGLOB_OFF=1
+    shopt -s dotglob
+    for probe_entry in "${PROBE_OUTPUT_DIR}"/*; do
+      [[ -e "${probe_entry}" || -L "${probe_entry}" ]] || continue
+      case "${probe_entry##*/}" in
+        *.body|*.headers|*.json)
+          "$RESOLVED_RM" -f "${probe_entry}"
+          ;;
+        *)
+          echo "ERROR: refusing to replace ${PROBE_OUTPUT_DIR}: unexpected entry ${probe_entry##*/}" >&2
+          exit 1
+          ;;
+      esac
+    done
+    if [[ "${PROBE_DOTGLOB_OFF}" -eq 1 ]]; then
+      shopt -u dotglob
+    fi
+  fi
   "$RESOLVED_MKDIR" -p "$("$SYSTEM_DIRNAME" "$OUTPUT_PATH")"
   echo "$REPORT_JSON" > "$OUTPUT_PATH"
-  PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
   "$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"
   "$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
   log "Report written to: $OUTPUT_PATH"

@@ -621,6 +621,86 @@ test_auth_deny_custom_cookie_patterns(void)
 }
 
 
+
+/* ================================================================
+ * Test: private-value preparation edge cases
+ *
+ * The authenticated Cache-Control rewrite prepares a value before it touches
+ * the header: an empty source falls back to the bare private value, an
+ * overflowing length or a missing buffer is refused, and the strip helper
+ * follows the same rules.
+ * ================================================================ */
+static void
+test_prepare_private_value_edges(void)
+{
+    ngx_http_request_t  *r;
+    ngx_str_t            empty = ngx_null_string;
+    ngx_str_t            broken;
+    ngx_str_t            huge;
+    ngx_str_t            prepared;
+    u_char               buffer[4] = { 'a', 'b', 'c', 'd' };
+
+    TEST_SUBSECTION("private-value preparation edges");
+
+    reset_pool();
+    r = make_req();
+    TEST_ASSERT(r != NULL, "request allocation succeeded");
+
+    prepared.data = NULL;
+    prepared.len = 0;
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(NULL, &empty, &prepared)
+            == NGX_ERROR,
+        "append helper refuses a NULL request");
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(r, NULL, &prepared)
+            == NGX_ERROR,
+        "append helper refuses a NULL source");
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(r, &empty, NULL)
+            == NGX_ERROR,
+        "append helper refuses a NULL destination");
+
+    broken.len = 3;
+    broken.data = NULL;
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(r, &broken, &prepared)
+            == NGX_ERROR,
+        "append helper refuses a source without data");
+
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(r, &empty, &prepared)
+            == NGX_OK,
+        "append helper accepts an empty source");
+    TEST_ASSERT(prepared.len == sizeof(ngx_http_markdown_cc_private) - 1,
+                "empty source becomes the bare private value");
+    TEST_ASSERT(memcmp(prepared.data, ngx_http_markdown_cc_private,
+                       prepared.len) == 0,
+                "private value text");
+
+    huge.len = (size_t) -1;
+    huge.data = buffer;
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_append_private_value(r, &huge, &prepared)
+            == NGX_ERROR,
+        "append helper refuses an overflowing length");
+
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_strip_public_value(NULL, &empty, &prepared)
+            == NGX_ERROR,
+        "strip helper refuses a NULL request");
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_strip_public_value(r, &empty, &prepared)
+            == NGX_OK,
+        "strip helper accepts an empty source");
+    TEST_ASSERT(prepared.len == sizeof(ngx_http_markdown_cc_private) - 1,
+                "strip helper falls back to the private value");
+    TEST_ASSERT(
+        ngx_http_markdown_prepare_strip_public_value(r, &huge, &prepared)
+            == NGX_ERROR,
+        "strip helper refuses an overflowing length");
+}
+
 /* ================================================================
  * Entry point
  * ================================================================ */
@@ -641,6 +721,7 @@ main(void)
     test_auth_deny_with_non_auth_cookie();
     test_auth_check_runs_before_streaming();
     test_auth_deny_custom_cookie_patterns();
+    test_prepare_private_value_edges();
 
     printf("\n========================================\n");
     printf("All auth deny security tests passed!\n");

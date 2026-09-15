@@ -211,7 +211,14 @@ function_brace_delta() {
     local opening
     local closing
 
-    braces="$(printf '%s\n' "$line" | sed 's/[^{}]//g')"
+    # Strip quoted spans and comments before counting. A brace inside a string
+    # literal or a comment is text, not block structure, and counting it would
+    # close the surrounding function body early.
+    braces="$(printf '%s\n' "$line" \
+        | sed -e "s/'[^']*'//g" \
+              -e 's/"[^"]*"//g' \
+              -e 's/\(^\|[[:space:]]\)#.*$//' \
+        | sed 's/[^{}]//g')"
     opening="${braces//\}/}"
     closing="${braces//\{}"
     printf '%s\n' "$(( ${#opening} - ${#closing} ))"
@@ -382,6 +389,8 @@ check_trusted_path() {
     strip_heredocs "$file" > "$stripped_tmp"
 
     local first_path_line=0
+    local extra_path_line=0
+    local trusted_path_seen=0
     local first_cmd_line=0
     local line_num=0
     local line=""
@@ -416,19 +425,34 @@ check_trusted_path() {
         case "$line" in
             'PATH=/usr/sbin:/usr/bin:/sbin:/bin'|\
             'PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH')
+                if [[ "$trusted_path_seen" -eq 1 ]]; then
+                    extra_path_line=$line_num
+                    break
+                fi
                 first_path_line=$line_num
-                break
+                trusted_path_seen=1
                 ;;
             'PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"')
                 if [[ "$trusted_path_root_initialized" -eq 1 ]]; then
+                    if [[ "$trusted_path_seen" -eq 1 ]]; then
+                        extra_path_line=$line_num
+                        break
+                    fi
                     first_path_line=$line_num
+                    trusted_path_seen=1
                 fi
-                break
                 ;;
             'TRUSTED_PATH_ROOT=""')
                 trusted_path_root_initialized=1
                 ;;
             PATH=*)
+                if [[ "$trusted_path_seen" -eq 1 ]]; then
+                    # The trusted assignment is established, so this later
+                    # top-level assignment replaces it and leaves command
+                    # resolution under a value the check never validated.
+                    extra_path_line=$line_num
+                    break
+                fi
                 # A non-literal or self-referencing PATH must not be used as
                 # a precursor to a later trusted assignment.
                 break
@@ -461,6 +485,41 @@ check_trusted_path() {
                 ;;
         esac
     done < "$stripped_tmp"
+
+    # Pass 1b: a later top-level PATH assignment replaces the trusted value.
+    # The prologue scan stops at the first statement, so this pass looks at
+    # every later top-level line: any of them re-points command resolution
+    # after the check has committed to the trusted value.
+    if [[ "$first_path_line" -ne 0 ]]; then
+        line_num=0
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line_num=$((line_num + 1))
+            if [[ "$line_num" -le "$first_path_line" ]]; then
+                continue
+            fi
+            trimmed="${line#"${line%%[![:space:]]*}"}"
+            if [[ -z "$trimmed" || "$trimmed" == "#"* ]]; then
+                continue
+            fi
+            if [[ "$line" != "$trimmed" ]]; then
+                # An indented line belongs to a block or a function body.
+                continue
+            fi
+            if skip_function_line "$line" "$trimmed"; then
+                continue
+            fi
+            case "$line" in
+                PATH=*)
+                    extra_path_line=$line_num
+                    break
+                    ;;
+                *)
+                    # Any other bare line is not the PATH export this pass looks
+                    # for; keep scanning.
+                    ;;
+            esac
+        done < "$stripped_tmp"
+    fi
 
     # Pass 2: find first external command usage
     FUNCTION_DEPTH=0
@@ -515,6 +574,10 @@ check_trusted_path() {
     if [[ "$first_path_line" -eq 0 ]]; then
         log_violation "$file" "0" "missing unconditional trusted PATH assignment"
         printf 'VIOLATION %s:0 missing unconditional trusted PATH assignment\n' "$file"
+        VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
+    elif [[ "$extra_path_line" -ne 0 ]]; then
+        log_violation "$file" "$extra_path_line" "a later top-level PATH assignment replaces the trusted PATH established at line $first_path_line"
+        printf 'VIOLATION %s:%s a later top-level PATH assignment replaces the trusted PATH\n' "$file" "$extra_path_line"
         VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
     elif [[ "$first_cmd_line" -ne 0 ]] && [[ "$first_cmd_line" -lt "$first_path_line" ]]; then
         log_violation "$file" "$first_cmd_line" "external command resolved before trusted PATH is established (PATH set at line $first_path_line)"

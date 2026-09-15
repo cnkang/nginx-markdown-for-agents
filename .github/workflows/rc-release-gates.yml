@@ -1,0 +1,191 @@
+name: Release Candidate Gates
+
+# Real-NGINX end-to-end checks that are too heavy for pull-request CI: they need
+# Docker, and one of them needs a real Kubernetes cluster.  They run for a
+# release candidate instead, and the job writes candidate-bound evidence so a
+# specific commit carries machine-verifiable PASS records for each check.
+#
+# The steps below only reference workflow-level constants and GitHub-provided
+# env values (GITHUB_SHA, GITHUB_REPOSITORY, GITHUB_REF, GITHUB_RUN_ID), never
+# event payload text, so no untrusted input reaches a shell.
+on:
+  # Called by the canonical release workflow, which owns the publication
+  # dependency, and kept on workflow_dispatch so a candidate can be qualified
+  # or debugged by hand.
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The module is loaded into the container images the checks default to, so the
+  # build version must match them, and the build runs in the same Alpine release
+  # as those images.
+  NGINX_VERSION: "1.30.4"
+  ALPINE_VERSION: "3.21"
+  RUST_VERSION: "1.98.1"
+  RUST_FEATURES: streaming,prune_noise_regions
+
+jobs:
+  real-nginx-e2e:
+    name: Real-NGINX E2E gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          # Only the tools the job itself needs: the module is built inside a
+          # container so that it matches the musl images the checks load it into.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            docker.io
+
+      - name: Install cluster tooling
+        run: |
+          # Each tool is fetched at a pinned version and checked against the
+          # digest its vendor publishes, so nothing unpinned reaches a shell.
+          set -euo pipefail
+
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64"
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  /tmp/kind" \
+            | sha256sum -c -
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -fsSLo /tmp/helm.tgz "https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz"
+          echo "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496  /tmp/helm.tgz" \
+            | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -fsSLo /tmp/kubectl "https://dl.k8s.io/release/v1.34.1/bin/linux/amd64/kubectl"
+          echo "7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3  /tmp/kubectl" \
+            | sha256sum -c -
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+        shell: bash
+
+      - name: Build the module inside the images the checks use
+        env:
+          NGX_MARKDOWN_BROTLI_STREAMING: "on"
+          NGX_MARKDOWN_RUST_FEATURES: ${{ env.RUST_FEATURES }}
+        run: |
+          # The container work lives in a repository script so the command needs
+          # no nested quoting, and so the same steps can be exercised locally.
+          # The image tag keeps the version visible to the baseline check while
+          # the digest, refreshed with the version, is what Docker resolves.
+          set -euo pipefail
+          mkdir -p build
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            -e NGINX_VERSION \
+            -e RUST_TARGET=x86_64-unknown-linux-musl \
+            -e NGX_MARKDOWN_BROTLI_STREAMING \
+            -e NGX_MARKDOWN_RUST_FEATURES \
+            "rust:${RUST_VERSION}-alpine${ALPINE_VERSION}@sha256:88a07cc2e9b783133cddf0ea84e759a1185eb6e7ff104deea18e985d84503af7" \
+            sh /src/tools/ci/build_musl_module_for_e2e.sh
+          test -s build/ngx_http_markdown_filter_module.so
+        shell: bash
+
+      - name: Run the real-NGINX end-to-end checks
+        run: |
+          # No `set -e`: every check runs, and the job fails after collecting all
+          # results, so one failure does not hide the state of the others.
+          set -uo pipefail
+          mkdir -p rc-evidence
+          : > rc-evidence/results.tsv
+
+          for spec in \
+            "realip_access_boundary|verify-realip-access-boundary-e2e" \
+            "slow_reader_backpressure|verify-slow-reader-backpressure-e2e" \
+            "graceful_reload_streaming|verify-graceful-reload-streaming-e2e" \
+            "module_version_mismatch|verify-module-version-mismatch-e2e" \
+            "auth_subrequest_observability|verify-auth-subrequest-observability-e2e" \
+            "helm_cluster_smoke|verify-helm-cluster-smoke-e2e"
+          do
+            name="${spec%%|*}"
+            target="${spec##*|}"
+            status=0
+            echo "=== ${name} ===" >&2
+            make "${target}" || status=$?
+            if [[ "${status}" -eq 0 ]]; then
+              printf '%s\tPASS\n' "${name}" >> rc-evidence/results.tsv
+            else
+              printf '%s\tFAIL\n' "${name}" >> rc-evidence/results.tsv
+            fi
+          done
+
+          # A truncated evidence file must not read as success: assert that the
+          # loop wrote one line per check before anything judges the contents.
+          # This step runs without `set -e`, so the check fails explicitly.
+          rows="$(wc -l < rc-evidence/results.tsv)"
+          if [ "${rows}" -ne 6 ]; then
+            echo "::error::expected 6 evidence rows, found ${rows}"
+            exit 1
+          fi
+
+          echo "=== collected results ==="
+          cat rc-evidence/results.tsv
+        shell: bash
+
+      - name: Write candidate-bound evidence
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          results = pathlib.Path("rc-evidence/results.tsv")
+          evidence = {
+              "candidate_sha": os.environ["GITHUB_SHA"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "ref": os.environ["GITHUB_REF"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "checks": {},
+          }
+          for line in results.read_text(encoding="utf-8").splitlines():
+              name, _, outcome = line.partition("\t")
+              if name:
+                  evidence["checks"][name] = outcome
+
+          pathlib.Path("rc-evidence/release-evidence.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        shell: bash
+
+      - name: Upload candidate-bound evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rc-release-evidence
+          path: rc-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail closed on any non-PASS check
+        run: |
+          set -euo pipefail
+          if grep -qv $'\tPASS$' rc-evidence/results.tsv; then
+            echo "::error title=Release candidate gate failed::at least one real-NGINX check did not pass for ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "all real-NGINX checks passed for ${GITHUB_SHA}"
+        shell: bash

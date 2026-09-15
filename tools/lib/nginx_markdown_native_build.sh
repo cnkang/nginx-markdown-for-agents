@@ -263,19 +263,23 @@ markdown_validate_nginx_bin() {
 
 markdown_nginx_runtime_conf_dir() {
   local nginx_bin="$1"
-  local source_root source_conf
+  local prefix source_root candidate
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
+  prefix="$(markdown_nginx_prefix "${nginx_bin}")"
   source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
-  source_conf="${source_root}/conf"
 
-  if [[ ! -f "${source_conf}/mime.types" ]]; then
-    return 1
-  fi
+  # The prefix the binary reports wins; a source tree that has not been
+  # installed keeps its configuration next to the build instead.
+  for candidate in "${prefix}/conf" "${source_root}/conf"; do
+    if [[ -f "${candidate}/mime.types" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
 
-  printf '%s\n' "${source_conf}"
-  return 0
+  return 1
 }
 
 markdown_can_reuse_nginx_bin() {
@@ -300,46 +304,145 @@ markdown_copy_runtime_conf_from_nginx_bin() {
   return 0
 }
 
-markdown_nginx_modules_dir() {
+markdown_nginx_configure_value() {
   local nginx_bin="$1"
-  local source_root source_modules modules_path
+  local flag="--$2="
+
+  # `nginx -V` prints the configure line, which wraps any value containing a
+  # space in single quotes, and a value may also be quoted with double quotes or
+  # end in any whitespace.
+  "${nginx_bin}" -V 2>&1 | awk -v flag="${flag}" -v sq="'" '
+    BEGIN {
+      quoted = "[\"][^\"]*[\"]|" sq "[^" sq "]*" sq
+      pattern = "--[A-Za-z0-9_-]+=(" quoted "|[^\"[:space:]]*)"
+    }
+    { line = line $0 " " }
+    END {
+      rest = line
+      while (match(rest, pattern)) {
+        token = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (index(token, flag) == 1) {
+          value = substr(token, length(flag) + 1)
+          if (substr(value, 1, 1) == "\"" || substr(value, 1, 1) == sq) {
+            value = substr(value, 2)
+          }
+          last = length(value)
+          if (last > 0 && (substr(value, last, 1) == "\"" || substr(value, last, 1) == sq)) {
+            value = substr(value, 1, last - 1)
+          }
+          gsub(/[[:space:]]+$/, "", value)
+          print value
+          exit
+        }
+      }
+    }
+  '
+  return 0
+}
+
+markdown_nginx_prefix() {
+  local nginx_bin="$1"
+  local reported
+
+  # A binary may live outside the prefix it was configured with, so the
+  # reported prefix wins over the directory layout.
+  reported="$(markdown_nginx_configure_value "${nginx_bin}" prefix)"
+  if [[ -n "${reported}" ]]; then
+    printf '%s\n' "${reported}"
+    return 0
+  fi
+
+  (cd "$(dirname "${nginx_bin}")/.." && pwd)
+  return 0
+}
+
+markdown_nginx_modules_candidates() {
+  local nginx_bin="$1"
+  local prefix modules_path
 
   markdown_validate_nginx_bin "${nginx_bin}" || return 1
 
-  source_root="$(cd "$(dirname "${nginx_bin}")/.." && pwd)"
-  source_modules="${source_root}/modules"
-  if [[ -d "${source_modules}" ]]; then
-    printf '%s\n' "${source_modules}"
-    return 0
+  prefix="$(markdown_nginx_prefix "${nginx_bin}")"
+
+  # An explicitly configured modules directory describes this installation
+  # better than any directory inferred from the layout, so it is searched first.
+  modules_path="$(markdown_nginx_configure_value "${nginx_bin}" modules-path)"
+  if [[ -n "${modules_path}" ]]; then
+    # A relative --modules-path is relative to the prefix, not to the caller.
+    if [[ "${modules_path}" != /* ]]; then
+      modules_path="${prefix}/${modules_path}"
+    fi
+    printf '%s\n' "${modules_path}"
   fi
 
-  modules_path="$("${nginx_bin}" -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | tail -n1)"
-  if [[ -n "${modules_path}" && -d "${modules_path}" ]]; then
-    printf '%s\n' "${modules_path}"
-    return 0
-  fi
+  # Installed layout: modules live under the prefix the binary reports.
+  printf '%s\n' "${prefix}/modules"
+
+  # A source tree that was compiled but never installed keeps its dynamic
+  # modules beside the binary in objs/, which is the layout `make modules`
+  # produces and the one the reuse workflow points NGINX_BIN at.
+  printf '%s\n' "$(cd "$(dirname "${nginx_bin}")" && pwd)"
+
+  return 0
+}
+
+markdown_find_module_in_dir() {
+  local candidate="$1"
+  local pattern="${2:-ngx_http_markdown*.so}"
+  local match
+
+  # The trailing slash makes find follow a modules directory the layout exposes
+  # through a symlink, which a packaged installation may do, and the module
+  # itself may be a symlink too, so links that resolve to a file count as well.
+  # A link that resolves to nothing is skipped instead of ending the search, so
+  # a dangling name that sorts first cannot hide a usable module beside it.
+  while IFS= read -r match; do
+    if [[ -f "${match}" ]]; then
+      printf '%s\n' "${match}"
+      return 0
+    fi
+  done < <(find "${candidate%/}/" -maxdepth 1 \( -type f -o -type l \) -name "${pattern}" | sort)
 
   return 1
 }
 
 markdown_find_dynamic_markdown_module() {
   local nginx_bin="$1"
-  local modules_dir module_path
+  local candidate module_path
+  local -a candidates=()
 
-  modules_dir="$(markdown_nginx_modules_dir "${nginx_bin}")" || return 1
-  module_path="$(
-    find "${modules_dir}" -maxdepth 1 -type f \( \
-      -name 'ngx_http_markdown*.so' -o \
-      -name '*markdown*.so' \
-    \) | sort | head -n1
-  )"
+  while IFS= read -r candidate; do
+    candidates+=("${candidate}")
+  done < <(markdown_nginx_modules_candidates "${nginx_bin}")
 
-  if [[ -z "${module_path}" ]]; then
+  # Bash 3.2 aborts on an empty array expansion under `set -u`, so a rejected
+  # binary reports its validation failure instead of an unbound variable.
+  if [[ ${#candidates[@]} -eq 0 ]]; then
     return 1
   fi
 
-  printf '%s\n' "${module_path}"
-  return 0
+  # Directory order is the decision that matters: an explicitly configured
+  # modules directory describes this installation better than one inferred from
+  # the layout, so the first directory that holds a module wins. The name this
+  # project builds only orders the choice within that directory.
+  for candidate in "${candidates[@]}"; do
+    [[ -d "${candidate}" ]] || continue
+    module_path="$(
+      markdown_find_module_in_dir "${candidate}" 'ngx_http_markdown_filter_module.so' || true
+    )"
+    if [[ -f "${module_path}" ]]; then
+      printf '%s\n' "${module_path}"
+      return 0
+    fi
+    module_path="$(markdown_find_module_in_dir "${candidate}" || true)"
+    if [[ -f "${module_path}" ]]; then
+      printf '%s\n' "${module_path}"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 markdown_prepare_runtime_reuse() {
@@ -355,17 +458,21 @@ markdown_prepare_runtime_reuse() {
       echo "Configured MODULE_SO is not a regular file: ${module_path}" >&2
       return 1
     fi
-    module_name="${module_path##*/}"
-    if [[ "${module_name}" != *.so || \
-          "${module_name}" == *[!A-Za-z0-9_.-]* ]]; then
-      echo "Configured MODULE_SO has an unsafe module filename: ${module_name}" >&2
-      return 1
-    fi
   else
     module_path="$(markdown_find_dynamic_markdown_module "${nginx_bin}" || true)"
   fi
   if [[ -z "${module_path}" ]]; then
     return 0
+  fi
+
+  # The basename reaches the generated `load_module` directive, so it must stay
+  # inside the characters an NGINX module name uses, whether it was configured
+  # explicitly or discovered next to the binary.
+  module_name="${module_path##*/}"
+  if [[ "${module_name}" != *.so || \
+        "${module_name}" == *[!A-Za-z0-9_.-]* ]]; then
+    echo "unsafe module filename: ${module_name} (${module_path})" >&2
+    return 1
   fi
 
   mkdir -p "${runtime_dir}/modules"
@@ -620,6 +727,7 @@ markdown_download_nginx_source() {
     "https://nginx.org/download/nginx-${nginx_version}.tar.gz" \
     -o "${dest_file}" || {
     echo "ERROR: failed to download nginx-${nginx_version}.tar.gz" >&2
+    rm -f "${dest_file}"
     return 1
   }
 
@@ -627,6 +735,7 @@ markdown_download_nginx_source() {
     -f "${dest_file}" \
     -i "nginx-${nginx_version}" || {
     echo "ERROR: checksum verification failed for nginx-${nginx_version}.tar.gz" >&2
+    rm -f "${dest_file}"
     return 1
   }
 

@@ -56,7 +56,7 @@ def _workflow_publish_body() -> str:
     # Stop at the next top-level job marker so a later job cannot leak
     # into the publish job's own configuration.  MULTILINE makes `$`
     # match the end of any line, not only the end of the whole text.
-    next_job = re.search(r"\n  [a-z][a-z0-9-]*:$", rest, flags=re.MULTILINE)
+    next_job = re.search(r"\n  [A-Za-z0-9_-]+:$", rest, flags=re.MULTILINE)
     if next_job is not None:
         rest = rest[: next_job.start()]
     return rest
@@ -117,3 +117,145 @@ def test_publish_hard_depends_on_release_gate() -> None:
     # The qualification validators run inside release-gate, so publish's
     # success condition on release-gate carries the qualification.
     assert "needs.release-gate.result == 'success'" in body
+
+
+RC_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "rc-release-gates.yml"
+
+
+def _release_jobs() -> dict:
+    import yaml
+
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+
+def _rc_jobs() -> dict:
+    import yaml
+
+    return yaml.safe_load(RC_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+
+def _rc_triggers() -> dict:
+    import yaml
+
+    document = yaml.safe_load(RC_WORKFLOW.read_text(encoding="utf-8"))
+    # YAML reads a bare `on` key as the boolean True.
+    return document.get("on", document.get(True, {}))
+
+
+def _publish_allowed(results: dict[str, str], event: str = "push") -> bool:
+    """Evaluate the publish condition with the given upstream results."""
+    condition = _release_jobs()["publish"]["if"]
+    # The workflow folds the condition over several lines.
+    condition = " ".join(condition.split())
+    condition = condition.replace("&&", " and ").replace("||", " or ")
+    condition = condition.replace("always()", "True")
+    condition = re.sub(
+        r"github\.event_name == '([a-z_]+)'",
+        lambda match: str(event == match.group(1)),
+        condition,
+    )
+    condition = re.sub(
+        r"needs\.([a-z-]+)\.result == '([a-z]+)'",
+        lambda match: str(results.get(match.group(1)) == match.group(2)),
+        condition,
+    )
+    assert "needs." not in condition, condition
+    return bool(eval(condition, {"__builtins__": {}}, {}))  # noqa: S307 - our own condition
+
+
+def test_the_release_workflow_calls_the_candidate_gates() -> None:
+    """The canonical publication path owns the heavy qualification."""
+    assert (
+        _release_jobs()["rc-release-gates"]["uses"]
+        == "./.github/workflows/rc-release-gates.yml"
+    )
+
+
+def test_the_candidate_gates_are_reusable_and_not_tag_triggered() -> None:
+    """One authoritative qualification per candidate, not two."""
+    triggers = _rc_triggers()
+    assert "workflow_call" in triggers
+    assert "workflow_dispatch" in triggers
+    assert "push" not in triggers
+
+
+def test_tag_publish_needs_the_candidate_gates() -> None:
+    publish = _release_jobs()["publish"]
+    assert "rc-release-gates" in publish["needs"]
+    assert "needs.rc-release-gates.result == 'success'" in publish["if"]
+
+
+def test_any_non_success_candidate_result_blocks_publication() -> None:
+    """Neither failure, cancellation nor a skip may publish the tag."""
+    green = {
+        "musl-build": "success",
+        "integrity-checksums": "success",
+        "release-gate": "success",
+        "official-docker-release-gate": "success",
+        "integrity-signature": "success",
+    }
+    assert _publish_allowed({**green, "rc-release-gates": "success"}) is True
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _publish_allowed({**green, "rc-release-gates": outcome}) is False
+
+
+def test_the_candidate_gates_run_the_called_commit() -> None:
+    """The evidence records the SHA the caller checked out, not a pinned ref."""
+    steps = _rc_jobs()["real-nginx-e2e"]["steps"]
+    checkout = next(
+        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert "ref" not in checkout.get("with", {})
+    assert 'os.environ["GITHUB_SHA"]' in RC_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_manual_qualification_is_explicitly_defined() -> None:
+    """A hand-run candidate gate is defined, and it is not a second tag path."""
+    assert "workflow_dispatch" in _rc_triggers()
+
+
+def _signing_allowed(results: dict[str, str], event: str = "push", ref_type: str = "tag") -> bool:
+    """Evaluate the signing condition with the given upstream results."""
+    condition = " ".join(str(_release_jobs()["integrity-signing"]["if"]).split())
+    condition = condition.replace("&&", " and ").replace("||", " or ")
+    condition = re.sub(
+        r"github\.event_name == '([a-z_]+)'",
+        lambda match: str(event == match.group(1)),
+        condition,
+    )
+    condition = re.sub(
+        r"github\.ref_type == '([a-z]+)'",
+        lambda match: str(ref_type == match.group(1)),
+        condition,
+    )
+    condition = re.sub(
+        r"needs\.([a-z-]+)\.result == '([a-z]+)'",
+        lambda match: str(results.get(match.group(1)) == match.group(2)),
+        condition,
+    )
+    assert "needs." not in condition, condition
+    return bool(eval(condition, {"__builtins__": {}}, {}))  # noqa: S307 - our own condition
+
+
+def test_tag_signing_requires_the_candidate_gates() -> None:
+    """A protected release signature follows a completed qualification."""
+    assert "rc-release-gates" in _release_jobs()["integrity-signing"]["needs"]
+
+
+def test_a_non_success_candidate_result_blocks_tag_signing() -> None:
+    """Neither failure, cancellation nor a skip may start protected signing."""
+    green = {
+        "smoke-test": "success",
+        "release-gate": "success",
+        "musl-build": "success",
+        "official-docker-release-gate": "success",
+    }
+    assert _signing_allowed({**green, "rc-release-gates": "success"}) is True
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _signing_allowed({**green, "rc-release-gates": outcome}) is False
+
+
+def test_manual_dispatch_does_not_sign() -> None:
+    """An artifact-only dispatch skips signing on purpose."""
+    green = {"rc-release-gates": "success"}
+    assert _signing_allowed(green, event="workflow_dispatch", ref_type="branch") is False

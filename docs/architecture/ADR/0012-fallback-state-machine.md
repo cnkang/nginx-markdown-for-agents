@@ -27,7 +27,13 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
    Fail-open replay stays available only while every consumed upstream
    byte is still retained in the module's replay buffer; if any consumed
    input is no longer available for replay, the module MUST fail-closed
-   instead of re-reading upstream data without bound.
+   instead of re-reading upstream data without bound.  Precedence: the
+   replay-buffer fail-closed rule GOVERNS — when replay data is
+   unavailable before commit, the module fails closed (configured error
+   status 429/503/502 via the `markdown_error_policy` directive's
+   `status <code>` form, or the `fail_closed` policy value) regardless of a
+   `pass` error policy, because the module cannot honor a pass policy
+   without the original bytes.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
    module terminates the response with whatever Markdown it produced.

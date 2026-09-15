@@ -52,7 +52,7 @@ data:
         markdown_auto_decompress {{ ternary "on" "off" .Values.markdown.autoDecompress }};
         markdown_cache_validation {{ .Values.markdown.conditionalRequests }};
         markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
-        {{- if .Values.markdown.streaming }}
+        {{- if and .Values.markdown.streaming .Values.markdown.streaming.mode }}
         markdown_streaming {{ .Values.markdown.streaming.mode }};
         {{- end }}
         {{- if .Values.markdown.prune }}

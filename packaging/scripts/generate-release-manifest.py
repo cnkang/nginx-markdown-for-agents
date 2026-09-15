@@ -18,7 +18,8 @@ Options:
     --ref-type T GitHub ref type (tag or branch)
     --repo REPO  GitHub repository (owner/repo format)
     --source-url URL   Source archive URL
-    --source-sha S     Source archive SHA-256 (omit to leave unavailable)
+    --source-sha S     Source archive SHA-256 (required with --tag; omit only
+                       for --no-source dispatches)
     --no-source        Mark source as unavailable (dispatch without tag)
 
 Exit codes:
@@ -210,17 +211,50 @@ def source_archive_info(
     repo: str, tag: str | None, source_url: str | None, source_sha: str | None
 ) -> dict:
     """Build source archive section."""
+    if source_url and tag:
+        # The validator requires the canonical release-download URL for a tag, so
+        # a supplied URL is replaced by the one the release publishes.
+        canonical = (
+            f"https://github.com/{repo}/releases/download/{tag}/"
+            f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        )
+        if source_url != canonical:
+            print(
+                f"NOTE: --source-url replaced by the canonical bundle URL for {tag}",
+                file=sys.stderr,
+            )
+        source_url = canonical
     if source_url:
+        if tag and not source_sha:
+            print(
+                f"ERROR: --source-url with --tag needs --source-sha: {tag} "
+                "publishes a source bundle and validation rejects a tag manifest "
+                "without its digest",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         info: dict = {"archive_url": source_url, "available": True}
         if source_sha:
             info["sha256"] = source_sha
         return info
 
     if tag:
-        url = f"https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz"
+        # A tag release publishes a canonical bundle, so the manifest has to
+        # describe that bundle and carry its digest; the validator rejects a tag
+        # manifest that names GitHub's auto-generated archive or omits the
+        # digest.
+        url = (
+            f"https://github.com/{repo}/releases/download/{tag}/"
+            f"nginx-markdown-for-agents-source-{tag}.tar.gz"
+        )
         info = {"archive_url": url, "available": True}
-        if source_sha:
-            info["sha256"] = source_sha
+        if not source_sha:
+            raise SystemExit(
+                "a tag manifest needs --source-sha: the release publishes a "
+                "source bundle and validation rejects a tag manifest without "
+                "its digest"
+            )
+        info["sha256"] = source_sha
         return info
 
     return {"available": False}
@@ -284,10 +318,8 @@ def build_manifest(
     repository = repo or gi["repository"]
     commit_sha = gi["commit"]
 
-    # Tag / version
-    tag_version = None
-    if tag:
-        tag_version = validate_version(version_from_tag(tag), "--tag")
+    # Tag / version.  `tag_version` was validated above for
+    # `expected_package_version`; reuse it rather than computing it twice.
     if version and tag_version and version != tag_version:
         print(
             f"ERROR: --version {version} does not match --tag {tag}",
@@ -320,6 +352,15 @@ def build_manifest(
 
     # Source archive
     if no_source:
+        if tag:
+            # A tag release publishes a source bundle, so marking the source
+            # unavailable describes a manifest the validator rejects.
+            print(
+                "ERROR: --no-source is not valid with --tag: a tag release "
+                "publishes a source bundle",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         source: dict = {"available": False}
     else:
         source = source_archive_info(repository, tag, source_url, source_sha)

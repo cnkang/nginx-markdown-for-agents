@@ -171,7 +171,6 @@ typedef struct {
         ngx_atomic_uint_t precommit_reject_total;
         ngx_atomic_uint_t budget_exceeded_total;
         ngx_atomic_uint_t last_ttfb_ms;
-        ngx_atomic_uint_t last_peak_memory_bytes;
 
         /* Fallback/failure counters */
         ngx_atomic_uint_t streaming_fallback_precommit_pass;
@@ -414,8 +413,6 @@ ngx_http_markdown_collect_streaming_snapshot(
     snapshot->streaming.budget_exceeded_total =
         metrics->streaming.budget_exceeded_total;
     snapshot->streaming.last_ttfb_ms = metrics->streaming.last_ttfb_ms;
-    snapshot->streaming.last_peak_memory_bytes =
-        metrics->streaming.last_peak_memory_bytes;
     snapshot->streaming.engine_choice.streaming =
         metrics->streaming.engine_choice.streaming;
     snapshot->streaming.engine_choice.full_buffer =
@@ -634,10 +631,16 @@ ngx_http_markdown_metrics_to_v1(
     /* Preserve byte and streaming gauges after the histogram conversion. */
     v1->input_bytes = snapshot->input_bytes;
     v1->output_bytes = snapshot->output_bytes;
+    /*
+     * The conversion peak is a conversion-wide gauge, not a streaming one, so it
+     * is populated in every build from the field the recorder maintains.
+     */
+    if (ngx_http_markdown_metrics != NULL) {
+        v1->conversion_peak_memory_bytes =
+            ngx_http_markdown_metrics->perf.conversion_peak_memory_bytes;
+    }
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->output_bytes += snapshot->streaming.selection.output_bytes_total;
-    v1->streaming_peak_memory_bytes =
-        snapshot->streaming.last_peak_memory_bytes;
 #endif
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->streaming_events.commit = snapshot->streaming.commit_total;
@@ -706,66 +709,15 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
         return NGX_HTTP_FORBIDDEN;
     }
 
-#if (NGX_HAVE_UNIX_DOMAIN)
-    if (r->connection->sockaddr->sa_family == AF_UNIX) {
-        /* UNIX-domain peers connect through a local socket path and
-         * cannot originate from a remote host, so the loopback-only
-         * boundary is inherently satisfied. */
-        return NGX_OK;
-    }
-#endif
-
-    if (r->connection->sockaddr->sa_family == AF_INET) {
-        const struct sockaddr_in *sin =
-            (const struct sockaddr_in *) r->connection->sockaddr;
-        /* Accept the whole 127.0.0.0/8 loopback range, not only
-         * 127.0.0.1: any address in the range is a local peer. */
-        if ((ntohl(sin->sin_addr.s_addr) & 0xff000000U)
-            != 0x7f000000U) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                         "markdown: access denied from non-localhost IPv4 address");
-            return NGX_HTTP_FORBIDDEN;
-        }
-    }
-#if (NGX_HAVE_INET6)
-    else if (r->connection->sockaddr->sa_family == AF_INET6) {
-        const struct sockaddr_in6 *sin6 =
-            (const struct sockaddr_in6 *) r->connection->sockaddr;
-        /* Accept ::1 and IPv4-mapped IPv6 addresses whose embedded
-         * IPv4 address is in 127.0.0.0/8 (e.g. ::ffff:127.0.0.1). */
-        if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
-            return NGX_OK;
-        }
-        if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-            uint32_t  v4;
-            v4 = ((uint32_t) sin6->sin6_addr.s6_addr[12] << 24)
-                 | ((uint32_t) sin6->sin6_addr.s6_addr[13] << 16)
-                 | ((uint32_t) sin6->sin6_addr.s6_addr[14] << 8)
-                 | (uint32_t) sin6->sin6_addr.s6_addr[15];
-            /* The bytes are assembled in host order above (byte 12 is the
-             * most significant octet of the embedded IPv4 address), so the
-             * /8 comparison uses the value directly.  Applying ntohl()
-             * here would byte-swap the already host-order value again on
-             * little-endian hosts and deny legitimate v4-mapped loopback
-             * peers.  The AF_INET branch above differs: sin_addr.s_addr is
-             * stored in network byte order, so ntohl() is required there. */
-            if ((v4 & 0xff000000U) == 0x7f000000U) {
-                return NGX_OK;
-            }
-        }
+    if (!ngx_http_markdown_peer_is_loopback(r)) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: access denied from non-localhost IPv6 address");
-        return NGX_HTTP_FORBIDDEN;
-    }
-#endif
-    else {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: access denied from unknown address family");
+                     "markdown: access denied from non-localhost peer");
         return NGX_HTTP_FORBIDDEN;
     }
 
     return NGX_OK;
 }
+
 
 
 /*

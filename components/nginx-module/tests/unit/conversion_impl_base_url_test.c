@@ -432,6 +432,19 @@ typedef struct ngx_log_s ngx_log_t;
 typedef struct ngx_pool_s ngx_pool_t;
 typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
+
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old,
+    ngx_atomic_t set)
+{
+    if (*(volatile ngx_atomic_t *) lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
 typedef struct ngx_time_s ngx_time_t;
 
 struct ngx_list_part_s {
@@ -1462,6 +1475,8 @@ test_base_url_decision_failure_propagates(void)
     set_str(&r.uri, "/p");
     r.loc_conf = &conf;
     r.main_conf = (void *) &main_conf;
+
+    ngx_memzero(&base_url, sizeof(base_url));
 
     TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
                     == NGX_ERROR,

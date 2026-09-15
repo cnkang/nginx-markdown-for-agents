@@ -710,6 +710,68 @@ static void test_safe_finish_copies_rust_output_before_free(void)
     TEST_PASS("safe_finish copies Rust output before free");
 }
 
+/* Two backpressures in a row, then success: the pending chain must stay the
+ * one the downstream owns, the resume counter must count each resume, and the
+ * terminal must be confirmed exactly once.  A resume that re-sent the original
+ * chain, or cleared the pending state on the first NGX_AGAIN, fails here. */
+static void test_safe_finish_repeated_backpressure_resumes_without_resending(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+    ngx_chain_t *owned;
+    u_char closing[] = "\n```";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = closing;
+    test_safe_finish_len = sizeof(closing) - 1;
+
+    test_output_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN, "first backpressure returns NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output == test_output_filter_chain,
+                "first backpressure keeps the downstream-owned chain");
+    TEST_ASSERT(ngx_http_markdown_pending_output_current() == 1,
+                "first backpressure counts one pending delivery");
+
+    /* The downstream owns the chain from the first attempt, so the resume must
+     * hand it NULL instead of the original chain. */
+    owned = ctx.streaming.pending_output;
+    test_output_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN, "second backpressure still returns NGX_AGAIN");
+    TEST_ASSERT(test_output_filter_called == 2,
+                "each resume reaches the downstream");
+    TEST_ASSERT(test_output_filter_chain == NULL,
+                "the resume must pass NULL, not the chain the downstream owns");
+    TEST_ASSERT(owned != NULL && test_output_filter_chain != owned,
+                "the original chain is never handed over twice");
+    /* The gauge counts outstanding pending deliveries, so a repeated
+     * backpressure on the same delivery must not add a second one. */
+    TEST_ASSERT(ngx_http_markdown_pending_output_current() == 1,
+                "a repeated backpressure does not double-count the delivery");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+                "two backpressures must not confirm the terminal");
+
+    test_output_filter_rc = NGX_DONE;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "the drained resume completes");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+                "a completed resume clears the pending chain");
+    TEST_ASSERT(ngx_http_markdown_pending_output_current() == 0,
+                "a completed resume clears the pending count");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+                "the terminal is confirmed exactly once");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "no resume aborts the handle");
+    TEST_ASSERT(test_poison_top_filter_called == 0,
+                "no resume bypasses the saved downstream filter");
+}
+
 static void test_safe_finish_backpressure_preserves_pending_chain(void)
 {
     ngx_http_markdown_ctx_t ctx;
@@ -1504,6 +1566,7 @@ int main(void)
     test_safe_finish_empty_rust_output_sends_terminal();
     test_safe_finish_copies_rust_output_before_free();
     test_safe_finish_backpressure_preserves_pending_chain();
+    test_safe_finish_repeated_backpressure_resumes_without_resending();
     test_safe_finish_data_only_pending_continues_to_terminal();
     test_safe_finish_no_closing_bytes_backpressure();
     test_safe_finish_idempotent_reentry();

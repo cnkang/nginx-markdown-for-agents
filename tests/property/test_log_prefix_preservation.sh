@@ -51,6 +51,9 @@ echo ""
 # Updated 2026-08-19: 374 — the dynconf bind-once fix removed
 # the effective-conf allocation-failure log site (by-value copy has no
 # allocation failure path).
+# Updated 2026-09-12: 334 — the convergence removed the five retired
+# directive names and their shared reject-only handler, which deleted four
+# log call sites.  The reviewed count at this revision is 334.
 # Updated 2026-08-28: 349 — the current branch has 346 sites at HEAD and
 # three reviewed terminal-diagnostic sites in this remediation. Keep this
 # explicit baseline so an accidental log-site deletion/addition still fails
@@ -69,7 +72,7 @@ echo ""
 # Updated 2026-09-08: 338 — Spec 62 removes the retired runtime dynconf
 # watcher and its 21 associated log sites.  The remaining count is the
 # reviewed static-convergence baseline for this checkout.
-BASELINE_LOG_SITES=338
+BASELINE_LOG_SITES=334
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0

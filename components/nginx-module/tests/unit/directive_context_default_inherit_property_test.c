@@ -828,12 +828,6 @@ test_default_values_property(void)
     TEST_ASSERT(child->advanced.prune_noise == 1,
         "markdown_prune_noise default should be on");
 
-    /*
-     * markdown_prune_selectors / markdown_prune_protection_selectors were
-     * removed in 0.9.2 (LTS-R009); the directive names remain registered with
-     * an error-returning handler but no config field backs them, so there are
-     * no default values to assert here.
-     */
 
     /* markdown_log_verbosity: default info */
     TEST_ASSERT(child->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_INFO,
@@ -1071,37 +1065,9 @@ test_trusted_proxies_http_only(void)
     TEST_PASS("Req 15.1: trusted_proxies http-only enforced");
 }
 
-/* ================================================================
- * 5. Requirement 15.10: removed directive context verification
- *
- * Removed directives remain HTTP-only migration entries. Verify the
- * command-table bits directly.
- * ================================================================ */
-static void
-test_dynconf_context(void)
-{
-    static const char *dynconf_names[] = {
-        "markdown_dynamic_config",
-        "markdown_dynamic_config_path",
-        "markdown_dynconf_dry_run"
-    };
-    ngx_command_t *cmd;
-    size_t         i;
-
-    TEST_SECTION("Property 3.5: Removed directive context");
-
-    for (i = 0; i < 3; i++) {
-        cmd = find_directive(dynconf_names[i]);
-        TEST_ASSERT(cmd != NULL, "removed directive must be registered");
-        TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
-            "removed directive must allow http context");
-    }
-
-    TEST_PASS("Removed directives have expected context flags");
-}
 
 /* ================================================================
- * 6. Command table count = exactly 25 (20 active + 5 reject-only)
+ * 6. Command table count = exactly 20 (all active)
  * ================================================================ */
 static void
 test_command_table_count(void)
@@ -1109,16 +1075,16 @@ test_command_table_count(void)
     ngx_command_t *cmd;
     int            count = 0;
 
-    TEST_SECTION("Property 3.6: Command table has exactly 25 entries");
+    TEST_SECTION("Property 3.6: Command table has exactly 20 entries");
 
     for (cmd = ngx_http_markdown_filter_commands; cmd->name.len != 0; cmd++) {
         count++;
     }
 
-    TEST_ASSERT(count == 25,
-        "command table must have exactly 25 entries (0.9.2 frozen target)");
+    TEST_ASSERT(count == 20,
+        "command table must have exactly 20 entries (0.9.2 frozen target)");
 
-    TEST_PASS("Command table count = 25");
+    TEST_PASS("Command table count = 20");
 }
 
 /* ================================================================
@@ -1133,7 +1099,6 @@ main(void)
     test_default_values_property();
     test_inheritance_property();
     test_trusted_proxies_http_only();
-    test_dynconf_context();
     test_command_table_count();
 
     printf("\n=== All Property 3 tests passed ===\n");
