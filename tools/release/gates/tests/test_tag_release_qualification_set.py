@@ -212,3 +212,50 @@ def test_the_candidate_gates_run_the_called_commit() -> None:
 def test_manual_qualification_is_explicitly_defined() -> None:
     """A hand-run candidate gate is defined, and it is not a second tag path."""
     assert "workflow_dispatch" in _rc_triggers()
+
+
+def _signing_allowed(results: dict[str, str], event: str = "push", ref_type: str = "tag") -> bool:
+    """Evaluate the signing condition with the given upstream results."""
+    condition = " ".join(str(_release_jobs()["integrity-signing"]["if"]).split())
+    condition = condition.replace("&&", " and ").replace("||", " or ")
+    condition = re.sub(
+        r"github\.event_name == '([a-z_]+)'",
+        lambda match: str(event == match.group(1)),
+        condition,
+    )
+    condition = re.sub(
+        r"github\.ref_type == '([a-z]+)'",
+        lambda match: str(ref_type == match.group(1)),
+        condition,
+    )
+    condition = re.sub(
+        r"needs\.([a-z-]+)\.result == '([a-z]+)'",
+        lambda match: str(results.get(match.group(1)) == match.group(2)),
+        condition,
+    )
+    assert "needs." not in condition, condition
+    return bool(eval(condition, {"__builtins__": {}}, {}))  # noqa: S307 - our own condition
+
+
+def test_tag_signing_requires_the_candidate_gates() -> None:
+    """A protected release signature follows a completed qualification."""
+    assert "rc-release-gates" in _release_jobs()["integrity-signing"]["needs"]
+
+
+def test_a_non_success_candidate_result_blocks_tag_signing() -> None:
+    """Neither failure, cancellation nor a skip may start protected signing."""
+    green = {
+        "smoke-test": "success",
+        "release-gate": "success",
+        "musl-build": "success",
+        "official-docker-release-gate": "success",
+    }
+    assert _signing_allowed({**green, "rc-release-gates": "success"}) is True
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _signing_allowed({**green, "rc-release-gates": outcome}) is False
+
+
+def test_manual_dispatch_does_not_sign() -> None:
+    """An artifact-only dispatch skips signing on purpose."""
+    green = {"rc-release-gates": "success"}
+    assert _signing_allowed(green, event="workflow_dispatch", ref_type="branch") is False
