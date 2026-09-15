@@ -308,3 +308,18 @@ def test_an_operator_glued_to_an_operand_is_not_a_plain_command() -> None:
     """`||true` reaches the tokenizer as one word."""
     assert reach.command_words("python3 tools/harness/detect_example.py ||true") == []
     assert reach.command_words("make root") == ["make", "root"]
+
+
+def test_an_overridden_recipe_replaces_its_predecessor() -> None:
+    """A `make` call written in an old recipe is not a live prerequisite."""
+    overridden = (
+        "root:\n\tmake checked\nroot:\n\ttrue\n"
+        "checked:\n\tpython3 " + CHECK + "\n"
+    )
+    merged = (
+        "root: dep1\nroot: dep2\n"
+        "dep1:\n\t@true\ndep2:\n\tpython3 " + CHECK + "\n"
+    )
+
+    assert CHECK in reach.reachable_commands(merged, ["make root"], PROFILE, [])
+    assert CHECK not in reach.reachable_commands(overridden, ["make root"], PROFILE, [])
