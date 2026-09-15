@@ -286,6 +286,14 @@ jobs:
         with:
           python-version: '3.14.6'
 
+      # A harness test runs `rustc -Vv` to check the release build identity, so
+      # the toolchain the repository pins is provisioned here rather than left to
+      # a rustup proxy that would resolve it on demand.
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.98.1
+
       - name: Install test dependencies
         run: >-
           python3 -m pip install --upgrade pip &&

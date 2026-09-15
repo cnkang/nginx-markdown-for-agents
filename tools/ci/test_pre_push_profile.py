@@ -128,7 +128,6 @@ def test_duplicate_json_keys_and_python_are_refused(tmp_path):
 
 def test_a_gate_that_cannot_start_fails_the_profile(monkeypatch, capsys, tmp_path) -> None:
     """An unlaunchable command is a failed gate, not a traceback."""
-    import pre_push_profile as profile
 
     monkeypatch.setattr(profile, "load_gates", lambda path: [{
         "name": "unlaunchable", "command": ["/nonexistent/gate-binary"],
