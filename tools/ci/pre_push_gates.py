@@ -9,6 +9,7 @@ the list is removed from both.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 # A gate names the command to run, whether it is selected from the change set,
@@ -79,20 +80,48 @@ def _validated_gate(entry: object, names: set[str]) -> dict:
 
 def load_gates(path: Path) -> list[dict]:
     """Read literal GATES data without executing the declaration file."""
-    import ast
-
     from tools.lib.path_validation import validate_read_path
 
     validated = validate_read_path(str(path))
     source = Path(validated)
     tree = ast.parse(source.read_text(encoding="utf-8"))
-    for node in tree.body:
+    declarations: list[ast.Assign | ast.AnnAssign] = []
+    for index, node in enumerate(tree.body):
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             if node.target.id == "GATES":
-                return validate_gates(ast.literal_eval(node.value))
+                declarations.append(node)
+                continue
         if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "GATES"
             for target in node.targets
         ):
-            return validate_gates(ast.literal_eval(node.value))
-    raise ValueError("missing GATES declaration")
+            declarations.append(node)
+            continue
+        if _mentions_gates(node):
+            # An import runs everything that follows, so a later statement that
+            # touches the name can change what the executor sees.
+            raise ValueError("the declaration must be the only use of GATES")
+    if not declarations:
+        raise ValueError("missing GATES declaration")
+    if len(declarations) > 1:
+        # The checker reads one assignment while Python applies the last.
+        raise ValueError("GATES must be declared exactly once")
+    return validate_gates(ast.literal_eval(declarations[0].value))
+
+
+# Statements that run when the module is imported.  A definition only runs
+# when it is called, so its body is not a later modification.
+_IMPORT_TIME = (
+    ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Delete, ast.For,
+    ast.While, ast.If, ast.With, ast.Try,
+)
+
+
+def _mentions_gates(node: ast.stmt) -> bool:
+    """True when importing the module could touch the name the declaration binds."""
+    if not isinstance(node, _IMPORT_TIME):
+        return False
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id == "GATES":
+            return True
+    return False

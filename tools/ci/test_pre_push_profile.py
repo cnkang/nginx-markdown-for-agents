@@ -83,3 +83,33 @@ def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys):
 def test_invalid_declaration_reports_incomplete(monkeypatch):
     monkeypatch.setattr(profile, "GATES", [])
     assert profile.main(["prog"]) == 2
+
+
+def test_a_duplicated_declaration_is_refused(tmp_path) -> None:
+    """The checker reads one assignment while Python applies the last."""
+    import pytest
+
+    from pre_push_gates import GATES, load_gates
+
+    good = tmp_path / "good.py"
+    good.write_text("GATES = " + repr(GATES) + "\n", encoding="utf-8")
+    assert load_gates(good) == list(GATES) or load_gates(good)
+
+    # The checker must not stop at the first assignment while the executor
+    # applies the last, which is the empty one here.
+    duplicate = tmp_path / "duplicate.py"
+    duplicate.write_text("GATES = " + repr(GATES) + "\nGATES = []\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_gates(duplicate)
+
+
+def test_a_later_modification_is_refused(tmp_path) -> None:
+    """An import runs what follows a declaration, so nothing may touch it."""
+    import pytest
+
+    from pre_push_gates import GATES, load_gates
+
+    later = tmp_path / "later.py"
+    later.write_text("GATES = " + repr(GATES) + "\nGATES.clear()\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_gates(later)

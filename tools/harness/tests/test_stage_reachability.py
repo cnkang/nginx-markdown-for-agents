@@ -323,3 +323,30 @@ def test_an_overridden_recipe_replaces_its_predecessor() -> None:
 
     assert CHECK in reach.reachable_commands(merged, ["make root"], PROFILE, [])
     assert CHECK not in reach.reachable_commands(overridden, ["make root"], PROFILE, [])
+
+
+def _make_dry_run(tmp_path, makefile: str, target: str) -> str:
+    """What Make itself says it would run, for comparison."""
+    import subprocess
+
+    (tmp_path / "Makefile").write_text(makefile, encoding="utf-8")
+    result = subprocess.run(
+        ["make", "-n", target], cwd=tmp_path, capture_output=True, text=True, check=False
+    )
+    return result.stdout
+
+
+def test_a_superseded_recipe_is_not_used_when_its_replacement_cannot_fail(tmp_path) -> None:
+    """Make replaced the recipe, so the old command is not a live call."""
+    makefile = f"root:\n\tpython3 {CHECK}\nroot:\n\t-echo noop\n"
+
+    assert CHECK not in _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_branch_that_may_redefine_a_target_makes_it_unknown(tmp_path) -> None:
+    """A target a branch redefines has no certain recipe."""
+    makefile = f"root:\n\tpython3 {CHECK}\nifeq (1,1)\nroot:\n\techo noop\nendif\n"
+
+    assert CHECK not in _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
