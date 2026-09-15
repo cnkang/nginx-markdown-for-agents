@@ -1,6 +1,8 @@
 # Release Packages — Unified DEB/RPM build, test, sign, and publish pipeline
 #
-# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix) → integrity → publish
+# Architecture: prepare → build (matrix) → package (matrix) → smoke-test (matrix)
+#   → release-gate + official-docker gate → RC real-environment qualification
+#   → integrity signing → publish
 # Tag releases also run release-gate after smoke-test; publish waits for both
 # release-gate and integrity to pass.
 #
@@ -82,7 +84,8 @@ permissions: {}
 #   - smoke-test:          Container install + module load verification (matrix)
 #   - release-gate:        Release governance and artifact layout gate
 #   - integrity-checksums: SHA256SUMS + release-manifest.json generation
-#   - integrity-signing:   Optional GPG signing (protected environment, tag only)
+#   - integrity-signing:   Mandatory GPG package signing for tag releases
+#     (skipped for workflow_dispatch; artifact-only dispatch stays intentional)
 #   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
 #
 # All third-party actions in jobs below MUST use full SHA pinning (Req 9.6).
@@ -1585,8 +1588,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate]
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate, rc-release-gates]
+    if: >-
+      github.event_name == 'push'
+      && github.ref_type == 'tag'
+      && needs.rc-release-gates.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
