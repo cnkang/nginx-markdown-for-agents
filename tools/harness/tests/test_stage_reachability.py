@@ -411,3 +411,15 @@ def test_an_interpreter_option_does_not_hide_the_script() -> None:
     assert sync._invocation_target(["bash", "-euo", "pipefail", "tools/x.sh"]) == "tools/x.sh"
     assert sync._invocation_target(["python3", "-m", "pytest", "tests/"]) is None
     assert sync._invocation_target(["python3", "tools/x.py"]) == "tools/x.py"
+
+
+def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
+    """`endif_var := value` neither closes a branch nor opens a target."""
+    open_branch = (
+        "ifeq ($(UNKNOWN),yes)\nendif_var := value\n"
+        "root:\n\tpython3 " + CHECK + "\n"
+    )
+    closed_branch = open_branch.replace("endif_var := value", "endif")
+
+    assert CHECK not in reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
+    assert CHECK in reach.reachable_commands(closed_branch, ["make root"], PROFILE, [])

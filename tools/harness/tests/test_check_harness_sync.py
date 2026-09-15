@@ -939,3 +939,11 @@ def test_default_working_directories_are_read() -> None:
     assert sync._document_run_commands(plain) == ["make root"]
     assert sync._document_run_commands(workflow_default) == []
     assert sync._document_run_commands(job_default) == []
+
+
+def test_an_option_value_is_not_a_test_path() -> None:
+    """The word after `-o` belongs to the option, not to the run."""
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-o", "tools/harness/tests/test_fake.py"]
+    ) is None
+    assert sync._discovery_target(["python3", "-m", "pytest", "-q", "tests/"]) == "tests"
