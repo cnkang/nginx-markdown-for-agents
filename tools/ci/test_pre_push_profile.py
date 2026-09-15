@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 # Run with PYTHONPATH=tools/ci, the way the aggregate entry runs the other
@@ -66,50 +67,60 @@ def test_shared_declaration_is_strict() -> None:
             validate_gates(invalid)
 
 
-def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys):
-    """A real subprocess proves the runner consumes the declaration."""
+def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys, tmp_path):
+    """A real subprocess proves the runner consumes the JSON declaration."""
     import sys
     command = [sys.executable, "-c", "import sys; print('gate executed'); sys.exit(7)"]
-    monkeypatch.setattr(profile, "GATES", [{
+    path = tmp_path / "tools/ci/pre_push_gates.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps([{
         "name": "probe", "command": command,
         "needs_c_change": False, "requires_nginx": False,
-    }])
+    }]), encoding="utf-8")
+    monkeypatch.setattr(profile, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(profile, "_merge_base", lambda base: "base")
     monkeypatch.setattr(profile, "_changed_files", lambda base: [])
     assert profile.main(["prog"]) == 1
     assert "gate executed" in capsys.readouterr().out
 
 
-def test_invalid_declaration_reports_incomplete(monkeypatch):
-    monkeypatch.setattr(profile, "GATES", [])
-    assert profile.main(["prog"]) == 2
+def test_invalid_declaration_reports_incomplete(monkeypatch, tmp_path):
+    """Missing and malformed data never fall back to the repository defaults."""
+    monkeypatch.setattr(profile, "REPO_ROOT", tmp_path)
+    assert profile.main(["prog", "--list"]) == 2
+    path = tmp_path / "tools/ci/pre_push_gates.json"
+    path.parent.mkdir(parents=True)
+    for data in ("[]", "not JSON", '[{"name":"one","name":"two"}]'):
+        path.write_text(data, encoding="utf-8")
+        assert profile.main(["prog", "--list"]) == 2
 
 
-def test_a_duplicated_declaration_is_refused(tmp_path) -> None:
-    """The checker reads one assignment while Python applies the last."""
+def test_consumers_share_json_and_do_not_cache(monkeypatch, tmp_path):
+    """Both real consumers observe each edit to the same JSON file."""
+    import shlex
+    from tools.harness import check_harness_sync as sync
+
+    path = tmp_path / "tools/ci/pre_push_gates.json"
+    path.parent.mkdir(parents=True)
+    monkeypatch.setattr(profile, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+    for command in (["make", "checked"], ["make", "other"]):
+        path.write_text(json.dumps([{
+            "name": "probe", "command": command,
+            "needs_c_change": False, "requires_nginx": False,
+        }]), encoding="utf-8")
+        assert profile._gates()[0].command == command
+        assert sync._profile_gate_text() == shlex.join(command)
+
+
+def test_duplicate_json_keys_and_python_are_refused(tmp_path):
+    """Aliases and duplicate declarations cannot hide a different gate list."""
     import pytest
+    from pre_push_gates import load_gates
 
-    from pre_push_gates import GATES, load_gates
-
-    good = tmp_path / "good.py"
-    good.write_text("GATES = " + repr(GATES) + "\n", encoding="utf-8")
-    assert load_gates(good) == list(GATES) or load_gates(good)
-
-    # The checker must not stop at the first assignment while the executor
-    # applies the last, which is the empty one here.
-    duplicate = tmp_path / "duplicate.py"
-    duplicate.write_text("GATES = " + repr(GATES) + "\nGATES = []\n", encoding="utf-8")
-    with pytest.raises(ValueError):
-        load_gates(duplicate)
-
-
-def test_a_later_modification_is_refused(tmp_path) -> None:
-    """An import runs what follows a declaration, so nothing may touch it."""
-    import pytest
-
-    from pre_push_gates import GATES, load_gates
-
-    later = tmp_path / "later.py"
-    later.write_text("GATES = " + repr(GATES) + "\nGATES.clear()\n", encoding="utf-8")
-    with pytest.raises(ValueError):
-        load_gates(later)
+    path = tmp_path / "gates.json"
+    for data in ('[{"command":["true"],"command":["false"]}]',
+                 'GATES = alias = []; alias.clear()', '[{"name":NaN}]'):
+        path.write_text(data, encoding="utf-8")
+        with pytest.raises(ValueError):
+            load_gates(path)

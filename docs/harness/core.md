@@ -121,14 +121,21 @@ raw traceback.
 The rule mapping checks static invocation paths, not just names in files.
 Commit hooks and enabled workflow run steps supply actual commands. The push
 entry reaches the shared gate declaration through `pre-push-check`. The runner
-and checker validate the same gate data before using it. CI path filters must
-include the declaration and its tests.
+and checker load `tools/ci/pre_push_gates.json` through the same strict loader.
+Missing data, duplicate JSON keys and invalid fields fail without a fallback.
+Neither consumer caches the declaration. CI path filters must include the JSON
+file, loader and tests.
 
 The resolver follows literal root Make targets, dependencies, recursive Make
 calls and finite variable lists. It does not certify compound shell scripts,
 subdirectory Make calls or dynamic target expressions. Put a required check in
 an explicit direct step when the resolver cannot verify its path. A missing path fails
 the mapping. It must not become a guessed edge.
+
+Reachability alone does not prove blocking behavior. A global `.IGNORE` or a
+target-specific `.IGNORE` removes recipe evidence, including recursive Make
+calls in that recipe. Prerequisites remain separate and can still fail the
+parent target. An unknown conditional or dynamic ignore scope fails validation.
 
 A `save` mapping describes the optional editor adapter for the commit checks.
 It does not prove that contributors installed an editor adapter or Git hook. CI mappings

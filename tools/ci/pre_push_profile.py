@@ -25,10 +25,11 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from pre_push_gates import GATES, validate_gates
+from pre_push_gates import load_gates
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
 
 @dataclass
@@ -131,7 +132,7 @@ def _gates() -> list[Gate]:
             needs_c_change=entry["needs_c_change"],
             requires_nginx=entry["requires_nginx"],
         )
-        for entry in validate_gates(GATES)
+        for entry in load_gates(REPO_ROOT / "tools/ci/pre_push_gates.json")
     ]
 
 
@@ -229,7 +230,7 @@ def main(argv: list[str]) -> int:
 
     try:
         gates = _gates()
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: invalid gate declaration: {exc}", file=sys.stderr)
         return 2
     if args.list:

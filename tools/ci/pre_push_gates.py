@@ -9,49 +9,13 @@ the list is removed from both.
 
 from __future__ import annotations
 
-import ast
+import json
 from pathlib import Path
-
-# A gate names the command to run, whether it is selected from the change set,
-# and whether it needs an environment that may be absent.
-GATES: tuple[dict[str, object], ...] = (
-    {
-        "name": "local gate set (test-all)",
-        "command": ["make", "test-all"],
-        "needs_c_change": False,
-        "requires_nginx": False,
-    },
-    {
-        "name": "real GCC C unit suite",
-        "command": ["make", "test-c-unit-gcc"],
-        "needs_c_change": True,
-        "requires_nginx": False,
-    },
-    {
-        "name": "security static analysis",
-        "command": ["make", "security-static"],
-        "needs_c_change": False,
-        "requires_nginx": False,
-    },
-    {
-        "name": "module end-to-end checks",
-        "command": ["make", "test-all-e2e"],
-        "needs_c_change": False,
-        "requires_nginx": True,
-    },
-    {
-        "name": "coverage gate",
-        "command": ["make", "test-all-coverage"],
-        "needs_c_change": False,
-        "requires_nginx": True,
-    },
-)
-
 
 def validate_gates(value: object) -> list[dict]:
     """Reject malformed declarations instead of coercing commands or flags."""
-    if not isinstance(value, (list, tuple)) or not value:
-        raise ValueError("GATES must be a non-empty sequence")
+    if not isinstance(value, list) or not value:
+        raise ValueError("gate declaration must be a non-empty list")
     names: set[str] = set()
     result: list[dict] = []
     for entry in value:
@@ -78,50 +42,21 @@ def _validated_gate(entry: object, names: set[str]) -> dict:
     return dict(entry, command=list(command))
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject duplicate JSON keys before a parser can silently overwrite them."""
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate gate declaration key: {key}")
+        result[key] = value
+    return result
+
+
 def load_gates(path: Path) -> list[dict]:
-    """Read literal GATES data without executing the declaration file."""
+    """Load and validate the sole JSON declaration, without caching or fallback."""
     from tools.lib.path_validation import validate_read_path
 
     validated = validate_read_path(str(path))
     source = Path(validated)
-    tree = ast.parse(source.read_text(encoding="utf-8"))
-    declarations: list[ast.Assign | ast.AnnAssign] = []
-    for index, node in enumerate(tree.body):
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id == "GATES":
-                declarations.append(node)
-                continue
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "GATES"
-            for target in node.targets
-        ):
-            declarations.append(node)
-            continue
-        if _mentions_gates(node):
-            # An import runs everything that follows, so a later statement that
-            # touches the name can change what the executor sees.
-            raise ValueError("the declaration must be the only use of GATES")
-    if not declarations:
-        raise ValueError("missing GATES declaration")
-    if len(declarations) > 1:
-        # The checker reads one assignment while Python applies the last.
-        raise ValueError("GATES must be declared exactly once")
-    return validate_gates(ast.literal_eval(declarations[0].value))
-
-
-# Statements that run when the module is imported.  A definition only runs
-# when it is called, so its body is not a later modification.
-_IMPORT_TIME = (
-    ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Delete, ast.For,
-    ast.While, ast.If, ast.With, ast.Try,
-)
-
-
-def _mentions_gates(node: ast.stmt) -> bool:
-    """True when importing the module could touch the name the declaration binds."""
-    if not isinstance(node, _IMPORT_TIME):
-        return False
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name) and child.id == "GATES":
-            return True
-    return False
+    data = json.loads(source.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+    return validate_gates(data)
