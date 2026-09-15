@@ -1777,6 +1777,8 @@ help:
 	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
 	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
 	@echo "  test-all                 - Run build + rust + unit tests"
+	@echo "  pre-push-check           - Run the gates a push has to complete, with PASS/FAIL/NOT_RUN"
+	@echo "  harness-quick-checks     - Fast harness checks for comments, workflow inputs, continuations"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
 	@echo "  test-benchmark-compare   - Compare corpus reports (baseline vs current)"
