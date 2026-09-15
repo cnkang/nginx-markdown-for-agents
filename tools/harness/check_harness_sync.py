@@ -602,8 +602,9 @@ def _missing_manifest_segment(
             missing.extend(_missing_make_targets(command, segment, targets))
             break
         if token == "pytest":
-            if not any(item in NON_RUNNING_TEST_OPTIONS for item in segment[index + 1:]):
-                missing.extend(_missing_command_paths(command, segment, index + 1))
+            # A collecting run names paths that still have to exist; only the
+            # claim that it executes them is what the option rules out.
+            missing.extend(_missing_command_paths(command, segment, index + 1))
             break
         if token in {"python", "python3", "bash", "sh"}:
             missing.extend(_missing_interpreter_path(command, segment, index))
