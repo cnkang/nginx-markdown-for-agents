@@ -57,11 +57,11 @@ def test_shared_declaration_is_strict() -> None:
     import pytest
     from pre_push_gates import validate_gates
 
-    valid = dict(name="gate", command=["true"], needs_c_change=False, requires_nginx=False)
+    valid = {"name": "gate", "command": ["true"], "needs_c_change": False, "requires_nginx": False}
     assert validate_gates([valid]) == [valid]
-    for invalid in ([], [dict(valid, command="make")],
-                    [dict(valid, needs_c_change="false")], [valid, valid],
-                    [dict(valid, command=[])], [dict(valid, requires_nginx=None)]):
+    for invalid in ([], [{**valid, "command": "make"}],
+                    [{**valid, "needs_c_change": "false"}], [valid, valid],
+                    [{**valid, "command": []}], [{**valid, "requires_nginx": None}]):
         with pytest.raises(ValueError):
             validate_gates(invalid)
 
