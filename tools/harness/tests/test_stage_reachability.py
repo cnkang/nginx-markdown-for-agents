@@ -404,3 +404,10 @@ def test_an_entry_that_names_an_interpreter_invokes_the_path() -> None:
     """`entry: python3 tools/x.py` runs the path the same way a line does."""
     assert sync._is_invoked("tools/harness/detect_example.py", "entry: python3 tools/harness/detect_example.py")
     assert not sync._is_invoked("tools/harness/detect_example.py", "entry: echo detect_example.py")
+
+
+def test_an_interpreter_option_does_not_hide_the_script() -> None:
+    """`bash -euo pipefail x.sh` runs x.sh, so that is the path it reaches."""
+    assert sync._invocation_target(["bash", "-euo", "pipefail", "tools/x.sh"]) == "tools/x.sh"
+    assert sync._invocation_target(["python3", "-m", "pytest", "tests/"]) is None
+    assert sync._invocation_target(["python3", "tools/x.py"]) == "tools/x.py"

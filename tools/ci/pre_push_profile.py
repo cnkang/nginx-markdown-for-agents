@@ -151,13 +151,18 @@ def _run(gate: Gate) -> Outcome:
     command = " ".join(gate.command)
     print(flush=True)
     print(f"── {gate.name}: {command}", flush=True)
-    process = subprocess.Popen(
-        gate.command,
-        cwd=REPO_ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    try:
+        process = subprocess.Popen(
+            gate.command,
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except OSError as exc:
+        # A gate whose command cannot start has failed, and saying so keeps the
+        # summary complete instead of ending the run with a traceback.
+        return Outcome(gate, "FAIL", f"cannot start: {exc}")
     tail: deque[str] = deque(maxlen=6)  # type: ignore[var-annotated]
     for line in process.stdout or []:
         print(line, end="", flush=True)

@@ -807,9 +807,21 @@ def _invocation_target(parts: list[str]) -> str | None:
     if not parts or parts[0] not in INTERPRETERS:
         return None
     rest = parts[1:]
-    if rest[:1] == ["-m"]:
-        return None
-    return rest[0].rstrip("/") if rest else None
+    while rest:
+        token = rest[0]
+        if token in {"-m", "-c"}:
+            # These take code, not a path.
+            return None
+        if not token.startswith("-"):
+            return token.rstrip("/")
+        # An option may carry a value in the next word: `bash -o pipefail` and
+        # the combined form `bash -euo pipefail` both do.
+        flags = token.lstrip("-")
+        if set(flags) & set("ocIF") and token not in {"-O"}:
+            rest = rest[2:]
+            continue
+        rest = rest[1:]
+    return None
 
 
 def _discovery_target(parts: list[str]) -> str | None:
