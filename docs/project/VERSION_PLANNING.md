@@ -94,6 +94,33 @@ than another baseline reset.
 New experimental surfaces must be clearly labeled and must not appear
 as part of the frozen stable contract.
 
+### Required v1.0 Work: Cross-Release Compatibility Gate
+
+The current public-surface detector proves that the implementation and its
+inventory agree with each other.  It cannot prove that the contract a previous
+stable release published is still satisfied, because one change can edit both
+the source and its inventory and leave them looking consistent while a contract
+breaks.
+
+Before the v1.0 line is frozen, a machine-readable baseline comparison must
+exist that covers at least:
+
+- directives,
+- metrics,
+- reason-code discriminants,
+- diagnostics compatibility rules, and
+- the FFI ABI and versioning policy.
+
+The comparison needs a frozen previous-release baseline, a reproducible way to
+produce it, and per-surface compatibility rules that distinguish an additive
+extension from a break.  Negative fixtures must show that editing source and the
+new inventory together cannot hide a breaking change.  The gate belongs behind a
+generic target, not one named after a specification number.
+
+This is deliberately not part of v0.9.2: the release keeps the detector and its
+current-release shape constants as they are, and a compatibility gate is a v1.0
+deliverable rather than a late pre-release design change.
+
 ## Post-v1.0 Compatibility Policy
 
 The project follows semantic versioning for public runtime behavior.
@@ -126,5 +153,6 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
 | 0.9.1 | 2026-07-14 | Codex | Replaced obsolete 0.4-to-0.6 planning with the final pre-v1.0 baseline, freeze, and post-v1.0 compatibility contract |

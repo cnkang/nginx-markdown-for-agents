@@ -13,6 +13,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# The repository root has to be importable before any `tools.*` import below, so
+# the script runs the same way whether it is started by a Makefile target or by
+# hand.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
 try:
     from tools.harness.constants import (
         FAIL,
@@ -28,9 +34,6 @@ except ModuleNotFoundError:
         WARN_NEEDS_AUTHOR_REVIEW,
     )
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
 
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
