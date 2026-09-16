@@ -123,6 +123,52 @@ def test_gate_declaration_selects_harness_ci():
     assert any(fnmatch.fnmatchcase(name, p) for p in yaml.safe_load(filters)["harness_tooling"])
 
 
+def test_ci_filters_cover_build_and_harness_support_surfaces() -> None:
+    """Changes to helper entrypoints must select their dependent CI jobs."""
+    import fnmatch
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    workflow = yaml.load(
+        (root / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    top_paths = set(workflow["on"]["pull_request"]["paths"])
+    assert "build.sh" in top_paths
+    assert ".clusterfuzzlite/**" in top_paths
+
+    filters_step = next(
+        step
+        for step in workflow["jobs"]["changes"]["steps"]
+        if step.get("id") == "filter"
+    )
+    filters = yaml.safe_load(filters_step["with"]["filters"])
+    required = {
+        "rust": [
+            "components/nginx-module/src/markdown_converter.h",
+            "tools/ci/coverage_gate.py",
+        ],
+        "nginx": [
+            "components/rust-converter/include/markdown_converter.h",
+            "tools/ci/coverage_gate.py",
+        ],
+        "e2e": ["tools/ci/verify_real_nginx_ims.sh"],
+        "harness_tooling": [
+            "tools/ci/coverage_gate.py",
+            "tools/ci/validate_required_workflow_contexts.py",
+            "tools/ci/test_validate_required_workflow_contexts.py",
+            "tools/ci/verify_real_nginx_ims.sh",
+            "build.sh",
+            ".clusterfuzzlite/**",
+        ],
+    }
+    for name, paths in required.items():
+        for path in paths:
+            assert any(fnmatch.fnmatchcase(path, pattern) for pattern in filters[name]), (
+                name,
+                path,
+            )
+
+
 @pytest.mark.parametrize("body", [
     "if false; then\n  make root\nfi",
     "cat <<EOF\nmake root\nEOF",
@@ -413,6 +459,16 @@ def test_an_interpreter_option_does_not_hide_the_script() -> None:
     assert sync._invocation_target(["python3", "tools/x.py"]) == "tools/x.py"
 
 
+def test_interpreter_value_and_separator_options_are_parsed_safely() -> None:
+    """Value-taking flags are consumed and ``--`` exposes the script."""
+    assert sync._invocation_target(["python3", "-I", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["python3", "-X", "utf8", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["python3", "-Xutf8", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["bash", "-O", "extglob", "tools/x.sh"]) == "tools/x.sh"
+    assert sync._invocation_target(["bash", "--", "tools/x.sh"]) == "tools/x.sh"
+    assert sync._invocation_target(["python3", "--unknown", "tools/x.py"]) is None
+
+
 def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
     """`endif_var := value` neither closes a branch nor opens a target."""
     open_branch = (
@@ -421,5 +477,20 @@ def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
     )
     closed_branch = open_branch.replace("endif_var := value", "endif")
 
-    assert CHECK not in reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
+    with pytest.raises(ValueError, match="unclosed"):
+        reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
     assert CHECK in reach.reachable_commands(closed_branch, ["make root"], PROFILE, [])
+
+
+@pytest.mark.parametrize(
+    "makefile, message",
+    [
+        ("endif\nroot:\n\t@true\n", "unmatched"),
+        ("ifeq (1,1)\nroot:\n\t@true\n", "unclosed"),
+        ("include generated.mk\nroot:\n\t@true\n", "included"),
+    ],
+)
+def test_uncertain_makefile_structure_fails_closed(makefile: str, message: str) -> None:
+    """Malformed or split Makefiles cannot establish a stage edge."""
+    with pytest.raises(ValueError, match=message):
+        reach.reachable_commands(makefile, ["make root"], PROFILE, [])

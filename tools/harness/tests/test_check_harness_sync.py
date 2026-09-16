@@ -12,6 +12,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tools.harness import check_harness_sync as sync
 
 
@@ -298,6 +300,62 @@ def test_collect_results_fail_for_invalid_manifest_json(tmp_path, monkeypatch):
     assert len(results) == 1
     assert results[0].name == "manifest-load"
     assert results[0].status == sync.FAIL
+
+
+def test_load_manifest_rejects_non_object_root(tmp_path) -> None:
+    """A scalar or list manifest cannot be treated as a valid mapping."""
+    path = tmp_path / "routing-manifest.json"
+    path.write_text("[]", encoding="utf-8")
+
+    try:
+        sync._load_manifest(path)
+    except ValueError as exc:
+        assert "root must be an object" in str(exc)
+    else:  # pragma: no cover - assertion keeps the failure message explicit
+        raise AssertionError("non-object manifest root was accepted")
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("truth_surfaces", None),
+        ("verification_families", None),
+        ("risk_packs", None),
+        ("task_entrypoints", None),
+        ("spec_resolver", None),
+    ],
+)
+def test_manifest_structure_rejects_null_nested_fields(field, value) -> None:
+    """Malformed nested values return FAIL instead of raising TypeError."""
+    manifest = {
+        "version": 1,
+        "truth_surfaces": {
+            "contract": [],
+            "harness": [],
+            "canonical_docs": [],
+            "optional_adapters": [],
+        },
+        "status_semantics": [
+            sync.PASS,
+            sync.FAIL,
+            sync.SKIP_NOT_PRESENT,
+            sync.WARN_NEEDS_AUTHOR_REVIEW,
+        ],
+        "spec_resolver": {
+            "priority": [],
+            "pointer_candidates": [],
+            "multiple_spec_policy": "policy",
+            "conflict_policy": "policy",
+        },
+        "verification_families": {},
+        "risk_packs": [],
+        "task_entrypoints": [],
+    }
+    manifest[field] = value
+
+    result = sync._check_manifest_structure(manifest)
+
+    assert result.status == sync.FAIL
 
 
 def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monkeypatch):
@@ -833,6 +891,16 @@ def test_rule_checks_reject_a_mapping_without_not_covered() -> None:
     assert "not_covered" in result.detail
 
 
+def test_rule_checks_reject_unknown_mapping_fields() -> None:
+    """Adding an unconsumed field must not silently change the contract."""
+    entry = _rule_check_entry(extra_policy="unvalidated")
+
+    result = sync._check_rule_checks({"rule_checks": [entry]})
+
+    assert result.status == "FAIL"
+    assert "unknown field" in result.detail
+
+
 def test_rule_checks_require_the_check_to_be_invoked() -> None:
     """A path that merely exists is not wiring."""
     entry = _rule_check_entry(check="README.md")
@@ -915,6 +983,16 @@ def test_collection_is_not_execution() -> None:
     assert sync._discovery_target(["python3", "-m", "pytest", "tests/"]) == "tests"
 
 
+def test_unknown_test_option_does_not_expose_its_value_as_a_path() -> None:
+    """An unmodeled option is ambiguous and must fail closed."""
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "--unknown", "tests/"]
+    ) is None
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "--", "tests/"]
+    ) == "tests"
+
+
 def test_a_step_running_elsewhere_does_not_certify() -> None:
     """`working-directory` decides which Makefile a step's commands reach."""
     steps = [{"run": "make root"}]
@@ -922,6 +1000,24 @@ def test_a_step_running_elsewhere_does_not_certify() -> None:
     assert sync._enabled_step_commands(steps) == ["make root"]
     assert sync._enabled_step_commands(steps, "packaging") == []
     assert sync._enabled_step_commands([{"run": "make root", "working-directory": "tools"}]) == []
+
+
+def test_dynamic_workflow_step_conditions_are_not_execution_evidence() -> None:
+    """Only unconditional or literal-true run steps establish a CI edge."""
+    steps = [
+        {"if": "always()", "run": "make dynamic"},
+        {"if": "matrix.enabled == 'true'", "run": "make matrix"},
+        {"if": True, "run": "make literal"},
+        {"if": "${{ true }}", "run": "make string-literal"},
+    ]
+
+    assert sync._enabled_step_commands(steps) == ["make literal", "make string-literal"]
+
+
+def test_malformed_workflow_shape_cannot_certify_ci() -> None:
+    """A malformed job or steps list is an explicit reachability error."""
+    with pytest.raises(ValueError, match="steps"):
+        sync._document_run_commands({"jobs": {"broken": {"steps": "make root"}}})
 
 
 def test_default_working_directories_are_read() -> None:

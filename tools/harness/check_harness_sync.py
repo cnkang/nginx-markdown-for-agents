@@ -133,10 +133,18 @@ def _load_manifest(path: Path | None = None) -> dict:
         ValueError: If the file cannot be read or contains invalid JSON.
     """
     path = path or MANIFEST_PATH
+    def reject_nonfinite(value: str) -> None:
+        raise ValueError(f"non-finite JSON number is not allowed: {value}")
+
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        document = json.loads(
+            path.read_text(encoding="utf-8"), parse_constant=reject_nonfinite
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise ValueError(f"failed to load harness manifest from {path}: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ValueError(f"failed to load harness manifest from {path}: root must be an object")
+    return document
 
 
 def _required_text(path: Path, needles: list[str]) -> list[str]:
@@ -241,6 +249,9 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         CheckResult with PASS if the schema is complete, or FAIL with
         details of the first missing key set.
     """
+    if not isinstance(manifest, dict):
+        return _result("manifest-structure", FAIL, "manifest root must be an object")
+
     required_keys = {
         "version",
         "truth_surfaces",
@@ -258,6 +269,10 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         )
 
     truth_surfaces = manifest["truth_surfaces"]
+    if not isinstance(truth_surfaces, dict):
+        return _result(
+            "manifest-structure", FAIL, "truth_surfaces must be an object"
+        )
     required_truth_surface_keys = {
         "contract",
         "harness",
@@ -273,6 +288,16 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
             "missing truth surface keys: "
             + ", ".join(missing_truth_surface_keys),
         )
+    for key in sorted(required_truth_surface_keys):
+        values = truth_surfaces[key]
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item.strip() for item in values
+        ):
+            return _result(
+                "manifest-structure",
+                FAIL,
+                f"truth_surfaces.{key} must be a list of non-empty strings",
+            )
 
     expected_statuses = {
         PASS,
@@ -293,6 +318,10 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         )
 
     spec_resolver = manifest["spec_resolver"]
+    if not isinstance(spec_resolver, dict):
+        return _result(
+            "manifest-spec-resolver", FAIL, "spec_resolver must be an object"
+        )
     required_resolver_keys = {
         "priority",
         "pointer_candidates",
@@ -306,6 +335,94 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
             FAIL,
             f"missing spec resolver keys: {', '.join(missing_resolver)}",
         )
+
+    for key in ("priority", "pointer_candidates"):
+        values = spec_resolver[key]
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item.strip() for item in values
+        ):
+            return _result(
+                "manifest-spec-resolver",
+                FAIL,
+                f"spec_resolver.{key} must be a list of non-empty strings",
+            )
+    for key in ("multiple_spec_policy", "conflict_policy"):
+        if not isinstance(spec_resolver[key], str) or not spec_resolver[key].strip():
+            return _result(
+                "manifest-spec-resolver",
+                FAIL,
+                f"spec_resolver.{key} must be a non-empty string",
+            )
+
+    families = manifest["verification_families"]
+    if not isinstance(families, dict):
+        return _result(
+            "manifest-structure", FAIL, "verification_families must be an object"
+        )
+    for name, family in families.items():
+        if not isinstance(family, dict):
+            return _result(
+                "manifest-structure", FAIL, f"verification family {name!r} must be an object"
+            )
+        for field in ("commands", "workflow_paths"):
+            if field in family and (
+                not isinstance(family[field], list)
+                or not all(isinstance(item, str) and item.strip() for item in family[field])
+            ):
+                return _result(
+                    "manifest-structure",
+                    FAIL,
+                    f"verification family {name!r} {field} must be a list of non-empty strings",
+                )
+
+    packs = manifest["risk_packs"]
+    if not isinstance(packs, list):
+        return _result("manifest-structure", FAIL, "risk_packs must be a list")
+    pack_fields = {"id", "doc", "verification_families"}
+    for index, pack in enumerate(packs):
+        if not isinstance(pack, dict):
+            return _result(
+                "manifest-structure", FAIL, f"risk_packs[{index}] must be an object"
+            )
+        missing_pack = sorted(pack_fields - set(pack))
+        if missing_pack:
+            return _result(
+                "manifest-structure",
+                FAIL,
+                f"risk_packs[{index}] missing keys: {', '.join(missing_pack)}",
+            )
+        for field in ("id", "doc"):
+            if not isinstance(pack[field], str) or not pack[field].strip():
+                return _result(
+                    "manifest-structure", FAIL, f"risk_packs[{index}].{field} must be a non-empty string"
+                )
+        values = pack["verification_families"]
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item.strip() for item in values
+        ):
+            return _result(
+                "manifest-structure",
+                FAIL,
+                f"risk_packs[{index}].verification_families must be a list of non-empty strings",
+            )
+
+    entrypoints = manifest["task_entrypoints"]
+    if not isinstance(entrypoints, list):
+        return _result("manifest-structure", FAIL, "task_entrypoints must be a list")
+    for index, entrypoint in enumerate(entrypoints):
+        if not isinstance(entrypoint, dict):
+            return _result(
+                "manifest-structure", FAIL, f"task_entrypoints[{index}] must be an object"
+            )
+        if not all(
+            isinstance(entrypoint.get(field), str) and entrypoint[field].strip()
+            for field in ("id", "default_route")
+        ):
+            return _result(
+                "manifest-structure",
+                FAIL,
+                f"task_entrypoints[{index}] needs non-empty id and default_route",
+            )
 
     return _result("manifest-structure", PASS, "manifest schema looks complete")
 
@@ -805,8 +922,68 @@ NON_RUNNING_TEST_OPTIONS = {"--collect-only", "--co"}
 
 # Options whose value is the following word, which is not a path to run.
 VALUE_TAKING_TEST_OPTIONS = {
-    "-k", "-m", "-n", "-o", "-p", "-W", "-c", "--confcutdir", "--deselect",
-    "--ignore", "--ignore-glob", "--junitxml", "--maxfail", "--rootdir", "--tb",
+    "-k",
+    "-m",
+    "-n",
+    "-o",
+    "-p",
+    "-W",
+    "-c",
+    "--basetemp",
+    "--confcutdir",
+    "--cov",
+    "--cov-config",
+    "--cov-report",
+    "--deselect",
+    "--doctest-glob",
+    "--ignore",
+    "--ignore-glob",
+    "--import-mode",
+    "--junitxml",
+    "--log-cli-level",
+    "--log-file",
+    "--maxfail",
+    "--override-ini",
+    "--rootdir",
+    "--tb",
+}
+
+
+BOOLEAN_TEST_OPTIONS = {
+    "--collect-in-virtualenv",
+    "--continue-on-collection-errors",
+    "--doctest-modules",
+    "--failed-first",
+    "--full-trace",
+    "--keep-duplicates",
+    "--last-failed",
+    "--lf",
+    "--no-header",
+    "--no-summary",
+    "--pdb",
+    "--pyargs",
+    "--quiet",
+    "--strict-config",
+    "--strict-markers",
+    "--trace",
+    "--verbose",
+    "--version",
+}
+
+
+INTERPRETER_VALUE_OPTIONS = {
+    "python": {"-W", "-X", "-Q"},
+    "python3": {"-W", "-X", "-Q"},
+    "bash": {"-o", "-O", "--rcfile", "--init-file"},
+    "sh": {"-o"},
+}
+
+
+INTERPRETER_BOOLEAN_SHORT = {
+    "python": set("B E I O P R S s u v x q").difference({" "}),
+    "python3": set("B E I O P R S s u v x q").difference({" "}),
+    "bash": set("abdefhkmnptuvx"),
+    "sh": set("abefhkmnptuvx"),
 }
 
 
@@ -816,21 +993,58 @@ def _invocation_target(parts: list[str]) -> str | None:
         parts = parts[1:]
     if not parts or parts[0] not in INTERPRETERS:
         return None
+    interpreter = parts[0]
     rest = parts[1:]
     while rest:
         token = rest[0]
-        if token in {"-m", "-c"}:
+        if token in {"-m", "--module", "-c", "--command"} or token.startswith(
+            ("-m", "--module=", "--command=")
+        ):
             # These take code, not a path.
             return None
-        if not token.startswith("-"):
-            return token.rstrip("/")
-        # An option may carry a value in the next word: `bash -o pipefail` and
-        # the combined form `bash -euo pipefail` both do.
-        flags = token.lstrip("-")
-        if set(flags) & set("ocIF") and token not in {"-O"}:
+        if token == "--":
+            return rest[1].rstrip("/") if len(rest) > 1 else None
+        if token.startswith("--"):
+            if "=" in token:
+                rest = rest[1:]
+                continue
+            if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
+                rest = rest[2:]
+                continue
+            # An unknown long option may consume a following word.  Refuse to
+            # guess, because treating that word as a script would be false
+            # evidence for the mapping checker.
+            return None
+        if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
             rest = rest[2:]
             continue
-        rest = rest[1:]
+        if not token.startswith("-"):
+            return token.rstrip("/")
+        flags = token[1:]
+        if not flags:
+            return token.rstrip("/")
+        if interpreter in {"bash", "sh"}:
+            for index, flag in enumerate(flags):
+                if flag == "c":
+                    return None
+                if flag in {"o", "O"}:
+                    # Bash accepts both `-o pipefail` and `-opipefail`.
+                    rest = rest[2:] if index == len(flags) - 1 else rest[1:]
+                    break
+                if flag not in INTERPRETER_BOOLEAN_SHORT[interpreter]:
+                    return None
+            else:
+                rest = rest[1:]
+            continue
+        if interpreter in {"python", "python3"}:
+            if flags[0] in {"W", "X", "Q"}:
+                # Python accepts both `-X utf8` and `-Xutf8` forms.
+                rest = rest[2:] if len(flags) == 1 else rest[1:]
+                continue
+            if all(flag in INTERPRETER_BOOLEAN_SHORT[interpreter] for flag in flags):
+                rest = rest[1:]
+                continue
+        return None
     return None
 
 
@@ -852,11 +1066,21 @@ def _discovery_target(parts: list[str]) -> str | None:
     index = 3
     while index < len(parts):
         token = parts[index]
+        if token == "--":
+            return parts[index + 1].rstrip("/") if index + 1 < len(parts) else None
         if token in VALUE_TAKING_TEST_OPTIONS:
             # The next word belongs to the option, not to the run.
             index += 2
             continue
         if token.startswith("-"):
+            if token.startswith("--") and token not in BOOLEAN_TEST_OPTIONS:
+                # An unknown long option may consume a following value.  Do not
+                # mistake that value for a test directory.
+                return None
+            if token.startswith("-") and not token.startswith("--"):
+                flags = token[1:]
+                if not flags or not all(flag in "qvxsrlafA" for flag in flags):
+                    return None
             index += 1
             continue
         return token.rstrip("/")
@@ -980,10 +1204,14 @@ def _workflow_run_text() -> str:
     commands: list[str] = []
     for path in _workflow_files():
         try:
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
-            continue
-        commands.extend(_document_run_commands(document))
+            text = path.read_text(encoding="utf-8")
+            document = yaml.safe_load(text)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"{_display_path(path)} cannot be read: {exc}") from exc
+        try:
+            commands.extend(_document_run_commands(document))
+        except ValueError as exc:
+            raise ValueError(f"{_display_path(path)} has invalid workflow shape: {exc}") from exc
     return "\n".join(commands)
 
 
@@ -1001,15 +1229,21 @@ def _defaults_directory(scope: object) -> object:
 def _document_run_commands(document: object) -> list[str]:
     """Return the `run` values of one workflow document."""
     if not isinstance(document, dict):
-        return []
+        raise ValueError("workflow document must be a mapping")
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
-        return []
+        raise ValueError("workflow jobs must be a mapping")
     workflow_directory = _defaults_directory(document)
     commands: list[str] = []
-    for job in jobs.values():
-        if not isinstance(job, dict) or job.get("if") is False:
+    for name, job in jobs.items():
+        if not isinstance(job, dict):
+            raise ValueError(f"job {name!r} must be a mapping")
+        if job.get("if") is False:
             continue
+        if "steps" not in job:
+            if isinstance(job.get("uses"), str) and job["uses"].strip():
+                continue
+            raise ValueError(f"job {name!r} has no steps or reusable workflow")
         directory = job.get("working-directory", _defaults_directory(job))
         if directory is None:
             directory = workflow_directory
@@ -1026,15 +1260,33 @@ def _runs_elsewhere(directory: object) -> bool:
     return directory.strip() not in {"", ".", "./"}
 
 
+def _condition_allows_execution(value: object) -> bool:
+    """Return whether a workflow condition is statically always true."""
+    if value is None or value is True:
+        return True
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"true", "${{ true }}"}
+    return False
+
+
 def _enabled_step_commands(steps: object, job_directory: object = None) -> list[str]:
     """Extract enabled run steps; unsupported structures provide no evidence."""
     if not isinstance(steps, list):
-        return []
+        raise ValueError("workflow steps must be a list")
     commands: list[str] = []
-    for step in steps:
-        if not isinstance(step, dict) or step.get("if") is False:
+    for index, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            raise ValueError(f"step {index} must be a mapping")
+        if step.get("if") is False:
             continue
+        if "run" in step and not isinstance(step["run"], str):
+            raise ValueError(f"step {index} run must be a string")
         if not isinstance(step.get("run"), str):
+            continue
+        if not _condition_allows_execution(step.get("if")):
+            # A dynamic expression (including always(), tag checks and manual
+            # inputs) cannot prove that the command runs on the current stage.
             continue
         # A step that runs elsewhere does not execute a repository-root gate.
         if _runs_elsewhere(job_directory) or _runs_elsewhere(
@@ -1112,6 +1364,8 @@ def _stage_problems(stages: object, rule: str) -> list[str]:
 def _mapping_shape_problems(entry: dict, rule: str) -> list[str]:
     """Return the problems with an entry's field types and emptiness."""
     problems = _stage_problems(entry["stage"], rule)
+    if not isinstance(entry["rule"], str) or not entry["rule"].strip():
+        problems.append(f"rule {rule}: rule must be a non-empty string")
     files = entry["files"]
     if (
         not isinstance(files, list)
@@ -1125,6 +1379,8 @@ def _mapping_shape_problems(entry: dict, rule: str) -> list[str]:
         if not isinstance(entry[key], str) or not entry[key].strip():
             problems.append(f"rule {rule}: {key} must be a non-empty string")
     if entry["test"] is not None and not isinstance(entry["test"], str):
+        problems.append(f"rule {rule}: test must be a path or null")
+    elif isinstance(entry["test"], str) and not entry["test"].strip():
         problems.append(f"rule {rule}: test must be a path or null")
     return problems
 
@@ -1140,6 +1396,9 @@ def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[st
         "rule", "summary", "check", "files", "stage", "blocking", "test", "not_covered",
     }
     rule = str(entry.get("rule", "?"))
+    unknown = sorted(set(entry) - required, key=str)
+    if unknown:
+        return [f"rule {rule}: unknown field(s): {', '.join(unknown)}"]
     missing = sorted(required - set(entry))
     if missing:
         return [f"rule {rule}: missing {', '.join(missing)}"]

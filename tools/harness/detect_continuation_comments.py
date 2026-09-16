@@ -29,7 +29,16 @@ from pathlib import Path
 import yaml
 
 SCAN_SUFFIXES = (".yml", ".yaml")
-SHELL_GLOBS = ("tools/**/*.sh", "packaging/**/*.sh", "scripts/**/*.sh")
+SHELL_GLOBS = (
+    "*.sh",
+    "tools/**/*.sh",
+    "packaging/**/*.sh",
+    "scripts/**/*.sh",
+    "tests/**/*.sh",
+    "examples/**/*.sh",
+    "components/**/*.sh",
+    ".clusterfuzzlite/**/*.sh",
+)
 
 
 def _ends_with_continuation(line: str) -> bool:
@@ -101,8 +110,29 @@ def _command_continues_after(lines: list[str], opened: int, comment: int) -> boo
     for candidate in lines[comment + 1 :]:
         if not candidate.strip():
             continue
-        return _indent(candidate) > _indent(lines[start])
+        if _indent(candidate) > _indent(lines[start]):
+            return True
+        # A same-indent option or value is still very likely to be an argument
+        # to the continued command.  Sibling commands in a function commonly
+        # start with a verb (``echo``, ``make``), so keep this heuristic narrow
+        # enough to avoid turning those into false positives.
+        if _indent(candidate) == _indent(lines[start]) and _looks_like_argument(
+            candidate
+        ):
+            return True
+        return False
     return False
+
+
+def _looks_like_argument(line: str) -> bool:
+    """Return whether a same-indent line has the shape of a command argument."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(("-", "$", "'", '"', "`")):
+        return True
+    first = stripped.split(None, 1)[0]
+    return any(marker in first for marker in ("/", ":", "="))
 
 
 def _workflow_runs(path: Path) -> list[tuple[str, str]]:
@@ -113,47 +143,65 @@ def _workflow_runs(path: Path) -> list[tuple[str, str]]:
     """
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
-        return []
+        raise ValueError("workflow document must be a mapping")
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
-        return []
+        raise ValueError("workflow jobs must be a mapping")
     found: list[tuple[str, str]] = []
     for name, job in jobs.items():
         if not isinstance(job, dict):
-            continue
-        for index, step in enumerate(job.get("steps") or [], 1):
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
+            raise ValueError(f"job {name!r} must be a mapping")
+        if "steps" not in job:
+            # Reusable-workflow jobs use ``uses`` instead of ``steps`` and have
+            # no shell text for this detector to inspect.
+            if isinstance(job.get("uses"), str) and job["uses"].strip():
+                continue
+            raise ValueError(f"job {name!r} has no steps or reusable workflow")
+        steps = job["steps"]
+        if not isinstance(steps, list):
+            raise ValueError(f"job {name!r} steps must be a list")
+        for index, step in enumerate(steps, 1):
+            if not isinstance(step, dict):
+                raise ValueError(f"job {name!r} step {index} must be a mapping")
+            if "run" in step and not isinstance(step["run"], str):
+                raise ValueError(f"job {name!r} step {index} run must be a string")
+            if isinstance(step.get("run"), str):
                 found.append((f"{name} step {index}", step["run"]))
     return found
 
 
 def _shell_scripts(root: Path) -> list[Path]:
     """Return the tracked shell scripts this check reads."""
-    found: list[Path] = []
+    found: set[Path] = set()
     for pattern in SHELL_GLOBS:
-        found.extend(sorted(root.glob(pattern)))
-    return found
+        found.update(path for path in root.glob(pattern) if path.is_file())
+    return sorted(found)
 
 
 def collect_errors(root: Path) -> list[str]:
     """Return a message for every comment a continuation swallows."""
+    if not root.is_dir():
+        return [f"{root}: scan root is missing or not a directory"]
     errors: list[str] = []
     workflow_dir = root / ".github/workflows"
-    for path in sorted(workflow_dir.glob("*.y*ml")):
-        try:
-            runs = _workflow_runs(path)
-        except (OSError, yaml.YAMLError) as exc:
-            # Its commands are unknown rather than absent, so this is reported
-            # once for the workflow instead of being skipped.
-            errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
-            continue
-        for name, script in runs:
-            for line in scan_shell_text(script):
-                errors.append(
-                    f"{path.relative_to(root)} ({name}): a comment on a continued "
-                    f"line swallows the arguments after it (line {line} of the "
-                    f"script)"
-                )
+    if workflow_dir.exists() and not workflow_dir.is_dir():
+        errors.append(f"{workflow_dir.relative_to(root)}: workflow path is not a directory")
+    elif workflow_dir.is_dir():
+        for path in sorted(workflow_dir.glob("*.y*ml")):
+            try:
+                runs = _workflow_runs(path)
+            except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+                # Its commands are unknown rather than absent, so this is reported
+                # once for the workflow instead of being skipped.
+                errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
+                continue
+            for name, script in runs:
+                for line in scan_shell_text(script):
+                    errors.append(
+                        f"{path.relative_to(root)} ({name}): a comment on a continued "
+                        f"line swallows the arguments after it (line {line} of the "
+                        f"script)"
+                    )
     for path in _shell_scripts(root):
         try:
             text = path.read_text(encoding="utf-8")
