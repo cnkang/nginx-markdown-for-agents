@@ -254,10 +254,10 @@ def format_missing(missing: List[Tuple[dict, str]]) -> str:
 def main(argv: List[str] | None = None) -> int:
     """
     Check whether all expected release artifacts are present for qualifying matrix entries.
-    
+
     Parameters:
         argv (List[str] | None): Command-line arguments to parse; uses sys.argv[1:] when None.
-    
+
     Returns:
         int: 0 when all expected artifacts are present; 1 when no qualifying entries exist or artifacts are missing.
     """
