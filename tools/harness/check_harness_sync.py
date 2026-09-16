@@ -236,23 +236,19 @@ def _is_git_ignored(path: Path) -> bool:
     return result.returncode == 0
 
 
-def _check_manifest_structure(manifest: dict) -> CheckResult:
-    """Validate that the manifest contains all required top-level and nested keys.
+def _is_nonempty_string(value: object) -> bool:
+    """Return whether a manifest value is a non-empty string."""
+    return isinstance(value, str) and bool(value.strip())
 
-    Checks for required top-level keys, truth-surface sub-keys, the
-    canonical four-state status semantics, and spec-resolver keys.
 
-    Args:
-        manifest: Parsed routing manifest dictionary.
+def _is_nonempty_string_list(value: object) -> bool:
+    """Return whether a manifest value is a list of non-empty strings."""
+    return isinstance(value, list) and all(_is_nonempty_string(item) for item in value)
 
-    Returns:
-        CheckResult with PASS if the schema is complete, or FAIL with
-        details of the first missing key set.
-    """
-    if not isinstance(manifest, dict):
-        return _result("manifest-structure", FAIL, "manifest root must be an object")
 
-    required_keys = {
+def _check_manifest_top_level(manifest: dict) -> CheckResult | None:
+    """Validate the required top-level manifest keys."""
+    required = {
         "version",
         "truth_surfaces",
         "status_semantics",
@@ -261,99 +257,88 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         "risk_packs",
         "task_entrypoints",
     }
-    if missing := sorted(required_keys - set(manifest)):
+    missing = sorted(required - set(manifest))
+    if missing:
         return _result(
-            "manifest-structure",
-            FAIL,
-            f"missing top-level keys: {', '.join(missing)}",
+            "manifest-structure", FAIL, f"missing top-level keys: {', '.join(missing)}"
         )
+    return None
 
+
+def _check_manifest_truth_surfaces(manifest: dict) -> CheckResult | None:
+    """Validate truth-surface names and path lists."""
     truth_surfaces = manifest["truth_surfaces"]
     if not isinstance(truth_surfaces, dict):
-        return _result(
-            "manifest-structure", FAIL, "truth_surfaces must be an object"
-        )
-    required_truth_surface_keys = {
-        "contract",
-        "harness",
-        "canonical_docs",
-        "optional_adapters",
-    }
-    if missing_truth_surface_keys := sorted(
-        required_truth_surface_keys - set(truth_surfaces)
-    ):
+        return _result("manifest-structure", FAIL, "truth_surfaces must be an object")
+    required = {"contract", "harness", "canonical_docs", "optional_adapters"}
+    missing = sorted(required - set(truth_surfaces))
+    if missing:
         return _result(
             "manifest-structure",
             FAIL,
-            "missing truth surface keys: "
-            + ", ".join(missing_truth_surface_keys),
+            "missing truth surface keys: " + ", ".join(missing),
         )
-    for key in sorted(required_truth_surface_keys):
-        values = truth_surfaces[key]
-        if not isinstance(values, list) or not all(
-            isinstance(item, str) and item.strip() for item in values
-        ):
+    for key in sorted(required):
+        if not _is_nonempty_string_list(truth_surfaces[key]):
             return _result(
                 "manifest-structure",
                 FAIL,
                 f"truth_surfaces.{key} must be a list of non-empty strings",
             )
+    return None
 
-    expected_statuses = {
-        PASS,
-        FAIL,
-        SKIP_NOT_PRESENT,
-        WARN_NEEDS_AUTHOR_REVIEW,
-    }
-    actual_statuses = manifest["status_semantics"]
-    if (
-        not isinstance(actual_statuses, list)
-        or len(actual_statuses) != len(expected_statuses)
-        or set(actual_statuses) != expected_statuses
-    ):
+
+def _check_manifest_statuses(manifest: dict) -> CheckResult | None:
+    """Validate the canonical four-state status contract."""
+    expected = {PASS, FAIL, SKIP_NOT_PRESENT, WARN_NEEDS_AUTHOR_REVIEW}
+    actual = manifest["status_semantics"]
+    if not isinstance(actual, list) or len(actual) != len(expected):
         return _result(
             "manifest-status-semantics",
             FAIL,
             "status semantics do not match the canonical four-state contract",
         )
-
-    spec_resolver = manifest["spec_resolver"]
-    if not isinstance(spec_resolver, dict):
+    if set(actual) != expected:
         return _result(
-            "manifest-spec-resolver", FAIL, "spec_resolver must be an object"
+            "manifest-status-semantics",
+            FAIL,
+            "status semantics do not match the canonical four-state contract",
         )
-    required_resolver_keys = {
-        "priority",
-        "pointer_candidates",
-        "multiple_spec_policy",
-        "conflict_policy",
-    }
-    missing_resolver = sorted(required_resolver_keys - set(spec_resolver))
-    if missing_resolver:
+    return None
+
+
+def _check_manifest_spec_resolver(manifest: dict) -> CheckResult | None:
+    """Validate spec-resolver keys and value types."""
+    resolver = manifest["spec_resolver"]
+    if not isinstance(resolver, dict):
+        return _result("manifest-spec-resolver", FAIL, "spec_resolver must be an object")
+    required = {"priority", "pointer_candidates", "multiple_spec_policy", "conflict_policy"}
+    missing = sorted(required - set(resolver))
+    if missing:
         return _result(
             "manifest-spec-resolver",
             FAIL,
-            f"missing spec resolver keys: {', '.join(missing_resolver)}",
+            f"missing spec resolver keys: {', '.join(missing)}",
         )
-
     for key in ("priority", "pointer_candidates"):
-        values = spec_resolver[key]
-        if not isinstance(values, list) or not all(
-            isinstance(item, str) and item.strip() for item in values
-        ):
+        if not _is_nonempty_string_list(resolver[key]):
             return _result(
                 "manifest-spec-resolver",
                 FAIL,
                 f"spec_resolver.{key} must be a list of non-empty strings",
             )
     for key in ("multiple_spec_policy", "conflict_policy"):
-        if not isinstance(spec_resolver[key], str) or not spec_resolver[key].strip():
+        if not _is_nonempty_string(resolver[key]):
             return _result(
                 "manifest-spec-resolver",
                 FAIL,
                 f"spec_resolver.{key} must be a non-empty string",
             )
+    return None
 
+
+def _check_manifest_families(manifest: dict) -> CheckResult | None:
+    """Validate verification-family object and optional path lists."""
     families = manifest["verification_families"]
     if not isinstance(families, dict):
         return _result(
@@ -365,47 +350,57 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
                 "manifest-structure", FAIL, f"verification family {name!r} must be an object"
             )
         for field in ("commands", "workflow_paths"):
-            if field in family and (
-                not isinstance(family[field], list)
-                or not all(isinstance(item, str) and item.strip() for item in family[field])
-            ):
+            if field in family and not _is_nonempty_string_list(family[field]):
                 return _result(
                     "manifest-structure",
                     FAIL,
                     f"verification family {name!r} {field} must be a list of non-empty strings",
                 )
+    return None
 
+
+def _check_manifest_risk_pack(index: int, pack: object) -> CheckResult | None:
+    """Validate one risk-pack entry."""
+    if not isinstance(pack, dict):
+        return _result("manifest-structure", FAIL, f"risk_packs[{index}] must be an object")
+    required = {"id", "doc", "verification_families"}
+    missing = sorted(required - set(pack))
+    if missing:
+        return _result(
+            "manifest-structure",
+            FAIL,
+            f"risk_packs[{index}] missing keys: {', '.join(missing)}",
+        )
+    for field in ("id", "doc"):
+        if not _is_nonempty_string(pack[field]):
+            return _result(
+                "manifest-structure",
+                FAIL,
+                f"risk_packs[{index}].{field} must be a non-empty string",
+            )
+    if not _is_nonempty_string_list(pack["verification_families"]):
+        return _result(
+            "manifest-structure",
+            FAIL,
+            f"risk_packs[{index}].verification_families must be a list of non-empty strings",
+        )
+    return None
+
+
+def _check_manifest_risk_packs(manifest: dict) -> CheckResult | None:
+    """Validate all risk-pack entries."""
     packs = manifest["risk_packs"]
     if not isinstance(packs, list):
         return _result("manifest-structure", FAIL, "risk_packs must be a list")
-    pack_fields = {"id", "doc", "verification_families"}
     for index, pack in enumerate(packs):
-        if not isinstance(pack, dict):
-            return _result(
-                "manifest-structure", FAIL, f"risk_packs[{index}] must be an object"
-            )
-        missing_pack = sorted(pack_fields - set(pack))
-        if missing_pack:
-            return _result(
-                "manifest-structure",
-                FAIL,
-                f"risk_packs[{index}] missing keys: {', '.join(missing_pack)}",
-            )
-        for field in ("id", "doc"):
-            if not isinstance(pack[field], str) or not pack[field].strip():
-                return _result(
-                    "manifest-structure", FAIL, f"risk_packs[{index}].{field} must be a non-empty string"
-                )
-        values = pack["verification_families"]
-        if not isinstance(values, list) or not all(
-            isinstance(item, str) and item.strip() for item in values
-        ):
-            return _result(
-                "manifest-structure",
-                FAIL,
-                f"risk_packs[{index}].verification_families must be a list of non-empty strings",
-            )
+        result = _check_manifest_risk_pack(index, pack)
+        if result is not None:
+            return result
+    return None
 
+
+def _check_manifest_entrypoints(manifest: dict) -> CheckResult | None:
+    """Validate task-entrypoint identifiers and routes."""
     entrypoints = manifest["task_entrypoints"]
     if not isinstance(entrypoints, list):
         return _result("manifest-structure", FAIL, "task_entrypoints must be a list")
@@ -415,7 +410,7 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
                 "manifest-structure", FAIL, f"task_entrypoints[{index}] must be an object"
             )
         if not all(
-            isinstance(entrypoint.get(field), str) and entrypoint[field].strip()
+            _is_nonempty_string(entrypoint.get(field))
             for field in ("id", "default_route")
         ):
             return _result(
@@ -423,7 +418,26 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
                 FAIL,
                 f"task_entrypoints[{index}] needs non-empty id and default_route",
             )
+    return None
 
+
+def _check_manifest_structure(manifest: dict) -> CheckResult:
+    """Validate required manifest structure and nested value types."""
+    if not isinstance(manifest, dict):
+        return _result("manifest-structure", FAIL, "manifest root must be an object")
+    checks = (
+        _check_manifest_top_level,
+        _check_manifest_truth_surfaces,
+        _check_manifest_statuses,
+        _check_manifest_spec_resolver,
+        _check_manifest_families,
+        _check_manifest_risk_packs,
+        _check_manifest_entrypoints,
+    )
+    for check in checks:
+        result = check(manifest)
+        if result is not None:
+            return result
     return _result("manifest-structure", PASS, "manifest schema looks complete")
 
 
@@ -987,104 +1001,160 @@ INTERPRETER_BOOLEAN_SHORT = {
 }
 
 
+def _drop_leading_assignments(parts: list[str]) -> list[str]:
+    """Drop environment assignments before an executable name."""
+    index = 0
+    while index < len(parts) and "=" in parts[index] and not parts[index].startswith("-"):
+        index += 1
+    return parts[index:]
+
+
+def _interpreter_code_option(token: str) -> bool:
+    """Return whether an interpreter option consumes source code."""
+    return token in {"-m", "--module", "-c", "--command"} or token.startswith(
+        ("-m", "--module=", "--command=")
+    )
+
+
+def _shell_short_option_action(
+    interpreter: str, flags: str
+) -> tuple[str, str | int | None]:
+    """Classify a bundled shell option and its possible value."""
+    for index, flag in enumerate(flags):
+        if flag == "c":
+            return "stop", None
+        if flag in {"o", "O"}:
+            skip = 2 if index == len(flags) - 1 else 1
+            return "skip", skip
+        if flag not in INTERPRETER_BOOLEAN_SHORT[interpreter]:
+            return "stop", None
+    return "skip", 1
+
+
+def _python_short_option_action(
+    interpreter: str, flags: str
+) -> tuple[str, str | int | None]:
+    """Classify a bundled Python option and its possible value."""
+    if flags[0] in {"W", "X", "Q"}:
+        # Python accepts both `-X utf8` and `-Xutf8` forms.
+        return "skip", 2 if len(flags) == 1 else 1
+    if all(flag in INTERPRETER_BOOLEAN_SHORT[interpreter] for flag in flags):
+        return "skip", 1
+    return "stop", None
+
+
+def _interpreter_option_action(
+    interpreter: str, rest: list[str]
+) -> tuple[str, str | int | None]:
+    """Classify one interpreter argument without guessing unknown options."""
+    token = rest[0]
+    if _interpreter_code_option(token):
+        return "stop", None
+    if token == "--":
+        path = rest[1].rstrip("/") if len(rest) > 1 else None
+        return "path", path
+    if token.startswith("--"):
+        if "=" in token:
+            return "skip", 1
+        if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
+            return "skip", 2
+        # An unknown long option may consume a following word.  Refuse to
+        # guess, because treating that word as a script would be false evidence.
+        return "stop", None
+    if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
+        return "skip", 2
+    if not token.startswith("-"):
+        return "path", token.rstrip("/")
+    flags = token[1:]
+    if not flags:
+        return "path", token.rstrip("/")
+    if interpreter in {"bash", "sh"}:
+        return _shell_short_option_action(interpreter, flags)
+    if interpreter in {"python", "python3"}:
+        return _python_short_option_action(interpreter, flags)
+    return "stop", None
+
+
+def _scan_interpreter_args(interpreter: str, rest: list[str]) -> str | None:
+    """Find the script path after safely consuming interpreter options."""
+    while rest:
+        action, value = _interpreter_option_action(interpreter, rest)
+        if action == "path":
+            return value if isinstance(value, str) else None
+        if action == "stop":
+            return None
+        rest = rest[int(value):]
+    return None
+
+
 def _invocation_target(parts: list[str]) -> str | None:
     """Return the path an entry line runs, if the line runs a path at all."""
-    while parts and "=" in parts[0] and not parts[0].startswith("-"):
-        parts = parts[1:]
+    parts = _drop_leading_assignments(parts)
     if not parts or parts[0] not in INTERPRETERS:
         return None
-    interpreter = parts[0]
-    rest = parts[1:]
-    while rest:
-        token = rest[0]
-        if token in {"-m", "--module", "-c", "--command"} or token.startswith(
-            ("-m", "--module=", "--command=")
-        ):
-            # These take code, not a path.
-            return None
-        if token == "--":
-            return rest[1].rstrip("/") if len(rest) > 1 else None
-        if token.startswith("--"):
-            if "=" in token:
-                rest = rest[1:]
-                continue
-            if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
-                rest = rest[2:]
-                continue
-            # An unknown long option may consume a following word.  Refuse to
-            # guess, because treating that word as a script would be false
-            # evidence for the mapping checker.
-            return None
-        if token in INTERPRETER_VALUE_OPTIONS.get(interpreter, set()):
-            rest = rest[2:]
-            continue
-        if not token.startswith("-"):
-            return token.rstrip("/")
+    return _scan_interpreter_args(parts[0], parts[1:])
+
+
+def _is_test_runner(parts: list[str]) -> bool:
+    """Return whether an argument vector invokes pytest or unittest discovery."""
+    return (
+        len(parts) >= 3
+        and parts[0] in INTERPRETERS
+        and parts[1] == "-m"
+        and parts[2] in {"pytest", "unittest"}
+    )
+
+
+def _has_non_running_test_option(parts: list[str]) -> bool:
+    """Return whether a runner invocation only collects or lists tests."""
+    for token in parts:
+        if token in NON_RUNNING_TEST_OPTIONS:
+            return True
+    return False
+
+
+def _test_runner_option_action(
+    token: str, parts: list[str], index: int
+) -> tuple[str, str | int | None]:
+    """Classify one pytest/unittest option or positional path."""
+    if token == "--":
+        path = parts[index + 1].rstrip("/") if index + 1 < len(parts) else None
+        return "path", path
+    if token in VALUE_TAKING_TEST_OPTIONS:
+        return "skip", 2
+    if token.startswith("--"):
+        if token in BOOLEAN_TEST_OPTIONS:
+            return "skip", 1
+        # An unknown long option may consume a following value.  Do not expose
+        # that value as a test directory.
+        return "stop", None
+    if token.startswith("-"):
         flags = token[1:]
-        if not flags:
-            return token.rstrip("/")
-        if interpreter in {"bash", "sh"}:
-            for index, flag in enumerate(flags):
-                if flag == "c":
-                    return None
-                if flag in {"o", "O"}:
-                    # Bash accepts both `-o pipefail` and `-opipefail`.
-                    rest = rest[2:] if index == len(flags) - 1 else rest[1:]
-                    break
-                if flag not in INTERPRETER_BOOLEAN_SHORT[interpreter]:
-                    return None
-            else:
-                rest = rest[1:]
-            continue
-        if interpreter in {"python", "python3"}:
-            if flags[0] in {"W", "X", "Q"}:
-                # Python accepts both `-X utf8` and `-Xutf8` forms.
-                rest = rest[2:] if len(flags) == 1 else rest[1:]
-                continue
-            if all(flag in INTERPRETER_BOOLEAN_SHORT[interpreter] for flag in flags):
-                rest = rest[1:]
-                continue
-        return None
+        if flags and all(flag in "qvxsrlafA" for flag in flags):
+            return "skip", 1
+        return "stop", None
+    return "path", token.rstrip("/")
+
+
+def _scan_test_runner_args(parts: list[str]) -> str | None:
+    """Find the first positional directory after runner options."""
+    index = 3
+    while index < len(parts):
+        action, value = _test_runner_option_action(parts[index], parts, index)
+        if action == "path":
+            return value if isinstance(value, str) else None
+        if action == "stop":
+            return None
+        index += int(value)
     return None
 
 
 def _discovery_target(parts: list[str]) -> str | None:
-    """Return the directory a test runner discovers, when one is named.
-
-    Only a runner with a discovery mechanism covers the files under a directory;
-    running an interpreter against a directory executes nothing.
-    """
-    while parts and "=" in parts[0] and not parts[0].startswith("-"):
-        parts = parts[1:]
-    if len(parts) < 3 or parts[0] not in INTERPRETERS or parts[1] != "-m":
+    """Return the directory a test runner discovers, when one is named."""
+    parts = _drop_leading_assignments(parts)
+    if not _is_test_runner(parts) or _has_non_running_test_option(parts[3:]):
         return None
-    if parts[2] not in {"pytest", "unittest"}:
-        return None
-    if any(token in NON_RUNNING_TEST_OPTIONS for token in parts[3:]):
-        # Collection lists tests instead of running them.
-        return None
-    index = 3
-    while index < len(parts):
-        token = parts[index]
-        if token == "--":
-            return parts[index + 1].rstrip("/") if index + 1 < len(parts) else None
-        if token in VALUE_TAKING_TEST_OPTIONS:
-            # The next word belongs to the option, not to the run.
-            index += 2
-            continue
-        if token.startswith("-"):
-            if token.startswith("--") and token not in BOOLEAN_TEST_OPTIONS:
-                # An unknown long option may consume a following value.  Do not
-                # mistake that value for a test directory.
-                return None
-            if token.startswith("-") and not token.startswith("--"):
-                flags = token[1:]
-                if not flags or not all(flag in "qvxsrlafA" for flag in flags):
-                    return None
-            index += 1
-            continue
-        return token.rstrip("/")
-    return None
+    return _scan_test_runner_args(parts)
 
 
 def _is_invoked(path: str, wiring: str) -> bool:
@@ -1236,18 +1306,7 @@ def _document_run_commands(document: object) -> list[str]:
     workflow_directory = _defaults_directory(document)
     commands: list[str] = []
     for name, job in jobs.items():
-        if not isinstance(job, dict):
-            raise ValueError(f"job {name!r} must be a mapping")
-        if job.get("if") is False:
-            continue
-        if "steps" not in job:
-            if isinstance(job.get("uses"), str) and job["uses"].strip():
-                continue
-            raise ValueError(f"job {name!r} has no steps or reusable workflow")
-        directory = job.get("working-directory", _defaults_directory(job))
-        if directory is None:
-            directory = workflow_directory
-        commands.extend(_enabled_step_commands(job.get("steps", []), directory))
+        commands.extend(_workflow_job_commands(name, job, workflow_directory))
     return commands
 
 
@@ -1270,32 +1329,57 @@ def _condition_allows_execution(value: object) -> bool:
     return False
 
 
+def _workflow_job_commands(
+    name: object, job: object, workflow_directory: object
+) -> list[str]:
+    """Validate one workflow job and return its root-directory commands."""
+    if not isinstance(job, dict):
+        raise ValueError(f"job {name!r} must be a mapping")
+    if job.get("if") is False:
+        return []
+    if "steps" not in job:
+        if isinstance(job.get("uses"), str) and job["uses"].strip():
+            return []
+        raise ValueError(f"job {name!r} has no steps or reusable workflow")
+    directory = job.get("working-directory", _defaults_directory(job))
+    if directory is None:
+        directory = workflow_directory
+    return _enabled_step_commands(job["steps"], directory)
+
+
+def _enabled_step_command(
+    index: int, step: object, job_directory: object
+) -> list[str] | None:
+    """Validate one step and return its literal root-directory commands."""
+    if not isinstance(step, dict):
+        raise ValueError(f"step {index} must be a mapping")
+    if step.get("if") is False:
+        return None
+    if "run" in step and not isinstance(step["run"], str):
+        raise ValueError(f"step {index} run must be a string")
+    run = step.get("run")
+    if not isinstance(run, str):
+        return None
+    if not _condition_allows_execution(step.get("if")):
+        # A dynamic expression (including always(), tag checks and manual
+        # inputs) cannot prove that the command runs on the current stage.
+        return None
+    if _runs_elsewhere(job_directory) or _runs_elsewhere(step.get("working-directory")):
+        return None
+    from tools.harness.stage_reachability import literal_script_lines
+
+    return literal_script_lines(run)
+
+
 def _enabled_step_commands(steps: object, job_directory: object = None) -> list[str]:
     """Extract enabled run steps; unsupported structures provide no evidence."""
     if not isinstance(steps, list):
         raise ValueError("workflow steps must be a list")
     commands: list[str] = []
     for index, step in enumerate(steps, 1):
-        if not isinstance(step, dict):
-            raise ValueError(f"step {index} must be a mapping")
-        if step.get("if") is False:
-            continue
-        if "run" in step and not isinstance(step["run"], str):
-            raise ValueError(f"step {index} run must be a string")
-        if not isinstance(step.get("run"), str):
-            continue
-        if not _condition_allows_execution(step.get("if")):
-            # A dynamic expression (including always(), tag checks and manual
-            # inputs) cannot prove that the command runs on the current stage.
-            continue
-        # A step that runs elsewhere does not execute a repository-root gate.
-        if _runs_elsewhere(job_directory) or _runs_elsewhere(
-            step.get("working-directory")
-        ):
-            continue
-        from tools.harness.stage_reachability import literal_script_lines
-
-        commands.extend(literal_script_lines(step["run"]))
+        step_commands = _enabled_step_command(index, step, job_directory)
+        if step_commands is not None:
+            commands.extend(step_commands)
     return commands
 
 
