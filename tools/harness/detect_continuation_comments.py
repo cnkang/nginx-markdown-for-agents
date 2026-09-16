@@ -149,24 +149,32 @@ def _workflow_runs(path: Path) -> list[tuple[str, str]]:
         raise ValueError("workflow jobs must be a mapping")
     found: list[tuple[str, str]] = []
     for name, job in jobs.items():
-        if not isinstance(job, dict):
-            raise ValueError(f"job {name!r} must be a mapping")
-        if "steps" not in job:
-            # Reusable-workflow jobs use ``uses`` instead of ``steps`` and have
-            # no shell text for this detector to inspect.
-            if isinstance(job.get("uses"), str) and job["uses"].strip():
-                continue
-            raise ValueError(f"job {name!r} has no steps or reusable workflow")
-        steps = job["steps"]
-        if not isinstance(steps, list):
-            raise ValueError(f"job {name!r} steps must be a list")
-        for index, step in enumerate(steps, 1):
-            if not isinstance(step, dict):
-                raise ValueError(f"job {name!r} step {index} must be a mapping")
-            if "run" in step and not isinstance(step["run"], str):
-                raise ValueError(f"job {name!r} step {index} run must be a string")
-            if isinstance(step.get("run"), str):
-                found.append((f"{name} step {index}", step["run"]))
+        found.extend(_workflow_job_runs(name, job))
+    return found
+
+
+def _workflow_job_runs(name: object, job: object) -> list[tuple[str, str]]:
+    """Validate one workflow job and return its shell run blocks."""
+    if not isinstance(job, dict):
+        raise ValueError(f"job {name!r} must be a mapping")
+    if "steps" not in job:
+        # Reusable-workflow jobs use ``uses`` instead of ``steps`` and have no
+        # shell text for this detector to inspect.
+        if isinstance(job.get("uses"), str) and job["uses"].strip():
+            return []
+        raise ValueError(f"job {name!r} has no steps or reusable workflow")
+    steps = job["steps"]
+    if not isinstance(steps, list):
+        raise ValueError(f"job {name!r} steps must be a list")
+    found: list[tuple[str, str]] = []
+    for index, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            raise ValueError(f"job {name!r} step {index} must be a mapping")
+        if "run" in step and not isinstance(step["run"], str):
+            raise ValueError(f"job {name!r} step {index} run must be a string")
+        run = step.get("run")
+        if isinstance(run, str):
+            found.append((f"{name} step {index}", run))
     return found
 
 
@@ -178,42 +186,58 @@ def _shell_scripts(root: Path) -> list[Path]:
     return sorted(found)
 
 
+def _workflow_file_errors(path: Path, root: Path) -> list[str]:
+    """Return continuation errors found in one workflow file."""
+    try:
+        runs = _workflow_runs(path)
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+        # Its commands are unknown rather than absent, so this is reported once
+        # for the workflow instead of being skipped.
+        return [f"{path.relative_to(root)}: cannot be read: {exc}"]
+    errors: list[str] = []
+    for name, script in runs:
+        for line in scan_shell_text(script):
+            errors.append(
+                f"{path.relative_to(root)} ({name}): a comment on a continued "
+                f"line swallows the arguments after it (line {line} of the "
+                f"script)"
+            )
+    return errors
+
+
+def _workflow_errors(root: Path, workflow_dir: Path) -> list[str]:
+    """Return continuation errors found in workflow run blocks."""
+    if workflow_dir.exists() and not workflow_dir.is_dir():
+        return [f"{workflow_dir.relative_to(root)}: workflow path is not a directory"]
+    if not workflow_dir.is_dir():
+        return []
+    errors: list[str] = []
+    for path in sorted(workflow_dir.glob("*.y*ml")):
+        errors.extend(_workflow_file_errors(path, root))
+    return errors
+
+
+def _shell_file_errors(path: Path, root: Path) -> list[str]:
+    """Return continuation errors found in one shell script."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Its commands were not read, so the scan is incomplete here.
+        return [f"{path.relative_to(root)}: cannot be read: {exc}"]
+    return [
+        f"{path.relative_to(root)}: a comment on a continued line "
+        f"swallows the arguments after it (line {line})"
+        for line in scan_shell_text(text)
+    ]
+
+
 def collect_errors(root: Path) -> list[str]:
     """Return a message for every comment a continuation swallows."""
     if not root.is_dir():
         return [f"{root}: scan root is missing or not a directory"]
-    errors: list[str] = []
-    workflow_dir = root / ".github/workflows"
-    if workflow_dir.exists() and not workflow_dir.is_dir():
-        errors.append(f"{workflow_dir.relative_to(root)}: workflow path is not a directory")
-    elif workflow_dir.is_dir():
-        for path in sorted(workflow_dir.glob("*.y*ml")):
-            try:
-                runs = _workflow_runs(path)
-            except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
-                # Its commands are unknown rather than absent, so this is reported
-                # once for the workflow instead of being skipped.
-                errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
-                continue
-            for name, script in runs:
-                for line in scan_shell_text(script):
-                    errors.append(
-                        f"{path.relative_to(root)} ({name}): a comment on a continued "
-                        f"line swallows the arguments after it (line {line} of the "
-                        f"script)"
-                    )
+    errors = _workflow_errors(root, root / ".github/workflows")
     for path in _shell_scripts(root):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            # Its commands were not read, so the scan is incomplete here.
-            errors.append(f"{path.relative_to(root)}: cannot be read: {exc}")
-            continue
-        for line in scan_shell_text(text):
-            errors.append(
-                f"{path.relative_to(root)}: a comment on a continued line "
-                f"swallows the arguments after it (line {line})"
-            )
+        errors.extend(_shell_file_errors(path, root))
     return errors
 
 

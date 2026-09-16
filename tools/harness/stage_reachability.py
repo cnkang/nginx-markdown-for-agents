@@ -273,6 +273,46 @@ def _consume_make_line(
         return recorded
     return None if line.strip() and not line.startswith("#") else current
 
+
+def _make_include_line(line: str) -> bool:
+    """Return whether a top-level line delegates parsing to another file."""
+    if line.startswith("\t"):
+        return False
+    return re.match(r"^(?:-?include|sinclude)\b", line.strip()) is not None
+
+
+def _update_conditional_depth(delta: int, depth: int) -> int:
+    """Apply one Make conditional directive, rejecting unmatched closers."""
+    if delta < 0 and depth == 0:
+        raise ValueError("unmatched make conditional endif")
+    if delta == 0 and depth == 0:
+        raise ValueError("unmatched make conditional else")
+    return depth + delta
+
+
+def _poison_conditional_line(
+    line: str,
+    variables: dict[str, str],
+    simple: set[str],
+    generation: dict[str, int],
+    recipes: dict[str, list[tuple[int, str | None]]],
+) -> None:
+    """Discard uncertain assignments and recipes from a conditional branch."""
+    poisoned = _assignment(line.strip())
+    if poisoned is not None:
+        variables.pop(poisoned[0], None)
+        simple.discard(poisoned[0])
+    redefined = _target(line.strip())
+    if redefined is None:
+        return
+    if redefined[0] == ".IGNORE":
+        raise ValueError("cannot verify conditional .IGNORE scope")
+    generation[redefined[0]] = generation.get(redefined[0], 0) + 1
+    recipes.setdefault(redefined[0], []).append(
+        (generation[redefined[0]], None)
+    )
+
+
 def _make_nodes(
     text: str,
 ) -> tuple[dict[str, list[str]], dict[str, list[tuple[int, str | None]]], dict[str, str]]:
@@ -285,18 +325,11 @@ def _make_nodes(
     conditionals = 0
     simple: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
-        stripped = line.strip()
-        if not line.startswith("\t") and re.match(
-            r"^(?:-?include|sinclude)\b", stripped
-        ):
+        if _make_include_line(line):
             raise ValueError("cannot verify included makefile")
         delta = _conditional_delta(line)
         if delta is not None:
-            if delta < 0 and conditionals == 0:
-                raise ValueError("unmatched make conditional endif")
-            if delta == 0 and conditionals == 0:
-                raise ValueError("unmatched make conditional else")
-            conditionals += delta
+            conditionals = _update_conditional_depth(delta, conditionals)
             current = None
             continue
         if conditionals:
@@ -304,18 +337,9 @@ def _make_nodes(
             # either value and a target it defines may replace the one outside.
             # Both are dropped here, before a later declaration could rely on
             # the value or the recipe from outside the branch.
-            poisoned = _assignment(line.strip())
-            if poisoned is not None:
-                variables.pop(poisoned[0], None)
-                simple.discard(poisoned[0])
-            redefined = _target(line.strip())
-            if redefined is not None and redefined[0] == ".IGNORE":
-                raise ValueError("cannot verify conditional .IGNORE scope")
-            if redefined is not None:
-                generation[redefined[0]] = generation.get(redefined[0], 0) + 1
-                recipes.setdefault(redefined[0], []).append(
-                    (generation[redefined[0]], None)
-                )
+            _poison_conditional_line(
+                line, variables, simple, generation, recipes
+            )
             continue
         current = _consume_make_line(
             line, dependencies, recipes, generation, variables, simple, current
