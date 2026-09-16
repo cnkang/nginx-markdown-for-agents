@@ -51,6 +51,13 @@ set -euo pipefail
 
 readonly SCAN_DIR="${1:-tools}"
 readonly MSG_NONE_FOUND="  (none found)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/collect_files.sh"
+
+if [[ ! -d "$SCAN_DIR" || ! -r "$SCAN_DIR" ]]; then
+    echo "ERROR: scan directory is missing or not readable: $SCAN_DIR" >&2
+    exit 2
+fi
 
 errors=0
 warnings=0
@@ -267,11 +274,16 @@ echo "--- Pattern (a): Functions without explicit return statement ---" >&2
 # substitutions run in a subshell, so in-memory counters would not
 # survive — and the summary replays the file as hard errors.
 AWK_STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-awk.XXXXXX")"
-trap 'rm -f "$AWK_STATUS_FILE"' EXIT
+SHELL_FILE_LIST="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-files.XXXXXX")"
+trap 'rm -f "$AWK_STATUS_FILE" "$SHELL_FILE_LIST"' EXIT
 : >"$AWK_STATUS_FILE"
+if ! harness_collect_find0 "$SHELL_FILE_LIST" "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate shell scripts in $SCAN_DIR" >&2
+    exit 2
+fi
 
 return_hits=0
-while IFS= read -r script_file; do
+while IFS= read -r -d '' script_file; do
     # Skip exempt files
     skip=0
     for exempt in ${RETURN_EXEMPT_FILES[@]+"${RETURN_EXEMPT_FILES[@]}"}; do
@@ -336,7 +348,7 @@ while IFS= read -r script_file; do
         printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
         true
     })
-done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+done < "$SHELL_FILE_LIST"
 
 if [[ "$return_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
@@ -459,7 +471,7 @@ echo "" >&2
 echo "--- Pattern (d): case statements without default *) clause (S131) ---" >&2
 
 case_hits=0
-while IFS= read -r script_file; do
+while IFS= read -r -d '' script_file; do
     # Use awk to find case/esac blocks and check for *) default
     while IFS=: read -r case_line has_default; do
         if [[ -z "$case_line" ]]; then
@@ -491,7 +503,7 @@ while IFS= read -r script_file; do
         printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
         true
     })
-done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+done < "$SHELL_FILE_LIST"
 
 if [[ "$case_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
@@ -543,7 +555,7 @@ echo "" >&2
 echo "--- Pattern (f): \$? inside negated conditional body ---" >&2
 
 negation_hits=0
-while IFS= read -r script_file; do
+while IFS= read -r -d '' script_file; do
     # Fixture tests intentionally embed defect shapes; exempt them.
     skip_negation=0
     for exempt in ${NEGATION_EXEMPT_FILES[@]+"${NEGATION_EXEMPT_FILES[@]}"}; do
@@ -779,7 +791,7 @@ while IFS= read -r script_file; do
         printf '%s\n' "awk:${rc}:${script_file}" >>"$AWK_STATUS_FILE"
         true
     })
-done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+done < "$SHELL_FILE_LIST"
 
 if [[ "$negation_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2

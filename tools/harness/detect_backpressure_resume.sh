@@ -20,6 +20,7 @@ set -eu
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: Source directory not found: $SRC_DIR" >&2
@@ -27,7 +28,12 @@ if [[ ! -d "$SRC_DIR" ]]; then
 fi
 
 tmp_violations=$(mktemp)
-trap 'rm -f "$tmp_violations"' EXIT
+file_list=$(mktemp "${TMPDIR:-/tmp}/backpressure-files.XXXXXX")
+trap 'rm -f "$tmp_violations" "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" -name "*.c" -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate C source files in $SRC_DIR" >&2
+    exit 2
+fi
 
 while IFS= read -r -d '' file; do
     grep -n "return.*NGX_AGAIN" "$file" 2>/dev/null | \
@@ -94,7 +100,7 @@ while IFS= read -r -d '' file; do
 
         echo "VIOLATION: $file:$line_num — '$func_name' returns NGX_AGAIN without state save" >> "$tmp_violations"
     done
-done < <(find "$SRC_DIR" -name "*.c" -type f -print0)
+done < "$file_list"
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 

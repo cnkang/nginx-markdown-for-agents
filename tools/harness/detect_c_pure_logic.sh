@@ -75,6 +75,9 @@ if [[ -z "$SRC_DIR" ]]; then
     SRC_DIR="components/nginx-module/src"
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/collect_files.sh"
+
 # Minimum function body size (lines) before a no-NGINX-API function is
 # considered a migration candidate.  Trivial accessors/wrappers are ignored.
 readonly MIN_BODY_LINES=5
@@ -106,6 +109,15 @@ echo "" >&2
 # for minutes; a single awk pass is effectively instantaneous.  File order is
 # not sorted (advisory output only), avoiding reliance on GNU-only `sort -z`.
 candidate_files=()
+file_list="$(mktemp "${TMPDIR:-/tmp}/c-pure-files.XXXXXX")" || {
+    echo "  [pure-logic] Cannot create the file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" -name '*.c' -type f 2>/dev/null; then
+    echo "  [pure-logic] Cannot enumerate C source files in $SRC_DIR" >&2
+    exit 2
+fi
 while IFS= read -r -d '' file; do
     base="$(basename "$file")"
     case "$base" in
@@ -116,7 +128,7 @@ while IFS= read -r -d '' file; do
             candidate_files+=("$file")
             ;;
     esac
-done < <(find "$SRC_DIR" -name '*.c' -type f -print0 2>/dev/null)
+done < "$file_list"
 
 candidates=0
 total_functions=0

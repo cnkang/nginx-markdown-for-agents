@@ -33,6 +33,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOWS_DIR="${REPO_ROOT}/.github/workflows"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 for arg in "$@"; do
     case "$arg" in
@@ -56,6 +57,16 @@ if [[ ! -d "$WORKFLOWS_DIR" ]]; then
 fi
 
 findings=0
+file_list="$(mktemp "${TMPDIR:-/tmp}/workflow-input-files.XXXXXX")" || {
+    echo "ERROR: cannot create the workflow file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+
+if ! harness_collect_find0 "$file_list" "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null; then
+    echo "ERROR: cannot enumerate workflow files in $WORKFLOWS_DIR" >&2
+    exit 2
+fi
 
 # Process each workflow YAML file
 while IFS= read -r -d '' file; do
@@ -255,7 +266,7 @@ while IFS= read -r -d '' file; do
         fi
 
     done < "$file"
-done < <(find "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
+done < "$file_list"
 
 if [[ $findings -gt 0 ]]; then
     echo "FAIL: found ${findings} workflow input injection pattern(s)" >&2
