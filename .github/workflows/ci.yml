@@ -7,6 +7,7 @@ on:
     paths:
       - "AGENTS.md"
       - "CHANGELOG.md"
+      - "build.sh"
       - "components/**"
       - "schemas/**"
       - "tools/**"
@@ -29,6 +30,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - ".clusterfuzzlite/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
@@ -39,6 +41,7 @@ on:
     paths:
       - "AGENTS.md"
       - "CHANGELOG.md"
+      - "build.sh"
       - "components/**"
       - "schemas/**"
       - "tools/**"
@@ -61,6 +64,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - ".clusterfuzzlite/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
@@ -160,10 +164,14 @@ jobs:
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'
+              - 'components/nginx-module/src/markdown_converter.h'
+              - 'tools/ci/coverage_gate.py'
               - 'rust-toolchain.toml'
             nginx:
               - 'components/nginx-module/**'
               - 'Makefile'
+              - 'components/rust-converter/include/markdown_converter.h'
+              - 'tools/ci/coverage_gate.py'
             e2e:
               - 'components/nginx-module/**'
               - 'components/rust-converter/**'
@@ -171,6 +179,7 @@ jobs:
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
               - 'tools/ci/verify_non_streaming_nginx_module.sh'
+              - 'tools/ci/verify_real_nginx_ims.sh'
               - 'Makefile'
             perf:
               - 'components/rust-converter/**'
@@ -201,6 +210,12 @@ jobs:
               - 'tools/ci/pre_push_gates.py'
               - 'tools/ci/pre_push_gates.json'
               - 'tools/ci/test_pre_push_profile.py'
+              - 'tools/ci/coverage_gate.py'
+              - 'tools/ci/validate_required_workflow_contexts.py'
+              - 'tools/ci/test_validate_required_workflow_contexts.py'
+              - 'tools/ci/verify_real_nginx_ims.sh'
+              - 'build.sh'
+              - '.clusterfuzzlite/**'
               - 'tools/sonar/**'
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
