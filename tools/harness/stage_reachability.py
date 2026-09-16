@@ -285,9 +285,18 @@ def _make_nodes(
     conditionals = 0
     simple: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
+        stripped = line.strip()
+        if not line.startswith("\t") and re.match(
+            r"^(?:-?include|sinclude)\b", stripped
+        ):
+            raise ValueError("cannot verify included makefile")
         delta = _conditional_delta(line)
         if delta is not None:
-            conditionals = max(0, conditionals + delta)
+            if delta < 0 and conditionals == 0:
+                raise ValueError("unmatched make conditional endif")
+            if delta == 0 and conditionals == 0:
+                raise ValueError("unmatched make conditional else")
+            conditionals += delta
             current = None
             continue
         if conditionals:
@@ -311,6 +320,8 @@ def _make_nodes(
         current = _consume_make_line(
             line, dependencies, recipes, generation, variables, simple, current
         )
+    if conditionals:
+        raise ValueError("unclosed make conditional")
     return dependencies, recipes, variables
 
 

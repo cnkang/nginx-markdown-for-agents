@@ -981,6 +981,31 @@
       "blocking": true,
       "test": "tools/ci/test_pre_push_profile.py",
       "not_covered": "the gate is selected from the change set; a push that changes no C file reports it as NOT_RUN rather than passed"
+    },
+    {
+      "rule": "73",
+      "summary": "continuation comment and shell-surface audit",
+      "check": "tools/harness/detect_continuation_comments.py",
+      "files": [
+        "*.sh",
+        "tools/**/*.sh",
+        "packaging/**/*.sh",
+        "scripts/**/*.sh",
+        "tests/**/*.sh",
+        "examples/**/*.sh",
+        "components/**/*.sh",
+        ".clusterfuzzlite/**/*.sh",
+        ".github/workflows/**"
+      ],
+      "stage": [
+        "save",
+        "commit",
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_continuation_comments.py",
+      "not_covered": "shell parsing is conservative and does not execute commands; generated or ignored files outside the listed tracked surfaces are not scanned"
     }
   ]
 }

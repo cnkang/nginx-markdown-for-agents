@@ -167,6 +167,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 70 | build-safety | Scratch/temporary file hygiene: one-off analysis scripts, PR drafts, editor/system junk must never enter commits; root-level `*.py`/`*.sh` forbidden except documented external contracts (`build.sh` ClusterFuzzLite entrypoint); test sources named `parse_*_test.*`/`test_*` exempt; `python3 tools/harness/detect_scratch_files.py` — blocking harness gate, `--staged` mode wired into `.pre-commit-config.yaml` |
 | 71 | dynconf-snapshot | CURRENT (static): explicit static settings mark a block-mask that propagates to child levels; block masks follow the configuration tree so unset fields stay open at more specific levels |
 | 72 | streaming-backpressure | Header-chain NGX_AGAIN publishes commit latches, defers success-only delivery metrics, and resumes body output without retrying the header chain |
+| 73 | build-safety | Continuation comments: scan every tracked shell/workflow surface, detect same-indent option/value continuations, and fail closed on missing, unreadable, or malformed inputs; `python3 tools/harness/detect_continuation_comments.py` runs in save/commit/CI harness gates |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
@@ -325,6 +326,12 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Merge nested `if` without `else` into compound `&&` conditions [18]
 - Never read `$?` inside a negated conditional body (`if ! cmd; then rc=$?` reads the negated status); capture with `cmd || rc=$?`; `bash tools/harness/detect_shell_hygiene.sh` pattern (f) — blocking harness gate [11,18]
 - No unsanitized path interpolation [12]
+- A comment immediately after a backslash continuation must not swallow the
+  next option or value; scan root, component, test, example, packaging, tool,
+  and ClusterFuzzLite shell surfaces plus workflow `run:` blocks, and fail
+  closed on missing, unreadable, or malformed inputs. `python3
+  tools/harness/detect_continuation_comments.py` — blocking save/commit/CI gate
+  and detector regression test in `tools/harness/tests/test_detect_continuation_comments.py` [73]
 
 **CI/Workflows** (CI)
 - Workflow env-var liveness: every run block must define each `$VAR` it references in step/job/workflow env, an earlier `GITHUB_ENV` export, or the run block itself. Step-local `env:` is invisible to later steps. Empty matrix collections fail the prepare step. `PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py` — blocking harness gate and pre-commit hook [13]
@@ -662,6 +669,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-16 | Codex | Added Rule 73 for continuation comments and complete shell/workflow surface scanning; malformed or unreadable scan inputs fail closed, same-indent option/value continuations are covered, and save/commit/push/CI wiring plus regression tests are synchronized |
 | 0.9.2 | 2026-09-05 | Kang | 0.9.2 convergence harness sync (dynconf removal): retired Rules 34 and 35 (removed runtime hot-reload snapshot/reload contract) keeping their numbers for traceability, relabeled Rules 45 and 71 as the retained CURRENT static effective_conf/block-mask rules, renamed the checklist section to "Static Configuration & Effective View"; updated the schema-drift verification line (dynconf precedence schema removed); dynconf-snapshot.md domain rules and the dynamic-config-hot-reload risk pack archived with historical-vs-current wording; routing manifest dropped the removed verify-dynconf-convergence-e2e command and archived the risk-pack routing. Historical Document Updates rows are left unchanged as history |
 | 0.9.2 | 2026-09-04 | Kang | Pre-freeze review closeout: added Rule 72 index and checklist synchronization for header-chain NGX_AGAIN commit-latch semantics, plus the [68] access-before-method C Safety checklist bullet |
 | 0.9.2 | 2026-08-22 | Kang | Extended Rule 61 with clause 10, the durable measurement ref: an immutable annotated `refs/tags/perf-baseline/<baseline-stem>` anchors every measurement commit, a commit an existing ref already reaches gets no redundant ref, and archival `verbatim_import` packs get no exemption; `detect_baseline_hand_edit.py` gained `repo_commit_anchored()` and the `harness-tooling` CI job gained a fail-closed provenance preparation step; naming and lifecycle policy documented in `perf/baselines/README.md` |

@@ -629,6 +629,7 @@ official-feature-manifest-generate:
 harness-security-checks:
 	python3 tools/ci/validate_required_workflow_contexts.py
 	python3 tools/harness/check_directive_registry_parity.py
+	python3 tools/harness/detect_continuation_comments.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
@@ -695,6 +696,7 @@ test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
