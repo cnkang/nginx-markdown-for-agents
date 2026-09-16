@@ -68,7 +68,7 @@ NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
 LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
-.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers capability-check \
+.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers generated-header-drift-check capability-check \
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-streaming-conflict-pbt test-upgrade-rollback-contract test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
@@ -135,6 +135,15 @@ copy-headers: rust-lib
 
 check-headers:
 	@cmp -s $(RUST_HEADER) $(NGINX_HEADER) && echo "Headers are in sync" || (echo "Header mismatch: run 'make copy-headers'" && exit 1)
+
+# CI regenerates both committed header copies and checks the worktree for
+# drift.  Keep the same check in the local aggregate and push profile so a
+# developer cannot accidentally leave a generated ABI header out of a commit.
+generated-header-drift-check:
+	@git diff --exit-code -- $(RUST_HEADER) $(NGINX_HEADER) || { \
+	  echo "Generated header drift detected: run 'make copy-headers' and commit both header copies" >&2; \
+	  exit 1; \
+	}
 
 capability-check:
 	@python3 tools/release/gates/verify_build_capabilities.py --source-root . --features "$(RUST_RELEASE_FEATURES)"
@@ -324,6 +333,7 @@ test-upgrade-rollback-contract:
 TEST_ALL_CORE := \
 	build \
 	check-headers \
+	generated-header-drift-check \
 	rust-fmt-check \
 	rust-clippy-check \
 	test-rust \
@@ -1778,6 +1788,7 @@ help:
 	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  pre-push-check           - Run the gates a push has to complete, with PASS/FAIL/NOT_RUN"
+	@echo "  generated-header-drift-check - Verify generated FFI headers are committed"
 	@echo "  harness-quick-checks     - Fast harness checks for comments, workflow inputs, continuations"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"

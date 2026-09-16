@@ -88,6 +88,23 @@ def test_c_hooks_also_fire_for_header_implementations(hook_id: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "components/rust-converter/src/ffi.rs",
+        "components/rust-converter/include/markdown_converter.h",
+        "components/rust-converter/cbindgen.toml",
+        "components/nginx-module/src/markdown_converter.h",
+    ],
+)
+def test_ffi_header_hook_covers_every_abi_surface(path: str) -> None:
+    """Top-level FFI and generated-header edits must not silently skip sync."""
+    import re
+
+    pattern = _hooks()["ffi-header-sync"]["files"]
+    assert re.search(pattern, path), path
+
+
+@pytest.mark.parametrize(
     "command,detector",
     [
         (["bash", "tools/harness/detect_pool_free.sh"], "pool/free"),
