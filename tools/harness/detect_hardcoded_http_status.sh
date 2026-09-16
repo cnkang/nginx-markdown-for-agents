@@ -94,7 +94,7 @@ while IFS= read -r -d '' file; do
 
         # Skip comment lines (starting with /* or * or //)
         case "$trimmed" in
-            /*|\**|//*) continue ;;
+            /*|\**) continue ;;
             *) ;;
         esac
 

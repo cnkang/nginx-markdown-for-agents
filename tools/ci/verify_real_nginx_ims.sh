@@ -407,11 +407,13 @@ echo "==> Running conditional-request validation scenario"
   #     list syntax, comma-separated): duplicate header *lines* are rejected
   #     by the NGINX core itself with 400 before any module code runs.
   inm_value=""
-  for i in $(seq 1 17); do
+  repeat_count=0
+  while (( repeat_count < 17 )); do
     if [[ -n "${inm_value}" ]]; then
       inm_value+=", "
     fi
     inm_value+="${etag}"
+    repeat_count=$((repeat_count + 1))
   done
   code2r="$(curl -sS -D resp2r.headers -o resp2r.body \
     -H "${ACCEPT_MARKDOWN_HEADER}" \
