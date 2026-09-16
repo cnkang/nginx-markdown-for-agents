@@ -28,8 +28,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
-REPO_ROOT="${SCRIPT_DIR}/../.."
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 # Structs that have Rust-provided init helpers
 GUARDED_STRUCTS=(
@@ -41,6 +42,20 @@ GUARDED_STRUCTS=(
 )
 
 violations=0
+
+if [[ ! -d "${SRC_DIR}" || ! -r "${SRC_DIR}" ]]; then
+    echo "ERROR: source directory is missing or not readable: ${SRC_DIR}" >&2
+    exit 2
+fi
+file_list="$(mktemp "${TMPDIR:-/tmp}/ffi-struct-files.XXXXXX")" || {
+    echo "ERROR: cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "${SRC_DIR}" \( -name '*.c' -o -name '*.h' \) -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate source files in ${SRC_DIR}" >&2
+    exit 2
+fi
 
 # ── Phase 1: Direct struct-name on memzero/memset line ──
 for struct in "${GUARDED_STRUCTS[@]}"; do
@@ -59,7 +74,7 @@ done
 # For each production source file, find declarations of guarded structs,
 # extract variable names, then check if those variables are passed to
 # ngx_memzero/memset anywhere in the same file.
-while IFS= read -r src_file; do
+while IFS= read -r -d '' src_file; do
     for struct in "${GUARDED_STRUCTS[@]}"; do
         # Find variable declarations: "struct <Name> <varname>",
         # "struct <Name> *<varname>", or typedef aliases such as
@@ -96,7 +111,7 @@ while IFS= read -r src_file; do
             fi
         done <<< "${var_names}"
     done
-done < <(find "${SRC_DIR}" -name '*.c' -o -name '*.h' | grep -v "_test\\.c" | sort)
+done < "$file_list"
 
 if [[ ${violations} -gt 0 ]]; then
     echo >&2

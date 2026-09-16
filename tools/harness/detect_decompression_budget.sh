@@ -35,6 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: Source directory not found: $SRC_DIR" >&2
@@ -42,6 +43,11 @@ if [[ ! -d "$SRC_DIR" ]]; then
 fi
 
 violations=0
+file_list="$(mktemp "${TMPDIR:-/tmp}/decompression-files.XXXXXX")" || {
+    echo "ERROR: cannot create the file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
 
 strip_c_comments() {
     local source_file="$1"
@@ -131,9 +137,13 @@ strip_c_comments() {
 
 # Find all .c and .h files
 source_files=()
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate source files in $SRC_DIR" >&2
+    exit 2
+fi
 while IFS= read -r -d '' file; do
     source_files+=("$file")
-done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
+done < "$file_list"
 
 if [[ ${#source_files[@]} -eq 0 ]]; then
     echo "No source files found in $SRC_DIR" >&2

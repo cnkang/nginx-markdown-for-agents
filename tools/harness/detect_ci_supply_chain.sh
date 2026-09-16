@@ -19,6 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOW_DIR="${MARKDOWN_WORKFLOW_DIR:-${REPO_ROOT}/.github/workflows}"
+. "${SCRIPT_DIR}/collect_files.sh"
 VIOLATIONS=0
 
 if [[ ! -d "$WORKFLOW_DIR" ]]; then
@@ -31,6 +32,31 @@ if [[ ! -d "$WORKFLOW_DIR" ]]; then
     echo "  [supply-chain] No workflow directory found at $WORKFLOW_DIR" >&2
     exit 0
 fi
+
+workflow_files="$(mktemp "${TMPDIR:-/tmp}/ci-supply-chain-files.XXXXXX")" || {
+    echo "  [supply-chain] Cannot create the workflow file list" >&2
+    exit 2
+}
+uses_file="$(mktemp "${TMPDIR:-/tmp}/ci-supply-chain-uses.XXXXXX")" || {
+    echo "  [supply-chain] Cannot create the action reference list" >&2
+    exit 2
+}
+trap 'rm -f "$workflow_files" "$uses_file"' EXIT
+if ! harness_collect_find0 "$workflow_files" "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null; then
+    echo "  [supply-chain] Cannot enumerate workflow files in $WORKFLOW_DIR" >&2
+    exit 2
+fi
+
+: >"$uses_file"
+while IFS= read -r -d '' workflow_file; do
+    awk '
+        /^[[:space:]]*#/ { next }
+        /uses:.*@/ { printf "%s:%d:%s\n", FILENAME, FNR, $0 }
+    ' "$workflow_file" >>"$uses_file" || {
+        echo "  [supply-chain] Cannot read workflow file: $workflow_file" >&2
+        exit 2
+    }
+done < "$workflow_files"
 
 check_network_to_shell() {
     local file="$1"
@@ -136,14 +162,11 @@ while IFS= read -r line; do
                 ;;
         esac
     fi
-done < <(awk '
-    /^[[:space:]]*#/ { next }
-    /uses:.*@/ { printf "%s:%d:%s\n", FILENAME, FNR, $0 }
-' "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml 2>/dev/null || true)
+done < "$uses_file"
 
 while IFS= read -r -d '' workflow_file; do
     check_network_to_shell "$workflow_file"
-done < <(find "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
+done < "$workflow_files"
 # The workflow order does not affect the findings, and `sort -z` is a GNU
 # extension: using it made the loop silently see no files on platforms whose
 # sort lacks the flag.

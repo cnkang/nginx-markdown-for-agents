@@ -15,6 +15,8 @@
 set -euo pipefail
 
 SRC_DIR="components/nginx-module/src"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 # ── Allowlist ──
 #
@@ -36,7 +38,7 @@ readonly ALLOWLIST=(
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "  [header-hash] Source directory not found: $SRC_DIR" >&2
-    exit 0
+    exit 2
 fi
 
 # ── Scanning ──
@@ -47,8 +49,17 @@ fi
 # Collect violation files into an array (safe empty expansion under set -u)
 VIOLATION_FILES=()
 VIOLATION_COUNT=0
+file_list="$(mktemp "${TMPDIR:-/tmp}/header-hash-files.XXXXXX")" || {
+    echo "  [header-hash] Cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name '*.c' -o -name '*.h' \) -type f 2>/dev/null; then
+    echo "  [header-hash] Cannot enumerate source files in $SRC_DIR" >&2
+    exit 2
+fi
 
-while IFS= read -r file; do
+while IFS= read -r -d '' file; do
     # Check if this file has header iteration patterns combined with header types
     # and lacks hash == 0 filtering
     if grep -q 'part->nelts\|part\.nelts' "$file" 2>/dev/null \
@@ -57,7 +68,7 @@ while IFS= read -r file; do
         VIOLATION_FILES+=("$file")
         VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
     fi
-done < <(find "$SRC_DIR" -name '*.c' -o -name '*.h' 2>/dev/null)
+done < "$file_list"
 
 # ── Filter against allowlist ──
 

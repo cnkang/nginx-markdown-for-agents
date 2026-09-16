@@ -35,6 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: Source directory not found: $SRC_DIR" >&2
@@ -56,7 +57,16 @@ tmp_violations=$(mktemp)
 # ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
 # ${arr[@]+...} idiom (Rule 11).
 GREP_TEMPS=()
-trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+file_list="$(mktemp "${TMPDIR:-/tmp}/ngx-again-files.XXXXXX")" || {
+    echo "ERROR: cannot create the file list" >&2
+    exit 2
+}
+trap 'rm -f "$tmp_violations" "$file_list" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate C source files in $SRC_DIR" >&2
+    exit 2
+fi
 
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
@@ -165,7 +175,7 @@ while IFS= read -r -d '' file; do
         done < "$grep_matches"
         rm -f "$grep_matches"
     done
-done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
+done < "$file_list"
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 
