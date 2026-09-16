@@ -59,8 +59,7 @@ MODULE_NAME="$(basename "${MODULE_SO}")"
 IMAGE="nginx:${INCOMPATIBLE_TAG}"
 
 run_nginx() {
-    local label="$1"
-    local conf="$2"
+    local conf="$1"
     local status=0
     docker run --rm \
         -v "${MODULE_DIR}:/module:ro" \
@@ -85,7 +84,7 @@ http { server { listen 127.0.0.1:8080; } }
 CONF
 
 control_status=0
-control_output="$(run_nginx control "${CONTROL_CONF}")" || control_status=$?
+control_output="$(run_nginx "${CONTROL_CONF}")" || control_status=$?
 if [[ "${control_status}" -ne 0 ]]; then
     echo "ERROR: the control configuration failed in ${IMAGE}; the image itself is unusable" >&2
     printf '%s\n' "${control_output}" >&2
@@ -102,7 +101,7 @@ http { server { listen 127.0.0.1:8080; markdown_filter on; } }
 CONF
 
 mismatch_status=0
-mismatch_output="$(run_nginx mismatch "${MISMATCH_CONF}")" || mismatch_status=$?
+mismatch_output="$(run_nginx "${MISMATCH_CONF}")" || mismatch_status=$?
 
 if [[ "${mismatch_status}" -eq 0 ]]; then
     echo "ERROR: ${IMAGE} loaded a module built for a different NGINX version" >&2

@@ -18,6 +18,8 @@
 
 set -euo pipefail
 
+# The renderer replaces this marker with the trusted executable prelude.
+# shellcheck disable=SC2288
 %%TRUSTED_EXEC_PRELUDE%%
 
 ##############################################################################

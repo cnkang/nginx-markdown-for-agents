@@ -113,7 +113,7 @@ while IFS= read -r line; do
     # Skip local actions (uses: ./path) — no @ref to validate — and lines
     # whose uses: keyword sits inside a comment.
     case "$content" in
-        *"uses: ./"*|"uses: ./") continue ;;
+        *"uses: ./"*) continue ;;
         *"#"*uses:*) continue ;;
         *) ;;
     esac
