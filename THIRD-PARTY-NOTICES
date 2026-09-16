@@ -162,7 +162,7 @@ they are not distributed with the converter binary unless stated otherwise.
 
 --------------------------------------------------------------------------------
 
-10. encoding_rs 0.8.35
+10. encoding_rs 0.8.41
     https://github.com/nickel-org/rust-encoding-rs
     License: MIT OR Apache-2.0
     Copyright Mozilla Foundation
