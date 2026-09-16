@@ -156,8 +156,8 @@ Verification:
 
 ## Rule 73: Continuation Comment and Surface Completeness
 
-**Principle**: A shell comment placed immediately after a backslash
-continuation is consumed as part of the continued command. Any option or value
+**Principle**: The shell consumes a comment placed immediately after a backslash
+continuation as part of the continued command. Any option or value
 on the following line then disappears before the shell executes the command.
 The detector must inspect every repository shell surface and every workflow
 `run:` block, including root, component, test, example, packaging, tool, and
@@ -170,7 +170,7 @@ must fail the scan instead of producing an empty result.
   shell steps.
 - Rejects missing scan roots, malformed workflow shapes, and unreadable files.
 - Runs from `harness-quick-checks`, `harness-security-checks`, and
-  `test-harness`; the mapping is recorded in
+  `test-harness`; the mapping records these entrypoints in
   `docs/harness/routing-manifest.json`.
 
 **Verification**: `PYTHONPATH=. python3 -m pytest
