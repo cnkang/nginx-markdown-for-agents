@@ -130,7 +130,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
 def _is_table_header_or_separator(nginx: str) -> bool:
     """
     Identify whether an Nginx table cell represents a header or separator row.
-    
+
     Returns:
         bool: `true` if the cell is a header or separator, `false` otherwise.
     """
