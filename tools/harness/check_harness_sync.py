@@ -1460,13 +1460,31 @@ def _mapping_shape_problems(entry: dict, rule: str) -> list[str]:
     if not isinstance(entry["blocking"], bool):
         problems.append(f"rule {rule}: blocking must be a boolean")
     for key in ("check", "summary", "not_covered"):
-        if not isinstance(entry[key], str) or not entry[key].strip():
-            problems.append(f"rule {rule}: {key} must be a non-empty string")
-    if entry["test"] is not None and not isinstance(entry["test"], str):
-        problems.append(f"rule {rule}: test must be a path or null")
-    elif isinstance(entry["test"], str) and not entry["test"].strip():
-        problems.append(f"rule {rule}: test must be a path or null")
+        problem = _mapping_text_problem(entry, key, rule)
+        if problem is not None:
+            problems.append(problem)
+    test_problem = _mapping_test_problem(entry, rule)
+    if test_problem is not None:
+        problems.append(test_problem)
     return problems
+
+
+def _mapping_text_problem(entry: dict, key: str, rule: str) -> str | None:
+    """Return a problem for a required non-empty mapping text field."""
+    value = entry[key]
+    if isinstance(value, str) and value.strip():
+        return None
+    return f"rule {rule}: {key} must be a non-empty string"
+
+
+def _mapping_test_problem(entry: dict, rule: str) -> str | None:
+    """Return a problem when the optional mapping test path has a bad shape."""
+    test = entry["test"]
+    if test is None:
+        return None
+    if isinstance(test, str) and test.strip():
+        return None
+    return f"rule {rule}: test must be a path or null"
 
 
 def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[str]:
