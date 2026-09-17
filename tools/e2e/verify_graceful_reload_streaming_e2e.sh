@@ -107,13 +107,15 @@ docker run -d --name "${CONTAINER}" \
     -v "${WORK_DIR}/large.html:/usr/share/nginx/html/large:ro" \
     -v "${WORK_DIR}/nginx.conf:/etc/nginx/nginx.conf:ro" \
     "${IMAGE}" \
-    sh -c 'apk add --no-cache libgcc curl >/dev/null 2>&1 || true; nginx -g "daemon off;"' >/dev/null
+    sh -c 'apk add --no-cache libgcc >/dev/null 2>&1 || echo "WARN: could not install libgcc inside the container" >&2; nginx -g "daemon off;"' >/dev/null
 
 # Readiness must prove a real conversion, not merely a reachable port.
+# The host curl is already a hard prerequisite and reaches the published
+# port, so probe through it instead of adding an in-container client.
 ready=0
 for _ in $(seq 1 50); do
-    if docker exec "${CONTAINER}" curl -sS -H 'Accept: text/markdown' \
-        http://127.0.0.1:8080/large 2>/dev/null | grep -q TAILMARKERPRESENT; then
+    if curl -sS -H 'Accept: text/markdown' "${ENDPOINT}" 2>/dev/null \
+        | grep -q TAILMARKERPRESENT; then
         ready=1
         break
     fi
