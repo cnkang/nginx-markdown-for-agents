@@ -716,3 +716,11 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_quoted_parenthesis_does_not_make_gate_nested(self):
+        """An unbalanced ``(`` inside a literal is not expression grouping."""
+        assert secret_scope_module._references_gate(
+            "github.event_name == '(x||y' && steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
