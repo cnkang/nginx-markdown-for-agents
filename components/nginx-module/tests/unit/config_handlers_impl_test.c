@@ -574,7 +574,10 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
              * Unrecognised conversion: abort instead of copying the
              * characters.  Copying consumes no va_arg, so every later
              * specifier would read a misaligned slot (the previous silent
-             * failure mode).
+             * failure mode).  Only the letter conversions that the
+             * configuration logging code uses are implemented on purpose —
+             * extend this list with a matching va_arg branch before a new
+             * specifier appears in a test.
              */
             abort();
         } else if (*fmt == '"' && *(fmt + 1) == '%') {
