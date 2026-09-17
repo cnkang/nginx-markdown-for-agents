@@ -282,6 +282,33 @@ def _presence_block(
     )
 
 
+def _separator_length(line: str, index: int) -> int:
+    """Length of the unquoted command separator at *index* (0 when none)."""
+    if line.startswith("&&", index) or line.startswith("||", index):
+        return 2
+    if line[index] in ";|&":
+        return 1
+    return 0
+
+
+def _consume_quoted(
+    line: str, index: int, quote: str, current: list[str]
+) -> tuple[str, int]:
+    """Consume one character inside *quote*, appending it to *current*.
+
+    A backslash-escaped character inside double quotes is literal text: it
+    is appended together with its escape and cannot close the quote.
+    """
+    char = line[index]
+    current.append(char)
+    if char == "\\" and quote == '"' and index + 1 < len(line):
+        current.append(line[index + 1])
+        return quote, index + 2
+    if char == quote:
+        return "", index + 1
+    return quote, index + 1
+
+
 def _split_shell_segments(line: str) -> list[str]:
     """Split a shell line on unquoted command separators.
 
@@ -297,29 +324,18 @@ def _split_shell_segments(line: str) -> list[str]:
     while index < length:
         char = line[index]
         if quote:
-            current.append(char)
-            if char == "\\" and quote == '"' and index + 1 < length:
-                current.append(line[index + 1])
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            index += 1
+            quote, index = _consume_quoted(line, index, quote, current)
             continue
         if char in "'\"":
             quote = char
             current.append(char)
             index += 1
             continue
-        if line.startswith("&&", index) or line.startswith("||", index):
+        separator = _separator_length(line, index)
+        if separator:
             segments.append("".join(current))
             current = []
-            index += 2
-            continue
-        if char in ";|&":
-            segments.append("".join(current))
-            current = []
-            index += 1
+            index += separator
             continue
         current.append(char)
         index += 1
