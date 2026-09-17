@@ -125,9 +125,10 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 
 - Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
   framing as a fallback for servers that emit raw deflate. The paths decide
-  differently: the **full-buffer path** tries RFC 1950 first and retries the
-  same input in raw RFC 1951 mode when RFC 1950 decoding fails with a format
-  error before producing any output. The **streaming path** defers decoder
+  differently: the **full-buffer path** tries RFC 1950 first and, when RFC 1950
+  decoding fails with a format error, replays the same input in raw RFC 1951
+  mode from the start, discarding any output the wrapped attempt produced. The
+  **streaming path** defers decoder
   initialization until the first two bytes arrive, sniffs the zlib header,
   and initializes as zlib-wrapped or raw accordingly. It cannot replay
   consumed chunks, so a stream misclassified by the sniff fails closed with
