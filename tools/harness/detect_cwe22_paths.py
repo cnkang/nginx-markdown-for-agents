@@ -786,6 +786,35 @@ def _scan_open_calls(
     return errors, warnings
 
 
+def _classify_open_match(
+    open_match: re.Match[str],
+    line: str,
+) -> tuple[str, str]:
+    """Classify one open() match as skip, duplicate, receiver or builtin.
+
+    A longer identifier ending in `open` (popen, fdopen, reopen, Popen) is
+    not a builtin open()/os.open() call.  A receiver match is either a
+    method call `receiver.open(...)` or a name that merely ends in `os`
+    (`someos.open(...)`), where the regex match begins at the `os.` inside
+    the receiver.  For a plain `os.open()` the call produces a SECOND,
+    dot-preceded match — that duplicate is skipped because the `os.open`
+    match itself is handled through the builtin branch.
+    """
+    prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
+    matched = open_match.group()
+    if (prev_char.isalnum() or prev_char == "_") and matched.startswith("open"):
+        return prev_char, "skip"
+    if prev_char == ".":
+        if re.match(
+            r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]
+        ):
+            return prev_char, "duplicate"
+        return prev_char, "receiver"
+    if (prev_char.isalnum() or prev_char == "_") and matched.startswith("os."):
+        return prev_char, "receiver"
+    return prev_char, "builtin"
+
+
 def _scan_single_open_match(
     open_match: re.Match[str],
     match_idx: int,
@@ -815,27 +844,10 @@ def _scan_single_open_match(
         if match_idx + 1 < len(open_matches)
         else len(line)
     )
-    prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
-    if (prev_char.isalnum() or prev_char == "_") \
-            and open_match.group().startswith("open"):
-        # A longer identifier ending in `open` (popen, fdopen, reopen,
-        # Popen) is not a builtin open()/os.open() call.
+    _, kind = _classify_open_match(open_match, line)
+    if kind in ("skip", "duplicate"):
         return match_errors, match_warnings
-    receiver_access = prev_char == "." or (
-        (prev_char.isalnum() or prev_char == "_")
-        and open_match.group().startswith("os.")
-    )
-    if receiver_access:
-        # Method call `receiver.open(...)` (also for receiver names that
-        # merely end in `os`, where the regex match begins at the `os.`
-        # inside the receiver).  For a plain `os.open()` the same call
-        # produces a SECOND, dot-preceded match — skip that duplicate
-        # (the `os.open` match starts at `os` and is handled through the
-        # builtin branch).
-        if prev_char == "." and re.match(
-            r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]
-        ):
-            return match_errors, match_warnings
+    if kind == "receiver":
         # Scope receiver extraction to this match's segment (from the
         # receiver start through the next open() match) so an earlier
         # call on the same line cannot mis-attribute this one's
