@@ -295,8 +295,15 @@ curl -fsSLO "${BASE_URL}/SHA256SUMS.asc"
 curl -fsSLO "${BASE_URL}/${PACKAGE_FILE}"
 curl -fsSLO "${BASE_URL}/release-manifest.json"
 
-# 2. Verify GPG signature on the checksum file
-gpg --verify SHA256SUMS.asc SHA256SUMS
+# 2. Verify GPG signature on the checksum file, then confirm the signing key
+#    against the independently authenticated full fingerprint. A valid
+#    signature under an unauthenticated key proves integrity, not project
+#    authenticity.
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
+VALIDSIG="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 
 # 3. Verify the package: require exactly one manifest entry for the
 #    requested package, then check its checksum (same awk validation as
