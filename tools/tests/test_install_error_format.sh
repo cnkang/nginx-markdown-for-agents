@@ -332,9 +332,13 @@ run_hiding_python3_with_fake_nginx() {
         fi
         [[ -n "$component" ]] || continue
         current="${current%/}/${component}"
-        owner="$(stat -f '%u' "$current" 2>/dev/null || stat -c '%u' "$current" 2>/dev/null)" || return 1
+        # Ask GNU stat (-c) first: on Linux `stat -f` means "filesystem
+        # status" and succeeds with an unrelated value, so a BSD-first probe
+        # would read garbage there instead of falling through.  macOS rejects
+        # -c and falls through to the BSD form.
+        owner="$(stat -c '%u' "$current" 2>/dev/null || stat -f '%u' "$current" 2>/dev/null)" || return 1
         [[ "$owner" == "0" ]] || return 1
-        mode="$(stat -f '%Lp' "$current" 2>/dev/null || stat -c '%a' "$current" 2>/dev/null)" || return 1
+        mode="$(stat -c '%a' "$current" 2>/dev/null || stat -f '%Lp' "$current" 2>/dev/null)" || return 1
         [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
         if (( (8#$mode & 8#22) == 0 )); then
           continue
