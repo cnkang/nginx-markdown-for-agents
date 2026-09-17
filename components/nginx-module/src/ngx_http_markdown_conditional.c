@@ -2721,11 +2721,11 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
  * Both steps combine into an all-or-nothing result: the only mutation that can
  * be observed by a later reader is a fully restored list.  A malformed part
  * (nelts beyond the captured count, or a non-empty part with no element
- * storage) aborts the loop instead of walking past the captured region; the
- * `last`/`nelts` rollback above has already happened, so the list never stays
- * half-restored and readable.
+ * storage) fails a PREVALIDATION walk before anything is mutated: the restore
+ * then returns NGX_ERROR and the list stays exactly as it was found, so a
+ * failed rollback is reported instead of being applied partially.
  */
-static void
+static ngx_int_t
 ngx_http_markdown_304_restore_list(ngx_list_t *list,
     const ngx_http_markdown_304_list_snapshot_t *snapshot)
 {
@@ -2733,7 +2733,24 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     ngx_uint_t        restored;
 
     if (list == NULL || snapshot == NULL) {
-        return;
+        return NGX_OK;
+    }
+
+    /*
+     * Prevalidate every part the copy loop below will visit so that no
+     * state is mutated unless the whole restore can complete.
+     */
+    restored = 0;
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL && restored < snapshot->entry_count;
+         part = part->next)
+    {
+        if (part->nelts > snapshot->entry_count - restored
+            || (part->nelts != 0 && part->elts == NULL))
+        {
+            return NGX_ERROR;
+        }
+        restored += part->nelts;
     }
 
     list->last = snapshot->original_last;
@@ -2743,7 +2760,7 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     }
 
     if (snapshot->entry_count == 0 || snapshot->entries == NULL) {
-        return;
+        return NGX_OK;
     }
 
     restored = 0;
@@ -2751,18 +2768,14 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
          part != NULL && restored < snapshot->entry_count;
          part = part->next)
     {
-        if (part->nelts > snapshot->entry_count - restored
-            || (part->nelts != 0 && part->elts == NULL))
-        {
-            return;
-        }
-
         entries = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             entries[i] = snapshot->entries[restored].saved;
             restored++;
         }
     }
+
+    return NGX_OK;
 }
 
 /*
@@ -2824,12 +2837,14 @@ ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-static void
+static ngx_int_t
 ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
     const ngx_http_markdown_304_snapshot_t *snapshot)
 {
+    ngx_int_t  rc;
+
     if (r == NULL || snapshot == NULL) {
-        return;
+        return NGX_OK;
     }
 
     r->headers_out.status = snapshot->status;
@@ -2851,10 +2866,22 @@ ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
     r->allow_ranges = snapshot->allow_ranges;
     r->header_only = snapshot->header_only;
 
-    ngx_http_markdown_304_restore_list(&r->headers_out.headers,
+    rc = ngx_http_markdown_304_restore_list(&r->headers_out.headers,
         &snapshot->headers_snapshot);
-    ngx_http_markdown_304_restore_list(&r->headers_out.trailers,
-        &snapshot->trailers_snapshot);
+    if (ngx_http_markdown_304_restore_list(&r->headers_out.trailers,
+            &snapshot->trailers_snapshot) != NGX_OK)
+    {
+        rc = NGX_ERROR;
+    }
+
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 304 rollback failure: a headers-list part "
+                      "failed validation, restore aborted");
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
 }
 
 static ngx_int_t

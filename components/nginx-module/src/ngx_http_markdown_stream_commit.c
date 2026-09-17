@@ -615,21 +615,34 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     }
 
     /*
+     * Representation-integrity metadata removal runs in the fallible
+     * phase: a headers-list part that fails validation must fail the
+     * commit into the rollback path instead of leaving source-HTML
+     * validators on the Markdown body.
+     */
+    rc = ngx_http_markdown_stream_commit_remove_representation_metadata(r);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: stream commit: "
+                      "failed to remove representation metadata");
+        return ngx_http_markdown_stream_commit_phase1_failure(r, &snap);
+    }
+
+    /*
      * --- Phase 2: Infallible mutations ---
      *
      * These operations are pointer/integer assignments that cannot
      * fail.  They are ordered so that Content-Type is set first
      * (establishing the Markdown content type) followed by
      * Content-Length and Content-Encoding removal.  Return values
-     * are intentionally not checked — all three functions are
-     * documented as always returning NGX_OK.
+     * are intentionally not checked — the three remaining functions
+     * are documented as always returning NGX_OK.
      */
 
     (void) ngx_http_markdown_stream_commit_set_content_type(r);
     (void) ngx_http_markdown_stream_commit_remove_content_length(r);
     (void) ngx_http_markdown_stream_commit_maybe_remove_content_encoding(
         r, ctx);
-    (void) ngx_http_markdown_stream_commit_remove_representation_metadata(r);
 
     /*
      * All mutations succeeded — set committed flag.
@@ -770,12 +783,14 @@ ngx_http_markdown_stream_commit_remove_etag(
  * Every list part is validated before dereferencing its elements, exactly
  * like the sibling snapshot/invalidate helpers above: a malformed part
  * (element size below ngx_table_elt_t, nelts beyond the allocation, or a
- * nonempty part with no element storage) is skipped instead of walked, so
- * a corrupt headers_out list cannot turn invalidation into an
- * out-of-bounds read.
+ * nonempty part with no element storage) fails the walk with NGX_ERROR
+ * instead of being walked, so a corrupt headers_out list can neither turn
+ * invalidation into an out-of-bounds read nor be skipped silently.
  *
  * Returns:
- *   NGX_OK always (invalidation cannot fail)
+ *   NGX_OK when the walk completed; NGX_ERROR when a headers-list part
+ *   fails validation.  The walk stops there and the caller must treat the
+ *   removal as failed (fail closed).
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_invalidate_header(
@@ -790,7 +805,7 @@ ngx_http_markdown_stream_commit_invalidate_header(
         if (ngx_http_markdown_stream_commit_list_part_valid(
                 &r->headers_out.headers, part) != NGX_OK)
         {
-            return NGX_OK;
+            return NGX_ERROR;
         }
 
         elts = part->elts;
@@ -825,11 +840,13 @@ ngx_http_markdown_stream_commit_invalidate_header(
  *
  * This mirrors the full-buffer path (headers_impl.h C6 Accept-Ranges
  * removal) so streaming and buffered responses share one mutation
- * contract.  Infallible: only pointer/integer writes and hash=0
- * invalidations.
+ * contract.
  *
  * Returns:
- *   NGX_OK always
+ *   NGX_OK when every metadata header was invalidated; NGX_ERROR when a
+ *   headers-list part fails validation anywhere in the walk.  The caller
+ *   treats that as a failed removal and rolls the commit back (fail
+ *   closed).
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_remove_representation_metadata(
@@ -848,22 +865,46 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     /* Accept-Ranges: clear the typed field and invalidate list entries. */
     r->allow_ranges = 0;
     r->headers_out.accept_ranges = NULL;
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_accept_ranges, sizeof(hdr_accept_ranges) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_accept_ranges, sizeof(hdr_accept_ranges) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Upstream X-Markdown-Tokens describes the HTML body. */
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_token_count, sizeof(hdr_token_count) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_token_count, sizeof(hdr_token_count) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Representation digests describe the HTML body. */
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_content_md5, sizeof(hdr_content_md5) - 1);
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_digest, sizeof(hdr_digest) - 1);
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_content_digest, sizeof(hdr_content_digest) - 1);
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_repr_digest, sizeof(hdr_repr_digest) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_content_md5, sizeof(hdr_content_md5) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_digest, sizeof(hdr_digest) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_content_digest, sizeof(hdr_content_digest) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_repr_digest, sizeof(hdr_repr_digest) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Decision G: the streamed Markdown representation must not carry the
      * source HTML mtime as its weak validator; ETag is the sole validator
@@ -872,21 +913,33 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
      * AND last_modified == NULL is false, so both fields must be reset. */
     r->headers_out.last_modified_time = (time_t) -1;
     r->headers_out.last_modified = NULL;
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_last_modified, sizeof(hdr_last_modified) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_last_modified, sizeof(hdr_last_modified) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Content-Location: the source HTML representation's location is
      * stale once the body is converted to Markdown; a client resolving
      * it would fetch the original HTML.  Clear it so the converted
      * response never advertises the source representation. */
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_content_location, sizeof(hdr_content_location) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_content_location, sizeof(hdr_content_location) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Upstream trailers describe the HTML body; the streamed Markdown
      * body replaces it, so the Trailer declaration must not be
      * forwarded. */
-    (void) ngx_http_markdown_stream_commit_invalidate_header(
-        r, hdr_trailer, sizeof(hdr_trailer) - 1);
+    if (ngx_http_markdown_stream_commit_invalidate_header(
+            r, hdr_trailer, sizeof(hdr_trailer) - 1)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Clear the actual trailer entries too: headers_out.trailers is an
      * independent list emitted by HTTP/2/3 and chunked encodings without
