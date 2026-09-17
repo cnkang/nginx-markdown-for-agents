@@ -24,7 +24,7 @@ for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
 before/after examples.
 
-- **Directive removals (38 total, plus the five convergence names).** The
+- **Directive removals (38 total).** The
   release deletes 19 reject-only migration stubs. NGINX now reports the
   standard `unknown directive` error instead of a migration hint. The release
   removes 14 active directives:
@@ -122,6 +122,9 @@ before/after examples.
 - C reason code constants were missing the decompression error series
   (codes 4–11). All 25 reason code constants are now synchronized between
   Rust and C.
+- Reason codes are published in lowercase_snake_case on every surface; the
+  decision-reason helper now matches the registry (`converted`), completing
+  the lowercase renaming.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect
