@@ -73,6 +73,9 @@ cleanup_runtime() {
             "${TMPDIR:-/tmp}"/nginx-trailers-e2e.*)
                 rm -rf "${BUILDROOT}"
                 ;;
+            *)
+                :
+                ;;
         esac
     fi
 
