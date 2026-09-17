@@ -256,6 +256,16 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "Release gate must explicitly select a canonical benchmark NGINX "
         "version to avoid artifact filename collisions"
     )
+    assert "normalize_compatibility_document" in workflow, (
+        "Benchmark selection must read the matrix through the compatibility "
+        "normalizer: the evidence normalizer drops owner_workflow / "
+        "support_tier / release_blocking, which the selection filter reads, "
+        "leaving the version set empty and failing the step"
+    )
+    assert "normalize_document(" not in workflow, (
+        "Benchmark selection must not read the matrix through the evidence "
+        "normalizer (it drops the release-metadata keys the filter reads)"
+    )
     assert "module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64" in workflow, (
         "Release gate must download the canonical benchmark NGINX artifact "
         "by exact name, not a wildcard pattern with merge-multiple"
@@ -282,6 +292,44 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         evidence_invocations[1]
     ), "Tag release evidence must run baseline 091 before baseline 092"
     assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in workflow
+
+
+def test_benchmark_selection_resolves_release_blocking_versions():
+    """The canonical benchmark step must resolve at least one version.
+
+    The step filters release-matrix.json entries by the legacy
+    release-metadata keys (owner_workflow / support_tier /
+    release_blocking).  Reading the matrix through the compatibility
+    normalizer preserves those keys; the evidence normalizer drops them
+    by design, which would leave the version set empty and fail the step
+    before any benchmark runs.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    from tools.release.matrix.normalize_matrix import (
+        canonical_arch,
+        normalize_compatibility_document,
+    )
+
+    matrix = normalize_compatibility_document(
+        json.loads(
+            (repo_root / "tools" / "release-matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    owner = ".github/workflows/release-packages.yml"
+    amd64 = {
+        e["nginx_version"]
+        for e in matrix["entries"]
+        if canonical_arch(e["target"]) == "x86_64"
+        and e.get("owner_workflow") == owner
+        and e.get("support_tier") == "supported"
+        and e.get("libc") == "glibc"
+        and e.get("release_blocking") is True
+    }
+    assert amd64, (
+        "benchmark selection resolved no release-blocking amd64 versions"
+    )
 
 
 def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
