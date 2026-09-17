@@ -510,8 +510,20 @@ test_peer_text_is_loopback_table(void)
                     (const u_char *) "::FFFF:127.10.20.30",
                     sizeof("::FFFF:127.10.20.30") - 1) == 1,
                 "the v4-mapped prefix compares case-insensitively");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:127.0.0.0",
+                    sizeof("::ffff:127.0.0.0") - 1) == 1,
+                "the v4-mapped bottom of the 127/8 is loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:127.255.255.255",
+                    sizeof("::ffff:127.255.255.255") - 1) == 1,
+                "the v4-mapped top of the 127/8 is loopback");
 
     /* Remote peers must never be classified as loopback. */
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:128.0.0.1",
+                    sizeof("::ffff:128.0.0.1") - 1) == 0,
+                "the v4-mapped /8 just above loopback is not loopback");
     TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
                     (const u_char *) "10.0.0.1",
                     sizeof("10.0.0.1") - 1) == 0,
