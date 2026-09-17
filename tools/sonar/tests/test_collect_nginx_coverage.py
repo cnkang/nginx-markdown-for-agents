@@ -97,6 +97,7 @@ def test_quoted_brace_locations_without_conflict_stay_clean() -> None:
     )
     assert not _conflicting_location_blocks(config)
 
+
 def test_tilde_star_modifier_locations_are_parsed() -> None:
     """A ~* (case-insensitive) location must be recognized."""
     config = (
