@@ -19,7 +19,9 @@ ARG INSTALL_SHA256
 
 # Install dependencies and install the module in one layer.
 RUN test -n "${INSTALL_SHA256}" \
-    || { echo "ERROR: INSTALL_SHA256 is required: pass the sha256 of install.sh so the download can be checksum-verified" >&2; exit 1; } ; \
+    || { echo "ERROR: INSTALL_SHA256 is required: pass the sha256 of " \
+              "install.sh so the download can be checksum-verified" >&2; \
+         exit 1; } ; \
     apk add --no-cache \
     bash \
     curl \

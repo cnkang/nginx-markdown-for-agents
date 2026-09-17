@@ -13,6 +13,9 @@ from pathlib import Path
 
 VARIABLE = re.compile(r"\$\((\w+)\)")
 
+# The Make directive that disables error checking for its prerequisites.
+IGNORE_TARGET = ".IGNORE"
+
 
 CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)(?:\s|$)")
 
@@ -249,7 +252,7 @@ def _record_target(
     generation[name] = generation.get(name, 0) + 1
     dependencies.setdefault(name, [])
     expanded = _expand(target[1].strip(), variables)
-    if name == ".IGNORE":
+    if name == IGNORE_TARGET:
         # An unresolved scope here could ignore more targets than the file
         # shows, so it keeps its fail-closed treatment (raised downstream).
         dependencies[name].append(expanded)
@@ -408,7 +411,7 @@ def _poison_conditional_line(
     redefined = _target(line.strip())
     if redefined is None:
         return
-    if redefined[0] == ".IGNORE":
+    if redefined[0] == IGNORE_TARGET:
         raise ValueError("cannot verify conditional .IGNORE scope")
     generation[redefined[0]] = generation.get(redefined[0], 0) + 1
     recipes.setdefault(redefined[0], []).append(
@@ -455,7 +458,7 @@ def _make_nodes(
 def _ignored_targets(dependencies: dict[str, list[str]]) -> set[str]:
     """Resolve .IGNORE at read time; unknown scopes cannot prove blocking calls."""
     ignored: set[str] = set()
-    for declaration in dependencies.get(".IGNORE", []):
+    for declaration in dependencies.get(IGNORE_TARGET, []):
         try:
             names = shlex.split(declaration, comments=True)
         except ValueError as exc:

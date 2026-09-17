@@ -164,7 +164,8 @@ def test_chained_cache_helper_line_reports_risky_command() -> None:
     issue = analyzer._check_risky_command(
         [line], 0, line, errexit_active=True
     )
-    assert issue is not None and "rm" in issue, issue
+    assert issue is not None, issue
+    assert "rm" in issue, issue
 
 
 def test_install_script_still_passes() -> None:

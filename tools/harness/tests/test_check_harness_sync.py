@@ -1216,6 +1216,33 @@ def test_a_path_pattern_does_not_cross_a_directory_separator() -> None:
     assert sync._path_pattern_matches("components/**", "components/nginx-module/src/a.c") is True
 
 
+def test_pattern_classes_and_questions_stay_inside_one_segment() -> None:
+    """Bracket classes, ranges, and `?` follow the single-separator rule."""
+    assert sync._path_pattern_matches("tools/[a-c]?.sh", "tools/ab.sh") is True
+    assert sync._path_pattern_matches("tools/[a-c]?.sh", "tools/dd.sh") is False
+    assert sync._path_pattern_matches("tools/[^a]?.sh", "tools/bz.sh") is True
+    assert sync._path_pattern_matches("tools/[^a]?.sh", "tools/az.sh") is False
+    assert sync._path_pattern_matches(r"tools/[\d].sh", "tools/7.sh") is True
+    assert sync._path_pattern_matches("tools/?.sh", "tools/a/b.sh") is False
+    assert sync._path_pattern_matches("tools/[abc.sh", "tools/[abc.sh") is True
+
+
+def test_a_wildcard_heavy_pattern_stays_deterministic() -> None:
+    """A backtracking-shaped pattern keeps a correct verdict, not a blowup.
+
+    Repeated `**/` groups separated by literals made the translated-regex
+    matcher super-linear; the deterministic matcher must answer the same
+    verdict in one pass over the path.
+    """
+    pattern = "**/" * 12 + "target"
+    assert sync._path_pattern_matches(pattern, "a/" * 40 + "other") is False
+    assert sync._path_pattern_matches(pattern, "a/" * 11 + "target") is True
+
+    star_pattern = "*a" * 12 + "*b"
+    assert sync._path_pattern_matches(star_pattern, "a" * 40) is False
+    assert sync._path_pattern_matches(star_pattern, "a" * 12 + "b") is True
+
+
 def test_missing_mapping_entry_is_a_structural_blind_spot() -> None:
     """AGENTS.md rule rows naming a detector must appear in the mapping.
 
@@ -1273,7 +1300,9 @@ def test_reverse_coverage_ignores_rows_that_do_not_name_a_detector() -> None:
     assert bindings == {"1": {"tools/harness/detect_example.sh"}}
 
 
-def test_a_removed_packaging_filter_is_a_must_fail_regression() -> None:
+def test_a_removed_packaging_filter_is_a_must_fail_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A packaging script change must start the job that audits it.
 
     The MUST-FAIL shape from the fix list: if the harness-tooling
@@ -1298,19 +1327,15 @@ def test_a_removed_packaging_filter_is_a_must_fail_regression() -> None:
     assert covered.status == sync.PASS, covered.detail
 
     # Simulate the gap: the filter no longer selects the packaging surface.
-    original = sync._paths_filter_patterns
-    try:
-        patterns = dict(original())
-        patterns["harness_tooling"] = [
-            pattern
-            for pattern in patterns["harness_tooling"]
-            if not sync._path_pattern_matches(pattern, "packaging/scripts/x.sh")
-        ]
-        assert "packaging/**/*.sh" not in patterns["harness_tooling"]
-        sync._paths_filter_patterns = lambda: patterns
-        gap = sync._check_ci_trigger_coverage([entry])
-    finally:
-        sync._paths_filter_patterns = original
+    patterns = dict(sync._paths_filter_patterns())
+    patterns["harness_tooling"] = [
+        pattern
+        for pattern in patterns["harness_tooling"]
+        if not sync._path_pattern_matches(pattern, "packaging/scripts/x.sh")
+    ]
+    assert "packaging/**/*.sh" not in patterns["harness_tooling"]
+    monkeypatch.setattr(sync, "_paths_filter_patterns", lambda: patterns)
+    gap = sync._check_ci_trigger_coverage([entry])
 
     assert gap.status == sync.FAIL
     assert "packaging/**/*.sh" in gap.detail

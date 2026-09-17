@@ -1384,7 +1384,7 @@ def _job_commands_regardless_of_condition(
 
 
 FILTER_GATE_TOKEN = re.compile(
-    r"needs\.changes\.outputs\.([A-Za-z0-9_]+)[ \t]*==[ \t]*'true'"
+    r"needs\.changes\.outputs\.(\w+)[ \t]*==[ \t]*'true'", re.ASCII
 )
 
 
@@ -1555,54 +1555,201 @@ def _filter_covers_pattern(patterns: list[str], declared: str) -> bool:
     )
 
 
-def _compile_path_pattern(pattern: str) -> re.Pattern:
-    """Translate a GitHub path filter pattern into a regular expression.
+_PATH_LITERAL = "literal"
+_PATH_QUESTION = "question"
+_PATH_STAR = "star"
+_PATH_GLOBSTAR = "globstar"
+_PATH_GLOBSTAR_DIR = "globstar_dir"
+_PATH_CLASS = "class"
+
+_ASCII_DIGITS = frozenset("0123456789")
+_ASCII_WORD = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+)
+_ASCII_SPACE = frozenset(" \t\n\r\f\v")
+
+
+def _path_pattern_tokens(pattern: str) -> list[tuple[str, str]]:
+    """Split a paths-filter pattern into deterministic match tokens.
 
     `paths-filter` uses picomatch semantics: `*` never crosses a directory
     separator and `**` does.  Python's `fnmatch` treats `/` as an ordinary
     character, which would make `*.sh` match every shell script in the
-    repository and quietly weaken the coverage verdict.
+    repository and quietly weaken the coverage verdict.  Matching advances
+    over the path token by token instead of translating the pattern into a
+    regular expression, so a wildcard-rich pattern stays data and cannot
+    backtrack super-linearly.
     """
-    out: list[str] = []
+    tokens: list[tuple[str, str]] = []
     index = 0
     while index < len(pattern):
         char = pattern[index]
         if char == "*":
-            replacement, index = _star_replacement(pattern, index)
-            out.append(replacement)
+            index = _append_star_token(tokens, pattern, index)
             continue
         if char == "?":
-            out.append("[^/]")
+            tokens.append((_PATH_QUESTION, ""))
             index += 1
             continue
         if char == "[":
             close = pattern.find("]", index + 1)
             if close > index:
-                out.append(pattern[index : close + 1])
+                tokens.append((_PATH_CLASS, pattern[index + 1 : close]))
                 index = close + 1
                 continue
-        out.append(re.escape(char))
+        tokens.append((_PATH_LITERAL, char))
         index += 1
-    return re.compile("^" + "".join(out) + "$")
+    return tokens
 
 
-def _star_replacement(pattern: str, index: int) -> tuple[str, int]:
-    """Return the regex for the `*` run at an index and the index after it.
+def _append_star_token(
+    tokens: list[tuple[str, str]], pattern: str, index: int
+) -> int:
+    """Append the token for the `*` run at an index and return the next index.
 
     `**/` matches zero or more whole segments, which is why GitHub documents
     `**/README.md` as matching the repository root as well, `**` matches across
     separators, and a single `*` stops at one separator.
     """
     if pattern[index : index + 3] == "**/":
-        return "(?:.*/)?", index + 3
+        tokens.append((_PATH_GLOBSTAR_DIR, ""))
+        return index + 3
     if pattern[index : index + 2] == "**":
-        return ".*", index + 2
-    return "[^/]*", index + 1
+        tokens.append((_PATH_GLOBSTAR, ""))
+        return index + 2
+    tokens.append((_PATH_STAR, ""))
+    return index + 1
 
 
 def _path_pattern_matches(pattern: str, path: str) -> bool:
     """Return whether a path filter pattern selects a repository path."""
-    return _compile_path_pattern(pattern).match(path) is not None
+    reachable = {0}
+    for token in _path_pattern_tokens(pattern):
+        reachable = _advanced_positions(token, reachable, path)
+        if not reachable:
+            return False
+    return len(path) in reachable
+
+
+def _advanced_positions(
+    token: tuple[str, str], reachable: set[int], path: str
+) -> set[int]:
+    """Return the path positions reachable after one pattern token."""
+    kind, data = token
+    if kind == _PATH_LITERAL:
+        return _literal_positions(data, reachable, path)
+    if kind == _PATH_QUESTION:
+        return _question_positions(reachable, path)
+    if kind == _PATH_STAR:
+        return _star_positions(reachable, path)
+    if kind == _PATH_GLOBSTAR:
+        return _suffix_positions(reachable, path)
+    if kind == _PATH_GLOBSTAR_DIR:
+        return _segment_positions(reachable, path)
+    return _class_positions(data, reachable, path)
+
+
+def _literal_positions(
+    literal: str, reachable: set[int], path: str
+) -> set[int]:
+    """Return the positions a literal character advances to."""
+    return {
+        index + 1
+        for index in reachable
+        if index < len(path) and path[index] == literal
+    }
+
+
+def _question_positions(reachable: set[int], path: str) -> set[int]:
+    """Return the positions `?` advances to: one non-separator character."""
+    return {
+        index + 1
+        for index in reachable
+        if index < len(path) and path[index] != "/"
+    }
+
+
+def _class_positions(
+    class_text: str, reachable: set[int], path: str
+) -> set[int]:
+    """Return the positions a bracketed class advances to."""
+    return {
+        index + 1
+        for index in reachable
+        if index < len(path) and _class_matches(class_text, path[index])
+    }
+
+
+def _suffix_positions(reachable: set[int], path: str) -> set[int]:
+    """Return the positions `**` reaches: any prefix, separators included."""
+    return set(range(min(reachable), len(path) + 1))
+
+
+def _star_positions(reachable: set[int], path: str) -> set[int]:
+    """Return the positions a single `*` reaches inside one path component."""
+    found: set[int] = set()
+    for index in reachable:
+        found.add(index)
+        while index < len(path) and path[index] != "/":
+            index += 1
+            found.add(index)
+    return found
+
+
+def _segment_positions(reachable: set[int], path: str) -> set[int]:
+    """Return the positions `**/` reaches: whole segments or nothing."""
+    found = set(reachable)
+    for index in range(min(reachable), len(path)):
+        if path[index] == "/":
+            found.add(index + 1)
+    return found
+
+
+def _class_matches(class_text: str, char: str) -> bool:
+    """Return whether a character satisfies a bracketed pattern class.
+
+    The supported forms match what a picomatch-compatible path filter can
+    carry: literal members, `a-z` ranges, the ASCII shorthand escapes, and a
+    leading `^` that negates the class.
+    """
+    negated = class_text.startswith("^")
+    body = class_text[1:] if negated else class_text
+    matched = _class_body_matches(body, char)
+    return not matched if negated else matched
+
+
+def _class_body_matches(body: str, char: str) -> bool:
+    """Return whether a character is a member of a class body."""
+    index = 0
+    while index < len(body):
+        if body[index] == "\\" and index + 1 < len(body):
+            if _escape_matches(body[index + 1], char):
+                return True
+            index += 2
+            continue
+        if index + 2 < len(body) and body[index + 1] == "-":
+            if body[index] <= char <= body[index + 2]:
+                return True
+            index += 3
+            continue
+        if body[index] == char:
+            return True
+        index += 1
+    return False
+
+
+def _escape_matches(escape: str, char: str) -> bool:
+    """Return whether an escaped class item matches a character."""
+    if escape in ("d", "D"):
+        member = char in _ASCII_DIGITS
+        return member if escape == "d" else not member
+    if escape in ("w", "W"):
+        member = char in _ASCII_WORD
+        return member if escape == "w" else not member
+    if escape in ("s", "S"):
+        member = char in _ASCII_SPACE
+        return member if escape == "s" else not member
+    return char == escape
 
 
 def _condition_allows_execution(value: object) -> bool:
@@ -2138,7 +2285,7 @@ def _check_agents_rule_coverage(manifest: dict) -> CheckResult:
 
 
 AGENTS_RULE_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
-AGENTS_TOOL_PATH = re.compile(r"tools/harness/[A-Za-z0-9_][A-Za-z0-9_./-]*")
+AGENTS_TOOL_PATH = re.compile(r"tools/harness/\w[\w./-]*", re.ASCII)
 
 
 def _agents_detector_rules(agents: str) -> dict[str, set[str]]:
