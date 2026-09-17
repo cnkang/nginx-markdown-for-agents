@@ -86,7 +86,10 @@ when the result differs.
 0.9.2 freezes the public configuration at 20 active directives. The seven names
 retired in 0.9.2 (five convergence names plus `markdown_profile` and
 `markdown_streaming_zero_copy`) are no longer registered and fail `nginx -t` with
-NGINX's standard `unknown directive` error. Configure the
+NGINX's standard `unknown directive` error. This list is a subset: see
+[CHANGELOG.md](CHANGELOG.md) for the complete removal inventory (14 removed
+active directives, 19 deleted migration stubs, and 5 directives folded into
+`markdown_limits`). Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
 ```nginx
