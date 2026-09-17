@@ -824,6 +824,21 @@ class TestReferencesGatePolarity:
         )
 
 
+    def test_a_yaml_quoted_condition_keeps_its_reference(self) -> None:
+        """Wrapping the whole condition in a YAML flow scalar must not hide
+        its gate reference from polarity analysis."""
+        value = secret_scope_module._step_if_value(
+            [
+                "      - name: probe\n",
+                "        if: \"steps.token.outputs.enabled == 'true'\"\n",
+            ],
+            0,
+            2,
+        )
+        assert value == "steps.token.outputs.enabled == 'true'"
+        assert secret_scope_module._references_gate(value, "token", {"enabled"})
+
+
 class TestGateNamePattern:
     """GATE_NAME_RE accepts quoted values (spaces allowed) and bare tokens."""
 
