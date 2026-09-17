@@ -122,9 +122,14 @@ before/after examples.
 - C reason code constants were missing the decompression error series
   (codes 4–11). All 25 reason code constants are now synchronized between
   Rust and C.
-- Reason codes are published in lowercase_snake_case on every surface; the
+- Every surface publishes reason codes in lowercase_snake_case. The
   decision-reason helper now matches the registry (`converted`), completing
   the lowercase renaming.
+- Decompression (deflate): the full-buffer decoder replays a zlib-wrapped
+  RFC 1950 format error as raw RFC 1951 from the start, while the streaming
+  decoder commits to the framing implied by the first two bytes and fails
+  open for a misclassified stream — streaming cannot replay committed
+  bytes. The divergence is deliberate and pinned by tests on both paths.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect

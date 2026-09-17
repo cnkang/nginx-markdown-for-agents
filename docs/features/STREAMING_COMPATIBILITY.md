@@ -23,7 +23,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
-| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
+| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer replays a deflate format error as raw from the start; streaming commits once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
 
 For an empty wire body, an identity-only `Content-Encoding` chain remains
