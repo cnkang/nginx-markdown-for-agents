@@ -401,6 +401,7 @@ assert_pattern_clean "${TMPDIR_TEST}/pat_e_neg" "instead of 'curl -X HEAD'" \
 # ---------------------------------------------------------------------------
 fake_bin="${TMPDIR_TEST}/fakebin"
 mkdir -p "${fake_bin}"
+real_grep="$(command -v grep 2>/dev/null || true)"
 cat > "${fake_bin}/grep" << 'EOF'
 #!/bin/bash
 # Recursive invocations fail hard; everything else delegates to realgrep.
@@ -410,8 +411,10 @@ for a in "$@"; do
         -rnE|-rn|-r|-R|-rE|--recursive) echo "grep: fake recursive failure" >&2; exit 2 ;;
     esac
 done
-exec /usr/bin/grep "$@"
+exec __REAL_GREP_BIN__ "$@"
 EOF
+sed -e "s|__REAL_GREP_BIN__|${real_grep}|" "${fake_bin}/grep" > "${fake_bin}/grep.tmp"
+mv "${fake_bin}/grep.tmp" "${fake_bin}/grep"
 chmod +x "${fake_bin}/grep"
 
 failopen_fixture="${TMPDIR_TEST}/failopen"
