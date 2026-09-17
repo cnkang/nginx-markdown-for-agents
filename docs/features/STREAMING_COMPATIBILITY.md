@@ -43,9 +43,12 @@ compressed response.
 
 Full-buffer mode computes an ETag from the complete Markdown output and supports
 `If-None-Match` / `If-Modified-Since` for 304 responses. For a converted
-response, only the Markdown ETag drives the 304 decision: the source
+response, only the Markdown ETag drives the 304 decision, and only when
+`markdown_cache_validation` is `full`: the source
 `Last-Modified` value is deliberately not an input, and the conversion clears
-that header. Source `Last-Modified` / `If-Modified-Since` validation therefore
+that header. With `ims_only` a converted response never produces a 304 through
+the transformed representation, and `off` disables conditional handling for
+it. Source `Last-Modified` / `If-Modified-Since` validation therefore
 applies to pass-through responses only. Streaming mode commits
 the response headers before the full output is available, so ETag generation
 and `If-None-Match`-based conditional validation are not possible.
@@ -157,6 +160,7 @@ fallback.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Scope the converted-response ETag/304 statement to `markdown_cache_validation = full`; `ims_only` never 304s a converted response through the transformed representation and `off` disables conditional handling for it |
 | 0.9.2 | 2026-09-07 | Kang | Split the post-commit fail-open outcome: later gzip-member failures finish the remaining Markdown safely; only impossible-safe-finish failures abort with truncated output |
 | 0.9.2 | 2026-08-24 | Kang | Corrected the parser_budget budget row: the bound covers both paths (full-buffer pre-parse estimate plus streaming enforcement), not streaming only |
 | 0.9.2 | 2026-08-19 | Hermes | Document the accepted no-ETag-for-streaming constraint (full-buffer vs streaming path divergence, user-confirmed) |
