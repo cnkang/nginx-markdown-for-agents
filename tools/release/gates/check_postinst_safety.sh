@@ -274,7 +274,7 @@ mask_command_text() {
     local text="$1"
 
     text="$(printf '%s' "$text" | sed -E "s/\"[^\"]*\"/\"/g; s/'[^']*'/''/g")"
-    text="$(printf '%s' "$text" | sed -E 's/(^|[[:space:]])#.*$/\1/')"
+    text="$(printf '%s' "$text" | sed -E 's/(^|[[:space:];|&])#.*$/\1/')"
     printf '%s' "$text"
 }
 
