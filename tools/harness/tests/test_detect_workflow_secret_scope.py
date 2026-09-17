@@ -672,10 +672,26 @@ class TestReferencesGatePolarity:
             {"enabled"},
         )
 
-    def test_always_call_does_not_gate(self):
-        """``always()`` can run the step with the gate unsatisfied."""
-        assert not secret_scope_module._references_gate(
+    def test_always_conjunction_still_gates(self):
+        """``always() && <gate>`` still requires the gate."""
+        assert secret_scope_module._references_gate(
             "always() && steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_always_disjunction_does_not_gate(self):
+        """``always() || <gate>`` leaves the gate optional."""
+        assert not secret_scope_module._references_gate(
+            "always() || steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_quoted_disjunction_is_not_a_disjunction(self):
+        """A ``||`` inside a quoted literal is not a top-level disjunction."""
+        assert secret_scope_module._references_gate(
+            "github.event_name == 'x||y' && steps.token.outputs.enabled == 'true'",
             "token",
             {"enabled"},
         )
