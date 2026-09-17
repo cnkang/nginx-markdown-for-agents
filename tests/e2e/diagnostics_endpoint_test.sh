@@ -9,6 +9,7 @@
 #   - markdown_diagnostics on; (enabled in nginx.conf)
 #   - allow directive configured for test client IP
 #   - curl available
+#   - python3 available (HEAD body probe)
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
 #
 # Test Scenario:
@@ -55,6 +56,11 @@ fail() {
 check_prerequisites() {
     if ! command -v curl >/dev/null 2>&1; then
         echo "Error: curl is required" >&2
+        exit 2
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 is required for the HEAD body probe" >&2
         exit 2
     fi
 
@@ -228,6 +234,7 @@ HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}" "${DIAGNOSTICS_PATH}" 2>/dev/null <<'
 import socket
 import ssl
 import sys
+import time
 import urllib.parse
 
 parsed = urllib.parse.urlparse(sys.argv[1])
@@ -246,8 +253,13 @@ try:
             path, host, port
         )
         sock.sendall(request.encode("ascii"))
+        deadline = time.time() + 10
+        max_bytes = 1 << 20
         data = b""
         while True:
+            if time.time() > deadline or len(data) > max_bytes:
+                print("-1")
+                sys.exit(0)
             chunk = sock.recv(65536)
             if not chunk:
                 break
