@@ -278,6 +278,23 @@ validate_helm_template() {
     fi
     pass "repository-only render rejected (image.tag/image.digest required)"
 
+    # Tag-only render must still fail and name the missing repository
+    # reference: image.tag alone cannot satisfy the image contract.
+    local tag_only_out
+    if tag_only_out="$(helm template "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
+        --namespace "${HELM_NAMESPACE}" \
+        --set image.tag=latest 2>&1)"; then
+        fail "helm template with only image.tag set unexpectedly succeeded (repository must be required)"
+        printf '%s\n' "$tag_only_out" >&2
+        return 1
+    fi
+    if ! grep -qF "image.repository" <<< "$tag_only_out"; then
+        fail "tag-only render failed without naming image.repository"
+        printf '%s\n' "$tag_only_out" >&2
+        return 1
+    fi
+    pass "tag-only render rejected (image.repository required)"
+
     # Render with an explicit stock-nginx image (the supported
     # markdown.enabled=false path) and validate the rendered output.
     local rendered
