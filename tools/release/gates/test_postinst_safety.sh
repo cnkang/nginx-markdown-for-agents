@@ -492,6 +492,41 @@ else
     fail "quoted prose note before the trusted PATH is not a command (exits 0)" "expected exit 0, got exit $local_exit"
 fi
 
+# --- Regression: mask_command_text strips comments after shell separators ---
+# The `;#`, `|#` and `&#` forms must be blotted out so a later command scan
+# never reads comment prose as an executed command.  The function is
+# extracted from the checker itself so the test exercises the real source.
+mask_fn="$(sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT")"
+if [[ -n "$mask_fn" ]]; then
+    eval "$mask_fn"
+    masked="$(mask_command_text 'true;# run sed -i on the config to fix it')"
+    if [[ "$masked" == 'true;' ]]; then
+        pass "mask strips a comment after a semicolon"
+    else
+        fail "mask strips a comment after a semicolon" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo ok |# note about pipes')"
+    if [[ "$masked" == 'echo ok |' ]]; then
+        pass "mask strips a comment after a pipe"
+    else
+        fail "mask strips a comment after a pipe" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'run &# prose note')"
+    if [[ "$masked" == 'run &' ]]; then
+        pass "mask strips a comment after an ampersand"
+    else
+        fail "mask strips a comment after an ampersand" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "# not a comment"')"
+    if [[ "$masked" == 'echo "' ]]; then
+        pass "mask keeps quoted hashes neutral"
+    else
+        fail "mask keeps quoted hashes neutral" "got '$masked'"
+    fi
+else
+    fail "mask_command_text extraction" "function not found in checker"
+fi
+
 printf '\n'
 
 # ---------------------------------------------------------------------------
