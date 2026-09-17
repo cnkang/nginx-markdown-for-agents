@@ -22,18 +22,14 @@ SONAR_SECRET_EXPRESSION = re.compile(
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
 GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
-# Splits a shell line into command segments so a chained `;`/`&&`/`||`/`|`
-# command cannot donate its output redirect (or its NAME=value echo) to a
-# neighbouring command.
-SHELL_SEPARATOR_RE = re.compile(r"&&|\|\||[;&|]")
 # A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
 # (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
 # NAME=value assignment after `echo`.  The value tail is anchored by the
 # single `>>` literal, so no quantifiers overlap and the pattern stays
-# linear on adversarial lines.  The value portion cannot cross shell
-# command separators: _published_gates() splits a chained line first, so
-# the captured gate always belongs to the echo that owns the redirect.
-GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^;&|\n]*>>')
+# linear on adversarial lines.  _published_gates() splits the line into
+# unquoted command segments first, so a quoted value that contains
+# separators cannot fabricate a gate assignment.
+GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>')
 STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
@@ -286,20 +282,65 @@ def _presence_block(
     )
 
 
+def _split_shell_segments(line: str) -> list[str]:
+    """Split a shell line on unquoted command separators.
+
+    Separators inside single- or double-quoted text are content, not command
+    boundaries, so a quoted gate value cannot fabricate a segment that the
+    anchored gate pattern would accept.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    index = 0
+    length = len(line)
+    while index < length:
+        char = line[index]
+        if quote:
+            current.append(char)
+            if char == "\\" and quote == '"' and index + 1 < length:
+                current.append(line[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if line.startswith("&&", index) or line.startswith("||", index):
+            segments.append("".join(current))
+            current = []
+            index += 2
+            continue
+        if char in ";|&":
+            segments.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    return segments
+
+
 def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
     """Return the step outputs the presence check publishes for gating.
 
     A line may chain several commands (``echo "debug=1"; echo "ready=go"
     >> "$GITHUB_OUTPUT"``): only the echo that owns the redirect may name
-    the gate, so the line is split on shell command separators before the
-    anchored gate pattern runs.
+    the gate, so the line is split into unquoted command segments before
+    the anchored gate pattern runs.
     """
     names: set[str] = set()
     for index in range(start, end):
         line = lines[index]
         if not GITHUB_OUTPUT_RE.search(line):
             continue
-        for segment in SHELL_SEPARATOR_RE.split(line):
+        for segment in _split_shell_segments(line):
             match = GATE_NAME_RE.match(segment)
             if match:
                 names.add(match.group(1))
