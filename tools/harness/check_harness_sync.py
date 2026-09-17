@@ -1685,13 +1685,24 @@ def _suffix_positions(reachable: set[int], path: str) -> set[int]:
 
 
 def _star_positions(reachable: set[int], path: str) -> set[int]:
-    """Return the positions a single `*` reaches inside one path component."""
+    """Return the positions a single `*` reaches inside one path component.
+
+    A run that starts at position p covers every position up to the next
+    separator (or the end of the path), so the union over all start
+    positions is a union of intervals.  Starts that fall inside a covered
+    interval add nothing, which keeps the walk linear even when a
+    preceding `**` hands this function one start per character.
+    """
     found: set[int] = set()
-    for index in reachable:
-        found.add(index)
-        while index < len(path) and path[index] != "/":
-            index += 1
-            found.add(index)
+    covered = -1
+    for index in sorted(reachable):
+        if index <= covered:
+            continue
+        end = index
+        while end < len(path) and path[end] != "/":
+            end += 1
+        found.update(range(index, end + 1))
+        covered = end
     return found
 
 
