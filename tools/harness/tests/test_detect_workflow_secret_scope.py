@@ -695,3 +695,24 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_backslash_literal_does_not_swallow_quote(self):
+        """A backslash in a literal is not an escape; the quote still closes.
+
+        GitHub expressions escape quotes by doubling, so a trailing
+        backslash must not hide the closing quote — otherwise a following
+        top-level ``||`` would be missed.
+        """
+        assert not secret_scope_module._references_gate(
+            "github.event_name == 'a\\' || steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_doubled_single_quote_stays_in_literal(self):
+        """A doubled quote inside a literal does not end it early."""
+        assert secret_scope_module._references_gate(
+            "github.event_name == 'it''s' && steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )

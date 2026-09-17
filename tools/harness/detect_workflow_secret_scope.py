@@ -305,10 +305,15 @@ def _optional_in_disjunction(if_value: str, ref: str) -> bool:
     while index < len(if_value):
         char = if_value[index]
         if quote is not None:
-            if char == "\\":
-                index += 2
-                continue
             if char == quote:
+                if (
+                    quote == "'"
+                    and index + 1 < len(if_value)
+                    and if_value[index + 1] == "'"
+                ):
+                    # GitHub expressions escape a quote by doubling it.
+                    index += 2
+                    continue
                 quote = None
         elif char in "'\"":
             quote = char
