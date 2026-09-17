@@ -1675,7 +1675,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-18 | Hermes | Reinstall example blocks define RELEASE_TAG and INSTALLER inline so each block runs on its own |
+| 0.9.2 | 2026-09-17 | Hermes | Reinstall example blocks define RELEASE_TAG and INSTALLER inline so each block runs on its own |
 | 0.9.2 | 2026-08-24 | Kang | DEB/RPM download commands now save responses to their intended artifact file names with curl -o options; AUTO_DISABLE_STALE_MODULE is passed through sudo env alongside VERSION |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that Linux package commands require published tag assets and checksums; release-candidate matrix entries are not downloadable packages. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
