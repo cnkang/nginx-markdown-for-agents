@@ -535,7 +535,7 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
             size_t             avail;
 
             if (*(fmt + 2) == 'i') {
-                uval = va_arg(ap, unsigned int);
+                uval = va_arg(ap, ngx_uint_t);
                 fmt += 3;
             } else if (*(fmt + 2) == 'z') {
                 uval = va_arg(ap, size_t);
@@ -553,12 +553,12 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                 p += written;
             }
         } else if (*fmt == '%' && *(fmt + 1) == 'i') {
-            long   ival = va_arg(ap, long);
-            int    written;
-            size_t avail;
+            ngx_int_t ival = va_arg(ap, ngx_int_t);
+            int       written;
+            size_t    avail;
 
             avail = (size_t) (end - p);
-            written = snprintf(p, avail, "%ld", ival);
+            written = snprintf(p, avail, "%lld", (long long) ival);
             if (written > 0) {
                 if ((size_t) written >= avail) {
                     written = (int) avail - 1;
