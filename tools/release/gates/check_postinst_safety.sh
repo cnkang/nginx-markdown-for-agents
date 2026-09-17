@@ -355,6 +355,65 @@ check_file() {
     return 0
 }
 
+# prologue_line_is_assignment_only — true when a prologue line stores a value
+# without running a command.
+#
+# An env-prefixed command ("LC_ALL=C sed -n ...") has the NAME=value shape but
+# resolves its command word through PATH, so it must end the prologue scan
+# exactly like any other statement.  A real assignment is NAME=value followed
+# by nothing, or by one or more further NAME=value pairs.
+#
+# Arguments: $1 = source line (top-level, already trimmed)
+# Outputs:   none
+# Returns:   0 when the line is assignment-only, 1 otherwise
+prologue_line_is_assignment_only() {
+    local text="$1"
+    local name_pattern='^[A-Za-z_][A-Za-z0-9_]*='
+    local value="" rest="" quote="" index=0 char=""
+
+    while [[ "$text" =~ $name_pattern ]]; do
+        rest="${text#*=}"
+        if [[ -z "$rest" ]]; then
+            return 0
+        fi
+        quote="${rest:0:1}"
+        if [[ "$quote" == '"' || "$quote" == "'" ]]; then
+            index=1
+            while [[ "$index" -lt "${#rest}" ]]; do
+                char="${rest:$index:1}"
+                if [[ "$char" == "$quote" ]]; then
+                    break
+                fi
+                index=$((index + 1))
+            done
+            if [[ "$index" -ge "${#rest}" ]]; then
+                # Unterminated quote: cannot prove this is assignment-only.
+                return 1
+            fi
+            text="${rest:$((index + 1))}"
+        else
+            # Process substitution executes a command: ``OUTPUT=<(hostname)``
+            # resolves hostname through PATH even though the line starts as
+            # an assignment, so it ends the prologue like other command
+            # execution.
+            if [[ "$rest" == *'<('* || "$rest" == *'>('* ]]; then
+                return 1
+            fi
+            # Unquoted value runs to the first whitespace.
+            value="${rest%%[[:space:]]*}"
+            text="${rest#"$value"}"
+        fi
+        # Only whitespace may remain before the next NAME=value pair (or the
+        # end of the line).
+        text="${text#"${text%%[![:space:]]*}"}"
+        if [[ -z "$text" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # check_trusted_path — verify that a top-level trusted PATH assignment
 # precedes any external command resolution in a maintainer script.
 #
@@ -475,9 +534,16 @@ check_trusted_path() {
                 # Command substitution, backticks, or command separators in
                 # the line execute commands before the trusted PATH
                 # assignment, so they end the prologue.
-                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= \
-                    && "$line" != *'$('* && "$line" != *'`'* \
-                    && "$line" != *';'* && "$line" != *'&'* && "$line" != *'|'* ]]; then
+                #
+                # The assignment must also be assignment-ONLY: an env-prefixed
+                # command such as "LC_ALL=C sed ..." starts with a NAME=value
+                # shape but runs a PATH-resolved command, so it ends the
+                # prologue like any other statement.
+                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] \
+                    && [[ "$line" != *'$('* && "$line" != *'`'* \
+                    && "$line" != *';'* && "$line" != *'&'* \
+                    && "$line" != *'|'* ]] \
+                    && prologue_line_is_assignment_only "$line"; then
                     :
                 else
                     break

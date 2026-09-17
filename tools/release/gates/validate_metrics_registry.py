@@ -134,12 +134,16 @@ def _validate_family_identity(
         if not isinstance(name, str) or not name.startswith(prefix):
             errors.append(f"Family '{name}' missing {prefix} prefix")
     # Type, duplicate, and seen_names bookkeeping run regardless of prefix
-    # validity so a missing prefix cannot mask other family defects.
+    # validity so a missing prefix cannot mask other family defects.  The
+    # duplicate bookkeeping only applies to string names: a non-string name
+    # (or an unhashable JSON array/object) is already reported above and must
+    # not abort validation with a TypeError.
     if family_type not in valid_types:
         errors.append(f"Family '{name}' has invalid type '{family_type}'")
-    if name in seen_names:
-        errors.append(f"Duplicate family name: {name}")
-    seen_names.add(name)
+    if isinstance(name, str):
+        if name in seen_names:
+            errors.append(f"Duplicate family name: {name}")
+        seen_names.add(name)
     return errors, name
 
 
