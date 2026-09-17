@@ -941,8 +941,8 @@ sudo nginx -t || {
 
 # Start a fresh master with the new module loaded, using the ownership
 # decision recorded before the stop.  A failed start must land on the PAIRED
-# previous module and pre-migration configuration: the recovery helper is
-# defined later in this block, so the fallback below restores both halves
+# previous module and pre-migration configuration: the recovery helper lives in
+# the final upgrade block below, so the fallback here restores both halves
 # explicitly when it is not yet available.
 start_new_master() {
   if [[ "$systemd_managed" -eq 1 ]]; then
@@ -1744,16 +1744,8 @@ if ! sudo nginx -t; then
   fi
   exit 1
 fi
-# Start a fresh master with the new module and validate it before
-# discarding the pre-upgrade backup: a failed start or an unhealthy
-# post-start check must leave ${MODULE_BACKUP} available for rollback.
-if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx || { restore_previous_module_and_config || true; exit 1; }
-else
-    sudo nginx || { restore_previous_module_and_config || true; exit 1; }
-fi
-# Recovery helpers for the post-start checks below (defined here so the start
-# above can already call the paired module-and-config rollback).  Replacing the module file under
+# Recovery helpers for the start below and the post-start checks that follow
+# (defined before the start so its failure path can call the paired module-and-config rollback).  Replacing the module file under
 # a live master is unsafe (the running worker still maps the previous file, and
 # a reload could pick up a half-restored pair), so every failure path stops the
 # started instance first and restarts it only once the restored module and
@@ -1866,6 +1858,14 @@ restore_previous_module_and_config() {
   echo "INFO: previous module and configuration restored, validated, and NGINX restarted" >&2
   return 0
 }
+# Start a fresh master with the new module and validate it before
+# discarding the pre-upgrade backup: a failed start or an unhealthy
+# post-start check must leave ${MODULE_BACKUP} available for rollback.
+if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx || { restore_previous_module_and_config || true; exit 1; }
+else
+    sudo nginx || { restore_previous_module_and_config || true; exit 1; }
+fi
 
 # Post-start verification: the new master must be serving and converting
 # before the backup is removed.  Probe a fixed, known-convertible fixture
