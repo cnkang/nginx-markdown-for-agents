@@ -19,8 +19,9 @@
 #   -t, --tag TAG           Image tag to use (default: nginx-markdown-test:latest)
 #   -c, --context PATH      Docker build context (default: repository root)
 #   --module-sha SHA        Reviewed full module commit (default: context HEAD)
-#   --module-ref REF        Commit ref forwarded to the build (alternative to
-#                           --module-sha when the commit is not published)
+#   --module-ref REF        Commit ref the build forwards alongside the reviewed
+#                           --module-sha; it complements that value and does
+#                           not replace it
 #   --no-cleanup            Keep the built image after test (default: remove)
 #   -h, --help              Show this help message
 #
