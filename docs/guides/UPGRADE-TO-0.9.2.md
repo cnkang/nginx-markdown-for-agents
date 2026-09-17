@@ -255,11 +255,11 @@ if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
   echo "ERROR: ${CONFIG_BACKUP_DIR}/tree is a symlink; remove it so the snapshot lands in a real directory" >&2
   exit 1
 fi
+if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
+  echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
+  exit 1
+fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
-  if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
-    exit 1
-  fi
   sudo mv -T "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
 sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
@@ -943,18 +943,28 @@ sudo nginx -t || {
   # report the manual-start diagnostic instead of silently continuing.
   if [[ "$systemd_managed" -eq 1 ]]; then
     if ! sudo systemctl start nginx; then
+      helper_status=0
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
-        restore_previous_module_and_config || true
+        restore_previous_module_and_config || helper_status=$?
       fi
-      echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      if [[ "$helper_status" -eq 0 ]]; then
+        echo "INFO: the recovery helper restored and restarted the previous module and configuration" >&2
+      else
+        echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      fi
       exit 1
     fi
   else
     if ! sudo nginx; then
+      helper_status=0
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
-        restore_previous_module_and_config || true
+        restore_previous_module_and_config || helper_status=$?
       fi
-      echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      if [[ "$helper_status" -eq 0 ]]; then
+        echo "INFO: the recovery helper restored and restarted the previous module and configuration" >&2
+      else
+        echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      fi
       exit 1
     fi
   fi
@@ -1224,11 +1234,11 @@ if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
   echo "ERROR: ${CONFIG_BACKUP_DIR}/tree is a symlink; remove it so the snapshot lands in a real directory" >&2
   exit 1
 fi
+if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
+  echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
+  exit 1
+fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
-  if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
-    exit 1
-  fi
   sudo mv -T "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
 sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
