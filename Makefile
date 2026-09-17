@@ -98,7 +98,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
-        verify-subrequest-filter-ordering-native-e2e verify-non-streaming-module-e2e \
+        verify-subrequest-filter-ordering-native-e2e verify-upstream-trailers-native-e2e verify-non-streaming-module-e2e \
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
@@ -440,6 +440,7 @@ test-all-e2e:
 		set -e; \
 		$(MAKE) verify-real-nginx-ims-e2e; \
 		$(MAKE) verify-subrequest-filter-ordering-native-e2e; \
+		$(MAKE) verify-upstream-trailers-native-e2e; \
 	fi
 	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
@@ -1678,6 +1679,16 @@ verify-subrequest-filter-ordering-native-e2e:
 	else \
 		REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
 			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
+	fi
+
+verify-upstream-trailers-native-e2e:
+	@if test "$(SKIP)" = "1"; then \
+		echo "SKIP: upstream-trailer native E2E skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: upstream-trailer native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
+	else \
+		bash tools/e2e/verify_upstream_trailers_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18119; \
 	fi
 
 # Non-streaming production-module linkage check — builds the Rust archive
