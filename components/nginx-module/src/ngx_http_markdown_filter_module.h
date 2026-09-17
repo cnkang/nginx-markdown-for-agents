@@ -146,7 +146,6 @@ static ngx_inline ngx_flag_t
 ngx_http_markdown_peer_text_is_loopback(const u_char *data, size_t len)
 {
     static const char  v4_mapped_prefix[] = "::ffff:127.";
-    size_t             i;
     u_char             c;
 
     if (data == NULL || len == 0) {
@@ -171,7 +170,7 @@ ngx_http_markdown_peer_text_is_loopback(const u_char *data, size_t len)
     if (len >= sizeof(v4_mapped_prefix) - 1) {
         /* ASCII case fold, kept locale-independent so the comparison does
          * not depend on the process locale. */
-        for (i = 0; i < sizeof(v4_mapped_prefix) - 1; i++) {
+        for (size_t i = 0; i < sizeof(v4_mapped_prefix) - 1; i++) {
             c = data[i];
             if (c >= 'A' && c <= 'Z') {
                 c = (u_char) (c + ('a' - 'A'));
@@ -218,9 +217,9 @@ ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r);
 static ngx_inline ngx_flag_t
 ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
 {
-    static ngx_str_t           realip_remote_addr =
+    static ngx_str_t                 realip_remote_addr =
         ngx_string("realip_remote_addr");
-    ngx_http_variable_value_t *value;
+    const ngx_http_variable_value_t *value;
 
     if (r == NULL || r->connection == NULL) {
         return 0;

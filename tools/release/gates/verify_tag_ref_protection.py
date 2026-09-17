@@ -243,8 +243,8 @@ def _resolve_repository(repo_arg: str | None) -> str:
     return _repository_from_origin()
 
 
-def _report_no_protecting_ruleset(rulesets: list[dict]) -> int:
-    """Report the no-protecting-ruleset case; returns the fail-closed code.
+def _report_no_protecting_ruleset(rulesets: list[dict]) -> None:
+    """Report the no-protecting-ruleset case; the caller fails closed.
 
     Distinguishes "the ruleset needs a bypass-actor field we could not read"
     from "there is no suitable ruleset at all": the first is an
@@ -270,7 +270,7 @@ def _report_no_protecting_ruleset(rulesets: list[dict]) -> int:
             "re-run with a token that can read the ruleset bypass list.",
             file=sys.stderr,
         )
-        return 1
+        return
     print(
         "FAIL: no active tag ruleset protects "
         f"'{REQUIRED_INCLUDE_PATTERN}' against deletion and updates "
@@ -279,7 +279,6 @@ def _report_no_protecting_ruleset(rulesets: list[dict]) -> int:
         "checklist) before tagging a release.",
         file=sys.stderr,
     )
-    return 1
 
 
 def main() -> int:
@@ -324,7 +323,8 @@ def main() -> int:
         if _ruleset_protects_release_tags(ruleset)
     ]
     if not matching:
-        return _report_no_protecting_ruleset(rulesets)
+        _report_no_protecting_ruleset(rulesets)
+        return 1
 
     for ruleset in matching:
         print(

@@ -79,6 +79,8 @@ MODULE_SHA="$(printf 'a%.0s' $(seq 1 40))"
 IMAGE_DIGEST="sha256:$(printf 'b%.0s' $(seq 1 64))"
 IMAGE_REFERENCE="nginx:1.31.5"
 OTHER_SHA="$(printf 'c%.0s' $(seq 1 40))"
+# Sentinel for the inspect-payload writer: this label is not present.
+ABSENT_LABEL="__absent__"
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/verifier-binding-fixtures.XXXXXX")"
 trap 'rm -f "${HELPERS_FILE}"; rm -rf "${WORK_DIR}"' EXIT
@@ -129,7 +131,7 @@ expect_binding "${FIXTURE_OK}" 0 "fixture 1 (revision+base digest match)"
 # Fixture 2: base name label absent (BuildKit omits it without a registry
 # name) -> still accepted, since revision + digest are the decisive evidence.
 FIXTURE_NO_NAME="${WORK_DIR}/inspect-no-name.json"
-write_inspect "${FIXTURE_NO_NAME}" "${MODULE_SHA}" "__absent__" "${IMAGE_DIGEST}"
+write_inspect "${FIXTURE_NO_NAME}" "${MODULE_SHA}" "${ABSENT_LABEL}" "${IMAGE_DIGEST}"
 expect_binding "${FIXTURE_NO_NAME}" 0 "fixture 2 (base name absent, digest matches)"
 
 # Fixture 3: stale image with a different module revision -> reject.
@@ -146,7 +148,7 @@ expect_binding "${FIXTURE_BASE_MISMATCH}" 1 "fixture 4 (base digest != IMAGE_DIG
 
 # Fixture 5: locally built image without any OCI labels -> reject.
 FIXTURE_LOCAL="${WORK_DIR}/inspect-no-labels.json"
-write_inspect "${FIXTURE_LOCAL}" "__absent__" "__absent__" "__absent__"
+write_inspect "${FIXTURE_LOCAL}" "${ABSENT_LABEL}" "${ABSENT_LABEL}" "${ABSENT_LABEL}"
 expect_binding "${FIXTURE_LOCAL}" 1 "fixture 5 (no OCI labels at all)"
 
 # Fixture 6: base name present but naming a different reference -> reject.

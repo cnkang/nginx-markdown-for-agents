@@ -231,3 +231,53 @@ def test_a_missing_workflow_directory_is_an_error(tmp_path) -> None:
     errors = collect_errors(tmp_path)
 
     assert any("workflow directory is missing" in error for error in errors)
+
+
+def test_a_clean_cli_root_reports_success(tmp_path, capsys) -> None:
+    """A clean root reached through the CLI exits zero with an OK line."""
+    from tools.harness.detect_continuation_comments import main
+
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+
+    assert main(["detect_continuation_comments.py", str(tmp_path)]) == 0
+    assert "OK:" in capsys.readouterr().out
+
+
+def test_the_cli_root_is_validated_and_scanned(tmp_path, capsys) -> None:
+    """The CLI root is resolved to a real path before the scan starts."""
+    from tools.harness.detect_continuation_comments import main
+
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    script = tmp_path / "tools" / "cli.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text(VIOLATION, encoding="utf-8")
+
+    assert main(["detect_continuation_comments.py", str(tmp_path)]) == 1
+    assert "cli.sh" in capsys.readouterr().out
+
+
+def test_an_option_shaped_root_is_still_scanned(tmp_path) -> None:
+    """A root whose basename starts with a dash is a directory, not an option."""
+    from tools.harness.detect_continuation_comments import main
+
+    root = tmp_path / "-dash-root"
+    (root / ".github/workflows").mkdir(parents=True)
+    script = root / "tools" / "dash.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text(VIOLATION, encoding="utf-8")
+
+    assert main(["detect_continuation_comments.py", str(root)]) == 1
+
+
+def test_a_traversal_root_is_rejected(tmp_path, capsys) -> None:
+    """A `..` component in the CLI root fails closed before the scan."""
+    from tools.harness.detect_continuation_comments import main
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+
+    assert (
+        main(["detect_continuation_comments.py", str(nested / ".." / "nested")])
+        == 1
+    )
+    assert "Refusing path" in capsys.readouterr().err

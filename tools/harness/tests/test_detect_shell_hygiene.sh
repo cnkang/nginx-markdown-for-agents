@@ -446,7 +446,7 @@ else
 fi
 if [[ "${grep_status_rc}" -ne 0 ]] \
     && [[ "${grep_status_output}" == *"grep scan failed"* ]]; then
-    echo "  PASS: failing recursive grep is a hard error (exit ${grep_status_rc})"
+    echo "  PASS: failing recursive grep is a hard error (exit ${grep_status_rc})" >&2
 else
     echo "  FAIL: failing recursive grep was hidden (exit ${grep_status_rc})" >&2
     echo "        output: ${grep_status_output}" >&2

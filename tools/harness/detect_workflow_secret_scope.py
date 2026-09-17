@@ -14,6 +14,7 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_ROOT = REPO_ROOT / ".github" / "workflows"
+SONAR_WORKFLOW_PATH = ".github/workflows/sonarcloud.yml"
 SECRET_EXPRESSION = re.compile(r"\$\{\{\s*secrets(\.\w+|\[[^]]*\])\s*\}\}")
 SONAR_SECRET_EXPRESSION = re.compile(
     r"\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}"
@@ -21,9 +22,8 @@ SONAR_SECRET_EXPRESSION = re.compile(
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
 GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
-GATE_NAME_RE = re.compile(r"^\s*echo\s+\"?([A-Za-z_][A-Za-z0-9_-]*)=[^\"]*\"?\s*>>")
-STEP_KEY_RE = re.compile(r"^\s*- ([A-Za-z0-9_-]+):\s*(.*)$")
-STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):\s*(.*)$")
+GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^"\s]*"?[ \t]*>>')
+STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ def _step_name(lines: list[str], token_index: int) -> str | None:
 
 def check_sonar_token_steps(text: str) -> list[Finding]:
     """Require SONAR_TOKEN only in the presence check and pinned scanners."""
-    path = ".github/workflows/sonarcloud.yml"
+    path = SONAR_WORKFLOW_PATH
     lines = text.splitlines()
     secret_occurrences = sum(
         len(SONAR_SECRET_EXPRESSION.findall(line)) for line in lines
@@ -370,7 +370,7 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
         return True
 
     before = if_value[: match.start()]
-    if re.search(r"!\s*\(*\s*$", before):
+    if re.search(r"!\s*(?:\(+\s*)?$", before):
         return True
     if re.search(r"!\s*contains\(\s*$", before):
         return True
@@ -436,7 +436,7 @@ def _ungated_scanner_findings(
             continue
         findings.append(
             Finding(
-                ".github/workflows/sonarcloud.yml",
+                SONAR_WORKFLOW_PATH,
                 block_start + 1,
                 f"token-consuming step is not gated on "
                 f"steps.{step_id}.outputs.*: an unset token must skip the "
@@ -474,7 +474,7 @@ def check_sonar_gate_wiring(text: str) -> list[Finding]:
     if not gates or step_id is None:
         return [
             Finding(
-                ".github/workflows/sonarcloud.yml",
+                SONAR_WORKFLOW_PATH,
                 start + 1,
                 "the token presence check must publish a gating step output "
                 "(id: plus a $GITHUB_OUTPUT assignment); an exit-only check "

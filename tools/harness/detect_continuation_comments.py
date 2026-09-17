@@ -31,6 +31,10 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from lib.path_validation import validate_read_path  # noqa: E402
+
 SCAN_SUFFIXES = (".yml", ".yaml")
 SHELL_GLOBS = (
     "*.sh",
@@ -225,10 +229,13 @@ def _tracked_paths(root: Path) -> list[str] | None:
     `git ls-files -z` output is NUL-delimited, so entries survive names with
     spaces or quoting; the bytes are decoded with the filesystem codec and
     surrogate escapes, matching the repository's NUL-safe scan convention.
+    The scan runs from the root directory instead of passing it as a command
+    argument, so a root that looks like an option is never read as one.
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
+            ["git", "ls-files", "-z"],
+            cwd=root,
             capture_output=True,
             check=False,
         )
@@ -355,7 +362,18 @@ def collect_errors(root: Path) -> list[str]:
 
 def main(argv: list[str]) -> int:
     """Report every comment a line continuation turns into code."""
-    root = Path(argv[1]) if len(argv) > 1 else Path(".")
+    if len(argv) > 1:
+        try:
+            root = Path(
+                validate_read_path(
+                    argv[1], must_exist=False, purpose="scan root"
+                )
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    else:
+        root = Path(".")
     errors = collect_errors(root)
     if errors:
         for error in errors:
