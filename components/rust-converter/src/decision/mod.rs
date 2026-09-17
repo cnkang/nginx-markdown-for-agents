@@ -164,7 +164,7 @@ pub fn make_decision(ctx: &DecisionContext) -> Decision {
 /// Return the reason code string for a decision.
 pub fn decision_reason_code(decision: &Decision) -> &'static str {
     match decision {
-        Decision::Convert => "CONVERT",
+        Decision::Convert => "converted",
         Decision::Skip(reason) => reason.code(),
     }
 }
@@ -191,7 +191,7 @@ mod tests {
         let ctx = default_ctx();
         let d = make_decision(&ctx);
         assert_eq!(d, Decision::Convert);
-        assert_eq!(decision_reason_code(&d), "CONVERT");
+        assert_eq!(decision_reason_code(&d), "converted");
     }
 
     #[test]
