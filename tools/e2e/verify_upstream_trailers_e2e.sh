@@ -207,10 +207,14 @@ http {
 
         location = /trailers-raw {
             proxy_pass http://trailer_backend/trailers;
+            # Forward upstream trailers to the client on the raw path so the
+            # sanity pass can prove the fixture really emits them.
+            proxy_pass_trailers on;
         }
 
         location = /trailers-md {
             proxy_pass http://trailer_backend/trailers;
+            proxy_pass_trailers on;
             proxy_set_header Accept "text/markdown";
             markdown_filter on;
             markdown_accept force;
