@@ -67,6 +67,7 @@ IMAGE_TAG="nginx-markdown-test:latest"
 BUILD_CONTEXT=""
 MODULE_SHA=""
 MODULE_REPO="${MODULE_REPO:-https://github.com/cnkang/nginx-markdown-for-agents.git}"
+MODULE_REF="${MODULE_REF:-}"
 CLEANUP="yes"
 RUNTIME_CONTAINER=""
 PASS_COUNT=0
@@ -181,12 +182,27 @@ resolve_module_sha() {
         rm -rf "$probe_dir"
         return 2
     fi
-    git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA" \
+    probe_rc=0
+    # Mirror the image build's resolution: try the exact MODULE_SHA first,
+    # retry with an explicitly provided MODULE_REF when the SHA fetch
+    # fails, and only accept when the fetched commit is exactly MODULE_SHA.
+    git -C "$probe_dir" fetch -q "$MODULE_REPO" "$MODULE_SHA" \
         >/dev/null 2>&1 || probe_rc=$?
+    if [[ "$probe_rc" -ne 0 && -n "$MODULE_REF" ]]; then
+        probe_rc=0
+        git -C "$probe_dir" fetch -q "$MODULE_REPO" "$MODULE_REF" \
+            >/dev/null 2>&1 || probe_rc=$?
+        if [[ "$probe_rc" -eq 0 ]]; then
+            fetched="$(git -C "$probe_dir" rev-parse "FETCH_HEAD^{commit}" 2>/dev/null)" || fetched=""
+            if [[ "$fetched" != "$MODULE_SHA" ]]; then
+                probe_rc=1
+            fi
+        fi
+    fi
     rm -rf "$probe_dir"
     if [[ "$probe_rc" -ne 0 ]]; then
         log_error "MODULE_SHA ${MODULE_SHA} is not reachable from MODULE_REPO ${MODULE_REPO}"
-        log_error "Push the reviewed commit, or pass a published one with --module-sha"
+        log_error "Push the reviewed commit, pass a published one with --module-sha, or pass the commit by ref with --module-ref"
         return 2
     fi
     return 0
@@ -225,6 +241,7 @@ test_docker_build() {
         -f "$DOCKERFILE" \
         --build-arg "MODULE_REPO=${MODULE_REPO}" \
         --build-arg "MODULE_SHA=${MODULE_SHA}" \
+        ${MODULE_REF:+--build-arg "MODULE_REF=${MODULE_REF}"} \
         -t "$IMAGE_TAG" \
         "$BUILD_CONTEXT" 2>&1)" || build_rc=$?
 
@@ -332,6 +349,7 @@ error_log /tmp/markdown-http.error;
 events { worker_connections 64; }
 http {
     markdown_filter on;
+    default_type text/html;
     server {
         listen 8080;
         root /tmp/markdown-html;
@@ -491,6 +509,14 @@ parse_args() {
                     return 2
                 fi
                 MODULE_SHA="$2"
+                shift 2
+                ;;
+            --module-ref)
+                if [[ "$#" -lt 2 ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 2
+                fi
+                MODULE_REF="$2"
                 shift 2
                 ;;
             --no-cleanup)
