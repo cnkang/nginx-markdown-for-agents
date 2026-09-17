@@ -175,20 +175,21 @@ stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub.XXXXXX")"
 abort_tmp="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-abort.XXXXXX")"
 abort_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc.XXXXXX")"
 mkdir -p "${abort_src}/src"
+real_mktemp="$(command -v mktemp)"
 cat >"${stub_dir}/mktemp" <<'STUB'
 #!/bin/bash
 if [[ "${1:-}" == *ngx-again-files* ]]; then
     exit 1
 fi
 if [[ $# -eq 0 ]]; then
-    exec /usr/bin/mktemp "${TMPDIR:?}/tmp.XXXXXX"
+    exec "${STUB_REAL_MKTEMP:?}" "${TMPDIR:?}/tmp.XXXXXX"
 fi
-exec /usr/bin/mktemp "$@"
+exec "${STUB_REAL_MKTEMP:?}" "$@"
 STUB
 chmod +x "${stub_dir}/mktemp"
 
 exit_code=0
-PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
+STUB_REAL_MKTEMP="${real_mktemp}" PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
     bash "${DETECTOR}" "${abort_src}" >"${abort_tmp}/detector.out" 2>&1 || exit_code=$?
 leaked="$(find "${abort_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
 if [[ "${exit_code}" -eq 2 ]] \
@@ -228,14 +229,15 @@ if [[ $# -eq 0 ]]; then
         echo "mktemp: simulated per-API allocation failure" >&2
         exit 1
     fi
-    exec /usr/bin/mktemp "${TMPDIR:?}/tmp.XXXXXX"
+    exec "${STUB_REAL_MKTEMP:?}" "${TMPDIR:?}/tmp.XXXXXX"
 fi
-exec /usr/bin/mktemp "$@"
+exec "${STUB_REAL_MKTEMP:?}" "$@"
 STUB
 chmod +x "${per_stub_dir}/mktemp"
 
 exit_code=0
-MKTEMP_BARE_COUNTER="${per_api_tmp}/bare.count" PATH="${per_stub_dir}:${PATH}" \
+STUB_REAL_MKTEMP="${real_mktemp}" MKTEMP_BARE_COUNTER="${per_api_tmp}/bare.count" \
+    PATH="${per_stub_dir}:${PATH}" \
     TMPDIR="${per_api_tmp}" \
     bash "${DETECTOR}" "${per_api_src}" >"${per_api_tmp}/detector.out" 2>&1 || exit_code=$?
 leaked="$(find "${per_api_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"

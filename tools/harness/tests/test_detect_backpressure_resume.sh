@@ -168,20 +168,21 @@ stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-stub.XXXXXX")"
 abort_tmp="$(mktemp -d "${TMPDIR:-/tmp}/bp-abort.XXXXXX")"
 abort_src="$(mktemp -d "${TMPDIR:-/tmp}/bp-asrc.XXXXXX")"
 mkdir -p "${abort_src}/src"
+real_mktemp="$(command -v mktemp)"
 cat >"${stub_dir}/mktemp" <<'STUB'
 #!/bin/bash
 if [[ "${1:-}" == *backpressure-files* ]]; then
     exit 1
 fi
 if [[ $# -eq 0 ]]; then
-    exec /usr/bin/mktemp "${TMPDIR:?}/tmp.XXXXXX"
+    exec "${STUB_REAL_MKTEMP:?}" "${TMPDIR:?}/tmp.XXXXXX"
 fi
-exec /usr/bin/mktemp "$@"
+exec "${STUB_REAL_MKTEMP:?}" "$@"
 STUB
 chmod +x "${stub_dir}/mktemp"
 
 exit_code=0
-PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
+STUB_REAL_MKTEMP="${real_mktemp}" PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
     bash "${DETECTOR}" "${abort_src}" >"${abort_tmp}/detector.out" 2>&1 || exit_code=$?
 leaked="$(find "${abort_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
 if [[ "${exit_code}" -eq 2 ]] \
