@@ -65,10 +65,19 @@ fi
 
 # ── Phase 1: Direct struct-name on memzero/memset line ──
 for struct in "${GUARDED_STRUCTS[@]}"; do
-    matches=$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null \
-        | grep -v "_test\\.c" \
+    matches_raw_rc=0
+    matches_raw="$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null)" \
+        || matches_raw_rc=$?
+    if [[ "$matches_raw_rc" -gt 1 ]]; then
+        echo "ERROR: grep failed scanning ${SRC_DIR}" >&2
+        exit 2
+    fi
+    # The filters run on the captured text, so a scan failure above can no
+    # longer be masked by a downstream no-match exit status.
+    matches="$(printf '%s\n' "$matches_raw" \
+        | grep -v "_test\.c" \
         | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
-        | grep -i "${struct}" || true)
+        | grep -i "${struct}" || true)"
     if [[ -n "${matches}" ]]; then
         echo "VIOLATION [phase1]: Direct memset/ngx_memzero on ${struct}:" >&2
         echo "${matches}" >&2
@@ -86,13 +95,19 @@ while IFS= read -r -d '' src_file; do
         # "struct <Name> *<varname>", or typedef aliases such as
         # "<Name> <varname>".
         # Extract variable names from declarations
-        var_names=$(grep -nE "(struct[[:space:]]+)?${struct}[[:space:]]+\**[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*" "${src_file}" 2>/dev/null \
+        names_raw_rc=0
+        names_raw="$(grep -nE "(struct[[:space:]]+)?${struct}[[:space:]]+\**[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*" "${src_file}" 2>/dev/null)" \
+            || names_raw_rc=$?
+        if [[ "$names_raw_rc" -gt 1 ]]; then
+            echo "ERROR: grep failed reading ${src_file} for ${struct} declarations" >&2
+            exit 2
+        fi
+        var_names="$(printf '%s\n' "$names_raw" \
             | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)|typedef|#include' \
             | sed -E -n \
                 -e 's/.*struct[[:space:]]+'"${struct}"'[[:space:]]+\**[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*).*/\1/p' \
                 -e 's/.*(^|[^a-zA-Z0-9_])'"${struct}"'[[:space:]]+\**[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*).*/\2/p' \
-            | sort -u \
-            || true)
+            | sort -u || true)"
         if [[ -z "${var_names}" ]]; then
             continue
         fi
@@ -105,11 +120,18 @@ while IFS= read -r -d '' src_file; do
             # Look for: ngx_memzero(&varname, sizeof(varname)) or
             #           ngx_memzero(&varname, sizeof(*varname)) or
             #           memset(&varname, 0, sizeof(varname))
-            memzero_hits=$(grep -n -E "ngx_memzero|memset" "${src_file}" 2>/dev/null \
-                | grep -v "_test\\.c" \
+            memzero_raw_rc=0
+            memzero_raw="$(grep -n -E "ngx_memzero|memset" "${src_file}" 2>/dev/null)" \
+                || memzero_raw_rc=$?
+            if [[ "$memzero_raw_rc" -gt 1 ]]; then
+                echo "ERROR: grep failed reading ${src_file} for ${varname} memzero calls" >&2
+                exit 2
+            fi
+            memzero_hits="$(printf '%s\n' "$memzero_raw" \
+                | grep -v "_test\.c" \
                 | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
                 | grep -E "[&*][[:space:]]*${varname}([^a-zA-Z0-9_]|$)" \
-                | grep "sizeof" || true)
+                | grep "sizeof" || true)"
             if [[ -n "${memzero_hits}" ]]; then
                 echo "VIOLATION [phase2]: ngx_memzero/memset on ${struct} variable '${varname}' in ${src_file}:" >&2
                 echo "${memzero_hits}" >&2
