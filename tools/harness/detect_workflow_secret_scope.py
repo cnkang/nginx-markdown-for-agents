@@ -285,6 +285,48 @@ def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
     }
 
 
+def _mask_quoted(if_value: str) -> str:
+    """Blot out quoted-literal content, keeping positions (GitHub syntax).
+
+    Quoted strings cannot contain operators that matter for the disjunction
+    scan, and GitHub escapes a quote by doubling it — so both quote runs
+    and literal content become spaces.
+    """
+    out: list[str] = []
+    in_quote = False
+    index = 0
+    length = len(if_value)
+    while index < length:
+        char = if_value[index]
+        if in_quote:
+            if char == "'":
+                if index + 1 < length and if_value[index + 1] == "'":
+                    out.append("  ")
+                    index += 2
+                    continue
+                in_quote = False
+            out.append(" ")
+        else:
+            if char == "'":
+                in_quote = True
+            out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _has_top_level_disjunction(if_value: str) -> bool:
+    """Return whether a ``||`` sits outside parentheses (quotes masked)."""
+    depth = 0
+    for char in _mask_quoted(if_value):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == "|" and depth == 0:
+            return True
+    return False
+
+
 def _optional_in_disjunction(if_value: str, ref: str) -> bool:
     """Return whether a disjunction can bypass the gate reference.
 
@@ -298,33 +340,8 @@ def _optional_in_disjunction(if_value: str, ref: str) -> bool:
     """
     if "||" not in if_value:
         return False
-
-    depth = 0
-    quote: str | None = None
-    index = 0
-    while index < len(if_value):
-        char = if_value[index]
-        if quote is not None:
-            if char == quote:
-                if (
-                    quote == "'"
-                    and index + 1 < len(if_value)
-                    and if_value[index + 1] == "'"
-                ):
-                    # GitHub expressions escape a quote by doubling it.
-                    index += 2
-                    continue
-                quote = None
-        elif char in "'\"":
-            quote = char
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            if depth > 0:
-                depth -= 1
-        elif char == "|" and depth == 0:
-            return True
-        index += 1
+    if _has_top_level_disjunction(if_value):
+        return True
 
     match = re.search(ref, if_value)
     if match is None:
