@@ -651,3 +651,16 @@ def test_uncertain_makefile_structure_fails_closed(makefile: str, message: str) 
     """Malformed or split Makefiles cannot establish a stage edge."""
     with pytest.raises(ValueError, match=message):
         reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_order_only_separator_is_not_a_prerequisite_token() -> None:
+    """`a | b` keeps both groups traversable and drops the bare `|` token."""
+    makefile = (
+        "root: left | right\n\tpython3 " + CHECK + "\n"
+        "left:\n\t@true\n"
+        "right:\n\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached

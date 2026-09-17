@@ -180,32 +180,48 @@ def _step_id(lines: list[str], start: int, end: int) -> str | None:
     return None
 
 
-def _step_if_value(lines: list[str], start: int, end: int) -> str:
-    """Return a step's own ``if:`` condition value, or an empty string.
+def _step_child_indent(lines: list[str], start: int, end: int) -> int | None:
+    """Indentation of the step's direct child keys, from the first key line."""
+    for index in range(start, end):
+        if STEP_CHILD_KEY_RE.match(lines[index]) is not None:
+            return len(lines[index]) - len(lines[index].lstrip())
+    return None
 
-    Only the ``if:`` condition gates a step.  A gate reference anywhere else
-    in the step (run body, env, with) does not make the step conditional, so
-    the wiring check reads this value alone.  Block scalars (``if: >-``) are
-    folded into one string because the condition then continues on the
-    following, more-indented lines.
+
+def _fold_block_scalar(lines: list[str], index: int, end: int) -> str:
+    """Join a block-scalar value that continues on more-indented lines."""
+    key_indent = len(lines[index]) - len(lines[index].lstrip())
+    collected: list[str] = []
+    for follower in range(index + 1, end):
+        if not lines[follower].strip():
+            continue
+        indent = len(lines[follower]) - len(lines[follower].lstrip())
+        if indent <= key_indent:
+            break
+        collected.append(lines[follower].strip())
+    return " ".join(collected)
+
+
+def _step_if_value(lines: list[str], start: int, end: int) -> str:
+    """Return the step's own ``if:`` value from its block, else ``""``.
+
+    Only a key at the step's direct-child indentation counts: an ``if:``
+    nested under ``env:`` or ``with:`` does not gate the step.  Block
+    scalars (``if: >-``) are folded into one string because the condition
+    then continues on the following, more-indented lines.
     """
+    child_indent = _step_child_indent(lines, start, end)
     for index in range(start, end):
         match = STEP_CHILD_KEY_RE.match(lines[index])
         if match is None or match.group(1) != "if":
             continue
+        indent = len(lines[index]) - len(lines[index].lstrip())
+        if child_indent is not None and indent != child_indent:
+            continue
         value = match.group(2).strip()
         if value and value[0] not in ">|":
             return value
-        key_indent = len(lines[index]) - len(lines[index].lstrip())
-        collected: list[str] = []
-        for follower in range(index + 1, end):
-            if not lines[follower].strip():
-                continue
-            indent = len(lines[follower]) - len(lines[follower].lstrip())
-            if indent <= key_indent:
-                break
-            collected.append(lines[follower].strip())
-        return " ".join(collected)
+        return _fold_block_scalar(lines, index, end)
     return ""
 
 
@@ -235,14 +251,23 @@ def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
 
 
 def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
-    """Return whether an ``if:`` value gates on a published step output."""
-    return any(
-        re.search(
-            rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b",
-            if_value,
-        )
-        for gate in gates
-    )
+    """Return whether an ``if:`` value gates on a published step output.
+
+    Only a positive requirement counts as wiring: a negated comparison such
+    as ``!= 'true'`` (or an equality against false, or a negated contains
+    call) runs the step when the gate did NOT pass and must not be treated
+    as gate wiring.
+    """
+    for gate in gates:
+        ref = rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b"
+        if not re.search(ref, if_value):
+            continue
+        if re.search(rf"{ref}\s*(?:!=|==\s*['\"]?false)", if_value):
+            continue
+        if re.search(rf"!\s*contains\(\s*{ref}", if_value):
+            continue
+        return True
+    return False
 
 
 def _scanner_blocks(

@@ -256,8 +256,10 @@ def _record_target(
         return name
     # Make expands a prerequisite list while it reads the line, so a reference
     # still open here is undefined at read time and expands to empty; a later
-    # assignment must not fill it in retroactively.
-    dependencies[name].append(VARIABLE.sub("", expanded))
+    # assignment must not fill it in retroactively.  The order-only separator
+    # (`|`) is not a prerequisite name: drop it before storing, while keeping
+    # both the normal and the order-only prerequisite groups traversable.
+    dependencies[name].append(VARIABLE.sub("", expanded).replace("|", " "))
     return name
 
 

@@ -524,3 +524,55 @@ class TestCLI:
             check=False,
         )
         assert result.returncode == 0, f"expected exit 0, got {result.returncode}; stderr:\n{result.stderr}"
+
+
+class TestStepIfValueIndentation:
+    """_step_if_value reads only direct step-child if: keys."""
+
+    def test_nested_if_under_env_does_not_gate(self):
+        lines = [
+            "      - name: Scan",
+            "        env:",
+            "          if: steps.token.outputs.enabled == 'true'",
+            "        run: echo scan",
+        ]
+        assert secret_scope_module._step_if_value(lines, 0, len(lines)) == ""
+
+    def test_direct_if_wins_over_nested_if(self):
+        lines = [
+            "      - name: Scan",
+            "        env:",
+            "          if: steps.token.outputs.enabled == 'true'",
+            "        if: steps.token.outputs.enabled == 'true'",
+            "        run: echo scan",
+        ]
+        assert (
+            secret_scope_module._step_if_value(lines, 0, len(lines))
+            == "steps.token.outputs.enabled == 'true'"
+        )
+
+
+class TestReferencesGatePolarity:
+    """_references_gate accepts only positive gate requirements."""
+
+    def test_positive_comparison_gates(self):
+        assert secret_scope_module._references_gate(
+            "steps.token.outputs.enabled == 'true'", "token", {"enabled"}
+        )
+
+    def test_negated_comparison_does_not_gate(self):
+        assert not secret_scope_module._references_gate(
+            "steps.token.outputs.enabled != 'true'", "token", {"enabled"}
+        )
+
+    def test_false_equality_does_not_gate(self):
+        assert not secret_scope_module._references_gate(
+            "steps.token.outputs.enabled == false", "token", {"enabled"}
+        )
+
+    def test_negated_contains_does_not_gate(self):
+        assert not secret_scope_module._references_gate(
+            "!contains(steps.token.outputs.enabled, 'true')",
+            "token",
+            {"enabled"},
+        )

@@ -604,7 +604,29 @@ else
 fi
 rm -f "${wf_dir}/job-with-wiring.yml"
 
-# Test 18: no arguments must succeed under bash 3.2 with set -euo pipefail
+# Test 18: flow-style with: mapping -> FAIL (cannot be statically validated)
+cat >"${wf_dir}/flow-with.yml" <<'Y'
+name: flow-with
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@abc123
+        with: { args: "${{ inputs.command }}" }
+Y
+
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "flow-style with: mapping is rejected as unvalidatable"
+else
+    fail "flow-style with: mapping is rejected as unvalidatable" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
+rm -f "${wf_dir}/flow-with.yml"
+
+# Test 19: no arguments must succeed under bash 3.2 with set -euo pipefail
 # (the bare "$@" list is treated as unset there; the ${1+"$@"} guard keeps
 # the default workflow directory in use and the run clean).
 no_args_output=""

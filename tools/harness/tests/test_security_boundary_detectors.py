@@ -200,6 +200,7 @@ def test_ingress_smoke_accepts_isolated_probe() -> None:
     isolated_probe = """
 git -C "$BUILD_CONTEXT" rev-parse --verify 'HEAD^{commit}'
 printf '%s' "$MODULE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/module-sha-probe.XXXXXX")"
 git -C "$probe_dir" init -q
 git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA"
 --build-arg "MODULE_SHA=${MODULE_SHA}"
