@@ -461,6 +461,7 @@ if true; then
 fi
 do_thing() {
     echo y
+    return 0
   }
 PATH=/tmp/evil:/usr/bin
 exit 0
