@@ -385,8 +385,8 @@ CONFIG_FILE="$(nginx -V 2>&1 | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p')"
 CONFIG_DIR="${CONFIG_FILE%/nginx.conf}"
 if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
     || ! -f "${CONFIG_090}/nginx.conf" \
-    || -e "${CONFIG_DIR}.restore-0.9.0" \
-    || -e "${CONFIG_DIR}.pre-0.9.0" ]]; then
+    || -e "${CONFIG_DIR}.restore-0.9.0" || -L "${CONFIG_DIR}.restore-0.9.0" \
+    || -e "${CONFIG_DIR}.pre-0.9.0" || -L "${CONFIG_DIR}.pre-0.9.0" ]]; then
   echo "ERROR: confirm the 0.9.0 configuration backup and active NGINX paths, and remove an earlier rollback artifact" >&2
   exit 1
 fi
