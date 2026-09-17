@@ -360,6 +360,14 @@ mask_command_text() {
             continue
         fi
         if [[ "$ch" == "$quote" ]]; then
+            evaluator=0
+            if [[ "$quote" == "'" ]] \
+                && [[ "$out" =~ (^|[^A-Za-z0-9_])(eval|sh|bash|dash|env)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                # An evaluator command (eval/sh/bash/dash/env) executes its
+                # single-quoted argument as a command string, so the span is
+                # executable text and must stay visible with its quotes.
+                evaluator=1
+            fi
             fused=0
             prev_last=""
             if [[ -n "$out" ]]; then
@@ -374,7 +382,9 @@ mask_command_text() {
                 ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
                 *) fused=1 ;;
             esac
-            if [[ "$fused" -eq 1 ]]; then
+            if [[ "$evaluator" -eq 1 ]]; then
+                out+="'$span'"
+            elif [[ "$fused" -eq 1 ]]; then
                 out+="x"
             else
                 out+="''"
