@@ -348,6 +348,39 @@ def _split_shell_segments(line: str) -> list[str]:
     return segments
 
 
+def _unquoted_redirect(segment: str) -> int | None:
+    """Index of the ``>>`` that redirects outside quotes and comments.
+
+    A ``>>`` inside a quoted string is literal text, and a ``>>`` after an
+    unquoted ``#`` lives in a comment; neither performs a redirection, so a
+    scanner that accepted them could certify a gate the shell never writes.
+    """
+    quote = ""
+    index = 0
+    length = len(segment)
+    while index < length - 1:
+        char = segment[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < length:
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            index += 1
+            continue
+        if char == "#" and (index == 0 or segment[index - 1] in " \t"):
+            break
+        if char == ">" and segment[index + 1] == ">":
+            if GITHUB_OUTPUT_RE.match(segment, index):
+                return index
+        index += 1
+    return None
+
+
 def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
     """Return the step outputs the presence check publishes for gating.
 
@@ -362,8 +395,13 @@ def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
         if not GITHUB_OUTPUT_RE.search(line):
             continue
         for segment in _split_shell_segments(line):
+            redirect = _unquoted_redirect(segment)
+            if redirect is None:
+                continue
             match = GATE_NAME_RE.match(segment)
-            if match:
+            # The gate pattern must reach exactly that redirection: a quoted
+            # `>>` earlier in the segment must not donate its position.
+            if match and match.end() == redirect + 2:
                 names.add(match.group(1))
     return names
 

@@ -882,6 +882,18 @@ class TestGateNamePattern:
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == {"debug"}
 
+    def test_a_quoted_fake_redirection_does_not_publish_a_gate(self) -> None:
+        """A `>>` inside a quoted string is literal text: the shell performs
+        no redirection, so no gate may be reported."""
+        lines = [
+            'echo "enabled=true; ready=go >> $GITHUB_OUTPUT"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == set()
+
+    def test_a_comment_fake_redirection_does_not_publish_a_gate(self) -> None:
+        lines = ['echo debug=1 # note >> "$GITHUB_OUTPUT"\n']
+        assert secret_scope_module._published_gates(lines, 0, 1) == set()
+
     def test_quoted_ampersands_stay_inside_the_value(self) -> None:
         lines = ['echo "note=a&&b" >> "$GITHUB_OUTPUT"\n']
         assert secret_scope_module._published_gates(lines, 0, 1) == {"note"}
