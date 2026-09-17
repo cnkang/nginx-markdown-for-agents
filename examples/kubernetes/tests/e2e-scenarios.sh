@@ -758,7 +758,8 @@ scenario_config_update() {
         fi
         log_info "nginx -T verification passed for updated config"
     else
-        log_info "no pod found for nginx -T verification; skipping strict check"
+        log_error "no pod found for nginx -T verification after rollout"
+        return 1
     fi
 
     # Run smoke test to verify functionality after config change
@@ -852,11 +853,22 @@ scenario_rollback() {
     # Wait for rollout to complete
     wait_for_rollout "$DEPLOYMENT_NAME" || return 1
 
-    # Verify the rollback took effect (env should differ from pre-rollback)
-    local post_rollback_env
+    # Verify the rollback took effect (env should differ from pre-rollback).
+    # Re-read the restored revision's container list: container order can
+    # differ between revisions, so re-resolve the index before reading env.
+    local post_rollback_env post_container_names post_container_index
+    post_container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" \
+        -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
+        2>/dev/null)"
+    post_container_index="$(resolve_deployment_container_index "$post_container_names")"
+    if [[ -z "$post_container_index" ]]; then
+        log_error "cannot resolve the restored deployment's container index"
+        return 1
+    fi
     post_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
-        -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
+        -o jsonpath="{.spec.template.spec.containers[${post_container_index}].env}" 2>/dev/null)" || true
     log_info "Post-rollback env: $post_rollback_env"
 
     if [ "$pre_rollback_env" = "$post_rollback_env" ]; then
