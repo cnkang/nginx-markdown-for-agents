@@ -1514,10 +1514,7 @@ impl IncrementalEmitter {
         }
         if self.in_code_block {
             /* Skip trailing-whitespace normalization inside code blocks */
-            let new_flushed_size = self
-                .flushed
-                .len()
-                .saturating_add(self.buffer.len());
+            let new_flushed_size = self.flushed.len().saturating_add(self.buffer.len());
             if new_flushed_size > self.max_buffer_size {
                 return Err(ConversionError::BudgetExceeded {
                     stage: "output_buffer (ready)".to_string(),
