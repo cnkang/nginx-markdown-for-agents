@@ -74,12 +74,13 @@ else
         "expected 6 lines, got ${line_count}"
 fi
 
-non_empty="$(grep -c '[^[:space:]]' "$guard_out")"
-if [[ "$non_empty" -eq 0 ]]; then
-    pass "early-exit resolver output lines are empty"
+expected_output="${work_dir}/guard.expected"
+printf '\n\n\n\n\n\n' > "$expected_output"
+if cmp -s "$expected_output" "$guard_out"; then
+    pass "early-exit resolver output is byte-exact six empty lines"
 else
-    fail "early-exit resolver output lines are empty" \
-        "found ${non_empty} non-empty line(s)"
+    fail "early-exit resolver output is byte-exact six empty lines" \
+        "expected exactly six empty lines"
 fi
 
 printf '\n'
