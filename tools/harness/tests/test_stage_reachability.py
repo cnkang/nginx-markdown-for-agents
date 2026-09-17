@@ -664,3 +664,51 @@ def test_order_only_separator_is_not_a_prerequisite_token() -> None:
     reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
 
     assert CHECK in reached
+
+
+def test_a_space_indented_assignment_is_read_like_make() -> None:
+    """GNU make ignores leading spaces; an indented reassignment wins."""
+    makefile = (
+        "LIST := checked\n"
+        "  LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_a_shell_assignment_invalidates_its_variable() -> None:
+    """`LIST != cmd` cannot be evaluated here, so its earlier value is
+    dropped instead of certifying a command the build may not run."""
+    makefile = (
+        "LIST := checked\n"
+        "LIST != echo other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+    assert "true" not in reached
+
+    plain = makefile.replace("LIST != echo other\n", "")
+    assert CHECK in reach.reachable_commands(plain, ["make root"], PROFILE, [])
+
+
+def test_a_space_indented_comment_keeps_the_recipe_open() -> None:
+    """An indented comment between recipe lines does not end the recipe."""
+    makefile = (
+        "root:\n"
+        f"\tpython3 {CHECK}\n"
+        "  # still the same recipe block\n"
+        "\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK in reached
