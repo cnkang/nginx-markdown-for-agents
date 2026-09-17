@@ -47,7 +47,7 @@ Publication and artifact availability are separate release gates.
      # Abort when the drain hit the timeout, and require an explicit
      # "inactive" state: any other nonzero is-active result (query failure,
      # failed unit) must not be treated as a confirmed stop.
-     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
+     if [ "$drain_status" -ne 0 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
@@ -56,10 +56,17 @@ Publication and artifact availability are separate release gates.
      # directly and poll for it to exit (graceful shutdown drains in-flight
      # requests first), then confirm it is really gone.
      sudo nginx -s quit
-     timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'
+     timeout 30 sh -c '
+       while :; do
+         pgrep -x nginx >/dev/null 2>&1
+         status=$?
+         [ "$status" -eq 1 ] && exit 0
+         [ "$status" -ne 0 ] && exit 3
+         sleep 1
+       done'
      drain_status=$?
-     if [ "$drain_status" -eq 124 ] || pgrep -x nginx >/dev/null 2>&1; then
-       echo "NGINX master process still running 30s after 'nginx -s quit' — investigate before continuing" >&2
+     if [ "$drain_status" -ne 0 ]; then
+       echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
        exit 1
      fi
    fi
@@ -174,7 +181,7 @@ Publication and artifact availability are separate release gates.
      # Abort when the drain hit the timeout, and require an explicit
      # "inactive" state: any other nonzero is-active result (query failure,
      # failed unit) must not be treated as a confirmed stop.
-     if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
+     if [ "$drain_status" -ne 0 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
        exit 1
      fi
@@ -182,8 +189,17 @@ Publication and artifact availability are separate release gates.
      # systemctl unavailable or does not manage NGINX: signal the master
      # directly and verify with a bounded drain that no NGINX process remains.
      sudo nginx -s quit
-     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
-       echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+     timeout 30 sh -c '
+       while :; do
+         pgrep -x nginx >/dev/null 2>&1
+         status=$?
+         [ "$status" -eq 1 ] && exit 0
+         [ "$status" -ne 0 ] && exit 3
+         sleep 1
+       done'
+     drain_status=$?
+     if [ "$drain_status" -ne 0 ]; then
+       echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
        exit 1
      fi
    fi
@@ -328,7 +344,7 @@ if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
   # Abort when the drain hit the timeout, and require an explicit
   # "inactive" state: any other nonzero is-active result (query failure,
   # failed unit) must not be treated as a confirmed stop.
-  if [ "$drain_status" -eq 124 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
+  if [ "$drain_status" -ne 0 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
     echo "NGINX did not stop within 30s — investigate before continuing" >&2
     exit 1
   fi
@@ -336,8 +352,17 @@ else
   # systemctl unavailable or does not manage NGINX: signal the master
   # directly and verify with a bounded drain that no NGINX process remains.
   sudo nginx -s quit
-  if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
-    echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+  timeout 30 sh -c '
+    while :; do
+      pgrep -x nginx >/dev/null 2>&1
+      status=$?
+      [ "$status" -eq 1 ] && exit 0
+      [ "$status" -ne 0 ] && exit 3
+      sleep 1
+    done'
+  drain_status=$?
+  if [ "$drain_status" -ne 0 ]; then
+    echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
     exit 1
   fi
 fi
@@ -537,7 +562,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-18 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |
+| 0.9.2 | 2026-09-17 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |
 | 0.9.2 | 2026-08-24 | Kang | Both shutdown blocks reuse the guarded systemd-detection logic with manual-master verification; MODULES_DIR fallback no longer guesses the first existing directory and requires explicit configuration |
 | 0.9.2 | 2026-08-15 | Kang | Modules path derived from nginx -V; bounded shutdown loop; metric-family difference table |
 | 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |
