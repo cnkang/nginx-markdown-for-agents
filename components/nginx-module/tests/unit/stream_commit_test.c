@@ -1844,10 +1844,12 @@ test_representation_metadata_invalidation_guards_malformed_part(void)
     rc = ngx_http_markdown_stream_commit_remove_representation_metadata(
         &test_request);
 
-    /* The invalidation returns NGX_OK (it cannot fail) and must not have
-     * touched the entry: an unvalidated part is skipped, not walked. */
-    TEST_ASSERT(rc == NGX_OK,
-                "invalidating a malformed list must return NGX_OK");
+    /* The invalidation fails closed: a malformed part makes the removal
+     * return NGX_ERROR (the commit path routes that into the rollback) and
+     * the entry must not have been touched — an unvalidated part is never
+     * dereferenced. */
+    TEST_ASSERT(rc == NGX_ERROR,
+                "invalidating a malformed list must return NGX_ERROR");
     TEST_ASSERT(test_headers_storage[0].hash == 1,
                 "malformed list part must not be dereferenced for invalidation");
 
