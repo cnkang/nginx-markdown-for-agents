@@ -206,13 +206,40 @@ class ThirdPartyNoticesTests(unittest.TestCase):
         self,
     ) -> None:
         """A crate in both sections is validated once, as a runtime dependency."""
-        proptest = checker.parse_rust_direct_deps(self.cargo_toml)
-        dev_proptest = checker.parse_rust_dev_deps(self.cargo_toml)
+        self.cargo_toml.write_text(
+            textwrap.dedent(
+                """\
+                [package]
+                name = "converter-fixture"
+                version = "0.1.0"
 
-        self.assertNotIn("proptest", proptest)
-        self.assertIn("proptest", dev_proptest)
-        self.assertNotIn("regex", dev_proptest), (
-            "the dev section must not read the runtime block"
+                [dependencies]
+                markup5ever_rcdom = "0.39"
+                regex = "1.10"
+                proptest = "1.11"
+
+                [dev-dependencies]
+                proptest = "1.11"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        direct = checker.parse_rust_direct_deps(self.cargo_toml)
+        dev = checker.parse_rust_dev_deps(self.cargo_toml)
+        dev_only = [name for name in dev if name not in direct]
+
+        self.assertIn(
+            "proptest", direct, "fixture must declare proptest in [dependencies]"
+        )
+        self.assertIn("proptest", dev)
+        self.assertNotIn(
+            "proptest",
+            dev_only,
+            "a both-sections crate is validated once, as a runtime dependency",
+        )
+        self.assertNotIn(
+            "regex", dev, "the dev section must not read the runtime block"
         )
 
     @unittest.skipUnless(
