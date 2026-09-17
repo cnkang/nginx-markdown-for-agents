@@ -226,15 +226,22 @@ HEAD_BODY_SIZE=""
 HEAD_REQUEST_RC=0
 HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}" "${DIAGNOSTICS_PATH}" 2>/dev/null <<'PROBE'
 import socket
+import ssl
 import sys
 import urllib.parse
 
 parsed = urllib.parse.urlparse(sys.argv[1])
 path = sys.argv[2]
 host = parsed.hostname or "localhost"
-port = parsed.port or 80
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
 try:
-    with socket.create_connection((host, port), timeout=10) as sock:
+    raw_sock = socket.create_connection((host, port), timeout=10)
+    if parsed.scheme == "https":
+        context = ssl.create_default_context()
+        sock = context.wrap_socket(raw_sock, server_hostname=host)
+    else:
+        sock = raw_sock
+    with sock:
         request = "HEAD {0} HTTP/1.1\r\nHost: {1}:{2}\r\nConnection: close\r\n\r\n".format(
             path, host, port
         )
