@@ -4176,9 +4176,12 @@ test_304_snapshot_error_guards(void)
     TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
                     NULL, &list, &snapshot) == NGX_OK,
                 "304 snapshot accepts an empty list");
-    ngx_http_markdown_304_restore_list(&list, &snapshot);
-    ngx_http_markdown_304_restore_list(NULL, &snapshot);
-    ngx_http_markdown_304_restore_list(&list, NULL);
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &snapshot) == NGX_OK,
+                "304 restore accepts an empty snapshot on a zero-initialized list");
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(NULL, &snapshot) == NGX_OK,
+                "304 restore ignores a NULL list");
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, NULL) == NGX_OK,
+                "304 restore ignores a NULL snapshot");
 
     list.part.nelts = NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES + 1;
     TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
@@ -4203,6 +4206,14 @@ test_304_snapshot_error_guards(void)
     restore_snapshot.entry_count = 1;
     restore_snapshot.entries = &saved_entry;
     g_pool_fail_at = (size_t) -1;
+    /* A nonempty snapshot still requires element storage on the target
+     * list; a zero-initialized list without any must fail closed. */
+    list.part.elts = NULL;
+    list.part.nelts = 0;
+    list.last = NULL;
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &restore_snapshot)
+                    == NGX_ERROR,
+                "304 restore rejects a nonempty snapshot on a list without element storage");
     list.part.elts = NULL;
     list.part.nelts = 1;
     ngx_http_markdown_304_restore_list(&list, &restore_snapshot);

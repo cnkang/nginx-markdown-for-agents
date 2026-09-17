@@ -2749,8 +2749,15 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
      * restore below rolls it back to its captured shape before any
      * entry is copied, so its growth is exactly what a rollback
      * discards.
+     *
+     * The element-storage size check applies only when entries are
+     * actually copied: an empty snapshot (entry_count == 0) performs a
+     * structural restore alone, so a zero-initialized list with no
+     * storage is a valid input for it.
      */
-    if (list->size < sizeof(ngx_table_elt_t)) {
+    if (snapshot->entry_count != 0
+        && list->size < sizeof(ngx_table_elt_t))
+    {
         return NGX_ERROR;
     }
     restored = 0;
