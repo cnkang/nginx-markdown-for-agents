@@ -732,3 +732,21 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_quoted_fake_negation_does_not_override_real_gate(self):
+        """A literal shaped like a negation cannot neutralise a real gate."""
+        assert secret_scope_module._references_gate(
+            "github.event_name == 'steps.token.outputs.enabled != true' && "
+            "steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_quoted_fake_unary_negation_does_not_override_real_gate(self):
+        """A literal shaped like ``! <gate>`` cannot neutralise a real gate."""
+        assert secret_scope_module._references_gate(
+            "github.event_name == '! steps.token.outputs.enabled' && "
+            "steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
