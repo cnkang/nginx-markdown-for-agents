@@ -8,13 +8,12 @@ URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx-r%{nginx_version}
-Requires:       nginx >= 1:%{nginx_version}
+Requires:       nginx >= %{nginx_version}
 Requires:       bash
 # %pre resolves /usr/bin/sed by fixed path to parse `nginx -v` and fails the
 # transaction when it is missing, so the dependency is declared rather than
 # left to the assumed base-system package set.
 Requires:       sed
-Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -101,7 +100,8 @@ NGINX_BIN=/usr/sbin/nginx
 SED_BIN=/usr/bin/sed
 # $1==1 during install, $1==2 during upgrade; erase uses %preun with $1==0,
 # so %pre never runs on erase. Tolerate a missing nginx binary (the RPM
-# dependencies still enforce the capability and floor/ceiling).
+# dependencies still enforce the capability and floor; the exact-version
+# check below enforces the built-against version).
 if [ -x "$NGINX_BIN" ]; then
     if [ ! -x "$SED_BIN" ]; then
         echo "ERROR: trusted sed executable not found at $SED_BIN" >&2

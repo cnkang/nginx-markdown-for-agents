@@ -932,8 +932,8 @@ release-gates-check-070:
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
-				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
-				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-1:$$nginx_version_ceil}"; \
+				rpm_nginx_evr="$${RPM_NGINX_EVR:-$$nginx_version}"; \
+				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
