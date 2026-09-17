@@ -327,17 +327,17 @@ def _has_top_level_disjunction(if_value: str) -> bool:
     return False
 
 
-def _optional_in_disjunction(if_value: str, ref: str) -> bool:
-    """Return whether a disjunction can bypass the gate reference.
+def _optional_in_disjunction(if_value: str, match: re.Match[str]) -> bool:
+    """Return whether a disjunction can bypass this reference occurrence.
 
-    The reference counts only as a member of the top-level ``&&`` chain:
+    The occurrence counts only as a member of the top-level ``&&`` chain:
     a ``||`` outside every parenthesized group (``ref || a``) runs the step
-    without the gate, and a reference that only appears inside parentheses
+    without the gate, and an occurrence that only appears inside parentheses
     cannot be proven required.  A disjunction nested inside parentheses
     under a top-level ``&&`` (``<gate> && (a || b)``) leaves the gate
     required.  Conditions without any ``||`` are never bypassed here; the
-    reference is looked up in the quote-masked value, so parentheses inside
-    literals can neither hide nor fabricate grouping.
+    parenthesis depth is measured at the occurrence's own position, so
+    repeated references are classified independently.
     """
     if "||" not in if_value:
         return False
@@ -345,9 +345,6 @@ def _optional_in_disjunction(if_value: str, ref: str) -> bool:
         return True
 
     masked = _mask_quoted(if_value)
-    match = re.search(ref, masked)
-    if match is None:
-        return False
     prefix = masked[: match.start()]
     return prefix.count("(") > prefix.count(")")
 
@@ -355,14 +352,14 @@ def _optional_in_disjunction(if_value: str, ref: str) -> bool:
 def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
     """Return whether this unquoted reference occurrence is negated.
 
-    The window right after the reference covers ``!=`` and ``== false``
-    comparisons (including quoted ``'false'``); the window right before
-    covers unary ``!`` and negated ``contains(`` forms.  Windows are read
-    at mask-verified positions, so only a real, unquoted reference is ever
-    examined — a literal shaped like a negation cannot negative a separate,
-    real occurrence.
+    The text right after the reference covers ``!=`` and ``== false``
+    comparisons (including quoted ``'false'``); the text right before
+    covers unary ``!`` and negated ``contains(`` forms.  Both run over the
+    full remaining text, so distant operators (long folded spacing) still
+    count, and they read at mask-verified positions — a literal shaped like
+    a negation cannot negative a separate, real occurrence.
     """
-    after = if_value[match.end(): match.end() + 24]
+    after = if_value[match.end():]
     stripped = after.lstrip()
     if stripped.startswith("!="):
         return True
@@ -372,7 +369,7 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
     ):
         return True
 
-    before = if_value[max(match.start() - 24, 0): match.start()]
+    before = if_value[: match.start()]
     if re.search(r"!\s*\(*\s*$", before):
         return True
     if re.search(r"!\s*contains\(\s*$", before):
@@ -404,7 +401,7 @@ def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
         for match in re.finditer(ref, masked):
             if _reference_negated(if_value, match):
                 continue
-            if _optional_in_disjunction(if_value, ref):
+            if _optional_in_disjunction(if_value, match):
                 continue
             return True
     return False
