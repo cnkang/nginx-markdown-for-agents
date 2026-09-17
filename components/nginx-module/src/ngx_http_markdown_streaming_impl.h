@@ -497,8 +497,14 @@ ngx_http_markdown_streaming_cleanup(void *data)
      */
     ngx_http_markdown_streaming_release_pending_header_output(ctx);
 
-    /* Release a deferred finalize result when the header NGX_AGAIN
-     * retry never completed on this request. */
+    /*
+     * Release a deferred finalize result when the header NGX_AGAIN
+     * retry never completed on this request.  Same ownership rule as
+     * pending_header_output above: the buffers inside this
+     * MarkdownResult (markdown/etag/error_message) were allocated by the
+     * Rust FFI and are NOT request-pool memory, so the request pool
+     * cannot reclaim them — they must go back through markdown_result_free().
+     */
     if (ctx->streaming.completion.finalize_pending_result != NULL) {
         markdown_result_free(
             ctx->streaming.completion.finalize_pending_result);
@@ -4142,6 +4148,21 @@ ngx_http_markdown_streaming_clone_chain_deep(
             b->last = b->pos + (in->buf->last - in->buf->pos);
             /* Payload bytes were copied: the clone is memory-backed. */
             b->memory = 1;
+            /*
+             * Carry the source's `temporary` bit forward instead of forcing
+             * it.  `temporary` is a downstream *behavior* hint ("this
+             * content may still be rewritten"), not an ownership marker:
+             * the clone already owns independent pool storage, so it is
+             * writable either way, and the only consumer that branches on
+             * the flag is the writer/filter chain deciding whether it may
+             * mutate bytes in place.  Forcing temporary=1 would invite a
+             * downstream filter to rewrite a clone whose bytes can still be
+             * shared with a retained sibling buffer (the fail-open clone
+             * shares ngx_buf_t metadata with the upstream chain); forcing 0
+             * would needlessly block legitimate in-place rewriting.  The
+             * source flag is the accurate answer in both directions, so it
+             * is preserved verbatim rather than re-derived from the copy.
+             */
             b->temporary = in->buf->temporary;
         } else if (in->buf->pos != NULL && in->buf->last != NULL
                    && in->buf->last == in->buf->pos)
@@ -4247,6 +4268,25 @@ ngx_http_markdown_streaming_send_failopen_chain(
         ngx_http_markdown_pending_output_set(
             &ctx->streaming.pending_output, out);
         ctx->streaming.pending_meta.has_data = 1;
+        /*
+         * Bytes MUST be zeroed for a fail-open chain.
+         *
+         * `pending_meta.bytes` is the deferred output-byte count that
+         * resume_pending() feeds to account_pending_output(), which adds it
+         * to streaming.selection.output_bytes_total and then zeroes it.
+         * send_output() sets it from the length it actually submitted; this
+         * function submits an upstream/fail-open chain rather than converted
+         * output, so it has no such length to report and must report 0
+         * explicitly.
+         *
+         * Leaving the field untouched would let a value left over from an
+         * earlier buffered cycle be counted a second time when this fail-open
+         * chain drains.  Setting it here (rather than relying on the
+         * consumer's zeroing) keeps the invariant local to the producer:
+         * every path that installs pending_output assigns `bytes` in the
+         * same statement group as `has_data`.
+         */
+        ctx->streaming.pending_meta.bytes = 0;
         ctx->streaming.pending_meta.main_terminal = cap_main_terminal;
         ctx->streaming.pending_meta.subrequest_terminal =
             cap_subrequest_terminal;

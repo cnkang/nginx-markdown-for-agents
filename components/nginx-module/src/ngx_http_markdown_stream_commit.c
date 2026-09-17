@@ -199,6 +199,29 @@ ngx_http_markdown_stream_commit_snapshot_header(
 }
 
 
+/*
+ * Rollback phase 1 of 2 — entry-level validation.
+ *
+ * A snapshot entry with a NULL `entry` pointer can never be restored
+ * (`snap->entries[i].entry->value = ...` would dereference NULL), so the
+ * whole rollback must abort.  This check is deliberately SEPARATE from and
+ * ordered BEFORE the live-chain proof in
+ * ngx_http_markdown_stream_commit_validate_live_snapshot():
+ *
+ *   - This pass is O(count) and depends only on the snapshot.  It rejects a
+ *     malformed snapshot before any list traversal, so a corrupt snapshot can
+ *     never steer the traversal in the second phase.
+ *   - The second pass is O(list) and depends on the live headers_out list.
+ *     It proves that every snapshotted pointer is still reachable inside the
+ *     list's original region and that the region has not shrunk.
+ *
+ * Splitting them keeps each phase's failure attributable (bad snapshot vs
+ * mutated list) and keeps the O(count) rejection cheap on the rollback path,
+ * which runs while the response representation is already known to be
+ * damaged.  Returning NGX_ERROR from either phase is the contract: callers
+ * must NOT fail open on a rollback failure, because the source
+ * representation is no longer known to be restorable.
+ */
 static ngx_int_t
 ngx_http_markdown_stream_commit_validate_snapshot_entries(
     const ngx_http_markdown_hdr_snap_t *snap)
@@ -227,6 +250,31 @@ ngx_http_markdown_stream_commit_snapshot_entry_matches(
 }
 
 
+/*
+ * Rollback phase 2 of 2 — live-chain proof.
+ *
+ * Walks the live headers_out list and proves, for the rollback to be safe:
+ *   - every list part is structurally valid (ngx_http_markdown_stream_commit_
+ *     list_part_valid), so a corrupt part cannot cause an out-of-bounds read;
+ *   - the list still contains at least `orig_nelts` entries after the
+ *     snapshot (`idx < snap->orig_nelts` ⇒ the original region SHRANK, e.g.
+ *     a part was truncated or a whole part was unlinked ⇒ abort);
+ *   - every one of the `snap->count` snapshotted pointers is still found
+ *     within that original region (`matched != snap->count` ⇒ an entry was
+ *     replaced by a different allocation at the same index ⇒ restoring
+ *     through the stale pointer would write into freed/foreign memory ⇒
+ *     abort).
+ *
+ * Only after both properties hold may the caller write through the
+ * snapshot's pointers.  Ordering matters: phase 1
+ * (validate_snapshot_entries) rejects a malformed snapshot first, so this
+ * traversal only ever runs for a structurally well-formed snapshot.
+ *
+ * `idx` and `matched` are separate because the original region is identified
+ * positionally while the snapshotted entries are identified by identity: a
+ * duplicate-header list can legitimately hold the same name several times,
+ * and only the exact pointers captured at snapshot time count as matches.
+ */
 static ngx_int_t
 ngx_http_markdown_stream_commit_validate_live_snapshot(
     ngx_http_request_t *r, const ngx_http_markdown_hdr_snap_t *snap)
@@ -719,6 +767,13 @@ ngx_http_markdown_stream_commit_remove_etag(
  * Invalidate a response header by name across the full headers_out list
  * (Rule 28: iterate every list part; Rule 40: hash=0 marks invalidated).
  *
+ * Every list part is validated before dereferencing its elements, exactly
+ * like the sibling snapshot/invalidate helpers above: a malformed part
+ * (element size below ngx_table_elt_t, nelts beyond the allocation, or a
+ * nonempty part with no element storage) is skipped instead of walked, so
+ * a corrupt headers_out list cannot turn invalidation into an
+ * out-of-bounds read.
+ *
  * Returns:
  *   NGX_OK always (invalidation cannot fail)
  */
@@ -732,6 +787,12 @@ ngx_http_markdown_stream_commit_invalidate_header(
     part = &r->headers_out.headers.part;
 
     while (part != NULL) {
+        if (ngx_http_markdown_stream_commit_list_part_valid(
+                &r->headers_out.headers, part) != NGX_OK)
+        {
+            return NGX_OK;
+        }
+
         elts = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (elts[i].hash == 0) {

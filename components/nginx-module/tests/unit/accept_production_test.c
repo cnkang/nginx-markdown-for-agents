@@ -746,12 +746,40 @@ test_markdown_options_init_defaults(void)
 
 /*
  * Verify that markdown_options_init handles NULL safely.
+ *
+ * markdown_options_init returns void, so the assertion is the observable
+ * contract: a NULL destination is a no-op that neither crashes nor writes
+ * outside the call, and a following valid call still produces the documented
+ * defaults.  The call goes through a function pointer so the compiler
+ * cannot fold the NULL check away.
  */
 static void
 test_markdown_options_init_null(void)
 {
-    markdown_options_init(NULL);
-    TEST_PASS("markdown_options_init(NULL) does not crash");
+    void (*init_fn)(struct MarkdownOptions *) = markdown_options_init;
+    struct MarkdownOptions options;
+    struct MarkdownOptions canary;
+    struct MarkdownOptions canary_before;
+
+    TEST_SUBSECTION("markdown_options_init(NULL) safety");
+
+    TEST_ASSERT(init_fn != NULL,
+                "markdown_options_init must resolve to a callable entry point");
+
+    memset(&canary, 0x5A, sizeof(canary));
+    canary_before = canary;
+
+    init_fn(NULL);
+
+    TEST_ASSERT(memcmp(&canary, &canary_before, sizeof(canary)) == 0,
+                "NULL call must not write outside the requested destination");
+
+    memset(&options, 0xFF, sizeof(options));
+    init_fn(&options);
+    TEST_ASSERT(options.timeout_ms == 5000 && options.generate_etag == 0,
+                "valid call after the NULL call still applies the defaults");
+
+    TEST_PASS("markdown_options_init(NULL) is a safe no-op");
 }
 
 static void

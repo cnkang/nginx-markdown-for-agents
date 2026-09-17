@@ -1806,6 +1806,54 @@ static void test_multipart_orig_nelts_cross_part_count(void)
     TEST_PASS("Multipart orig_nelts: cross-part linear count is correct");
 }
 
+/*
+ * A malformed (non-committed) headers_out list part must make the
+ * representation-metadata invalidation abort cleanly rather than walk the
+ * part.  The sibling snapshot/invalidate helpers above all guard with
+ * ngx_http_markdown_stream_commit_list_part_valid(); the invalidation sweep
+ * had no such guard, so a part whose element size is below ngx_table_elt_t
+ * (or whose nelts exceeds its allocation) would have been dereferenced as
+ * ngx_table_elt_t[] and read out of bounds.
+ *
+ * MUTATION SENSITIVITY: removing the guard in
+ * ngx_http_markdown_stream_commit_invalidate_header() makes this test read
+ * past the two-element storage below and fail.
+ */
+static void
+test_representation_metadata_invalidation_guards_malformed_part(void)
+{
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_int_t                rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+
+    /* Seed a stale representation header that the sweep would invalidate. */
+    test_headers_storage[0].hash = 1;
+    ngx_str_set(&test_headers_storage[0].key, "Accept-Ranges");
+    ngx_str_set(&test_headers_storage[0].value, "bytes");
+    test_request.allow_ranges = 1;
+    test_request.headers_out.accept_ranges = &test_headers_storage[0];
+    test_request.headers_out.headers.part.nelts = 1;
+
+    /* Corrupt the list metadata: the element size is smaller than
+     * ngx_table_elt_t, so part->nelts cannot be trusted. */
+    test_request.headers_out.headers.size = 1;
+
+    rc = ngx_http_markdown_stream_commit_remove_representation_metadata(
+        &test_request);
+
+    /* The invalidation returns NGX_OK (it cannot fail) and must not have
+     * touched the entry: an unvalidated part is skipped, not walked. */
+    TEST_ASSERT(rc == NGX_OK,
+                "invalidating a malformed list must return NGX_OK");
+    TEST_ASSERT(test_headers_storage[0].hash == 1,
+                "malformed list part must not be dereferenced for invalidation");
+
+    TEST_PASS("Representation-metadata invalidation guards malformed list parts");
+}
+
 int main(void)
 {
     TEST_SECTION("Stream Header Commit (streaming fallback state machine, header commit)");
@@ -1843,6 +1891,7 @@ int main(void)
     test_multipart_rollback_new_push_invalidated_across_parts();
     test_multipart_rollback_cc_failure_target_in_p1_etag_in_p2();
     test_multipart_orig_nelts_cross_part_count();
+    test_representation_metadata_invalidation_guards_malformed_part();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;

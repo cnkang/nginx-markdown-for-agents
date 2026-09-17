@@ -2700,6 +2700,31 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
     return NGX_OK;
 }
 
+/*
+ * Restore one outgoing header list from its snapshot.
+ *
+ * The snapshot stores a full VALUE COPY of every entry (`saved` is an
+ * ngx_table_elt_t by value) plus the original `last` part pointer and that
+ * part's original nelts/next.  The rollback is therefore atomic and needs no
+ * deep copy of the backing storage:
+ *
+ *   - Restoring `list->last` first re-anchors the list at the part that was
+ *     current when the snapshot was taken, and `nelts`/`next` roll that part
+ *     back to its snapshot-time shape.  Entries pushed into that same part
+ *     after the snapshot stop being reachable immediately — no free is
+ *     required, because the part's element storage is pool memory that lives
+ *     for the whole request.
+ *   - The per-entry loop then re-copies each saved value over its element.
+ *     Entry data (key/value bytes, hash, pointer fields) was captured by
+ *     value, so a mutated or invalidated entry is restored byte-for-byte.
+ *
+ * Both steps combine into an all-or-nothing result: the only mutation that can
+ * be observed by a later reader is a fully restored list.  A malformed part
+ * (nelts beyond the captured count, or a non-empty part with no element
+ * storage) aborts the loop instead of walking past the captured region; the
+ * `last`/`nelts` rollback above has already happened, so the list never stays
+ * half-restored and readable.
+ */
 static void
 ngx_http_markdown_304_restore_list(ngx_list_t *list,
     const ngx_http_markdown_304_list_snapshot_t *snapshot)
@@ -2740,6 +2765,20 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     }
 }
 
+/*
+ * Snapshot every outgoing field that a 304/412 rewrite may touch.
+ *
+ * Scalar and pointer fields are captured by value; the two header LISTS are
+ * captured through ngx_http_markdown_304_snapshot_list(), which copies every
+ * live entry by value plus the original `last` part shape (see
+ * ngx_http_markdown_304_restore_list() for the rollback correctness
+ * rationale: value copy + nelts rollback is sound because entry storage is
+ * request-pool memory that outlives the rollback).
+ *
+ * Because the snapshot owns a value copy of each entry, every mutation made
+ * by ngx_http_markdown_send_304()/send_412() on a snapshotted entry is
+ * undoable from this structure alone, with no additional bookkeeping.
+ */
 static ngx_int_t
 ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
     ngx_http_markdown_304_snapshot_t *snapshot)

@@ -54,6 +54,19 @@ ngx_http_markdown_marshal_str_array(ngx_pool_t *pool, const ngx_array_t *arr)
     struct FFIStr   *list;
     const ngx_str_t *src;
 
+    /*
+     * Guard the element-count multiplication before it feeds ngx_palloc:
+     * nelts is an unvalidated configuration count, so `nelts * sizeof`
+     * could wrap size_t and hand the allocator a too-small buffer that the
+     * element loop would then overrun.  Division precheck is the standard
+     * overflow guard for a multiplication.
+     */
+    if ((size_t) arr->nelts
+        > ((size_t) -1) / sizeof(struct FFIStr))
+    {
+        return NULL;
+    }
+
     list = ngx_palloc(pool, arr->nelts * sizeof(struct FFIStr));
     if (list == NULL) {
         return NULL;
