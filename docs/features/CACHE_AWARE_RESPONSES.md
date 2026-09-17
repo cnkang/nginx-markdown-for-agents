@@ -354,7 +354,7 @@ When the module detects authentication:
 - `Cache-Control: public` → `Cache-Control: private`
 - `Cache-Control: max-age=3600` → `Cache-Control: private, max-age=3600`
 
-This prevents shared caches (CDNs) from caching authenticated content.
+This prevents shared caches (CDNs) from caching authenticated content. The sanitization applies on every forwarded response, including `markdown_filter off` pass-through and pre-commit fail-open paths.
 
 ## Deterministic Output
 
