@@ -138,13 +138,13 @@ replacement threshold directive and no size heuristic.
 
 In `auto` mode, every response that clears the eligibility gates is a
 **streaming candidate**. Response size is not part of the decision and there is
-no internal candidate boundary: an unknown-length response and a response with a
-the module treats a known `Content-Length` alike.
+no internal candidate boundary: the module treats an unknown-length response
+and a response with a known `Content-Length` alike.
 
 A response that is **not eligible for conversion** is never converted at all:
 the module bypasses the filter and forwards the upstream response. A response
-that is eligible for conversion but **not a streaming candidate**, the module converts it
-with the bounded full-buffer engine instead.
+that is eligible for conversion but fails one of the pre-selection guards below
+falls back to the bounded full-buffer engine instead.
 
 `ngx_http_markdown_select_processing_path()` decides between the two conversion
 engines on these pre-selection guards alone:
