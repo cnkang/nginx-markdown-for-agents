@@ -304,6 +304,14 @@ mask_command_text() {
             continue
         fi
         if [[ "$quote" == '"' ]]; then
+            # A backslash escapes the next character: an escaped quote is
+            # literal text and cannot terminate the span (nor open a
+            # substitution).
+            if [[ "$ch" == '\' && -n "${text:$((i + 1)):1}" ]]; then
+                span+="$ch${text:$((i + 1)):1}"
+                i=$((i + 2))
+                continue
+            fi
             # Track command-substitution nesting inside the double-quoted
             # span: a quote inside $(...) belongs to the substitution's own
             # context and does not terminate the surrounding span.

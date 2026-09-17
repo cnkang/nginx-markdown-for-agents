@@ -547,6 +547,12 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps a doubly nested substitution visible" "got '$masked'"
     fi
+    masked="$(mask_command_text 'NOTE="say \"hi\" $(cat f)"')"
+    if [[ "$masked" == 'NOTE="say \"hi\" $(cat f)"' ]]; then
+        pass "mask honors a backslash-escaped quote inside a span"
+    else
+        fail "mask honors a backslash-escaped quote inside a span" "got '$masked'"
+    fi
     masked="$(mask_command_text "echo '\$(cat /etc/passwd)'")"
     if [[ "$masked" == "echo ''" ]]; then
         pass "mask blanks single-quoted substitutions that never execute"
