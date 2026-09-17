@@ -169,11 +169,13 @@ The detector records the declared charset and honors it during decoding.
 `decode_html_to_utf8` in `parser.rs` keeps UTF-8 input borrowed (zero-copy)
 and transcodes any other `encoding_rs`-supported charset (for example
 ISO-8859-1, Windows-1252, Shift_JIS) into owned UTF-8 before HTML parsing.
-Invalid UTF-8 bytes in a UTF-8-declared response, an unsupported charset
-label, or a byte sequence invalid for the declared charset return an
-encoding error and the conversion fails closed. `encoding_rs` labels that
-map to UTF-8 internally (for example `utf8` aliases) stay on the borrowed
-path.
+Invalid UTF-8 bytes in a UTF-8-declared response, a charset label in the
+Content-Type declaration that no supported encoding matches, or a byte
+sequence invalid for the declared charset return an encoding error and the
+conversion fails closed. An unsupported label in the HTML meta tag does not
+fail the conversion: the cascade skips it and continues. `encoding_rs`
+labels that map to UTF-8 internally (for example `utf8` aliases) stay on the
+borrowed path.
 
 ### Performance Considerations
 

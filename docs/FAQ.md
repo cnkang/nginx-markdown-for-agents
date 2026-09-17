@@ -161,8 +161,8 @@ prefers streaming for every eligible response **when no hard blocker applies**
 regardless of the streaming policy (and combining `force` with `full` fails
 during `nginx -t`). See
 [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and
-[ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind
-this design.
+[ADR-0023](architecture/ADR/0023-single-streaming-policy.md) for the current
+single-policy contract (ADR-0007 records the superseded v0.6.0 reasoning).
 
 ---
 

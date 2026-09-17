@@ -348,9 +348,12 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- `markdown_streaming auto` and the response is eligible for conversion but is
-  not a streaming candidate. A response that is not eligible for conversion is
-  never converted, so it is not a fallback case.
+- a section 2.2 pre-selection guard routes an otherwise eligible response to
+  the bounded full-buffer engine (for example `markdown_stream_excluded_types`
+  or a policy other than `auto`/`force`). Every eligible response remains a
+  streaming candidate by definition; the guard selects the engine. A response
+  that is not eligible for conversion is never converted, so it is not a
+  fallback case.
 
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is
