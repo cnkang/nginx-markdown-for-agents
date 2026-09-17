@@ -381,7 +381,7 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
         return True
     if re.search(r"!\s*=\s*$", before):
         return True
-    if re.search(r"['\"]?false['\"]?\s*==\s*$", before):
+    if re.search(r"(?<![\w.])['\"]?false['\"]?\s*==\s*$", before):
         return True
     if re.search(r"!\s*contains\(\s*$", before):
         return True

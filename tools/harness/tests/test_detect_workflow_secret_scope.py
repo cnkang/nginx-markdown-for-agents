@@ -795,6 +795,13 @@ class TestReferencesGatePolarity:
             "false == steps.token.outputs.enabled", "token", {"enabled"}
         )
 
+    def test_a_dotted_false_property_is_not_a_false_literal(self):
+        """`inputs.false ==` is an equality comparison against a property,
+        not a false-literal negation, so the reference still counts."""
+        assert secret_scope_module._references_gate(
+            "inputs.false == steps.token.outputs.enabled", "token", {"enabled"}
+        )
+
     def test_a_double_quoted_reference_beside_a_real_one_still_gates(self):
         """Masking a double-quoted literal must not neutralise a real
         unquoted reference on the same line."""
