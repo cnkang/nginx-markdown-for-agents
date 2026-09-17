@@ -260,8 +260,7 @@ RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS = [
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
     "Requires:       nginx-r%{nginx_version}",
-    "Requires:       nginx >= 1:%{nginx_version}",
-    "Conflicts:      nginx >= 1:%{nginx_version_ceil}",
+    "Requires:       nginx >= %{nginx_version}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
