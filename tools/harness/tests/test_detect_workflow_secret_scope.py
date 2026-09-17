@@ -858,3 +858,15 @@ class TestGateNamePattern:
             'echo "first=1" >> "$GITHUB_OUTPUT"; echo "second=2"\n'
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == {"first"}
+
+    def test_quoted_separators_do_not_fabricate_gates(self) -> None:
+        """A separator inside a quoted value is content: the line stays one
+        segment and only the echo's own assignment names the gate."""
+        lines = [
+            'echo "debug=1; ready=go" >> "$GITHUB_OUTPUT"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"debug"}
+
+    def test_quoted_ampersands_stay_inside_the_value(self) -> None:
+        lines = ['echo "note=a&&b" >> "$GITHUB_OUTPUT"\n']
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"note"}
