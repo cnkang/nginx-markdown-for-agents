@@ -2,11 +2,9 @@
  * NGINX Markdown Filter Module - Diagnostics Endpoint
  *
  * Provides runtime introspection for the markdown filter module:
- * configuration snapshot, recent decision history, metrics snapshot,
- * and dynamic configuration state.
+ * configuration snapshot, recent decision history, and metrics snapshot.
  *
  * Requirement: structured decision path logging
- * Risk Pack: dynamic-config-hot-reload
  */
 
 #ifndef _NGX_HTTP_MARKDOWN_DIAGNOSTICS_H_INCLUDED_

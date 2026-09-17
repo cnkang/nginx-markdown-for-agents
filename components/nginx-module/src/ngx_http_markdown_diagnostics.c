@@ -12,7 +12,6 @@
  * (allow/deny).
  *
  * Requirement: structured decision path logging
- * Risk Pack: dynamic-config-hot-reload
  */
 
 #include <ngx_config.h>
@@ -60,7 +59,7 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
  * where each worker has its own address space.  This diagnostics state
  * is local to the worker that handles the diagnostics request.  If
  * multiple workers are configured, each worker reports only its own
- * configuration, decisions, and dynamic-configuration state.  Metrics are
+ * configuration and recent decisions.  Metrics are
  * read separately from the shared-memory counter zone.
  *
  * Initialized once during module postconfiguration (or worker init)
