@@ -39,15 +39,6 @@ NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 DIAGNOSTICS_PATH="/nginx-markdown/diagnostics"
 PASS_COUNT=0
 FAIL_COUNT=0
-HEAD_BODY_FILE=""
-
-cleanup() {
-    if [[ -n "$HEAD_BODY_FILE" ]]; then
-        rm -f "$HEAD_BODY_FILE"
-    fi
-    return 0
-}
-trap cleanup EXIT
 
 pass() {
     local msg="$1"
@@ -231,14 +222,13 @@ case "$HEAD_CODE" in
         ;;
 esac
 
-HEAD_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/diagnostics-head.XXXXXX")"
-HEAD_BODY_SIZE="-1"
+HEAD_BODY_SIZE=""
 HEAD_REQUEST_RC=0
-curl -sf -o "$HEAD_BODY_FILE" -X HEAD \
-    "${NGINX_URL}${DIAGNOSTICS_PATH}" >/dev/null 2>&1 \
+HEAD_BODY_SIZE="$(curl -sf -I -o /dev/null -w "%{size_download}" \
+    "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null)" \
     || HEAD_REQUEST_RC=$?
-if [[ "$HEAD_REQUEST_RC" -eq 0 ]]; then
-    HEAD_BODY_SIZE="$(wc -c < "$HEAD_BODY_FILE" | tr -d '[:space:]')"
+if [[ "$HEAD_REQUEST_RC" -ne 0 ]]; then
+    HEAD_BODY_SIZE="-1"
 fi
 
 if [[ "$HEAD_BODY_SIZE" -gt 0 ]]; then
