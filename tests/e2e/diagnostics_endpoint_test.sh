@@ -230,7 +230,7 @@ esac
 
 HEAD_BODY_SIZE=""
 HEAD_REQUEST_RC=0
-HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}" "${DIAGNOSTICS_PATH}" 2>/dev/null <<'PROBE'
+HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null <<'PROBE'
 import socket
 import ssl
 import sys
@@ -238,7 +238,9 @@ import time
 import urllib.parse
 
 parsed = urllib.parse.urlparse(sys.argv[1])
-path = sys.argv[2]
+path = parsed.path or "/"
+if parsed.query:
+    path += "?" + parsed.query
 host = parsed.hostname or "localhost"
 port = parsed.port or (443 if parsed.scheme == "https" else 80)
 try:
@@ -249,8 +251,8 @@ try:
     else:
         sock = raw_sock
     with sock:
-        request = "HEAD {0} HTTP/1.1\r\nHost: {1}:{2}\r\nConnection: close\r\n\r\n".format(
-            path, host, port
+        request = "HEAD {0} HTTP/1.1\r\nHost: {1}\r\nConnection: close\r\n\r\n".format(
+            path, parsed.netloc
         )
         sock.sendall(request.encode("ascii"))
         deadline = time.time() + 10
