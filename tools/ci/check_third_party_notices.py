@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Verify THIRD-PARTY-NOTICES covers all direct runtime dependencies.
+"""Verify THIRD-PARTY-NOTICES covers all direct runtime and dev dependencies.
 
 Checks:
 1. Every Rust [dependencies] crate has an entry with its exact resolved version.
-2. Required transitive runtime crates have entries with exact resolved versions.
-3. Every known C runtime dependency (NGINX, zlib, brotli) has a matching entry.
-4. Every first-party Rust workspace has a present and current Cargo.lock.
+2. Every direct [dev-dependencies] crate of the converter crate has an entry
+   with its exact resolved version, because the notices preamble lists
+   development-only crates.
+3. Required transitive runtime crates have entries with exact resolved versions.
+4. Every known C runtime dependency (NGINX, zlib, brotli) has a matching entry.
+5. Every first-party Rust workspace has a present and current Cargo.lock.
 
-Dev-only dependencies ([dev-dependencies], test frameworks, CI tools) are
-intentionally excluded because they are not linked into or distributed with
-the final binary.
+Dev-only dependencies are not linked into or distributed with the final
+binary.  They still need an entry: the notices file lists them so the
+development toolchain's licenses are auditable, and a dependency that
+arrives without an entry would otherwise go unnoticed.
 """
 
 from __future__ import annotations
@@ -51,6 +55,45 @@ SUB_WORKSPACE_CARGO_LOCKS: list[Path] = [
     ROOT / "tools" / "e2e-harness" / _CARGO_LOCK_NAME,
 ]
 
+# Cross-workspace version-consistency allowlist.
+#
+# The baseline lock is components/rust-converter/Cargo.lock (the production
+# archive).  Every other lock must resolve each package it shares with the
+# baseline to a version the baseline also resolves; a sub-workspace that pins
+# an OLDER shared version silently exercises different code than the shipped
+# artifact (the 0.9.2 rc9 drift: encoding_rs 0.8.35 vs 0.8.41, flate2 1.1.9 vs
+# 1.1.10, brotli 8.0.4 vs 9.0.0).
+#
+# Entries below are divergences that exist today and are documented, not
+# blessed: the entry names the exact stale version, so a *new* divergence (or
+# a further drift of the same package) fails the check instead of inheriting
+# the exemption.  Remove an entry by rebuilding that lock against the baseline
+# (`cargo update --manifest-path <lock's manifest>` or a targeted
+# `cargo update -p <crate> --precise <baseline version>`).
+CROSS_LOCK_ALLOWED_DIVERGENCES: dict[str, dict[str, set[str]]] = {
+    "tools/corpus/test-corpus-conversion/Cargo.lock": {
+        "encoding_rs": {"0.8.35"},
+        "flate2": {"1.1.9"},
+        "libc": {"0.2.186"},
+        "miniz_oxide": {"0.8.9"},
+        "regex": {"1.13.0"},
+        "regex-automata": {"0.4.15"},
+    },
+    "tools/e2e-harness/Cargo.lock": {
+        "alloc-no-stdlib": {"2.0.4"},
+        "alloc-stdlib": {"0.2.4"},
+        "brotli": {"8.0.4"},
+        "brotli-decompressor": {"5.0.3"},
+        "flate2": {"1.1.9"},
+        "libc": {"0.2.186"},
+        "miniz_oxide": {"0.8.9"},
+        "regex": {"1.13.0"},
+        "regex-automata": {"0.4.15"},
+        "serde_json": {"1.0.150"},
+        "simd-adler32": {"0.3.10"},
+    },
+}
+
 # Runtime crates that are transitive but intentionally documented because their
 # implementation is shipped as part of the converter's parser stack.
 NOTICE_REQUIRED_TRANSITIVE_DEPS = ("markup5ever",)
@@ -69,11 +112,21 @@ _KV_RE = re.compile(r"^([A-Za-z0-9_-]+)\s*=")
 
 
 def parse_rust_direct_deps(cargo_toml: Path) -> list[str]:
-    """Extract crate names from the [dependencies] section of Cargo.toml.
+    """Extract crate names from one manifest section of Cargo.toml.
 
     Stops at the next section header or end-of-file.  Skips comments and
     blank lines.  Handles both ``crate = "version"`` and ``crate = { ... }``
     forms.
+    """
+    return parse_rust_section_deps(cargo_toml, "[dependencies]")
+
+
+def parse_rust_section_deps(cargo_toml: Path, section: str) -> list[str]:
+    """Extract crate names from a named section of Cargo.toml.
+
+    The section name is matched exactly, so ``[dev-dependencies]`` never reads
+    the ``[dependencies]`` block and a target-specific table such as
+    ``[target.'cfg(unix)'.dependencies]`` stays out of scope.
     """
     text = cargo_toml.read_text(encoding="utf-8")
     in_deps = False
@@ -81,7 +134,7 @@ def parse_rust_direct_deps(cargo_toml: Path) -> list[str]:
 
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped == "[dependencies]":
+        if stripped == section:
             in_deps = True
             continue
         if _SECTION_RE.match(stripped):
@@ -95,6 +148,11 @@ def parse_rust_direct_deps(cargo_toml: Path) -> list[str]:
         if m := _KV_RE.match(stripped):
             deps.append(m[1])
     return deps
+
+
+def parse_rust_dev_deps(cargo_toml: Path) -> list[str]:
+    """Extract crate names from the [dev-dependencies] section of Cargo.toml."""
+    return parse_rust_section_deps(cargo_toml, "[dev-dependencies]")
 
 
 def load_notices(path: Path) -> str:
@@ -144,13 +202,21 @@ def notice_has_exact_version(name: str, version: str, notices: str) -> bool:
 
 
 def collect_notice_version_issues(
-    rust_deps: list[str], cargo_lock: Path, notices: str
+    required_names: list[str],
+    cargo_lock: Path,
+    notices: str,
+    label: str = "Rust dependency",
 ) -> list[str]:
-    """Collect missing or stale exact-version NOTICE entries."""
-    required_names = rust_deps + list(NOTICE_REQUIRED_TRANSITIVE_DEPS)
+    """Collect missing or stale exact-version NOTICE entries.
+
+    The caller passes the full name list, so a dev-dependency call cannot
+    inherit the transitive runtime scope.  The label distinguishes a runtime
+    dependency from a dev dependency, so a finding names the manifest section
+    that must gain the entry.
+    """
     versions = resolved_versions(cargo_lock, required_names)
     return [
-        f"Rust dependency: {name} must list resolved version {version}"
+        f"{label}: {name} must list resolved version {version}"
         for name, version in versions.items()
         if not notice_has_exact_version(name, version, notices)
     ]
@@ -213,6 +279,82 @@ def collect_workspace_lock_issues() -> list[str]:
     return issues
 
 
+def lock_package_versions(cargo_lock: Path) -> dict[str, set[str]]:
+    """Return every `name -> {versions}` pair resolved in one Cargo.lock."""
+    data = tomllib.loads(cargo_lock.read_text(encoding="utf-8"))
+    versions: dict[str, set[str]] = {}
+    for package in data.get("package", []):
+        name = package.get("name")
+        version = package.get("version")
+        if name and version:
+            versions.setdefault(str(name), set()).add(str(version))
+    return versions
+
+
+def display_path(path: Path) -> str:
+    """Render a path relative to the repository root when it lives inside it."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        # A fixture or out-of-tree lock path is reported as given.
+        return str(path)
+
+
+def collect_cross_lock_version_issues(
+    baseline_lock: Path,
+    sub_locks: list[Path],
+    allowed: dict[str, dict[str, set[str]]] | None = None,
+) -> list[str]:
+    """Fail when a sub-workspace lock resolves a shared package differently.
+
+    A sub-workspace lock (fuzz, e2e harness, corpus tooling) that pins its own
+    copy of a shared crate silently exercises different code than the shipped
+    production archive: the rc9 drift had fuzz decompression running
+    encoding_rs 0.8.35 / flate2 1.1.9 while the release artifact linked
+    0.8.41 / 1.1.10, and the fuzz helper compressing with brotli 8.0.4 while
+    the converter decoded with 9.0.0.
+
+    Only packages present in BOTH locks are compared: a sub-workspace's own
+    dependencies (libfuzzer-sys, clap, tokio, ...) are legitimately unique to
+    it.  Any version the sub-lock resolves that the baseline never resolves is
+    a divergence unless the exact version is listed in `allowed` for that
+    lock, so a documented-yet-untouched entry cannot absorb a further drift.
+    """
+    allowed = allowed or {}
+    try:
+        baseline = lock_package_versions(baseline_lock)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return [f"cannot read baseline Cargo.lock {baseline_lock.name}: {exc}"]
+
+    issues: list[str] = []
+    for sub_lock in sub_locks:
+        if not sub_lock.is_file():
+            continue
+        relative = display_path(sub_lock)
+        exemption = allowed.get(relative, {})
+        try:
+            sub_versions = lock_package_versions(sub_lock)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            issues.append(f"cannot read Cargo.lock {relative}: {exc}")
+            continue
+        for name, versions in sorted(sub_versions.items()):
+            baseline_versions = baseline.get(name)
+            if not baseline_versions:
+                continue  # unique to this workspace: not a shared package
+            stale = versions - baseline_versions
+            stale -= exemption.get(name, set())
+            if stale:
+                issues.append(
+                    f"cross-workspace version drift: {relative} resolves "
+                    f"{name} {', '.join(sorted(stale))} but the baseline lock "
+                    f"({display_path(baseline_lock)}) resolves "
+                    f"{', '.join(sorted(baseline_versions))}; rebuild the lock "
+                    "against the baseline or record the divergence in "
+                    "CROSS_LOCK_ALLOWED_DIVERGENCES"
+                )
+    return issues
+
+
 def main() -> int:
     """Run THIRD-PARTY-NOTICES coverage check and report results."""
     # --- Existence check ---
@@ -229,8 +371,27 @@ def main() -> int:
 
     # --- Rust direct dependencies ---
     rust_deps = parse_rust_direct_deps(CARGO_TOML)
+    # --- Rust direct dev dependencies ---
+    # The notices preamble states that development-only crates are listed, so
+    # the checker holds the file to that claim instead of trusting it.
+    rust_dev_deps = [
+        name for name in parse_rust_dev_deps(CARGO_TOML) if name not in rust_deps
+    ]
+    runtime_names = rust_deps + list(NOTICE_REQUIRED_TRANSITIVE_DEPS)
     try:
-        problems.extend(collect_notice_version_issues(rust_deps, CARGO_LOCK, notices))
+        problems.extend(
+            collect_notice_version_issues(
+                runtime_names, CARGO_LOCK, notices, label="Rust dependency"
+            )
+        )
+        problems.extend(
+            collect_notice_version_issues(
+                rust_dev_deps,
+                CARGO_LOCK,
+                notices,
+                label="Rust dev dependency",
+            )
+        )
     except (OSError, ValueError) as exc:
         problems.append(f"Cargo.lock resolution error: {exc}")
 
@@ -244,11 +405,28 @@ def main() -> int:
     # --- Sub-workspace Cargo.lock freshness check ---
     problems.extend(collect_workspace_lock_issues())
 
+    # --- Cross-workspace shared-package version consistency ---
+    # The baseline is the production converter lock; every other lock must
+    # agree with it on shared packages (see CROSS_LOCK_ALLOWED_DIVERGENCES
+    # for the documented current exceptions).  A Dependabot-style commit that
+    # touches only the baseline lock now fails here instead of silently
+    # leaving the fuzz/e2e locks behind.
+    problems.extend(
+        collect_cross_lock_version_issues(
+            CARGO_LOCK,
+            [lock for lock in SUB_WORKSPACE_CARGO_LOCKS if lock != CARGO_LOCK],
+            CROSS_LOCK_ALLOWED_DIVERGENCES,
+        )
+    )
+
     # --- Report ---
     if problems:
         return report_missing_and_fail(problems)
     dep_count = (
-        len(rust_deps) + len(NOTICE_REQUIRED_TRANSITIVE_DEPS) + len(C_RUNTIME_DEPS)
+        len(rust_deps)
+        + len(rust_dev_deps)
+        + len(NOTICE_REQUIRED_TRANSITIVE_DEPS)
+        + len(C_RUNTIME_DEPS)
     )
     print(f"THIRD-PARTY-NOTICES coverage check passed ({dep_count} dependencies verified).")
     return 0

@@ -96,9 +96,9 @@ Section A: C / NGINX Module Dependencies
 Section B: Rust Conversion Engine Dependencies
 
 These crates are linked into or distributed with the conversion binary.
-Development-only crates (test reports, property-testing harnesses) are
-listed at the end of this section with their development-only scope noted;
-they are not distributed with the converter binary unless stated otherwise.
+The converter crate's direct development dependencies appear at the end of
+this section with their development-only scope noted. They are not linked
+into or distributed with the converter binary.
 
 ================================================================================
 
@@ -218,13 +218,55 @@ they are not distributed with the converter binary unless stated otherwise.
     Licensed under the Apache License, Version 2.0 or the MIT license, at your
     option.
 
+--------------------------------------------------------------------------------
+
+15. proptest 1.11.0 (development/test dependency only)
+    https://github.com/proptest-rs/proptest
+    License: MIT OR Apache-2.0
+    Copyright (c) 2016 FullContact, Inc
+
+    proptest is declared under [dev-dependencies] and drives the
+    property-based test suites; it is not linked into or distributed with the
+    final binary.
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
+--------------------------------------------------------------------------------
+
+16. libc 0.2.189 (development/test dependency only)
+    https://github.com/rust-lang/libc
+    License: MIT OR Apache-2.0
+    Copyright (c) The Rust Project Developers
+
+    libc is declared under [dev-dependencies] and is used only by the
+    development examples that read platform resource counters; it is not
+    linked into or distributed with the final binary.
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
+--------------------------------------------------------------------------------
+
+17. toml 1.1.6+spec-1.1.0 (development/test dependency only)
+    https://github.com/toml-rs/toml
+    License: MIT OR Apache-2.0
+    Copyright (c) Individual contributors
+
+    toml is declared under [dev-dependencies] and parses the known-difference
+    registry used by the streaming parity harness; it is not linked into or
+    distributed with the final binary.
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
 ================================================================================
 
 Section C: Build-Time Tool Dependencies (not distributed in binary)
 
 ================================================================================
 
-15. cbindgen 0.29.4
+18. cbindgen 0.29.4
     https://github.com/mozilla/cbindgen
     License: MPL-2.0
     Copyright (c) Mozilla Corporation
