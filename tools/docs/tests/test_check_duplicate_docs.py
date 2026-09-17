@@ -65,3 +65,15 @@ def test_document_update_tables_are_ignored(tmp_path):
     (docs / "architecture" / "two.md").write_text(table, encoding="utf-8")
 
     assert _find_duplicate_tables(docs) == []
+
+
+def test_document_update_tables_with_a_subheading_are_ignored(tmp_path):
+    """An H3 between the Document Updates heading and its table must not
+    lift the boilerplate exemption."""
+    docs = tmp_path / "docs"
+    (docs / "architecture").mkdir(parents=True)
+    table = "## Document Updates\n\n### Detailed notes\n\n" + _substantial_table()
+    (docs / "architecture" / "one.md").write_text(table, encoding="utf-8")
+    (docs / "architecture" / "two.md").write_text(table, encoding="utf-8")
+
+    assert _find_duplicate_tables(docs) == []
