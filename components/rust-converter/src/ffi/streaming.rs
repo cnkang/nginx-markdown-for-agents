@@ -261,17 +261,18 @@ pub unsafe extern "C" fn markdown_streaming_new_with_code(
     }
 }
 
+/// Create a streaming handle for tests, or panic when construction fails.
+///
+/// The success path returns the owning pointer from
+/// [`markdown_streaming_new_impl`] directly, so no caller can observe a
+/// NULL construction path. Tests that read handle fields therefore
+/// dereference a pointer whose provenance is the allocated box, which
+/// keeps those direct field reads free of invalid-pointer findings.
 #[cfg(test)]
 unsafe fn new_streaming_handle_for_test(
     options: *const MarkdownOptions,
 ) -> *mut StreamingConverterHandle {
-    let mut handle = ptr::null_mut();
-    let rc = unsafe { markdown_streaming_new_with_code(options, &mut handle) };
-    if rc == ERROR_SUCCESS {
-        handle
-    } else {
-        ptr::null_mut()
-    }
+    markdown_streaming_new_impl(options).expect("test streaming handle construction must succeed")
 }
 
 /// Feed a chunk of HTML input and receive any ready Markdown output.
@@ -1032,7 +1033,9 @@ mod tests {
 
     #[test]
     fn test_streaming_null_options() {
-        let handle = unsafe { new_streaming_handle_for_test(ptr::null()) };
+        let mut handle: *mut StreamingConverterHandle = ptr::null_mut();
+        let rc = unsafe { markdown_streaming_new_with_code(ptr::null(), &mut handle) };
+        assert_eq!(rc, ERROR_INVALID_INPUT);
         assert!(handle.is_null(), "NULL options should return NULL handle");
     }
 
