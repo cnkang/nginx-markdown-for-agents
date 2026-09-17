@@ -348,6 +348,30 @@ def _split_shell_segments(line: str) -> list[str]:
     return segments
 
 
+def _comment_starts_at(segment: str, index: int) -> bool:
+    """True when the unquoted ``#`` at *index* begins a comment."""
+    return index == 0 or segment[index - 1] in " \t"
+
+
+def _redirect_here(segment: str, index: int) -> bool:
+    """True when an unquoted ``>>`` at *index* redirects to $GITHUB_OUTPUT."""
+    return (
+        segment[index] == ">"
+        and segment[index + 1] == ">"
+        and GITHUB_OUTPUT_RE.match(segment, index) is not None
+    )
+
+
+def _advance_in_quote(segment: str, index: int, quote: str) -> tuple[str, int]:
+    """Advance one character inside *quote*; returns the (quote, next) pair."""
+    char = segment[index]
+    if char == "\\" and quote == '"' and index + 1 < len(segment):
+        return quote, index + 2
+    if char == quote:
+        return "", index + 1
+    return quote, index + 1
+
+
 def _unquoted_redirect(segment: str) -> int | None:
     """Index of the ``>>`` that redirects outside quotes and comments.
 
@@ -361,22 +385,16 @@ def _unquoted_redirect(segment: str) -> int | None:
     while index < length - 1:
         char = segment[index]
         if quote:
-            if char == "\\" and quote == '"' and index + 1 < length:
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            index += 1
+            quote, index = _advance_in_quote(segment, index, quote)
             continue
         if char in "'\"":
             quote = char
             index += 1
             continue
-        if char == "#" and (index == 0 or segment[index - 1] in " \t"):
+        if char == "#" and _comment_starts_at(segment, index):
             break
-        if char == ">" and segment[index + 1] == ">":
-            if GITHUB_OUTPUT_RE.match(segment, index):
-                return index
+        if _redirect_here(segment, index):
+            return index
         index += 1
     return None
 
