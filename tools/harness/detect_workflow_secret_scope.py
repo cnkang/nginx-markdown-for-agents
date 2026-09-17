@@ -22,7 +22,12 @@ SONAR_SECRET_EXPRESSION = re.compile(
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
 GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
-GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^"\s]*"?[ \t]*>>')
+# A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
+# (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
+# NAME=value assignment after `echo`.  The value tail is anchored by the
+# single `>>` literal, so no quantifiers overlap and the pattern stays
+# linear on adversarial lines.
+GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>')
 STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
@@ -289,26 +294,26 @@ def _mask_quoted(if_value: str) -> str:
     """Blot out quoted-literal content, keeping positions (GitHub syntax).
 
     Quoted strings cannot contain operators that matter for the disjunction
-    scan, and GitHub escapes a quote by doubling it — so both quote runs
-    and literal content become spaces.
+    scan, and GitHub escapes a quote by doubling it — so single- and
+    double-quoted runs and their literal content all become spaces.
     """
     out: list[str] = []
-    in_quote = False
+    quote = ""
     index = 0
     length = len(if_value)
     while index < length:
         char = if_value[index]
-        if in_quote:
-            if char == "'":
-                if index + 1 < length and if_value[index + 1] == "'":
+        if quote:
+            if char == quote:
+                if index + 1 < length and if_value[index + 1] == quote:
                     out.append("  ")
                     index += 2
                     continue
-                in_quote = False
+                quote = ""
             out.append(" ")
         else:
-            if char == "'":
-                in_quote = True
+            if char in "'\"":
+                quote = char
             out.append(char)
         index += 1
     return "".join(out)
@@ -354,10 +359,12 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
 
     The text right after the reference covers ``!=`` and ``== false``
     comparisons (including quoted ``'false'``); the text right before
-    covers unary ``!`` and negated ``contains(`` forms.  Both run over the
-    full remaining text, so distant operators (long folded spacing) still
-    count, and they read at mask-verified positions — a literal shaped like
-    a negation cannot negative a separate, real occurrence.
+    covers unary ``!``, negated ``contains(`` forms, and comparison
+    operators whose left operand precedes the reference (``x !=
+    <ref>``, ``false == <ref>``).  Both run over the full remaining text,
+    so distant operators (long folded spacing) still count, and they read
+    at mask-verified positions — a literal shaped like a negation cannot
+    negative a separate, real occurrence.
     """
     after = if_value[match.end():]
     stripped = after.lstrip()
@@ -371,6 +378,10 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
 
     before = if_value[: match.start()]
     if re.search(r"!\s*(?:\(+\s*)?$", before):
+        return True
+    if re.search(r"!\s*=\s*$", before):
+        return True
+    if re.search(r"['\"]?false['\"]?\s*==\s*$", before):
         return True
     if re.search(r"!\s*contains\(\s*$", before):
         return True
