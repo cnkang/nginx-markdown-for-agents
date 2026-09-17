@@ -122,6 +122,20 @@ while IFS= read -r -d '' file; do
         if [[ "$line" =~ ^[[:space:]]*jobs:[[:space:]]*$ ]]; then
             steps_indent=-1
         fi
+        # Flow-style mappings keep the whole input map on one line, where the
+        # block tracker below cannot inspect individual keys; a command-bearing
+        # key with an input interpolation there would go unchecked.  Reject the
+        # form explicitly instead of silently missing it.
+        if [[ "$line" =~ ^[[:space:]]*(-[[:space:]]*)?with:[[:space:]]*\{ ]]; then
+            echo "ERROR: ${rel_path}:${line_num}: flow-style 'with:' mapping cannot be statically validated; use a block-style mapping" >&2
+            echo "  ${line}" >&2
+            echo "  Fix: expand the mapping to block style (one key per line) so command inputs can be checked" >&2
+            findings=$((findings + 1))
+            in_with_block=0
+            with_key=""
+            in_run_block=0
+            continue
+        fi
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with:[[:space:]]*$ ]]; then
             in_with_block=1
             with_indent=$indent_len
