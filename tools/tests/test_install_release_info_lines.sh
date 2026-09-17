@@ -60,6 +60,12 @@ fi
 # Run the resolver with no release inputs: the early exit must still
 # publish exactly six (empty) lines.
 env -i PATH="${PATH}" python3 "$guard_py" > "$guard_out" 2>"$work_dir/guard.err"
+guard_rc=$?
+if [[ "$guard_rc" -eq 0 ]]; then
+    pass "early-exit resolver exits 0"
+else
+    fail "early-exit resolver exits 0" "exit=${guard_rc}; stderr=$(tr '\n' ' ' <"$work_dir/guard.err" | head -c 120)"
+fi
 line_count="$(wc -l < "$guard_out" | tr -d ' ')"
 if [[ "$line_count" -eq 6 ]]; then
     pass "early-exit resolver output is exactly six lines"
