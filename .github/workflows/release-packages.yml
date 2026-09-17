@@ -1166,10 +1166,19 @@ jobs:
           )
           versions = json.loads(sys.argv[1])
           matrix = normalize_document(json.load(open('tools/release-matrix.json')))
+          # The amd64 version set mirrors the versions/package filtering
+          # above: only release-blocking glibc entries owned by this
+          # workflow may contribute a benchmark version, so an unrelated
+          # x86_64 row cannot select a version without an amd64 package.
+          owner = '.github/workflows/release-packages.yml'
           amd64 = {
               e['nginx_version']
               for e in matrix['entries']
               if canonical_arch(e['target']) == 'x86_64'
+              and e.get('owner_workflow') == owner
+              and e.get('support_tier') == 'supported'
+              and e.get('libc') == 'glibc'
+              and e.get('release_blocking') is True
           }
           print(next((v for v in versions if v in amd64), '') if versions else '')
           " "${NGINX_VERSIONS}")"
