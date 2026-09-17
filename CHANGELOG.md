@@ -41,7 +41,10 @@ before/after examples.
   `markdown_parse_timeout`, `markdown_parser_budget`, and
   `markdown_decompress_max_size`. `markdown_stream_flush_min` has no
   replacement. Four directives map to `markdown_limits`. Use downstream
-  buffering for the removed flush directive. Use key=value syntax for
+  buffering for the removed flush directive. The seven names highlighted in
+  the upgrade guide (the five convergence names plus `markdown_profile` and
+  `markdown_streaming_zero_copy`) are a subset of this inventory. Use
+  key=value syntax for
   `streaming_buffer=`,
   `parser_timeout=`, `parser_budget=`, and `decompressed_size=`.
 - **Rust API removals: LLM adapter and the incremental API.** The release
