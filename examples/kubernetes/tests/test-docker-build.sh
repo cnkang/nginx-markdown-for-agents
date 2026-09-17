@@ -183,10 +183,11 @@ resolve_module_sha() {
         return 2
     fi
     probe_rc=0
-    # Mirror the image build's resolution: try the exact MODULE_SHA first,
-    # retry with an explicitly provided MODULE_REF when the SHA fetch
-    # fails, and only accept when the fetched commit is exactly MODULE_SHA.
-    git -C "$probe_dir" fetch -q "$MODULE_REPO" "$MODULE_SHA" \
+    # Probe reachability from the isolated empty object store, mirroring the
+    # image build's resolution: the exact MODULE_SHA first, then an
+    # explicitly provided MODULE_REF, verifying the resolved commit is
+    # exactly MODULE_SHA before accepting.
+    git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA" \
         >/dev/null 2>&1 || probe_rc=$?
     if [[ "$probe_rc" -ne 0 && -n "$MODULE_REF" ]]; then
         probe_rc=0
