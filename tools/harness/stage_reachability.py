@@ -135,7 +135,7 @@ def _conditional_delta(line: str) -> int | None:
     return None
 
 
-ASSIGNMENT_OPERATORS = (":=", "?=", "+=", "=")
+ASSIGNMENT_OPERATORS = (":=", "?=", "+=", "!=", "=")
 
 ASSIGNMENT_PREFIX = re.compile(r"(?:override|export)\s+")
 
@@ -219,6 +219,12 @@ def _apply_assignment(
     if operator == "=":
         variables[name] = value
         simple.discard(name)
+        return
+    if operator == "!=":
+        # A shell assignment's value comes from running its command; the
+        # result cannot be known here, so the variable is dropped rather
+        # than trusted.
+        _drop(name, variables, simple)
         return
     expanded = _expand(value, variables)
     if VARIABLE.search(expanded):
@@ -370,14 +376,15 @@ def _consume_make_line(
     """Read one recipe, assignment or target line; return its target."""
     if line.startswith("\t"):
         return _consume_recipe(line, recipes, generation, current)
-    assignment = _assignment(_strip_assignment_prefixes(line))
+    stripped = line.strip()
+    assignment = _assignment(_strip_assignment_prefixes(stripped))
     if assignment is not None:
         _apply_assignment(assignment, variables, simple)
         return None
-    recorded = _record_target(line, dependencies, generation, variables)
+    recorded = _record_target(stripped, dependencies, generation, variables)
     if recorded is not None:
         return recorded
-    return None if line.strip() and not line.startswith("#") else current
+    return None if stripped and not stripped.startswith("#") else current
 
 
 def _make_include_line(line: str) -> bool:
