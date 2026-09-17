@@ -314,6 +314,15 @@ http {{\n\
             proxy_set_header Accept \"\";\n\
             proxy_pass http://fixture_backend;\n\
         }}\n\
+        location /md-off/ {{\n\
+            markdown_filter off;\n\
+            markdown_accept force;\n\
+            markdown_streaming off;\n\
+            markdown_auth_policy allow;\n\
+            markdown_auth_cookies session* auth_token PHPSESSID rememberme;\n\
+            proxy_set_header Accept \"\";\n\
+            proxy_pass http://fixture_backend;\n\
+        }}\n\
     }}\n\
 }}\n",
         error_log.display(),

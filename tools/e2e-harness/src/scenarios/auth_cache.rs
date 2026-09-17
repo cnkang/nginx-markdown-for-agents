@@ -32,6 +32,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
     let md_url = format!("{base_url}/md/html");
     let md_deny_url = format!("{base_url}/md-deny/html");
+    let md_off_url = format!("{base_url}/md-off/html");
 
     let mut markdown_headers = HashMap::new();
     markdown_headers.insert("Accept".to_string(), "text/markdown".to_string());
@@ -51,6 +52,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     case5_auth_cache_control_presence(&md_url, &auth_headers, &mut assertions);
     case6_nonauth_etag_replacement(&md_url, &markdown_headers, &mut assertions);
     case7_vary_cookie(&md_url, &auth_headers, &mut assertions);
+    case8_filter_off_auth_sanitized(&md_off_url, &auth_headers, &mut assertions);
 
     Ok(common::finalize_report(SCENARIO, start, assertions))
 }
@@ -257,6 +259,43 @@ fn case7_vary_cookie(
             } else {
                 vary_value
             },
+            message: None,
+        });
+    }
+}
+
+/// Case 8: `markdown_filter off` pass-through with an auth cookie still
+/// receives the auth-aware cache sanitization: the upstream `public`
+/// Cache-Control must not reach the client on this path either, and the
+/// pass-through keeps the original HTML body.
+fn case8_filter_off_auth_sanitized(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(resp) =
+        common::try_get_with_headers(url, headers, assertions, "case8_filter_off_auth")
+    {
+        assertions.push(assertions::assert_status(
+            "case8_filter_off_auth_status_200",
+            resp.status,
+            200,
+        ));
+        let cc_value = common::header_value(&resp.headers, "Cache-Control");
+        let contains_public = cc_value.contains("public");
+        assertions.push(AssertionResult {
+            name: "case8_filter_off_auth_no_public_cache".to_string(),
+            passed: !contains_public,
+            expected: "filter-off auth response Cache-Control contains no public".to_string(),
+            actual: cc_value,
+            message: None,
+        });
+        let content_type = common::header_value(&resp.headers, "Content-Type");
+        assertions.push(AssertionResult {
+            name: "case8_filter_off_auth_passthrough_html".to_string(),
+            passed: content_type.contains("text/html"),
+            expected: "filter-off pass-through preserves the upstream text/html body".to_string(),
+            actual: content_type,
             message: None,
         });
     }
