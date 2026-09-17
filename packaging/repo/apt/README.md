@@ -344,8 +344,8 @@ if [[ "${actual_fingerprints}" != "${expected_fingerprints}" ]] \
 fi
 # Install the keyring directly from the checked-in .asc file; the
 # temporary keyring above is used only for fingerprint verification.
-sudo gpg --dearmor \
-    -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg \
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg \
     < packaging/nginx-markdown-for-agents-release.asc
 ```
 

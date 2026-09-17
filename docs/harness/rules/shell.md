@@ -114,34 +114,45 @@ run_case || rc=$?
   a regex-capable command (for example `needle=...` assigned before
   `grep -E "$needle"`), not just variables named `pattern=` or `regex=`:
   ```bash
-  # 1) PCRE classes on regex-command or pattern-assignment lines. Construct
-  #    the backslash at runtime so the gate can scan its own source without
-  #    matching the detector's example as a prohibited literal.
-  _backslash='\'
+  # 0) Build a shell-only view of each detector first: skip the body of every
+  #    embedded Python heredoc (<<'PY' .. PY) before running the greps. Those
+  #    bodies use Python re semantics and are exempt, so only shell command
+  #    and shell assignment lines are validated below.
+  _backslash='\'   # constructed at runtime so the gate can scan its own
+                   # source without matching the detector's example
   _pcre_needle="${_backslash}${_backslash}s|${_backslash}${_backslash}d|${_backslash}${_backslash}w"
-  # Match regex-capable commands OR any shell variable assignment (the
-  # assigned value may later feed a regex command, e.g. needle=... before
-  # grep -E "$needle").  Known non-regex assignments (e.g. entry_pattern
-  # used to build allowlists) are skipped by the allowlist in the
-  # detector, not by this filter.
-  if grep -REn "${_pcre_needle}" tools/harness/detect_*.sh \
-      | sed -E 's/^[^:]*:[0-9]+://' \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
-      | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
-     echo "FAIL: prohibited PCRE regex classes found" >&2
-     exit 1
-  fi
-  # 2) BRE-only grouping on regex-capable command lines and shell pattern
-  #    assignments. Embedded Python heredocs are exempt: they use Python re
-  #    semantics.
   _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
-  if grep -REn "${_bre_needle}" tools/harness/detect_*.sh \
-      | sed -E 's/^[^:]*:[0-9]+://' \
-      | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
-      | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
-     echo "FAIL: BRE-only grouping syntax found" >&2
-     exit 1
-  fi
+  for _detector in tools/harness/detect_*.sh; do
+      _shell_lines="$(awk '
+          /<<-?[[:space:]]*'\''?PY'\''?/ { skip = 1 }
+          skip && /^PY$/ { skip = 0; next }
+          skip { next }
+          { print }
+      ' "${_detector}")"
+      # 1) PCRE classes on regex-command or pattern-assignment lines.
+      #    Match regex-capable commands OR any shell variable assignment (the
+      #    assigned value may later feed a regex command, e.g. needle=...
+      #    before grep -E "$needle").  Known non-regex assignments (e.g.
+      #    entry_pattern used to build allowlists) are skipped by the
+      #    allowlist in the detector, not by this filter.
+      if printf '%s\n' "${_shell_lines}" \
+          | grep -E "${_pcre_needle}" \
+          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+          | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
+         echo "FAIL: prohibited PCRE regex classes found in ${_detector}" >&2
+         exit 1
+      fi
+      # 2) BRE-only grouping on regex-capable command lines and shell pattern
+      #    assignments.  Embedded Python heredoc bodies were already skipped
+      #    by step 0: they use Python re semantics.
+      if printf '%s\n' "${_shell_lines}" \
+          | grep -E "${_bre_needle}" \
+          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+          | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
+         echo "FAIL: BRE-only grouping syntax found in ${_detector}" >&2
+         exit 1
+      fi
+  done
   ```
   (Python `re` patterns inside detectors are exempt: they use Python
   regex semantics, not POSIX ERE. The `detect_header_hash_filter.sh`

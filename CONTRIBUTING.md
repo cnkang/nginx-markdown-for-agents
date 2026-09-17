@@ -286,7 +286,7 @@ make -C components/nginx-module/tests unit-eligibility
 ### Test Coverage
 
 - Aim for >80% code coverage for new code
-- Critical paths should have >95% coverage
+- Critical paths must keep >=90% line coverage (`COVERAGE_CRITICAL_MIN`, enforced by `tools/ci/coverage_gate.py`)
 - Include edge cases and error conditions
 
 ## Continuous Integration

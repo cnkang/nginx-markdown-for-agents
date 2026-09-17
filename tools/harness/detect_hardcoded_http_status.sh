@@ -23,6 +23,7 @@
 # Exit codes:
 #   0 — no findings (advisory by default)
 #   1 — usage error or findings in --strict mode
+#   2 — scan setup failure (temp file, creation, enumeration, or unreadable source)
 
 set -euo pipefail
 
