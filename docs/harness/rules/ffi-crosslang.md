@@ -110,8 +110,10 @@ Required:
   documented fallback path — it must not re-enter the handle's normal
   entry points hoping the failure was transient.  `markdown_streaming_feed`
   is the reference case: any non-`ERROR_SUCCESS` return means no further
-  `feed`, and no `finalize`/`safe_finish`; only
-  `markdown_streaming_abort` may follow (the C layer already routes every
+  `feed` and never a `finalize`; after a **post-commit** failure
+  (`ERROR_POST_COMMIT`) the caller may instead close the handle with
+  `markdown_streaming_safe_finish`, and every other non-success return
+  allows only `markdown_streaming_abort` (the C layer already routes every
   non-zero `feed` result to abort / safe-finish and clears its handle).
   The abort path must always work.  Document this contract in the Rust
   doc comment next to the entry point, not only here — the C caller reads

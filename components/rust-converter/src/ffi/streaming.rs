@@ -19,10 +19,12 @@
 //! # Error contract
 //!
 //! Once [`markdown_streaming_feed`] returns any code other than
-//! `ERROR_SUCCESS` (0), the handle must not be driven again: no further
-//! `feed`, and no `finalize` or `safe_finish`. The only permitted
-//! continuation is [`markdown_streaming_abort`], which releases it. The full
-//! statement, including the poisoned-handle rule, lives on
+//! `ERROR_SUCCESS` (0), the handle must not be driven again by `feed` and
+//! never by `finalize`. After a post-commit failure (`ERROR_POST_COMMIT`,
+//! 8) the caller may instead close the handle with
+//! [`markdown_streaming_safe_finish`]; every other non-success return
+//! permits only [`markdown_streaming_abort`], which releases the handle.
+//! The full statement, including the poisoned-handle rule, lives on
 //! [`markdown_streaming_feed`].
 //!
 //! # Memory ownership
