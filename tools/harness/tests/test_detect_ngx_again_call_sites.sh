@@ -170,6 +170,37 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
+# 5. Abort path: a scratch-file failure exits 2 without leaking temp files.
+stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub.XXXXXX")"
+abort_tmp="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-abort.XXXXXX")"
+abort_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc.XXXXXX")"
+mkdir -p "${abort_src}/src"
+cat >"${stub_dir}/mktemp" <<'STUB'
+#!/bin/bash
+if [[ "${1:-}" == *ngx-again-files* ]]; then
+    exit 1
+fi
+if [[ $# -eq 0 ]]; then
+    exec /usr/bin/mktemp "${TMPDIR:?}/tmp.XXXXXX"
+fi
+exec /usr/bin/mktemp "$@"
+STUB
+chmod +x "${stub_dir}/mktemp"
+
+exit_code=0
+PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
+    bash "${DETECTOR}" "${abort_src}" >"${abort_tmp}/detector.out" 2>&1 || exit_code=$?
+leaked="$(find "${abort_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
+if [[ "${exit_code}" -eq 2 ]] \
+    && grep -q 'cannot create the file list' "${abort_tmp}/detector.out" \
+    && [[ "${leaked}" -eq 0 ]]; then
+    pass "a scratch-file failure exits 2 without leaking temp files"
+else
+    fail "a scratch-file failure exits 2 without leaking temp files" \
+        "exit=${exit_code}; leaked=${leaked}"
+fi
+rm -rf "${stub_dir}" "${abort_tmp}" "${abort_src}"
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1
