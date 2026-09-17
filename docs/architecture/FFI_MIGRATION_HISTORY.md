@@ -54,7 +54,7 @@ release metadata and is not a substitute for this ABI identifier.
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
 | Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration, while Rust exposes only production APIs consumed by C, covering request-path decisions only: the runtime dynamic-configuration parser was removed in 0.9.2 |
-| `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | The whole incremental conversion surface left with the `IncrementalConverter` type; the streaming API replaced its use case | Removed, no replacement |
+| `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | The whole incremental conversion surface left with the `IncrementalConverter` type; the streaming API replaced its use case | Removed; no one-to-one replacement exists. Consumers migrate to the streaming API lifecycle (`markdown_streaming_*`) documented in `FFI_ABI_COMPATIBILITY.md` and [RFC-0008-streaming-conversion-support-contract.md](RFC-0008-streaming-conversion-support-contract.md) |
 
 ## Shared struct policy
 
