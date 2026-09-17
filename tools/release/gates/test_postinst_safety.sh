@@ -451,6 +451,48 @@ fi
 
 printf '\n'
 
+# --- Regression: an indented closing brace must not hide a later PATH reassignment (must exit 1) ---
+cat > "$TMPDIR_TEST/indented_brace_path_reassign.sh" <<'FIXTURE'
+#!/bin/bash
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+if true; then
+    echo x
+fi
+do_thing() {
+    echo y
+  }
+PATH=/tmp/evil:/usr/bin
+exit 0
+FIXTURE
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/indented_brace_path_reassign.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 1 ]]; then
+    pass "indented closing brace does not hide a later PATH reassignment (exits 1)"
+else
+    fail "indented closing brace does not hide a later PATH reassignment (exits 1)" "expected exit 1, got exit $local_exit"
+fi
+
+# --- Regression: a quoted prose note before the trusted PATH is not a command (must exit 0) ---
+cat > "$TMPDIR_TEST/prose_note_before_path.sh" <<'FIXTURE'
+#!/bin/bash
+NOTE="run sed -i on the config to fix it"
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+exit 0
+FIXTURE
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/prose_note_before_path.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 0 ]]; then
+    pass "quoted prose note before the trusted PATH is not a command (exits 0)"
+else
+    fail "quoted prose note before the trusted PATH is not a command (exits 0)" "expected exit 0, got exit $local_exit"
+fi
+
+printf '\n'
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
