@@ -284,6 +284,9 @@ mask_command_text() {
     local ch
     local quote=""
     local span=""
+    local fused
+    local prev_last
+    local next_ch
 
     while [[ "$i" -lt "$n" ]]; do
         ch="${text:$i:1}"
@@ -303,10 +306,32 @@ mask_command_text() {
                 && [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
                 # Keep a double-quoted span whose substitutions still run.
                 out+='"'"$span"'"'
-            elif [[ "$quote" == '"' ]]; then
-                out+='"'
             else
-                out+="''"
+                # A span fused to adjacent word characters (`NOTE="run "sed`)
+                # belongs to one shell word: replacing it with a quote would
+                # invent a command boundary the shell does not have.  A span
+                # that stands alone keeps the old quote placeholder behavior.
+                fused=0
+                prev_last=""
+                if [[ -n "$out" ]]; then
+                    prev_last="${out:${#out}-1:1}"
+                fi
+                next_ch="${text:$((i + 1)):1}"
+                case "$prev_last" in
+                    ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
+                    *) fused=1 ;;
+                esac
+                case "$next_ch" in
+                    ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
+                    *) fused=1 ;;
+                esac
+                if [[ "$fused" -eq 1 ]]; then
+                    out+="x"
+                elif [[ "$quote" == '"' ]]; then
+                    out+='"'
+                else
+                    out+="''"
+                fi
             fi
             quote=""
             i=$((i + 1))
