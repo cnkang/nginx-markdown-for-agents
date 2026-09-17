@@ -534,8 +534,8 @@ def _is_wire_compressed(body: bytes) -> bool:
     is_gzip = body.startswith(b"\x1f\x8b")
     is_zlib = (
         len(body) >= 2
-        and body[0] == 0x78
-        and body[1] in (0x01, 0x5E, 0x9C, 0xDA)
+        and (body[0] & 0x0F) == 8
+        and ((body[0] << 8) | body[1]) % 31 == 0
     )
     # Brotli streams have no fixed magic number, but the Brotli window byte
     # starts with WBITS in the low 4 bits (1-24) and the stream typically
