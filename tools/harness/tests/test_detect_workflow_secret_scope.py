@@ -750,3 +750,29 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_distant_unary_negation_is_recognized(self):
+        """Folded spacing does not hide a unary negation of the reference."""
+        assert not secret_scope_module._references_gate(
+            "!" + " " * 30 + "steps.token.outputs.enabled",
+            "token",
+            {"enabled"},
+        )
+
+    def test_distant_false_comparison_is_recognized(self):
+        """Folded spacing does not hide an ``== 'false'`` comparison."""
+        assert not secret_scope_module._references_gate(
+            "steps.token.outputs.enabled" + " " * 30 + "== 'false'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_repeated_reference_positions_are_independent(self):
+        """An occurrence nested under a disjunction must not disqualify a
+        separate top-level occurrence."""
+        assert secret_scope_module._references_gate(
+            "(a || steps.token.outputs.enabled) && "
+            "steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
