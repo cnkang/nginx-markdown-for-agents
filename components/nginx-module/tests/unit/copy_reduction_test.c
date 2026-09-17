@@ -879,7 +879,7 @@ test_empty_decompressed_payload_releases_compressed_buffer(void)
  * would bypass the one place the gate is defined.
  *
  * This test drives the production handler with an effective view whose
- * error_policy is REJECT and asserts:
+ * error_policy is PASS (fail-open) and asserts:
  *   - the helper stub was invoked exactly once (the production code calls
  *     it rather than incrementing the counter inline), and
  *   - the raw metric macro was not used for failopen_count (the helper
