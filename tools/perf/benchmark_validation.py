@@ -535,6 +535,7 @@ def _is_wire_compressed(body: bytes) -> bool:
     is_zlib = (
         len(body) >= 2
         and (body[0] & 0x0F) == 8
+        and (body[0] >> 4) <= 7
         and ((body[0] << 8) | body[1]) % 31 == 0
     )
     # Brotli streams have no fixed magic number, but the Brotli window byte

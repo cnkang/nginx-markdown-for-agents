@@ -19,5 +19,10 @@ def test_zlib_header_with_invalid_fcheck_is_not_compressed():
     assert not _is_wire_compressed(b"\x78\x1d" + b"\x00" * 8)
 
 
+def test_zlib_header_with_reserved_cinfo_is_not_compressed():
+    """CINFO above 7 is reserved; such a header is not a valid zlib stream."""
+    assert not _is_wire_compressed(b"\x88\x1c" + b"\x00" * 8)
+
+
 def test_gzip_magic_is_still_detected():
     assert _is_wire_compressed(b"\x1f\x8b" + b"\x00" * 8)
