@@ -567,7 +567,7 @@ This implementation satisfies the following requirements:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-18 | Hermes | conversion_memory expected behavior states the 64k..1g range and conversion_timeout states the 1ms..1h range |
+| 0.9.2 | 2026-09-17 | Hermes | conversion_memory expected behavior states the 64k..1g range and conversion_timeout states the 1ms..1h range |
 | 0.9.2 | 2026-08-08 | Kang | Fixed markdown_limits key names (conversion_memory, conversion_timeout); marked markdown_buffer_chunked removed in 0.9.2 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

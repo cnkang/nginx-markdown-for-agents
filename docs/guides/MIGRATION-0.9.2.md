@@ -540,7 +540,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
-| 0.9.2 | 2026-09-18 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
+| 0.9.2 | 2026-09-17 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
 | 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |

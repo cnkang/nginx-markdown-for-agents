@@ -337,7 +337,7 @@ After building successfully:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-18 | Hermes | Corrected the frozen contract artifact count to six and added pre-lts-status.json to the enumerated list |
+| 0.9.2 | 2026-09-17 | Hermes | Corrected the frozen contract artifact count to six and added pre-lts-status.json to the enumerated list |
 | 0.9.2 | 2026-08-24 | Kang | Clarified that only the six frozen contract artifacts may be committed under artifacts/release/0.9.2 |
 | 0.9.2 | 2026-08-15 | Hermes | State explicitly that Git ignores generated evidence under artifacts/ |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
