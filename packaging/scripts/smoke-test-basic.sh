@@ -397,6 +397,20 @@ CONF
     fi
     info "Positive module request verified Content-Type, Vary, and Markdown body"
 
+    # A partially configured harness is its own failure mode and must be
+    # reported even when the diagnostics request itself did not succeed;
+    # detect it before the request so the signal cannot be masked.
+    if [[ -n "${EXPECTED_SOURCE_SHA:-}" \
+        || -n "${EXPECTED_RUST_VERSION:-}" \
+        || -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+        if [[ -z "${EXPECTED_SOURCE_SHA:-}" \
+            || -z "${EXPECTED_RUST_VERSION:-}" \
+            || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+            diagnostics_ok=0
+            diagnostics_harness_incomplete=1
+        fi
+    fi
+
     info "Reading diagnostics from the loaded package module..."
     if "$curl_bin" -fsS -o "$diagnostics_file" \
         http://127.0.0.1:19999/nginx-markdown/diagnostics; then
@@ -405,14 +419,9 @@ CONF
             diagnostics_ok=1
         fi
         if [[ -n "${EXPECTED_SOURCE_SHA:-}" \
-            || -n "${EXPECTED_RUST_VERSION:-}" \
-            || -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
-            if [[ -z "${EXPECTED_SOURCE_SHA:-}" \
-                || -z "${EXPECTED_RUST_VERSION:-}" \
-                || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
-                diagnostics_ok=0
-                diagnostics_harness_incomplete=1
-            elif ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
+            && -n "${EXPECTED_RUST_VERSION:-}" \
+            && -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+            if ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
                 || ! grep -Fq "\"source_sha\":\"${EXPECTED_SOURCE_SHA}\"" \
                     "$diagnostics_file" \
                 || ! grep -Fq "\"rust_version\":\"${EXPECTED_RUST_VERSION}\"" \
