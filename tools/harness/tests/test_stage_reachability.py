@@ -700,6 +700,20 @@ def test_a_shell_assignment_invalidates_its_variable() -> None:
     assert CHECK in reach.reachable_commands(plain, ["make root"], PROFILE, [])
 
 
+def test_a_target_naming_a_shell_assigned_variable_is_uncertifiable() -> None:
+    """A prerequisite referencing a `!=` variable stays a literal token, so
+    the target is reported uncertifiable: its recipe is not certified
+    instead of the unknown prerequisite being silently blanked away."""
+    makefile = (
+        "LIST != echo other\n"
+        "root: $(LIST)\n"
+        f"\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
 def test_a_space_indented_comment_keeps_the_recipe_open() -> None:
     """An indented comment between recipe lines does not end the recipe."""
     makefile = (
