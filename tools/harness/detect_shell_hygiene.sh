@@ -242,6 +242,15 @@ readonly WARNING_ALLOWLIST=(
 # shell snippets inside their heredocs are data, not code under review.
 readonly RETURN_EXEMPT_FILES=(
     "tools/harness/tests/test_check_postinst_safety.sh"
+    "tools/harness/tests/test_detect_shell_hygiene.sh"
+)
+
+# Files exempt from patterns (b) stdout diagnostics, (c) single-bracket
+# tests, (d) case-without-default, and (e) curl -X HEAD: fixture tests
+# intentionally embed the defect shapes they assert on, so the snippets
+# inside their heredocs are data, not code under review.
+readonly FIXTURE_EXEMPT_FILES=(
+    "tools/harness/tests/test_detect_shell_hygiene.sh"
 )
 
 # Files exempt from pattern (f) ($? inside negated conditionals):
@@ -268,15 +277,37 @@ WARNING_ENTRY_COUNT=0
 # For accuracy we count brace depth from the opening brace.
 echo "--- Pattern (a): Functions without explicit return statement ---" >&2
 
-# awk failure sentinel: `|| true` on an awk feed would swallow a failed
-# scan (unreadable file, awk syntax abort) and silently report a clean
-# result.  Each feed appends its exit status to a status file — process
-# substitutions run in a subshell, so in-memory counters would not
-# survive — and the summary replays the file as hard errors.
+# Scan-failure sentinel: `|| true` on an awk/grep feed would swallow a failed
+# scan (unreadable file, awk syntax abort) and silently report a clean result.
+# Each feed appends its exit status to a status file — process substitutions
+# run in a subshell, so in-memory counters would not survive — and the summary
+# replays the file as hard errors.  Only rc 0 (matches/report) and rc 1 (no
+# matches/report) are clean outcomes for a scan feed; anything else is an
+# incomplete scan.
 AWK_STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-awk.XXXXXX")"
+GREP_MATCH_FILE="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-grep.XXXXXX")"
+GREP_STDERR_FILE="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-grep-err.XXXXXX")"
 SHELL_FILE_LIST="$(mktemp "${TMPDIR:-/tmp}/shell-hygiene-files.XXXXXX")"
-trap 'rm -f "$AWK_STATUS_FILE" "$SHELL_FILE_LIST"' EXIT
+trap 'rm -f "$AWK_STATUS_FILE" "$GREP_MATCH_FILE" "$GREP_STDERR_FILE" "$SHELL_FILE_LIST"' EXIT
 : >"$AWK_STATUS_FILE"
+
+# Run one recursive grep feed and record a hard failure instead of hiding it.
+#   $1 matches file (scan output)  $2 stderr file  $3 label  $4... grep args
+# The caller then filters the matches file with a second, non-scanning grep.
+harness_grep_feed() {
+    local matches_file="$1"
+    local stderr_file="$2"
+    local label="$3"
+    shift 3
+
+    : >"$stderr_file"
+    local rc=0
+    grep "$@" >"$matches_file" 2>"$stderr_file" || rc=$?
+    if [[ "$rc" -gt 1 ]]; then
+        printf '%s\n' "grep:${rc}:${label}" >>"$AWK_STATUS_FILE"
+    fi
+    return 0
+}
 if ! harness_collect_find0 "$SHELL_FILE_LIST" "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null; then
     echo "ERROR: cannot enumerate shell scripts in $SCAN_DIR" >&2
     exit 2
@@ -361,12 +392,34 @@ echo "" >&2
 # SUGGEST markers that lack >&2 redirection.
 echo "--- Pattern (b): Diagnostic messages missing stderr redirection ---" >&2
 
+# Two-step feed: the recursive scan must report its own exit status (an
+# unreadable tree makes grep exit 2 and produce no output), and only then is
+# the match list filtered.  A single pipeline would lose the scan status.
+harness_grep_feed "$GREP_MATCH_FILE" "$GREP_STDERR_FILE" \
+    "pattern (b) diagnostic-stdout scan" \
+    -rnE '(echo|printf)[[:space:]].*\b(INFO|WARN|WARNING|DEBUG|ERROR|SUGGEST)\b' \
+    "$SCAN_DIR" --include='*.sh'
+if [[ -s "$GREP_STDERR_FILE" ]]; then
+    cat "$GREP_STDERR_FILE" >&2
+fi
+
 stderr_hits=0
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
+    # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
+    skip_fixture=0
+    for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
+        if [[ "$file" == *"$exempt"* ]]; then
+            skip_fixture=1
+            break
+        fi
+    done
+    if [[ "$skip_fixture" -eq 1 ]]; then
+        continue
+    fi
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
@@ -400,7 +453,7 @@ while IFS= read -r match; do
     stderr_hits=$((stderr_hits + 1))
     WARNING_ENTRIES+=("${file}:stderr:line${line}")
     WARNING_ENTRY_COUNT=$((WARNING_ENTRY_COUNT + 1))
-done < <(grep -rnE '(echo|printf)[[:space:]].*\b(INFO|WARN|WARNING|DEBUG|ERROR|SUGGEST)\b' "$SCAN_DIR" --include='*.sh' 2>/dev/null | grep -vE '>&2' || true)
+done < "$GREP_MATCH_FILE"
 
 if [[ "$stderr_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
@@ -414,12 +467,31 @@ echo "" >&2
 # conditional tests in bash scripts must use [[ ]].
 echo "--- Pattern (c): Single-bracket [ ] instead of [[ ]] (S7688) ---" >&2
 
+harness_grep_feed "$GREP_MATCH_FILE" "$GREP_STDERR_FILE" \
+    "pattern (c) single-bracket scan" \
+    -rnE '(^|[[:space:];])(if|while|until|elif)[[:space:]]+\[[[:space:]][^[]' \
+    "$SCAN_DIR" --include='*.sh'
+if [[ -s "$GREP_STDERR_FILE" ]]; then
+    cat "$GREP_STDERR_FILE" >&2
+fi
+
 bracket_hits=0
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
+    # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
+    skip_fixture=0
+    for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
+        if [[ "$file" == *"$exempt"* ]]; then
+            skip_fixture=1
+            break
+        fi
+    done
+    if [[ "$skip_fixture" -eq 1 ]]; then
+        continue
+    fi
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
@@ -457,7 +529,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — use '[[ ]]' instead of '[ ]': ${content}" >&2
     errors=$((errors + 1))
     bracket_hits=$((bracket_hits + 1))
-done < <(grep -rnE '(^|[[:space:];])(if|while|until|elif)[[:space:]]+\[[[:space:]][^[]' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
+done < "$GREP_MATCH_FILE"
 
 if [[ "$bracket_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
@@ -472,6 +544,17 @@ echo "--- Pattern (d): case statements without default *) clause (S131) ---" >&2
 
 case_hits=0
 while IFS= read -r -d '' script_file; do
+    # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
+    skip_fixture=0
+    for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
+        if [[ "$script_file" == *"$exempt"* ]]; then
+            skip_fixture=1
+            break
+        fi
+    done
+    if [[ "$skip_fixture" -eq 1 ]]; then
+        continue
+    fi
     # Use awk to find case/esac blocks and check for *) default
     while IFS=: read -r case_line has_default; do
         if [[ -z "$case_line" ]]; then
@@ -517,12 +600,30 @@ echo "" >&2
 # fix in commit e0f3948, prefer --head.
 echo "--- Pattern (e): curl -X HEAD instead of --head / -I ---" >&2
 
+harness_grep_feed "$GREP_MATCH_FILE" "$GREP_STDERR_FILE" \
+    "pattern (e) HEAD-request scan" \
+    -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh'
+if [[ -s "$GREP_STDERR_FILE" ]]; then
+    cat "$GREP_STDERR_FILE" >&2
+fi
+
 curl_head_hits=0
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
     fi
     file="$(echo "$match" | cut -d: -f1)"
+    # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
+    skip_fixture=0
+    for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
+        if [[ "$file" == *"$exempt"* ]]; then
+            skip_fixture=1
+            break
+        fi
+    done
+    if [[ "$skip_fixture" -eq 1 ]]; then
+        continue
+    fi
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines (lines starting with # or echo of description strings)
@@ -540,7 +641,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — use 'curl --head' or 'curl -I' instead of 'curl -X HEAD': ${content}" >&2
     errors=$((errors + 1))
     curl_head_hits=$((curl_head_hits + 1))
-done < <(grep -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
+done < "$GREP_MATCH_FILE"
 
 if [[ "$curl_head_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
@@ -568,6 +669,14 @@ while IFS= read -r -d '' script_file; do
         continue
     fi
     # Single-line form first: `if ! cmd; then rc=$?; fi`
+    # The per-file grep keeps its own status: an unreadable file exits 2 and
+    # would otherwise be indistinguishable from "no matches".
+    harness_grep_feed "$GREP_MATCH_FILE" "$GREP_STDERR_FILE" \
+        "pattern (f) negated-\$? scan of ${script_file}" \
+        -nE '^[[:space:]]*(if|elif|while|until)[[:space:]]+!.*\$\?' "$script_file"
+    if [[ -s "$GREP_STDERR_FILE" ]]; then
+        cat "$GREP_STDERR_FILE" >&2
+    fi
     while IFS=: read -r hit_line hit_content; do
         [[ -z "$hit_line" ]] && continue
         # Skip the prescribed capture idiom `|| rc=$?`.
@@ -577,7 +686,7 @@ while IFS= read -r -d '' script_file; do
         echo "  ERROR   ${script_file}:${hit_line} — \$? inside a negated conditional reads the negated status; capture with 'cmd || rc=\$?': ${hit_content}" >&2
         errors=$((errors + 1))
         negation_hits=$((negation_hits + 1))
-    done < <(grep -nE '^[[:space:]]*(if|elif|while|until)[[:space:]]+!.*\$\?' "$script_file" 2>/dev/null || true)
+    done < "$GREP_MATCH_FILE"
 
     # Multi-line form: track open negated conditions across lines.
     while IFS=: read -r hit_line hit_content; do
@@ -837,11 +946,18 @@ for entry in ${WARNING_ENTRIES[@]+"${WARNING_ENTRIES[@]}"}; do
 done
 
 # ── Summary ──
-HYGIENE_AWK_ERRORS=0
+# The status file carries both feed kinds: "awk:<rc>:<file>" per-file awk
+# analyses and "grep:<rc>:<label>" recursive grep feeds.  Either one failing
+# means the scan never saw part of the tree, so both are hard errors.
+HYGIENE_FEED_ERRORS=0
 if [[ -s "$AWK_STATUS_FILE" ]]; then
-    while IFS=: read -r _awk_tag awk_rc awk_file; do
-        echo "  ERROR   ${awk_file} — awk analysis failed (exit ${awk_rc})" >&2
-        HYGIENE_AWK_ERRORS=$((HYGIENE_AWK_ERRORS + 1))
+    while IFS=: read -r feed_tag feed_rc feed_target; do
+        if [[ "$feed_tag" == "grep" ]]; then
+            echo "  ERROR   ${feed_target} — grep scan failed (exit ${feed_rc})" >&2
+        else
+            echo "  ERROR   ${feed_target} — awk analysis failed (exit ${feed_rc})" >&2
+        fi
+        HYGIENE_FEED_ERRORS=$((HYGIENE_FEED_ERRORS + 1))
     done <"$AWK_STATUS_FILE"
     echo "" >&2
 fi
@@ -850,8 +966,8 @@ echo "  Errors:   ${errors}" >&2
 echo "  Warnings: ${warnings} (${non_exempt_warnings} non-allowlisted)" >&2
 echo "" >&2
 
-if [[ "$HYGIENE_AWK_ERRORS" -gt 0 ]]; then
-    echo "FAIL: ${HYGIENE_AWK_ERRORS} awk scan failure(s) — results incomplete" >&2
+if [[ "$HYGIENE_FEED_ERRORS" -gt 0 ]]; then
+    echo "FAIL: ${HYGIENE_FEED_ERRORS} scan feed failure(s) — results incomplete" >&2
     exit 1
 fi
 

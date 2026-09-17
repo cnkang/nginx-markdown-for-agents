@@ -236,7 +236,8 @@ class TestFailClosed:
         assert "SCAN_ERROR" in result.stderr
 
     def test_non_strict_does_not_print_ok_with_errors(self, tmp_path: Path) -> None:
-        """Non-strict mode must not print 'OK' when scan errors exist."""
+        """Non-strict mode must not print 'OK' when scan errors exist, and must
+        exit non-zero (2): an incomplete scan is never a pass."""
         files = {
             "tools/e2e/test.sh": (
                 "#!/usr/bin/env bash\n"
@@ -256,6 +257,7 @@ class TestFailClosed:
         )
         assert "SCAN_ERROR" in result.stderr
         assert "OK: no contradictory" not in result.stderr
+        assert result.returncode == 2
 
     def test_rust_raw_string(self, tmp_path: Path) -> None:
         """Rust raw-string config is extracted and checked."""

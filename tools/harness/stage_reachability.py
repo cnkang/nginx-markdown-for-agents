@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import re
 import shlex
+from pathlib import Path
 
 
 VARIABLE = re.compile(r"\$\((\w+)\)")
 
 
-CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
+CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)(?:\s|$)")
 
 
 def command_words(line: str) -> list[str]:
@@ -124,14 +125,30 @@ def _conditional_delta(line: str) -> int | None:
     stripped = line.strip()
     if CONDITIONAL_START.match(stripped):
         return 1
-    if re.match(r"endif\b", stripped):
+    if re.match(r"endif(?:\s|$)", stripped):
         return -1
-    if re.match(r"else\b", stripped):
+    if re.match(r"else(?:\s|$)", stripped):
         return 0
     return None
 
 
 ASSIGNMENT_OPERATORS = (":=", "?=", "+=", "=")
+
+ASSIGNMENT_PREFIX = re.compile(r"(?:override|export)\s+")
+
+
+def _strip_assignment_prefixes(line: str) -> str:
+    """Drop Make's `override`/`export` prefixes so the assignment is read.
+
+    Both are modifiers: `override LIST := other` still assigns LIST here, and
+    the value must win over an earlier assignment the way Make applies it.
+    """
+    stripped = line
+    while True:
+        match = ASSIGNMENT_PREFIX.match(stripped)
+        if match is None:
+            return stripped
+        stripped = stripped[match.end():]
 
 
 def _assignment(line: str) -> tuple[str, str, str] | None:
@@ -231,8 +248,89 @@ def _record_target(
     # an earlier one, so the two are kept apart.
     generation[name] = generation.get(name, 0) + 1
     dependencies.setdefault(name, [])
-    dependencies[name].append(_expand(target[1].strip(), variables))
+    expanded = _expand(target[1].strip(), variables)
+    if name == ".IGNORE":
+        # An unresolved scope here could ignore more targets than the file
+        # shows, so it keeps its fail-closed treatment (raised downstream).
+        dependencies[name].append(expanded)
+        return name
+    # Make expands a prerequisite list while it reads the line, so a reference
+    # still open here is undefined at read time and expands to empty; a later
+    # assignment must not fill it in retroactively.
+    dependencies[name].append(VARIABLE.sub("", expanded))
     return name
+
+
+def _existing_leaf(token: str, root: Path | None) -> bool:
+    """Return whether a prerequisite token names an existing file under root.
+
+    Make treats an on-disk file as a satisfied leaf prerequisite, so such a
+    token is not missing; only tokens that are neither declared targets nor
+    existing files leave a target uncertifiable.  Tokens resolving outside
+    the root are refused: certification must not follow a path out of the
+    tree under verification.
+    """
+    if root is None:
+        return False
+    try:
+        base = root.resolve()
+        target = (root / token).resolve()
+    except OSError:
+        return False
+    if not target.is_relative_to(base):
+        return False
+    return target.is_file() or target.is_dir()
+
+
+def _names_broken_target(entry: str, broken: set[str]) -> bool:
+    """Return whether a prerequisite entry names an already-broken target."""
+    return any(token in broken for token in entry.split())
+
+
+def _directly_broken_targets(
+    dependencies: dict[str, list[str]],
+    root: Path | None,
+    declared: set[str],
+) -> set[str]:
+    """Return targets naming a prerequisite outside the declared graph."""
+    return {
+        name
+        for name, entries in dependencies.items()
+        if any(
+            any(
+                token not in declared and not _existing_leaf(token, root)
+                for token in entry.split()
+            )
+            for entry in entries
+        )
+    }
+
+
+def _broken_targets(
+    dependencies: dict[str, list[str]], recipes: dict[str, list[tuple[int, str | None]]],
+    root: Path | None = None,
+) -> set[str]:
+    """Targets whose prerequisites leave the declared graph, transitively.
+
+    Make refuses to build a target with an undeclared prerequisite (or one
+    reachable only through such a target), so none of that subtree is
+    certifiable.  A prerequisite naming an existing file under *root* is a
+    satisfied leaf instead: Make accepts it without a rule.  The resolver
+    under-certifies here instead of over-certifying: a subtree reachable only
+    through a broken prerequisite stays unreached.
+    """
+    declared = set(dependencies) | set(recipes)
+    broken = _directly_broken_targets(dependencies, root, declared)
+    changed = True
+    while changed:
+        changed = False
+        for name, entries in dependencies.items():
+            if name in broken:
+                continue
+            if any(_names_broken_target(entry, broken) for entry in entries):
+                broken.add(name)
+                changed = True
+    return broken
 
 
 def _target_script(
@@ -240,8 +338,11 @@ def _target_script(
     dependencies: dict[str, list[str]],
     recipes: dict[str, list[tuple[int, str | None]]],
     ignored: set[str],
+    broken: set[str],
 ) -> str:
     """Lines a target contributes: its prerequisites, then its last recipe."""
+    if name in broken:
+        return ""
     lines = [f"make {deps}" for deps in dependencies.get(name, []) if deps.strip()]
     entries = recipes.get(name, [])
     if entries and name not in ignored and "*" not in ignored:
@@ -264,7 +365,7 @@ def _consume_make_line(
     """Read one recipe, assignment or target line; return its target."""
     if line.startswith("\t"):
         return _consume_recipe(line, recipes, generation, current)
-    assignment = _assignment(line)
+    assignment = _assignment(_strip_assignment_prefixes(line))
     if assignment is not None:
         _apply_assignment(assignment, variables, simple)
         return None
@@ -278,7 +379,7 @@ def _make_include_line(line: str) -> bool:
     """Return whether a top-level line delegates parsing to another file."""
     if line.startswith("\t"):
         return False
-    return re.match(r"^(?:-?include|sinclude)\b", line.strip()) is not None
+    return re.match(r"^(?:-?include|sinclude)(?:\s|$)", line.strip()) is not None
 
 
 def _update_conditional_depth(delta: int, depth: int) -> int:
@@ -298,7 +399,7 @@ def _poison_conditional_line(
     recipes: dict[str, list[tuple[int, str | None]]],
 ) -> None:
     """Discard uncertain assignments and recipes from a conditional branch."""
-    poisoned = _assignment(line.strip())
+    poisoned = _assignment(_strip_assignment_prefixes(line.strip()))
     if poisoned is not None:
         variables.pop(poisoned[0], None)
         simple.discard(poisoned[0])
@@ -374,10 +475,15 @@ def _runs_profile(words: list[str], profile: str) -> bool:
 
 
 def reachable_commands(makefile: str, entries: list[str], profile: str,
-                       gates: list[str]) -> str:
-    """Follow only targets called by entries, including the push profile gates."""
+                       gates: list[str], root: Path | None = None) -> str:
+    """Follow only targets called by entries, including the push profile gates.
+
+    When *root* is given, prerequisites that name existing files under it are
+    satisfied leaves; without it, only declared targets satisfy prerequisites.
+    """
     dependencies, recipes, variables = _make_nodes(makefile)
     ignored = _ignored_targets(dependencies)
+    broken = _broken_targets(dependencies, recipes, root)
     pending = list(entries)
     visited: set[str] = set()
     reached: list[str] = []
@@ -396,6 +502,8 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
             if target not in visited:
                 visited.add(target)
                 pending.extend(
-                    literal_script_lines(_target_script(target, dependencies, recipes, ignored))
+                    literal_script_lines(
+                        _target_script(target, dependencies, recipes, ignored, broken)
+                    )
                 )
     return "\n".join(reached)

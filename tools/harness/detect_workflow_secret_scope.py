@@ -14,11 +14,16 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_ROOT = REPO_ROOT / ".github" / "workflows"
-SECRET_EXPRESSION = re.compile(r"\$\{\{\s*secrets\.\w+\s*\}\}")
+SECRET_EXPRESSION = re.compile(r"\$\{\{\s*secrets(\.\w+|\[[^]]*\])\s*\}\}")
 SONAR_SECRET_EXPRESSION = re.compile(
     r"\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}"
 )
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
+# A run body publishes a gating value to the step output file.
+GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
+GATE_NAME_RE = re.compile(r"^\s*echo\s+\"?([A-Za-z_][A-Za-z0-9_-]*)=[^\"]*\"?\s*>>")
+STEP_KEY_RE = re.compile(r"^\s*- ([A-Za-z0-9_-]+):\s*(.*)$")
+STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):\s*(.*)$")
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,184 @@ def check_sonar_token_steps(text: str) -> list[Finding]:
     return findings
 
 
+def _step_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    """Return (start, end) index pairs for each YAML step list item."""
+    starts = [
+        (index, len(match.group(1)))
+        for index, line in enumerate(lines)
+        if (match := re.match(r"^(\s*)-\s+\S", line))
+    ]
+    blocks: list[tuple[int, int]] = []
+    for start, indent in starts:
+        end = len(lines)
+        for index in range(start + 1, len(lines)):
+            if not lines[index].strip():
+                continue
+            current = len(lines[index]) - len(lines[index].lstrip())
+            if current <= indent:
+                end = index
+                break
+        blocks.append((start, end))
+    return blocks
+
+
+def _step_id(lines: list[str], start: int, end: int) -> str | None:
+    """Return a step's ``id:`` value, or None when the step has no id."""
+    for index in range(start, end):
+        match = re.match(r"^\s+id:\s*(\S+)\s*$", lines[index])
+        if match:
+            return match.group(1)
+    return None
+
+
+def _step_if_value(lines: list[str], start: int, end: int) -> str:
+    """Return a step's own ``if:`` condition value, or an empty string.
+
+    Only the ``if:`` condition gates a step.  A gate reference anywhere else
+    in the step (run body, env, with) does not make the step conditional, so
+    the wiring check reads this value alone.  Block scalars (``if: >-``) are
+    folded into one string because the condition then continues on the
+    following, more-indented lines.
+    """
+    for index in range(start, end):
+        match = STEP_CHILD_KEY_RE.match(lines[index])
+        if match is None or match.group(1) != "if":
+            continue
+        value = match.group(2).strip()
+        if value and value[0] not in ">|":
+            return value
+        key_indent = len(lines[index]) - len(lines[index].lstrip())
+        collected: list[str] = []
+        for follower in range(index + 1, end):
+            if not lines[follower].strip():
+                continue
+            indent = len(lines[follower]) - len(lines[follower].lstrip())
+            if indent <= key_indent:
+                break
+            collected.append(lines[follower].strip())
+        return " ".join(collected)
+    return ""
+
+
+def _presence_block(
+    blocks: list[tuple[int, int]],
+    lines: list[str],
+) -> tuple[int, int] | None:
+    """Return the step block that carries the token presence check."""
+    return next(
+        (
+            (start, end)
+            for start, end in blocks
+            if any(SONAR_TOKEN_LINE.match(lines[i]) for i in range(start, end))
+        ),
+        None,
+    )
+
+
+def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
+    """Return the step outputs the presence check publishes for gating."""
+    return {
+        match.group(1)
+        for index in range(start, end)
+        if GITHUB_OUTPUT_RE.search(lines[index])
+        and (match := GATE_NAME_RE.match(lines[index]))
+    }
+
+
+def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
+    """Return whether an ``if:`` value gates on a published step output."""
+    return any(
+        re.search(
+            rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b",
+            if_value,
+        )
+        for gate in gates
+    )
+
+
+def _scanner_blocks(
+    blocks: list[tuple[int, int]],
+    lines: list[str],
+    presence_start: int,
+) -> list[tuple[int, int]]:
+    """Return the token-consuming step blocks other than the presence check."""
+    return [
+        (start, end)
+        for start, end in blocks
+        if start != presence_start
+        and any(SONAR_TOKEN_LINE.match(lines[i]) for i in range(start, end))
+    ]
+
+
+def _ungated_scanner_findings(
+    lines: list[str],
+    scanners: list[tuple[int, int]],
+    step_id: str,
+    gates: set[str],
+) -> list[Finding]:
+    """Return one finding per token-consuming step not gated on the output."""
+    findings: list[Finding] = []
+    for block_start, block_end in scanners:
+        if _references_gate(
+            _step_if_value(lines, block_start, block_end), step_id, gates,
+        ):
+            continue
+        findings.append(
+            Finding(
+                ".github/workflows/sonarcloud.yml",
+                block_start + 1,
+                f"token-consuming step is not gated on "
+                f"steps.{step_id}.outputs.*: an unset token must skip the "
+                f"scan, not run it unguarded",
+            )
+        )
+    return findings
+
+
+def check_sonar_gate_wiring(text: str) -> list[Finding]:
+    """Require the presence check to gate both scanner steps.
+
+    The documented skip contract (BUILD_INSTRUCTIONS.md: an unset token skips
+    the scan) depends on the presence check publishing a step output and every
+    later token-consuming scanner step being gated on it.  A presence check
+    that merely exits — the drifted `if [ -z "$SONAR_TOKEN" ]; then exit 0; fi`
+    shape — leaves the scanners ungated because nothing references the check.
+
+    This reads the run body and the ``if:`` conditions the token-scope check
+    itself does not judge, so the fixture cannot drift silently.
+    """
+    lines = text.splitlines()
+    if not any(SONAR_TOKEN_LINE.match(line) for line in lines):
+        return []
+
+    blocks = _step_blocks(lines)
+    presence = _presence_block(blocks, lines)
+    if presence is None:
+        return []
+
+    start, end = presence
+    step_id = _step_id(lines, start, end)
+    gates = _published_gates(lines, start, end)
+
+    if not gates or step_id is None:
+        return [
+            Finding(
+                ".github/workflows/sonarcloud.yml",
+                start + 1,
+                "the token presence check must publish a gating step output "
+                "(id: plus a $GITHUB_OUTPUT assignment); an exit-only check "
+                "leaves the scanner steps ungated",
+            )
+        ]
+
+    return _ungated_scanner_findings(
+        lines,
+        _scanner_blocks(blocks, lines, start),
+        step_id,
+        gates,
+    )
+
+
 def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
     """Scan all workflow files, failing closed on read errors."""
     findings: list[Finding] = []
@@ -161,6 +344,7 @@ def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
         if path.name == "sonarcloud.yml":
             seen_sonarcloud = True
             findings.extend(check_sonar_token_steps(text))
+            findings.extend(check_sonar_gate_wiring(text))
     if not seen_sonarcloud:
         findings.append(
             Finding(

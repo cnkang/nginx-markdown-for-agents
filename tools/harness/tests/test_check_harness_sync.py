@@ -556,6 +556,37 @@ def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch
     assert manifest_result.status == sync.PASS
 
 
+@pytest.mark.parametrize("bad_item", [{"nested": []}, [1, 2]])
+def test_non_scalar_status_semantics_fail_structurally(tmp_path, monkeypatch, bad_item):
+    """A status list holding an object or array fails the check, not the run."""
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=False)
+    manifest_path = repo / "docs/harness/routing-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status_semantics"] = [
+        sync.PASS,
+        sync.FAIL,
+        sync.SKIP_NOT_PRESENT,
+        bad_item,
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
+    monkeypatch.setattr(sync, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results()
+    manifest_result = next(
+        item for item in results if item.name == "manifest-status-semantics"
+    )
+    assert manifest_result.status == sync.FAIL
+    assert "scalar" in manifest_result.detail
+
+
 def test_collect_results_passes_traceable_recent_analysis_report(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=False)
@@ -993,6 +1024,16 @@ def test_unknown_test_option_does_not_expose_its_value_as_a_path() -> None:
     ) == "tests"
 
 
+def test_an_inline_option_value_does_not_stop_the_scan() -> None:
+    """`--junitxml=out.xml` carries its value, so the directory still counts."""
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-q", "--junitxml=out.xml", "tools/harness/tests/"]
+    ) == "tools/harness/tests"
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-q", "--junitxml=out.xml", "--unknown", "tests/"]
+    ) is None
+
+
 def test_a_step_running_elsewhere_does_not_certify() -> None:
     """`working-directory` decides which Makefile a step's commands reach."""
     steps = [{"run": "make root"}]
@@ -1043,3 +1084,234 @@ def test_an_option_value_is_not_a_test_path() -> None:
         ["python3", "-m", "pytest", "-o", "tools/harness/tests/test_fake.py"]
     ) is None
     assert sync._discovery_target(["python3", "-m", "pytest", "-q", "tests/"]) == "tests"
+
+
+def test_an_unknown_inline_option_does_not_stop_the_scan() -> None:
+    """`--junitxml=x` carries its own value, so discovery continues past it.
+
+    An unknown option without an inline value is ambiguous (it may consume the
+    next word), but `--name=value` cannot: the run's directory argument is
+    still discoverable.
+    """
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-q", "--junitxml=out.xml", "tools/harness/tests/"]
+    ) == "tools/harness/tests"
+    assert sync._discovery_target(
+        ["python3", "-m", "pytest", "-q", "--some-future-flag=1", "tests/"]
+    ) == "tests"
+    assert sync._invocation_target(
+        ["python3", "--some-future-flag=1", "tools/x.py"]
+    ) == "tools/x.py"
+
+
+def test_dynamic_job_conditions_are_not_execution_evidence() -> None:
+    """A job's own dynamic `if:` cannot certify a CI edge.
+
+    The job level applies the same rule as the step level: a paths-filter gate
+    or any other dynamic expression can be false for the change under
+    evaluation.  Reachability of such a job is established separately, by the
+    paths-filter coverage check.
+    """
+    document = {
+        "jobs": {
+            "gated": {
+                "if": "needs.changes.outputs.harness_tooling == 'true'",
+                "steps": [{"run": "make gated"}],
+            },
+            "literal": {"if": True, "steps": [{"run": "make literal"}]},
+            "unconditional": {"steps": [{"run": "make plain"}]},
+            "disabled": {"if": False, "steps": [{"run": "make disabled"}]},
+            "false-string": {"if": "false", "steps": [{"run": "make false"}]},
+        }
+    }
+
+    assert sync._document_run_commands(document) == ["make literal", "make plain"]
+
+
+def test_filter_gate_names_reads_only_a_pure_filter_condition() -> None:
+    """A condition is attributable to a filter only when nothing else is in it."""
+    assert sync._filter_gate_names(
+        "needs.changes.outputs.harness_tooling == 'true'"
+    ) == frozenset({"harness_tooling"})
+    assert sync._filter_gate_names(
+        "needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'"
+    ) == frozenset({"nginx", "workflows"})
+    assert sync._filter_gate_names(
+        "needs.changes.outputs.nginx == 'true' || github.ref == 'refs/heads/main'"
+    ) is None
+    assert sync._filter_gate_names("always()") is None
+    assert sync._filter_gate_names(None) is None
+
+
+def test_advisory_job_commands_do_not_certify(monkeypatch) -> None:
+    """continue-on-error jobs contribute no lane commands.
+
+    Their commands run but never fail the workflow, so they cannot gate a
+    rule; an expression-valued setting is statically undecidable and is
+    treated the same way (fail closed).
+    """
+    document = {
+        "jobs": {
+            "advisory": {
+                "continue-on-error": True,
+                "steps": [{"run": "make advisory"}],
+            },
+            "expression-advisory": {
+                "continue-on-error": "${{ github.event_name == 'push' }}",
+                "steps": [{"run": "make expr"}],
+            },
+            "blocking": {"steps": [{"run": "make blocking"}]},
+        }
+    }
+    monkeypatch.setattr(
+        sync, "_workflow_documents", lambda: [("ci.yml", document)]
+    )
+
+    lanes = sync._ci_entry_point_lanes()
+
+    commands = [
+        command for _display, _names, lane_commands in lanes
+        for command in lane_commands
+    ]
+    assert "make blocking" in commands
+    assert "make advisory" not in commands
+    assert "make expr" not in commands
+
+
+def test_a_pattern_matching_no_tracked_file_is_covered_vacuously() -> None:
+    """Empty-match rule patterns cannot be missed by any filter.
+
+    A few rules keep patterns ahead of the surface they will cover; until a
+    file matches, there is nothing a change could touch, so the vacuous
+    coverage verdict is the documented reading rather than a gap.
+    """
+    assert (
+        sync._filter_covers_pattern(["tools/**"], "no/such/surface/*.xyz")
+        is True
+    )
+
+
+def test_a_matching_pattern_outside_the_filter_is_not_covered() -> None:
+    """A pattern with real files outside the filter is a gap."""
+    assert (
+        sync._filter_covers_pattern(["tools/**"], ".github/workflows/*.yml")
+        is False
+    )
+
+
+def test_a_path_pattern_does_not_cross_a_directory_separator() -> None:
+    """`*.sh` is a root-level pattern, as picomatch reads it.
+
+    `**/` matches zero or more segments (GitHub documents `**/README.md` as
+    matching the repository root too), so it is the single `*` that must not
+    cross a separator.
+    """
+    assert sync._path_pattern_matches("*.sh", "build.sh") is True
+    assert sync._path_pattern_matches("*.sh", "packaging/scripts/x.sh") is False
+    assert sync._path_pattern_matches("tools/*.sh", "tools/x.sh") is True
+    assert sync._path_pattern_matches("tools/*.sh", "tools/a/b.sh") is False
+    assert sync._path_pattern_matches("tools/**/*.sh", "tools/a/b.sh") is True
+    assert sync._path_pattern_matches("tools/**/*.sh", "tools/x.sh") is True
+    assert sync._path_pattern_matches("**/*.sh", "tools/a/b.sh") is True
+    assert sync._path_pattern_matches("components/**", "components/nginx-module/src/a.c") is True
+
+
+def test_missing_mapping_entry_is_a_structural_blind_spot() -> None:
+    """AGENTS.md rule rows naming a detector must appear in the mapping.
+
+    Removing an entry from a copy of the shipped mapping has to fail: the
+    forward validator can only judge entries that exist, so without reverse
+    coverage a rule could be unmapped forever.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    manifest = json.loads(
+        (repo_root / "docs/harness/routing-manifest.json").read_text(encoding="utf-8")
+    )
+    assert sync._check_agents_rule_coverage(manifest).status == sync.PASS
+
+    bound = {
+        path
+        for paths in sync._agents_detector_rules(
+            sync.AGENTS_PATH.read_text(encoding="utf-8")
+        ).values()
+        for path in paths
+    }
+    tested = 0
+    for entry in manifest["rule_checks"]:
+        if entry["check"] not in bound:
+            # Only the AGENTS.md-bound detector entries are under test.
+            continue
+        tested += 1
+        reduced = [
+            other for other in manifest["rule_checks"] if other is not entry
+        ]
+        result = sync._check_agents_rule_coverage({"rule_checks": reduced})
+
+        assert result.status == sync.FAIL, entry["rule"]
+        assert "has no entry for it" in result.detail, result.detail
+    assert tested >= 6, tested
+
+
+def test_reverse_coverage_ignores_rows_that_do_not_name_a_detector() -> None:
+    """Only AGENTS.md rows with a literal tool path are bindings.
+
+    A rule row that describes a check without naming a tool must not fail the
+    mapping: its binding is a Makefile target or a hook id, which this check
+    cannot judge from the row text.
+    """
+    agents = "\n".join(
+        [
+            "| 99 | build-safety | A rule that names no tool at all |",
+            "| 1 | build-safety | `bash tools/harness/detect_example.sh` |",
+            "",
+            "- A prose line outside the table mentioning tools/harness/detect_prose.py",
+        ]
+    )
+
+    bindings = sync._agents_detector_rules(agents)
+
+    assert bindings == {"1": {"tools/harness/detect_example.sh"}}
+
+
+def test_a_removed_packaging_filter_is_a_must_fail_regression() -> None:
+    """A packaging script change must start the job that audits it.
+
+    The MUST-FAIL shape from the fix list: if the harness-tooling
+    paths-filter stops selecting a packaging script while a rule still covers
+    it, the CI mapping claims a gate that a packaging change never starts.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    assert sync._check_ci_trigger_coverage(
+        json.loads(
+            (repo_root / "docs/harness/routing-manifest.json").read_text(encoding="utf-8")
+        )["rule_checks"]
+    ).status == sync.PASS
+
+    detector = "tools/harness/detect_continuation_comments.py"
+    entry = {
+        "rule": "73",
+        "check": detector,
+        "files": ["packaging/**/*.sh"],
+        "stage": ["ci"],
+    }
+    covered = sync._check_ci_trigger_coverage([entry])
+    assert covered.status == sync.PASS, covered.detail
+
+    # Simulate the gap: the filter no longer selects the packaging surface.
+    original = sync._paths_filter_patterns
+    try:
+        patterns = dict(original())
+        patterns["harness_tooling"] = [
+            pattern
+            for pattern in patterns["harness_tooling"]
+            if not sync._path_pattern_matches(pattern, "packaging/scripts/x.sh")
+        ]
+        assert "packaging/**/*.sh" not in patterns["harness_tooling"]
+        sync._paths_filter_patterns = lambda: patterns
+        gap = sync._check_ci_trigger_coverage([entry])
+    finally:
+        sync._paths_filter_patterns = original
+
+    assert gap.status == sync.FAIL
+    assert "packaging/**/*.sh" in gap.detail
+    assert "would never start the job" in gap.detail

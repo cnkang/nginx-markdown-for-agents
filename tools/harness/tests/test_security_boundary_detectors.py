@@ -173,6 +173,41 @@ def test_ingress_smoke_requires_module_sha_build_arg() -> None:
     assert any("receive" in finding.message for finding in findings)
 
 
+def test_ingress_smoke_requires_isolated_reachability_probe() -> None:
+    """A context-relative probe false-passes an unpushed commit.
+
+    `git -C "$BUILD_CONTEXT" fetch --dry-run <repo> <sha>` returns 0 whenever
+    the object is already local, so inside a worktree it accepts a commit the
+    remote never received and the build fails later.  The smoke must probe
+    from an empty object store instead.
+    """
+    context_relative_probe = """
+git -C "$BUILD_CONTEXT" rev-parse --verify 'HEAD^{commit}'
+[[ "$MODULE_SHA" =~ ^[0-9a-f]{40}$ ]]
+git -C "$BUILD_CONTEXT" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA"
+--build-arg "MODULE_SHA=${MODULE_SHA}"
+"""
+
+    findings = check_ingress_smoke(context_relative_probe)
+
+    messages = "\n".join(finding.message for finding in findings)
+    assert "empty object store" in messages
+    assert "isolated probe repository" in messages
+
+
+def test_ingress_smoke_accepts_isolated_probe() -> None:
+    """The isolated probe satisfies the reachability contract."""
+    isolated_probe = """
+git -C "$BUILD_CONTEXT" rev-parse --verify 'HEAD^{commit}'
+printf '%s' "$MODULE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+git -C "$probe_dir" init -q
+git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA"
+--build-arg "MODULE_SHA=${MODULE_SHA}"
+"""
+
+    assert check_ingress_smoke(isolated_probe) == []
+
+
 def test_job_level_secret_is_rejected_but_step_secret_is_allowed() -> None:
     """Secret expressions are permitted only under a step-local env map."""
     broad = """

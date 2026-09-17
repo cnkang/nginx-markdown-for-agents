@@ -303,6 +303,18 @@ for script_name in "nfpm/scripts/preinstall.sh" "nfpm/scripts/postinstall.sh" "n
     fi
 done
 
+# The default target set covers the packaged maintainer scripts.  The real
+# tree currently carries trusted-PATH violations the run reports, so a zero
+# exit code cannot be asserted here; the exit status must instead be one of
+# the gate's documented statuses (0 = clean, 1 = violations) rather than a
+# crash or usage error (>= 2).
+if [[ "${RC}" -eq 0 || "${RC}" -eq 1 ]]; then
+    pass "Fixture 7: default target run exited with a documented status (exit ${RC})"
+else
+    fail "Fixture 7: default target run exited with an undocumented status" \
+        "expected exit 0 or 1, got exit ${RC}: ${OUTPUT}"
+fi
+
 if [[ "${NFPM_SCRIPTS_FOUND}" -eq 3 ]]; then
     pass "Fixture 7: default target set includes all 3 nfpm scripts"
 else
@@ -367,10 +379,124 @@ chmod +x "${FIXTURE_9}"
 RC=0
 OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_9}" 2>&1)" || RC=$?
 
+# A violation is a hard failure: the gate must exit 1, not merely print the
+# message, so the assertion pins the exact status in addition to the output.
+if [[ "${RC}" -eq 1 ]]; then
+    pass "Fixture 9: gate exited 1 for a later-PATH violation"
+else
+    fail "Fixture 9: expected exit 1 for a later-PATH violation" "got exit ${RC}"
+fi
+
 if printf '%s\n' "${OUTPUT}" | grep -q "later top-level PATH assignment replaces"; then
     pass "Fixture 9: a later top-level PATH assignment is a violation"
 else
     fail "Fixture 9: expected a later-PATH violation" "gate output: ${OUTPUT}"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 10: Env-prefixed command in the prologue is NOT an assignment
+##############################################################################
+
+echo "--- Fixture 10: env-prefixed command before trusted PATH ---" >&2
+
+FIXTURE_10="${WORK_DIR}/fixture_env_prefix.sh"
+# awk is deliberately chosen: it is not in the gate's external-command list,
+# so only the prologue classification (assignment vs env-prefixed command)
+# can catch this line.  With "sed" the Pass-2 command scan would flag it even
+# when the line is misclassified as an assignment.
+cat > "${FIXTURE_10}" <<'SCRIPT'
+#!/bin/sh
+set -e
+LC_ALL=C awk 'BEGIN{print "x"}' </dev/null
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_10}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_10}" 2>&1)" || RC=$?
+
+# "LC_ALL=C sed ..." only looks like an assignment; it resolves sed through
+# PATH, so the trusted-PATH prologue must not treat it as one.
+if [[ "${RC}" -eq 1 ]]; then
+    pass "Fixture 10: gate exited 1 for an env-prefixed prologue command"
+else
+    fail "Fixture 10: expected exit 1 for an env-prefixed prologue command" "got exit ${RC}"
+fi
+
+if printf '%s\n' "${OUTPUT}" | grep -qE "^\[VIOLATION\]"; then
+    pass "Fixture 10: env-prefixed prologue command is flagged as a violation"
+else
+    fail "Fixture 10: expected a VIOLATION for the env-prefixed command"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 11: A quoted assignment in the prologue is still safe
+##############################################################################
+
+echo "--- Fixture 11: quoted assignment stays in the prologue ---" >&2
+
+FIXTURE_11="${WORK_DIR}/fixture_quoted_assignment.sh"
+cat > "${FIXTURE_11}" <<'SCRIPT'
+#!/bin/sh
+set -e
+MARKDOWN_MSG="module enabled"
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_11}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_11}" 2>&1)" || RC=$?
+
+if [[ "${RC}" -eq 0 ]]; then
+    pass "Fixture 11: quoted assignment does not end the prologue"
+else
+    fail "Fixture 11: gate returned ${RC} for a quoted assignment" \
+        "output: ${OUTPUT}"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 12: Process substitution in the prologue ends it (it executes)
+##############################################################################
+
+echo "--- Fixture 12: process substitution ends the prologue ---" >&2
+
+FIXTURE_12="${WORK_DIR}/fixture_process_substitution.sh"
+cat > "${FIXTURE_12}" <<'SCRIPT'
+#!/bin/sh
+set -e
+OUTPUT=<(hostname)
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_12}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_12}" 2>&1)" || RC=$?
+
+# <(hostname) runs hostname through the inherited PATH, so the line ends the
+# prologue: the trusted PATH assignment after it is no longer ordered first.
+if [[ "${RC}" -eq 1 ]]; then
+    pass "Fixture 12: gate exited 1 for process substitution in the prologue"
+else
+    fail "Fixture 12: expected exit 1 for process substitution in the prologue" \
+        "got exit ${RC}"
+fi
+
+if printf '%s\n' "${OUTPUT}" | grep -qE "^\[VIOLATION\]"; then
+    pass "Fixture 12: process substitution is flagged as a violation"
+else
+    fail "Fixture 12: expected a VIOLATION for the process substitution"
 fi
 
 echo "" >&2

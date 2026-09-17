@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -140,7 +141,7 @@ def _load_manifest(path: Path | None = None) -> dict:
         document = json.loads(
             path.read_text(encoding="utf-8"), parse_constant=reject_nonfinite
         )
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         raise ValueError(f"failed to load harness manifest from {path}: {exc}") from exc
     if not isinstance(document, dict):
         raise ValueError(f"failed to load harness manifest from {path}: root must be an object")
@@ -246,6 +247,16 @@ def _is_nonempty_string_list(value: object) -> bool:
     return isinstance(value, list) and all(_is_nonempty_string(item) for item in value)
 
 
+def _is_hashable_scalar(value: object) -> bool:
+    """Return whether a JSON value is a hashable scalar.
+
+    JSON objects and arrays are unhashable and cannot join a set comparison,
+    so the status contract rejects them before `set()` raises `TypeError` out
+    of the structured check.
+    """
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
 def _check_manifest_top_level(manifest: dict) -> CheckResult | None:
     """Validate the required top-level manifest keys."""
     required = {
@@ -297,6 +308,12 @@ def _check_manifest_statuses(manifest: dict) -> CheckResult | None:
             "manifest-status-semantics",
             FAIL,
             "status semantics do not match the canonical four-state contract",
+        )
+    if not all(_is_hashable_scalar(item) for item in actual):
+        return _result(
+            "manifest-status-semantics",
+            FAIL,
+            "status semantics must contain only scalar values, not objects or arrays",
         )
     if set(actual) != expected:
         return _result(
@@ -1125,6 +1142,10 @@ def _test_runner_option_action(
     if token.startswith("--"):
         if token in BOOLEAN_TEST_OPTIONS:
             return "skip", 1
+        if "=" in token:
+            # An inline value (`--junitxml=out.xml`) is self-contained: the
+            # option cannot consume the next token, so keep scanning.
+            return "skip", 1
         # An unknown long option may consume a following value.  Do not expose
         # that value as a test directory.
         return "stop", None
@@ -1319,8 +1340,280 @@ def _runs_elsewhere(directory: object) -> bool:
     return directory.strip() not in {"", ".", "./"}
 
 
+def _workflow_documents() -> list[tuple[str, dict]]:
+    """Return every workflow as (display path, parsed document).
+
+    A workflow that cannot be read or parsed is a hard error: an unreadable
+    trigger surface must not silently drop the CI edges it carries.
+    """
+    import yaml
+
+    documents: list[tuple[str, dict]] = []
+    for path in _workflow_files():
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"{_display_path(path)} cannot be read: {exc}") from exc
+        if not isinstance(document, dict):
+            raise ValueError(
+                f"{_display_path(path)}: workflow document must be a mapping"
+            )
+        documents.append((_display_path(path), document))
+    return documents
+
+
+def _job_commands_regardless_of_condition(
+    name: object, job: object, workflow_directory: object
+) -> list[str]:
+    """Return a job's root-directory run commands, ignoring its own condition.
+
+    This is the raw trigger surface: the caller decides whether the job's
+    condition is static enough to be execution evidence on its own, or whether
+    a paths-filter gate has to cover the changed files first.
+    """
+    if not isinstance(job, dict):
+        raise ValueError(f"job {name!r} must be a mapping")
+    if "steps" not in job:
+        if isinstance(job.get("uses"), str) and job["uses"].strip():
+            return []
+        raise ValueError(f"job {name!r} has no steps or reusable workflow")
+    directory = job.get("working-directory", _defaults_directory(job))
+    if directory is None:
+        directory = workflow_directory
+    return _enabled_step_commands(job["steps"], directory)
+
+
+FILTER_GATE_TOKEN = re.compile(
+    r"needs\.changes\.outputs\.([A-Za-z0-9_]+)[ \t]*==[ \t]*'true'"
+)
+
+
+def _filter_gate_names(condition: object) -> frozenset[str] | None:
+    """Return the paths-filter names a job condition gates on, or None.
+
+    Only a *pure* filter gate is recognized: an expression built from
+    `needs.changes.outputs.<name> == 'true'` terms combined with `||`, `&&`,
+    parentheses and whitespace.  A condition with any other clause
+    (`github.ref == ...`, `always()`, a matrix term) is not reducible to a
+    filter, so it provides no coverage evidence.
+    """
+    if not isinstance(condition, str):
+        return None
+    remainder = FILTER_GATE_TOKEN.sub("", condition)
+    remainder = remainder.replace("||", "").replace("&&", "")
+    if remainder.replace("(", "").replace(")", "").replace("\n", "").strip():
+        return None
+    names = frozenset(
+        match.group(1) for match in FILTER_GATE_TOKEN.finditer(condition)
+    )
+    return names or None
+
+
+def _paths_filter_patterns() -> dict[str, list[str]]:
+    """Return the `paths-filter` pattern lists declared by the change detector."""
+    for path in _workflow_files():
+        document = _read_workflow_document(path)
+        if document is None:
+            continue
+        for step in _document_steps(document):
+            patterns = _step_filter_patterns(step)
+            if patterns is not None:
+                return patterns
+    return {}
+
+
+def _read_workflow_document(path: Path) -> dict | None:
+    """Parse one workflow file, or no document when it is not a mapping.
+
+    A file that cannot be read is a hard error: a filter declaration that
+    silently disappeared would leave the trigger surface unchecked.
+    """
+    import yaml
+
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"{_display_path(path)} cannot be read: {exc}") from exc
+    return document if isinstance(document, dict) else None
+
+
+def _step_filter_patterns(step: dict) -> dict[str, list[str]] | None:
+    """Return one step's `filters` patterns, or no patterns for another step.
+
+    The change detector carries its pattern lists as a YAML string inside the
+    step, so the payload is parsed a second time.  Only list-valued entries
+    become pattern lists, and only string items become patterns.
+    """
+    import yaml
+
+    if step.get("id") != "filter":
+        return None
+    with_block = step.get("with")
+    raw = with_block.get("filters") if isinstance(with_block, dict) else None
+    if not isinstance(raw, str):
+        return None
+    parsed = yaml.safe_load(raw)
+    if not isinstance(parsed, dict):
+        return None
+    return {
+        name: [item for item in patterns if isinstance(item, str)]
+        for name, patterns in parsed.items()
+        if isinstance(patterns, list)
+    }
+
+
+def _document_steps(document: dict) -> list[dict]:
+    """Yield every step mapping of a workflow document."""
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    steps: list[dict] = []
+    for job in jobs.values():
+        if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+            continue
+        steps.extend(step for step in job["steps"] if isinstance(step, dict))
+    return steps
+
+
+def _tracked_surface_files() -> list[str]:
+    """Return repository-relative paths for the tracked-file coverage check.
+
+    Tracked files are the surface the detectors scan; an untracked worktree
+    artifact is not a change a paths-filter has to select.  When Git cannot
+    answer, fall back to the worktree so the check still produces a verdict.
+    """
+    tracked = _git_tracked_files(resolve_approved_executable("git"))
+    return tracked if tracked is not None else _worktree_surface_files()
+
+
+def _git_tracked_files(git: str | None) -> list[str] | None:
+    """Return the files Git tracks, or no answer when Git cannot provide one."""
+    if git is None:
+        return None
+    try:
+        result = subprocess.run(
+            [git, "-C", str(REPO_ROOT), "ls-files", "-z"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [
+        entry.decode("utf-8", "surrogateescape")
+        for entry in result.stdout.split(b"\0")
+        if entry
+    ]
+
+
+def _worktree_surface_files() -> list[str]:
+    """Return the worktree paths the tracked-file coverage check falls back to."""
+    return sorted(
+        str(path.relative_to(REPO_ROOT)).replace(os.sep, "/")
+        for path in REPO_ROOT.rglob("*")
+        if _is_worktree_surface_file(path)
+    )
+
+
+def _is_worktree_surface_file(path: Path) -> bool:
+    """Return whether a worktree path belongs to the scanned surface.
+
+    A directory entry is not a surface file, the repository metadata
+    directory is not a change, and a hidden entry is not something a
+    paths-filter selects.
+    """
+    if not path.is_file():
+        return False
+    if "/.git/" in str(path):
+        return False
+    return not any(part.startswith(".") and part != "." for part in path.parts)
+
+
+def _filter_covers_pattern(patterns: list[str], declared: str) -> bool:
+    """Return whether a paths-filter selects every change a rule covers.
+
+    `declared` is a rule's file pattern.  It is covered when the filter carries
+    an equal or broader pattern, or - for patterns no filter models exactly -
+    when no repository file the pattern matches escapes the filter.  A pattern
+    that matches no tracked file is covered vacuously: there is nothing a
+    change could touch.  A few rules keep patterns ahead of the surface they
+    will cover; until a file matches, that verdict stays covered by design.
+    """
+    for pattern in patterns:
+        if pattern == declared or _path_pattern_matches(pattern, declared):
+            return True
+    matched = [
+        path
+        for path in _tracked_surface_files()
+        if _path_pattern_matches(declared, path)
+    ]
+    return all(
+        any(_path_pattern_matches(pattern, path) for pattern in patterns)
+        for path in matched
+    )
+
+
+def _compile_path_pattern(pattern: str) -> re.Pattern:
+    """Translate a GitHub path filter pattern into a regular expression.
+
+    `paths-filter` uses picomatch semantics: `*` never crosses a directory
+    separator and `**` does.  Python's `fnmatch` treats `/` as an ordinary
+    character, which would make `*.sh` match every shell script in the
+    repository and quietly weaken the coverage verdict.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "*":
+            replacement, index = _star_replacement(pattern, index)
+            out.append(replacement)
+            continue
+        if char == "?":
+            out.append("[^/]")
+            index += 1
+            continue
+        if char == "[":
+            close = pattern.find("]", index + 1)
+            if close > index:
+                out.append(pattern[index : close + 1])
+                index = close + 1
+                continue
+        out.append(re.escape(char))
+        index += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def _star_replacement(pattern: str, index: int) -> tuple[str, int]:
+    """Return the regex for the `*` run at an index and the index after it.
+
+    `**/` matches zero or more whole segments, which is why GitHub documents
+    `**/README.md` as matching the repository root as well, `**` matches across
+    separators, and a single `*` stops at one separator.
+    """
+    if pattern[index : index + 3] == "**/":
+        return "(?:.*/)?", index + 3
+    if pattern[index : index + 2] == "**":
+        return ".*", index + 2
+    return "[^/]*", index + 1
+
+
+def _path_pattern_matches(pattern: str, path: str) -> bool:
+    """Return whether a path filter pattern selects a repository path."""
+    return _compile_path_pattern(pattern).match(path) is not None
+
+
 def _condition_allows_execution(value: object) -> bool:
-    """Return whether a workflow condition is statically always true."""
+    """Return whether a workflow condition is statically always true.
+
+    A dynamic condition (`needs.changes.outputs.x == 'true'`, `always()`,
+    `matrix...`) cannot prove the work runs on the stage under evaluation, so
+    it is not execution evidence.  Job and step level apply the same rule: a
+    job whose condition is dynamic is a *conditional* trigger, and the CI
+    trigger coverage check is what keeps its paths-filter honest.
+    """
     if value is None or value is True:
         return True
     if isinstance(value, str):
@@ -1329,13 +1622,25 @@ def _condition_allows_execution(value: object) -> bool:
     return False
 
 
+def _job_condition_allows_execution(job: dict) -> bool:
+    """Return whether a job's own condition is statically always true."""
+    return _condition_allows_execution(job.get("if"))
+
+
 def _workflow_job_commands(
     name: object, job: object, workflow_directory: object
 ) -> list[str]:
-    """Validate one workflow job and return its root-directory commands."""
+    """Validate one workflow job and return its root-directory commands.
+
+    A job gated by a dynamic condition is not execution evidence on its own:
+    the same semantics as the step level apply, because a `${{ ... }}`
+    condition can be false for the change under evaluation.  Such a job's
+    reachability is instead established by the paths-filter coverage check in
+    `_check_ci_trigger_coverage`.
+    """
     if not isinstance(job, dict):
         raise ValueError(f"job {name!r} must be a mapping")
-    if job.get("if") is False:
+    if not _job_condition_allows_execution(job):
         return []
     if "steps" not in job:
         if isinstance(job.get("uses"), str) and job["uses"].strip():
@@ -1401,12 +1706,15 @@ def _workflow_files() -> list[Path]:
     return sorted((REPO_ROOT / ".github" / "workflows").glob("*.y*ml"))
 
 
-def _stage_wiring(stage: str) -> str:
+def _stage_wiring(stage: str, files: list[str] | None = None) -> str:
     """Resolve actual stage entries, never inserting expected targets as edges.
 
     Save denotes the optional editor adapter for the same quick hooks. This
     proves configured commands, not installation of an editor or Git hook.
-    CI edges may be conditional; trigger coverage is checked separately.
+    CI edges may be conditional; trigger coverage is checked separately, and a
+    paths-filter-gated job only contributes its commands when the filter would
+    actually start it for the files the rule covers.  That is what makes a
+    conditional job an honest edge instead of a blanket one.
     """
     from tools.harness.stage_reachability import reachable_commands
 
@@ -1414,13 +1722,45 @@ def _stage_wiring(stage: str) -> str:
     if stage in {"save", "commit"}:
         entries = _precommit_hook_entries()
     elif stage == "ci":
-        entries = _workflow_run_text().splitlines()
+        entries = _ci_entry_points(files)
     elif stage == "push":
         entries = ["make pre-push-check"]
         gates = _profile_gate_text().splitlines()
     else:
         return ""
-    return reachable_commands(_makefile_text(), entries, PUSH_PROFILE, gates)
+    return reachable_commands(_makefile_text(), entries, PUSH_PROFILE, gates,
+                              root=REPO_ROOT)
+
+
+def _ci_entry_points(files: list[str] | None) -> list[str]:
+    """Return the commands a CI run would execute for a change touching *files*.
+
+    Unconditional jobs always contribute; a job gated by a paths-filter
+    contributes only when that filter selects everything the rule covers.  An
+    unknown file set therefore certifies only the unconditional jobs, which is
+    the fail-closed direction.
+    """
+    try:
+        filters = _paths_filter_patterns()
+        lanes = _ci_entry_point_lanes()
+    except (OSError, ValueError, SyntaxError):
+        # An unreadable workflow surface cannot certify a conditional edge.
+        return _workflow_run_text().splitlines()
+    selected: list[str] = []
+    for _display, gate_names, commands in lanes:
+        if "" in gate_names:
+            selected.extend(commands)
+            continue
+        if not files:
+            continue
+        patterns = [
+            pattern
+            for gate in sorted(gate_names)
+            for pattern in filters.get(gate, [])
+        ]
+        if all(_filter_covers_pattern(patterns, pattern) for pattern in files):
+            selected.extend(commands)
+    return selected
 
 
 def _wiring_text() -> str:
@@ -1524,30 +1864,227 @@ def _rule_check_entry_problems(entry: dict, agents: str, wiring: str) -> list[st
     elif isinstance(test, str) and test.strip() and not _is_invoked(test, wiring):
         problems.append(f"rule {rule}: nothing runs {test}")
 
-    problems.extend(_stage_wiring_problems(entry["stage"], rule, check))
+    problems.extend(_stage_wiring_problems(entry["stage"], rule, check, entry["files"]))
     return problems
 
 
-def _stage_wiring_problems(stages: object, rule: str, check: object) -> list[str]:
+def _stage_wiring_problems(
+    stages: object, rule: str, check: object, files: object = None
+) -> list[str]:
     """Return the stages whose entry points do not reach the check.
 
     The declared stages have to reach the check, not just the tree: a check
-    named under a target nobody calls would never gate anything.
+    named under a target nobody calls would never gate anything.  A CI mapping
+    is evaluated against the files the rule covers, so a paths-filter-gated job
+    is an edge only when its filter selects those files.
     """
     if not isinstance(check, str) or not check.strip() or not isinstance(stages, list):
         return []
+    covered = _covered_rule_files(files)
     problems: list[str] = []
     for stage in stages:
-        if not isinstance(stage, str) or stage not in RULE_CHECK_STAGES:
-            continue
-        try:
-            wiring = _stage_wiring(stage)
-        except (OSError, ValueError, SyntaxError) as exc:
-            problems.append(f"rule {rule}: cannot verify {stage}: {exc}")
-            continue
-        if not _is_invoked(check, wiring):
-            problems.append(f"rule {rule}: no {stage} entry point runs {check}")
+        problem = _stage_entry_problem(stage, rule, check, covered)
+        if problem is not None:
+            problems.append(problem)
     return problems
+
+
+def _covered_rule_files(files: object) -> list[str]:
+    """Return the file patterns a rule declares, ignoring any other item."""
+    return [item for item in files if isinstance(item, str)] if isinstance(files, list) else []
+
+
+def _stage_entry_problem(
+    stage: object, rule: str, check: str, covered: list[str]
+) -> str | None:
+    """Return why one declared stage does not reach the check, or no problem.
+
+    A stage that is not a declarable stage contributes nothing.  A stage whose
+    entry points cannot be resolved is a problem in its own right: a stage that
+    cannot be read is not evidence that a gate runs.
+    """
+    if not isinstance(stage, str) or stage not in RULE_CHECK_STAGES:
+        return None
+    try:
+        wiring = _stage_wiring(stage, covered)
+    except (OSError, ValueError, SyntaxError) as exc:
+        return f"rule {rule}: cannot verify {stage}: {exc}"
+    if _is_invoked(check, wiring):
+        return None
+    return f"rule {rule}: no {stage} entry point runs {check}"
+
+
+def _job_is_advisory(job: dict) -> bool:
+    """Return whether a job's failures are non-blocking by design.
+
+    ``continue-on-error: true`` (or any value that does not statically
+    evaluate to false) means a failing command does not fail the workflow,
+    so the job's commands cannot certify that a gate blocks anything.
+    """
+    value = job.get("continue-on-error")
+    return value is not None and value is not False
+
+
+def _ci_entry_point_lanes() -> list[tuple[str, frozenset[str], list[str]]]:
+    """Return (job name, filter names the job gates on, its commands).
+
+    A job whose condition is a pure paths-filter gate contributes its commands
+    to the lanes selected by those filter names.  A job with no condition, or a
+    condition that is statically true, is an unconditional lane (`""`), which
+    matches every filter name.  A condition this cannot reduce to a filter is
+    skipped: it is neither unconditional evidence nor attributable coverage,
+    and the check's job is the reachable lanes (the CI mappings prove
+    configured calls, which the routing docs already say can be conditional).
+    Advisory jobs (``continue-on-error``) contribute no lane at all: their
+    commands run but never block, so they cannot certify a gate.
+    """
+    lanes: list[tuple[str, frozenset[str], list[str]]] = []
+    for display, document in _workflow_documents():
+        jobs = _workflow_jobs(display, document)
+        workflow_directory = _defaults_directory(document)
+        for name, job in jobs.items():
+            lane = _ci_entry_point_lane(display, name, job, workflow_directory)
+            if lane is not None:
+                lanes.append(lane)
+    return lanes
+
+
+def _workflow_jobs(display: str, document: dict) -> dict:
+    """Return a workflow's job mappings, failing closed on any other shape."""
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        raise ValueError(f"{display}: workflow jobs must be a mapping")
+    return jobs
+
+
+def _ci_entry_point_lane(
+    display: str, name: object, job: object, workflow_directory: object
+) -> tuple[str, frozenset[str], list[str]] | None:
+    """Return one job's lane, or no lane when it cannot certify a gate.
+
+    An advisory job contributes nothing, and a job whose condition reduces to
+    neither static truth nor a pure filter gate contributes nothing either.
+    """
+    if not isinstance(job, dict):
+        raise ValueError(f"{display}: job {name!r} must be a mapping")
+    if _job_is_advisory(job):
+        return None
+    condition = job.get("if")
+    commands = _job_commands_regardless_of_condition(name, job, workflow_directory)
+    if _condition_allows_execution(condition):
+        return (f"{display}:{name}", frozenset({""}), commands)
+    filter_names = _filter_gate_names(condition)
+    if filter_names is None:
+        return None
+    return (f"{display}:{name}", filter_names, commands)
+
+
+def _ci_lane_wiring(commands: list[str]) -> str:
+    """Resolve a CI lane's commands through the Makefile, with a small cache.
+
+    A workflow step says `make harness-security-checks`; the check it reaches
+    is two Make targets deeper.  The lane has to go through the same resolver
+    the stage wiring uses, or a gate would look unreachable and its filter
+    coverage would go unchecked.
+    """
+    from tools.harness.stage_reachability import reachable_commands
+
+    return _CI_LANE_WIRING_CACHE.setdefault(
+        tuple(commands),
+        reachable_commands(_makefile_text(), list(commands), PUSH_PROFILE, [],
+                           root=REPO_ROOT),
+    )
+
+
+_CI_LANE_WIRING_CACHE: dict[tuple[str, ...], str] = {}
+
+
+def _dynamic_gate_names(check: str, lanes: list) -> list[str]:
+    """Return the filter names of the dynamic lanes that reach a check."""
+    names: set[str] = set()
+    for _display, filter_names, commands in lanes:
+        if "" in filter_names:
+            continue
+        if _is_invoked(check, _ci_lane_wiring(commands)):
+            names.update(filter_names)
+    return sorted(names)
+
+
+def _check_ci_trigger_coverage(entries: list) -> CheckResult:
+    """Verify that a dynamic CI mapping is backed by its path filter.
+
+    A mapping that declares `ci` claims the check runs on that stage.  A CI job
+    gated by a dynamic `if:` (a paths-filter gate) is not execution evidence on
+    its own, so the filter has to select the rule's own files: without that, a
+    change to the rule's surface would never start the job and the mapping
+    would claim a gate that never runs for the very change it covers.
+    """
+    try:
+        filters = _paths_filter_patterns()
+        lanes = _ci_entry_point_lanes()
+    except (OSError, ValueError, SyntaxError) as exc:
+        return _result("ci-trigger-coverage", FAIL, f"cannot verify ci coverage: {exc}")
+
+    problems: list[str] = []
+    checked = 0
+    for entry in entries:
+        entry_problems = _ci_trigger_entry_problems(entry, filters, lanes)
+        if entry_problems is None:
+            continue
+        checked += 1
+        problems.extend(entry_problems)
+
+    if problems:
+        return _result("ci-trigger-coverage", FAIL, "; ".join(problems[:4]))
+    return _result(
+        "ci-trigger-coverage",
+        PASS,
+        f"{checked} conditional CI mapping(s) covered by their paths filters",
+    )
+
+
+def _ci_trigger_entry_problems(entry: object, filters: dict, lanes: list) -> list[str] | None:
+    """Return the uncovered filter gaps of one mapping, or no finding.
+
+    No finding covers three cases: an entry that is not a conditional CI
+    mapping, an entry that declares no covered files, and an entry whose check
+    runs through an unconditional lane, which needs no filter to start it.
+    The returned list is empty when the conditional lanes are all covered.
+    """
+    if not isinstance(entry, dict) or "ci" not in (entry.get("stage") or []):
+        return None
+    check = entry.get("check")
+    if not isinstance(check, str) or not check.strip():
+        return None
+    files = [item for item in entry.get("files") or [] if isinstance(item, str)]
+    if not files:
+        return None
+    gate_names = _dynamic_gate_names(check, lanes)
+    if not gate_names:
+        # The check runs through an unconditional lane; nothing to gate.
+        return None
+    return [
+        problem
+        for gate in gate_names
+        for problem in _uncovered_filter_problems(entry, check, files, filters, gate)
+    ]
+
+
+def _uncovered_filter_problems(
+    entry: dict, check: str, files: list[str], filters: dict, gate: str
+) -> list[str]:
+    """Return one finding per filter that leaves part of a rule's surface out."""
+    patterns = filters.get(gate) or []
+    uncovered = [
+        pattern for pattern in files if not _filter_covers_pattern(patterns, pattern)
+    ]
+    if not uncovered:
+        return []
+    return [
+        f"rule {entry.get('rule', '?')}: the {gate} paths-filter does not "
+        f"select {', '.join(sorted(uncovered))}, so a change to "
+        f"{check} would never start the job that runs it"
+    ]
 
 
 def _check_rule_checks(manifest: dict) -> CheckResult:
@@ -1572,6 +2109,147 @@ def _check_rule_checks(manifest: dict) -> CheckResult:
     if problems:
         return _result("rule-checks", FAIL, "; ".join(problems[:4]))
     return _result("rule-checks", PASS, f"{len(entries)} rule(s) mapped to an existing check")
+
+
+def _check_agents_rule_coverage(manifest: dict) -> CheckResult:
+    """Fail when an AGENTS.md detector rule is absent from the mapping.
+
+    `_check_rule_checks` validates the mapping entry by entry, so it can only
+    judge rules that are present: a blocking detector rule that nobody mapped
+    is invisible to it.  This is the reverse direction, and it is what makes
+    the mapping's silence a finding instead of a blind spot.
+
+    It runs as its own result because it needs the *shipped* manifest: the
+    single-entry fixtures the stage-wiring tests build are deliberately
+    partial and must keep their focused PASS/FAIL verdicts.
+    """
+    entries = manifest.get("rule_checks")
+    if not isinstance(entries, list) or not entries:
+        return _result("agents-rule-coverage", FAIL, "rule_checks missing from the manifest")
+    agents = AGENTS_PATH.read_text(encoding="utf-8") if AGENTS_PATH.exists() else ""
+    problems = _agents_rule_coverage_problems(entries, agents)
+    if problems:
+        return _result("agents-rule-coverage", FAIL, "; ".join(problems[:4]))
+    return _result(
+        "agents-rule-coverage",
+        PASS,
+        "every AGENTS.md rule row naming a harness detector is mapped",
+    )
+
+
+AGENTS_RULE_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
+AGENTS_TOOL_PATH = re.compile(r"tools/harness/[A-Za-z0-9_][A-Za-z0-9_./-]*")
+
+
+def _agents_detector_rules(agents: str) -> dict[str, set[str]]:
+    """Map rule number -> the harness tool paths its AGENTS.md row names.
+
+    The source of truth is the rule table itself: only a row that literally
+    contains a `tools/harness/...` path is a detector binding, so a rule that
+    merely *describes* a check without naming it is not reported.  That keeps
+    the reverse coverage free of rows whose binding is a Makefile target or a
+    pre-commit hook id alone, and prose outside the table cannot add a binding.
+    """
+    bindings: dict[str, set[str]] = {}
+    rule: str | None = None
+    row: str | None = None
+    for line in agents.splitlines():
+        rule, row = _agents_row_step(bindings, line, rule, row)
+    _flush_agents_row(bindings, rule, row)
+    return bindings
+
+
+def _agents_row_step(
+    bindings: dict[str, set[str]], line: str, rule: str | None, row: str | None
+) -> tuple[str | None, str | None]:
+    """Return the `(rule, row)` state after one AGENTS.md line.
+
+    A line that opens a rule row starts a new binding, a further `|` line
+    extends the current row (a table row wrapped over several lines keeps its
+    binding, while prose that follows the table closes the row), and any other
+    line closes it.
+    """
+    match = AGENTS_RULE_ROW.match(line)
+    if match:
+        _flush_agents_row(bindings, rule, row)
+        return match.group(1), line
+    if rule is not None and line.lstrip().startswith("|"):
+        return rule, f"{row} {line}" if row is not None else line
+    _flush_agents_row(bindings, rule, row)
+    return None, None
+
+
+def _flush_agents_row(
+    bindings: dict[str, set[str]], rule: str | None, row: str | None
+) -> None:
+    """Record the tool paths one closed row names under its rule number."""
+    if rule is None or row is None:
+        return
+    paths = {
+        match.group(0).rstrip(".,;:`")
+        for match in AGENTS_TOOL_PATH.finditer(row)
+    }
+    if paths:
+        bindings.setdefault(rule, set()).update(paths)
+
+
+def _agents_rule_coverage_problems(entries: list, agents: str) -> list[str]:
+    """Return rules whose AGENTS.md detector binding is absent from the mapping.
+
+    `_rule_check_entry_problems` validates the mapping in one direction: every
+    entry names a real, invoked check.  Nothing there can notice a *missing*
+    entry, so a blocking detector rule can stay unmapped forever.  This closes
+    that structural blind spot by enumerating the AGENTS.md rule rows that name
+    a harness detector and requiring each of them in `rule_checks`.
+    """
+    mapped_rules, mapped_checks = _mapped_rule_bindings(entries)
+    bindings = _agents_detector_rules(agents)
+    problems: list[str] = []
+    for rule, paths in sorted(bindings.items(), key=lambda kv: int(kv[0])):
+        problem = _unmapped_rule_problem(rule, paths, mapped_rules, mapped_checks)
+        if problem is not None:
+            problems.append(problem)
+    return problems
+
+
+def _mapped_rule_bindings(entries: list) -> tuple[set[str], set[object]]:
+    """Return the rule numbers and check paths the mapping already declares.
+
+    An entry that is not a mapping, or whose rule or check is not a string,
+    contributes nothing: the forward validator is what reports that shape.
+    """
+    mapped_rules: set[str] = {
+        str(entry.get("rule"))
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("rule"), str)
+    }
+    mapped_checks: set[object] = {
+        entry.get("check")
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("check"), str)
+    }
+    return mapped_rules, mapped_checks
+
+
+def _unmapped_rule_problem(
+    rule: str, paths: set[str], mapped_rules: set[str], mapped_checks: set[object]
+) -> str | None:
+    """Return why one AGENTS.md-bound rule is unmapped, or no problem.
+
+    A rule the mapping already lists, and a rule whose every bound detector
+    path appears as some entry's check, are both covered: the first by rule
+    number, the second because the mapping does reach that detector.
+    """
+    if rule in mapped_rules:
+        return None
+    unmapped = sorted(path for path in paths if path not in mapped_checks)
+    if not unmapped:
+        return None
+    return (
+        f"rule {rule}: AGENTS.md names {', '.join(unmapped)} but the mapping "
+        f"has no entry for it; a blocking detector rule that is not mapped "
+        f"can go unwired without the mapping noticing"
+    )
 
 
 def _check_agents_map() -> CheckResult:
@@ -2413,6 +3091,8 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_harness_docs(manifest),
         _check_agents_map(),
         _check_rule_checks(manifest),
+        _check_agents_rule_coverage(manifest),
+        _check_ci_trigger_coverage(manifest.get("rule_checks") or []),
         _check_e2e_harness_contract(),
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),

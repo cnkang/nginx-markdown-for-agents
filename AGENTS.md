@@ -167,7 +167,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 70 | build-safety | Scratch/temporary file hygiene: one-off analysis scripts, PR drafts, editor/system junk must never enter commits; root-level `*.py`/`*.sh` forbidden except documented external contracts (`build.sh` ClusterFuzzLite entrypoint); test sources named `parse_*_test.*`/`test_*` exempt; `python3 tools/harness/detect_scratch_files.py` — blocking harness gate, `--staged` mode wired into `.pre-commit-config.yaml` |
 | 71 | dynconf-snapshot | CURRENT (static): explicit static settings mark a block-mask that propagates to child levels; block masks follow the configuration tree so unset fields stay open at more specific levels |
 | 72 | streaming-backpressure | Header-chain NGX_AGAIN publishes commit latches, defers success-only delivery metrics, and resumes body output without retrying the header chain |
-| 73 | build-safety | Continuation comments: scan every tracked shell/workflow surface, detect same-indent option/value continuations, and fail closed on missing, unreadable, or malformed inputs; `python3 tools/harness/detect_continuation_comments.py` runs in save/commit/CI harness gates |
+| 73 | build-safety | Continuation comments: scan every tracked shell/workflow surface, detect same-indent option/value continuations, and fail closed on missing, unreadable, or malformed inputs; `python3 tools/harness/detect_continuation_comments.py` runs in save/commit/push/CI harness gates |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
