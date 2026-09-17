@@ -256,7 +256,11 @@ if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
   exit 1
 fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
-  sudo mv "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
+  if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
+    echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
+    exit 1
+  fi
+  sudo mv -T "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
 sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
@@ -1221,7 +1225,11 @@ if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
   exit 1
 fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
-  sudo mv "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
+  if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" || -L "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
+    echo "ERROR: stale snapshot path ${CONFIG_BACKUP_DIR}/tree.old already exists; remove it before retrying" >&2
+    exit 1
+  fi
+  sudo mv -T "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
 sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
