@@ -31,7 +31,8 @@ The earlier reset:
   helpers, Rust decision/error-policy wrappers, standalone URL checks,
   diagnostics-schema accessors, convenience constructors, and redundant
   streaming finish/free/reason helpers, and
-- retains `markdown_decide_conditional` and `markdown_decide_base_url` as the
+- retains `markdown_negotiate_accept`, `markdown_decide_eligibility`,
+  `markdown_decide_conditional`, and `markdown_decide_base_url` as the
   complete production decision interfaces.
 
 These changes are intentionally breaking at the internal FFI boundary. The

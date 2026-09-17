@@ -455,7 +455,6 @@
         "docs-tooling",
         "version-consistency",
         "v070-gates",
-        "v080-gates",
         "release-quality"
       ]
     },
@@ -669,7 +668,6 @@
         "harness-sync",
         "docs-tooling",
         "release-governance",
-        "v080-gates",
         "v092-gates",
         "release-quality",
         "release-matrix",

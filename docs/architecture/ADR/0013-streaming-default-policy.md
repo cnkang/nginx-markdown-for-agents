@@ -42,11 +42,12 @@ Default to `auto` mode per RFC 0008 section 2.1:
    eligibility gates is a streaming candidate. `conversion_memory` and the
    remaining gates decide the path (RFC 0008 section 2.2). Response size is
    not part of the decision, and no size threshold is active. The 0.8.0-era
-   internal threshold (target default: 1m) is historical and never was an
-   operator-facing configuration knob.
-   `markdown_stream_threshold` is historical wording from this ADR's era:
-   under the active Config V2 surface only `markdown_streaming
-   off|auto|force` remains a directive.
+   internal threshold (nominal default: 1m) is historical and distinct from
+   the former `markdown_stream_threshold` directive. That directive was
+   operator-facing in 0.8.0 with a default of 1m. The 0.9.2 release removed
+   it with no replacement, and the remaining tuning limits are
+   `markdown_limits` keys. Under the active Config V2 surface only
+   `markdown_streaming off|auto|force` remains a directive.
 2. Chunked transfer encoding and a missing `Content-Length` do not change
    the path. Those responses face the same eligibility gates as any other
    response (RFC 0008 section 2.2).
