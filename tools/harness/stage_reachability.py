@@ -230,7 +230,7 @@ def _apply_assignment(
     """Apply one assignment the way Make would, flavor included."""
     name, operator, value = assignment
     if operator == "?=":
-        if name not in variables:
+        if name not in variables and name not in unknown:
             variables[name] = value
             simple.discard(name)
             unknown.discard(name)

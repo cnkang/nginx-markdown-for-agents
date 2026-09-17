@@ -714,6 +714,23 @@ def test_a_target_naming_a_shell_assigned_variable_is_uncertifiable() -> None:
     assert CHECK not in reached
 
 
+def test_a_later_question_assignment_keeps_the_unknown_name() -> None:
+    """`NAME ?= value` is a no-op when GNU Make already considers NAME
+    defined (a `!=` assignment does count), so the unknown state must
+    survive and keep referencing targets uncertifiable."""
+    makefile = (
+        "LIST != echo other\n"
+        "LIST ?= checked\n"
+        "root: $(LIST)\n"
+        f"\tpython3 {CHECK}\n"
+        "checked:\n"
+        "\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
 def test_a_space_indented_comment_keeps_the_recipe_open() -> None:
     """An indented comment between recipe lines does not end the recipe."""
     makefile = (

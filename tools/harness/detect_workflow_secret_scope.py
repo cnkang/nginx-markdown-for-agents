@@ -336,6 +336,13 @@ def _split_shell_segments(line: str) -> list[str]:
             current.append(char)
             index += 1
             continue
+        if char == "#" and _comment_starts_at(line, index):
+            # A comment is not executable text: keep its remainder attached
+            # to the current segment and stop scanning, so separators inside
+            # the comment cannot fabricate another command segment.
+            current.append(line[index:])
+            index = length
+            continue
         separator = _separator_length(line, index)
         if separator:
             segments.append("".join(current))
@@ -416,10 +423,11 @@ def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
             redirect = _unquoted_redirect(segment)
             if redirect is None:
                 continue
-            match = GATE_NAME_RE.match(segment)
-            # The gate pattern must reach exactly that redirection: a quoted
-            # `>>` earlier in the segment must not donate its position.
-            if match and match.end() == redirect + 2:
+            # Match the gate pattern against the prefix that ends at that
+            # redirection, so a `>>` inside quotes or a comment after it
+            # cannot donate or receive the match.
+            match = GATE_NAME_RE.match(segment[: redirect + 2])
+            if match:
                 names.add(match.group(1))
     return names
 
