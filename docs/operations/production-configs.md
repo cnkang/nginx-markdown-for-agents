@@ -22,9 +22,8 @@ to the cleartext backend listener.
 
 - **`auto`** — recommended starting point for most deployments. The module
   streams every response that clears its eligibility gates. A response that
-  stays eligible for conversion but cannot stream, the module converts it with the
-  full-buffer engine, and the module passes a response that is not eligible for
-  conversion through unchanged.
+  stays eligible for conversion but cannot stream uses the full-buffer engine.
+  A response that is not eligible for conversion passes through unchanged.
 
 - **`off`** — optimized for deployments that require full-buffer conversion and
   deterministic cache validation.
