@@ -776,3 +776,53 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_a_double_quoted_reference_is_not_wiring(self):
+        """A reference inside a double-quoted literal cannot gate the step."""
+        assert not secret_scope_module._references_gate(
+            'github.event_name == "steps.token.outputs.enabled"',
+            "token",
+            {"enabled"},
+        )
+
+    def test_an_operator_before_the_reference_is_not_wiring(self):
+        """A comparison whose left operand precedes the reference is not a
+        positive requirement."""
+        assert not secret_scope_module._references_gate(
+            "'true' != steps.token.outputs.enabled", "token", {"enabled"}
+        )
+        assert not secret_scope_module._references_gate(
+            "false == steps.token.outputs.enabled", "token", {"enabled"}
+        )
+
+    def test_a_double_quoted_reference_beside_a_real_one_still_gates(self):
+        """Masking a double-quoted literal must not neutralise a real
+        unquoted reference on the same line."""
+        assert secret_scope_module._references_gate(
+            '"steps.token.outputs.enabled" == github.event_name && '
+            "steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
+
+
+class TestGateNamePattern:
+    """GATE_NAME_RE accepts quoted values (spaces allowed) and bare tokens."""
+
+    def test_a_quoted_value_with_spaces_is_accepted(self) -> None:
+        match = secret_scope_module.GATE_NAME_RE.match(
+            'echo "name=$(python3 tools/perf/report_utils.py detect-platform)"'
+            ' >> "$GITHUB_OUTPUT"'
+        )
+        assert match is not None
+        assert match.group(1) == "name"
+
+    def test_bare_and_simple_quoted_values_are_accepted(self) -> None:
+        bare = secret_scope_module.GATE_NAME_RE.match(
+            'echo gate=true >> "$GITHUB_OUTPUT"'
+        )
+        assert bare is not None and bare.group(1) == "gate"
+        quoted = secret_scope_module.GATE_NAME_RE.match(
+            'echo "enabled=true" >> "$GITHUB_OUTPUT"'
+        )
+        assert quoted is not None and quoted.group(1) == "enabled"
