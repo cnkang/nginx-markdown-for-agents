@@ -201,3 +201,25 @@ def test_os_open_concatenated_argument_still_classified(tmp_path):
     assert len(errors) == 1
     assert "base" in errors[0]
     assert warnings == []
+
+
+def test_a_longer_identifier_ending_in_open_is_not_a_sink(tmp_path):
+    """popen/fdopen/reopen/Popen end in `open` but are not builtin
+    open()/os.open() calls, so they must not be reported."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "import os\n"
+        "import subprocess\n"
+        "def run(cmd, fd, p, mode):\n"
+        "    stream = os.popen(cmd)\n"
+        "    handle = os.fdopen(fd, mode)\n"
+        "    again = reopen(p, mode)\n"
+        "    proc = subprocess.Popen(cmd)\n"
+        "    return stream, handle, again, proc\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []

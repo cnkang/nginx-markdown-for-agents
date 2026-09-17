@@ -816,6 +816,10 @@ def _scan_single_open_match(
         else len(line)
     )
     prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
+    if prev_char.isalnum() or prev_char == "_":
+        # A longer identifier ending in `open` (popen, fdopen, reopen,
+        # Popen) is not a builtin open()/os.open() call.
+        return match_errors, match_warnings
     if prev_char == ".":
         # Method call `receiver.open(...)`.  The OPEN_CALL_RE match
         # sits on the `open` token; os.open() produces a SECOND,
