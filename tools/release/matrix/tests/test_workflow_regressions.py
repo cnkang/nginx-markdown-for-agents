@@ -134,7 +134,8 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     assert "Enable auto-merge for release matrix PR" not in text
     assert 'gh pr merge "$PR_NUMBER"' not in text
     assert "Remind maintainer review for release matrix PR" in text
-    assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
+    assert "Automatic PR creation for the matrix update did not complete." in text
+    assert "auto/update-matrix" in text
 
 
 def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
