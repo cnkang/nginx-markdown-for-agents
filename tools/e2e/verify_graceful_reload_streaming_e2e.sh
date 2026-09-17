@@ -121,7 +121,7 @@ for _ in $(seq 1 50); do
 done
 if [[ "${ready}" -ne 1 ]]; then
     echo "ERROR: the container never served a converted /large" >&2
-    docker logs "${CONTAINER}" >&2 | tail -20 || true
+    docker logs "${CONTAINER}" 2>&1 | tail -20 >&2 || true
     exit 1
 fi
 
@@ -190,17 +190,34 @@ if ! cmp -s "${baseline}" "${slow}"; then
 fi
 
 # The old worker must exit once its in-flight request finished; one worker plus
-# the master is the steady state.
-workers="$(docker exec "${CONTAINER}" sh -c 'ps -o comm= | grep -c "^nginx$"' 2>/dev/null || echo 0)"
+# the master is the steady state.  The retired worker can take a moment to
+# finish its shutdown handshake, so poll for the steady state instead of
+# sampling once: a single sample turns a slow-but-correct retirement into a
+# false leak report, and a poll that never converges still fails the check.
+workers=""
+workers_steady=0
+for _ in $(seq 1 25); do
+    # The count is parsed from the first line only: grep -c prints 0 and exits
+    # 1 on zero matches, so an unparsed multi-line capture would break the
+    # numeric test below instead of reporting the steady-state result.
+    workers="$(docker exec "${CONTAINER}" sh -c 'ps -o comm= | grep -c "^nginx$"' 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if ! [[ "${workers}" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: could not count the nginx processes after the reload (got '${workers}')" >&2
+        exit 1
+    fi
+    # One master plus one worker is the steady state: the retired worker must
+    # exit once its in-flight request finished, and a stuck extra worker
+    # leaks.  Stop at the first sample that shows the steady state.
+    if [[ "${workers}" -eq 2 ]]; then
+        workers_steady=1
+        break
+    fi
+    sleep 0.2
+done
 echo "nginx processes after the reload: ${workers}" >&2
-if ! [[ "${workers}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: could not count the nginx processes after the reload (got '${workers}')" >&2
-    exit 1
-fi
-# One master plus one worker is the steady state: the retired worker must exit
-# once its in-flight request finished, and a stuck extra worker would leak.
-if [[ "${workers}" -ne 2 ]]; then
-    echo "ERROR: expected 2 nginx processes after the reload, found ${workers}" >&2
+if [[ "${workers_steady}" -ne 1 ]]; then
+    echo "ERROR: nginx process leak after the reload: expected the steady state of 2 processes (one master, one worker) within 5s, still found ${workers}" >&2
+    docker exec "${CONTAINER}" sh -c 'ps -o pid=,ppid=,comm=' >&2 2>/dev/null || true
     exit 1
 fi
 

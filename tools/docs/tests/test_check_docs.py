@@ -133,6 +133,93 @@ def test_document_updates_does_not_consume_a_later_section_table():
     assert docs_checker._document_update_table_lines(content) == []
 
 
+def test_document_updates_rejects_a_second_table_in_the_same_section(tmp_path):
+    """A second ledger table in the section is checked, not bypassed."""
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n"
+        "| 0.9.1 | 2026-07-14 | Older |\n"
+        "\n"
+        "A second table continues the ledger.\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.8.1 | 2026-01-01 | Oldest |\n"
+        "| 0.9.0 | 2026-05-01 | Newer |\n",
+        encoding="utf-8",
+    )
+
+    errors = docs_checker.check_document_updates_order([f])
+
+    assert any("descending chronological order" in error for error in errors)
+
+
+def test_document_updates_rejects_a_table_under_a_subheading(tmp_path):
+    """A ledger table filed under a sub-heading is still inside the section."""
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n"
+        "| 0.9.1 | 2026-07-14 | Older |\n"
+        "\n"
+        "### Archived Rows\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.8.0 | 2026-01-01 | Oldest |\n"
+        "| 0.8.3 | 2026-06-26 | Newer |\n",
+        encoding="utf-8",
+    )
+
+    errors = docs_checker.check_document_updates_order([f])
+
+    assert any("descending chronological order" in error for error in errors)
+
+
+def test_document_updates_accepts_every_ordered_table_in_the_section(tmp_path):
+    """Both bypass shapes pass once their rows descend correctly."""
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n"
+        "| 0.9.1 | 2026-07-14 | Older |\n"
+        "\n"
+        "### Archived Rows\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.8.3 | 2026-06-26 | Newer |\n"
+        "| 0.8.0 | 2026-01-01 | Oldest |\n",
+        encoding="utf-8",
+    )
+
+    assert docs_checker.check_document_updates_order([f]) == []
+
+
+def test_document_updates_later_section_table_is_not_consumed_as_history():
+    """A table after the next H2 stays out of the Document Updates scope."""
+    content = (
+        "## Document Updates\n\n"
+        "| Version | Date | Notes |\n"
+        "|---------|------|-------|\n"
+        "| 0.9.2 | 2026-09-02 | Release |\n"
+        "\n"
+        "## Compatibility\n\n"
+        "| Version | Support |\n"
+        "|---|---|\n"
+        "| 0.9.1 | supported |\n"
+    )
+
+    tables = docs_checker._document_update_tables(content)
+
+    assert len(tables) == 1
+    assert all("0.9.1 | supported" not in line for line in tables[0])
+
+
 def test_internal_reference_policy_rejects_kiro_directory_reference(tmp_path):
     f = tmp_path / "doc.md"
     f.write_text("See `.kiro/specs/` for details.\n", encoding="utf-8")
