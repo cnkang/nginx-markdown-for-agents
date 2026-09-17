@@ -1190,6 +1190,19 @@ fn epoch_days_to_ymd(days: u64) -> (u64, u64, u64) {
 /// assert_eq!(report["schema_version"], "1.0.0");
 /// assert!(report.get("tiers").and_then(|t| t.as_object()).is_some());
 /// ```
+///
+/// # `stage_breakdown` placeholders
+///
+/// When a tier has no matching entry in `breakdowns` (a run that skipped the
+/// per-stage timing pass, or a tier whose benchmark was not scheduled), the
+/// emitted `stage_breakdown` object is written with all four percentages at
+/// `0.0`.  Those zeros are **intentional placeholders, not measurements**: the
+/// JSON schema requires the key to be present so consumers can index it
+/// unconditionally, and a zero means "no stage timing was collected", never
+/// "the stage took no time".  A real breakdown always divides by
+/// `BreakdownSummary::total_ms` and only falls back to `0.0` per field when
+/// that total is zero, so a populated object and a placeholder object cannot
+/// be confused once the source of the tier is known.
 fn build_measurement_report(
     ffi_results: &[(Sample, FfiSummary, RunConfig)],
     streaming_results: &Option<Vec<(Sample, StreamingSummary, RunConfig)>>,

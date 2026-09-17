@@ -64,7 +64,7 @@
  * cbindgen-generated header via
  * `tools/release/gates/compute_abi_fingerprints.py`.
  */
-#define MARKDOWN_HEADER_HASH 13334292661023671046ull
+#define MARKDOWN_HEADER_HASH 4327775645248237787
 
 /**
  * SHA-256 truncated hash of the sorted exported symbol name set.
@@ -378,6 +378,11 @@ typedef struct MarkdownTrustedProxies MarkdownTrustedProxies;
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
  * Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
+ *
+ * This type is deliberately **not** `#[repr(C)]`: the C side only ever holds
+ * the opaque `struct StreamingConverterHandle *` produced by
+ * [`markdown_streaming_new_with_code`], so private fields may be added
+ * without changing the ABI.
  */
 typedef struct StreamingConverterHandle StreamingConverterHandle;
 #endif
@@ -1285,6 +1290,20 @@ struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void);
  * `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1) when the CIDR is malformed, or
  * `TRUSTED_PROXIES_PUSH_NULL` (2) when `handle` or `cidr` is NULL/empty.
  *
+ * # Panic fallback contract
+ *
+ * A panic raised while parsing or storing the CIDR is caught and mapped to
+ * `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1), never to `TRUSTED_PROXIES_PUSH_OK`:
+ * the rejected CIDR is treated exactly like a malformed one, so a caught
+ * panic can only ever *narrow* the trusted-proxy set, never widen it
+ * (fail-closed).  A panic can therefore leave the set without the current
+ * CIDR while every CIDR accepted before it stays stored; there is no
+ * transactional rollback of earlier successful pushes.
+ *
+ * The 1-byte status cannot distinguish "malformed CIDR" from "caught panic";
+ * the C caller must not assume the reason.  `handle` stays a live pointer in
+ * both cases and must still be released with `markdown_trusted_proxies_free`.
+ *
  * # Safety
  *
  * The caller must ensure that `handle` points to a live set created by
@@ -1654,6 +1673,39 @@ uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options,
  * On error, `*out_data` is set to NULL and `*out_len` to 0. The returned
  * error code indicates the failure type.
  *
+ * # Consume-or-abort contract (any non-`ERROR_SUCCESS` return)
+ *
+ * After **any** return code other than `ERROR_SUCCESS` (0) the caller MUST
+ * stop feeding: it MUST NOT call `feed` again.  What may follow depends on
+ * when the failure happened:
+ *
+ * - a **pre-commit** failure (no output committed yet) may only continue
+ *   through [`markdown_streaming_abort`], which releases the handle;
+ * - a **post-commit** failure (`ERROR_POST_COMMIT` (8)) may instead be
+ *   closed with [`markdown_streaming_safe_finish`], which emits closing
+ *   markers for the structures that were already committed and consumes the
+ *   handle; if that closure fails (`POST_COMMIT_ABORT` (4)) the caller
+ *   terminates through the abort path.
+ *
+ * [`markdown_streaming_finalize`] is never valid after a failed `feed`.
+ * This mirrors the C layer's existing behavior: every non-zero `feed` result
+ * routes to an abort or safe-finish path that clears the handle, and a
+ * failed conversion never resumes on converter state the failure may have
+ * left torn.
+ *
+ * `ERROR_INTERNAL` (99) is returned both for a caught panic **and** for a
+ * non-panicking `ConversionError::InternalError`; the caller must not infer
+ * which occurred. A caught panic additionally marks the handle *poisoned*
+ * (see below), but the abort-only rule applies to every non-zero code.
+ *
+ * # Poisoned handles
+ *
+ * If this call caught a panic, the handle is marked poisoned: any later
+ * `feed`, `finalize`, or `safe_finish` on it returns `ERROR_INTERNAL` (99)
+ * without touching the possibly-torn converter state, and the result/output
+ * slots are populated as a normal error return. The handle stays a live
+ * allocation, so [`markdown_streaming_abort`] always releases it.
+ *
  * # Safety
  *
  * - `handle` must be a live pointer returned by [`markdown_streaming_new_with_code`].
@@ -1670,7 +1722,8 @@ uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options,
  * - `ERROR_POST_COMMIT` (8) for post-commit error
  * - `ERROR_TIMEOUT` (3) for timeout
  * - `ERROR_INVALID_INPUT` (5) for NULL handle or output pointers
- * - `ERROR_INTERNAL` (99) for caught panics
+ * - `ERROR_INTERNAL` (99) for a caught panic, a non-panicking internal error,
+ *   or a call on an already-poisoned handle
  */
 uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle,
                                  const uint8_t *data,
@@ -1689,6 +1742,13 @@ uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle,
  * If validation fails (NULL `handle` or NULL `result`), `ERROR_INVALID_INPUT`
  * is returned and the handle is NOT consumed — the caller remains responsible
  * for freeing or aborting it.
+ *
+ * A handle poisoned by an earlier caught panic (`feed` returned
+ * `ERROR_INTERNAL` after a panic) is still consumed here, but the inner
+ * converter is not driven again: `result` receives `ERROR_INTERNAL` (99)
+ * and a diagnostic message instead of torn Markdown output. Callers that
+ * follow the `feed` consume-or-abort contract abort instead of finalizing,
+ * so this path exists only as a belt-and-suspenders guard.
  *
  * # Safety
  *
@@ -1714,6 +1774,11 @@ uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle,
  *
  * Use this function when the conversion must be abandoned (e.g. client
  * abort or unrecoverable error). This always consumes the handle.
+ *
+ * This is the only continuation that is valid after a failed
+ * [`markdown_streaming_feed`] (any non-`ERROR_SUCCESS` return), and it also
+ * releases a handle poisoned by a caught panic: poisoning only blocks
+ * further conversion work, never the free path.
  *
  * Passing NULL is a safe no-op.
  *
@@ -1757,6 +1822,13 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
  * for aborting it. All other return codes consume the handle. In
  * particular, a caught panic (`ERROR_INTERNAL`) can only occur after
  * `Box::from_raw` has taken ownership, so the handle is consumed in that case.
+ *
+ * A handle poisoned by an earlier caught panic is consumed too, but the torn
+ * converter is not driven again: the call returns `POST_COMMIT_ABORT` (4)
+ * with a NULL/0 output buffer, which already means "caller must abort" — the
+ * same contract a failed safe finish has. Callers that follow the `feed`
+ * consume-or-abort contract never reach this call, so this is a
+ * belt-and-suspenders guard.
  *
  * # Safety
  *

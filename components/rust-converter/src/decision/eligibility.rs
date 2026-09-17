@@ -31,27 +31,56 @@
 /// Mirrors `ngx_http_markdown_eligibility_t`. `IneligibleAuth` is part of
 /// the C enum but is decided by a separate auth path, not by this function;
 /// it is retained here only so the mapping is exhaustive.
+///
+/// # Repr
+///
+/// Uses `#[repr(u8)]` with explicit discriminants: the values are the FFI
+/// contract with the C `ngx_http_markdown_eligibility_t` enum, which the C
+/// caller casts back directly from the returned `u8`. Discriminants are
+/// stable and must not be reordered.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Eligibility {
     /// Response is eligible for conversion.
-    Eligible,
+    Eligible = 0,
     /// Request method is not GET or HEAD.
-    IneligibleMethod,
+    IneligibleMethod = 1,
     /// Response status is not 200.
-    IneligibleStatus,
+    IneligibleStatus = 2,
     /// Response Content-Type is not in the allowlist.
-    IneligibleContentType,
+    IneligibleContentType = 3,
     /// Response size exceeds the configured limit.
-    IneligibleSize,
+    IneligibleSize = 4,
     /// Response is an unbounded streaming type.
-    IneligibleStreaming,
+    IneligibleStreaming = 5,
     /// Auth policy denies conversion (decided elsewhere).
-    IneligibleAuth,
+    IneligibleAuth = 6,
     /// Range request (Range header or 206 Partial Content).
-    IneligibleRange,
+    IneligibleRange = 7,
     /// Conversion disabled by configuration for this request.
-    IneligibleConfig,
+    IneligibleConfig = 8,
 }
+
+/// Number of `Eligibility` variants; the FFI contract keeps the
+/// discriminants contiguous from `0` to `ELIGIBILITY_VARIANT_COUNT - 1`.
+///
+/// Internal (not `pub`): the C `ngx_http_markdown_eligibility_t` enum is
+/// hand-written in the module and needs no generated macro, so this count
+/// stays out of the cbindgen header (like `META_SCAN_LIMIT`).
+const ELIGIBILITY_VARIANT_COUNT: u8 = 9;
+
+/// Compile-time guard: the enum must stay single-byte and contiguous so the
+/// `u8` transport across FFI keeps matching the C
+/// `ngx_http_markdown_eligibility_t` discriminants exactly.
+const _: () = assert!(
+    std::mem::size_of::<Eligibility>() == 1,
+    "Eligibility must stay repr(u8): the FFI transports one byte"
+);
+const _: () = assert!(
+    Eligibility::Eligible as u8 == 0
+        && Eligibility::IneligibleConfig as u8 == ELIGIBILITY_VARIANT_COUNT - 1,
+    "Eligibility discriminants must stay contiguous 0..ELIGIBILITY_VARIANT_COUNT"
+);
 
 impl Eligibility {
     /// Stable reason string for logging/metrics (matches the C strings).
@@ -76,18 +105,11 @@ impl Eligibility {
 
     /// Stable u8 FFI code matching the C `ngx_http_markdown_eligibility_t`
     /// enum discriminants, so the C caller can cast the return value directly.
+    ///
+    /// Derived from the explicit `#[repr(u8)]` discriminants; the
+    /// compile-time guards above pin them to the C enum order.
     pub fn ffi_code(self) -> u8 {
-        match self {
-            Eligibility::Eligible => 0,
-            Eligibility::IneligibleMethod => 1,
-            Eligibility::IneligibleStatus => 2,
-            Eligibility::IneligibleContentType => 3,
-            Eligibility::IneligibleSize => 4,
-            Eligibility::IneligibleStreaming => 5,
-            Eligibility::IneligibleAuth => 6,
-            Eligibility::IneligibleRange => 7,
-            Eligibility::IneligibleConfig => 8,
-        }
+        self as u8
     }
 }
 
@@ -402,5 +424,38 @@ mod tests {
     fn idempotent() {
         let i = base();
         assert_eq!(decide_eligibility(&i), decide_eligibility(&i));
+    }
+
+    /// FFI contract: the `repr(u8)` discriminants must stay `0..=8` in the C
+    /// `ngx_http_markdown_eligibility_t` declaration order because the C
+    /// caller casts the returned `u8` back to its enum directly.
+    #[test]
+    fn ffi_codes_match_c_enum_discriminants() {
+        let all = [
+            (Eligibility::Eligible, 0u8),
+            (Eligibility::IneligibleMethod, 1),
+            (Eligibility::IneligibleStatus, 2),
+            (Eligibility::IneligibleContentType, 3),
+            (Eligibility::IneligibleSize, 4),
+            (Eligibility::IneligibleStreaming, 5),
+            (Eligibility::IneligibleAuth, 6),
+            (Eligibility::IneligibleRange, 7),
+            (Eligibility::IneligibleConfig, 8),
+        ];
+        assert_eq!(all.len(), usize::from(ELIGIBILITY_VARIANT_COUNT));
+        for (variant, expected) in all {
+            assert_eq!(
+                variant.ffi_code(),
+                expected,
+                "{variant:?} FFI discriminant drifted from the C enum"
+            );
+            assert_eq!(variant as u8, expected);
+        }
+    }
+
+    #[test]
+    fn enum_is_single_byte_for_ffi() {
+        assert_eq!(std::mem::size_of::<Eligibility>(), 1);
+        assert_eq!(std::mem::align_of::<Eligibility>(), 1);
     }
 }

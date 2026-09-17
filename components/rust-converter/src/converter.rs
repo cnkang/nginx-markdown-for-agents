@@ -278,6 +278,16 @@ pub struct ConversionContext {
     /// (e.g., the FFI layer) should set this via [`set_input_size_hint`].
     input_size_hint: usize,
     /// Maximum generated Markdown size for the full-buffer path.
+    ///
+    /// The budget bounds the combined accounting (retained output capacity
+    /// plus live `working_set_bytes`), not the emitted text alone.  A caller
+    /// that passes `conversion_memory` gets the documented whole-conversion
+    /// working-set cap: output growth and transient scratch buffers draw from
+    /// the same budget, so neither can push the request past the configured
+    /// limit.  The two comparisons in the code enforce this from different
+    /// angles: `check_output_budget` compares the logical output length,
+    /// while `BudgetedMarkdownWriter` charges the buffer capacity together
+    /// with the working set.
     output_budget: usize,
     /// Bytes of transient working-set memory currently charged to temporary
     /// allocations that are not part of the output buffer itself (escape
@@ -508,9 +518,12 @@ impl ConversionContext {
 
     /// Set the maximum generated Markdown size for this conversion.
     ///
-    /// A zero FFI budget selects the same 64 MiB default used by the NGINX
-    /// conversion-memory limit. Values that do not fit in `usize` saturate
-    /// at the platform maximum.
+    /// The value bounds the combined accounting (retained output capacity
+    /// plus live working-set bytes), not the emitted text alone: a caller
+    /// passing `conversion_memory` gets the documented whole-conversion
+    /// working-set cap.  A zero FFI budget selects the same 64 MiB default
+    /// used by the NGINX conversion-memory limit. Values that do not fit in
+    /// `usize` saturate at the platform maximum.
     pub(crate) fn set_output_budget(&mut self, budget: u64) {
         self.output_budget = if budget == 0 {
             DEFAULT_FULL_BUFFER_OUTPUT_BUDGET

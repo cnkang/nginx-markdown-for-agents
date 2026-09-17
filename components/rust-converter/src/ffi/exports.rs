@@ -672,6 +672,20 @@ pub extern "C" fn markdown_trusted_proxies_new() -> *mut MarkdownTrustedProxies 
 /// `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1) when the CIDR is malformed, or
 /// `TRUSTED_PROXIES_PUSH_NULL` (2) when `handle` or `cidr` is NULL/empty.
 ///
+/// # Panic fallback contract
+///
+/// A panic raised while parsing or storing the CIDR is caught and mapped to
+/// `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1), never to `TRUSTED_PROXIES_PUSH_OK`:
+/// the rejected CIDR is treated exactly like a malformed one, so a caught
+/// panic can only ever *narrow* the trusted-proxy set, never widen it
+/// (fail-closed).  A panic can therefore leave the set without the current
+/// CIDR while every CIDR accepted before it stays stored; there is no
+/// transactional rollback of earlier successful pushes.
+///
+/// The 1-byte status cannot distinguish "malformed CIDR" from "caught panic";
+/// the C caller must not assume the reason.  `handle` stays a live pointer in
+/// both cases and must still be released with `markdown_trusted_proxies_free`.
+///
 /// # Safety
 ///
 /// The caller must ensure that `handle` points to a live set created by

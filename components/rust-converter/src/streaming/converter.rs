@@ -87,8 +87,11 @@ pub struct StreamingConverter {
     /// configured `TokenEstimator` ratio.
     total_markdown_chars: u64,
     /// Characters-per-token ratio for token estimation.
-    /// Defaults to 4.0 (English text); can be overridden via FFI
-    /// options for CJK, code-heavy, or other LLM profiles.
+    /// Defaults to 4.0 (English text); Rust callers can override it through
+    /// [`with_chars_per_token`](Self::with_chars_per_token) for CJK,
+    /// code-heavy, or other LLM profiles.  The C ABI carries no
+    /// chars-per-token field (removed in the 0.9.2 freeze), so FFI constructs
+    /// always run with the default ratio.
     chars_per_token: f32,
     /// Commit state (PreCommit / PostCommit).
     commit_state: CommitState,
