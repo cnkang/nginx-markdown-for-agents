@@ -338,6 +338,37 @@ class TestSonarTokenSteps:
         findings = check_sonar_gate_wiring(text)
         assert findings == []
 
+    def test_negated_gate_is_reported_as_unwired(self):
+        """A scanner gated on the negation of the output is not wired.
+
+        ``! steps.token.outputs.enabled`` runs the step precisely when the
+        token is absent, so the wiring check must not accept it.
+        """
+        text = (
+            "name: SonarCloud\n"
+            "on: push\n"
+            "jobs:\n"
+            "  scan:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - name: Check Sonar token\n"
+            "        id: token\n"
+            "        env:\n"
+            "          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}\n"
+            "        run: |\n"
+            "          if [[ -n \"${SONAR_TOKEN:-}\" ]]; then\n"
+            "            echo \"enabled=true\" >> \"$GITHUB_OUTPUT\"\n"
+            "          fi\n"
+            "      - name: SonarCloud Scan\n"
+            "        if: ${{ ! steps.token.outputs.enabled }}\n"
+            "        uses: SonarSource/sonarcloud-github-action@abc123\n"
+            "        env:\n"
+            "          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}\n"
+        )
+        findings = check_sonar_gate_wiring(text)
+        assert len(findings) == 1
+        assert "not gated on steps.token.outputs" in findings[0].message
+
     def test_run_only_gate_reference_is_not_wiring(self):
         """A gate reference outside if: does not gate the step.
 
@@ -551,6 +582,33 @@ class TestStepIfValueIndentation:
             == "steps.token.outputs.enabled == 'true'"
         )
 
+    def test_dash_line_block_scalar_body_is_not_yaml(self):
+        """A ``key:``-looking line inside ``- run: |`` must not gate the step.
+
+        Adversarial and accidental heredoc content both hit this shape: the
+        body line matches the child-key regex yet lives inside the scalar,
+        so reading it as the step gate would fabricate wiring.
+        """
+        lines = [
+            "      - run: |",
+            "          if: steps.token.outputs.enabled",
+            "        env:",
+            "          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}",
+        ]
+        assert secret_scope_module._step_if_value(lines, 0, len(lines)) == ""
+
+    def test_gate_after_dash_line_block_scalar_still_gates(self):
+        """A real ``if:`` after a ``- run: |`` body is still read."""
+        lines = [
+            "      - run: |",
+            "          echo scan",
+            "        if: steps.token.outputs.enabled == 'true'",
+        ]
+        assert (
+            secret_scope_module._step_if_value(lines, 0, len(lines))
+            == "steps.token.outputs.enabled == 'true'"
+        )
+
 
 class TestReferencesGatePolarity:
     """_references_gate accepts only positive gate requirements."""
@@ -573,6 +631,25 @@ class TestReferencesGatePolarity:
     def test_negated_contains_does_not_gate(self):
         assert not secret_scope_module._references_gate(
             "!contains(steps.token.outputs.enabled, 'true')",
+            "token",
+            {"enabled"},
+        )
+
+    def test_unary_negation_does_not_gate(self):
+        assert not secret_scope_module._references_gate(
+            "! steps.token.outputs.enabled", "token", {"enabled"}
+        )
+
+    def test_negated_parenthesized_gate_does_not_gate(self):
+        assert not secret_scope_module._references_gate(
+            "! (steps.token.outputs.enabled == 'true')",
+            "token",
+            {"enabled"},
+        )
+
+    def test_unrelated_negation_still_gates(self):
+        assert secret_scope_module._references_gate(
+            "!cancelled() && steps.token.outputs.enabled == 'true'",
             "token",
             {"enabled"},
         )

@@ -180,12 +180,46 @@ def _step_id(lines: list[str], start: int, end: int) -> str | None:
     return None
 
 
+def _step_structural_lines(
+    lines: list[str], start: int, end: int
+) -> list[tuple[int, int]]:
+    """Return (index, indent) pairs for the step's YAML structure lines.
+
+    A block scalar (``run: |``, ``if: >-``, and their chomping variants)
+    owns every following line that is more indented than its key, so those
+    lines are skipped: a heredoc or script line that happens to look like
+    ``key: value`` must never be read as YAML.  The dash line itself can
+    open a scalar (``- run: |``); its body ends at the first line that is
+    not deeper than the key.
+    """
+    body_indent: int | None = None
+    leading = re.match(r"^(\s*)-[^\n]*?:\s*[|>]", lines[start])
+    if leading is not None:
+        body_indent = len(leading.group(1)) + 3
+
+    structural: list[tuple[int, int]] = []
+    for index in range(start + 1, end):
+        line = lines[index]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if body_indent is not None:
+            if indent >= body_indent:
+                continue
+            body_indent = None
+        match = STEP_CHILD_KEY_RE.match(line)
+        if match is None:
+            continue
+        if match.group(2).strip()[:1] in (">", "|"):
+            body_indent = indent + 1
+        structural.append((index, indent))
+    return structural
+
+
 def _step_child_indent(lines: list[str], start: int, end: int) -> int | None:
     """Indentation of the step's direct child keys, from the first key line."""
-    for index in range(start, end):
-        if STEP_CHILD_KEY_RE.match(lines[index]) is not None:
-            return len(lines[index]) - len(lines[index].lstrip())
-    return None
+    structural = _step_structural_lines(lines, start, end)
+    return structural[0][1] if structural else None
 
 
 def _fold_block_scalar(lines: list[str], index: int, end: int) -> str:
@@ -205,18 +239,19 @@ def _fold_block_scalar(lines: list[str], index: int, end: int) -> str:
 def _step_if_value(lines: list[str], start: int, end: int) -> str:
     """Return the step's own ``if:`` value from its block, else ``""``.
 
-    Only a key at the step's direct-child indentation counts: an ``if:``
-    nested under ``env:`` or ``with:`` does not gate the step.  Block
-    scalars (``if: >-``) are folded into one string because the condition
-    then continues on the following, more-indented lines.
+    Only a key at the step's direct-child indentation counts, and lines
+    owned by a block scalar are never treated as YAML: an ``if:`` nested
+    under ``env:``/``with:`` or a script line inside ``run: |`` does not
+    gate the step.  Block scalars (``if: >-``) are folded into one string
+    because the condition then continues on the following lines.
     """
-    child_indent = _step_child_indent(lines, start, end)
-    for index in range(start, end):
+    structural = _step_structural_lines(lines, start, end)
+    if not structural:
+        return ""
+    child_indent = structural[0][1]
+    for index, indent in structural:
         match = STEP_CHILD_KEY_RE.match(lines[index])
-        if match is None or match.group(1) != "if":
-            continue
-        indent = len(lines[index]) - len(lines[index].lstrip())
-        if child_indent is not None and indent != child_indent:
+        if match is None or match.group(1) != "if" or indent != child_indent:
             continue
         value = match.group(2).strip()
         if value and value[0] not in ">|":
@@ -265,6 +300,8 @@ def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
         if re.search(rf"{ref}\s*(?:!=|==\s*['\"]?false)", if_value):
             continue
         if re.search(rf"!\s*contains\(\s*{ref}", if_value):
+            continue
+        if re.search(rf"!\s*\(*\s*{ref}", if_value):
             continue
         return True
     return False
