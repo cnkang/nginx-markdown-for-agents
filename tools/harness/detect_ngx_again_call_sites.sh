@@ -52,16 +52,22 @@ NGX_AGAIN_APIS=(
     ngx_http_markdown_streaming_resume_pending
 )
 
-tmp_violations=$(mktemp)
+tmp_violations="$(mktemp)" || {
+    echo "ERROR: cannot create the violations file" >&2
+    exit 2
+}
 # Bash 3.2 + set -u: an empty GREP_TEMPS would make a bare
 # ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
-# ${arr[@]+...} idiom (Rule 11).
+# ${arr[@]+...} idiom (Rule 11).  The same guard covers file_list,
+# which does not exist yet when the trap is installed — the trap is
+# armed before the second scratch file is created so a failure there
+# still cleans up the first.
 GREP_TEMPS=()
+trap 'rm -f "$tmp_violations" ${file_list:+"$file_list"} ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
 file_list="$(mktemp "${TMPDIR:-/tmp}/ngx-again-files.XXXXXX")" || {
     echo "ERROR: cannot create the file list" >&2
     exit 2
 }
-trap 'rm -f "$tmp_violations" "$file_list" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
 
 if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f 2>/dev/null; then
     echo "ERROR: cannot enumerate C source files in $SRC_DIR" >&2

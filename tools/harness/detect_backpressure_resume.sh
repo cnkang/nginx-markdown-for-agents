@@ -27,9 +27,15 @@ if [[ ! -d "$SRC_DIR" ]]; then
     exit 2
 fi
 
-tmp_violations=$(mktemp)
-file_list=$(mktemp "${TMPDIR:-/tmp}/backpressure-files.XXXXXX")
-trap 'rm -f "$tmp_violations" "$file_list"' EXIT
+tmp_violations=$(mktemp) || {
+    echo "ERROR: cannot create the violations file" >&2
+    exit 2
+}
+trap 'rm -f "$tmp_violations" ${file_list:+"$file_list"}' EXIT
+file_list=$(mktemp "${TMPDIR:-/tmp}/backpressure-files.XXXXXX") || {
+    echo "ERROR: cannot create the file list" >&2
+    exit 2
+}
 if ! harness_collect_find0 "$file_list" "$SRC_DIR" -name "*.c" -type f 2>/dev/null; then
     echo "ERROR: cannot enumerate C source files in $SRC_DIR" >&2
     exit 2
