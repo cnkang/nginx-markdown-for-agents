@@ -64,20 +64,21 @@ if ! harness_collect_find0 "$file_list" "${SRC_DIR}" \
 fi
 
 # ── Phase 1: Direct struct-name on memzero/memset line ──
+memzero_raw_rc=0
+memzero_raw="$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null)" \
+    || memzero_raw_rc=$?
+if [[ "$memzero_raw_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR}" >&2
+    exit 2
+fi
+# The filters run on the captured text once; the per-struct loop below only
+# narrows the already-captured lines, so the recursive scan is not repeated
+# per guarded struct.
+memzero_clean="$(printf '%s\n' "$memzero_raw" \
+    | grep -v "_test\.c" \
+    | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' || true)"
 for struct in "${GUARDED_STRUCTS[@]}"; do
-    matches_raw_rc=0
-    matches_raw="$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null)" \
-        || matches_raw_rc=$?
-    if [[ "$matches_raw_rc" -gt 1 ]]; then
-        echo "ERROR: grep failed scanning ${SRC_DIR}" >&2
-        exit 2
-    fi
-    # The filters run on the captured text, so a scan failure above can no
-    # longer be masked by a downstream no-match exit status.
-    matches="$(printf '%s\n' "$matches_raw" \
-        | grep -v "_test\.c" \
-        | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
-        | grep -i "${struct}" || true)"
+    matches="$(printf '%s\n' "$memzero_clean" | grep -i "${struct}" || true)"
     if [[ -n "${matches}" ]]; then
         echo "VIOLATION [phase1]: Direct memset/ngx_memzero on ${struct}:" >&2
         echo "${matches}" >&2
