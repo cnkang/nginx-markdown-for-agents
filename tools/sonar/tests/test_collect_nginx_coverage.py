@@ -24,7 +24,7 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     # silently skipped, and a conflicting block inside one would go unreported.
     for match in re.finditer(
         r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?"
-        r"(?:\"[^\"]*\"|'[^']*'|[^\s{]+)\s*\{",
+        r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s{]+)\s*\{",
         script,
     ):
         depth = 1
@@ -110,3 +110,22 @@ def test_tilde_star_modifier_locations_are_parsed() -> None:
     )
     blocks = _conflicting_location_blocks(config)
     assert len(blocks) == 1
+
+
+def test_escaped_quote_delimiters_in_location_arguments_are_detected() -> None:
+    """Quoted location arguments with escaped delimiters must not hide a
+    conflicting block from the scan."""
+    script = (
+        'location ~ "a\\"b" {\n'
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+        "location ~ 'c\\'d' {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert len(blocks) == 2
