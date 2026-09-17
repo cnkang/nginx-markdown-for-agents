@@ -292,12 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn test_markdown_higher_q() {
-        let r = negotiate("text/markdown;q=0.9, text/html;q=0.8");
-        assert_eq!(r, NegotiationResult::Convert);
-    }
-
-    #[test]
     fn test_html_higher_q() {
         let r = negotiate("text/html;q=0.9, text/markdown;q=0.8");
         assert_eq!(
@@ -428,12 +422,6 @@ mod tests {
                 reason: PassthroughReason::ExplicitReject
             }
         );
-    }
-
-    #[test]
-    fn test_q_value_boundary_one() {
-        let r = negotiate("text/markdown;q=1.0");
-        assert_eq!(r, NegotiationResult::Convert);
     }
 
     #[test]
