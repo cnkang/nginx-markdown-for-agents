@@ -933,11 +933,26 @@ sudo nginx -t || {
     exit 1
   fi
   # The rollback left NGINX stopped; restart it on the restored, validated
-  # pair using the ownership decision recorded before the stop.
+  # pair using the ownership decision recorded before the stop.  A failed
+  # restart must run the recovery helper when this shell session already
+  # defines it; a standalone run of this block cannot define it, so it must
+  # report the manual-start diagnostic instead of silently continuing.
   if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx || { restore_previous_module_and_config || true; exit 1; }
+    if ! sudo systemctl start nginx; then
+      if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
+        restore_previous_module_and_config || true
+      fi
+      echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      exit 1
+    fi
   else
-    sudo nginx || { restore_previous_module_and_config || true; exit 1; }
+    if ! sudo nginx; then
+      if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
+        restore_previous_module_and_config || true
+      fi
+      echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are restored and validated. Start NGINX manually and check the error log" >&2
+      exit 1
+    fi
   fi
   exit 1
 }
