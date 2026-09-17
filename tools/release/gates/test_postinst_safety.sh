@@ -542,10 +542,34 @@ if [[ -n "$mask_fn" ]]; then
         fail "mask blanks single-quoted substitutions that never execute" "got '$masked'"
     fi
     masked="$(mask_command_text 'NOTE="run sed -i on the config to fix it"')"
-    if [[ "$masked" == 'NOTE="' ]]; then
-        pass "mask still blanks plain prose spans"
+    if [[ "$masked" == 'NOTE=x' ]]; then
+        pass "mask fuses a prose span into its assignment word"
     else
-        fail "mask still blanks plain prose spans" "got '$masked'"
+        fail "mask fuses a prose span into its assignment word" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="run "sed -i x')"
+    if [[ "$masked" == 'NOTE=xsed -i x' ]]; then
+        pass "mask keeps a quote-adjacent word inside one shell word"
+    else
+        fail "mask keeps a quote-adjacent word inside one shell word" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "y"x')"
+    if [[ "$masked" == 'echo xx' ]]; then
+        pass "mask fuses a quoted span followed by word characters"
+    else
+        fail "mask fuses a quoted span followed by word characters" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "y" x')"
+    if [[ "$masked" == 'echo " x' ]]; then
+        pass "mask keeps a standalone span as a token boundary"
+    else
+        fail "mask keeps a standalone span as a token boundary" "got '$masked'"
+    fi
+    masked="$(mask_command_text "P='a'b")"
+    if [[ "$masked" == 'P=xb' ]]; then
+        pass "mask fuses a single-quoted span into its word"
+    else
+        fail "mask fuses a single-quoted span into its word" "got '$masked'"
     fi
 else
     fail "mask_command_text extraction" "function not found in checker"
