@@ -31,8 +31,12 @@ CANONICAL_REASON_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 EVENT_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 VALID_OUTCOMES = {"converted", "skipped", "failed_open", "failed_closed",
                   "aborted"}
+# Mirrors the stage set in tools/reason-codegen/generate.py.  The retired
+# runtime hot-reload overlay owned a "dynconf" stage, and the generator never
+# accepted that value: keeping it here let an entry pass these tests while
+# codegen rejected it.
 VALID_STAGES = {"eligibility", "decompression", "parsing", "conversion",
-                "precommit", "postcommit", "delivery", "dynconf"}
+                "precommit", "postcommit", "delivery"}
 VALID_ERROR_ORIGINS = {"allocation", "downstream", "invariant", "format",
                        "truncated", "timeout", "memory_budget", "internal",
                        "none"}
