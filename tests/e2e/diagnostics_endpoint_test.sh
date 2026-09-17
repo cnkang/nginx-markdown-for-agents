@@ -255,13 +255,15 @@ try:
             path, parsed.netloc
         )
         sock.sendall(request.encode("ascii"))
-        deadline = time.time() + 10
+        deadline = time.monotonic() + 10
         max_bytes = 1 << 20
         data = b""
         while True:
-            if time.time() > deadline or len(data) > max_bytes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or len(data) > max_bytes:
                 print("-1")
                 sys.exit(0)
+            sock.settimeout(remaining)
             chunk = sock.recv(65536)
             if not chunk:
                 break
