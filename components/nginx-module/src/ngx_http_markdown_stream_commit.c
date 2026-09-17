@@ -827,6 +827,32 @@ ngx_http_markdown_stream_commit_invalidate_header(
 
 
 /*
+ * Validate every part of one headers list without mutating it.
+ *
+ * The representation-metadata phase runs this over both outgoing lists
+ * before its first mutation so a malformed part can never leave a
+ * partially-invalidated list behind for the rollback to miss: the failure
+ * happens before the first byte is touched, so no snapshot is needed.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_validate_list(ngx_list_t *list)
+{
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL;
+         part = part->next)
+    {
+        if (ngx_http_markdown_stream_commit_list_part_valid(list, part)
+            != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Remove representation-integrity metadata that describes the upstream
  * HTML representation, not the transformed Markdown body.
  *
@@ -840,7 +866,9 @@ ngx_http_markdown_stream_commit_invalidate_header(
  *
  * This mirrors the full-buffer path (headers_impl.h C6 Accept-Ranges
  * removal) so streaming and buffered responses share one mutation
- * contract.
+ * contract.  Both outgoing lists are prevalidated before the first
+ * mutation, so a malformed part fails the removal with no partial state
+ * for the rollback to miss.
  *
  * Returns:
  *   NGX_OK when every metadata header was invalidated; NGX_ERROR when a
@@ -861,6 +889,21 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     static u_char  hdr_last_modified[] = "Last-Modified";
     static u_char  hdr_trailer[] = "Trailer";
     static u_char  hdr_content_location[] = "Content-Location";
+
+    /*
+     * Prevalidate both outgoing lists before the first mutation: the
+     * invalidations and the trailer clearing below must either all find
+     * a well-formed list or fail with nothing touched (the caller routes
+     * the error into the phase-1 rollback).
+     */
+    if (ngx_http_markdown_stream_commit_validate_list(&r->headers_out.headers)
+            != NGX_OK
+        || ngx_http_markdown_stream_commit_validate_list(
+               &r->headers_out.trailers)
+            != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* Accept-Ranges: clear the typed field and invalidate list entries. */
     r->allow_ranges = 0;
