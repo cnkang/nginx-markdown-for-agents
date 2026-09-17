@@ -165,19 +165,30 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
-# Fail-closed: an unreadable source file aborts the scan with exit 2.
+# Fail-closed: a failing recursive scan aborts with exit 2.  A PATH stub
+# makes grep fail deterministically, so the case behaves the same for
+# privileged and unprivileged users (chmod-based traps do not stop root).
 scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/ffi-scan.XXXXXX")"
-mkdir -p "${scan_dir}/src"
+real_grep="$(command -v grep)"
+mkdir -p "${scan_dir}/src" "${scan_dir}/bin"
 printf 'struct MarkdownOptions opts;\n' >"${scan_dir}/src/readable.c"
-printf 'struct MarkdownResult r;\n' >"${scan_dir}/src/locked.c"
-chmod 000 "${scan_dir}/src/locked.c"
+cat >"${scan_dir}/bin/grep" <<STUB
+#!/bin/bash
+for arg in "\$@"; do
+    if [[ "\$arg" == -*r* ]]; then
+        echo "grep: simulated recursive scan failure" >&2
+        exit 2
+    fi
+done
+exec "${real_grep}" "\$@"
+STUB
+chmod +x "${scan_dir}/bin/grep"
 exit_code=0
-bash "${DETECTOR}" "${scan_dir}/src" >"${scan_dir}/out.txt" 2>&1 || exit_code=$?
-chmod 600 "${scan_dir}/src/locked.c"
+PATH="${scan_dir}/bin:${PATH}" bash "${DETECTOR}" "${scan_dir}/src" >"${scan_dir}/out.txt" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed' "${scan_dir}/out.txt"; then
-    pass "an unreadable source file aborts with exit 2"
+    pass "a failing recursive scan aborts with exit 2"
 else
-    fail "an unreadable source file aborts with exit 2" \
+    fail "a failing recursive scan aborts with exit 2" \
         "exit=${exit_code}; out=$(tr '\n' ' ' <"${scan_dir}/out.txt" | head -c 120)"
 fi
 rm -rf "${scan_dir}"
