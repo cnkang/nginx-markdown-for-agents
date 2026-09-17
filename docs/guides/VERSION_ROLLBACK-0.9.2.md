@@ -38,9 +38,10 @@ Publication and artifact availability are separate release gates.
      echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
    fi
 
-   sudo nginx -s quit
    if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
-     # systemd-managed NGINX: wait for a confirmed shutdown.
+     # systemd-managed NGINX: stop the unit so the unit state and the master
+     # shutdown stay consistent, then wait for a confirmed shutdown.
+     sudo systemctl stop nginx
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
@@ -51,9 +52,10 @@ Publication and artifact availability are separate release gates.
        exit 1
      fi
    else
-     # systemctl unavailable or does not manage NGINX: poll for the master
-     # process to exit after 'nginx -s quit' (graceful shutdown drains
-     # in-flight requests first), then confirm it is really gone.
+     # systemctl unavailable or does not manage NGINX: signal the master
+     # directly and poll for it to exit (graceful shutdown drains in-flight
+     # requests first), then confirm it is really gone.
+     sudo nginx -s quit
      timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'
      drain_status=$?
      if [ "$drain_status" -eq 124 ] || pgrep -x nginx >/dev/null 2>&1; then
@@ -163,8 +165,10 @@ Publication and artifact availability are separate release gates.
      echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
    fi
 
-   sudo nginx -s quit
    if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
+     # systemd-managed NGINX: stop the unit so the unit state and the master
+     # shutdown stay consistent, then wait for a confirmed shutdown.
+     sudo systemctl stop nginx
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
      drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
@@ -175,8 +179,9 @@ Publication and artifact availability are separate release gates.
        exit 1
      fi
    else
-     # systemctl unavailable or does not manage NGINX: verify with a bounded
-     # drain that no NGINX process remains before continuing.
+     # systemctl unavailable or does not manage NGINX: signal the master
+     # directly and verify with a bounded drain that no NGINX process remains.
+     sudo nginx -s quit
      if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
        echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
        exit 1
@@ -214,10 +219,37 @@ Publication and artifact availability are separate release gates.
      sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}"
      exit 1
    fi
+   # Stage the rollback module BEFORE replacing the active one, and restore the
+   # 0.9.2 configuration tree on any staging or replace failure, so the active
+   # module and configuration always pair with each other.
    sudo cp objs/ngx_http_markdown_filter_module.so \
-       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" && \
+       "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" || {
+     if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
+       echo "ERROR: could not stage the rollback module AND could not move the rollback tree aside. Restore manually with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-rollback\" \"${CONFIG_DIR}\"" >&2
+       exit 1
+     fi
+     if ! sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}" 2>/dev/null; then
+       echo "ERROR: could not stage the rollback module AND could not restore the 0.9.2 tree. The 0.9.2 tree is at ${CONFIG_DIR}.pre-rollback; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-rollback\" \"${CONFIG_DIR}\"" >&2
+       exit 1
+     fi
+     echo "ERROR: could not stage the rollback module; the 0.9.2 module/configuration pair is active again. Verify with: sudo nginx -t" >&2
+     exit 1
+   }
    sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.restore" \
-       "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+       "$MODULES_DIR/ngx_http_markdown_filter_module.so" || {
+     if ! sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed" 2>/dev/null; then
+       echo "ERROR: could not replace the active module with the rollback module AND could not move the rollback tree aside. Restore manually with: sudo mv -- \"${CONFIG_DIR}\" \"${CONFIG_DIR}.restore-failed\" && sudo mv -- \"${CONFIG_DIR}.pre-rollback\" \"${CONFIG_DIR}\"" >&2
+       exit 1
+     fi
+     if ! sudo mv -- "${CONFIG_DIR}.pre-rollback" "${CONFIG_DIR}" 2>/dev/null; then
+       echo "ERROR: could not replace the active module with the rollback module AND could not restore the 0.9.2 tree. The 0.9.2 tree is at ${CONFIG_DIR}.pre-rollback; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-rollback\" \"${CONFIG_DIR}\"" >&2
+       exit 1
+     fi
+     sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback" \
+         "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+     echo "ERROR: could not replace the active module with the rollback module; the 0.9.2 module/configuration pair was restored. Verify with: sudo nginx -t" >&2
+     exit 1
+   }
    if ! sudo nginx -t; then
      echo "ERROR: rollback module fails nginx -t; restoring the 0.9.2 configuration tree and module" >&2
      sudo mv -- "${CONFIG_DIR}" "${CONFIG_DIR}.restore-failed"
@@ -287,8 +319,10 @@ if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet ngin
   echo "systemd owns an active nginx unit: prefer 'sudo systemctl stop nginx' so the unit state and the master shutdown stay consistent" >&2
 fi
 
-sudo nginx -s quit
 if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
+  # systemd-managed NGINX: stop the unit so the unit state and the master
+  # shutdown stay consistent, then wait for a confirmed shutdown.
+  sudo systemctl stop nginx
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
   drain_status=$?
   # Abort when the drain hit the timeout, and require an explicit
@@ -299,8 +333,9 @@ if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
     exit 1
   fi
 else
-  # systemctl unavailable or does not manage NGINX: verify with a bounded
-  # drain that no NGINX process remains before continuing.
+  # systemctl unavailable or does not manage NGINX: signal the master
+  # directly and verify with a bounded drain that no NGINX process remains.
+  sudo nginx -s quit
   if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
     echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
     exit 1
@@ -321,8 +356,10 @@ CONFIG_090="${CONFIG_090:?set the path to the versioned 0.9.0 configuration dire
 CONFIG_FILE="$(nginx -V 2>&1 | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p')"
 CONFIG_DIR="${CONFIG_FILE%/nginx.conf}"
 if [[ -z "${CONFIG_DIR}" || "${CONFIG_DIR}" == / \
-    || ! -f "${CONFIG_090}/nginx.conf" ]]; then
-  echo "ERROR: confirm the 0.9.0 configuration backup and active NGINX paths" >&2
+    || ! -f "${CONFIG_090}/nginx.conf" \
+    || -e "${CONFIG_DIR}.restore-0.9.0" \
+    || -e "${CONFIG_DIR}.pre-0.9.0" ]]; then
+  echo "ERROR: confirm the 0.9.0 configuration backup and active NGINX paths, and remove an earlier rollback artifact" >&2
   exit 1
 fi
 # Swap the configuration tree atomically, keeping the current tree for
@@ -500,6 +537,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-18 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |
 | 0.9.2 | 2026-08-24 | Kang | Both shutdown blocks reuse the guarded systemd-detection logic with manual-master verification; MODULES_DIR fallback no longer guesses the first existing directory and requires explicit configuration |
 | 0.9.2 | 2026-08-15 | Kang | Modules path derived from nginx -V; bounded shutdown loop; metric-family difference table |
 | 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |

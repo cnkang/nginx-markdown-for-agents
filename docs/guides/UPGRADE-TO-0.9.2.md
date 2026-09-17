@@ -11,7 +11,7 @@
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 0.9.2 is a **breaking release**. The release freezes 20 active directives. The
-five names it removed are no longer registered, so `nginx -t` fails them with
+seven names it removed are no longer registered, so `nginx -t` fails them with
 NGINX's standard `unknown directive` error, and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) names the replacement for each. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
@@ -246,12 +246,18 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
 # the new one, and restore the old on failure — never delete the
 # previous snapshot before the new one is in place.
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.old"
+# Refuse a symlink (including a dangling one) at tree/: mv -T would
+# replace the link itself, silently orphaning the directory it targets.
+if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
+  echo "ERROR: ${CONFIG_BACKUP_DIR}/tree is a symlink; remove it so the snapshot lands in a real directory" >&2
+  exit 1
+fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
   sudo mv "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
-sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
+sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    if ! sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
+    if ! sudo mv -T "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
       echo "ERROR: could not install the new configuration snapshot AND could not restore the previous one; both artifacts are preserved at ${CONFIG_BACKUP_DIR}/tree.new and ${CONFIG_BACKUP_DIR}/tree.old — restore manually" >&2
       exit 1
     fi
@@ -466,17 +472,21 @@ migrate_restore() {
     # target as recovery material instead of deleting it: move it to a
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
-    PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
+    PREVIOUS_TARGET=""
+    if ! PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")"; then
       # The configuration is already restored: only the parking of the previous
-      # target failed, so report it and keep the restore successful.
+      # target failed, so report it and continue to the disarm/exit below with
+      # the previous tree left in place.
+      PREVIOUS_TARGET=""
       echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
-      return 0
-    }
-    sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
-    if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
-      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
-    else
-      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
+    if [[ -n "${PREVIOUS_TARGET}" ]]; then
+      sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
+      if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+        echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+      else
+        echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+      fi
     fi
   else
     # Non-symlink root: move the active tree to a UNIQUE sibling,
@@ -558,17 +568,21 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # target as recovery material instead of deleting it: move it to a
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
-    PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
+    PREVIOUS_TARGET=""
+    if ! PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")"; then
       # The configuration is already restored: only the parking of the previous
-      # target failed, so report it and keep the restore successful.
+      # target failed, so report it and continue to the disarm/exit below with
+      # the previous tree left in place.
+      PREVIOUS_TARGET=""
       echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
-      return 0
-    }
-    sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
-    if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
-      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
-    else
-      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
+    if [[ -n "${PREVIOUS_TARGET}" ]]; then
+      sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
+      if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+        echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+      else
+        echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+      fi
     fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
@@ -918,19 +932,42 @@ sudo nginx -t || {
   # The rollback left NGINX stopped; restart it on the restored, validated
   # pair using the ownership decision recorded before the stop.
   if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx
+    sudo systemctl start nginx || { restore_previous_module_and_config || true; exit 1; }
   else
-    sudo nginx
+    sudo nginx || { restore_previous_module_and_config || true; exit 1; }
   fi
   exit 1
 }
 
 # Start a fresh master with the new module loaded, using the ownership
-# decision recorded before the stop.
-if [[ "$systemd_managed" -eq 1 ]]; then
-  sudo systemctl start nginx
-else
-  sudo nginx
+# decision recorded before the stop.  A failed start must land on the PAIRED
+# previous module and pre-migration configuration: the recovery helper is
+# defined later in this block, so the fallback below restores both halves
+# explicitly when it is not yet available.
+start_new_master() {
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx
+  else
+    sudo nginx
+  fi
+}
+if ! start_new_master; then
+  echo "ERROR: NGINX did not start with the 0.9.2 module; restoring the previous module and the pre-migration configuration" >&2
+  if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
+    restore_previous_module_and_config || true
+  else
+    if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.start-failed"; then
+      echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    fi
+    if ! sudo mv -f "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.start-failed" \
+        "${MODULES_DIR}/ngx_http_markdown_filter_module.so"; then
+      echo "ERROR: could not replace the 0.9.2 module with the previous module; restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
+      exit 1
+    fi
+    restore_pre_migration_tree
+  fi
+  exit 1
 fi
 ```
 
@@ -1159,12 +1196,18 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
 # the new one, and restore the old on failure — never delete the
 # previous snapshot before the new one is in place.
 sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.old"
+# Refuse a symlink (including a dangling one) at tree/: mv -T would
+# replace the link itself, silently orphaning the directory it targets.
+if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
+  echo "ERROR: ${CONFIG_BACKUP_DIR}/tree is a symlink; remove it so the snapshot lands in a real directory" >&2
+  exit 1
+fi
 if [[ -e "${CONFIG_BACKUP_DIR}/tree" ]]; then
   sudo mv "${CONFIG_BACKUP_DIR}/tree" "${CONFIG_BACKUP_DIR}/tree.old"
 fi
-sudo mv "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
+sudo mv -T "${CONFIG_BACKUP_DIR}/tree.new" "${CONFIG_BACKUP_DIR}/tree" || {
   if [[ -e "${CONFIG_BACKUP_DIR}/tree.old" ]]; then
-    if ! sudo mv "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
+    if ! sudo mv -T "${CONFIG_BACKUP_DIR}/tree.old" "${CONFIG_BACKUP_DIR}/tree"; then
       echo "ERROR: could not install the new configuration snapshot AND could not restore the previous one; both artifacts are preserved at ${CONFIG_BACKUP_DIR}/tree.new and ${CONFIG_BACKUP_DIR}/tree.old — restore manually" >&2
       exit 1
     fi
@@ -1345,17 +1388,21 @@ migrate_restore() {
     # target as recovery material instead of deleting it: move it to a
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
-    PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
+    PREVIOUS_TARGET=""
+    if ! PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")"; then
       # The configuration is already restored: only the parking of the previous
-      # target failed, so report it and keep the restore successful.
+      # target failed, so report it and continue to the disarm/exit below with
+      # the previous tree left in place.
+      PREVIOUS_TARGET=""
       echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
-      return 0
-    }
-    sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
-    if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
-      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
-    else
-      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
+    if [[ -n "${PREVIOUS_TARGET}" ]]; then
+      sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
+      if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+        echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+      else
+        echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+      fi
     fi
   else
     # Non-symlink root: move the active tree to a UNIQUE sibling,
@@ -1437,17 +1484,21 @@ if { [[ "$grep_rc" -ne 0 ]] && [[ "$grep_rc" -ne 1 ]]; } || [[ "$sed_rc" -ne 0 ]
     # target as recovery material instead of deleting it: move it to a
     # unique sibling so the original path stays clean while the
     # pre-migration tree remains available if the operator needs it.
-    PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")" || {
+    PREVIOUS_TARGET=""
+    if ! PREVIOUS_TARGET="$(sudo mktemp -d "${ROOT_LINK_TARGET}.pre-migration-XXXXXX")"; then
       # The configuration is already restored: only the parking of the previous
-      # target failed, so report it and keep the restore successful.
+      # target failed, so report it and continue to the disarm/exit below with
+      # the previous tree left in place.
+      PREVIOUS_TARGET=""
       echo "WARN: could not allocate a recovery path for the previous target ${ROOT_LINK_TARGET}; the configuration is restored and the previous tree stays in place there. Remove or relocate it once the upgrade is confirmed" >&2
-      return 0
-    }
-    sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
-    if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
-      echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
-    else
-      echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+    fi
+    if [[ -n "${PREVIOUS_TARGET}" ]]; then
+      sudo rmdir "${PREVIOUS_TARGET}" 2>/dev/null || true
+      if sudo mv -T "${ROOT_LINK_TARGET}" "${PREVIOUS_TARGET}" 2>/dev/null; then
+        echo "NOTE: the previous configuration target ${ROOT_LINK_TARGET} was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
+      else
+        echo "WARN: could not move the previous configuration target ${ROOT_LINK_TARGET} aside; it was left in place" >&2
+      fi
     fi
   else
     sudo rm -rf "${NGINX_CONF_DIR}" 2>/dev/null || true
@@ -1677,11 +1728,19 @@ if ! sudo nginx -t; then
   fi
   echo "INFO: previous module and configuration restored and verified." >&2
   # The rollback left NGINX stopped; restart it on the restored, validated
-  # pair using the ownership decision recorded before the stop.
+  # pair using the ownership decision recorded before the stop.  Both halves
+  # are already restored at this point, so a failed start is reported with a
+  # manual-start instruction instead of a second rollback.
   if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx
+    sudo systemctl start nginx || {
+      echo "ERROR: NGINX did not become active after the rollback restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+      exit 1
+    }
   else
-    sudo nginx
+    sudo nginx || {
+      echo "ERROR: NGINX did not start after the rollback restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+      exit 1
+    }
   fi
   exit 1
 fi
@@ -1689,11 +1748,12 @@ fi
 # discarding the pre-upgrade backup: a failed start or an unhealthy
 # post-start check must leave ${MODULE_BACKUP} available for rollback.
 if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx
+    sudo systemctl start nginx || { restore_previous_module_and_config || true; exit 1; }
 else
-    sudo nginx
+    sudo nginx || { restore_previous_module_and_config || true; exit 1; }
 fi
-# Recovery helpers for the post-start checks.  Replacing the module file under
+# Recovery helpers for the post-start checks below (defined here so the start
+# above can already call the paired module-and-config rollback).  Replacing the module file under
 # a live master is unsafe (the running worker still maps the previous file, and
 # a reload could pick up a half-restored pair), so every failure path stops the
 # started instance first and restarts it only once the restored module and
@@ -1962,7 +2022,8 @@ curl -s http://localhost/nginx-markdown/diagnostics \
     | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-assert d.get("version") == "0.9.2", f"version={d.get(\"version\")!r}"
+v = d.get("version")
+assert v == "0.9.2", f"version={v!r}"
 recent = d.get("recent_decisions")
 assert isinstance(recent, list), f"recent_decisions is not a list: {type(recent).__name__}"
 reasons = [r.get("reason") for r in recent]
@@ -1998,6 +2059,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-18 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
 | 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
 | 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
 | 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
