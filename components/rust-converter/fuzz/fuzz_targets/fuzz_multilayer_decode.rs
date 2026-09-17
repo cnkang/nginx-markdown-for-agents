@@ -12,8 +12,9 @@
 //! Input model:
 //! - byte 0: layer count - 1 (1..=3 layers, application order)
 //! - bytes 1..: per-layer encoding selectors (0=gzip, 1=deflate, 2=br)
-//! - next byte: payload kind (0=raw, 1=gzip, 2=deflate, 3=br, 4=expansion
-//!   bomb, 5=truncated gzip)
+//! - next byte: payload kind (0=raw, 1=gzip, 2=deflate, 3=br, 4=incompressible
+//!   expansion bomb (absolute budget path), 5=compression bomb (ratio path),
+//!   6=truncated gzip)
 //! - remaining bytes: payload source
 //!
 //! Invariants checked:
@@ -84,23 +85,47 @@ fn brotli_compress(data: &[u8]) -> Vec<u8> {
 /// Returns the wire payload plus, for the single-format round-trip oracle,
 /// the original uncompressed bytes when they are recoverable.
 fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<Vec<u8>>) {
-    let single = match kind % 6 {
+    let single = match kind % 7 {
         0 => (src.to_vec(), None),
         1 => (gzip_compress(src), Some(src.to_vec())),
         2 => (deflate_compress(src), Some(src.to_vec())),
         3 => (brotli_compress(src), Some(src.to_vec())),
         4 => {
-            /* Expansion bomb: highly repetitive data whose decoded size
-             * always exceeds MAX_OUTPUT, so the single-layer case exercises
-             * the absolute budget path. */
-            let size = MAX_OUTPUT
+            /* Absolute-budget case: an incompressible payload whose decoded
+             * size strictly exceeds MAX_OUTPUT, so the 100x ratio ceiling
+             * cannot bind first and the classifier must report the absolute
+             * budget. */
+            let overrun = 1
                 + u32::from_le_bytes([
                     src.first().copied().unwrap_or(0),
                     src.get(1).copied().unwrap_or(0),
                     0,
                     0,
                 ]) as usize
-                    % 900_000;
+                    % 899_999;
+            let size = MAX_OUTPUT + overrun;
+            let mut payload = Vec::with_capacity(size);
+            /* Deterministic LCG: poor compressibility keeps the wire size
+             * close to the decoded size, so only the budget can bind. */
+            let mut state = (src.get(2).copied().unwrap_or(0) as u32) | 1;
+            while payload.len() < size {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                payload.push((state >> 24) as u8);
+            }
+            (gzip_compress(&payload), None)
+        }
+        5 => {
+            /* Ratio-ceiling case: a highly compressible payload whose decoded
+             * size stays inside the absolute budget but exceeds 100x the wire
+             * size, so the classifier must report the ratio ceiling. */
+            let size = 200_000
+                + u32::from_le_bytes([
+                    src.first().copied().unwrap_or(0),
+                    src.get(1).copied().unwrap_or(0),
+                    0,
+                    0,
+                ]) as usize
+                    % 300_000;
             let rep = src.get(2).copied().unwrap_or(b'0');
             (gzip_compress(&vec![rep; size]), None)
         }
@@ -172,7 +197,7 @@ fuzz_target!(|data: &[u8]| {
             if layers.len() == 1
                 && let Some(orig) = original
             {
-                let format_matches = match kind % 6 {
+                let format_matches = match kind % 7 {
                     1 => layers[0] == Encoding::Gzip,
                     2 => layers[0] == Encoding::Deflate,
                     _ => layers[0] == Encoding::Br,
