@@ -123,7 +123,7 @@ fn set_test_panic_streaming(tag: Option<&'static str>) {
 }
 
 #[cfg(test)]
-fn test_should_panic_streaming(tag: &'static str) -> bool {
+fn test_should_panic(tag: &'static str) -> bool {
     TEST_PANIC_TAG.with(|current| {
         if current.get() == Some(tag) {
             current.set(None);
@@ -371,7 +371,7 @@ pub unsafe extern "C" fn markdown_streaming_feed(
         }
 
         #[cfg(test)]
-        if test_should_panic_streaming("feed") {
+        if test_should_panic("feed") {
             panic!("test-injected panic in markdown_streaming_feed");
         }
 
