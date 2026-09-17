@@ -223,3 +223,24 @@ def test_a_longer_identifier_ending_in_open_is_not_a_sink(tmp_path):
 
     assert errors == []
     assert warnings == []
+
+
+def test_a_receiver_ending_in_os_is_classified_as_a_method_call(tmp_path):
+    """A receiver name that merely ends in `os` (myos.open, someos.open)
+    must be classified through the method-call path instead of being
+    skipped as a longer identifier."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(myos, someos, path):\n"
+        "    first = myos.open(path, 'r')\n"
+        "    second = someos.open(path, 'r')\n"
+        "    return first, second\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 2
+    assert any("myos" in e for e in errors)
+    assert any("someos" in e for e in errors)
+    assert warnings == []

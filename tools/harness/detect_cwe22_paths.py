@@ -816,17 +816,25 @@ def _scan_single_open_match(
         else len(line)
     )
     prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
-    if prev_char.isalnum() or prev_char == "_":
+    if (prev_char.isalnum() or prev_char == "_") \
+            and open_match.group().startswith("open"):
         # A longer identifier ending in `open` (popen, fdopen, reopen,
         # Popen) is not a builtin open()/os.open() call.
         return match_errors, match_warnings
-    if prev_char == ".":
-        # Method call `receiver.open(...)`.  The OPEN_CALL_RE match
-        # sits on the `open` token; os.open() produces a SECOND,
-        # dot-preceded match inside the same call — skip that
-        # duplicate (the `os.open` match starts at `os` and is
-        # handled through the builtin branch).
-        if re.match(r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]):
+    receiver_access = prev_char == "." or (
+        (prev_char.isalnum() or prev_char == "_")
+        and open_match.group().startswith("os.")
+    )
+    if receiver_access:
+        # Method call `receiver.open(...)` (also for receiver names that
+        # merely end in `os`, where the regex match begins at the `os.`
+        # inside the receiver).  For a plain `os.open()` the same call
+        # produces a SECOND, dot-preceded match — skip that duplicate
+        # (the `os.open` match starts at `os` and is handled through the
+        # builtin branch).
+        if prev_char == "." and re.match(
+            r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]
+        ):
             return match_errors, match_warnings
         # Scope receiver extraction to this match's segment (from the
         # receiver start through the next open() match) so an earlier
