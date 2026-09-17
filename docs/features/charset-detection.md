@@ -220,11 +220,15 @@ Parsing a body fails in four scenarios:
   `ConversionError::EncodingError`
 
 Missing or malformed charset parameters fall back down the cascade
-(Content-Type parameter, then HTML meta tag, then UTF-8 default). Charset
-detection itself never fails: it always returns a charset, defaulting to
-UTF-8. The parser then requires the body bytes to be valid for that charset:
-input that does not decode under the declared charset fails the conversion
-with `ConversionError::EncodingError`.
+(Content-Type parameter, then HTML meta tag, then UTF-8 default). The cascade
+skips an unsupported label in the HTML meta tag and continues. This UTF-8
+fallback applies only while a usable charset parameter is missing or
+malformed: when the Content-Type declares a charset label that no supported
+encoding matches, the conversion fails with `ConversionError::EncodingError`
+instead of falling back. Charset detection itself never fails: it always
+returns a charset, defaulting to UTF-8. The parser then requires the body
+bytes to be valid for that charset: input that does not decode under the
+declared charset fails the conversion with `ConversionError::EncodingError`.
 
 ## Dependencies
 
