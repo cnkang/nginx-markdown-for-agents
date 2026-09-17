@@ -165,6 +165,23 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
+# Fail-closed: an unreadable source file aborts the scan with exit 2.
+scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/ffi-scan.XXXXXX")"
+mkdir -p "${scan_dir}/src"
+printf 'struct MarkdownOptions opts;\n' >"${scan_dir}/src/readable.c"
+printf 'struct MarkdownResult r;\n' >"${scan_dir}/src/locked.c"
+chmod 000 "${scan_dir}/src/locked.c"
+exit_code=0
+bash "${DETECTOR}" "${scan_dir}/src" >"${scan_dir}/out.txt" 2>&1 || exit_code=$?
+chmod 600 "${scan_dir}/src/locked.c"
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed' "${scan_dir}/out.txt"; then
+    pass "an unreadable source file aborts with exit 2"
+else
+    fail "an unreadable source file aborts with exit 2" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${scan_dir}/out.txt" | head -c 120)"
+fi
+rm -rf "${scan_dir}"
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1

@@ -364,6 +364,23 @@ else
         "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
+# Fail-closed: an unreadable source file aborts the scan with exit 2.
+scan_root="$(mktemp -d "${TMPDIR:-/tmp}/cwe190-scan.XXXXXX")"
+mkdir -p "${scan_root}/src"
+printf 'int ok;\n' >"${scan_root}/src/readable.c"
+printf 'int locked;\n' >"${scan_root}/src/locked.c"
+chmod 000 "${scan_root}/src/locked.c"
+exit_code=0
+bash "${DETECTOR}" "${scan_root}/src" >"${scan_root}/out.txt" 2>&1 || exit_code=$?
+chmod 600 "${scan_root}/src/locked.c"
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed' "${scan_root}/out.txt"; then
+    pass "an unreadable source file aborts with exit 2"
+else
+    fail "an unreadable source file aborts with exit 2" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${scan_root}/out.txt" | head -c 120)"
+fi
+rm -rf "${scan_root}"
+
 printf '\n  Results: %d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     exit 1
