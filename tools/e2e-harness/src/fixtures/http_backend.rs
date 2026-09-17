@@ -450,7 +450,7 @@ fn scenario_response(
             true,
         );
     }
-    if path == "/md/html" {
+    if path == "/md/html" || path == "/md-off/html" {
         return md_html_response(state, method, headers);
     }
     if path.ends_with("/echo-headers") {
