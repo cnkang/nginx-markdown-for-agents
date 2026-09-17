@@ -7,10 +7,11 @@
 ## Overview
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
-shrank to 20 active directives. The five names removed by the pre-LTS
-convergence are no longer registered, so `nginx -t` reports NGINX's standard
-"unknown directive" error for them too, and the replacement table below names
-the migration target for each.
+shrank to 20 active directives. The seven names retired in 0.9.2 — the five
+removed by the pre-LTS convergence plus `markdown_profile` and
+`markdown_streaming_zero_copy` — are no longer registered, so `nginx -t`
+reports NGINX's standard "unknown directive" error for them too, and the
+replacement table below names the migration target for each.
 
 After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 24 months.
