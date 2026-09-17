@@ -31,10 +31,12 @@ installable while a plain NGINX patch upgrade no longer satisfies the
 dependency — the package manager keeps the module and NGINX versions in lock
 step. The RPM metadata additionally requires the `nginx-rX.Y.Z` capability
 published by the official nginx.org NGINX package, alongside an
-epoch-flexible floor (`nginx >= X.Y.Z`). An epochless requirement makes RPM
-skip the epoch comparison, so the floor stays installable whether the
-distribution's NGINX package carries an epoch or not. The `%pre` scriptlet
-enforces the exact version at install time. RPM therefore rejects a
+epoch-flexible floor (`nginx >= X.Y.Z`). Omitting the epoch is deliberate:
+RPM's dependency comparison does not demand an epoch match when the
+requirement leaves one out, so the floor can also accept a package whose
+epoch is higher, while the version part must satisfy the bound. The floor is
+version-scoped, not epoch-independent — the `%pre` scriptlet performs the
+exact-version check at install time. RPM therefore rejects a
 same-version package that does not provide the expected NGINX package ABI
 capability before installation.
 **Runtime compatibility is only verified for the exact NGINX versions listed
