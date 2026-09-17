@@ -2,20 +2,25 @@
 #
 # Removed-Directive / Removed-Value Rejection Test (LTS-R008, LTS-R010)
 #
-# Validates that every directive and directive-value removed by the pre-LTS
-# convergence (0.9.2) causes `nginx -t` to FAIL (non-zero exit) AND emit a
-# migration message that names the removed item, so old configurations are
-# never silently ignored (Property 14; Requirements 8.1, 8.2, 10.2).
+# Validates the frozen 0.9.2 removal contract with `nginx -t`:
 #
-# Removed directives (each must fail nginx -t with a migration message):
-#   - markdown_dynamic_config
-#   - markdown_dynamic_config_path
-#   - markdown_dynconf_dry_run
-#   - markdown_prune_selectors
-#   - markdown_prune_protection_selectors
+#   - The five removed directives are no longer registered: `nginx -t` fails
+#     with NGINX's standard `unknown directive` error naming the directive,
+#     and the oracle asserts exactly that wording (no module-specific
+#     migration text exists for them).
+#     - markdown_dynamic_config
+#     - markdown_dynamic_config_path
+#     - markdown_dynconf_dry_run
+#     - markdown_prune_selectors
+#     - markdown_prune_protection_selectors
 #
-# Removed directive value (must fail nginx -t with a migration message):
-#   - markdown_accept wildcard
+#   - `markdown_accept wildcard` (a removed VALUE of a retained directive)
+#     still answers with an explicit migration message naming the removed
+#     value; the oracle matches that stable phrase.
+#
+# A negative control places an ordinary unknown directive under a path that
+# CONTAINS "removed" and requires the same standard-unknown contract, proving
+# the oracle does not pass just because a path echoes a marker word.
 #
 # This test uses `nginx -t` to validate configuration acceptance. It does NOT
 # require a running NGINX instance — only a compiled binary with the markdown
@@ -36,9 +41,9 @@
 #   ./test_removed_directives.sh [--nginx-bin PATH] [--keep-artifacts] [-h]
 #
 # Exit codes:
-#   0 - All removed items rejected with a migration message
-#   1 - One or more removed items accepted, or rejected without a migration
-#       message
+#   0 - Every removed item rejected with the expected standard/migration error
+#   1 - One or more removed items accepted, or rejected without the expected
+#       error wording
 #   2 - Usage error or missing prerequisites
 #
 
@@ -63,12 +68,14 @@ TRUSTED_NGINX_PATHS=(
   "/opt/homebrew/sbin/nginx"
 )
 
-# A removed item is considered rejected "with migration guidance" when the
-# nginx -t error output both names the removed item AND signals a migration.
-# Matching the migration signal (not only the directive name) prevents an
-# unrelated syntax error that happens to mention the directive from counting
-# as a valid migration rejection.
-MIGRATION_MARKERS='removed|migrat|no longer|static config'
+# Standard error required for the five removed directives: NGINX reports an
+# unknown directive, and the message must name the directive that was used.
+STANDARD_UNKNOWN_MARKER='unknown directive'
+
+# The removed *value* (markdown_accept wildcard) keeps a migration message;
+# match its stable phrase rather than loose words so an unrelated failure
+# cannot satisfy the oracle.
+WILDCARD_MIGRATION_MARKER='markdown_accept wildcard.*was removed in 0\.9\.2'
 
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -210,31 +217,23 @@ log_fail() {
   return 0
 }
 
-# Write a config containing the given http-context line(s) and run nginx -t,
-# asserting that nginx -t fails AND the error names the removed item and
-# signals migration guidance.
+# Write a config containing the given http-context line(s) and run nginx -t.
+# Returns non-zero when nginx -t unexpectedly accepts the configuration.
 #
-# Arguments:
-#   $1 - test ID
-#   $2 - description
-#   $3 - an ERE naming the removed item that must appear in the error (e.g.
-#        "markdown_dynamic_config", or "markdown_accept|wildcard" for a removed
-#        enum value); used to confirm the failure names the removed item rather
-#        than an unrelated error
+#   $1 - conf file path
+#   $2 - log file path
+#   $3 - pid file path
 #   $4 - the http-context config line(s) exercising the removed item
-expect_removed_rejection() {
-  local test_id="$1"
-  local description="$2"
-  local removed_token="$3"
+run_rejection_probe() {
+  local conf_file="$1"
+  local log_file="$2"
+  local pid_file="$3"
   local http_line="$4"
-
-  local conf_file="${TMPDIR_BASE}/removed_${test_id}.conf"
-  local log_file="${TMPDIR_BASE}/removed_${test_id}.log"
 
   cat > "${conf_file}" <<EOF
 worker_processes 1;
 error_log /dev/null crit;
-pid ${TMPDIR_BASE}/removed_${test_id}.pid;
+pid ${pid_file};
 
 events { worker_connections 64; }
 
@@ -252,22 +251,81 @@ EOF
 }
 EOF
 
+  if "${NGINX_BIN}" -t -c "${conf_file}" >"${log_file}" 2>&1; then
+    return 1
+  fi
+  return 0
+}
+
+# Standard-unknown oracle for the five removed directives: nginx -t must
+# fail, name the directive, and use NGINX's standard `unknown directive`
+# wording. The marker match is case-insensitive so it survives capitalization
+# changes, while the directive name pins which failure actually happened.
+#
+#   $1 - test ID
+#   $2 - description
+#   $3 - an ERE naming the directive that must appear in the error
+#   $4 - the http-context config line exercising the removed directive
+#   $5 - optional subdirectory under TMPDIR_BASE (used by the path control)
+expect_standard_unknown_rejection() {
+  local test_id="$1"
+  local description="$2"
+  local directive_token="$3"
+  local http_line="$4"
+  local subdir="${5:-}"
+
+  local case_dir="${TMPDIR_BASE}"
+  if [[ -n "${subdir}" ]]; then
+    case_dir="${TMPDIR_BASE}/${subdir}"
+    mkdir -p "${case_dir}"
+  fi
+  local conf_file="${case_dir}/case_${test_id}.conf"
+  local log_file="${case_dir}/case_${test_id}.log"
+  local pid_file="${case_dir}/case_${test_id}.pid"
+
   log_test "${description}"
 
-  if "${NGINX_BIN}" -t -c "${conf_file}" >"${log_file}" 2>&1; then
-    log_fail "expected nginx -t to reject the removed item, but it was accepted"
+  if ! run_rejection_probe "${conf_file}" "${log_file}" "${pid_file}" "${http_line}"; then
+    log_fail "expected nginx -t to reject the removed directive, but it was accepted"
+    return 0
+  fi
+  if ! grep -Eq "${directive_token}" "${log_file}" 2>/dev/null; then
+    log_fail "nginx -t failed but the error did not name '${directive_token}': $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
+    return 0
+  fi
+  if ! grep -Eqi "${STANDARD_UNKNOWN_MARKER}" "${log_file}" 2>/dev/null; then
+    log_fail "nginx -t rejected '${directive_token}' without the standard '${STANDARD_UNKNOWN_MARKER}' wording: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     return 0
   fi
 
-  # nginx -t failed. Require the error to both name the removed item and
-  # signal a migration path; otherwise the failure is not a migration
-  # rejection.
+  log_pass
+  return 0
+}
+
+# Migration oracle for a removed VALUE of a retained directive: the error
+# must name the removed item and carry the explicit migration phrase.
+expect_migration_rejection() {
+  local test_id="$1"
+  local description="$2"
+  local removed_token="$3"
+  local http_line="$4"
+
+  local conf_file="${TMPDIR_BASE}/case_${test_id}.conf"
+  local log_file="${TMPDIR_BASE}/case_${test_id}.log"
+  local pid_file="${TMPDIR_BASE}/case_${test_id}.pid"
+
+  log_test "${description}"
+
+  if ! run_rejection_probe "${conf_file}" "${log_file}" "${pid_file}" "${http_line}"; then
+    log_fail "expected nginx -t to reject the removed item, but it was accepted"
+    return 0
+  fi
   if ! grep -Eq "${removed_token}" "${log_file}" 2>/dev/null; then
     log_fail "nginx -t failed but the error did not name '${removed_token}': $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     return 0
   fi
-  if ! grep -Eiq "${MIGRATION_MARKERS}" "${log_file}" 2>/dev/null; then
-    log_fail "nginx -t rejected '${removed_token}' without a migration message: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
+  if ! grep -Eq "${WILDCARD_MIGRATION_MARKER}" "${log_file}" 2>/dev/null; then
+    log_fail "nginx -t rejected '${removed_token}' without the migration phrase: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     return 0
   fi
 
@@ -278,7 +336,7 @@ EOF
 # --- Main ---
 resolve_nginx_bin || exit 2
 
-TMPDIR_BASE="$(mktemp -d /tmp/removed-directives.XXXXXX)"
+TMPDIR_BASE="$(mktemp -d /tmp/md-compat.XXXXXX)"
 
 cleanup_tmpdir() {
   if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
@@ -326,28 +384,34 @@ echo "==========================================================" >&2
 echo "" >&2
 
 echo "--- Removed dynconf directives (LTS-R008) ---" >&2
-expect_removed_rejection 1 "markdown_dynamic_config rejected with migration" \
+expect_standard_unknown_rejection 1 "markdown_dynamic_config rejected as unknown directive" \
   "markdown_dynamic_config" \
   "markdown_dynamic_config on;"
-expect_removed_rejection 2 "markdown_dynamic_config_path rejected with migration" \
+expect_standard_unknown_rejection 2 "markdown_dynamic_config_path rejected as unknown directive" \
   "markdown_dynamic_config_path" \
   "markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;"
-expect_removed_rejection 3 "markdown_dynconf_dry_run rejected with migration" \
+expect_standard_unknown_rejection 3 "markdown_dynconf_dry_run rejected as unknown directive" \
   "markdown_dynconf_dry_run" \
   "markdown_dynconf_dry_run on;"
 
 echo "--- Removed custom-selector directives (LTS-R008, LTS-R009) ---" >&2
-expect_removed_rejection 4 "markdown_prune_selectors rejected with migration" \
+expect_standard_unknown_rejection 4 "markdown_prune_selectors rejected as unknown directive" \
   "markdown_prune_selectors" \
   "markdown_prune_selectors \"nav footer aside\";"
-expect_removed_rejection 5 "markdown_prune_protection_selectors rejected with migration" \
+expect_standard_unknown_rejection 5 "markdown_prune_protection_selectors rejected as unknown directive" \
   "markdown_prune_protection_selectors" \
   "markdown_prune_protection_selectors \"nav\";"
 
 echo "--- Removed markdown_accept value (LTS-R010) ---" >&2
-expect_removed_rejection 6 "markdown_accept wildcard value rejected with migration" \
+expect_migration_rejection 6 "markdown_accept wildcard value rejected with migration" \
   "markdown_accept|wildcard" \
   "markdown_accept wildcard;"
+
+echo "--- Negative control: the standard-unknown oracle ignores the pathname ---" >&2
+expect_standard_unknown_rejection 7 "ordinary unknown directive under a 'removed' path" \
+  "markdown_zz_unknown_control" \
+  "markdown_zz_unknown_control on;" \
+  "removed-control"
 
 echo "" >&2
 echo "==========================================================" >&2

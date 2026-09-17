@@ -12,6 +12,12 @@
 #   trailing-garbage.md.br — valid Brotli stream with trailing garbage appended
 #   truncated.md.br  — truncated (incomplete) Brotli stream
 #
+# The .br payloads are reproducible build products and stay out of the
+# repository (see tests/corpus/brotli/README.md and the root .gitignore).
+# The generator is deterministic: this script reproduces byte-identical .br
+# output from the committed sources, so run it locally when a test or an
+# inspection needs the payloads.  Do not commit the generated .br files.
+#
 # Prerequisites:
 #   brotli CLI (libbrotli / brew install brotli)
 #
