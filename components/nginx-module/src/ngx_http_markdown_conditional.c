@@ -2753,6 +2753,16 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         restored += part->nelts;
     }
 
+    /*
+     * After the list-structure restore the reachable entry count must
+     * match the snapshot exactly; a truncated chain would silently drop
+     * snapshotted entries, so report it instead of applying a partial
+     * restore.
+     */
+    if (restored < snapshot->entry_count) {
+        return NGX_ERROR;
+    }
+
     list->last = snapshot->original_last;
     if (snapshot->original_last != NULL) {
         snapshot->original_last->nelts = snapshot->original_last_nelts;
