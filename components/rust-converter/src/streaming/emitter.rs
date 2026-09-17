@@ -1514,8 +1514,10 @@ impl IncrementalEmitter {
         }
         if self.in_code_block {
             /* Skip trailing-whitespace normalization inside code blocks */
-            let output = std::mem::take(&mut self.buffer);
-            let new_flushed_size = self.flushed.len().saturating_add(output.len());
+            let new_flushed_size = self
+                .flushed
+                .len()
+                .saturating_add(self.buffer.len());
             if new_flushed_size > self.max_buffer_size {
                 return Err(ConversionError::BudgetExceeded {
                     stage: "output_buffer (ready)".to_string(),
@@ -1523,6 +1525,7 @@ impl IncrementalEmitter {
                     limit: self.max_buffer_size,
                 });
             }
+            let output = std::mem::take(&mut self.buffer);
             self.flushed.extend_from_slice(&output);
             return Ok(());
         }
@@ -3087,6 +3090,33 @@ mod tests {
         assert!(result.is_err(), "should return BudgetExceeded");
         let err = result.unwrap_err();
         assert_eq!(err.code(), 6, "error code should be BudgetExceeded (6)");
+    }
+
+    /// Regression: the code-block flush branch must not consume the
+    /// pending buffer before the ready-size check: a BudgetExceeded
+    /// error leaves the bytes (and their capacity) exactly as found.
+    #[test]
+    fn test_code_block_budget_error_preserves_pending_bytes() {
+        let budget = MemoryBudget {
+            output_buffer: 16,
+            ..MemoryBudget::default()
+        };
+        let mut emitter = IncrementalEmitter::new(&budget);
+        emitter.in_code_block = true;
+        emitter.flushed.extend_from_slice(b"0123456789");
+        emitter.buffer.extend_from_slice(b"0123456789");
+        let pending_capacity = emitter.buffer.capacity();
+
+        let err = emitter.flush_to_ready().unwrap_err();
+        assert_eq!(err.code(), 6, "error code should be BudgetExceeded (6)");
+        assert_eq!(emitter.pending_bytes(), 10, "pending bytes must survive");
+        assert_eq!(emitter.buffer.capacity(), pending_capacity);
+        assert_eq!(emitter.flushed.len(), 10, "ready buffer must be untouched");
+
+        emitter.max_buffer_size = 64;
+        emitter.flush_to_ready().unwrap();
+        assert_eq!(emitter.flushed.len(), 20);
+        assert!(emitter.buffer.is_empty());
     }
 
     /// Regression: the flushed (ready) buffer must also be bounded.
