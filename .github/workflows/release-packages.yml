@@ -1154,18 +1154,20 @@ jobs:
           # build/ngx_http_markdown_filter_module.so).
           #
           # The matrix is read through the single normalization entry point
-          # (Rule 62): normalize_document folds the legacy `arch` alias into
-          # `target`, so this step keeps working if the source matrix is
-          # rewritten with canonical keys, instead of silently resolving an
-          # empty version set.
+          # (Rule 62): normalize_compatibility_document folds the legacy
+          # `arch` alias into `target` while preserving the legacy
+          # release-metadata keys (`owner_workflow`, `support_tier`,
+          # `release_blocking`) that the filter below reads.  The evidence
+          # normalizer drops those keys by design, which would leave the
+          # version set empty and fail this step before any benchmark runs.
           BENCH_VERSION="$(python3 -c "
           import json, sys
           from tools.release.matrix.normalize_matrix import (
               canonical_arch,
-              normalize_document,
+              normalize_compatibility_document,
           )
           versions = json.loads(sys.argv[1])
-          matrix = normalize_document(json.load(open('tools/release-matrix.json')))
+          matrix = normalize_compatibility_document(json.load(open('tools/release-matrix.json')))
           # The amd64 version set mirrors the versions/package filtering
           # above: only release-blocking glibc entries owned by this
           # workflow may contribute a benchmark version, so an unrelated
