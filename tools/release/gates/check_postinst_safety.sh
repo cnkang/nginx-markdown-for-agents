@@ -270,12 +270,60 @@ skip_function_line() {
 # mask_command_text — blot out quoted spans and comments for command matching
 # Arguments: $1 = line
 # Returns: the masked line on stdout
+#
+# Single-quoted spans never execute, so their content is always masked.
+# Double-quoted spans are masked too — EXCEPT when they contain a command
+# substitution ($(...)) or a backtick, because those run their command
+# before the quoting context matters; hiding them would let the later
+# command scan miss an external command that resolves through PATH.
 mask_command_text() {
     local text="$1"
+    local out=""
+    local i=0
+    local n=${#text}
+    local ch
+    local quote=""
+    local span=""
 
-    text="$(printf '%s' "$text" | sed -E "s/\"[^\"]*\"/\"/g; s/'[^']*'/''/g")"
-    text="$(printf '%s' "$text" | sed -E 's/(^|[[:space:];|&])#.*$/\1/')"
-    printf '%s' "$text"
+    while [[ "$i" -lt "$n" ]]; do
+        ch="${text:$i:1}"
+        if [[ -z "$quote" ]]; then
+            if [[ "$ch" == "'" || "$ch" == '"' ]]; then
+                quote="$ch"
+                span=""
+                i=$((i + 1))
+                continue
+            fi
+            out+="$ch"
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$ch" == "$quote" ]]; then
+            if [[ "$quote" == '"' ]] \
+                && [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
+                # Keep a double-quoted span whose substitutions still run.
+                out+='"'"$span"'"'
+            elif [[ "$quote" == '"' ]]; then
+                out+='"'
+            else
+                out+="''"
+            fi
+            quote=""
+            i=$((i + 1))
+            continue
+        fi
+        span+="$ch"
+        i=$((i + 1))
+    done
+
+    # An unterminated quote keeps its tail verbatim: masking it would hide
+    # executable text.
+    if [[ -n "$quote" ]]; then
+        out+="$quote$span"
+    fi
+
+    out="$(printf '%s' "$out" | sed -E 's/(^|[[:space:];|&])#.*$/\1/')"
+    printf '%s' "$out"
 }
 
 
