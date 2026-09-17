@@ -618,7 +618,9 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * Representation-integrity metadata removal runs in the fallible
      * phase: a headers-list part that fails validation must fail the
      * commit into the rollback path instead of leaving source-HTML
-     * validators on the Markdown body.
+     * validators on the Markdown body.  The callee prevalidates both
+     * outgoing lists before its first mutation, so a malformed part fails
+     * here with nothing partially mutated for the rollback to miss.
      */
     rc = ngx_http_markdown_stream_commit_remove_representation_metadata(r);
     if (rc != NGX_OK) {
