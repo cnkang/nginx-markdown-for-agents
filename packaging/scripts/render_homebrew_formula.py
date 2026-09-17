@@ -43,11 +43,17 @@ def render_formula(text: str, url: str, sha256: str, version: str) -> str:
 
     for line in text.splitlines():
         if line.startswith("  url "):
+            if re.fullmatch(r'  url "[^"]+"', line) is None:
+                raise ValueError(f"malformed url stanza: {line!r}")
             rendered.append(f'  url "{url}"')
             url_count += 1
         elif line.startswith("  version "):
+            if re.fullmatch(r'  version "[^"]+"', line) is None:
+                raise ValueError(f"malformed version stanza: {line!r}")
             version_count += 1
         elif line.startswith("  sha256 "):
+            if re.fullmatch(r'  sha256 "[^"]+"', line) is None:
+                raise ValueError(f"malformed sha256 stanza: {line!r}")
             rendered.extend((f'  version "{version}"', f'  sha256 "{sha256}"'))
             sha_count += 1
         else:
