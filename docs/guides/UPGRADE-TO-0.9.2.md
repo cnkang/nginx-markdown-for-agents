@@ -11,8 +11,11 @@
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 0.9.2 is a **breaking release**. The release freezes 20 active directives. The
-seven names it removed are no longer registered, so `nginx -t` fails them with
-NGINX's standard `unknown directive` error, and
+seven removed names — `markdown_dynamic_config`, `markdown_dynamic_config_path`,
+`markdown_dynconf_dry_run`, `markdown_prune_selectors`,
+`markdown_prune_protection_selectors`, `markdown_profile`, and
+`markdown_streaming_zero_copy` — are no longer registered, so `nginx -t` fails
+them with NGINX's standard `unknown directive` error, and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) names the replacement for each. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
@@ -2059,7 +2062,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-18 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
+| 0.9.2 | 2026-09-17 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
 | 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
 | 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
 | 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
