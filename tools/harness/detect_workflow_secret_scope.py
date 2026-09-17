@@ -262,6 +262,11 @@ def _step_if_value(lines: list[str], start: int, end: int) -> str:
             continue
         value = match.group(2).strip()
         if value and value[0] not in ">|":
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                # A YAML flow scalar wraps the whole condition; the wrapping
+                # quotes are YAML syntax, not expression syntax, so strip
+                # them before polarity analysis.
+                value = value[1:-1]
             return value
         return _fold_block_scalar(lines, index, end)
     return ""
