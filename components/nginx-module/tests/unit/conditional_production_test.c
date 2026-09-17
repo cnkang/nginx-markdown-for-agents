@@ -1132,6 +1132,79 @@ test_send_304_etag_value_failure_restores_headers(void)
     TEST_PASS("304 ETag value failure rolls back all representation headers");
 }
 
+/* A failure after the ETag append must restore a grown multipart tail.
+ *
+ * The 304 snapshot may be taken while the last header-list part still has
+ * spare capacity; the ETag append then grows that part past its captured
+ * count.  The structural rollback truncates the part back to its captured
+ * shape, so the restore must accept the grown tail instead of aborting —
+ * an aborted rollback would leave the appended entry and the invalidated
+ * originals in the header list.
+ */
+static void
+test_send_304_multipart_etag_failure_restores_grown_tail(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_list_part_t          *tail;
+    ngx_uint_t                original_tail_nelts;
+    ngx_uint_t                total_before;
+    ngx_uint_t                total_after;
+    struct MarkdownResult     result;
+    static uint8_t             etag_data[] = "\"markdown\"";
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Multipart fixture: fill the embedded part, then let the next pushes
+     * expand into a second part that keeps spare capacity. */
+    g_list_grow = 1;
+    for (int i = 0; i < 32; i++) {
+        add_header(&r->headers_out.headers, "X-Filler", "value");
+    }
+    add_header(&r->headers_out.headers, "Digest", "sha-256=upstream");
+    g_list_grow = 0;
+    original_etag = add_header(&r->headers_out.headers, "ETag",
+                               "\"upstream\"");
+    r->headers_out.etag = original_etag;
+    tail = r->headers_out.headers.last;
+    original_tail_nelts = tail->nelts;
+    total_before = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_before += part->nelts;
+    }
+
+    /* Snapshot allocation succeeds; the ETag value copy must fail. */
+    g_pool_fail_at = g_pool_allocations + 1;
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "multipart ETag value failure returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.headers.last == tail,
+                "rollback must keep the original tail part");
+    TEST_ASSERT(tail->nelts == original_tail_nelts,
+                "rollback must truncate the grown tail back to its shape");
+    TEST_ASSERT(original_etag->hash == 1,
+                "rollback must restore the invalidated original ETag");
+    TEST_ASSERT(r->headers_out.etag == original_etag,
+                "rollback must restore the typed ETag pointer");
+    total_after = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_after += part->nelts;
+    }
+    TEST_ASSERT(total_after == total_before,
+                "rollback must drop the appended entry from the list");
+    TEST_PASS("multipart ETag failure restores the grown tail");
+}
+
 static void
 test_send_304_vary_failure_restores_headers(void)
 {
@@ -4160,6 +4233,7 @@ main(void)
     test_send_304_send_header_again();
     test_send_304_etag_failure_restores_headers();
     test_send_304_etag_value_failure_restores_headers();
+    test_send_304_multipart_etag_failure_restores_grown_tail();
     test_send_304_vary_failure_restores_headers();
     test_send_304_auth_cache_control_failure_restores_headers();
 
