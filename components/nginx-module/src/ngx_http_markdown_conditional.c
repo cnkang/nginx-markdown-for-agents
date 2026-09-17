@@ -2720,10 +2720,13 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
  *
  * Both steps combine into an all-or-nothing result: the only mutation that can
  * be observed by a later reader is a fully restored list.  A malformed part
- * (nelts beyond the captured count, or a non-empty part with no element
- * storage) fails a PREVALIDATION walk before anything is mutated: the restore
- * then returns NGX_ERROR and the list stays exactly as it was found, so a
- * failed rollback is reported instead of being applied partially.
+ * (a part whose count exceeds the captured budget — except the snapshotted
+ * tail, which appends legitimately grow and which the structural restore
+ * truncates back to its captured shape — a part larger than the list
+ * capacity, or a non-empty part with no element storage) fails a
+ * PREVALIDATION walk before anything is mutated: the restore then returns
+ * NGX_ERROR and the list stays exactly as it was found, so a failed rollback
+ * is reported instead of being applied partially.
  */
 static ngx_int_t
 ngx_http_markdown_304_restore_list(ngx_list_t *list,
@@ -2738,15 +2741,30 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
 
     /*
      * Prevalidate every part the copy loop below will visit so that no
-     * state is mutated unless the whole restore can complete.
+     * state is mutated unless the whole restore can complete.  A part
+     * larger than the list capacity, or one that cannot hold table
+     * entries, is malformed and fails closed.  A count beyond the
+     * captured budget is malformed too — EXCEPT on the snapshotted
+     * tail: appends grow it after the snapshot, and the structural
+     * restore below rolls it back to its captured shape before any
+     * entry is copied, so its growth is exactly what a rollback
+     * discards.
      */
+    if (list->size < sizeof(ngx_table_elt_t)) {
+        return NGX_ERROR;
+    }
     restored = 0;
     for (ngx_list_part_t *part = &list->part;
          part != NULL && restored < snapshot->entry_count;
          part = part->next)
     {
-        if (part->nelts > snapshot->entry_count - restored
+        if (part->nelts > list->nalloc
             || (part->nelts != 0 && part->elts == NULL))
+        {
+            return NGX_ERROR;
+        }
+        if (part->nelts > snapshot->entry_count - restored
+            && part != snapshot->original_last)
         {
             return NGX_ERROR;
         }
