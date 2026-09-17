@@ -523,6 +523,30 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps quoted hashes neutral" "got '$masked'"
     fi
+    masked="$(mask_command_text 'echo "$(cat /etc/passwd)"')"
+    if [[ "$masked" == 'echo "$(cat /etc/passwd)"' ]]; then
+        pass "mask keeps command substitutions inside double quotes visible"
+    else
+        fail "mask keeps command substitutions inside double quotes visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "`id`"')"
+    if [[ "$masked" == 'echo "`id`"' ]]; then
+        pass "mask keeps backticks inside double quotes visible"
+    else
+        fail "mask keeps backticks inside double quotes visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text "echo '\$(cat /etc/passwd)'")"
+    if [[ "$masked" == "echo ''" ]]; then
+        pass "mask blanks single-quoted substitutions that never execute"
+    else
+        fail "mask blanks single-quoted substitutions that never execute" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="run sed -i on the config to fix it"')"
+    if [[ "$masked" == 'NOTE="' ]]; then
+        pass "mask still blanks plain prose spans"
+    else
+        fail "mask still blanks plain prose spans" "got '$masked'"
+    fi
 else
     fail "mask_command_text extraction" "function not found in checker"
 fi
