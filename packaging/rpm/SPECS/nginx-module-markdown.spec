@@ -10,6 +10,10 @@ Source0:        %{name}-%{version}.tar.gz
 Requires:       nginx-r%{nginx_version}
 Requires:       nginx >= 1:%{nginx_version}
 Requires:       bash
+# %pre resolves /usr/bin/sed by fixed path to parse `nginx -v` and fails the
+# transaction when it is missing, so the dependency is declared rather than
+# left to the assumed base-system package set.
+Requires:       sed
 Conflicts:      nginx >= 1:%{nginx_version_ceil}
 
 %description

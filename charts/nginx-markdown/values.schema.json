@@ -90,6 +90,10 @@
         "enabled": { "type": "boolean" },
         "uri": { "type": "string" },
         "shmSize": { "type": "string" },
+        "expose": {
+          "type": "boolean",
+          "description": "Merge the sidecar metrics port into the application Service. Disabled by default so no operator-controlled Service type (NodePort, LoadBalancer) can publish the unauthenticated scrape endpoint without an explicit decision."
+        },
         "sidecar": {
           "type": "object",
           "properties": {

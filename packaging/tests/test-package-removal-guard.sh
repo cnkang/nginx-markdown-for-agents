@@ -72,6 +72,13 @@ printf 'nginx: configuration could not be tested\n' >&2
 exit 1
 EOF
             ;;
+        reference-single-quoted)
+            cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
+#!/bin/bash
+printf "load_module '/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so';\n"
+exit 0
+EOF
+            ;;
         clear)
             cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
 #!/bin/bash
@@ -127,6 +134,15 @@ run_case reference deconfigure 0 >/dev/null
 run_case reference failed-upgrade 0 >/dev/null
 run_case reference-large remove 1 >/dev/null
 run_case reference-failed remove 1 >/dev/null
+# A single-quoted load_module argument is legal NGINX syntax; the guard must
+# match it with the same optional-quote class as the unquoted and
+# double-quoted forms.
+single_quoted_output="$(run_case reference-single-quoted remove 1)"
+if ! printf '%s\n' "${single_quoted_output}" | grep -F -q "still contains a load_module directive"; then
+    printf 'FAIL: single-quoted load_module did not trip the removal guard\n' >&2
+    exit 1
+fi
+printf 'PASS: single-quoted load_module is matched by the removal guard\n' >&2
 run_case clear remove 0 >/dev/null
 run_case unreadable remove 1 >/dev/null
 
