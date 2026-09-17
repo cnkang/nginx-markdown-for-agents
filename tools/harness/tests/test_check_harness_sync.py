@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -1241,6 +1242,24 @@ def test_a_wildcard_heavy_pattern_stays_deterministic() -> None:
     star_pattern = "*a" * 12 + "*b"
     assert sync._path_pattern_matches(star_pattern, "a" * 40) is False
     assert sync._path_pattern_matches(star_pattern, "a" * 12 + "b") is True
+
+
+def test_a_wildcard_run_stays_linear_on_a_long_path() -> None:
+    """A star run must not walk once per start position.
+
+    A preceding `**` hands the star matcher one start per path character;
+    walking to the end of the component from every start costs
+    O(len(path) ** 2) and takes seconds on a 20k-character path.  The
+    verdicts must arrive within a small budget at a length where the
+    quadratic form cannot.
+    """
+    path = "a" * 20000
+    started = time.perf_counter()
+    assert sync._path_pattern_matches("***", path) is True
+    assert sync._path_pattern_matches("*a*", path) is True
+    assert sync._path_pattern_matches("*a*b*", path) is False
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2.0, f"wildcard run matching took {elapsed:.2f}s"
 
 
 def test_missing_mapping_entry_is_a_structural_blind_spot() -> None:
