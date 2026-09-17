@@ -72,6 +72,125 @@ ngx_http_markdown_sockaddr_is_loopback(const struct sockaddr *sa)
 
 
 /*
+ * Classify a realip peer TEXT value as loopback.
+ *
+ * Pure text predicate: it takes the bytes of the `realip_remote_addr`
+ * variable value and no NGINX state at all, so the classification rule can be
+ * unit-tested directly (no variable API, no stub request) and remains the
+ * single implementation used by ngx_http_markdown_peer_is_loopback below.
+ *
+ * Accepts exactly the three loopback shapes NGINX's realip module can
+ * produce:
+ *   - "127.x.x.x"          — the whole IPv4 127.0.0.0/8 range
+ *   - "::1"                — IPv6 loopback
+ *   - "::ffff:127.x.x.x"   — IPv4-mapped IPv6 whose embedded address is
+ *                            loopback (compared case-insensitively: the
+ *                            mapped prefix can appear in either case)
+ *
+ * All three shapes require the dotted quad to be complete: truncated text
+ * such as a bare "127." or "::ffff:127", and text with trailing bytes such
+ * as "::ffff:1270.0.1", are NOT loopback.
+ *
+ * Anything else — including an empty value, a bare "::", a different
+ * mapped IPv4 peer, or unparsable text — is NOT loopback.  Returning 0 for
+ * unrecognised input keeps the access gate fail-closed: an address the
+ * predicate does not positively recognise cannot broaden access.
+ */
+
+/*
+ * Whether the tail of an IPv4 loopback prefix is a complete dotted quad.
+ *
+ * The caller hands over the bytes after "127." (or after the v4-mapped
+ * prefix).  Requiring three more decimal octets with nothing left over
+ * keeps truncated or padded text outside the loopback class; returning 0
+ * for input the predicate cannot positively recognise keeps the access
+ * gate fail-closed.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_ipv4_tail_complete(const u_char *data, size_t len)
+{
+    size_t      i = 0;
+    size_t      digits;
+    ngx_uint_t  octets = 0;
+    ngx_uint_t  value;
+
+    while (octets < 3) {
+        value = 0;
+        digits = 0;
+
+        while (i < len && data[i] >= '0' && data[i] <= '9' && digits < 3) {
+            value = value * 10 + (ngx_uint_t) (data[i] - '0');
+            digits++;
+            i++;
+        }
+
+        if (digits == 0 || value > 255) {
+            return 0;
+        }
+
+        octets++;
+
+        if (octets < 3) {
+            if (i >= len || data[i] != '.') {
+                return 0;
+            }
+            i++;
+        }
+    }
+
+    return (i == len) ? 1 : 0;
+}
+
+
+static ngx_inline ngx_flag_t
+ngx_http_markdown_peer_text_is_loopback(const u_char *data, size_t len)
+{
+    static const char  v4_mapped_prefix[] = "::ffff:127.";
+    size_t             i;
+    u_char             c;
+
+    if (data == NULL || len == 0) {
+        return 0;
+    }
+
+    /* IPv4 loopback: the whole 127.0.0.0/8 range, as a complete quad. */
+    if (len >= 4 && data[0] == '1' && data[1] == '2' && data[2] == '7'
+        && data[3] == '.')
+    {
+        return ngx_http_markdown_ipv4_tail_complete(data + 4, len - 4);
+    }
+
+    if (data[0] != ':') {
+        return 0;
+    }
+
+    if (len == 3 && data[1] == ':' && data[2] == '1') {
+        return 1;
+    }
+
+    if (len >= sizeof(v4_mapped_prefix) - 1) {
+        /* ASCII case fold, kept locale-independent so the comparison does
+         * not depend on the process locale. */
+        for (i = 0; i < sizeof(v4_mapped_prefix) - 1; i++) {
+            c = data[i];
+            if (c >= 'A' && c <= 'Z') {
+                c = (u_char) (c + ('a' - 'A'));
+            }
+            if (c != (u_char) v4_mapped_prefix[i]) {
+                return 0;
+            }
+        }
+
+        return ngx_http_markdown_ipv4_tail_complete(
+                   data + (sizeof(v4_mapped_prefix) - 1),
+                   len - (sizeof(v4_mapped_prefix) - 1));
+    }
+
+    return 0;
+}
+
+
+/*
  * Whether the request arrived over a loopback peer.
  *
  * NGINX's realip module rewrites `c->sockaddr` when it accepts a forwarding
@@ -101,7 +220,6 @@ ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
 {
     static ngx_str_t           realip_remote_addr =
         ngx_string("realip_remote_addr");
-    static u_char              v4_mapped_prefix[] = "::ffff:127.";
     ngx_http_variable_value_t *value;
 
     if (r == NULL || r->connection == NULL) {
@@ -125,27 +243,11 @@ ngx_http_markdown_peer_is_loopback(ngx_http_request_t *r)
     if (value != NULL && value->valid && !value->not_found
         && value->data != NULL && value->len > 0)
     {
-        /* IPv4 loopback: the whole 127.0.0.0/8 range. */
-        if (value->len >= 4 && ngx_strncmp(value->data, "127.", 4) == 0) {
-            return 1;
-        }
-
-        if (value->data[0] == ':') {
-            if (value->len == 3
-                && ngx_strncmp(value->data, "::1", 3) == 0)
-            {
-                return 1;
-            }
-
-            if (value->len >= 10
-                && ngx_strncasecmp(value->data, v4_mapped_prefix, 10) == 0)
-            {
-                return 1;
-            }
-        }
-
-        /* The peer that opened the connection is remote. */
-        return 0;
+        /* The classification rule itself lives in the pure text predicate
+         * above so it can be unit-tested without this variable API; this
+         * branch only decides WHEN the text applies. */
+        return ngx_http_markdown_peer_text_is_loopback(value->data,
+                                                       value->len);
     }
 
     /* No realip module in play: the socket address is the transport peer. */

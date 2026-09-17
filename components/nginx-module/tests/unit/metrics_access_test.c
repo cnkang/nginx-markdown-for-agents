@@ -477,6 +477,90 @@ test_ipv6_loopback_and_v4mapped(void)
 #endif
 }
 
+/*
+ * The production realip classifier is now split into a pure text predicate
+ * (ngx_http_markdown_peer_text_is_loopback, filter_module.h) plus the thin
+ * variable-read wrapper that the access gate calls.  The stub above replaces
+ * only the wrapper; the classification RULE below is the real production
+ * implementation, so these cases exercise it un-stubbed.
+ *
+ * The predicate compares exactly the first 10 bytes of "::ffff:127." for the
+ * v4-mapped shape, matching the pre-extraction implementation byte for byte.
+ */
+static void
+test_peer_text_is_loopback_table(void)
+{
+    TEST_SUBSECTION("production realip text classifier (pure, unstubbed)");
+
+    /* Loopback shapes the realip module can produce. */
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.0.0.1", 9) == 1,
+                "127.0.0.1 is loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.255.255.254", 15) == 1,
+                "127.255.255.254 (top of the /8) is loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::1", 3) == 1,
+                "::1 is loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:127.0.0.1",
+                    sizeof("::ffff:127.0.0.1") - 1) == 1,
+                "::ffff:127.0.0.1 is loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::FFFF:127.10.20.30",
+                    sizeof("::FFFF:127.10.20.30") - 1) == 1,
+                "the v4-mapped prefix compares case-insensitively");
+
+    /* Remote peers must never be classified as loopback. */
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "10.0.0.1",
+                    sizeof("10.0.0.1") - 1) == 0,
+                "10.0.0.1 is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:10.0.0.5",
+                    sizeof("::ffff:10.0.0.5") - 1) == 0,
+                "::ffff:10.0.0.5 is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "126.255.255.254", 15) == 0,
+                "the address just below the /8 is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::2", 3) == 0,
+                "::2 is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "2001:db8::1", 11) == 0,
+                "2001:db8::1 is not loopback");
+
+    /* Unrecognised input fails closed: it must NOT broaden access. */
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "garbage", 7) == 0,
+                "unparsable text is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127", 3) == 0,
+                "a truncated 127 without the dot is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "2127.0.0.1", 10) == 0,
+                "a value merely containing 127. is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.", 4) == 0,
+                "a bare 127. prefix without the quad is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.0.0.1x", 10) == 0,
+                "trailing bytes after the quad are not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:127", 10) == 0,
+                "a truncated v4-mapped loopback is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "::ffff:1270.0.1", 15) == 0,
+                "a longer mapped prefix is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "", 0) == 0,
+                "an empty value is not loopback");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(NULL, 0) == 0,
+                "a NULL value is not loopback");
+
+    TEST_PASS("realip text classifier table enforced (fail-closed)");
+}
+
 static void
 test_method_after_access(void)
 {
@@ -524,6 +608,7 @@ main(void)
     test_unix_peer_allowed();
     test_ipv4_loopback_range();
     test_ipv6_loopback_and_v4mapped();
+    test_peer_text_is_loopback_table();
     test_method_after_access();
 
     printf("\n========================================\n");

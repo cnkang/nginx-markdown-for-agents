@@ -141,7 +141,7 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
          * NGX_AGAIN (backpressure) or NGX_ERROR as fail-open
          * completions — the response has not reached the client.
          */
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        ngx_http_markdown_metric_inc_failopen(ctx->effective_conf, conf);
     }
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
@@ -324,8 +324,22 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
     if (decompressed_chain->buf->pos == NULL
         && decompressed_chain->buf->last == NULL)
     {
-        ctx->decompression.decompressed_size = 0;
+        /*
+         * The compressed payload is gone, so the pre-decompression buffer
+         * must be released exactly like the buffer-swap path below does;
+         * leaving it allocated would leak the compressed bytes (and would
+         * let later stages observe stale compressed data next to a zero
+         * size).  Keep every field consistent with the success path:
+         * data ownership, size, capacity, decompressed size, and done.
+         */
+        if (ctx->buffer.data != NULL) {
+            ngx_free(ctx->buffer.data);
+        }
+
+        ctx->buffer.data = NULL;
         ctx->buffer.size = 0;
+        ctx->buffer.capacity = 0;
+        ctx->decompression.decompressed_size = 0;
         ctx->decompression.done = 1;
         return NGX_OK;
     }
@@ -926,16 +940,16 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
     /* Invalid arguments and unknown FFI categories intentionally share the
      * I/O error path; no distinct local return code exists. */
     switch (ffi_rc) {
-    case 101:
+    case DECOMP_CATEGORY_BUDGET_EXCEEDED:
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-    case 102:
+    case DECOMP_CATEGORY_FORMAT_ERROR:
         return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-    case 103:
+    case DECOMP_CATEGORY_TRUNCATED_INPUT:
         return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-    case 106:
+    case DECOMP_CATEGORY_RATIO_EXCEEDED:
         return NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED;
-    case 104:
-    case 105:
+    case DECOMP_CATEGORY_IO_ERROR:
+    case DECOMP_CATEGORY_INVALID_ARGS:
     default:
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }

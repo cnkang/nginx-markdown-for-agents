@@ -94,7 +94,7 @@ static ngx_int_t
 ngx_http_markdown_sha256_transform(uint32_t state[8], const u_char block[64])
 {
     static const uint32_t k[64] = {
-        0x428a2f98U, 0x71374491U, 0xb5c0fbcf, 0xe9b5dba5U,
+        0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U,
         0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
         0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
         0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,

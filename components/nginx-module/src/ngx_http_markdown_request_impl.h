@@ -1668,6 +1668,12 @@ ngx_http_markdown_select_header_path(
 #ifdef MARKDOWN_STREAMING_ENABLED
 path_selected:
     ;
+#else
+    /* Non-streaming build: this selector has no work to do.  Keep the
+     * unused-parameter surface explicit rather than suppressed. */
+    (void) r;
+    (void) ctx;
+    (void) conf;
 #endif
 }
 

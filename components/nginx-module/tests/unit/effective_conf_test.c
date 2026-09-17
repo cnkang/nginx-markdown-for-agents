@@ -367,21 +367,42 @@ test_effective_view_consistency_after_conf_change(void)
 
 /*
  * build_effective_conf must not crash on NULL inputs.
+ *
+ * The helper has no return value, so the observable contract is that an
+ * invalid call is a no-op: a fully populated destination stays untouched and
+ * no field is partially projected from a missing source.
  */
 static void
 test_build_effective_conf_null_inputs(void)
 {
     ngx_http_markdown_effective_conf_t eff;
     ngx_http_markdown_conf_t           conf;
+    ngx_http_markdown_effective_conf_t eff_before;
 
     TEST_SUBSECTION("build_effective_conf with NULL inputs does not crash");
 
     ngx_memzero(&eff, sizeof(eff));
     ngx_memzero(&conf, sizeof(conf));
 
+    /* Mark every byte so a partial write is detectable. */
+    memset(&eff, 0xAB, sizeof(eff));
+    eff_before = eff;
+
     ngx_http_markdown_build_effective_conf(NULL, NULL);
     ngx_http_markdown_build_effective_conf(NULL, &conf);
     ngx_http_markdown_build_effective_conf(&eff, NULL);
+
+    TEST_ASSERT(memcmp(&eff, &eff_before, sizeof(eff)) == 0,
+                "NULL conf must leave the destination view untouched");
+
+    /* A valid call still populates the destination, so the guard above is
+     * not vacuously true. */
+    conf.advanced.static_block_mask = 0x5;
+    conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    conf.enabled = 1;
+    ngx_http_markdown_build_effective_conf(&eff, &conf);
+    TEST_ASSERT(eff.block_mask == 0x5 && eff.enabled == 1,
+                "valid call still projects the static configuration");
 
     TEST_PASS("build_effective_conf with NULL inputs does not crash");
 }

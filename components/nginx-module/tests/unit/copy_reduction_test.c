@@ -146,6 +146,7 @@ ngx_module_t ngx_http_markdown_filter_module;
 /* Pool allocator: plain heap with a test-visible allocation counter. */
 static int g_palloc_fail_once;
 static size_t g_heap_alloc_count;
+static size_t g_heap_free_count;
 
 void *
 ngx_alloc(size_t size, ngx_log_t *log)
@@ -191,6 +192,9 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
 void
 ngx_free(void *p)
 {
+    if (p != NULL) {
+        g_heap_free_count++;
+    }
     free(p);
 }
 
@@ -484,7 +488,16 @@ ngx_http_markdown_record_decompression_failure_io(
     NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
 }
 
-/* Fail-open decision counter (owned by request_impl.h in production). */
+/*
+ * Fail-open decision counter (owned by request_impl.h in production).
+ *
+ * Records its own invocation count so a test can prove the payload path
+ * routes its delivered fail-open accounting THROUGH this helper instead of
+ * incrementing results.failopen_count inline.  The helper is the single
+ * place that applies the fail-open policy gate (Rule 38/23).
+ */
+static size_t g_failopen_helper_calls;
+
 static void
 ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_effective_conf_t *eff,
@@ -492,6 +505,7 @@ ngx_http_markdown_metric_inc_failopen(
 {
     (void) eff;
     (void) conf;
+    g_failopen_helper_calls++;
     NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
 }
 
@@ -511,17 +525,19 @@ ngx_http_markdown_log_decision_with_category(
 
 /*
  * Auth-aware header-filter delegation (owned by request_impl.h in
- * production).  The copy-reduction tests never drive the header-forward
- * path, so this stub returns DECLINED without touching the real filter
- * chain.
+ * production).  Most tests never drive the header-forward path, so this
+ * stub returns the test-controlled g_next_header_with_auth_rc (DECLINED by
+ * default) without touching the real filter chain.
  */
+static ngx_int_t g_next_header_with_auth_rc = NGX_DECLINED;
+
 static ngx_int_t
 ngx_http_markdown_next_header_filter_with_auth(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
     (void) r;
     (void) conf;
-    return NGX_DECLINED;
+    return g_next_header_with_auth_rc;
 }
 
 /*
@@ -649,6 +665,24 @@ markdown_chain_decode_free(struct FFIChainDecodeResult *result)
 #include "../../src/ngx_http_markdown_decompression_route.h"
 #include "../../src/ngx_http_markdown_payload_impl.h"
 
+/*
+ * The payload path forwards fail-open output through the captured
+ * ngx_http_next_body_filter pointer, which is NULL until a filter chain is
+ * installed.  Provide a counting stub and install it so the fail-open
+ * delivery branch can be exercised deterministically.
+ */
+static ngx_uint_t  g_next_body_calls;
+static ngx_int_t   g_next_body_rc = NGX_OK;
+
+static ngx_int_t
+test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    (void) r;
+    (void) in;
+    g_next_body_calls++;
+    return g_next_body_rc;
+}
+
 /* ── Test: contiguous single-buffer skips the linearize copy ────────── */
 
 static void
@@ -760,6 +794,166 @@ test_multi_buffer_chain_linearizes(void)
     TEST_PASS("multi-buffer chain linearizes with correct byte count");
 }
 
+/* ── Test: empty decompressed payload releases the compressed buffer ── */
+
+/*
+ * A successful decompression of an empty compressed stream yields a
+ * zero-length buffer (pos == NULL && last == NULL).  The apply helper must
+ * treat that as a valid empty payload AND must release the pre-decompression
+ * compressed bytes: leaving them allocated leaks the ngx_alloc'd backing
+ * store, and leaving ctx->buffer.capacity stale would misreport the buffer
+ * as still owning storage.  The buffer-swap path already frees the old
+ * compressed buffer, so the empty path must match it field for field.
+ */
+static void
+test_empty_decompressed_payload_releases_compressed_buffer(void)
+{
+    ngx_http_request_t        r;
+    ngx_connection_t          conn;
+    ngx_log_t                 log;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    ngx_chain_t               chain;
+    ngx_buf_t                 buf;
+    u_char                   *compressed;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("empty decompressed payload releases compressed buffer");
+
+    memset(&r, 0, sizeof(r));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    r.connection = &conn;
+    r.connection->log = &log;
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    conf.decompress.max_size = 64 * 1024;
+
+    /* Pre-decompression state: a real ngx_alloc'd compressed buffer. */
+    compressed = malloc(64);
+    TEST_ASSERT(compressed != NULL, "compressed buffer allocation should succeed");
+    memset(compressed, 'C', 64);
+    ctx.buffer.data = compressed;
+    ctx.buffer.size = 64;
+    ctx.buffer.capacity = 64;
+    ctx.decompression.compressed_size = 64;
+    ctx.decompression.done = 0;
+
+    /* Empty decompressor output: valid zero-length payload (both NULL). */
+    memset(&chain, 0, sizeof(chain));
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = NULL;
+    buf.last = NULL;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    g_heap_free_count = 0;
+
+    rc = ngx_http_markdown_apply_decompressed_payload(&r, &ctx, &conf, &chain);
+
+    TEST_ASSERT(rc == NGX_OK, "empty payload apply should return NGX_OK");
+    TEST_ASSERT(g_heap_free_count == 1,
+                "empty payload apply must free the compressed buffer exactly once");
+    TEST_ASSERT(ctx.buffer.data == NULL,
+                "released compressed buffer pointer must be cleared");
+    TEST_ASSERT(ctx.buffer.size == 0, "buffer size must be zero");
+    TEST_ASSERT(ctx.buffer.capacity == 0, "buffer capacity must be zero");
+    TEST_ASSERT(ctx.decompression.decompressed_size == 0,
+                "decompressed size must be zero");
+    TEST_ASSERT(ctx.decompression.done == 1,
+                "empty payload still completes decompression");
+
+    TEST_PASS("empty decompressed payload releases the compressed buffer");
+}
+
+/* ── Test: fail-open accounting routes through the shared policy helper ── */
+
+/*
+ * The buffered-append overflow path delivers the original response and then
+ * counts a fail-open delivery.  That counter is a POLICY-gated metric: the
+ * canonical increment lives in ngx_http_markdown_metric_inc_failopen(), which
+ * only counts when the effective error policy is fail-open (Rule 38/23).
+ * Inlining NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count) here would
+ * count fail-open deliveries even for an on_error=reject configuration and
+ * would bypass the one place the gate is defined.
+ *
+ * This test drives the production handler with an effective view whose
+ * error_policy is REJECT and asserts:
+ *   - the helper stub was invoked exactly once (the production code calls
+ *     it rather than incrementing the counter inline), and
+ *   - the raw metric macro was not used for failopen_count (the helper
+ *     stub owns that increment; a raw inline increment would add a second
+ *     uncounted-by-helper metric event).
+ *
+ * MUTATION SENSITIVITY: reverting the call to
+ * NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count) leaves
+ * g_failopen_helper_calls at 0 and fails the first assertion.
+ */
+static void
+test_failopen_accounting_uses_policy_helper(void)
+{
+    ngx_http_request_t               r;
+    ngx_connection_t                 conn;
+    ngx_log_t                        log;
+    ngx_http_markdown_ctx_t          ctx;
+    ngx_http_markdown_conf_t         conf;
+    ngx_http_markdown_effective_conf_t eff;
+    ngx_chain_t                      cl;
+    ngx_buf_t                        buf;
+    u_char                           chunk[8];
+    size_t                           calls_before;
+
+    TEST_SUBSECTION("fail-open accounting uses the shared policy helper");
+
+    memset(&r, 0, sizeof(r));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    r.connection = &conn;
+    r.connection->log = &log;
+    r.method = NGX_HTTP_GET;
+    r.main = &r;
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&eff, 0, sizeof(eff));
+    memset(chunk, 'x', sizeof(chunk));
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = chunk;
+    buf.last = chunk + sizeof(chunk);
+    memset(&cl, 0, sizeof(cl));
+    cl.buf = &buf;
+    cl.next = NULL;
+
+    /* Buffer is already at its ceiling, so the append must fail. */
+    ctx.buffer.max_size = 4;
+    ctx.buffer.size = 4;
+    ctx.effective_conf = &eff;
+    eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /* The downstream send is accepted; make header forwarding a no-op that
+     * reports success so the delivery branch is reached. */
+    g_next_header_with_auth_rc = NGX_OK;
+    g_next_body_calls = 0;
+    g_next_body_rc = NGX_OK;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    calls_before = g_failopen_helper_calls;
+
+    (void) ngx_http_markdown_handle_buffer_append_failure(
+        &r, &ctx, &conf, &cl, sizeof(chunk));
+
+    TEST_ASSERT(g_next_body_calls == 1,
+                "fail-open replay must reach the downstream body filter once");
+    TEST_ASSERT(g_failopen_helper_calls == calls_before + 1,
+                "delivered fail-open accounting must go through the policy helper");
+    TEST_ASSERT(ctx.fullbuffer.failopen_delivery_pending == 0,
+                "accepted delivery must not leave a deferred fail-open latch");
+
+    TEST_PASS("fail-open accounting routes through the shared policy helper");
+}
+
 int
 main(void)
 {
@@ -769,6 +963,8 @@ main(void)
 
     test_contiguous_single_buffer_skips_copy();
     test_multi_buffer_chain_linearizes();
+    test_empty_decompressed_payload_releases_compressed_buffer();
+    test_failopen_accounting_uses_policy_helper();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

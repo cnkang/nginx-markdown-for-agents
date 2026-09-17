@@ -89,6 +89,68 @@ static char ngx_conf_error_val[] = "ERROR";
 
 typedef intptr_t ngx_err_t;
 
+#ifndef NGX_CONF_TAKE1
+#define NGX_CONF_TAKE1 0x00000002
+#endif
+#ifndef NGX_CONF_TAKE2
+#define NGX_CONF_TAKE2 0x00000004
+#endif
+#ifndef NGX_CONF_TAKE12
+#define NGX_CONF_TAKE12 (NGX_CONF_TAKE1|NGX_CONF_TAKE2)
+#endif
+#ifndef NGX_CONF_NOARGS
+#define NGX_CONF_NOARGS 0x00000001
+#endif
+#ifndef NGX_CONF_1MORE
+#define NGX_CONF_1MORE 0x00000800
+#endif
+#ifndef NGX_CONF_FLAG
+#define NGX_CONF_FLAG 0x00000200
+#endif
+#ifndef NGX_CONF_ANY
+#define NGX_CONF_ANY 0x00001000
+#endif
+#ifndef NGX_HTTP_MAIN_CONF_OFFSET
+#define NGX_HTTP_MAIN_CONF_OFFSET 0
+#endif
+#ifndef NGX_HTTP_LOC_CONF_OFFSET
+#define NGX_HTTP_LOC_CONF_OFFSET 0
+#endif
+#ifndef ngx_null_string
+#define ngx_null_string { 0, NULL }
+#endif
+#ifndef ngx_null_command
+#define ngx_null_command { ngx_null_string, 0, NULL, 0, 0, NULL }
+#endif
+
+typedef struct {
+    ngx_str_t   name;
+    ngx_uint_t  value;
+} ngx_conf_enum_t;
+
+/*
+ * Generic slot setters referenced only by the directive table in
+ * ngx_http_markdown_config_directives_impl.h, whose addresses the table
+ * stores.  The handlers under test are the module's own wrappers.
+ */
+static char *
+ngx_conf_set_flag_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return (char *) NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_size_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return (char *) NGX_CONF_OK;
+}
+
 /* ----------------------------------------------------------------
  * Minimal NGINX type stubs for standalone compilation
  * ---------------------------------------------------------------- */
@@ -120,8 +182,12 @@ struct ngx_conf_s {
 };
 
 struct ngx_command_s {
-    ngx_str_t  name;
-    void      *post;
+    ngx_str_t   name;
+    ngx_uint_t  type;
+    char       *(*set)(ngx_conf_t *cf, struct ngx_command_s *cmd, void *conf);
+    ngx_uint_t  conf;
+    ngx_uint_t  offset;
+    void       *post;
 };
 
 struct ngx_module_s {
@@ -139,27 +205,6 @@ ngx_module_t ngx_http_core_module;
 /* ----------------------------------------------------------------
  * NGINX primitive stubs
  * ---------------------------------------------------------------- */
-
-static ngx_int_t
-ngx_ascii_strncasecmp(u_char *s1, u_char *s2, size_t n)
-{
-    size_t i;
-
-    for (i = 0; i < n; i++) {
-        u_char c1 = (u_char) tolower((unsigned char) s1[i]);
-        u_char c2 = (u_char) tolower((unsigned char) s2[i]);
-        if (c1 != c2) {
-            return (ngx_int_t) c1 - (ngx_int_t) c2;
-        }
-    }
-    return 0;
-}
-
-static ngx_int_t
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
-{
-    return ngx_ascii_strncasecmp(s1, s2, n);
-}
 
 static u_char *
 ngx_strlchr(u_char *p, u_char *last, u_char c)
@@ -251,7 +296,6 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
 
 /* Stubs that the config header references but we don't need. */
 static ngx_http_core_loc_conf_t *g_clcf;
-static ngx_http_markdown_main_conf_t g_main_conf;
 static ngx_uint_t g_diagnostics_recording_requested;
 
 static ngx_int_t
@@ -282,14 +326,6 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
     return g_clcf;
 }
 
-static void *
-ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
-{
-    UNUSED(cf);
-    UNUSED(module);
-    return &g_main_conf;
-}
-
 typedef struct {
     ngx_conf_t                 *cf;
     ngx_str_t                  *value;
@@ -318,17 +354,6 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
     return malloc(size);
-}
-
-static void *
-ngx_pcalloc(ngx_pool_t *pool, size_t size)
-{
-    UNUSED(pool);
-    void *p = malloc(size);
-    if (p != NULL) {
-        memset(p, 0, size);
-    }
-    return p;
 }
 
 static ngx_pool_cleanup_t *
@@ -388,6 +413,7 @@ ngx_array_push(ngx_array_t *a)
  * limits parsing functions we're testing)
  * ---------------------------------------------------------------- */
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
+#include "../../src/ngx_http_markdown_config_directives_impl.h"
 
 /* ----------------------------------------------------------------
  * Simple PRNG (xorshift32) for deterministic pseudo-random sequences
