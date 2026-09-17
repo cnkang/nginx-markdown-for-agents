@@ -42,7 +42,11 @@ compressed response.
 ### ETag and conditional requests
 
 Full-buffer mode computes an ETag from the complete Markdown output and supports
-`If-None-Match` / `If-Modified-Since` for 304 responses. Streaming mode commits
+`If-None-Match` / `If-Modified-Since` for 304 responses. For a converted
+response, only the Markdown ETag drives the 304 decision: the source
+`Last-Modified` value is deliberately not an input, and the conversion clears
+that header. Source `Last-Modified` / `If-Modified-Since` validation therefore
+applies to pass-through responses only. Streaming mode commits
 the response headers before the full output is available, so ETag generation
 and `If-None-Match`-based conditional validation are not possible.
 

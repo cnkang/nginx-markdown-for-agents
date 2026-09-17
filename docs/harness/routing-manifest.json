@@ -973,7 +973,21 @@
       "summary": "real GCC before pushing C changes",
       "check": "tools/ci/pre_push_profile.py",
       "files": [
-        "components/nginx-module/**"
+        "components/nginx-module/**",
+        "components/rust-converter/src/ffi/**",
+        "components/rust-converter/src/ffi.rs",
+        "components/rust-converter/include/markdown_converter.h",
+        "components/nginx-module/src/markdown_converter.h",
+        "Makefile",
+        "build.sh",
+        "components/rust-converter/cbindgen.toml",
+        "components/rust-converter/reason_registry.toml",
+        "tools/ci/*.sh",
+        "tools/ci/*.mk",
+        "tools/ci/pre_push_profile.py",
+        "tools/ci/pre_push_gates.py",
+        "tools/ci/pre_push_gates.json",
+        "tools/ci/test_pre_push_profile.py"
       ],
       "stage": [
         "push"
@@ -1006,6 +1020,117 @@
       "blocking": true,
       "test": "tools/harness/tests/test_detect_continuation_comments.py",
       "not_covered": "shell parsing is conservative and does not execute commands; generated or ignored files outside the listed tracked surfaces are not scanned"
+    },
+    {
+      "rule": "13",
+      "summary": "workflow env-var liveness",
+      "check": "tools/harness/detect_workflow_env_liveness.py",
+      "files": [
+        ".github/workflows/**"
+      ],
+      "stage": [
+        "save",
+        "commit",
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_workflow_env_liveness.py",
+      "not_covered": "the check reads each workflow's own env declarations; a variable exported by a reusable workflow or a composite action is not traced"
+    },
+    {
+      "rule": "61",
+      "summary": "performance baseline binding lifecycle",
+      "check": "tools/harness/detect_baseline_hand_edit.py",
+      "files": [
+        "perf/baselines/**"
+      ],
+      "stage": [
+        "save",
+        "commit",
+        "push"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_baseline_hand_edit.py",
+      "not_covered": "the full audit resolves every source_git_commit in the local checkout; a baseline whose measurement object is unreachable fails closed instead of being judged"
+    },
+    {
+      "rule": "65",
+      "summary": "whole-struct initialization for stack config holders",
+      "check": "tools/harness/detect_uninitialized_stack_struct.sh",
+      "files": [
+        "components/nginx-module/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_uninitialized_stack_struct.sh",
+      "not_covered": "the detector is advisory by default and reports candidate sites for human review; only --strict escalates a finding to exit 1, and a struct zeroed in a callee is not followed"
+    },
+    {
+      "rule": "67",
+      "summary": "v1 terminal-outcome conservation",
+      "check": "tools/harness/detect_metrics_event_conservation.py",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_metrics_event_conservation.py",
+      "not_covered": "the audit verifies the structural presence of the conservation arithmetic in the renderer; whether each counter is incremented on the right path stays a runtime question"
+    },
+    {
+      "rule": "68",
+      "summary": "access control before method handling",
+      "check": "tools/harness/detect_access_before_method.py",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_access_before_method.py",
+      "not_covered": "the ordering is judged by source order in one function; a handler that delegates the access decision to a helper called behind an unevaluated branch is reported rather than proven"
+    },
+    {
+      "rule": "69",
+      "summary": "representation-change metadata-surface completeness",
+      "check": "tools/harness/detect_representation_metadata_clearing.py",
+      "files": [
+        "components/nginx-module/src/**"
+      ],
+      "stage": [
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_representation_metadata_clearing.py",
+      "not_covered": "the audit judges mirror-pair completeness inside one function body; a clear split across two functions that both run on the path is not proven"
+    },
+    {
+      "rule": "70",
+      "summary": "scratch and temporary file hygiene",
+      "check": "tools/harness/detect_scratch_files.py",
+      "files": [
+        "*.py",
+        "*.sh"
+      ],
+      "stage": [
+        "save",
+        "commit",
+        "push",
+        "ci"
+      ],
+      "blocking": true,
+      "test": "tools/harness/tests/test_detect_scratch_files.py",
+      "not_covered": "the root-level rule covers repository-root scripts; the scratch-name and editor-junk signals are the ones that reach files elsewhere in the tree"
     }
   ]
 }

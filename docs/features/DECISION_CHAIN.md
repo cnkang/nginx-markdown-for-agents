@@ -167,7 +167,7 @@ Use `fail_closed` only when you need strict guarantees that clients never receiv
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_requests_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which depends solely on the `markdown_error_policy` setting.
+When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. The sub-classification appears as `reason=<code>` in decision log entries (for example `reason=timeout`, plus `event=` for the emitting site). The `nginx_markdown_requests_total` metric does not carry these sub-classifications. Its `reason` label holds only the ten frozen values (`converted`, `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`, `bypass_no_transform`, `failed_open`, `failed_closed`, `streaming_mid_flight_error`). The `category=` field in the decision log is a separate coarse error class (`conversion`, `resource_limit`, `system`, `unknown`). None of these change the primary outcome (`failed_open` or `failed_closed`), which depends solely on the `markdown_error_policy` setting.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|

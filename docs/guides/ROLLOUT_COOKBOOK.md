@@ -1187,11 +1187,11 @@ Decision log entries use the format `markdown: reason=<REASON_CODE> ...` and app
 ```bash
 # Count all conversion failures
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "outcome=failed_open\|outcome=failed_closed" -c
+  grep -E "outcome=(failed_open|failed_closed)" -c
 
 # Show the most recent failures with full context
 grep "markdown:" /var/log/nginx/error.log | \
-  grep -E "outcome=failed_open\|outcome=failed_closed" | tail -10
+  grep -E "outcome=(failed_open|failed_closed)" | tail -10
 ```
 
 #### Check for system-level failures
@@ -1573,7 +1573,7 @@ for the incident.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-07 | Kang | Per-URI failure check now reads the error log directly (grep markdown: before the outcome/URI filters) |
+| 0.9.2 | 2026-09-07 | Kang | Per-URI failure check now reads the error log directly (grep markdown: before the outcome/URI filters); the failure-count pattern now uses the correct ERE alternation |
 | 0.9.2 | 2026-08-15 | Kang | Failure-rate formulas split conversion-attempt vs request based; error-policy pass scoped to pre-commit |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire the large-response threshold directive) |

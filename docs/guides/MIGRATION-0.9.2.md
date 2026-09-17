@@ -388,9 +388,11 @@ command table.
 ## Removed 0.9.2 Directives (5)
 
 These directives were active in 0.9.1. The 0.9.2 pre-LTS convergence
-(LTS-R006/LTS-R009) removes them. Their names stay registered with an
-error-returning handler, so `nginx -t` fails with an explicit migration
-message naming the directive rather than a bare "unknown directive" error.
+(LTS-R006/LTS-R009) removes them. Their names are no longer registered, so
+`nginx -t` fails with NGINX's standard `unknown directive` error naming the
+directive. Earlier 0.9.2 development builds kept the names as reject-only
+entries with a module migration message, and the frozen contract drops that
+handler.
 Remove them from your configuration and rely on static config validated by
 `nginx -t` plus a reload.
 
@@ -525,7 +527,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
-| 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five explicit reject-only convergence entries. |
+| 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |
 | 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |

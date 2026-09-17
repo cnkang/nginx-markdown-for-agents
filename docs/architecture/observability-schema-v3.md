@@ -29,7 +29,8 @@ metric families, labels, or configuration directives.
 ## Diagnostics Schema v3
 
 The NGINX C renderer is the single implementation of the live diagnostics
-endpoint. The response has exactly these seven top-level fields:
+endpoint. The response carries seven required top-level fields plus an optional
+`extensions` container:
 
 - `schema_version`: integer constant `3`
 - `product_version`

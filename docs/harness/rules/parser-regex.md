@@ -155,7 +155,8 @@ Required:
   multi-line `re.compile(...)` statement can suppress calls.
 
 CLI contract:
-- Default (no flags): advisory exit 0 regardless of findings.
+- Default (no flags): advisory exit 0 regardless of findings; scan/read
+  errors exit 1 even here, because an incomplete scan is never a pass.
 - `--strict`: exit 1 on ERROR findings, parse errors, or scan/read errors.
   REVIEW findings are non-blocking.
 - `--fail-on-review`: implies `--strict` and additionally exits 1 on REVIEW.

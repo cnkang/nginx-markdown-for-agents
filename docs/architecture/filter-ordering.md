@@ -32,9 +32,17 @@ register runs **first** when a response flows through the chain.
 
 | Phase | Modules (in registration order) |
 |-------|--------------------------------|
-| Standard (compiled-in) | `gzip` → `gunzip` |
-| Optional (ngx_brotli, load_module or compiled-in) | `brotli` |
+| Standard (compiled-in) | `gzip` |
+| Optional (`--with-http_gunzip_module`, ngx_brotli load_module or compiled-in) | `gunzip`, `brotli` |
 | Dynamic (load_module) | `markdown_filter` (this module) |
+
+`gunzip` is not part of the default NGINX build: it requires
+`--with-http_gunzip_module` at configure time. The repository CI build script
+enables it explicitly (`tools/ci/verify_real_nginx_ims.sh`), and the E2E
+filter-ordering test lists gunzip as a fixture prerequisite that the test
+configuration switches on (`tests/e2e/filter_ordering_test.sh`).
+When the module is absent from the build, the registration table and the
+runtime chain below simply omit it.
 
 Because each module prepends itself, the **runtime** chain is the reverse of
 the registration order: `markdown_filter` → `brotli` → `gunzip` → `gzip`.

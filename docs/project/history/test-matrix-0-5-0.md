@@ -34,7 +34,7 @@ canonical key — never reuse the same ID for different tuples.
 ```
 
 These two rows illustrate the format only. They are not counted toward the
-required cross-product coverage or the 282 required tuples.
+required cross-product coverage or the 258 required tuples.
 
 ## Gap Record Format
 
@@ -362,7 +362,8 @@ process records a covering sub-spec:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-07 | Kang | Split fallback and fail-open into separate coverage obligations: Conversion Path becomes 6 values, the matrix grows to 288 tuples (282 required after the six Expected-Rejection exclusions), and every TM row is renumbered |
+| 0.9.2 | 2026-09-17 | Hermes | Corrected the required-tuple count to 258 in the illustrative-rows note and the 0.9.2 history row (288 − 6 Expected-Rejection − 24 unreachable) |
+| 0.9.2 | 2026-09-07 | Kang | Split fallback and fail-open into separate coverage obligations: Conversion Path becomes 6 values, the matrix grows to 288 tuples (258 required after the six Expected-Rejection and the 24 unreachable full-buffer/fallback exclusions), and every TM row is renumbered |
 | 0.9.2 | 2026-09-07 | Kang | Mark all six Extra-Large full-buffer convert tuples Expected-Rejection and exclude them from the required set (240 → 234 required tuples) |
 | 0.9.2 | 2026-09-06 | Kang | Annotate the Extra-Large full-buffer convert tuple as an expected size-limit rejection; no covering sub-spec required |
 | 0.9.2 | 2026-08-15 | Hermes | Define the required coverage set as the complete 240-tuple Cartesian product (five conversion paths) |
