@@ -103,6 +103,31 @@ Required:
   model, update all C-side call sites in the same changeset: any code that
   held a raw pointer into Rust-owned memory must switch to copying data
   out before the consumption call.
+- **FFI failed-call consume-or-abort contract**: A *borrowed* handle
+  (one that consumption functions do not take by value) still has an
+  error contract: after any entry point on it returns a failure code, the
+  caller must stop driving it and either abort it or follow the one
+  documented fallback path — it must not re-enter the handle's normal
+  entry points hoping the failure was transient.  `markdown_streaming_feed`
+  is the reference case: any non-`ERROR_SUCCESS` return means no further
+  `feed`, and no `finalize`/`safe_finish`; only
+  `markdown_streaming_abort` may follow (the C layer already routes every
+  non-zero `feed` result to abort / safe-finish and clears its handle).
+  The abort path must always work.  Document this contract in the Rust
+  doc comment next to the entry point, not only here — the C caller reads
+  the generated header, which carries the doc comment.
+- **FFI poisoned-handle fail-closed guard**: A `catch_unwind` boundary
+  cannot roll back writes the panicking function already made to shared
+  state, so a handler that catches a panic while driving a long-lived
+  object must mark that object *poisoned* and refuse further work on it
+  (fail closed with `ERROR_INTERNAL`), while keeping the free/abort path
+  unconditionally available.  Do not "resume" a handle whose last call
+  panicked: the observable state may be torn.  The poison flag belongs to
+  Rust-internal state — never add it to a `#[repr(C)]` struct, since that
+  would change the ABI; an opaque handle's private fields are free to
+  grow.  Example: `StreamingConverterHandle::poisoned` blocks
+  `feed`/`finalize`/`safe_finish` after a caught panic and leaves
+  `markdown_streaming_abort` able to release the handle.
 
 Verification:
 - `grep -rn 'catch_unwind' components/rust-converter/src/` — verify

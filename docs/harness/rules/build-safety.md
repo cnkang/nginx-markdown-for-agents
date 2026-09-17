@@ -4,6 +4,7 @@ rules: [56, 57, 58, 59, 70, 73]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
+  - "components/**/*.sh"
   - ".github/workflows/**"
   - "tools/**"
   - "packaging/**/*.sh"

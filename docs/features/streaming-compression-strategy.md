@@ -103,6 +103,8 @@ and the configured `markdown_error_policy` applies before commit:
 
 - **pass** (default): original compressed response served to client unchanged.
 - **fail_closed**: 502 Bad Gateway returned.
+- **status <code>**: the configured `markdown_error_policy status 429|503` code
+  returned through `ngx_http_markdown_effective_error_status()`.
 
 After the module commits streaming output, the existing post-commit
 safe-finish or abort behavior applies. The module does not attempt impossible

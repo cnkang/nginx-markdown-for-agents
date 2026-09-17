@@ -145,8 +145,8 @@ evidence references.
 | DEB package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | RPM package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | Helm chart values | helm lint + values schema | `validate_k8s_manifests.py` | Gate 4 |
-| Fuzz targets + infrastructure | fuzz infrastructure validator | `validate_fuzz_packaging.py` | Gate 6 |
-| Release workflow artifacts | packaging workflow validator | `validate_fuzz_packaging.py` | Gate 6 |
+| Fuzz targets + infrastructure | fuzz infrastructure validator | `python3 tools/release/gates/validate_fuzz_packaging.py` | Gate 6 |
+| Release workflow artifacts | packaging workflow validator | `python3 tools/release/gates/validate_fuzz_packaging.py` | Gate 6 |
 
 ---
 
@@ -156,17 +156,17 @@ evidence references.
 
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
-| 6.1 | Fuzz targets exist and buildable | `validate_fuzz_packaging.py` | fuzz/Cargo.toml has [[bin]] targets |
-| 6.2 | ClusterFuzzLite PR workflow | `validate_fuzz_packaging.py` | .github/workflows/cflite_pr.yml exists |
-| 6.3 | Nightly batch fuzz workflow | `validate_fuzz_packaging.py` | .github/workflows/cflite_batch.yml exists |
-| 6.4 | Corpus pruning mechanism | `validate_fuzz_packaging.py` | cflite_cron.yml exists with prune mode |
-| 6.5 | Fuzz guide complete | `validate_fuzz_packaging.py` | fuzz/README.md has FUZZ-001..007 |
-| 6.6 | Release package workflow | `validate_fuzz_packaging.py` | release-packages.yml exists |
-| 6.7 | Artifact naming with NGINX version | `validate_fuzz_packaging.py` | nFPM config + workflow reference NGINX_VERSION |
-| 6.8 | SHA256SUMS generation | `validate_fuzz_packaging.py` | Release workflow has checksum logic |
-| 6.9 | Install/compatibility docs | `validate_fuzz_packaging.py` | Documentation exists |
-| 6.10 | Package smoke test job | `validate_fuzz_packaging.py` | Smoke test job in release workflow |
-| 6.11 | Harness rules FUZZ-001..007 | `validate_fuzz_packaging.py` | All rules defined in fuzz/README.md |
+| 6.1 | Fuzz targets exist and buildable | `python3 tools/release/gates/validate_fuzz_packaging.py` | fuzz/Cargo.toml has [[bin]] targets |
+| 6.2 | ClusterFuzzLite PR workflow | `python3 tools/release/gates/validate_fuzz_packaging.py` | .github/workflows/cflite_pr.yml exists |
+| 6.3 | Nightly batch fuzz workflow | `python3 tools/release/gates/validate_fuzz_packaging.py` | .github/workflows/cflite_batch.yml exists |
+| 6.4 | Corpus pruning mechanism | `python3 tools/release/gates/validate_fuzz_packaging.py` | cflite_cron.yml exists with prune mode |
+| 6.5 | Fuzz guide complete | `python3 tools/release/gates/validate_fuzz_packaging.py` | fuzz/README.md has FUZZ-001..007 |
+| 6.6 | Release package workflow | `python3 tools/release/gates/validate_fuzz_packaging.py` | release-packages.yml exists |
+| 6.7 | Artifact naming with NGINX version | `python3 tools/release/gates/validate_fuzz_packaging.py` | nFPM config + workflow reference NGINX_VERSION |
+| 6.8 | SHA256SUMS generation | `python3 tools/release/gates/validate_fuzz_packaging.py` | Release workflow has checksum logic |
+| 6.9 | Install/compatibility docs | `python3 tools/release/gates/validate_fuzz_packaging.py` | Documentation exists |
+| 6.10 | Package smoke test job | `python3 tools/release/gates/validate_fuzz_packaging.py` | Smoke test job in release workflow |
+| 6.11 | Harness rules FUZZ-001..007 | `python3 tools/release/gates/validate_fuzz_packaging.py` | All rules defined in fuzz/README.md |
 
 **Fail action**: Block release. Fuzz infrastructure and packaging artifacts must be complete.
 
@@ -214,6 +214,7 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Gate 6 verification commands use the full tools/release/gates path, matching the partial-validation block |
 | 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the ten-family freeze |
 | 0.9.2 | 2026-08-15 | Kang | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |

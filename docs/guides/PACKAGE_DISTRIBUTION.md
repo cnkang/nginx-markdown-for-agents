@@ -197,7 +197,8 @@ Every release includes a `release-manifest.json` providing structured metadata
 about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
 source archive hash (for tag releases), and GitHub Actions workflow metadata.
 
-The `integrity-checksums` CI job generates the manifest and includes it
+The `integrity-checksums` CI job of `release-packages.yml` generates the
+manifest and includes it
 in `SHA256SUMS`. The release then signs the `SHA256SUMS` file as
 `SHA256SUMS.asc` for tag releases, providing a chain of custody:
 
@@ -224,12 +225,14 @@ curl -fsSL -H "Accept: application/json" -o release-manifest.json \
 
 ## GPG Signature Verification
 
-For a published GitHub Release, the `release-binaries` workflow publishes a
+For a published GitHub Release, the `release-packages` workflow publishes a
 detached ASCII-armored signature file (`SHA256SUMS.asc`) alongside
-`SHA256SUMS`. The signing job checks out the exact commit resolved by the
-workflow's prepare job, so the signing script and release metadata come from
-the same immutable source revision. Manual runs only publish the signature
-when the requested ref is a version tag (`v...`).
+`SHA256SUMS`. Its `integrity-signature` job runs only on a tag push, checks out
+the exact commit resolved by the workflow's prepare job, so the signing script
+and release metadata come from the same immutable source revision, and signs
+the checksum manifest inside the protected `release-signing` environment.
+`release-binaries` never signs anything: it is a manual rebuild tool that
+uploads workflow artifacts only.
 The `release-signing` environment secrets are therefore mandatory for a
 published release. The workflow fails closed rather than publishing an
 unsigned release asset.

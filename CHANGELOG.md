@@ -15,17 +15,19 @@ a public surface source metadata and ABI drift gate for release integrity.
 ### Breaking Changes
 
 0.9.2 is the breaking release before 1.0. The release reduces the
-configuration surface to 20 active directives and five reject-only migration
-entries. Those five names produce migration errors. Other removed names
-produce `unknown directive` errors. See
+configuration surface to 20 active directives. The five names removed by the
+0.9.2 convergence are no longer registered. NGINX reports its standard
+`unknown directive` error for them. Names removed in earlier releases fail
+the same way. See
 [docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
 for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
 before/after examples.
 
-- **Directive removals (38 total):** The release deletes 19 reject-only
-  migration stubs. NGINX now reports the standard `unknown directive` error
-  instead of a migration hint. The release removes 14 active directives:
+- **Directive removals (38 total, plus the five convergence names).** The
+  release deletes 19 reject-only migration stubs. NGINX now reports the
+  standard `unknown directive` error instead of a migration hint. The release
+  removes 14 active directives:
   `markdown_profile`, `markdown_metrics_format`, `markdown_metrics_per_path`,
   `markdown_metrics_per_path_cardinality`, `markdown_buffer_chunked`,
   `markdown_streaming_shadow`, `markdown_streaming_zero_copy`,
@@ -42,14 +44,32 @@ before/after examples.
   buffering for the removed flush directive. Use key=value syntax for
   `streaming_buffer=`,
   `parser_timeout=`, `parser_budget=`, and `decompressed_size=`.
+- **Rust API removals: LLM adapter and the incremental API.** The release
+  deletes the `llm_adapter` module and its provider abstraction, so token
+  estimation uses the fixed built-in ratio instead of a per-provider table.
+  The release also deletes the `incremental` feature and the whole
+  `IncrementalConverter` surface, covering the Rust type, the
+  `markdown_incremental_new`, `markdown_incremental_feed`,
+  `markdown_incremental_finalize`, and `markdown_incremental_free` FFI
+  exports, and the `markdown_large_body_threshold` routing directive. The
+  `streaming` feature is now the only processing-path feature, and its
+  default feature list no longer contains `incremental`.
+- **FFI/ABI break.** The bundled Rust/C boundary moves from ABI version 1 to
+  ABI version 3. `MarkdownOptions` shrank from 128 to 96 bytes with the
+  custom-selector and LLM-provider fields gone, `FFIDynconfResult` and its
+  three exports are gone, and the export set is 38 symbols. The module
+  validates the full four-part ABI handshake at preconfiguration, so a
+  mismatched pair refuses to start. Rebuild any external FFI consumer against
+  the 0.9.2 header.
 - **Profile presets removed.** The release removes `balanced`, `strict_cache`,
   and `streaming_first`. Use explicit directives to configure limits.
 - **OTel subsystem removed.** The experimental `markdown_otel` /
   `markdown_otel_endpoint` surface and OTel metrics/spans/export paths are
   gone. Use NGINX's native OTel module.
-- **`REJECT_STATUS` action rename (internal).**
-  The code now calls `NGX_HTTP_MD_ACTION_REJECT_STATUS` instead of
-  `NGX_HTTP_MD_ACTION_REJECT_502`. This change has no configuration impact.
+- **Reject status follows the error policy.** The module selects the reject
+  response through `markdown_error_policy`. `fail_closed` rejects with the
+  internal default status, and `status <429|503>` stores that code in the
+  effective configuration. No separate reject-action symbol exists in 0.9.2.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
 - **Runtime configuration removed.** Move dynamic settings to static directives
@@ -100,7 +120,7 @@ before/after examples.
 - Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
   entry. The diagnostics endpoint now returns the complete mapping.
 - C reason code constants were missing the decompression error series
-  (codes 4–11). All 27 reason code constants are now synchronized between
+  (codes 4–11). All 25 reason code constants are now synchronized between
   Rust and C.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
@@ -145,15 +165,30 @@ before/after examples.
 - Release gates 0.9.2 (`make release-gates-check-092`) use one current
   candidate-bound blocking contract. Focused 0.7.0/0.8.0 compatibility checks
   remain as regression inputs. The obsolete 0.9.0/0.9.1 wrapper chain is gone.
+- Harness and docs gates close four drift gaps. The scratch-file detector
+  reads Git path output as NUL-delimited bytes, so a non-UTF-8 tracked name
+  no longer aborts the scan, and a malformed allowlist entry now fails the
+  check instead of silently dropping its exemption. The Document Updates
+  ordering check covers every table in the section, so a second table can no
+  longer carry any row order. The notices checker validates direct
+  `[dev-dependencies]` crates against the resolved lock versions, and the
+  notices file lists those crates.
 
 ### Removed
 
+- The Rust `llm_adapter` module and the `incremental` feature are gone, along
+  with the `IncrementalConverter` type, its four FFI exports, and the
+  `markdown_large_body_threshold` routing directive. Token estimation keeps a
+  fixed built-in ratio, and `streaming` is the only processing-path feature.
 - The project removed the standalone C/Rust streaming decision-state model and
   its duplicate tests. Runtime streaming behavior now uses the minimal phase and
   terminal latches required for backpressure and request lifetime.
 - The project retired the generic 0.5.0 release validator, the 0.9.0/0.9.1
   release-chain wrappers, and duplicate fail-open/streaming E2E wrappers after
   moving their valuable invariants into current feature-oriented gates.
+- The orphan Brotli `.br` payloads under `tests/corpus/brotli/` are no longer
+  committed. No test or script consumed them, and the committed generator
+  reproduces the same bytes on demand.
 
 ## [0.9.1] - 2026-07-29
 
@@ -949,6 +984,8 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `docs/guides/PACKAGE_INSTALLATION.md`: DEB/RPM install guide.
   - `docs/guides/KUBERNETES_DEPLOYMENT.md`: K8s reference examples.
   - `docs/guides/F5_INGRESS_FEASIBILITY.md`: F5 Ingress feasibility.
+    (A later docs consolidation folded this page into
+    `docs/guides/KUBERNETES_DEPLOYMENT.md` and removed the standalone page.)
   - `docs/guides/DYNAMIC_CONFIG.md`: dynconf operational guide with
     LKG/rollback semantics and dry-run workflow.
   - `docs/FAQ.md`: decompression architecture recommendations.
@@ -1016,6 +1053,8 @@ hardening fixes before the v0.6.3 tag.
     `docs/testing/C_TEST_BOUNDARY.md`,
     `docs/project/release-notes-0-6-3.md`,
     `docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md`.
+    (A later docs cleanup removed the stale 0.6.3 release-notes page.
+    `docs/project/history/0.6.3-e2e-parity.md` remains the 0.6.3 record.)
 - Harness risk pack for E2E migration:
   `docs/harness/risk-packs/e2e-migration.md`.
 - Harness validation contract for Rust E2E migration policy in

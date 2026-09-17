@@ -82,8 +82,10 @@ and verifiability.
 > shipped inside a GitHub Release asset shares the fate of the binaries
 > it is meant to authenticate: an attacker who replaces the release
 > artifacts can replace the attached key as well. Always obtain the key
-> from an independent channel above (or a source checkout) and verify
-> its fingerprint per §3 before use.
+> from an independent channel above and verify its fingerprint per §3
+> before use. A clone of this project repository is not an independent
+> channel: it carries the checked-in key but not an independent statement
+> of its identity.
 
 ### Export Public Key
 
@@ -414,5 +416,6 @@ If you suspect the signing key got compromised, rotate immediately:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Removed the source checkout as an acceptable independent channel for the public key |
 | 0.9.2 | 2026-09-07 | Kang | Reworded the repository-metadata rotation step to active voice; no behavior change |
 | 0.7.0 | 2026-05-17 | spec-agent | Initial GPG key management documentation |

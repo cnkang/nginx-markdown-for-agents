@@ -2,7 +2,7 @@
 
 Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
-This is the final checkpoint before the 0.4.0 release. The Go/No-Go review
+This is the final checkpoint before the [release version] release. The Go/No-Go review
 verifies that all P0 sub-specs have passed their DoD evaluation. It also
 verifies that all release gates pass or have an approved eligible exception.
 An unresolved release-gate failure is No-Go. An approved exception can permit
@@ -67,10 +67,13 @@ Every unresolved failure must have an exception record here that includes its ra
 1. All P0 sub-specs must pass their DoD evaluation before a Go decision.
 2. The team may exclude the P1 sub-spec (parser-path-optimization) without blocking the release (Req 7.5).
 3. The release owner must approve any exception before the release proceeds. The record must state why the exception is eligible for Go, include risk assessment and mitigation evidence, and identify the approver. An unapproved or P0/safety exception is No-Go (Req 7.6).
+4. Any artifact signature record that is not ✅ is No-Go. A missing signature row, an invalid signature, or an unverified signer identity blocks the release. No exception path applies to signature evidence, because the project cannot repair an unverifiable release after publication. The record must also carry one signature-evidence row per artifact family listed in `release/signing-policy.json`: GPG verification for `source_archive`, `dynamic_module`, `deb`, and `rpm`, checksum and provenance evidence for the `homebrew_formula_source` and `homebrew_bottle` families, and the not-enabled status the policy records for the `oci` family.
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Rule 4 now requires one signature-evidence row per artifact family in `release/signing-policy.json`, and the checkpoint sentence no longer pins a release version |
+| 0.9.2 | 2026-09-17 | Hermes | Rule 4 added: any artifact signature record that is not ✅ is No-Go with no exception path |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

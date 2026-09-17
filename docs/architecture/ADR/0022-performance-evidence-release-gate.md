@@ -18,12 +18,12 @@ Add `evidence_gate.py` as the formal release gate for 0.9.1.
 
 ### Performance Thresholds
 The latency, TTFB, and memory thresholds are relative to the recorded 0.9.0
-baseline. The streaming fallback rate is an absolute cap, not a percentage
+baseline. The pre-commit fail-open rate is an absolute cap, not a percentage
 relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
-- **Streaming fallback rate**: ≤ 5% absolute. Numerator: streaming responses that emit `fallback_to_buffered` or `fallback_to_full_buffer`. Denominator: responses that actually attempted streaming (selected the streaming engine via `markdown_streaming auto|force` and passed the pre-attempt hard gates). Excluded: responses that never attempted streaming — routed directly to full-buffer by `markdown_streaming off`, profile, decision-chain `not_eligible`, or a pre-attempt hard gate such as `markdown_cache_validation full` (which blocks streaming before any attempt). Measurement window: per benchmark scenario run. Aggregation: per streaming-attempted response (not per chunk or attempt). The window combines results by summing numerator and denominator across all iterations within a scenario before computing the rate.
+- **Pre-commit fail-open rate**: ≤ 5% absolute. Numerator: `precommit_failopen_total`, the count of streaming responses that failed open before commit. Denominator: `streaming_requests_total`, the count of responses that actually attempted streaming (selected the streaming engine via `markdown_streaming auto|force` and passed the pre-attempt hard gates). The counter increments when the streaming engine initializes, before any initialization step can fail, so it records attempts rather than successes. Capability fallbacks (`ERROR_STREAMING_FALLBACK` returning the response to the full-buffer engine) stay out of the numerator: they increment `fallback_total` and `streaming_fallback_precommit_pass` instead, and the gate measures the fail-open share only. Excluded from the denominator: responses that never attempted streaming — routed directly to full-buffer by `markdown_streaming off`, profile, decision-chain `not_eligible`, or a pre-attempt hard gate such as `markdown_cache_validation full` (which blocks streaming before any attempt). Measurement window: per benchmark scenario run. Aggregation: per streaming-attempted response (not per chunk or attempt). The window combines results by summing numerator and denominator across all iterations within a scenario before computing the rate.
 - **Memory slope**: ≤ +20%
 
 ### Tooling
@@ -50,7 +50,7 @@ relative to a baseline:
 
 ### Positive Consequences
 - Ensures no performance regression ships to production.
-- Provides an evidence pack (benchmark tiers, decompression coverage, fallback rate, memory slope) for every release.
+- Provides an evidence pack (benchmark tiers, decompression coverage, pre-commit fail-open rate, memory slope) for every release.
 
 ### Negative Consequences
 - Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`. The
@@ -86,6 +86,7 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Renamed the streaming fallback rate threshold to pre-commit fail-open rate, matching the evidence gate and performance baselines; numerator, denominator, and the fallback_total exclusion stay unchanged |
 | 0.9.1 | 2026-07-19 | Kang | Added Brotli streaming evidence; 8 scenarios total with per-codec path and response-equivalence checks |
 | 0.9.1 | 2026-07-16 | Kang | Added gzip-streaming-first and deflate-streaming-first scenarios; promoted gzip-large to critical; 7 scenarios total with per-codec decompression path evidence |
 | 0.9.1 | 2026-07-14 | Codex | Required a large non-fallback, genuinely chunked streaming-first scenario and real module evidence for blocking release validation |

@@ -118,6 +118,15 @@ never runs on release publication. Both workflows consume the same
 `tools/release-matrix.json` rows, so the matrix rows are the single source of
 truth for which musl versions and architectures ship.
 
+### Checksum signature ownership
+
+`release-packages.yml` is the publishing workflow, and it also owns the detached
+`SHA256SUMS.asc` signature: its `integrity-signature` job runs on a tag push
+inside the protected `release-signing` environment before publication.
+`release-binaries.yml` builds and verifies archives only. It uploads workflow
+artifacts and never signs or publishes release assets, so a `SHA256SUMS.asc`
+on a GitHub Release always comes from the canonical publication path.
+
 ---
 
 ## Unsupported Environments
@@ -381,6 +390,7 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Checksum-signature ownership clarified: release-packages.yml signs, release-binaries.yml never does |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that compatibility-matrix coverage does not imply a published package asset; made artifact names version-neutral templates. |
 | 0.9.1 | 2026-07-17 | Kang | Consolidated build matrix references to prevent version conflicts with dynamic support matrix for v0.9.1. |
 | 0.8.3 | 2026-06-26 | Kang | Updated artifact naming examples to 0.8.3 |

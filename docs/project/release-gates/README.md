@@ -42,7 +42,7 @@ templates above are the active ones consumed by tooling.
 
 ## Usage
 
-Each sub-spec consumes these artifacts during development and completion. Sub-spec owners use the templates to record DoD evaluations, risk registers, boundary descriptions, and test matrix coverage. The release checklist and Go/No-Go template serve at release time to verify all gates pass before shipping 0.4.0.
+Each sub-spec consumes these artifacts during development and completion. Sub-spec owners use the templates to record DoD evaluations, risk registers, boundary descriptions, and test matrix coverage. The release checklist and Go/No-Go template serve at release time to verify all gates pass before a release ships.
 
 For the full requirements and design, see the `specs/5-overall-scope-release-gates/` directory.
 
@@ -50,5 +50,6 @@ For the full requirements and design, see the `specs/5-overall-scope-release-gat
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Usage guidance no longer pins a fixed release version |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

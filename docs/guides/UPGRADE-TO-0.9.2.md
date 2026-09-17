@@ -304,8 +304,8 @@ sudo install -m 0755 ngx_http_markdown_filter_module.so \
 
 ### 5. Migrate the configuration
 
-0.9.2 is a breaking configuration release (20 active directives, and the five
-removed names are no longer registered). Before validating or restarting
+0.9.2 is a breaking configuration release (20 active directives, and the
+seven retired names are no longer registered). Before validating or restarting
 NGINX, apply the 0.9.2 migration:
 
 ```bash
@@ -338,9 +338,11 @@ STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
 trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; exit "$rc"' EXIT
 sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # Apply the deterministic part of MIGRATION-0.9.2.md to the STAGED COPY:
-# remove the five retired directives (three dynconf + two prune
-# selectors).  The remaining migration items are consumer-side (reason
-# integers, diagnostics schema) and need no config edit.  The staged
+# remove the seven retired directive names that 0.9.2 no longer
+# registers (five convergence names, plus markdown_profile and
+# markdown_streaming_zero_copy).  The remaining migration items are
+# consumer-side (reason integers, diagnostics schema) and need no
+# config edit.  The staged
 # tree is a disposable copy: edit in place WITHOUT .bak backups, so no
 # stale backup file can be scanned below, counted as a second
 # load_module entry, or loaded by a wildcard include during nginx -t.
@@ -391,8 +393,9 @@ fi
 # untouched.
 sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
-# tree now (before the module swap): remove the five retired
-# directives.  The active load_module entry stays as-is — it already
+# tree now (before the module swap): remove the seven retired
+# directive names that 0.9.2 no longer registers.  The active
+# load_module entry stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
 # Snapshot the active tree FIRST: the sed edits below are in-place, so a
@@ -503,7 +506,7 @@ migrate_restore() {
 }
 MIGRATE_ACTIVE=1
 trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore || :; exit "$rc"' EXIT
-if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors|markdown_profile|markdown_streaming_zero_copy" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
@@ -511,6 +514,8 @@ if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_profile[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_streaming_zero_copy[[:space:]]+[^;]*;||" \
             "${active_conf}" || exit 1
       done; then
     pipeline_status=(0 0)
@@ -931,6 +936,33 @@ fi
 
 ---
 
+## FFI/ABI Compatibility
+
+0.9.2 changes the internal Rust/C boundary. The module and the Rust archive it
+links are one matched pair, so treat a module replacement as an atomic pair
+replacement.
+
+| Aspect | 0.9.1 | 0.9.2 |
+|--------|-------|-------|
+| ABI version | 1 | 3 |
+| `MarkdownOptions` size (LP64) | 128 bytes | 96 bytes |
+| `FFIDynconfResult` | Present (72 bytes) | Removed |
+| FFI exports | 36 | 38 |
+
+A 0.9.1 module linked against the 0.9.2 archive (or the reverse) fails the
+four-part handshake at preconfiguration: the numeric ABI version, the
+generated-header hash, the exported-symbol-set hash, and the struct-layout
+fingerprint must all agree. The failure appears at `nginx -t` and NGINX refuses
+to start, so it never reaches request handling.
+
+The prebuilt module archive carries the matching pair. Source builders who
+vendor the Rust archive separately must rebuild both halves from the same
+commit. External FFI consumers must regenerate bindings from
+`components/rust-converter/include/markdown_converter.h` at 0.9.2, because
+`MarkdownOptions` tail fields moved down by 32 bytes and nine exports are gone.
+
+---
+
 ## Source Build Upgrade
 
 ### 1. Update the repository
@@ -1169,11 +1201,11 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # migration mistake surfaces here with the active configuration still
 # intact.  After staged validation succeeds, repeat the SAME edits on
 # the active tree (${NGINX_CONF_DIR}) before the module swap.
-# The deterministic part of the migration is removing the three retired
-# dynconf directives (MIGRATION-0.9.2.md "Static configuration
-# migration"); the remaining items are consumer-side (reason integers,
-# diagnostics schema) and need no config edit:
-if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${STAGED_ROOT}" 2>/dev/null \
+# The deterministic part of the migration is removing the seven retired
+# directive names that 0.9.2 no longer registers (MIGRATION-0.9.2.md
+# "Static configuration migration"); the remaining items are consumer-side
+# (reason integers, diagnostics schema) and need no config edit:
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors|markdown_profile|markdown_streaming_zero_copy" "${STAGED_ROOT}" 2>/dev/null \
     | while read -r staged_conf; do
         # The staged tree is a disposable copy: edit in place WITHOUT
         # .bak backups, so no stale backup file can be scanned below,
@@ -1185,6 +1217,8 @@ if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_profile[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_streaming_zero_copy[[:space:]]+[^;]*;||" \
             "${staged_conf}" || exit 1
       done; then
     pipeline_status=(0 0)
@@ -1221,8 +1255,9 @@ fi
 # untouched.
 sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
-# tree now (before the module swap): remove the five retired directives
-# directives.  The active load_module entry stays as-is — it already
+# tree now (before the module swap): remove the seven retired directive
+# names that 0.9.2 no longer registers.  The active load_module entry
+# stays as-is — it already
 # references the canonical module path, which the swap below replaces
 # with the 0.9.2 binary.
 # Back up the running module FIRST: a backup failure or mismatch must
@@ -1350,7 +1385,7 @@ migrate_restore() {
 }
 MIGRATE_ACTIVE=1
 trap 'rc=$?; sudo rm -rf -- "$STAGED_ROOT" || :; migrate_restore || :; exit "$rc"' EXIT
-if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors" "${NGINX_CONF_DIR}" 2>/dev/null \
+if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown_dynconf_dry_run|markdown_prune_selectors|markdown_prune_protection_selectors|markdown_profile|markdown_streaming_zero_copy" "${NGINX_CONF_DIR}" 2>/dev/null \
     | while read -r active_conf; do
         sudo sed -i -E \
             -e "s|^[[:space:]]*markdown_dynamic_config[[:space:]]+[^;]*;||" \
@@ -1358,6 +1393,8 @@ if sudo grep -rlE "markdown_dynamic_config|markdown_dynamic_config_path|markdown
             -e "s|^[[:space:]]*markdown_dynconf_dry_run[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_selectors[[:space:]]+[^;]*;||" \
             -e "s|^[[:space:]]*markdown_prune_protection_selectors[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_profile[[:space:]]+[^;]*;||" \
+            -e "s|^[[:space:]]*markdown_streaming_zero_copy[[:space:]]+[^;]*;||" \
             "${active_conf}" || exit 1
       done; then
     pipeline_status=(0 0)
@@ -1961,6 +1998,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
 | 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
 | 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
 | 0.9.2 | 2026-07-30 | Kang | Initial upgrade guide for 0.9.2 |

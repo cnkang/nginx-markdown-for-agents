@@ -124,8 +124,9 @@ budget and replay-overflow errors follow `markdown_error_policy`. With
 `pass`, the module normally forwards the original response — but only while
 the replay buffer still holds the original body. If a replay overflow makes
 that body unavailable before commit, even `pass` cannot forward it. In that
-exception the decision engine rejects the request using `REJECT_STATUS`
-instead. With `fail_closed` or `status <code>`, the module rejects the
+exception the decision engine returns the internal default reject status
+(`mcf->error_status`, 502 unless the configuration overrides it). With
+`fail_closed` or `status <code>`, the module rejects the
 request and returns the configured reject status.
 
 The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that

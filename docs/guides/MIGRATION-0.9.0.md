@@ -249,22 +249,56 @@ For Grafana dashboards and alert rules, apply these transformations:
 # Step 1: Replace old per-reason metric names with unified family + label
 # Example: nginx_markdown_skipped_accept_total → nginx_markdown_skips_total{reason="skipped_accept"}
 
-# Step 2: Rewrite reason values that have explicit mapping-table rows
-# before the generic prefix replacement, so FAIL_CONVERSION and
-# SKIPPED_ACCEPT_REJECT become conversion_error and
-# skipped_accept_reject (not failed_*).
+# Step 2: Rewrite every reason value that the mapping table renames, not
+# only lowercases.  The renames are FAILED_DECOMPRESSION,
+# PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, REPLAY_BUFFER_ERROR, and
+# FFI_CALL_ERROR, plus the two whole-row renames FAIL_CONVERSION and
+# SKIPPED_ACCEPT_REJECT.
+# Step 3: Lowercase the reason values that only change case.
+# Each value has two substitutions below, and both run against
+# dashboard.json. Grafana stores PromQL inside JSON strings, so a reason
+# value on disk reads reason=\"SKIPPED_ACCEPT\"
+# with one real backslash before each quote. The first command of each
+# pair matches that escaped form. The second expects a plain-quote
+# expression file, so it is a no-op on dashboard.json.
+sed -i 's/reason=\\"FAIL_CONVERSION\\"/reason=\\"conversion_error\\"/g' dashboard.json
 sed -i 's/reason="FAIL_CONVERSION"/reason="conversion_error"/g' dashboard.json
+sed -i 's/reason=\\"SKIPPED_ACCEPT_REJECT\\"/reason=\\"skipped_accept_reject\\"/g' dashboard.json
 sed -i 's/reason="SKIPPED_ACCEPT_REJECT"/reason="skipped_accept_reject"/g' dashboard.json
-
-# Step 3: Lowercase all remaining reason label values in existing queries.
-# sed operates byte-wise without word boundaries: SKIP_/FAIL_ prefixes are
-# ASCII-only. dashboard.json stores PromQL strings as JSON, where the
-# quotes around label values are escaped (\"SKIP_ACC...) — match both the
-# escaped and unescaped forms so the rewrite survives either encoding.
-sed -i 's/reason=\"SKIP_/reason=\"skipped_/g' dashboard.json
-sed -i 's/reason="SKIP_/reason="skipped_/g' dashboard.json
-sed -i 's/reason=\"FAIL_/reason=\"failed_/g' dashboard.json
-sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
+sed -i 's/reason=\\"CONVERTED\\"/reason=\\"converted\\"/g' dashboard.json
+sed -i 's/reason="CONVERTED"/reason="converted"/g' dashboard.json
+sed -i 's/reason=\\"SKIPPED_ACCEPT\\"/reason=\\"skipped_accept\\"/g' dashboard.json
+sed -i 's/reason="SKIPPED_ACCEPT"/reason="skipped_accept"/g' dashboard.json
+sed -i 's/reason=\\"SKIPPED_NO_ACCEPT\\"/reason=\\"skipped_no_accept\\"/g' dashboard.json
+sed -i 's/reason="SKIPPED_NO_ACCEPT"/reason="skipped_no_accept"/g' dashboard.json
+sed -i 's/reason=\\"SKIPPED_CONDITIONAL\\"/reason=\\"skipped_conditional\\"/g' dashboard.json
+sed -i 's/reason="SKIPPED_CONDITIONAL"/reason="skipped_conditional"/g' dashboard.json
+sed -i 's/reason=\\"FAILED_DECOMPRESSION\\"/reason=\\"decompression_error\\"/g' dashboard.json
+sed -i 's/reason="FAILED_DECOMPRESSION"/reason="decompression_error"/g' dashboard.json
+sed -i 's/reason=\\"DECOMPRESSION_BUDGET_EXCEEDED\\"/reason=\\"decompression_budget_exceeded\\"/g' dashboard.json
+sed -i 's/reason="DECOMPRESSION_BUDGET_EXCEEDED"/reason="decompression_budget_exceeded"/g' dashboard.json
+sed -i 's/reason=\\"DECOMPRESSION_FORMAT_ERROR\\"/reason=\\"decompression_format_error\\"/g' dashboard.json
+sed -i 's/reason="DECOMPRESSION_FORMAT_ERROR"/reason="decompression_format_error"/g' dashboard.json
+sed -i 's/reason=\\"DECOMPRESSION_TRUNCATED_INPUT\\"/reason=\\"decompression_truncated_input\\"/g' dashboard.json
+sed -i 's/reason="DECOMPRESSION_TRUNCATED_INPUT"/reason="decompression_truncated_input"/g' dashboard.json
+sed -i 's/reason=\\"DECOMPRESSION_IO_ERROR\\"/reason=\\"decompression_io_error\\"/g' dashboard.json
+sed -i 's/reason="DECOMPRESSION_IO_ERROR"/reason="decompression_io_error"/g' dashboard.json
+sed -i 's/reason=\\"PARSE_TIMEOUT\\"/reason=\\"timeout\\"/g' dashboard.json
+sed -i 's/reason="PARSE_TIMEOUT"/reason="timeout"/g' dashboard.json
+sed -i 's/reason=\\"PARSE_BUDGET_EXCEEDED\\"/reason=\\"budget_exceeded\\"/g' dashboard.json
+sed -i 's/reason="PARSE_BUDGET_EXCEEDED"/reason="budget_exceeded"/g' dashboard.json
+sed -i 's/reason=\\"REPLAY_BUFFER_ERROR\\"/reason=\\"replay_error\\"/g' dashboard.json
+sed -i 's/reason="REPLAY_BUFFER_ERROR"/reason="replay_error"/g' dashboard.json
+sed -i 's/reason=\\"FFI_CALL_ERROR\\"/reason=\\"ffi_panic\\"/g' dashboard.json
+sed -i 's/reason="FFI_CALL_ERROR"/reason="ffi_panic"/g' dashboard.json
+sed -i 's/reason=\\"NOT_ELIGIBLE\\"/reason=\\"not_eligible\\"/g' dashboard.json
+sed -i 's/reason="NOT_ELIGIBLE"/reason="not_eligible"/g' dashboard.json
+sed -i 's/reason=\\"DISABLED\\"/reason=\\"disabled\\"/g' dashboard.json
+sed -i 's/reason="DISABLED"/reason="disabled"/g' dashboard.json
+sed -i 's/reason=\\"FAILED_OPEN\\"/reason=\\"failed_open\\"/g' dashboard.json
+sed -i 's/reason="FAILED_OPEN"/reason="failed_open"/g' dashboard.json
+sed -i 's/reason=\\"FAILED_CLOSED\\"/reason=\\"failed_closed\\"/g' dashboard.json
+sed -i 's/reason="FAILED_CLOSED"/reason="failed_closed"/g' dashboard.json
 
 # Step 4: Replace old metric names with new unified families.  The old
 # names carry the nginx_ prefix (see the mapping table above), so match
