@@ -352,6 +352,34 @@ def _optional_in_disjunction(if_value: str, ref: str) -> bool:
     return prefix.count("(") > prefix.count(")")
 
 
+def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
+    """Return whether this unquoted reference occurrence is negated.
+
+    The window right after the reference covers ``!=`` and ``== false``
+    comparisons (including quoted ``'false'``); the window right before
+    covers unary ``!`` and negated ``contains(`` forms.  Windows are read
+    at mask-verified positions, so only a real, unquoted reference is ever
+    examined — a literal shaped like a negation cannot negative a separate,
+    real occurrence.
+    """
+    after = if_value[match.end(): match.end() + 24]
+    stripped = after.lstrip()
+    if stripped.startswith("!="):
+        return True
+    if (
+        stripped.startswith("==")
+        and stripped[2:].lstrip().lstrip("'\"").startswith("false")
+    ):
+        return True
+
+    before = if_value[max(match.start() - 24, 0): match.start()]
+    if re.search(r"!\s*\(*\s*$", before):
+        return True
+    if re.search(r"!\s*contains\(\s*$", before):
+        return True
+    return False
+
+
 def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
     """Return whether an ``if:`` value requires a published step output.
 
@@ -366,24 +394,19 @@ def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
     does ``always()`` combined with the gate (it only overrides the
     cancellation default; the conjunction still requires the gate).
 
-    The reference must exist unquoted (the lookup runs on the quote-masked
-    value), so text inside a literal can never fabricate gate wiring; the
-    polarity checks only ever apply around a real, unquoted reference.
+    References are matched on the quote-masked value and each unquoted
+    occurrence is judged on its own polarity, so text inside a literal can
+    neither fabricate wiring nor neutralise a real reference.
     """
     masked = _mask_quoted(if_value)
     for gate in gates:
         ref = rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b"
-        if not re.search(ref, masked):
-            continue
-        if re.search(rf"{ref}\s*(?:!=|==\s*['\"]?false)", if_value):
-            continue
-        if re.search(rf"!\s*contains\(\s*{ref}", if_value):
-            continue
-        if re.search(rf"!\s*\(*\s*{ref}", if_value):
-            continue
-        if _optional_in_disjunction(if_value, ref):
-            continue
-        return True
+        for match in re.finditer(ref, masked):
+            if _reference_negated(if_value, match):
+                continue
+            if _optional_in_disjunction(if_value, ref):
+                continue
+            return True
     return False
 
 
