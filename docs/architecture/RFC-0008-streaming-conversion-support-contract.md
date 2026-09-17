@@ -351,7 +351,7 @@ the parser allowance.
 - a section 2.2 pre-selection guard routes an otherwise eligible response to
   the bounded full-buffer engine (for example `markdown_stream_excluded_types`
   or a policy other than `auto`/`force`). Every eligible response remains a
-  streaming candidate by definition; the guard selects the engine. A response
+  streaming candidate by definition. The guard selects the engine. A response
   that is not eligible for conversion is never converted, so it is not a
   fallback case.
 
