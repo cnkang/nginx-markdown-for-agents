@@ -64,7 +64,11 @@ cleanup() {
         kill "${PF_PID}" >/dev/null 2>&1 || true
     fi
     if [[ "${KEEP}" -eq 0 ]]; then
-        helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" >/dev/null 2>&1 || true
+        # Pin the context on uninstall too: a reused cluster is supported, and
+        # without --kube-context the release name could resolve against
+        # whatever cluster the current context points at.
+        helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" \
+            --kube-context "kind-${CLUSTER}" >/dev/null 2>&1 || true
         # Delete only a cluster this run created.  Reusing an existing cluster
         # is supported, and removing the user's would be destructive.
         if [[ "${CREATED_CLUSTER}" -eq 1 ]]; then
@@ -109,7 +113,11 @@ fi
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
-kubectl create namespace "${NAMESPACE}" >/dev/null 2>&1 || true
+# Create the namespace on the SAME cluster the release targets: this run may
+# reuse an existing cluster (kind create is skipped below), so an unpinned
+# kubectl could create the namespace on an unrelated current context while
+# the following helm install targets kind-${CLUSTER}.
+kubectl --context "kind-${CLUSTER}" create namespace "${NAMESPACE}" >/dev/null 2>&1 || true
 helm upgrade --install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
@@ -172,7 +180,7 @@ BODY="$(curl -sS -H 'Accept: text/markdown' "http://127.0.0.1:${PF_PORT}/index.h
 
 if [[ -z "${BODY}" ]]; then
     echo "ERROR: the Service returned no body" >&2
-    kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" logs "${POD}" >&2 | tail -20 || true
+    kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" logs "${POD}" 2>&1 | tail -20 >&2 || true
     exit 1
 fi
 # The stock page is stable across NGINX images, so its title in the converted

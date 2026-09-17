@@ -136,7 +136,7 @@ for _ in $(seq 1 40); do
 done
 if [[ "${ready}" -ne 1 ]]; then
     echo "ERROR: the container never served the probe endpoint" >&2
-    docker logs "${CONTAINER}" >&2 | tail -20 || true
+    docker logs "${CONTAINER}" 2>&1 | tail -20 >&2 || true
     exit 1
 fi
 
