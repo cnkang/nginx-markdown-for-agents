@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tools.harness.detect_continuation_comments import scan_shell_text
 
 
@@ -112,6 +114,49 @@ def test_a_same_indent_image_argument_after_comment_is_reported() -> None:
     assert detect(script) == [2]
 
 
+def test_a_bare_same_indent_value_after_comment_is_reported() -> None:
+    """A bare positional value at the command indentation is also lost."""
+    script = "docker run --rm \\\n  # a note\nalpine\n"
+
+    assert detect(script) == [2]
+
+
+def test_a_bare_sibling_command_after_comment_is_not_reported() -> None:
+    """A no-argument command at command indent runs as its own command."""
+    script = "build() {\n  docker run --rm \\\n    # a note\n  true\n}\n"
+
+    assert detect(script) == []
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "true",
+        "false",
+        ":",
+        "echo",
+        "exit",
+        "return",
+        "break",
+        "continue",
+        "fi",
+        "done",
+        "esac",
+        "}",
+        "then",
+        "else",
+        "elif",
+        "do",
+        ";;",
+    ],
+)
+def test_single_token_keywords_and_commands_are_not_arguments(token: str) -> None:
+    """Keywords and no-argument commands lose nothing when the comment ends."""
+    script = "echo a \\\n  # a note\n" + token + "\n"
+
+    assert detect(script) == []
+
+
 def test_a_backslash_escaping_a_space_does_not_continue() -> None:
     """The backslash escapes the space, so the next line stands on its own."""
     script = "echo 'a'\\ \n  # a note\n  more\n"
@@ -125,7 +170,8 @@ def test_missing_scan_root_is_an_error(tmp_path) -> None:
 
     errors = collect_errors(tmp_path / "missing")
 
-    assert errors and "missing or not a directory" in errors[0]
+    assert errors
+    assert "missing or not a directory" in errors[0]
 
 
 def test_malformed_workflow_shape_is_an_error(tmp_path) -> None:
@@ -139,3 +185,49 @@ def test_malformed_workflow_shape_is_an_error(tmp_path) -> None:
     errors = collect_errors(tmp_path)
 
     assert any("broken.yml" in error and "cannot be read" in error for error in errors)
+
+
+VIOLATION = "docker run --rm \\\n  # note\n  rust:1.98.1 sh /src/build.sh\n"
+
+
+def test_an_untracked_shell_script_is_not_scanned(tmp_path) -> None:
+    """Only tracked shell scripts join the blocking scan."""
+    import subprocess
+
+    from tools.harness.detect_continuation_comments import collect_errors
+
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    tracked = tmp_path / "tools" / "tracked.sh"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text(VIOLATION, encoding="utf-8")
+    (tmp_path / "tools" / "untracked.sh").write_text(VIOLATION, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "tools/tracked.sh"], cwd=tmp_path, check=True)
+
+    errors = collect_errors(tmp_path)
+
+    assert any("tracked.sh" in error for error in errors)
+    assert not any("untracked.sh" in error for error in errors)
+
+
+def test_a_non_git_fixture_root_still_discovers_scripts(tmp_path) -> None:
+    """Fixture mode keeps glob discovery so tests need no repository."""
+    from tools.harness.detect_continuation_comments import collect_errors
+
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    script = tmp_path / "tools" / "fixture.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text(VIOLATION, encoding="utf-8")
+
+    errors = collect_errors(tmp_path)
+
+    assert any("fixture.sh" in error for error in errors)
+
+
+def test_a_missing_workflow_directory_is_an_error(tmp_path) -> None:
+    """A root without .github/workflows cannot prove its run blocks."""
+    from tools.harness.detect_continuation_comments import collect_errors
+
+    errors = collect_errors(tmp_path)
+
+    assert any("workflow directory is missing" in error for error in errors)

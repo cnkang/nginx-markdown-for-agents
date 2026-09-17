@@ -309,6 +309,56 @@ def test_prerequisites_expand_where_they_are_read() -> None:
     assert CHECK not in reached
 
 
+def test_a_prerequisite_open_at_read_time_expands_empty(tmp_path) -> None:
+    """A reference Make cannot resolve while reading expands to nothing."""
+    makefile = "root: $(LATER)\n" f"checked:\n\tpython3 {CHECK}\n" "LATER = checked\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK not in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_prerequisite_defined_before_its_line_still_expands(tmp_path) -> None:
+    """The positive counterpart: a resolvable reference keeps its value."""
+    makefile = "LATER = checked\n" "root: $(LATER)\n" f"checked:\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in dry
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_the_resolvable_sibling_of_an_open_reference_still_certifies(tmp_path) -> None:
+    """`root: good $(LATER)` builds `good`; the open reference adds nothing."""
+    makefile = f"root: good $(LATER)\ngood:\n\tpython3 {CHECK}\nLATER = checked\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in dry
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_an_existing_file_prerequisite_is_a_satisfied_leaf(tmp_path) -> None:
+    """A file that exists in the tree is a satisfied leaf prerequisite."""
+    (tmp_path / "Makefile").write_text("", encoding="utf-8")
+    makefile = "root: Makefile\n\tpython3 tools/check.py\n"
+
+    reached = reach.reachable_commands(
+        makefile, ["make root"], PROFILE, [], root=tmp_path
+    )
+
+    assert "tools/check.py" in reached
+
+
+def test_a_missing_file_prerequisite_still_breaks(tmp_path) -> None:
+    """A prerequisite that names nothing in the tree stays uncertifiable."""
+    makefile = "root: missing-file.xyz\n\tpython3 tools/check.py\n"
+
+    reached = reach.reachable_commands(
+        makefile, ["make root"], PROFILE, [], root=tmp_path
+    )
+
+    assert "tools/check.py" not in reached
+
+
 def test_the_last_recipe_wins() -> None:
     """Make drops an overridden recipe instead of running both."""
     overridden = f"root:\n\tpython3 {CHECK}\nroot:\n\t@echo OTHER\n"
@@ -351,6 +401,49 @@ def test_a_conditional_assignment_invalidates_the_earlier_value() -> None:
     assert CHECK not in reached
 
 
+def test_an_override_assignment_wins_like_make() -> None:
+    """`override LIST := other` replaces the earlier value."""
+    makefile = (
+        "LIST := checked\n"
+        "override LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_an_export_prefixed_assignment_is_read() -> None:
+    """`export LIST := other` assigns LIST, exactly as Make reads it."""
+    makefile = (
+        "LIST := checked\n"
+        "export LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_an_override_inside_a_branch_still_invalidates() -> None:
+    """A branch assignment with a prefix is poison like any other."""
+    makefile = (
+        "LIST := checked\n"
+        "ifeq (1,1)\noverride LIST := other\nendif\n"
+        "root: $(LIST)\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
 def test_an_operator_glued_to_an_operand_is_not_a_plain_command() -> None:
     """`||true` reaches the tokenizer as one word."""
     assert reach.command_words("python3 tools/harness/detect_example.py ||true") == []
@@ -372,6 +465,41 @@ def test_an_overridden_recipe_replaces_its_predecessor() -> None:
     assert CHECK not in reach.reachable_commands(overridden, ["make root"], PROFILE, [])
 
 
+def test_an_undeclared_prerequisite_makes_its_target_unknown(tmp_path) -> None:
+    """Make refuses `root: missing`; its recipe must not certify anything."""
+    makefile = f"root: missing\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_broken_prerequisite_propagates_to_its_dependents(tmp_path) -> None:
+    """A subtree reachable only through a broken target stays unknown."""
+    makefile = f"root: intermediate\nintermediate: missing\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_sibling_of_a_missing_prerequisite_is_not_certified(tmp_path) -> None:
+    """`root: good missing` runs neither branch, so nothing is proven."""
+    makefile = f"root: good missing\n\tpython3 {CHECK}\ngood:\n\t@true\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_fully_declared_graph_still_certifies(tmp_path) -> None:
+    """The positive counterpart: declared prerequisites keep the evidence."""
+    makefile = f"root: good\n\tpython3 {CHECK}\ngood:\n\t@true\n"
+
+    assert "No rule to make target" not in _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
 def _make_dry_run(tmp_path, makefile: str, target: str) -> str:
     """What Make itself says it would run, for comparison."""
     import subprocess
@@ -380,7 +508,9 @@ def _make_dry_run(tmp_path, makefile: str, target: str) -> str:
     result = subprocess.run(
         ["make", "-n", target], cwd=tmp_path, capture_output=True, text=True, check=False
     )
-    return result.stdout
+    # Diagnostics ("No rule to make target ...") arrive on stderr; combine both
+    # streams so wording checks hold whichever stream a host's make uses.
+    return result.stdout + result.stderr
 
 
 def test_a_superseded_recipe_is_not_used_when_its_replacement_cannot_fail(tmp_path) -> None:
@@ -480,6 +610,33 @@ def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
     with pytest.raises(ValueError, match="unclosed"):
         reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
     assert CHECK in reach.reachable_commands(closed_branch, ["make root"], PROFILE, [])
+
+
+def test_a_target_that_starts_with_a_conditional_word_is_not_a_directive() -> None:
+    """`ifeq-cache:`, `endif-clean:` and `else-clean:` are targets."""
+    makefile = (
+        "ifeq-cache:\n\t@true\n"
+        "endif-clean:\n\t@true\n"
+        "else-clean:\n\t@true\n"
+        "root: ifeq-cache\n\tpython3 " + CHECK + "\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
+
+
+def test_a_target_that_starts_with_include_is_not_an_include_directive() -> None:
+    """`include-deps:` and `sinclude-stubs:` are targets, not includes."""
+    makefile = (
+        "include-deps:\n\t@true\n"
+        "sinclude-stubs:\n\t@true\n"
+        "root: include-deps\n\tpython3 " + CHECK + "\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
 
 
 @pytest.mark.parametrize(

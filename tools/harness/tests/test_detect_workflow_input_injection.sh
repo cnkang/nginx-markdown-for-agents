@@ -419,6 +419,207 @@ else
 fi
 rm -f "${wf_dir}/blank-line-run.yml"
 
+# Test 14: Direct inputs.* interpolation inside an action's command-bearing
+# with: input (args:) is a command-injection surface: the value reaches the
+# action's command line exactly like a run block.
+cat >"${wf_dir}/with-command.yml" <<'Y'
+name: with-command
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: 'PR number'
+        required: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        uses: SonarSource/sonarqube-scan-action@0000000000000000000000000000000000000000
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >-
+            -Dsonar.projectKey=example
+            -Dsonar.pullrequest.key=${{ inputs.pull_request_number }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "with:" "${output_file}"; then
+    pass "inputs.* in an action with: command input detected"
+else
+    fail "inputs.* in an action with: command input detected" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-command.yml"
+
+# Test 15: github.event.inputs.* in a with: command input is flagged too.
+cat >"${wf_dir}/with-event-input.yml" <<'Y'
+name: with-event-input
+on:
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        uses: example/action@0000000000000000000000000000000000000000
+        with:
+          command: ${{ github.event.inputs.command }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "github.event.inputs" "${output_file}"; then
+    pass "github.event.inputs.* in an action with: command input detected"
+else
+    fail "github.event.inputs.* in an action with: command input detected" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-event-input.yml"
+
+# Test 15a: bracket-form inputs.* in a with: command input is flagged too
+# (a dot-only pattern lets inputs['x'] evade the detector).
+cat >"${wf_dir}/with-bracket-input.yml" <<'Y'
+name: with-bracket-input
+on:
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        uses: example/action@0000000000000000000000000000000000000000
+        with:
+          args: -Dsonar.pullrequest.key=${{ inputs['pull_request_number'] }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "inputs" "${output_file}"; then
+    pass "bracket-form inputs.* in a with: command input detected"
+else
+    fail "bracket-form inputs.* in a with: command input detected" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-bracket-input.yml"
+
+# Test 15b: bracket-form github.event.inputs.* in a with: command input.
+cat >"${wf_dir}/with-bracket-event-input.yml" <<'Y'
+name: with-bracket-event-input
+on:
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        uses: example/action@0000000000000000000000000000000000000000
+        with:
+          command: ${{ github.event.inputs['command'] }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "github.event.inputs" "${output_file}"; then
+    pass "bracket-form github.event.inputs.* in a with: command input detected"
+else
+    fail "bracket-form github.event.inputs.* in a with: command input detected" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-bracket-event-input.yml"
+
+# Test 15c: bracket-form inputs.* inside a run block is flagged.
+cat >"${wf_dir}/run-bracket-input.yml" <<'Y'
+name: run-bracket-input
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: |
+          PKG_VERSION="${{ inputs['version'] }}"
+          echo "Building ${PKG_VERSION}"
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "inputs" "${output_file}"; then
+    pass "bracket-form inputs.* in a run block detected"
+else
+    fail "bracket-form inputs.* in a run block detected" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/run-bracket-input.yml"
+
+# Test 16: structured with: inputs (ref:, python-version:) are not command
+# lines; interpolating dispatch inputs there must not be reported as command
+# injection (the workflow validates them before the scan step consumes them).
+cat >"${wf_dir}/with-structured.yml" <<'Y'
+name: with-structured
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@0000000000000000000000000000000000000000
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+      - name: Setup
+        uses: actions/setup-python@0000000000000000000000000000000000000000
+        with:
+          python-version: '3.14.6'
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "structured with: inputs are not treated as command lines"
+else
+    fail "structured with: inputs are not treated as command lines" "expected exit 0, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-structured.yml"
+
+# Test 17: a reusable-workflow job's with: is wiring; module_ref/sha style
+# inputs there must stay clean (the job-level with: indent is shallower than
+# the step list indent).
+cat >"${wf_dir}/job-with-wiring.yml" <<'Y'
+name: job-with-wiring
+on:
+  workflow_dispatch:
+jobs:
+  call:
+    uses: ./.github/workflows/official.yml
+    with:
+      module_ref: ${{ inputs.module_ref }}
+      module_sha: ${{ github.event.inputs.module_sha }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "reusable-workflow job with: wiring stays clean"
+else
+    fail "reusable-workflow job with: wiring stays clean" "expected exit 0, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/job-with-wiring.yml"
+
+# Test 18: no arguments must succeed under bash 3.2 with set -euo pipefail
+# (the bare "$@" list is treated as unset there; the ${1+"$@"} guard keeps
+# the default workflow directory in use and the run clean).
+no_args_output=""
+no_args_rc=0
+if no_args_output="$(cd "${SCRIPT_DIR}/../.." && "${DETECTOR[@]}" 2>&1)"; then
+    no_args_rc=0
+else
+    no_args_rc=$?
+fi
+if [[ ${no_args_rc} -eq 0 ]]; then
+    pass "no-argument invocation succeeds (default workflows dir)"
+else
+    fail "no-argument invocation succeeds" "expected exit 0, got ${no_args_rc}: ${no_args_output}"
+fi
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

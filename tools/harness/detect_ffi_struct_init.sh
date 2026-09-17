@@ -52,7 +52,13 @@ file_list="$(mktemp "${TMPDIR:-/tmp}/ffi-struct-files.XXXXXX")" || {
     exit 2
 }
 trap 'rm -f "$file_list"' EXIT
-if ! harness_collect_find0 "$file_list" "${SRC_DIR}" \( -name '*.c' -o -name '*.h' \) -type f 2>/dev/null; then
+# Test translation units are excluded at enumeration time: fixture files
+# intentionally embed ngx_memzero/memset shapes to exercise this detector, so
+# auditing them reports the fixture as a production violation (pre-rc9 the
+# exclusion lived on each per-file grep; the NUL-safe collector switch dropped
+# it for Phase 2).
+if ! harness_collect_find0 "$file_list" "${SRC_DIR}" \
+    \( -name '*.c' -o -name '*.h' \) -type f ! -name '*_test.c' 2>/dev/null; then
     echo "ERROR: cannot enumerate source files in ${SRC_DIR}" >&2
     exit 2
 fi

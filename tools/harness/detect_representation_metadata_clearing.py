@@ -88,7 +88,9 @@ TRAILER_MARKER_RE = re.compile(r"hdr_trailer\b|[\"']Trailer[\"']")
 CLEAR_TRAILERS_RE = re.compile(r"ngx_http_markdown_clear_trailers\s*\(")
 LM_TIME_STRIP_RE = re.compile(
     r"->\s*headers_out\s*\.\s*last_modified_time\s*=\s*"
-    r"(?:\(time_t\)\s*)-\s*1\b"
+    # The time_t cast is optional: NGINX idiom allows the uncast form
+    # (`.last_modified_time = -1;`) alongside (time_t) -1.
+    r"(?:\(time_t\)\s*)?-\s*1\b"
 )
 LM_PTR_NULL_RE = re.compile(
     r"->\s*headers_out\s*\.\s*last_modified\s*=\s*NULL\b"

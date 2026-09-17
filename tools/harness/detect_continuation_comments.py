@@ -23,6 +23,9 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -38,6 +41,32 @@ SHELL_GLOBS = (
     "examples/**/*.sh",
     "components/**/*.sh",
     ".clusterfuzzlite/**/*.sh",
+)
+
+# Single tokens that are shell keywords, syntax, or no-argument commands.  A
+# bare sibling command in this set loses nothing when a comment ends the
+# command, so reporting it as a swallowed argument would be a false positive.
+# Any other single token stays ambiguous and fails closed.
+_SINGLE_TOKEN_COMMANDS = frozenset(
+    {
+        "true",
+        "false",
+        ":",
+        "echo",
+        "exit",
+        "return",
+        "break",
+        "continue",
+        "fi",
+        "done",
+        "esac",
+        "}",
+        "then",
+        "else",
+        "elif",
+        "do",
+        ";;",
+    }
 )
 
 
@@ -125,13 +154,25 @@ def _command_continues_after(lines: list[str], opened: int, comment: int) -> boo
 
 
 def _looks_like_argument(line: str) -> bool:
-    """Return whether a same-indent line has the shape of a command argument."""
+    """Return whether a same-indent line has the shape of a command argument.
+
+    A bare single token is ambiguous: it is either the positional value the
+    comment swallowed (an image name such as ``alpine``) or a bare sibling
+    command, so the check fails closed instead of guessing -- except for the
+    small set of shell keywords and no-argument commands whose bare form is
+    never a positional value.  A multi-word line still reads as a sibling
+    command (``echo``, ``make``) unless its first token carries an argument
+    marker.
+    """
     stripped = line.strip()
     if not stripped:
         return False
     if stripped.startswith(("-", "$", "'", '"', "`")):
         return True
-    first = stripped.split(None, 1)[0]
+    words = stripped.split()
+    if len(words) == 1:
+        return stripped not in _SINGLE_TOKEN_COMMANDS
+    first = words[0]
     return any(marker in first for marker in ("/", ":", "="))
 
 
@@ -178,19 +219,88 @@ def _workflow_job_runs(name: object, job: object) -> list[tuple[str, str]]:
     return found
 
 
-def _shell_scripts(root: Path) -> list[Path]:
-    """Return the tracked shell scripts this check reads."""
+def _tracked_paths(root: Path) -> list[str] | None:
+    """Return the tracked files under `root`, or None for a non-Git root.
+
+    `git ls-files -z` output is NUL-delimited, so entries survive names with
+    spaces or quoting; the bytes are decoded with the filesystem codec and
+    surrogate escapes, matching the repository's NUL-safe scan convention.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return [os.fsdecode(entry) for entry in result.stdout.split(b"\0") if entry]
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate one configured glob to the path shape `Path.glob` matches.
+
+    The configured patterns only use `*` segments and `**` directory spans;
+    `*` stays inside one path component, while `**/` spans zero or more and
+    already carries the separator that follows it.
+    """
+    parts: list[str] = []
+    previous_spanned = False
+    for index, segment in enumerate(pattern.split("/")):
+        if index and not previous_spanned:
+            parts.append("/")
+        if segment == "**":
+            parts.append("(?:[^/]+/)*")
+            previous_spanned = True
+        else:
+            parts.append(re.escape(segment).replace(r"\*", "[^/]*"))
+            previous_spanned = False
+    return re.compile("^" + "".join(parts) + "$")
+
+
+def _glob_shell_scripts(root: Path) -> list[Path]:
+    """Return the shell scripts a checkout-level glob finds under root."""
     found: set[Path] = set()
     for pattern in SHELL_GLOBS:
         found.update(path for path in root.glob(pattern) if path.is_file())
     return sorted(found)
 
 
+def _tracked_shell_scripts(root: Path, tracked: list[str]) -> list[Path]:
+    """Return the tracked paths a configured shell glob selects."""
+    patterns = [_glob_to_regex(pattern) for pattern in SHELL_GLOBS]
+    selected: set[Path] = set()
+    for relative in tracked:
+        if not any(pattern.match(relative) for pattern in patterns):
+            continue
+        path = root / relative
+        if path.is_file():
+            selected.add(path)
+    return sorted(selected)
+
+
+def _shell_scripts(root: Path) -> list[Path]:
+    """Return the tracked shell scripts this check reads.
+
+    Discovery prefers `git ls-files` so a scratch file that is not committed
+    cannot join the blocking scan, and the configured globs filter those paths
+    the way a checkout-level glob would.  A root that is not a Git work tree —
+    the explicit fixture mode used by tests — keeps glob discovery so fixture
+    scripts stay visible without a repository.
+    """
+    tracked = _tracked_paths(root)
+    if tracked is None:
+        return _glob_shell_scripts(root)
+    return _tracked_shell_scripts(root, tracked)
+
+
 def _workflow_file_errors(path: Path, root: Path) -> list[str]:
     """Return continuation errors found in one workflow file."""
     try:
         runs = _workflow_runs(path)
-    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         # Its commands are unknown rather than absent, so this is reported once
         # for the workflow instead of being skipped.
         return [f"{path.relative_to(root)}: cannot be read: {exc}"]
@@ -207,10 +317,12 @@ def _workflow_file_errors(path: Path, root: Path) -> list[str]:
 
 def _workflow_errors(root: Path, workflow_dir: Path) -> list[str]:
     """Return continuation errors found in workflow run blocks."""
-    if workflow_dir.exists() and not workflow_dir.is_dir():
-        return [f"{workflow_dir.relative_to(root)}: workflow path is not a directory"]
+    if not workflow_dir.exists():
+        # The workflow scripts are unknown rather than absent; a scan without
+        # them would silently skip every `run:` block.
+        return [f"{workflow_dir.relative_to(root)}: workflow directory is missing"]
     if not workflow_dir.is_dir():
-        return []
+        return [f"{workflow_dir.relative_to(root)}: workflow path is not a directory"]
     errors: list[str] = []
     for path in sorted(workflow_dir.glob("*.y*ml")):
         errors.extend(_workflow_file_errors(path, root))

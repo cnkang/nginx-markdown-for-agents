@@ -97,19 +97,16 @@ def _require(path: str, text: str, needle: str, message: str) -> list[Finding]:
 def _require_order(
     path: str,
     text: str,
-    first: str,
-    second: str,
-    third: str,
+    markers: tuple[str, ...],
     message: str,
 ) -> list[Finding]:
-    """Require three security boundary markers in strict source order."""
-    first_pos = text.find(first)
-    second_pos = text.find(second, first_pos + len(first)) if first_pos >= 0 else -1
-    third_pos = text.find(third, second_pos + len(second)) if second_pos >= 0 else -1
-    positions = (first_pos, second_pos, third_pos)
-    if positions[0] >= 0 and positions[0] < positions[1] < positions[2]:
-        return []
-    return [Finding(path, message)]
+    """Require the given security boundary markers in strict source order."""
+    position = -1
+    for marker in markers:
+        position = text.find(marker, position + 1)
+        if position < 0:
+            return [Finding(path, message)]
+    return []
 
 
 def check_release_builder_digests(
@@ -165,9 +162,11 @@ def check_ingress_builder(text: str) -> list[Finding]:
         _require_order(
             path,
             text,
-            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz",
-            "/opt/nginx-markdown/verify-checksum.sh",
-            "tar -xzf /tmp/nginx.tar.gz",
+            (
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz",
+                "/opt/nginx-markdown/verify-checksum.sh",
+                "tar -xzf /tmp/nginx.tar.gz",
+            ),
             "NGINX source must be verified before extraction",
         )
     )
@@ -179,9 +178,11 @@ def check_official_nginx_builder(text: str) -> list[Finding]:
     return _require_order(
         "examples/docker/Dockerfile.official-nginx-source-build",
         text,
-        "https://nginx.org/download/nginx-${nginx_version}.tar.gz",
-        "bash /opt/nginx-markdown/verify-checksum.sh",
-        "tar -xzf /tmp/nginx.tar.gz",
+        (
+            "https://nginx.org/download/nginx-${nginx_version}.tar.gz",
+            "bash /opt/nginx-markdown/verify-checksum.sh",
+            "tar -xzf /tmp/nginx.tar.gz",
+        ),
         "official-image NGINX source must be verified before extraction",
     )
 
@@ -210,9 +211,11 @@ def check_homebrew_formula(text: str) -> list[Finding]:
         _require_order(
             path,
             text,
-            "https://nginx.org/download/#{nginx_archive}",
-            "verify-checksum.sh",
-            'system "tar", "-xzf", nginx_archive',
+            (
+                "https://nginx.org/download/#{nginx_archive}",
+                "verify-checksum.sh",
+                'system "tar", "-xzf", nginx_archive',
+            ),
             "Formula NGINX source must be verified before extraction",
         )
     )
@@ -292,8 +295,29 @@ def check_ingress_smoke(text: str) -> list[Finding]:
         "'^[0-9a-f]{40}$'": (
             "smoke must reject abbreviated or malformed module identities"
         ),
+        # The reachability probe must run against an empty object store.  A
+        # context-relative `git -C "$BUILD_CONTEXT" fetch --dry-run` answers
+        # "present locally OR served by the remote", so it passes an unpushed
+        # commit inside a worktree and the build's own `git fetch --depth 1`
+        # then fails after the smoke reported success.
+        'git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA"': (
+            "smoke must probe MODULE_SHA reachability from an empty object "
+            "store, not from the build context"
+        ),
     }.items():
         findings.extend(_require(path, text, needle, message))
+    findings.extend(
+        _require_order(
+            path,
+            text,
+            (
+                'git -C "$probe_dir" init -q',
+                'git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA"',
+            ),
+            "smoke must create the isolated probe repository before the "
+            "reachability fetch",
+        )
+    )
     return findings
 
 

@@ -55,6 +55,22 @@ def _scan_py(content: str, tmp_path: Path, name: str = "test.py") -> tuple[list[
     return _scan_python_file(f, tmp_path)
 
 
+def _copy_detector_with_lib(shim_dir: Path, repo_root: Path) -> None:
+    """Mirror the detector into a shim repo so its default scope is local.
+
+    The detector resolves REPO_ROOT from ``__file__`` (parents[2]), so a copy
+    at ``<repo>/tools/harness/detect_regex_safety.py`` scans that repo.  The
+    ``lib`` package it imports is copied next to it.
+    """
+    import shutil
+
+    shutil.copy2(DETECTOR, shim_dir / "detect_regex_safety.py")
+    lib_src = TOOLS_DIR / "lib"
+    lib_dst = repo_root / "tools" / "lib"
+    if lib_src.is_dir() and not lib_dst.exists():
+        shutil.copytree(lib_src, lib_dst)
+
+
 # ---------------------------------------------------------------------------
 # AST extraction: import forms
 # ---------------------------------------------------------------------------
@@ -377,6 +393,179 @@ class TestErrorHandling:
         )
         assert result.returncode == 0
         assert "OK" in result.stderr
+
+    def test_default_scope_missing_directory_is_nonzero(self, tmp_path: Path) -> None:
+        """A missing default scan directory must fail, not report a clean scan.
+
+        Regression: renaming or moving one of the default directories
+        silently narrowed the scan surface while CI stayed green, because the
+        missing directory was dropped and an empty file list printed
+        "OK: no files to scan" with exit 0.
+        """
+        repo = tmp_path / "repo"
+        shim = repo / "tools" / "harness"
+        shim.mkdir(parents=True)
+        _copy_detector_with_lib(shim, repo)
+        # tests/ is deliberately absent while the other defaults exist.
+        for name in ("tools", "packaging", "skills"):
+            (repo / name).mkdir(exist_ok=True)
+
+        result = subprocess.run(
+            [sys.executable, str(shim / "detect_regex_safety.py")],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode != 0
+        assert "default scan directory missing" in result.stderr
+        assert "OK: no files to scan" not in result.stderr
+
+    def test_default_scope_empty_file_list_is_nonzero(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Every default directory present but no scannable file → non-zero.
+
+        An empty scan under the default scope must not be indistinguishable
+        from a clean scan.  Driven in-process because any on-disk copy of the
+        detector is itself a scannable .py file.
+        """
+        import harness.detect_regex_safety as regex_safety_module
+
+        repo = tmp_path / "repo"
+        for name in ("tools", "packaging", "tests", "skills"):
+            (repo / name).mkdir(parents=True)
+        monkeypatch.setattr(regex_safety_module, "REPO_ROOT", repo)
+        monkeypatch.setattr(
+            regex_safety_module, "_DEFAULT_SCAN_DIRS",
+            ("tools", "packaging", "tests", "skills"),
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["detect_regex_safety.py"],
+        )
+
+        assert regex_safety_module.main() != 0
+
+    def test_non_strict_scan_errors_exit_nonzero(self) -> None:
+        """Scan errors exit 1 even in the advisory default mode.
+
+        Regression: read/parse errors used to print the summary and still
+        return 0, reporting an incomplete scan with the same shape as a
+        clean pass.
+        """
+        import argparse
+
+        import harness.detect_regex_safety as regex_safety_module
+
+        args = argparse.Namespace(strict=False, fail_on_review=False)
+        errors = [
+            regex_safety_module.ScanError("broken.py", 1, "cannot parse")
+        ]
+
+        assert regex_safety_module._compute_exit_code([], errors, args) == 1
+
+    def test_non_strict_error_findings_remain_advisory(self) -> None:
+        """Findings stay advisory in the default mode when no scan errors."""
+        import argparse
+
+        import harness.detect_regex_safety as regex_safety_module
+
+        args = argparse.Namespace(strict=False, fail_on_review=False)
+        findings = [
+            regex_safety_module.RegexFinding(
+                severity=regex_safety_module.Severity.ERROR,
+                engine=regex_safety_module.Engine.PYTHON_RE,
+                file_path="x.py",
+                line=1,
+                function="f",
+                api="re.search",
+                pattern="(a+)+$",
+                pattern_source=regex_safety_module.PatternSource.STATIC_LITERAL,
+                input_scope="unknown",
+                reason="test fixture",
+                remediation="test fixture",
+            )
+        ]
+
+        assert regex_safety_module._compute_exit_code(findings, [], args) == 0
+
+    def test_symlink_escaping_scan_root_is_skipped_and_recorded(
+        self, tmp_path: Path,
+    ) -> None:
+        """A symlink resolving outside the scan root is refused.
+
+        Before the fix the detector read the target's text and reported it
+        under the in-repo link name, pulling external content into the report
+        and contradicting the read-path policy.
+        """
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "external_secret.py"
+        target.write_text("import re\nre.compile(r'(a+)+$')\n", encoding="utf-8")
+
+        scan_root = tmp_path / "scanroot"
+        scan_root.mkdir()
+        (scan_root / "leak.py").symlink_to(target)
+
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(scan_root), "--strict"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 1
+        assert "resolves outside the scan root" in result.stderr
+        # The external dangerous pattern must not be reported as an ERROR
+        # finding of leak.py.
+        assert "external_secret.py" in result.stderr
+        assert "blocking finding" not in result.stderr
+
+    def test_symlink_into_excluded_dir_is_excluded(
+        self, tmp_path: Path, monkeypatch, capsys,
+    ) -> None:
+        """A link whose target sits in an excluded dir stays excluded.
+
+        Before the fix, exclusion was matched on the unresolved path only, so
+        tools/link_bypass.py -> node_modules/bad/x.py was scanned as
+        tools/link_bypass.py.  Driven in-process so the detector's REPO_ROOT
+        points at this fixture tree.
+        """
+        import harness.detect_regex_safety as regex_safety_module
+
+        repo = tmp_path / "repo"
+        excluded = repo / "node_modules" / "bad"
+        excluded.mkdir(parents=True)
+        (excluded / "in_excluded.py").write_text(
+            "import re\nre.compile(r'(a+)+$')\n", encoding="utf-8",
+        )
+        tools_dir = repo / "tools"
+        tools_dir.mkdir()
+        (tools_dir / "link_bypass.py").symlink_to(
+            excluded / "in_excluded.py"
+        )
+
+        monkeypatch.setattr(regex_safety_module, "REPO_ROOT", repo)
+        monkeypatch.setattr(
+            sys, "argv", ["detect_regex_safety.py", "--path", str(repo)],
+        )
+
+        assert regex_safety_module.main() == 0
+        captured = capsys.readouterr()
+        assert "link_bypass" not in captured.err
+        assert "link_bypass" not in captured.out
+
+    def test_symlinked_directory_is_reported(self, tmp_path: Path) -> None:
+        """A symlinked directory under the scan root yields a visible warning.
+
+        rglob does not descend symlinked directories, so files reachable only
+        through one are silently unscanned; the detector must say so.
+        """
+        scan_root = tmp_path / "scanroot"
+        real = scan_root / "ext_dir"
+        real.mkdir(parents=True)
+        (real / "f.py").write_text("import re\n", encoding="utf-8")
+        (scan_root / "lnk").symlink_to(real)
+
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(scan_root)],
+            capture_output=True, text=True, check=False,
+        )
+        assert "symlinked directory is not descended" in result.stderr
 
 
 # ---------------------------------------------------------------------------

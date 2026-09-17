@@ -50,6 +50,31 @@ TEST_FUNCTION_PATTERN = re.compile(
 )
 
 
+def _should_panic_declared(
+    content: str, match_start: int, attribute_end: int,
+) -> bool:
+    """Return whether ``#[should_panic]`` is declared for this test.
+
+    Rust allows the attribute on either side of ``#[test]``, so the whole
+    contiguous attribute block counts: the attribute text captured between
+    ``#[test]`` and ``fn`` plus the run of attribute lines directly above
+    ``#[test]``.
+    """
+    if re.search(r'#\[should_panic', content[match_start:attribute_end]):
+        return True
+    line_start = content.rfind('\n', 0, match_start) + 1
+    while line_start > 0:
+        prev_end = line_start - 1
+        prev_start = content.rfind('\n', 0, prev_end) + 1
+        prev_line = content[prev_start:prev_end].strip()
+        if not prev_line.startswith('#['):
+            break
+        if re.search(r'#\[should_panic', prev_line):
+            return True
+        line_start = prev_start
+    return False
+
+
 def _is_escaped_quote(content: str, offset: int) -> bool:
     return offset > 0 and content[offset - 1] == '\\'
 
@@ -149,8 +174,11 @@ def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool
 
         func_body = content[brace_start:func_end]
 
-        # Check if test has #[should_panic] attribute
-        has_should_panic = bool(re.search(r'#\[should_panic', content[max(0, start_pos-200):start_pos]))
+        # Check if test has #[should_panic] attribute anywhere in its
+        # contiguous attribute block (either side of #[test]).
+        has_should_panic = _should_panic_declared(
+            content, start_pos, brace_start
+        )
 
         # Check if test uses proptest or quickcheck
         is_property_test = bool(re.search(r'(?:proptest|quickcheck|for_all)', func_body))

@@ -92,9 +92,9 @@ while IFS= read -r -d '' file; do
         # Strip leading whitespace for display
         trimmed="${line_text#"${line_text%%[![:space:]]*}"}"
 
-        # Skip comment lines (starting with /* or * or //)
+        # Skip comment lines (starting with /*, * or //)
         case "$trimmed" in
-            /*|\**) continue ;;
+            /*|\**|//*) continue ;;
             *) ;;
         esac
 
