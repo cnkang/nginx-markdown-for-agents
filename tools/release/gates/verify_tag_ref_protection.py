@@ -211,6 +211,77 @@ def _ruleset_protects_release_tags(ruleset: dict) -> bool:
     return REQUIRED_RULE_TYPES.issubset(rule_types)
 
 
+def _bypass_actors_unverifiable(ruleset: dict) -> bool:
+    """True when a ruleset's bypass list is absent instead of a known list.
+
+    ``bypass_actors: []`` is a verified empty list.  A missing key (or an
+    explicit null) means the detail payload did not carry the field, which is
+    what the API returns when the token lacks the scope needed to read bypass
+    actors.  Both cases fail closed, but only the second deserves the
+    insufficient-token-scope diagnostic instead of the "create a ruleset"
+    one.
+    """
+    if "bypass_actors" not in ruleset:
+        return True
+    return ruleset.get("bypass_actors") is None
+
+
+def _ruleset_matches_tag_contract_except_bypass(ruleset: dict) -> bool:
+    """True when a ruleset meets every requirement except a verified bypass list."""
+    if not _bypass_actors_unverifiable(ruleset):
+        return False
+    return _ruleset_protects_release_tags({**ruleset, "bypass_actors": []})
+
+
+def _resolve_repository(repo_arg: str | None) -> str:
+    """Resolve the repository to check from the argument, env, or origin."""
+    if repo_arg is not None:
+        return _validate_repo(repo_arg)
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if repository:
+        return _validate_repo(repository)
+    return _repository_from_origin()
+
+
+def _report_no_protecting_ruleset(rulesets: list[dict]) -> int:
+    """Report the no-protecting-ruleset case; returns the fail-closed code.
+
+    Distinguishes "the ruleset needs a bypass-actor field we could not read"
+    from "there is no suitable ruleset at all": the first is an
+    environment/scope problem, and pointing the operator at the ruleset
+    configuration would send them chasing a defect that does not exist.
+    """
+    unverifiable = [
+        ruleset
+        for ruleset in rulesets
+        if _ruleset_matches_tag_contract_except_bypass(ruleset)
+    ]
+    if unverifiable:
+        names = ", ".join(
+            f"{ruleset.get('name')!r} (id {ruleset.get('id')})"
+            for ruleset in unverifiable
+        )
+        print(
+            "FAIL: the tag ruleset(s) "
+            f"{names} match the release-tag contract except that "
+            "'bypass_actors' was omitted from the API response, so "
+            "bypass protection cannot be verified.  This normally means "
+            "the token lacks the scope needed to read bypass actors; "
+            "re-run with a token that can read the ruleset bypass list.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        "FAIL: no active tag ruleset protects "
+        f"'{REQUIRED_INCLUDE_PATTERN}' against deletion and updates "
+        "without bypass actors. "
+        "Create one via the repository rulesets API (see the release "
+        "checklist) before tagging a release.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Assert that release tags are protected against "
@@ -224,14 +295,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        if args.repo is not None:
-            repository = _validate_repo(args.repo)
-        else:
-            repository = os.environ.get("GITHUB_REPOSITORY")
-            if repository:
-                repository = _validate_repo(repository)
-            else:
-                repository = _repository_from_origin()
+        repository = _resolve_repository(args.repo)
         rulesets = _list_rulesets(repository)
     except json.JSONDecodeError as exc:
         print(f"FAIL: malformed ruleset payload: {exc}", file=sys.stderr)
@@ -260,15 +324,7 @@ def main() -> int:
         if _ruleset_protects_release_tags(ruleset)
     ]
     if not matching:
-        print(
-            "FAIL: no active tag ruleset protects "
-            f"'{REQUIRED_INCLUDE_PATTERN}' against deletion and updates "
-            "without bypass actors. "
-            "Create one via the repository rulesets API (see the release "
-            "checklist) before tagging a release.",
-            file=sys.stderr,
-        )
-        return 1
+        return _report_no_protecting_ruleset(rulesets)
 
     for ruleset in matching:
         print(

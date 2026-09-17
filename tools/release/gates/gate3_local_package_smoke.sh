@@ -283,12 +283,12 @@ RUN cd /tmp/nginx-\${NGINX_VERSION} \\
     && ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \\
     && make modules
 
-# Copy output and verify libbrotlidec linkage
+# Copy output and verify the exact libbrotlidec NEEDED entry
 RUN mkdir -p /output \\
     && cp /tmp/nginx-\${NGINX_VERSION}/objs/ngx_http_markdown_filter_module.so /output/ \\
-    && echo "--- Verifying libbrotlidec linkage ---" \\
-    && readelf -d /output/ngx_http_markdown_filter_module.so | grep -i brotli \\
-    && echo "--- libbrotlidec linkage confirmed ---"
+    && echo "--- Verifying libbrotlidec NEEDED entry ---" \\
+    && readelf -d /output/ngx_http_markdown_filter_module.so | grep -Eq 'NEEDED.*libbrotlidec\\.so' \\
+    && echo "--- libbrotlidec NEEDED entry confirmed ---"
 
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS packager
 ENV DEBIAN_FRONTEND=noninteractive
