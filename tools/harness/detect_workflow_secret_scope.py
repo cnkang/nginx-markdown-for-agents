@@ -365,10 +365,15 @@ def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
     (``<gate> && (a || b)``) leaves the gate required and still counts, as
     does ``always()`` combined with the gate (it only overrides the
     cancellation default; the conjunction still requires the gate).
+
+    The reference must exist unquoted (the lookup runs on the quote-masked
+    value), so text inside a literal can never fabricate gate wiring; the
+    polarity checks only ever apply around a real, unquoted reference.
     """
+    masked = _mask_quoted(if_value)
     for gate in gates:
         ref = rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b"
-        if not re.search(ref, if_value):
+        if not re.search(ref, masked):
             continue
         if re.search(rf"{ref}\s*(?:!=|==\s*['\"]?false)", if_value):
             continue

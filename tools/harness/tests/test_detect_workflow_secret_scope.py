@@ -724,3 +724,11 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_quoted_reference_is_not_wiring(self):
+        """A reference that only exists inside a literal is not a gate."""
+        assert not secret_scope_module._references_gate(
+            "github.event_name == 'steps.token.outputs.enabled'",
+            "token",
+            {"enabled"},
+        )
