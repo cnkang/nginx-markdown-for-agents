@@ -300,9 +300,9 @@ Request arrives
     │
     ├─ Full-buffer pre-parse deadline checkpoint
     │   ├─ parser_timeout= (nonzero, from conversion_start, check first)
-    │   │   └─ FAIL → pass-through, reason: timeout
+    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
     │   └─ conversion_timeout= (from conversion_start)
-    │       └─ FAIL → pass-through, reason: timeout
+    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), reason: timeout
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Input capped by markdown_limits conversion_memory= before parsing

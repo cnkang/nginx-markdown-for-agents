@@ -149,17 +149,20 @@ See [Performance Tuning](guides/PERFORMANCE_TUNING.md) for details.
 
 ### Does it support streaming?
 
-Yes, the current `markdown_streaming auto` policy prefers the bounded
-streaming engine for every eligible response, independent of response size. A
-response that is eligible for conversion but blocked from streaming, the module
-converts it with the full-buffer engine. A response that is not eligible for
-conversion passes through unchanged. Use
-`markdown_streaming off` to require full-buffer processing or
-`markdown_streaming force` to prefer streaming for every eligible response
-**when no hard blocker applies** — `markdown_cache_validation full` is a
-hard blocker that routes to full-buffer regardless of the streaming policy
-(and combining `force` with `full` fails during `nginx -t`).
-See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind this design.
+Yes. Bounded streaming applies only when you configure `markdown_streaming auto`
+or `markdown_streaming force` explicitly. The unset default and
+`markdown_streaming off` use bounded full-buffer processing. With `auto`, the
+module prefers the bounded streaming engine for every eligible response,
+independent of response size. A response that is eligible for conversion but
+blocked from streaming uses the full-buffer engine. A response that is not
+eligible for conversion passes through unchanged. `markdown_streaming force`
+prefers streaming for every eligible response **when no hard blocker applies**
+— `markdown_cache_validation full` is a hard blocker that routes to full-buffer
+regardless of the streaming policy (and combining `force` with `full` fails
+during `nginx -t`). See
+[Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and
+[ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind
+this design.
 
 ---
 

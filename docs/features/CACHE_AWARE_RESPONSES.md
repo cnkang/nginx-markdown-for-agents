@@ -188,7 +188,8 @@ The module:
 1. Converts the HTML to Markdown
 2. Generates the ETag from the Markdown output
 3. Compares with the client's ETag
-4. Returns 304 if they match, 200 with body if they do not
+4. Returns 304 if they match in `full` mode, 200 with body if they do not. In
+   `ims_only` mode the module ignores `If-None-Match`.
 
 **304 Response**:
 ```http
@@ -457,7 +458,7 @@ Check:
 
 Check:
 1. Client sends `If-None-Match` with correct ETag
-2. `markdown_cache_validation` is not `off`
+2. `markdown_cache_validation` is set to `full`
 3. Content hasn't changed (ETag should match)
 
 ### Wrong Variant from Cache

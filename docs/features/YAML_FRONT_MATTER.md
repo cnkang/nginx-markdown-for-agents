@@ -66,17 +66,19 @@ front matter must validate the extracted metadata before accepting the result.
 
 ### Configuration
 
-Enable YAML front matter by setting `include_front_matter`. The converter
-automatically promotes `extract_metadata` internally when `include_front_matter`
-is set — `include_front_matter` alone gates and enables front matter output.
+Enable YAML front matter by setting `include_front_matter`. At the FFI entry
+point, the converter promotes `extract_metadata` internally when
+`include_front_matter` is set, so this option alone gates front matter output
+there. Direct `ConversionOptions` construction is not a promotion site: it
+needs both flags set to emit front matter.
 
 The `extract_metadata` option by itself supports metadata/ETag processing
 without emitting front matter when enabled alone:
 
 ```rust
 let options = ConversionOptions {
-    include_front_matter: true,  // Enable front matter output; promotes extract_metadata internally
-    extract_metadata: false,      // Raised internally for front matter
+    include_front_matter: true,  // Emit front matter output
+    extract_metadata: true,       // Required in direct construction: both flags gate output
     base_url: Some("https://example.com/page".to_string()),
     resolve_relative_urls: true,  // Resolve relative URLs to absolute
     ..Default::default()

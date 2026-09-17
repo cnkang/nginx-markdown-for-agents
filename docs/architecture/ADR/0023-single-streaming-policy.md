@@ -27,7 +27,8 @@ not provide.
 selector:
 
 - `off` requires the full-buffer path.
-- `auto` uses the response size and shape after hard eligibility gates.
+- `auto` treats every response that clears the hard eligibility gates as a
+  streaming candidate. Response size does not take part in that decision.
 - `force` selects streaming for every eligible response after hard request,
   content-type, and cache-validation gates.
 

@@ -222,9 +222,9 @@ Parsing a body fails in four scenarios:
 Missing or malformed charset parameters fall back down the cascade
 (Content-Type parameter, then HTML meta tag, then UTF-8 default). Charset
 detection itself never fails: it always returns a charset, defaulting to
-UTF-8. Valid UTF-8 bytes remain parseable even when the declared charset is
-not UTF-8, because the converter only transcodes when the declared charset
-differs from UTF-8.
+UTF-8. The parser then requires the body bytes to be valid for that charset:
+input that does not decode under the declared charset fails the conversion
+with `ConversionError::EncodingError`.
 
 ## Dependencies
 
