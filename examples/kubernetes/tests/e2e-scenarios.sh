@@ -235,6 +235,11 @@ resolve_deployment_container_index() {
     local name_index
     local container_name
 
+    if [[ -z "$DEPLOYMENT_NAME" ]]; then
+        log_error "deployment name is not set; cannot resolve its container index"
+        return 1
+    fi
+
     name_index=0
     while IFS= read -r container_name; do
         if [[ "$container_name" == "$DEPLOYMENT_NAME" ]]; then
@@ -836,7 +841,11 @@ scenario_rollback() {
     container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    rollback_container_index="$(resolve_deployment_container_index "$container_names")"
+    rollback_container_index="$(resolve_deployment_container_index "$container_names")" \
+        || {
+        log_error "cannot resolve the deployment's container index before rollback"
+        return 1
+    }
     pre_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
         -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
