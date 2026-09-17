@@ -106,14 +106,29 @@ def make_targets(line: str) -> list[str]:
     return targets
 
 
-def _expand(text: str, variables: dict[str, str]) -> str:
-    """Expand only finite, literal variable lists, retaining unknown expressions."""
+def _expand(
+    text: str, variables: dict[str, str], unknown: set[str] | None = None
+) -> str:
+    """Expand only finite, literal variable lists, retaining unknown expressions.
+
+    A name in *unknown* (a ``!=`` shell assignment, or one whose value could
+    not be read here) stays as its literal ``$(name)`` reference: an unknown
+    token must reach the certification step so that a target naming it is
+    reported uncertifiable instead of silently losing the prerequisite.
+    """
     seen: set[str] = set()
+
+    def _replace(match: "re.Match[str]") -> str:
+        name = match.group(1)
+        if unknown is not None and name in unknown:
+            return match.group(0)
+        return variables.get(name, match.group(0))
+
     for _ in range(32):
         if text in seen or len(text) > 65536:
             return ""
         seen.add(text)
-        expanded = VARIABLE.sub(lambda m: variables.get(m[1], m[0]), text)
+        expanded = VARIABLE.sub(_replace, text)
         if expanded == text:
             return text
         text = expanded
@@ -207,7 +222,10 @@ def _drop(name: str, variables: dict[str, str], simple: set[str]) -> None:
 
 
 def _apply_assignment(
-    assignment: tuple[str, str, str], variables: dict[str, str], simple: set[str]
+    assignment: tuple[str, str, str],
+    variables: dict[str, str],
+    simple: set[str],
+    unknown: set[str],
 ) -> None:
     """Apply one assignment the way Make would, flavor included."""
     name, operator, value = assignment
@@ -215,25 +233,32 @@ def _apply_assignment(
         if name not in variables:
             variables[name] = value
             simple.discard(name)
+            unknown.discard(name)
         return
     if operator == "=":
         variables[name] = value
         simple.discard(name)
+        unknown.discard(name)
         return
     if operator == "!=":
         # A shell assignment's value comes from running its command; the
-        # result cannot be known here, so the variable is dropped rather
-        # than trusted.
+        # result cannot be known here, so the name is marked unknown.  A
+        # target that references it must stay uncertifiable: treating the
+        # reference as empty could certify a build that runs other things.
         _drop(name, variables, simple)
+        unknown.add(name)
         return
-    expanded = _expand(value, variables)
+    expanded = _expand(value, variables, unknown)
     if VARIABLE.search(expanded):
-        # A later assignment must not fill a reference that is open here.
+        # A later assignment must not fill a reference that is open here;
+        # the unresolved reference keeps the name unknown.
         _drop(name, variables, simple)
+        unknown.add(name)
         return
     if operator == ":=":
         variables[name] = expanded
         simple.add(name)
+        unknown.discard(name)
         return
     if name in simple:
         # Appending to a simple variable expands the tail right here.
@@ -247,6 +272,7 @@ def _record_target(
     dependencies: dict[str, list[str]],
     generation: dict[str, int],
     variables: dict[str, str],
+    unknown: set[str],
 ) -> str | None:
     """Record a target declaration, expanding its prerequisites where it is read."""
     target = _target(line)
@@ -257,7 +283,7 @@ def _record_target(
     # an earlier one, so the two are kept apart.
     generation[name] = generation.get(name, 0) + 1
     dependencies.setdefault(name, [])
-    expanded = _expand(target[1].strip(), variables)
+    expanded = _expand(target[1].strip(), variables, unknown)
     if name == IGNORE_TARGET:
         # An unresolved scope here could ignore more targets than the file
         # shows, so it keeps its fail-closed treatment (raised downstream).
@@ -268,7 +294,12 @@ def _record_target(
     # assignment must not fill it in retroactively.  The order-only separator
     # (`|`) is not a prerequisite name: drop it before storing, while keeping
     # both the normal and the order-only prerequisite groups traversable.
-    dependencies[name].append(VARIABLE.sub("", expanded).replace("|", " "))
+    def _blank_known(match: "re.Match[str]") -> str:
+        return match.group(0) if match.group(1) in unknown else ""
+
+    dependencies[name].append(
+        VARIABLE.sub(_blank_known, expanded).replace("|", " ")
+    )
     return name
 
 
@@ -371,6 +402,7 @@ def _consume_make_line(
     generation: dict[str, int],
     variables: dict[str, str],
     simple: set[str],
+    unknown: set[str],
     current: str | None,
 ) -> str | None:
     """Read one recipe, assignment or target line; return its target."""
@@ -379,9 +411,11 @@ def _consume_make_line(
     stripped = line.strip()
     assignment = _assignment(_strip_assignment_prefixes(stripped))
     if assignment is not None:
-        _apply_assignment(assignment, variables, simple)
+        _apply_assignment(assignment, variables, simple, unknown)
         return None
-    recorded = _record_target(stripped, dependencies, generation, variables)
+    recorded = _record_target(
+        stripped, dependencies, generation, variables, unknown
+    )
     if recorded is not None:
         return recorded
     return None if stripped and not stripped.startswith("#") else current
@@ -428,7 +462,12 @@ def _poison_conditional_line(
 
 def _make_nodes(
     text: str,
-) -> tuple[dict[str, list[str]], dict[str, list[tuple[int, str | None]]], dict[str, str]]:
+) -> tuple[
+    dict[str, list[str]],
+    dict[str, list[tuple[int, str | None]]],
+    dict[str, str],
+    set[str],
+]:
     """Collect target prerequisites and recipes from the root Makefile."""
     dependencies: dict[str, list[str]] = {}
     recipes: dict[str, list[tuple[int, str | None]]] = {}
@@ -437,6 +476,7 @@ def _make_nodes(
     current: str | None = None
     conditionals = 0
     simple: set[str] = set()
+    unknown: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
         if _make_include_line(line):
             raise ValueError("cannot verify included makefile")
@@ -455,11 +495,18 @@ def _make_nodes(
             )
             continue
         current = _consume_make_line(
-            line, dependencies, recipes, generation, variables, simple, current
+            line,
+            dependencies,
+            recipes,
+            generation,
+            variables,
+            simple,
+            unknown,
+            current,
         )
     if conditionals:
         raise ValueError("unclosed make conditional")
-    return dependencies, recipes, variables
+    return dependencies, recipes, variables, unknown
 
 
 def _ignored_targets(dependencies: dict[str, list[str]]) -> set[str]:
@@ -493,7 +540,7 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
     When *root* is given, prerequisites that name existing files under it are
     satisfied leaves; without it, only declared targets satisfy prerequisites.
     """
-    dependencies, recipes, variables = _make_nodes(makefile)
+    dependencies, recipes, variables, unknown = _make_nodes(makefile)
     ignored = _ignored_targets(dependencies)
     broken = _broken_targets(dependencies, recipes, root)
     pending = list(entries)
@@ -501,7 +548,7 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
     reached: list[str] = []
     profile_seen = False
     while pending:
-        line = _expand(pending.pop(), variables)
+        line = _expand(pending.pop(), variables, unknown)
         words = command_words(line)
         if not words:
             continue
