@@ -3,7 +3,7 @@
 #
 # Usage:
 #   record-source-archive-digest.sh TAG [--repo OWNER/REPO] [--registry FILE]
-#                                       [--github-archive] [-h]
+#                                       [--refresh] [--github-archive] [-h]
 #
 # Records the SHA256 of the release's published source bundle,
 # https://github.com/OWNER/REPO/releases/download/TAG/nginx-markdown-for-agents-source-TAG.tar.gz,
@@ -38,7 +38,11 @@ DEFAULT_REGISTRY="${REPO_ROOT}/packaging/source-archive-digests.sha256"
 DEFAULT_REPO="cnkang/nginx-markdown-for-agents"
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
+    # The header block reaches past the fail-closed paragraph, where --refresh
+    # is first documented: a 2,20p window stopped short of it, so -h printed a
+    # synopsis that omitted a flag the script requires for a deliberate
+    # overwrite.
+    sed -n '2,30p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
     return 0
 }
 

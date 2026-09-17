@@ -284,6 +284,11 @@ run_module_behavior_smoke() {
     local vary_ok=0
     local body_ok=0
     local diagnostics_ok=0
+    # Set when only some of the three EXPECTED_* release identity variables are
+    # present.  That is a harness configuration error, not a module defect, and
+    # it must fail with its own message instead of the generic contract
+    # mismatch below (which would send the operator hunting for a module bug).
+    local diagnostics_harness_incomplete=0
     local i=0
 
     curl_bin="$(command -v curl 2>/dev/null || true)"
@@ -406,6 +411,7 @@ CONF
                 || -z "${EXPECTED_RUST_VERSION:-}" \
                 || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
                 diagnostics_ok=0
+                diagnostics_harness_incomplete=1
             elif ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
                 || ! grep -Fq "\"source_sha\":\"${EXPECTED_SOURCE_SHA}\"" \
                     "$diagnostics_file" \
@@ -422,6 +428,12 @@ CONF
     kill "$nginx_pid" 2>/dev/null || true
     wait "$nginx_pid" 2>/dev/null || true
 
+    # Report a partially configured harness as itself: a caller who exports one
+    # release identity variable must set all three, and a generic contract
+    # mismatch message hides that.
+    if [[ "$diagnostics_harness_incomplete" -eq 1 ]]; then
+        die "Release identity harness is only partially configured: EXPECTED_SOURCE_SHA, EXPECTED_RUST_VERSION, and EXPECTED_FEATURE_MANIFEST_DIGEST must be set together (set all three or none)"
+    fi
     if [[ "$diagnostics_ok" -ne 1 ]]; then
         die "Diagnostics response did not match the expected module contract"
     fi
