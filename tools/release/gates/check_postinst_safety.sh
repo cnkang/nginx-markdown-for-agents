@@ -266,6 +266,19 @@ skip_function_line() {
     return 1
 }
 
+
+# mask_command_text — blot out quoted spans and comments for command matching
+# Arguments: $1 = line
+# Returns: the masked line on stdout
+mask_command_text() {
+    local text="$1"
+
+    text="$(printf '%s' "$text" | sed -E "s/\"[^\"]*\"/\"/g; s/'[^']*'/''/g")"
+    text="$(printf '%s' "$text" | sed -E 's/(^|[[:space:]])#.*$/\1/')"
+    printf '%s' "$text"
+}
+
+
 # check_file — run all forbidden pattern checks against a single file
 # Arguments: $1 = file path
 # Returns: 0 always (violations tracked in VIOLATION_COUNT), 2 on file error
@@ -567,11 +580,15 @@ check_trusted_path() {
             if [[ -z "$trimmed" || "$trimmed" == "#"* ]]; then
                 continue
             fi
-            if [[ "$line" != "$trimmed" ]]; then
-                # An indented line belongs to a block or a function body.
+            # Track function scope before the indentation check: an
+            # indented closing brace must still decrement the depth, or a
+            # later top-level PATH line reads as still inside a function.
+            if skip_function_line "$line" "$trimmed"; then
                 continue
             fi
-            if skip_function_line "$line" "$trimmed"; then
+            if [[ "$line" != "$trimmed" ]]; then
+                # An indented line that is not part of a function body
+                # belongs to a block.
                 continue
             fi
             case "$line" in
@@ -609,6 +626,11 @@ check_trusted_path() {
             continue
         fi
 
+        # Blot out quoted spans and trailing comments: prose inside a
+        # string or a comment must not read as an executed command.
+        local match_line
+        match_line="$(mask_command_text "$line")"
+
         # Check each known external command
         local cmd=""
         for cmd in "${external_cmds[@]}"; do
@@ -617,7 +639,7 @@ check_trusted_path() {
             # For single-word commands, match as standalone token
             case "$cmd" in
                 "command -v")
-                    if [[ "$line" =~ (^|[[:space:]\"\'\(;|&])command[[:space:]]+-v($|[[:space:]]) ]]; then
+                    if [[ "$match_line" =~ (^|[[:space:]\"\'\(;|&])command[[:space:]]+-v($|[[:space:]]) ]]; then
                         first_cmd_line=$line_num
                         break 2
                     fi
@@ -625,7 +647,7 @@ check_trusted_path() {
                 *)
                     # Match command at: start of line (with optional whitespace),
                     # after $( ), after ` `, after pipe, after semicolon, after &&/||
-                    if [[ "$line" =~ (^|[[:space:]\"\'\`\$\(;|&])${cmd}($|[[:space:];|&\)\>]) ]]; then
+                    if [[ "$match_line" =~ (^|[[:space:]\"\'\`\$\(;|&])${cmd}($|[[:space:];|&\)\>]) ]]; then
                         first_cmd_line=$line_num
                         break 2
                     fi
