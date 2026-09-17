@@ -575,6 +575,34 @@ def test_release_notes_output():
     assert "supported" in result.lower()
 
 
+def test_basic_entry_validation_rejects_malformed_digest_and_abi():
+    """The structural fallback must reject a malformed manifest digest and a
+    non-positive ABI version even when the jsonschema import is unavailable."""
+    base_entry = {
+        "nginx_version": "1.26.3",
+        "nginx_channel": "stable",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "test_level": "ci",
+        "support_tier": "supported",
+        "release_blocking": True,
+        "owner_workflow": "release-packages.yml",
+        "feature_manifest_digest": "sha256:" + "0" * 64,
+        "abi_version": 3,
+    }
+    assert rmd._validate_basic_entry(0, base_entry) == []
+
+    errors = rmd._validate_basic_entry(
+        1, dict(base_entry, feature_manifest_digest="sha256:not-hex")
+    )
+    assert any("feature_manifest_digest" in e for e in errors), errors
+
+    errors = rmd._validate_basic_entry(2, dict(base_entry, abi_version=0))
+    assert any("abi_version" in e for e in errors), errors
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -617,6 +645,7 @@ def run_tests():
         test_write_file_rejects_unregistered_target,
         test_main_reports_matrix_validation_error,
         test_release_notes_output,
+        test_basic_entry_validation_rejects_malformed_digest_and_abi,
     ]
 
     passed = 0
