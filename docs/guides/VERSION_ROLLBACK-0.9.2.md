@@ -42,8 +42,9 @@ Publication and artifact availability are separate release gates.
      # systemd-managed NGINX: stop the unit so the unit state and the master
      # shutdown stay consistent, then wait for a confirmed shutdown.
      sudo systemctl stop nginx
-     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     drain_status=$?
+     drain_status=0
+     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
+         || drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
      # "inactive" state: any other nonzero is-active result (query failure,
      # failed unit) must not be treated as a confirmed stop.
@@ -56,6 +57,7 @@ Publication and artifact availability are separate release gates.
      # directly and poll for it to exit (graceful shutdown drains in-flight
      # requests first), then confirm it is really gone.
      sudo nginx -s quit
+     drain_status=0
      timeout 30 sh -c '
        while :; do
          pgrep -x nginx >/dev/null 2>&1
@@ -63,8 +65,7 @@ Publication and artifact availability are separate release gates.
          [ "$status" -eq 1 ] && exit 0
          [ "$status" -ne 0 ] && exit 3
          sleep 1
-       done'
-     drain_status=$?
+       done' || drain_status=$?
      if [ "$drain_status" -ne 0 ]; then
        echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
        exit 1
@@ -176,8 +177,9 @@ Publication and artifact availability are separate release gates.
      # systemd-managed NGINX: stop the unit so the unit state and the master
      # shutdown stay consistent, then wait for a confirmed shutdown.
      sudo systemctl stop nginx
-     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-     drain_status=$?
+     drain_status=0
+     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
+         || drain_status=$?
      # Abort when the drain hit the timeout, and require an explicit
      # "inactive" state: any other nonzero is-active result (query failure,
      # failed unit) must not be treated as a confirmed stop.
@@ -189,6 +191,7 @@ Publication and artifact availability are separate release gates.
      # systemctl unavailable or does not manage NGINX: signal the master
      # directly and verify with a bounded drain that no NGINX process remains.
      sudo nginx -s quit
+     drain_status=0
      timeout 30 sh -c '
        while :; do
          pgrep -x nginx >/dev/null 2>&1
@@ -196,8 +199,7 @@ Publication and artifact availability are separate release gates.
          [ "$status" -eq 1 ] && exit 0
          [ "$status" -ne 0 ] && exit 3
          sleep 1
-       done'
-     drain_status=$?
+       done' || drain_status=$?
      if [ "$drain_status" -ne 0 ]; then
        echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
        exit 1
@@ -342,8 +344,9 @@ if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
   # systemd-managed NGINX: stop the unit so the unit state and the master
   # shutdown stay consistent, then wait for a confirmed shutdown.
   sudo systemctl stop nginx
-  timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-  drain_status=$?
+  drain_status=0
+  timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
+      || drain_status=$?
   # Abort when the drain hit the timeout, and require an explicit
   # "inactive" state: any other nonzero is-active result (query failure,
   # failed unit) must not be treated as a confirmed stop.
@@ -355,6 +358,7 @@ else
   # systemctl unavailable or does not manage NGINX: signal the master
   # directly and verify with a bounded drain that no NGINX process remains.
   sudo nginx -s quit
+  drain_status=0
   timeout 30 sh -c '
     while :; do
       pgrep -x nginx >/dev/null 2>&1
@@ -362,8 +366,7 @@ else
       [ "$status" -eq 1 ] && exit 0
       [ "$status" -ne 0 ] && exit 3
       sleep 1
-    done'
-  drain_status=$?
+    done' || drain_status=$?
   if [ "$drain_status" -ne 0 ]; then
     echo "NGINX stop could not be confirmed within 30s (drain status ${drain_status}) — investigate before continuing" >&2
     exit 1
