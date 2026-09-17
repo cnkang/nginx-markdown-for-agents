@@ -15,6 +15,8 @@ pub mod eligibility;
 pub mod reason_code;
 pub mod streaming;
 
+use self::reason_code::ReasonCode;
+
 /// Conversion decision result.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
@@ -64,17 +66,22 @@ pub enum SkipReason {
 
 /// Reason code string for each decision path.
 impl SkipReason {
-    /// Return the reason code string for logging and metrics.
+    /// Return the canonical reason code string for logging and metrics.
+    ///
+    /// The spelling is the registry key ([`ReasonCode::as_str`], lowercase
+    /// `snake_case`), so decision logs and metrics agree with the reason
+    /// registry without a translation table; the pre-0.9.2 UPPERCASE forms
+    /// are historical aliases only.
     pub fn code(&self) -> &'static str {
         match self {
-            SkipReason::SkipAccept => "SKIP_ACCEPT",
-            SkipReason::SkipNoAccept => "SKIP_NO_ACCEPT",
-            SkipReason::SkipConditional => "SKIP_CONDITIONAL",
-            SkipReason::FailDecompression => "FAIL_DECOMPRESSION",
-            SkipReason::ParseTimeout => "PARSE_TIMEOUT",
-            SkipReason::ParseBudgetExceeded => "PARSE_BUDGET_EXCEEDED",
-            SkipReason::NotEligible => "NOT_ELIGIBLE",
-            SkipReason::Disabled => "DISABLED",
+            SkipReason::SkipAccept => ReasonCode::SkippedAccept.as_str(),
+            SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept.as_str(),
+            SkipReason::SkipConditional => ReasonCode::SkippedConditional.as_str(),
+            SkipReason::FailDecompression => ReasonCode::DecompressionError.as_str(),
+            SkipReason::ParseTimeout => ReasonCode::Timeout.as_str(),
+            SkipReason::ParseBudgetExceeded => ReasonCode::BudgetExceeded.as_str(),
+            SkipReason::NotEligible => ReasonCode::NotEligible.as_str(),
+            SkipReason::Disabled => ReasonCode::Disabled.as_str(),
         }
     }
 }
@@ -193,7 +200,7 @@ mod tests {
         ctx.enabled = false;
         let d = make_decision(&ctx);
         assert_eq!(d, Decision::Skip(SkipReason::Disabled));
-        assert_eq!(decision_reason_code(&d), "DISABLED");
+        assert_eq!(decision_reason_code(&d), "disabled");
     }
 
     #[test]
@@ -290,6 +297,45 @@ mod tests {
                     codes[i], codes[j]
                 );
             }
+        }
+    }
+
+    /// Every skip reason must report the canonical reason-registry key from
+    /// `reason_registry.toml` (via [`ReasonCode::as_str`]), never a
+    /// pre-0.9.2 UPPERCASE alias such as `SKIP_ACCEPT` or `DISABLED`.
+    #[test]
+    fn test_skip_reason_codes_match_reason_registry() {
+        use crate::decision::reason_code::ReasonCode;
+
+        let registry_pairs = [
+            (SkipReason::SkipAccept, ReasonCode::SkippedAccept),
+            (SkipReason::SkipNoAccept, ReasonCode::SkippedNoAccept),
+            (SkipReason::SkipConditional, ReasonCode::SkippedConditional),
+            (
+                SkipReason::FailDecompression,
+                ReasonCode::DecompressionError,
+            ),
+            (SkipReason::ParseTimeout, ReasonCode::Timeout),
+            (SkipReason::ParseBudgetExceeded, ReasonCode::BudgetExceeded),
+            (SkipReason::NotEligible, ReasonCode::NotEligible),
+            (SkipReason::Disabled, ReasonCode::Disabled),
+        ];
+
+        for (reason, registry) in registry_pairs {
+            assert_eq!(
+                reason.code(),
+                registry.as_str(),
+                "{reason:?} must use the canonical registry key for {registry:?}"
+            );
+            assert!(
+                reason
+                    .code()
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?} code '{}' is not lowercase snake_case",
+                reason,
+                reason.code()
+            );
         }
     }
 }

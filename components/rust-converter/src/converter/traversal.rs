@@ -103,8 +103,14 @@ pub(super) fn append_repeated_char_with_context(
 /// Reserve a temporary allocation while the final output remains live.
 ///
 /// `output.capacity()` is charged only for the duration of the reservation
-/// check.  The temporary charge remains active while `f` runs, so a writer
-/// growth or nested scratch allocation cannot exceed the same logical budget.
+/// check: the retained output *capacity* is already part of the working-set
+/// budget, so re-charging it here would double-count the same bytes.  The
+/// `bytes` parameter is what stays charged while `f` runs — the temporary
+/// scratch this helper is reserving (an escaped link label, a fused-normalizer
+/// buffer, ...) — so a writer growth or nested scratch allocation inside `f`
+/// cannot exceed the same logical budget.  Note the asymmetry: `bytes` is the
+/// transient charge, `output_capacity` is the pre-existing retained charge
+/// that is re-derived (not added) inside the reservation check.
 pub(super) fn with_reserved_working_set<F>(
     output: &mut String,
     ctx: &mut Option<&mut ConversionContext>,

@@ -319,7 +319,8 @@ fn negative_7_userinfo() {
     let mut input = trusted_input("10.0.0.1");
     input.forwarded = Some("for=198.51.100.7;proto=https;host=user:pass@example.com");
     let d = decide_base_url(&input, &t);
-    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    /* RFC 7239 host failures carry the field-specific code. */
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
@@ -400,7 +401,7 @@ fn negative_13_invalid_host() {
     let mut input = trusted_input("10.0.0.1");
     input.forwarded = Some("for=198.51.100.7;proto=https;host=a..b");
     let d = decide_base_url(&input, &t);
-    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
@@ -444,5 +445,35 @@ fn obfuscated_host_rejected() {
     let mut input = trusted_input("10.0.0.1");
     input.forwarded = Some("for=198.51.100.7;proto=https;host=_evil.example.com");
     let d = decide_base_url(&input, &t);
-    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
+}
+
+/// Invalid host in the RFC 7239 `Forwarded` set reports the field-specific
+/// `forwarded_invalid_host` (discriminant 3); the set is discarded and the
+/// `Host` header is used.
+#[test]
+fn forwarded_invalid_host_reports_host_reason_code() {
+    let t = cidrs(&["10.0.0.0/8"]);
+    let mut input = trusted_input("10.0.0.1");
+    input.forwarded = Some("for=198.51.100.7;proto=https;host=a..b");
+    let d = decide_base_url(&input, &t);
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
+    assert_eq!(d.reason.as_u8(), 3, "FFI discriminant must stay frozen");
+    assert_eq!(d.source, BaseUrlSource::Host);
+    assert_eq!(d.base_url, "http://origin.example.com");
+}
+
+/// Invalid proto in the RFC 7239 `Forwarded` set reports the field-specific
+/// `forwarded_invalid_proto` (discriminant 4); the set is discarded and the
+/// `Host` header is used.
+#[test]
+fn forwarded_invalid_proto_reports_proto_reason_code() {
+    let t = cidrs(&["10.0.0.0/8"]);
+    let mut input = trusted_input("10.0.0.1");
+    input.forwarded = Some("for=198.51.100.7;proto=ftp;host=example.com");
+    let d = decide_base_url(&input, &t);
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidProto);
+    assert_eq!(d.reason.as_u8(), 4, "FFI discriminant must stay frozen");
+    assert_eq!(d.source, BaseUrlSource::Host);
+    assert_eq!(d.base_url, "http://origin.example.com");
 }

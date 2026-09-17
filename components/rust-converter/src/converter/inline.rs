@@ -40,7 +40,6 @@ pub(super) struct CodeContentStats {
     current_backtick_run: usize,
     pub(super) first_byte: Option<u8>,
     pub(super) last_byte: Option<u8>,
-    pub(super) len: usize,
 }
 
 const MEASUREMENT_CHECKPOINT_BYTES: usize = 1024;
@@ -404,9 +403,6 @@ impl MarkdownConverter {
                         stats.first_byte = Some(byte);
                     }
                     stats.last_byte = Some(byte);
-                    stats.len = stats.len.checked_add(1).ok_or_else(|| {
-                        ConversionError::MemoryLimit("code content size overflow".into())
-                    })?;
                     if byte == b'`' {
                         stats.current_backtick_run =
                             stats.current_backtick_run.checked_add(1).ok_or_else(|| {

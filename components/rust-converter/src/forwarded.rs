@@ -56,11 +56,14 @@ pub enum BaseUrlReason {
     /// `trusted_proxies_not_configured` — `markdown_trusted_proxies` was not
     /// configured; forwarded headers were ignored.
     TrustedProxiesNotConfigured = 2,
-    /// `forwarded_invalid_host` — a trusted forwarded host failed validation
-    /// (empty / control chars / comma / userinfo / path / bad port / bracket).
+    /// `forwarded_invalid_host` — a host value in a trusted RFC 7239
+    /// `Forwarded` set failed validation (empty / control chars / comma /
+    /// userinfo / path / bad port / bracket); the entire forwarded set is
+    /// discarded.
     ForwardedInvalidHost = 3,
-    /// `forwarded_invalid_proto` — a trusted forwarded proto was not
-    /// `http`/`https`.
+    /// `forwarded_invalid_proto` — a proto value in a trusted RFC 7239
+    /// `Forwarded` set was not `http`/`https`; the entire forwarded set is
+    /// discarded.
     ForwardedInvalidProto = 4,
     /// `fallback_to_host` — base URL was derived from the `Host` header.
     FallbackToHost = 5,
@@ -78,10 +81,11 @@ pub enum BaseUrlReason {
     /// address in the chain; the forwarded set is discarded and direct
     /// peer/direct request metadata is used.
     ChainExhausted = 9,
-    /// `forwarded_invalid_value` — an address/scheme/host/port value in the
-    /// forwarded set failed validation (unknown, obfuscated, userinfo,
-    /// control character, malformed IPv6, zone ID, invalid scheme/port/host);
-    /// the entire forwarded set is discarded.
+    /// `forwarded_invalid_value` — an address (`for=`) value in a trusted
+    /// RFC 7239 `Forwarded` set, or any value in an `X-Forwarded-*` metadata
+    /// list, failed validation (unknown, obfuscated, userinfo, control
+    /// character, malformed IPv6, zone ID, invalid scheme/port/host); the
+    /// entire forwarded set is discarded.
     ForwardedInvalidValue = 10,
 }
 
@@ -787,12 +791,12 @@ fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecis
         if let Some(proto) = &element.proto
             && validate_proto(proto).is_none()
         {
-            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidProto);
         }
         if let Some(host) = &element.host
             && validate_forwarded_host(host).is_none()
         {
-            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidHost);
         }
     }
 

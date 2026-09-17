@@ -16,6 +16,10 @@
 
 /// Resolve `reference` against `base`, or return `None` when the base cannot
 /// be used (not an absolute `http`/`https` URL, or malformed).
+///
+/// Callers must sanitize the reference first (for example with
+/// `crate::security::sanitize_url_value`); this resolver performs no scheme
+/// or character safety filtering of its own.
 pub(crate) fn resolve_reference(base: &str, reference: &str) -> Option<String> {
     let (scheme, authority, base_path, base_query) = split_absolute(base)?;
 
@@ -31,12 +35,39 @@ pub(crate) fn resolve_reference(base: &str, reference: &str) -> Option<String> {
 
     let (ref_scheme, ref_rest) = split_scheme(reference);
 
-    if ref_scheme.is_some() {
-        // An absolute reference keeps its own form: only resolve against the
-        // base when the reference has no scheme.  Rewriting it would mangle
-        // non-hierarchical schemes such as `mailto:` or `tel:`.
-        let _ = ref_rest;
-        return Some(reference.to_string());
+    if let Some(ref_scheme) = ref_scheme {
+        // An absolute reference keeps its own scheme and authority, so it is
+        // never merged with the base.  A hierarchical `http`/`https`
+        // reference still normalizes its path: RFC 3986 section 5.2.2
+        // recomputes `T.path` as `remove_dot_segments(R.path)` for the
+        // absolute form, so `https://h/a/b/../c` becomes `https://h/a/c`.
+        // Every other scheme — opaque ones such as `mailto:`/`tel:`, and
+        // non-http hierarchical ones — is returned verbatim: rewriting a
+        // non-http reference would mangle an address the resolver does not
+        // own, and the caller's sanitizer decides whether it may be emitted
+        // at all.  A reference with a scheme but no `//authority` (RFC 3986
+        // section 5.4 abnormal form, e.g. `http:g`) is also returned
+        // verbatim, since there is no authority to reassemble.
+        if !matches!(ref_scheme.as_str(), s if s.eq_ignore_ascii_case("http") || s.eq_ignore_ascii_case("https"))
+        {
+            return Some(reference.to_string());
+        }
+        let (ref_authority, path, query, fragment) = split_rest(ref_rest);
+        if ref_authority.is_empty() {
+            return Some(reference.to_string());
+        }
+        let target_path = if path.is_empty() {
+            path
+        } else {
+            remove_dot_segments(&path)
+        };
+        return Some(assemble(
+            &ref_scheme,
+            &ref_authority,
+            &target_path,
+            query.as_deref(),
+            fragment.as_deref(),
+        ));
     }
 
     let (ref_authority, path, query, fragment) = split_rest(ref_rest);
@@ -337,6 +368,91 @@ mod tests {
     fn refuses_a_base_that_is_not_absolute_http() {
         for base in ["/dir/page.html", "ftp://example.com/x", "example.com/x", ""] {
             assert!(resolve_reference(base, "a").is_none(), "base {base:?}");
+        }
+    }
+
+    /// Contract: the resolver is not a sanitizer. An absolute-scheme
+    /// reference is returned verbatim, so callers must run references
+    /// through `security::sanitize_url_value` (which rejects `javascript:`
+    /// and other dangerous schemes) before emitting the resolved URL.
+    #[test]
+    fn resolver_defers_safety_filtering_to_callers() {
+        assert_eq!(
+            resolve_reference(BASE, "javascript:alert(1)").as_deref(),
+            Some("javascript:alert(1)"),
+            "the resolver must not silently filter schemes; callers sanitize"
+        );
+        assert!(
+            crate::security::sanitize_url_value("javascript:alert(1)").is_none(),
+            "the sanitizer is the layer that rejects the dangerous reference"
+        );
+        assert_eq!(
+            resolve_reference(BASE, "https://example.com/x").as_deref(),
+            Some("https://example.com/x")
+        );
+    }
+
+    /// RFC 3986 section 5.2.2: an absolute `http`/`https` reference is not
+    /// merged with the base, but its own path still goes through
+    /// `remove_dot_segments`.
+    #[test]
+    fn absolute_http_reference_removes_dot_segments() {
+        let cases = [
+            (
+                "https://other.example/a/b/../c",
+                "https://other.example/a/c",
+            ),
+            ("https://other.example/a/./b", "https://other.example/a/b"),
+            ("https://other.example/a/b/..", "https://other.example/a/"),
+            ("https://other.example/../x", "https://other.example/x"),
+            ("https://other.example/a/..//b", "https://other.example//b"),
+            /* Query and fragment are preserved and are not part of the path
+             * handed to remove_dot_segments. */
+            (
+                "https://other.example/a/b/../c?x=1#f",
+                "https://other.example/a/c?x=1#f",
+            ),
+            /* A bare absolute authority keeps no path. */
+            ("https://other.example", "https://other.example"),
+            ("https://other.example/", "https://other.example/"),
+            /* Scheme comparison is case-insensitive; the emitted scheme keeps
+             * the reference's own spelling. */
+            ("HTTP://other.example/a/b/../c", "HTTP://other.example/a/c"),
+        ];
+
+        for (reference, expected) in cases {
+            assert_eq!(
+                resolve_reference(BASE, reference).as_deref(),
+                Some(expected),
+                "reference {reference:?}"
+            );
+        }
+    }
+
+    /// Opaque and non-http schemes are returned byte-for-byte: the resolver
+    /// has no path semantics for them and must not rewrite the address.
+    #[test]
+    fn opaque_schemes_are_returned_verbatim() {
+        let cases = [
+            "mailto:user@example.com",
+            "mailto:user@example.com?subject=a..b",
+            "tel:+1234",
+            "javascript:alert(1)",
+            "data:text/html;base64,PGI+",
+            "ftp://example.com/a/../b",
+            "urn:isbn:0451450523",
+            /* Scheme with no `//authority` (RFC 3986 section 5.4 abnormal
+             * form): cannot be reassembled, so it is left alone. */
+            "http:g",
+            "https:relative/../path",
+        ];
+
+        for reference in cases {
+            assert_eq!(
+                resolve_reference(BASE, reference).as_deref(),
+                Some(reference),
+                "{reference:?} must not be rewritten"
+            );
         }
     }
 }

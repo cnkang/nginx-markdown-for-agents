@@ -866,7 +866,6 @@ impl IncrementalEmitter {
         }
         self.inline_code_backtick_max = 0;
         self.inline_code_trailing_backticks = 0;
-        self.in_inline_code = false;
         Ok(())
     }
 
@@ -1061,8 +1060,9 @@ impl IncrementalEmitter {
             }
         }
         self.inline_code_buffer.push_str(&normalized_text);
-        /* The flag tracks the normalized output, where CR/LF became spaces. */
-        self.last_was_newline = normalized_text.ends_with('\n');
+        /* The flag tracks the normalized output, where CR/LF became spaces;
+        the text can therefore never end with a newline. */
+        self.last_was_newline = false;
         Ok(())
     }
 
@@ -2595,6 +2595,30 @@ mod tests {
             end_tag("p"),
         ]);
         assert!(output.contains("`println!`"), "got: {}", output);
+    }
+
+    #[test]
+    fn test_inline_code_text_normalization_clears_newline_flag() {
+        let (mut emitter, mut sm) = make_pair();
+        for ev in [
+            start_tag("p"),
+            start_tag("code"),
+            text("a\r\n"),
+            text("b\n"),
+        ] {
+            let action = sm.process_event(&ev).expect("state machine");
+            emitter.process_action(&action, &mut sm).expect("emitter");
+        }
+
+        assert!(
+            !emitter.last_was_newline,
+            "normalized inline-code text must not end with a newline"
+        );
+        assert!(
+            !emitter.inline_code_buffer.contains('\n')
+                && !emitter.inline_code_buffer.contains('\r'),
+            "normalization must leave no CR/LF in the inline-code buffer"
+        );
     }
 
     #[test]
