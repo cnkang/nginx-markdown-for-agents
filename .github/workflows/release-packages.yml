@@ -1604,7 +1604,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Signing Job: Mandatory GPG signing for tag releases
   # Runs for qualified tag releases after the required release and RC gates
-    # pass; skipped for workflow_dispatch.
+  # pass; skipped for workflow_dispatch.
   # Requires Protected Environment "release-signing" with required reviewers.
   #
   # Security:
