@@ -80,7 +80,10 @@ while IFS= read -r -d '' file; do
         # grep exits 1 when a file has no call; that is the expected
         # no-match result.  Any other grep failure (exit 2) or a failure
         # inside the loop body must propagate under set -euo pipefail.
-        grep_matches="$(mktemp)"
+        grep_matches="$(mktemp)" || {
+            echo "ERROR: cannot create the per-API grep file for $file" >&2
+            exit 2
+        }
         GREP_TEMPS+=("$grep_matches")
         grep_rc=0
         grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
