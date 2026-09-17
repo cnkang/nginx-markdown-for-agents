@@ -145,6 +145,9 @@ markdown_profile balanced;
 markdown_limits conversion_memory=64m conversion_timeout=5s parser_timeout=5s max_inflight=64;
 markdown_cache_validation ims_only;
 markdown_error_policy pass;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
 
 ```nginx
@@ -155,6 +158,9 @@ markdown_profile strict_cache;
 markdown_limits conversion_memory=128m conversion_timeout=10s max_inflight=32;
 markdown_cache_validation full;
 markdown_error_policy pass;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
 
 ```nginx
@@ -166,7 +172,14 @@ markdown_streaming force;
 markdown_limits conversion_memory=256m conversion_timeout=30s streaming_buffer=16m max_inflight=128;
 markdown_error_policy pass;
 markdown_accept force;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
+
+Every 0.9.1 profile set `auth_policy=allow`, and the 0.9.2 default is `deny`,
+so each mapping above sets `markdown_auth_policy allow;` explicitly to keep the
+profile's conversion behavior.
 
 These presets are recommendations, not equivalents. The 0.9.1 profiles
 shared one resource envelope: 8 MiB conversion memory, 2 s timeout, and
@@ -527,6 +540,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9.2 | 2026-09-18 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
 | 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |

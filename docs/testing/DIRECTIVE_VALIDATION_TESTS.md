@@ -61,7 +61,7 @@ markdown_limits conversion_memory;          # Error: missing value
 **Expected behavior:**
 - Default: 64m (64 megabytes)
 - Context: http, server, location
-- Validation: must be positive integer with optional suffix (k, m, g)
+- Validation: must be positive integer with optional suffix (k, m, g) and within 64k..1g
 
 ---
 
@@ -87,7 +87,7 @@ markdown_limits conversion_timeout;           # Error: missing value
 **Expected behavior:**
 - Default: 30s (30000 milliseconds)
 - Context: http, server, location
-- Validation: must be positive integer with optional suffix (ms, s, m, h)
+- Validation: must be positive integer with optional suffix (ms, s, m, h) and within 1ms..1h
 
 ---
 
@@ -567,6 +567,7 @@ This implementation satisfies the following requirements:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-18 | Hermes | conversion_memory expected behavior states the 64k..1g range and conversion_timeout states the 1ms..1h range |
 | 0.9.2 | 2026-08-08 | Kang | Fixed markdown_limits key names (conversion_memory, conversion_timeout); marked markdown_buffer_chunked removed in 0.9.2 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
