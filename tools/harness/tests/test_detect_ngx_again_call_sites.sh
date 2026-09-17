@@ -201,6 +201,54 @@ else
 fi
 rm -rf "${stub_dir}" "${abort_tmp}" "${abort_src}"
 
+# 2b. Per-API scratch-file failure: the per-API grep file allocation is the
+# third scratch file the detector creates (after the violations file and the
+# file list).  A failure there must exit 2 with a setup error instead of
+# reading as a violation, and it must not leak temp files.
+per_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub2.XXXXXX")"
+per_api_tmp="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-api.XXXXXX")"
+per_api_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc2.XXXXXX")"
+mkdir -p "${per_api_src}/src"
+cat >"${per_api_src}/src/caller.c" <<'C'
+static ngx_int_t
+caller(ngx_http_request_t *r)
+{
+    return ngx_http_markdown_forward_headers(r);
+}
+C
+cat >"${per_stub_dir}/mktemp" <<'STUB'
+#!/bin/bash
+counter="${MKTEMP_BARE_COUNTER:?}"
+if [[ $# -eq 0 ]]; then
+    n=0
+    [[ -f "$counter" ]] && n="$(cat "$counter")"
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$counter"
+    if [[ "$n" -ge 2 ]]; then
+        echo "mktemp: simulated per-API allocation failure" >&2
+        exit 1
+    fi
+    exec /usr/bin/mktemp "${TMPDIR:?}/tmp.XXXXXX"
+fi
+exec /usr/bin/mktemp "$@"
+STUB
+chmod +x "${per_stub_dir}/mktemp"
+
+exit_code=0
+MKTEMP_BARE_COUNTER="${per_api_tmp}/bare.count" PATH="${per_stub_dir}:${PATH}" \
+    TMPDIR="${per_api_tmp}" \
+    bash "${DETECTOR}" "${per_api_src}" >"${per_api_tmp}/detector.out" 2>&1 || exit_code=$?
+leaked="$(find "${per_api_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
+if [[ "${exit_code}" -eq 2 ]] \
+    && grep -q 'cannot create the per-API grep file' "${per_api_tmp}/detector.out" \
+    && [[ "${leaked}" -eq 0 ]]; then
+    pass "a per-API scratch-file failure exits 2 without leaking temp files"
+else
+    fail "a per-API scratch-file failure exits 2 without leaking temp files" \
+        "exit=${exit_code}; leaked=${leaked}"
+fi
+rm -rf "${per_stub_dir}" "${per_api_tmp}" "${per_api_src}"
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1
