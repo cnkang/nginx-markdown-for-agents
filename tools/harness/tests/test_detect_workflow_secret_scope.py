@@ -795,11 +795,22 @@ class TestReferencesGatePolarity:
             "false == steps.token.outputs.enabled", "token", {"enabled"}
         )
 
-    def test_a_dotted_false_property_is_not_a_false_literal(self):
-        """`inputs.false ==` is an equality comparison against a property,
-        not a false-literal negation, so the reference still counts."""
-        assert secret_scope_module._references_gate(
+    def test_a_dotted_false_property_is_not_wiring(self):
+        """`inputs.false ==` compares the gate against a property
+        reference, not against the literal true, so the reference does
+        not count as a positive requirement."""
+        assert not secret_scope_module._references_gate(
             "inputs.false == steps.token.outputs.enabled", "token", {"enabled"}
+        )
+
+    def test_a_literal_true_operand_keeps_the_equality_positive(self):
+        """Only a literal true on the left keeps `== ref` a positive
+        requirement."""
+        assert secret_scope_module._references_gate(
+            "true == steps.token.outputs.enabled", "token", {"enabled"}
+        )
+        assert secret_scope_module._references_gate(
+            "'true' == steps.token.outputs.enabled", "token", {"enabled"}
         )
 
     def test_a_double_quoted_reference_beside_a_real_one_still_gates(self):
@@ -833,3 +844,17 @@ class TestGateNamePattern:
             'echo "enabled=true" >> "$GITHUB_OUTPUT"'
         )
         assert quoted is not None and quoted.group(1) == "enabled"
+
+    def test_a_chained_debug_echo_does_not_mask_the_ready_gate(self) -> None:
+        """A debug echo chained before the gate echo must not supply the
+        gate name: only the echo that owns the redirect names the gate."""
+        lines = [
+            '            echo "debug=1"; echo "ready=go" >> "$GITHUB_OUTPUT"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"ready"}
+
+    def test_each_segment_of_a_chain_contributes_only_its_own_gate(self) -> None:
+        lines = [
+            'echo "first=1" >> "$GITHUB_OUTPUT"; echo "second=2"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"first"}

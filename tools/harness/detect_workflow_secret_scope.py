@@ -22,12 +22,18 @@ SONAR_SECRET_EXPRESSION = re.compile(
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
 GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
+# Splits a shell line into command segments so a chained `;`/`&&`/`||`/`|`
+# command cannot donate its output redirect (or its NAME=value echo) to a
+# neighbouring command.
+SHELL_SEPARATOR_RE = re.compile(r"&&|\|\||[;&|]")
 # A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
 # (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
 # NAME=value assignment after `echo`.  The value tail is anchored by the
 # single `>>` literal, so no quantifiers overlap and the pattern stays
-# linear on adversarial lines.
-GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>')
+# linear on adversarial lines.  The value portion cannot cross shell
+# command separators: _published_gates() splits a chained line first, so
+# the captured gate always belongs to the echo that owns the redirect.
+GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^;&|\n]*>>')
 STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
@@ -281,13 +287,23 @@ def _presence_block(
 
 
 def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
-    """Return the step outputs the presence check publishes for gating."""
-    return {
-        match.group(1)
-        for index in range(start, end)
-        if GITHUB_OUTPUT_RE.search(lines[index])
-        and (match := GATE_NAME_RE.match(lines[index]))
-    }
+    """Return the step outputs the presence check publishes for gating.
+
+    A line may chain several commands (``echo "debug=1"; echo "ready=go"
+    >> "$GITHUB_OUTPUT"``): only the echo that owns the redirect may name
+    the gate, so the line is split on shell command separators before the
+    anchored gate pattern runs.
+    """
+    names: set[str] = set()
+    for index in range(start, end):
+        line = lines[index]
+        if not GITHUB_OUTPUT_RE.search(line):
+            continue
+        for segment in SHELL_SEPARATOR_RE.split(line):
+            match = GATE_NAME_RE.match(segment)
+            if match:
+                names.add(match.group(1))
+    return names
 
 
 def _mask_quoted(if_value: str) -> str:
@@ -381,8 +397,16 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
         return True
     if re.search(r"!\s*=\s*$", before):
         return True
-    if re.search(r"(?<![\w.])['\"]?false['\"]?\s*==\s*$", before):
-        return True
+    if re.search(r"==\s*$", before):
+        # The reference is the RIGHT operand of an equality.  That is a
+        # positive requirement only when the left operand is the literal
+        # true (`true == ref`); any other left operand (a property
+        # reference such as `inputs.false`, a dynamic expression) merely
+        # compares the gate's value, so it is not wiring.
+        if not re.search(
+            r"(?<![\w.])(?:'true'|\"true\"|true)\s*==\s*$", before
+        ):
+            return True
     if re.search(r"!\s*contains\(\s*$", before):
         return True
     return False
