@@ -186,7 +186,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-24 | Kang | Deflate framing section now states the two decision paths precisely: full-buffer retries after a zero-output RFC 1950 format error; streaming sniffs the first two bytes and fails closed on misclassification |
+| 0.9.2 | 2026-08-24 | Kang | Deflate framing section now states the two decision paths precisely: full-buffer replays an RFC 1950 format error as raw RFC 1951 from the start; streaming sniffs the first two bytes and fails closed on misclassification |
 | 0.9.2 | 2026-08-12 | Codex | Align the public deflate contract with RFC 1950 zlib-wrapped decoding and mark raw framing as historical compatibility behavior |
 | 0.9.1 | 2026-07-18 | Kang | Promoted Brotli from bounded full-buffer to streaming decompression path; updated routing table, flowchart, rationale, and operator guidance; replaced Deferred Work with Build Compatibility section |
 | 0.9.1 | 2026-07-17 | Kang | Document deflate trailing-data integrity: complete input consumption required, trailing bytes after Z_STREAM_END rejected as FORMAT_ERROR, gzip concatenated members remain supported |
