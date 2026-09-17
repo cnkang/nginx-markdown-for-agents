@@ -285,14 +285,52 @@ def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
     }
 
 
-def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
-    """Return whether an ``if:`` value gates on a published step output.
+def _optional_in_disjunction(if_value: str, ref: str) -> bool:
+    """Return whether a disjunction can bypass the gate reference.
 
-    Only a positive requirement counts as wiring: a negated comparison such
-    as ``!= 'true'`` (or an equality against false, or a negated contains
-    call) runs the step when the gate did NOT pass and must not be treated
-    as gate wiring.
+    The reference counts only as a member of the top-level ``&&`` chain:
+    a ``||`` outside every parenthesized group (``ref || a``) runs the step
+    without the gate, and a reference that only appears inside parentheses
+    cannot be proven required.  A disjunction nested inside parentheses
+    under a top-level ``&&`` (``<gate> && (a || b)``) leaves the gate
+    required.  Conditions without any ``||`` are never bypassed here.
     """
+    if "||" not in if_value:
+        return False
+
+    depth = 0
+    for char in if_value:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth > 0:
+                depth -= 1
+        elif char == "|" and depth == 0:
+            return True
+
+    match = re.search(ref, if_value)
+    if match is None:
+        return False
+    prefix = if_value[: match.start()]
+    return prefix.count("(") > prefix.count(")")
+
+
+def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
+    """Return whether an ``if:`` value requires a published step output.
+
+    Only a positive, required check counts as wiring.  An ``always()`` call
+    can run the step with the gate unsatisfied; a negated comparison of the
+    gate (``!= 'true'``, an equality against false, a negated ``contains``
+    call, or a unary ``!`` on the reference itself) runs it when the gate
+    did NOT pass; and a disjunction that can bypass the reference
+    (``<gate> || a``) makes the gate optional — none of those count.  A
+    negation of some *other* predicate in a conjunction
+    (``!cancelled() && <gate>``) or a disjunction nested under it
+    (``<gate> && (a || b)``) leaves the gate required and still counts.
+    """
+    if "always(" in if_value.replace(" ", ""):
+        return False
+
     for gate in gates:
         ref = rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b"
         if not re.search(ref, if_value):
@@ -302,6 +340,8 @@ def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
         if re.search(rf"!\s*contains\(\s*{ref}", if_value):
             continue
         if re.search(rf"!\s*\(*\s*{ref}", if_value):
+            continue
+        if _optional_in_disjunction(if_value, ref):
             continue
         return True
     return False

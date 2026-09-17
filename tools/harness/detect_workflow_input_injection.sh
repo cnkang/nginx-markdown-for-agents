@@ -78,6 +78,13 @@ if ! harness_collect_find0 "$file_list" "$WORKFLOWS_DIR" -maxdepth 1 -type f \( 
     exit 2
 fi
 
+# A quoted key ('with': / "with":) is the same YAML key as with:.  Accept
+# optional matching quotes everywhere a with key drives state so a quoted key
+# cannot silently bypass the input checks.  The fragments live in variables so
+# the quote characters survive bash source parsing.
+KEYQ="['\"]?"
+WITH_KEY="${KEYQ}with${KEYQ}"
+
 # Process each workflow YAML file
 while IFS= read -r -d '' file; do
     rel_path="${file#${REPO_ROOT}/}"
@@ -126,7 +133,7 @@ while IFS= read -r -d '' file; do
         # block tracker below cannot inspect individual keys; a command-bearing
         # key with an input interpolation there would go unchecked.  Reject the
         # form explicitly instead of silently missing it.
-        if [[ "$line" =~ ^[[:space:]]*(-[[:space:]]*)?with:[[:space:]]*\{ ]]; then
+        if [[ "$line" =~ ^[[:space:]]*(-[[:space:]]*)?${WITH_KEY}:[[:space:]]*\{ ]]; then
             echo "ERROR: ${rel_path}:${line_num}: flow-style 'with:' mapping cannot be statically validated; use a block-style mapping" >&2
             echo "  ${line}" >&2
             echo "  Fix: expand the mapping to block style (one key per line) so command inputs can be checked" >&2
@@ -136,14 +143,14 @@ while IFS= read -r -d '' file; do
             in_run_block=0
             continue
         fi
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with:[[:space:]]*$ ]]; then
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*${WITH_KEY}:[[:space:]]*$ ]]; then
             in_with_block=1
             with_indent=$indent_len
             with_key=""
             in_run_block=0
             continue
         fi
-        if [[ "$line" =~ ^[[:space:]]*with:[[:space:]]*$ ]]; then
+        if [[ "$line" =~ ^[[:space:]]*${WITH_KEY}:[[:space:]]*$ ]]; then
             with_key=""
             in_run_block=0
             if [[ "$steps_indent" -ge 0 && "$indent_len" -gt "$steps_indent" ]]; then
@@ -160,7 +167,7 @@ while IFS= read -r -d '' file; do
             if [[ "$indent_len" -le "$with_indent" ]]; then
                 in_with_block=0
                 with_key=""
-            elif [[ "$line" =~ ^[[:space:]]*([A-Za-z0-9_.-]+): ]]; then
+            elif [[ "$line" =~ ^[[:space:]]*${KEYQ}([A-Za-z0-9_.-]+)${KEYQ}: ]]; then
                 with_key="${BASH_REMATCH[1]}"
             fi
         fi
@@ -210,7 +217,7 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*uses: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*id: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*if: ]] || \
-           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*${WITH_KEY}: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*shell: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*working-directory: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*timeout-minutes: ]] || \

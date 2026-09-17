@@ -626,6 +626,60 @@ fi
 
 rm -f "${wf_dir}/flow-with.yml"
 
+# Test 20: quoted flow-style keys (YAML-equivalent to with:) -> FAIL
+cat >"${wf_dir}/flow-with-quoted.yml" <<'Y'
+name: flow-with-quoted
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@abc123
+        "with": { args: "${{ inputs.command }}" }
+      - uses: actions/github-script@def456
+        'with': { args: "${{ inputs.command }}" }
+Y
+
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] \
+    && grep -q "flow-style 'with:' mapping cannot be statically validated" "${output_file}"; then
+    pass "quoted flow-style with: keys are rejected as unvalidatable"
+else
+    fail "quoted flow-style with: keys are rejected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
+rm -f "${wf_dir}/flow-with-quoted.yml"
+
+# Test 21: quoted block-style keys still track command inputs -> FAIL
+cat >"${wf_dir}/block-with-quoted.yml" <<'Y'
+name: block-with-quoted
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@abc123
+        'with':
+          args: "${{ inputs.command }}"
+      - uses: actions/setup-node@def456
+        "with":
+          node-version: 20
+Y
+
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] \
+    && grep -q "directly interpolated in an action 'with:' command input" "${output_file}"; then
+    pass "quoted block-style with: keys still track command inputs"
+else
+    fail "quoted block-style with: keys still track command inputs" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
+rm -f "${wf_dir}/block-with-quoted.yml"
+
 # Test 19: no arguments must succeed under bash 3.2 with set -euo pipefail
 # (the bare "$@" list is treated as unset there; the ${1+"$@"} guard keeps
 # the default workflow directory in use and the run clean).

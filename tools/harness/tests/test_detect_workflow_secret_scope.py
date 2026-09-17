@@ -653,3 +653,29 @@ class TestReferencesGatePolarity:
             "token",
             {"enabled"},
         )
+
+    def test_disjunction_does_not_gate(self):
+        """A gate reachable through a top-level ``||`` is optional."""
+        assert not secret_scope_module._references_gate(
+            "steps.token.outputs.enabled == 'true' || github.event_name == 'push'",
+            "token",
+            {"enabled"},
+        )
+
+    def test_nested_disjunction_still_gates(self):
+        """``<gate> && (a || b)`` still requires the gate."""
+        assert secret_scope_module._references_gate(
+            "steps.token.outputs.enabled == 'true' && "
+            "(github.event_name == 'pull_request' || "
+            "github.event_name == 'workflow_dispatch')",
+            "token",
+            {"enabled"},
+        )
+
+    def test_always_call_does_not_gate(self):
+        """``always()`` can run the step with the gate unsatisfied."""
+        assert not secret_scope_module._references_gate(
+            "always() && steps.token.outputs.enabled == 'true'",
+            "token",
+            {"enabled"},
+        )
