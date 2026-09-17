@@ -890,6 +890,14 @@ class TestGateNamePattern:
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == set()
 
+    def test_separators_inside_a_comment_cannot_fabricate_gates(self) -> None:
+        """Text after an unquoted `#` is not executable: a chained fake gate
+        hidden in the comment must not be reported."""
+        lines = [
+            'echo "gate=1" >> "$GITHUB_OUTPUT" # tail; echo fake=2 >> "$GITHUB_OUTPUT"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"gate"}
+
     def test_a_comment_fake_redirection_does_not_publish_a_gate(self) -> None:
         lines = ['echo debug=1 # note >> "$GITHUB_OUTPUT"\n']
         assert secret_scope_module._published_gates(lines, 0, 1) == set()

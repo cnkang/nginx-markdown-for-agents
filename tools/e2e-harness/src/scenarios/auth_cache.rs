@@ -298,5 +298,13 @@ fn case8_filter_off_auth_sanitized(
             actual: content_type,
             message: None,
         });
+        let body_is_source = resp.body.contains("fixture html");
+        assertions.push(AssertionResult {
+            name: "case8_filter_off_auth_body_passthrough".to_string(),
+            passed: body_is_source,
+            expected: "pass-through body keeps the fixture html marker".to_string(),
+            actual: format!("body bytes={}", resp.body.len()),
+            message: None,
+        });
     }
 }

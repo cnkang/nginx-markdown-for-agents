@@ -83,9 +83,10 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 20 active directives. The seven names
-retired in 0.9.2 (five convergence names plus `markdown_profile` and
-`markdown_streaming_zero_copy`) are no longer registered and fail `nginx -t` with
+0.9.2 freezes the public configuration at 20 active directives. The seven
+highlighted retired names (a commonly used subset: five convergence names plus
+`markdown_profile` and `markdown_streaming_zero_copy`) are no longer registered
+and fail `nginx -t` with
 NGINX's standard `unknown directive` error. This list is a subset: see
 [CHANGELOG.md](CHANGELOG.md) for the complete removal inventory (14 removed
 active directives, 19 deleted migration stubs, and 5 directives folded into
@@ -168,8 +169,9 @@ eligibility checks still apply.
 0.9.2 is a breaking release candidate. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 freezes 20 active directives. The seven names retired in 0.9.2 — the
-  five convergence names plus `markdown_profile` and
+- 0.9.2 freezes 20 active directives. The seven highlighted retired names —
+  a commonly used subset of the removal inventory, spanning the five
+  convergence names plus `markdown_profile` and
   `markdown_streaming_zero_copy` — are no longer registered, so `nginx -t`
   reports NGINX's standard
   `unknown directive` error and [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)
