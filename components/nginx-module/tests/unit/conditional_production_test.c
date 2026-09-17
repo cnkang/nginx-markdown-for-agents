@@ -4214,6 +4214,30 @@ test_304_snapshot_error_guards(void)
     TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &restore_snapshot)
                     == NGX_ERROR,
                 "304 restore rejects a nonempty snapshot on a list without element storage");
+
+    /* A nonempty snapshot whose traversal never reaches original_last
+     * must fail closed before any mutation: accepting it would re-anchor
+     * the list to an unvalidated part. */
+    {
+        ngx_http_markdown_304_list_snapshot_t bad_snapshot;
+        ngx_list_part_t fake_last;
+
+        memset(&bad_snapshot, 0, sizeof(bad_snapshot));
+        memset(&fake_last, 0, sizeof(fake_last));
+        list.size = sizeof(ngx_table_elt_t);
+        list.nalloc = 4;
+        list.part.elts = &entry;
+        list.part.nelts = 1;
+        list.part.next = NULL;
+        list.last = &list.part;
+        bad_snapshot.entry_count = 1;
+        bad_snapshot.entries = &saved_entry;
+        bad_snapshot.original_last = &fake_last;
+        TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &bad_snapshot)
+                        == NGX_ERROR,
+                    "304 restore rejects a snapshot whose original_last is not in the chain");
+    }
+
     list.part.elts = NULL;
     list.part.nelts = 1;
     ngx_http_markdown_304_restore_list(&list, &restore_snapshot);

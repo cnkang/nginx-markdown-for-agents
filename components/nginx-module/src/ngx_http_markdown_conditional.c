@@ -2734,6 +2734,7 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
 {
     ngx_table_elt_t  *entries;
     ngx_uint_t        restored;
+    ngx_uint_t        original_last_seen;
 
     if (list == NULL || snapshot == NULL) {
         return NGX_OK;
@@ -2761,6 +2762,7 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         return NGX_ERROR;
     }
     restored = 0;
+    original_last_seen = 0;
     for (ngx_list_part_t *part = &list->part;
          part != NULL && restored < snapshot->entry_count;
          part = part->next)
@@ -2775,6 +2777,9 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         {
             return NGX_ERROR;
         }
+        if (part == snapshot->original_last) {
+            original_last_seen = 1;
+        }
         restored += part->nelts;
     }
 
@@ -2782,9 +2787,15 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
      * After the list-structure restore the reachable entry count must
      * match the snapshot exactly; a truncated chain would silently drop
      * snapshotted entries, so report it instead of applying a partial
-     * restore.
+     * restore.  A nonempty snapshot must also reach its captured tail:
+     * original_last re-anchors the list, so accepting a chain that never
+     * contains it would attach the list to an unvalidated part.
      */
-    if (restored < snapshot->entry_count) {
+    if (restored < snapshot->entry_count
+        || (snapshot->entry_count != 0
+            && snapshot->original_last != NULL
+            && !original_last_seen))
+    {
         return NGX_ERROR;
     }
 
