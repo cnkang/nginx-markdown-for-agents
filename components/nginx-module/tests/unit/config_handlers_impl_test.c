@@ -529,6 +529,54 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                 p += written;
             }
             fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 'u') {
+            unsigned long long uval;
+            int                written;
+            size_t             avail;
+
+            if (*(fmt + 2) == 'i') {
+                uval = va_arg(ap, unsigned int);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'z') {
+                uval = va_arg(ap, size_t);
+                fmt += 3;
+            } else {
+                uval = va_arg(ap, unsigned int);
+                fmt += 2;
+            }
+            avail = (size_t) (end - p);
+            written = snprintf(p, avail, "%llu", uval);
+            if (written > 0) {
+                if ((size_t) written >= avail) {
+                    written = (int) avail - 1;
+                }
+                p += written;
+            }
+        } else if (*fmt == '%' && *(fmt + 1) == 'i') {
+            long   ival = va_arg(ap, long);
+            int    written;
+            size_t avail;
+
+            avail = (size_t) (end - p);
+            written = snprintf(p, avail, "%ld", ival);
+            if (written > 0) {
+                if ((size_t) written >= avail) {
+                    written = (int) avail - 1;
+                }
+                p += written;
+            }
+            fmt += 2;
+        } else if (*fmt == '%'
+                   && ((*(fmt + 1) >= 'A' && *(fmt + 1) <= 'Z')
+                       || (*(fmt + 1) >= 'a' && *(fmt + 1) <= 'z')))
+        {
+            /*
+             * Unrecognised conversion: abort instead of copying the
+             * characters.  Copying consumes no va_arg, so every later
+             * specifier would read a misaligned slot (the previous silent
+             * failure mode).
+             */
+            abort();
         } else if (*fmt == '"' && *(fmt + 1) == '%') {
             /* pass the literal quote character */
             *p++ = *fmt++;
@@ -1388,6 +1436,51 @@ test_limits_handler(void)
 }
 
 /*
+ * Verify the decompression_ratio over-limit rejection renders both the
+ * numeric value and the directive name: the "%ui" conversion must consume
+ * its argument so the following "%V" still reads its own slot instead of
+ * desyncing the argument list.
+ *
+ * Return: void.
+ *
+ * Side effects: writes to g_conf_log_buf via the stub logger.
+ */
+static void
+test_decompression_ratio_limit_message(void)
+{
+    ngx_conf_t                       cf;
+    ngx_array_t                      args;
+    ngx_str_t                        values[2];
+    ngx_command_t                    cmd;
+    ngx_http_markdown_conf_t         mcf;
+    ngx_http_markdown_limits_seen_t  seen;
+    ngx_str_t                        val;
+    const char                      *rc;
+
+    TEST_SUBSECTION("decompression_ratio over-limit message");
+
+    set_arg(&cmd.name, "markdown_limits");
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "decompression_ratio=10001");
+
+    init_conf(&mcf);
+    ngx_memzero(&seen, sizeof(seen));
+    set_arg(&val, "10001");
+
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_apply_decompression_ratio_limit(
+        &cf, &cmd, &mcf, &val, &seen);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "ratio 10001 should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "value 10001 in") != NULL,
+        "the numeric ratio value must be rendered");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_limits") != NULL,
+        "the directive name must still occupy its argument slot");
+
+    TEST_PASS("decompression_ratio over-limit message rendered");
+}
+
+/*
  * Verify metrics handler installation and duplicate-handler rejection.
  *
  * Return: void.
@@ -1922,6 +2015,7 @@ main(void)
     test_conditional_and_log_verbosity_handlers();
     test_streaming_policy_handler();
     test_limits_handler();
+    test_decompression_ratio_limit_message();
     test_metrics_handlers();
     test_v080_stream_directive_handlers();
     test_parse_size_edge_cases();
