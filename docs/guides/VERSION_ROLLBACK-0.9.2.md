@@ -261,8 +261,11 @@ Publication and artifact availability are separate release gates.
        echo "ERROR: could not replace the active module with the rollback module AND could not restore the 0.9.2 tree. The 0.9.2 tree is at ${CONFIG_DIR}.pre-rollback; restore manually with: sudo mv -- \"${CONFIG_DIR}.pre-rollback\" \"${CONFIG_DIR}\"" >&2
        exit 1
      fi
-     sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback" \
-         "$MODULES_DIR/ngx_http_markdown_filter_module.so"
+     if ! sudo mv -f "$MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback" \
+         "$MODULES_DIR/ngx_http_markdown_filter_module.so"; then
+       echo "ERROR: could not replace the active module with the rollback module AND could not restore the 0.9.2 module binary. Restore manually from $MODULES_DIR/.ngx_http_markdown_filter_module.so.pre-rollback" >&2
+       exit 1
+     fi
      echo "ERROR: could not replace the active module with the rollback module; the 0.9.2 module/configuration pair was restored. Verify with: sudo nginx -t" >&2
      exit 1
    }
