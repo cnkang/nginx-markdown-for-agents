@@ -535,6 +535,18 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps backticks inside double quotes visible" "got '$masked'"
     fi
+    masked="$(mask_command_text 'NOTE="$(echo "x" y)"')"
+    if [[ "$masked" == 'NOTE="$(echo "x" y)"' ]]; then
+        pass "mask keeps a nested quote inside a command substitution"
+    else
+        fail "mask keeps a nested quote inside a command substitution" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="$(echo "$(sed -i x f)")"')"
+    if [[ "$masked" == 'NOTE="$(echo "$(sed -i x f)")"' ]]; then
+        pass "mask keeps a doubly nested substitution visible"
+    else
+        fail "mask keeps a doubly nested substitution visible" "got '$masked'"
+    fi
     masked="$(mask_command_text "echo '\$(cat /etc/passwd)'")"
     if [[ "$masked" == "echo ''" ]]; then
         pass "mask blanks single-quoted substitutions that never execute"

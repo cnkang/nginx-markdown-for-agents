@@ -287,6 +287,7 @@ mask_command_text() {
     local fused
     local prev_last
     local next_ch
+    local sub_depth=0
 
     while [[ "$i" -lt "$n" ]]; do
         ch="${text:$i:1}"
@@ -294,6 +295,7 @@ mask_command_text() {
             if [[ "$ch" == "'" || "$ch" == '"' ]]; then
                 quote="$ch"
                 span=""
+                sub_depth=0
                 i=$((i + 1))
                 continue
             fi
@@ -301,37 +303,73 @@ mask_command_text() {
             i=$((i + 1))
             continue
         fi
-        if [[ "$ch" == "$quote" ]]; then
-            if [[ "$quote" == '"' ]] \
-                && [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
-                # Keep a double-quoted span whose substitutions still run.
-                out+='"'"$span"'"'
-            else
-                # A span fused to adjacent word characters (`NOTE="run "sed`)
-                # belongs to one shell word: replacing it with a quote would
-                # invent a command boundary the shell does not have.  A span
-                # that stands alone keeps the old quote placeholder behavior.
-                fused=0
-                prev_last=""
-                if [[ -n "$out" ]]; then
-                    prev_last="${out:${#out}-1:1}"
-                fi
-                next_ch="${text:$((i + 1)):1}"
-                case "$prev_last" in
-                    ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
-                    *) fused=1 ;;
-                esac
-                case "$next_ch" in
-                    ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
-                    *) fused=1 ;;
-                esac
-                if [[ "$fused" -eq 1 ]]; then
-                    out+="x"
-                elif [[ "$quote" == '"' ]]; then
-                    out+='"'
+        if [[ "$quote" == '"' ]]; then
+            # Track command-substitution nesting inside the double-quoted
+            # span: a quote inside $(...) belongs to the substitution's own
+            # context and does not terminate the surrounding span.
+            if [[ "$ch" == '$' && "${text:$((i + 1)):1}" == '(' ]]; then
+                sub_depth=$((sub_depth + 1))
+            elif [[ "$ch" == ')' && "$sub_depth" -gt 0 ]]; then
+                sub_depth=$((sub_depth - 1))
+            fi
+            if [[ "$ch" == '"' && "$sub_depth" -eq 0 ]]; then
+                if [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
+                    # Keep a double-quoted span whose substitutions run.
+                    out+='"'"$span"'"'
                 else
-                    out+="''"
+                    # A span fused to adjacent word characters
+                    # (`NOTE="run "sed`) belongs to one shell word:
+                    # replacing it with a quote would invent a command
+                    # boundary the shell does not have.  A span that
+                    # stands alone keeps the old placeholder behavior.
+                    fused=0
+                    prev_last=""
+                    if [[ -n "$out" ]]; then
+                        prev_last="${out:${#out}-1:1}"
+                    fi
+                    next_ch="${text:$((i + 1)):1}"
+                    case "$prev_last" in
+                        ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
+                        *) fused=1 ;;
+                    esac
+                    case "$next_ch" in
+                        ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
+                        *) fused=1 ;;
+                    esac
+                    if [[ "$fused" -eq 1 ]]; then
+                        out+="x"
+                    else
+                        out+='"'
+                    fi
                 fi
+                quote=""
+                sub_depth=0
+                i=$((i + 1))
+                continue
+            fi
+            span+="$ch"
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$ch" == "$quote" ]]; then
+            fused=0
+            prev_last=""
+            if [[ -n "$out" ]]; then
+                prev_last="${out:${#out}-1:1}"
+            fi
+            next_ch="${text:$((i + 1)):1}"
+            case "$prev_last" in
+                ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
+                *) fused=1 ;;
+            esac
+            case "$next_ch" in
+                ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
+                *) fused=1 ;;
+            esac
+            if [[ "$fused" -eq 1 ]]; then
+                out+="x"
+            else
+                out+="''"
             fi
             quote=""
             i=$((i + 1))
