@@ -72,7 +72,11 @@ echo ""
 # Updated 2026-09-08: 338 — Spec 62 removes the retired runtime dynconf
 # watcher and its 21 associated log sites.  The remaining count is the
 # reviewed static-convergence baseline for this checkout.
-BASELINE_LOG_SITES=334
+# Updated 2026-09-17: 336 — the release-hardening round adds two fail-closed
+# commit diagnostics, both with the canonical `markdown:` prefix:
+# ngx_http_markdown_stream_commit_remove_representation_metadata failure
+# (+1 NGX_LOG_ERR) and the 304 headers-list rollback failure (+1 NGX_LOG_ERR).
+BASELINE_LOG_SITES=336
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0
