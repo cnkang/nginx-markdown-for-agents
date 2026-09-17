@@ -224,10 +224,39 @@ esac
 
 HEAD_BODY_SIZE=""
 HEAD_REQUEST_RC=0
-HEAD_BODY_SIZE="$(curl -sf -I -o /dev/null -w "%{size_download}" \
-    "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null)" \
-    || HEAD_REQUEST_RC=$?
-if [[ "$HEAD_REQUEST_RC" -ne 0 ]]; then
+HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}" "${DIAGNOSTICS_PATH}" 2>/dev/null <<'PROBE'
+import socket
+import sys
+import urllib.parse
+
+parsed = urllib.parse.urlparse(sys.argv[1])
+path = sys.argv[2]
+host = parsed.hostname or "localhost"
+port = parsed.port or 80
+try:
+    with socket.create_connection((host, port), timeout=10) as sock:
+        request = "HEAD {0} HTTP/1.1\r\nHost: {1}:{2}\r\nConnection: close\r\n\r\n".format(
+            path, host, port
+        )
+        sock.sendall(request.encode("ascii"))
+        data = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+except OSError:
+    print("-1")
+    sys.exit(0)
+
+head_end = data.find(b"\r\n\r\n")
+if head_end < 0 or not data.startswith(b"HTTP/"):
+    print("-1")
+else:
+    print(len(data) - head_end - 4)
+PROBE
+)" || HEAD_REQUEST_RC=$?
+if [[ "$HEAD_REQUEST_RC" -ne 0 || -z "$HEAD_BODY_SIZE" ]]; then
     HEAD_BODY_SIZE="-1"
 fi
 
@@ -236,7 +265,7 @@ if [[ "$HEAD_BODY_SIZE" -gt 0 ]]; then
 elif [[ "$HEAD_BODY_SIZE" -lt 0 ]]; then
     fail "HEAD response body size could not be measured"
 else
-    pass "HEAD response has no body content (${HEAD_BODY_SIZE} bytes downloaded)"
+    pass "HEAD response has no body content (${HEAD_BODY_SIZE} bytes after headers)"
 fi
 
 # --- Summary ---
