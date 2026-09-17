@@ -183,6 +183,7 @@ jobs:
           --include-generated
 
       - name: Validate manual PR analysis inputs
+        id: manual-pr
         if: >-
           steps.token.outputs.enabled == 'true' &&
           github.event_name == 'workflow_dispatch' &&
@@ -202,6 +203,28 @@ jobs:
             echo "pull_request_branch must match the checked-out workflow ref" >&2
             exit 1
           fi
+          # Strict validation before the values reach the scanner action:
+          # dispatch inputs are operator-supplied text and must not be able
+          # to smuggle additional scanner arguments or non-PR values.  The
+          # scanner args below consume these validated outputs, never the
+          # raw inputs.* expressions.
+          if [[ ! "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "pull_request_number must be a positive integer" >&2
+            exit 1
+          fi
+          if [[ ! "${PR_BRANCH}" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]]; then
+            echo "pull_request_branch contains unsupported characters" >&2
+            exit 1
+          fi
+          if [[ ! "${PR_BASE}" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]]; then
+            echo "pull_request_base contains unsupported characters" >&2
+            exit 1
+          fi
+          {
+            printf 'pr_number=%s\n' "${PR_NUMBER}"
+            printf 'pr_branch=%s\n' "${PR_BRANCH}"
+            printf 'pr_base=%s\n' "${PR_BASE}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: SonarCloud Scan
         if: >-
@@ -215,13 +238,18 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         with:
+          # The scanner action parses this string into argv (no shell), so the
+          # values must be inlined.  Dispatch values therefore come only from
+          # the regex-validated outputs of "Validate manual PR analysis
+          # inputs" (^[0-9]+$ / ^[A-Za-z0-9_][A-Za-z0-9_./-]*$), never from raw
+          # inputs.* text that could smuggle extra scanner arguments.
           args: >
             -Dproject.settings=.sonarcloud.properties
             -Dsonar.organization=cnkang
             -Dsonar.projectKey=cnkang_nginx-markdown-for-agents
-            -Dsonar.pullrequest.key=${{ github.event.pull_request.number || inputs.pull_request_number }}
-            -Dsonar.pullrequest.branch=${{ github.head_ref || inputs.pull_request_branch }}
-            -Dsonar.pullrequest.base=${{ github.base_ref || inputs.pull_request_base }}
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number || steps.manual-pr.outputs.pr_number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref || steps.manual-pr.outputs.pr_branch }}
+            -Dsonar.pullrequest.base=${{ github.base_ref || steps.manual-pr.outputs.pr_base }}
 
       - name: SonarCloud Branch Scan
         if: >-

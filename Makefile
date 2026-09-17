@@ -104,7 +104,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e verify-realip-access-boundary-e2e \
         verify-helm-cluster-smoke-e2e verify-graceful-reload-streaming-e2e \
-        verify-auth-subrequest-observability-e2e
+        verify-auth-subrequest-observability-e2e \
+        ci-local-check release-gates-check-070-strict verify-real-nginx-ims-e2e
 
 all: build
 
@@ -139,11 +140,11 @@ check-headers:
 # CI regenerates both committed header copies and checks the worktree for
 # drift.  Keep the same check in the local aggregate and push profile so a
 # developer cannot accidentally leave a generated ABI header out of a commit.
+# The target regenerates into the gitignored target/ workspace and compares
+# against the working tree copies and the HEAD-committed copies, so two
+# identical-but-stale copies cannot pass the way a bare git diff would.
 generated-header-drift-check:
-	@git diff --exit-code -- $(RUST_HEADER) $(NGINX_HEADER) || { \
-	  echo "Generated header drift detected: run 'make copy-headers' and commit both header copies" >&2; \
-	  exit 1; \
-	}
+	@python3 tools/harness/check_generated_header_drift.py
 
 capability-check:
 	@python3 tools/release/gates/verify_build_capabilities.py --source-root . --features "$(RUST_RELEASE_FEATURES)"
@@ -387,9 +388,12 @@ ci-local-check:
 	@echo "module-enabled NGINX: use \`make pre-push-check\` for the profile a"
 	@echo "push has to complete, and report what ran as PASS / FAIL / NOT_RUN."
 	@echo "Checks that need a module-enabled NGINX binary:"
-	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"
+	@echo "tests/property/test_log_prefix_preservation.sh needs no NGINX_BIN and no"
+	@echo "module-enabled binary: it compiles the stub unit suite and then runs"
+	@echo "'make coverage-c', so it needs lcov/gcov plus network access for the"
+	@echo "pinned Rust toolchain instead."
 
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
@@ -696,7 +700,10 @@ test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
+	bash tools/ci/test_verify_official_nginx_docker_binding.sh
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/docs/tests/ -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/sonar/tests/ -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
@@ -720,6 +727,11 @@ test-harness:
 	bash tools/harness/tests/test_detect_decompression_budget.sh
 	bash tools/harness/tests/test_detect_shell_hygiene.sh
 	bash tools/harness/tests/test_check_postinst_safety.sh
+	bash tools/harness/tests/test_detect_ci_supply_chain.sh
+	bash tools/harness/tests/test_detect_backpressure_resume.sh
+	bash tools/harness/tests/test_detect_finalize_return.sh
+	bash tools/harness/tests/test_detect_header_hash_filter.sh
+	bash tools/harness/tests/test_detect_version_consistency.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short
 
 workflow-context-check:

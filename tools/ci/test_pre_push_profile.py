@@ -169,3 +169,38 @@ def test_a_gate_that_cannot_start_fails_the_profile(monkeypatch, capsys, tmp_pat
     # main() parses argv[1:], so the program name comes first.
     assert profile.main(["pre_push_profile", "--base", "base"]) == 1
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_rule_66_manifest_patterns_cover_the_selector_surface() -> None:
+    """Every selector that can trigger the gate resolves to a manifest claim.
+
+    Forward: each C_BUILD entry must match at least one rule-66 pattern, so a
+    change the profile runs GCC for is also claimed by the routing manifest.
+    Reverse: non-triggers must stay unclaimed, so the manifest cannot
+    overstate coverage.
+    """
+    import fnmatch
+
+    manifest = json.loads(
+        (REPO_ROOT / "docs/harness/routing-manifest.json").read_text(encoding="utf-8")
+    )
+    entry = next(e for e in manifest["rule_checks"] if e["rule"] == "66")
+    patterns = entry["files"]
+
+    def claimed(path: str) -> bool:
+        return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+
+    for prefix in profile.C_BUILD_PREFIXES:
+        assert claimed(prefix + "probe.c"), prefix
+        assert claimed(prefix + "nested/probe.rs"), prefix
+    for path in profile.C_BUILD_FILES:
+        assert claimed(path), path
+    for suffix in profile.C_BUILD_SUFFIXES:
+        assert claimed(f"tools/ci/probe{suffix}"), suffix
+
+    for path in (
+        "docs/harness/core.md",
+        "components/rust-converter/src/converter.rs",
+        "tools/ci/check_checks.py",
+    ):
+        assert not claimed(path), path
