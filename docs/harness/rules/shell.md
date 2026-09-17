@@ -124,7 +124,7 @@ run_case || rc=$?
   _bre_needle="${_backslash}${_backslash}[()]"   # constructed at runtime
   for _detector in tools/harness/detect_*.sh; do
       _shell_lines="$(awk '
-          /<<-?[[:space:]]*'\''?PY'\''?/ { skip = 1; indented = ($0 ~ /<<-/) }
+          /<<-?[[:space:]]*'\''?PY'\''?([^A-Za-z0-9_]|$)/ { skip = 1; indented = ($0 ~ /<<-/) }
           skip && indented && /^\t*PY$/ { skip = 0; next }
           skip && /^PY$/ { skip = 0; next }
           skip { next }
