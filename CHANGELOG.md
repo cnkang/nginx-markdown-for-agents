@@ -106,7 +106,8 @@ before/after examples.
   (including a patch release) as fatal, the DEB dependency metadata keeps the
   pinned version installable across distro revisions while refusing any
   next-patch NGINX upgrade (`nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`),
-  the RPM dependency pins the exact version (`nginx = 1:X.Y.Z`), and the
+  the RPM dependency enforces the pin through an epoch-flexible floor
+  (`nginx >= X.Y.Z`) plus the install-time exact-version guard, and the
   project no longer makes the misleading "--with-compat same-minor
   compatibility" claim.
   NGINX's dynamic module loader rejects a version mismatch before

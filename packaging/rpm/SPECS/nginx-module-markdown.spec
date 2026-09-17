@@ -25,7 +25,8 @@ WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
 checks. The RPM dependency requires the nginx.org nginx-r%{nginx_version}
-capability in addition to the epoch-aware version bounds. A package that
+capability in addition to the epoch-flexible version floor. The %pre
+scriptlet enforces the exact version at install time. A package that
 merely reports the same version without the expected ABI capability is
 rejected before installation. It will NOT work with distro-provided,
 vendor-patched, OpenResty, Tengine, or custom-built NGINX binaries, or with

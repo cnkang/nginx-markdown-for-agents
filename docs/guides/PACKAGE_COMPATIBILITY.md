@@ -30,9 +30,13 @@ metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus
 installable while a plain NGINX patch upgrade no longer satisfies the
 dependency — the package manager keeps the module and NGINX versions in lock
 step. The RPM metadata additionally requires the `nginx-rX.Y.Z` capability
-published by the official nginx.org NGINX package, alongside the epoch-aware
-closed version bounds. RPM therefore rejects a same-version package that does
-not provide the expected NGINX package ABI capability before installation.
+published by the official nginx.org NGINX package, alongside an
+epoch-flexible floor (`nginx >= X.Y.Z`). An epochless requirement makes RPM
+skip the epoch comparison, so the floor stays installable whether the
+distribution's NGINX package carries an epoch or not. The `%pre` scriptlet
+enforces the exact version at install time. RPM therefore rejects a
+same-version package that does not provide the expected NGINX package ABI
+capability before installation.
 **Runtime compatibility is only verified for the exact NGINX versions listed
 in the build matrix below**. Loading the module on any other NGINX version
 will fail with a version mismatch before signature checks. Install the
