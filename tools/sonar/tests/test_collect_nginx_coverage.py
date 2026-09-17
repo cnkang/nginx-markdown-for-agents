@@ -23,7 +23,9 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     # exact (`= /x`) or prefix-modified (`^~ /x`, `~ /x`, `~* /x`) location is
     # silently skipped, and a conflicting block inside one would go unreported.
     for match in re.finditer(
-        r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?[^\s{]+\s*\{", script
+        r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?"
+        r"(?:\"[^\"]*\"|'[^']*'|[^\s{]+)\s*\{",
+        script,
     ):
         depth = 1
         index = match.end()
@@ -61,3 +63,49 @@ def test_streaming_failure_cache_runtime_avoids_rejected_combination() -> None:
     script = STREAMING_FAILURE_CACHE_SCRIPT.read_text(encoding="utf-8")
 
     assert not _conflicting_location_blocks(script)
+
+
+def test_quoted_regex_location_with_brace_is_parsed() -> None:
+    """A quoted regex location containing `{` must not truncate at the brace."""
+    config = (
+        "server {\n"
+        "    location /ok {\n"
+        "        markdown_streaming off;\n"
+        "    }\n"
+        '    location ~ "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(config)
+    assert len(blocks) == 1
+    assert '"^/v\\d{2}$"' in blocks[0]
+
+
+def test_quoted_brace_locations_without_conflict_stay_clean() -> None:
+    """Separate locations around a quoted brace must not merge into one."""
+    config = (
+        "server {\n"
+        '    location ~ "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "    }\n"
+        "    location /ok {\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    assert not _conflicting_location_blocks(config)
+
+def test_tilde_star_modifier_locations_are_parsed() -> None:
+    """A ~* (case-insensitive) location must be recognized."""
+    config = (
+        "server {\n"
+        '    location ~* "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(config)
+    assert len(blocks) == 1
