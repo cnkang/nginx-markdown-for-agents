@@ -908,10 +908,6 @@ class TestGateNamePattern:
     def test_descriptor_and_name_prefixed_redirects_do_not_count(self) -> None:
         """`2>>` and `$GITHUB_OUTPUT_BACKUP` are not stdout appends to the
         gate output, so the wrapped gate must not be certified."""
-        for line in (
-            'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
-        ):
-            pass
         lines = [
             'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
             '  echo text=1 2>> "$GITHUB_OUTPUT"\n',
