@@ -93,8 +93,7 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
         4 => {
             /* Absolute-budget case: an incompressible payload whose decoded
              * size strictly exceeds MAX_OUTPUT, so the 100x ratio ceiling
-             * cannot bind first and the absolute budget path is exercised
-             * budget. */
+             * cannot bind first, so the absolute-budget guard triggers. */
             let overrun = 1
                 + u32::from_le_bytes([
                     src.first().copied().unwrap_or(0),
