@@ -153,13 +153,19 @@ conversion eligibility:
 - the configured `markdown_streaming` policy is `auto` or `force`. `off`, unset,
   and out-of-range values resolve to bounded full-buffer
 - `markdown_front_matter on` requires the full-buffer engine
+- `markdown_streaming force` combined with `markdown_cache_validation full`
+  is rejected at configuration load (`nginx -t`) because the streaming path
+  cannot generate a transformed-representation ETag; `markdown_streaming
+  auto` with `full` logs a warning, and each request is blocked at runtime
+  (`streaming_block_full_cache_validation`) onto the full-buffer path
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
 - a content type matched by `markdown_stream_excluded_types` (routed to the
   bounded full-buffer engine)
 
-Everything else is a streaming candidate. The module applies codec routing
-separately. The canonical check ordering and the exclusion routing live in
+A streaming candidate is an eligible response that passes every
+pre-selection guard above. The module applies codec routing separately. The
+canonical check ordering and the exclusion routing live in
 [streaming-check-order.md](streaming-check-order.md).
 Failures that occur after the module selects the streaming path fall into two classes,
 checked in this order:

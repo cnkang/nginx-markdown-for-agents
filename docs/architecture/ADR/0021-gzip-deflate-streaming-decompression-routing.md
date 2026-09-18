@@ -12,7 +12,7 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 > **Divergence note:** the full-buffer path may replay a wrapped attempt as
 > raw after a format error (the decoder keeps the input), while the streaming
 > path commits to one framing after the first two bytes and cannot replay:
-> a misclassified stream raises a format error (fail-closed, no retry) and
+> a misclassified stream raises a format error (no framing retry) and
 > then flows through the configured error policy.  Deployments whose
 > upstreams emit ambiguous raw-deflate prefixes keep `markdown_streaming off`
 > so the full-buffer trial decoding serves those responses.  The divergence
