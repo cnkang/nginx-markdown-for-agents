@@ -264,18 +264,19 @@ gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 
 ### Verifying the Signature
 
-Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify:
+Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify against the
+independently authenticated fingerprint — a bare `gpg --verify` exit
+status, or a "Good signature" line under an unauthenticated key, proves
+integrity only, not project authenticity:
 
 ```bash
-gpg --verify SHA256SUMS.asc SHA256SUMS
-```
-
-A successful verification produces output similar to:
-
-```text
-gpg: Signature made Mon 01 Jan 2026 12:00:00 AM UTC
-gpg:                using RSA key <KEY_ID>
-gpg: Good signature from "nginx-markdown-for-agents release signing key"
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
+GPG_STATUS="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null)" \
+    || { echo "ERROR: GPG verification failed" >&2; exit 1; }
+VALIDSIG="$(printf '%s\n' "${GPG_STATUS}" \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 ```
 
 If verification fails with `BAD signature`, do not trust the checksums or
