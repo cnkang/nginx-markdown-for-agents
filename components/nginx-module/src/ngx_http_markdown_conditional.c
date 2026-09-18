@@ -2728,17 +2728,22 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
  * NGX_ERROR and the list stays exactly as it was found, so a failed rollback
  * is reported instead of being applied partially.
  */
+/*
+ * Prevalidate every part a list restore will visit so that no state is
+ * mutated unless the whole restore can complete.  A malformed part (one
+ * whose count exceeds the captured budget — except the snapshotted tail,
+ * which appends legitimately grow and which the structural restore later
+ * truncates back to its captured shape — one larger than the list
+ * capacity, or a non-empty part with no element storage) fails this walk,
+ * and a geometry that cannot reproduce the captured entry count fails it
+ * too: the caller then reports NGX_ERROR with the list unchanged.
+ */
 static ngx_int_t
-ngx_http_markdown_304_restore_list(ngx_list_t *list,
+ngx_http_markdown_304_restore_prevalidate(ngx_list_t *list,
     const ngx_http_markdown_304_list_snapshot_t *snapshot)
 {
-    ngx_table_elt_t  *entries;
     ngx_uint_t        restored;
     ngx_uint_t        original_last_seen;
-
-    if (list == NULL || snapshot == NULL) {
-        return NGX_OK;
-    }
 
     /*
      * Prevalidate every part the copy loop below will visit so that no
@@ -2816,6 +2821,27 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         || (snapshot->entry_count != 0
             && snapshot->original_last != NULL
             && !original_last_seen))
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_304_restore_list(ngx_list_t *list,
+    const ngx_http_markdown_304_list_snapshot_t *snapshot)
+{
+    ngx_table_elt_t  *entries;
+    ngx_uint_t        restored;
+
+    if (list == NULL || snapshot == NULL) {
+        return NGX_OK;
+    }
+
+    if (ngx_http_markdown_304_restore_prevalidate(list, snapshot)
+        != NGX_OK)
     {
         return NGX_ERROR;
     }
