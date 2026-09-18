@@ -46,8 +46,10 @@ Default to `auto` mode per RFC 0008 section 2.1:
    the former `markdown_stream_threshold` directive. That directive was
    operator-facing in 0.8.0 with a default of 1m. The 0.9.2 release removed
    it with no replacement, and the remaining tuning limits are
-   `markdown_limits` keys. Under the active Config V2 surface only
-   `markdown_streaming off|auto|force` remains a directive.
+   `markdown_limits` keys. Under the active Config V2 surface
+   `markdown_streaming off|auto|force` is the only processing-path
+   selector; the `markdown_limits` keys remain active resource-tuning
+   directives.
 2. Chunked transfer encoding and a missing `Content-Length` do not change
    the path. Those responses face the same eligibility gates as any other
    response (RFC 0008 section 2.2).
