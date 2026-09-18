@@ -72,7 +72,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-streaming-conflict-pbt test-upgrade-rollback-contract test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
-        test-all-e2e test-all-coverage \
+        test-all-e2e test-all-coverage perf-gate-check security-static \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -325,7 +325,8 @@ test-upgrade-rollback-contract:
 # test-all: aggregate every CI-checkable gate that can run on the current
 # host.  Mirrors the blocking jobs in .github/workflows/ci.yml:
 #   docs-check / harness-tooling / rust-quality / nginx-c-tests /
-#   release-092-contract-gates / matrix-release-tests
+#   release-092-contract-gates / matrix-release-tests / perf-smoke (the
+#   host-runnable subset through perf-gate-check) / security-static
 # Native-E2E jobs (runtime-regressions, brotli-build-matrix) and the
 # coverage gate need a module-enabled NGINX binary and are aggregated
 # separately: `make test-all-e2e NGINX_BIN=...` and
@@ -363,6 +364,8 @@ TEST_ALL_CORE := \
 	test-corpus-determinism \
 	complexity-check \
 	workflow-context-check \
+	perf-gate-check \
+	security-static \
 	license-check
 
 # ci-local-check runs the CI gate set through test-all, so the two entry points
@@ -394,6 +397,22 @@ ci-local-check:
 	@echo "module-enabled binary: it compiles the stub unit suite and then runs"
 	@echo "'make coverage-c', so it needs lcov/gcov plus network access for the"
 	@echo "pinned Rust toolchain instead."
+
+
+# The perf-smoke job also builds the release binary and runs the baseline
+# generators; those steps stay CI-only.  This target covers the test-bearing
+# steps so a push cannot miss them.
+perf-gate-check:
+	@echo "=== perf-gate-check: host-runnable Perf Smoke Gate steps ==="
+	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
+		python3 -m pytest tools/perf/tests/ -q --tb=short; \
+	else \
+		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
+		exit 1; \
+	fi
+	bash tools/perf/tests/test_local_runner_output_paths.sh
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+
 
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
