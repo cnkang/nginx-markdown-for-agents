@@ -278,3 +278,19 @@ def test_later_call_does_not_warn_for_earlier_literal(tmp_path):
 
     assert errors == []
     assert len(warnings) == 1
+
+
+def test_dynamic_call_after_multiline_string_close_is_detected(tmp_path):
+    """A multiline string that closes earlier on the same line must not
+    leave the quote state stale and suppress the unaudited warning."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'doc = """first line\n'
+        'second line""" ; x = open(f"{base}/b.txt")\n',
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
