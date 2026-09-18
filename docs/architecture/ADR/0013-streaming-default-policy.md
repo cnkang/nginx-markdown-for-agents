@@ -36,7 +36,7 @@ streaming definition and updated threshold.
 
 ## Decision
 
-Default to `auto` mode per RFC 0008 section 2.1:
+When the operator selects `auto`, the RFC 0008 section 2.1 policy applies:
 
 1. Under `markdown_streaming auto`, every response that clears the hard
    eligibility gates is a streaming candidate. `conversion_memory` and the

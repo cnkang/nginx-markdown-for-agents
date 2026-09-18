@@ -71,6 +71,9 @@ cleanup() {
     if [[ -n "$TMPDIR_TEST" && -d "$TMPDIR_TEST" ]]; then
         rm -rf "$TMPDIR_TEST"
     fi
+    if [[ -n "${mask_fn_file:-}" ]]; then
+        rm -f "$mask_fn_file"
+    fi
     return 0
 }
 
@@ -497,7 +500,6 @@ fi
 # never reads comment prose as an executed command.  The function is
 # extracted from the checker itself so the test exercises the real source.
 mask_fn_file="$(mktemp)"
-trap 'rm -f "$mask_fn_file"' EXIT
 sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT" > "$mask_fn_file"
 if [[ -s "$mask_fn_file" ]]; then
     # shellcheck source=/dev/null
