@@ -248,7 +248,6 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
 # Failure-safe replacement: move the previous snapshot aside, install
 # the new one, and restore the old on failure — never delete the
 # previous snapshot before the new one is in place.
-sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.old"
 # Refuse a symlink (including a dangling one) at tree/: mv -T would
 # replace the link itself, silently orphaning the directory it targets.
 if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
@@ -1231,7 +1230,6 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${CONFIG_BACKUP_DIR}/tree.new/" || {
 # Failure-safe replacement: move the previous snapshot aside, install
 # the new one, and restore the old on failure — never delete the
 # previous snapshot before the new one is in place.
-sudo rm -rf "${CONFIG_BACKUP_DIR}/tree.old"
 # Refuse a symlink (including a dangling one) at tree/: mv -T would
 # replace the link itself, silently orphaning the directory it targets.
 if [[ -L "${CONFIG_BACKUP_DIR}/tree" ]]; then
