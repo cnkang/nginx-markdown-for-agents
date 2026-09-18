@@ -249,8 +249,8 @@ resolve_deployment_container_index() {
         name_index=$((name_index + 1))
     done <<< "$container_names"
 
-    printf '0\n'
-    return 0
+    log_error "container '${DEPLOYMENT_NAME}' is not present in the deployment spec; refusing to default to container index 0"
+    return 1
 }
 
 # Build a JSON Patch for the named ConfigMap volume and its first mount.
@@ -380,7 +380,8 @@ ensure_deployment_configmap_mount() {
     container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    container_index="$(resolve_deployment_container_index "$container_names")"
+    container_index="$(resolve_deployment_container_index "$container_names")" \
+        || return 1
 
     mount_index=-1
     mount_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
@@ -579,9 +580,8 @@ $DEPLOYMENT_NAME")"
         return 1
     fi
 
-    container_index="$(resolve_deployment_container_index "sidecar")"
-    if [[ "$container_index" != "0" ]]; then
-        log_error "Missing container name fallback returned '$container_index', expected 0"
+    if resolve_deployment_container_index "sidecar" >/dev/null 2>&1; then
+        log_error "an unmatched deployment name must fail container resolution"
         return 1
     fi
 
