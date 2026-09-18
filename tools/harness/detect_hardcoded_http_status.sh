@@ -54,7 +54,7 @@ done
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: directory not found: $SRC_DIR" >&2
-    exit 1
+    exit 2
 fi
 
 findings=0
