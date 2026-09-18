@@ -288,6 +288,11 @@ mask_command_text() {
     local prev_last
     local next_ch
     local sub_depth=0
+    local commandword
+    # Command-position separator tail: start of text or a separator followed
+    # by whitespace only.  Kept in a variable so the regex never collides
+    # with shell tokenization or static analysis.
+    local sep_re='(^|[;&|(])[[:space:]]*$'
 
     while [[ "$i" -lt "$n" ]]; do
         ch="${text:$i:1}"
@@ -321,7 +326,12 @@ mask_command_text() {
                 sub_depth=$((sub_depth - 1))
             fi
             if [[ "$ch" == '"' && "$sub_depth" -eq 0 ]]; then
-                if [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
+                if [[ "$out" =~ $sep_re ]] \
+                    || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                    # A double-quoted command word (`"sed"`) is executable
+                    # text at a command position: keep it visible.
+                    out+="$span"
+                elif [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
                     # Keep a double-quoted span whose substitutions run.
                     out+='"'"$span"'"'
                 else
@@ -361,6 +371,14 @@ mask_command_text() {
         fi
         if [[ "$ch" == "$quote" ]]; then
             evaluator=0
+            commandword=0
+            if [[ "$out" =~ $sep_re ]] \
+                || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                # Shell quoting is also valid around a command word
+                # (`'sed' -i ...`): the span names the command that runs,
+                # so its text must stay visible without the quotes.
+                commandword=1
+            fi
             if [[ "$quote" == "'" ]] \
                 && [[ "$out" =~ (^|[^A-Za-z0-9_])(eval|sh|bash|dash|env)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
                 # An evaluator command (eval/sh/bash/dash/env) executes its
@@ -382,7 +400,9 @@ mask_command_text() {
                 ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
                 *) fused=1 ;;
             esac
-            if [[ "$evaluator" -eq 1 ]]; then
+            if [[ "$commandword" -eq 1 ]]; then
+                out+="$span"
+            elif [[ "$evaluator" -eq 1 ]]; then
                 out+="'$span'"
             elif [[ "$fused" -eq 1 ]]; then
                 out+="x"
