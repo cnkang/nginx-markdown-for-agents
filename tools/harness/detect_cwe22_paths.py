@@ -741,13 +741,20 @@ def _has_complex_open_argument(
     return False
 
 
-def _emit_unaudited_warning(warnings: list[str], rel: str, lineno: int) -> None:
-    """Report an unresolved dynamic open() argument as unaudited."""
+def _emit_unaudited_warning(
+    warnings: list[str], rel: str, lineno: int, call_text: str = "",
+) -> None:
+    """Report an unresolved dynamic open() argument as unaudited.
+
+    *call_text* names the exact call the warning belongs to, so a line
+    carrying several open() calls cannot misattribute the finding.
+    """
+    suffix = f" — call: {call_text}" if call_text else ""
     warnings.append(
         f"  WARNING {rel}:{lineno} — open() path argument is a "
         f"dynamic expression the detector cannot statically "
         f"resolve; review the expression for user-derived "
-        f"components and pass it through validate_read_path()"
+        f"components and pass it through validate_read_path(){suffix}"
     )
 
 
@@ -911,7 +918,12 @@ def _scan_single_open_match(
         if _has_complex_open_argument(
             line[open_match.start():segment_end], quote_at_match
         ):
-            _emit_unaudited_warning(match_warnings, state.rel, lineno)
+            _emit_unaudited_warning(
+                match_warnings,
+                state.rel,
+                lineno,
+                line[open_match.start():segment_end].strip()[:80],
+            )
         return match_errors, match_warnings
 
     call_errors, call_warnings = _classify_open_call(

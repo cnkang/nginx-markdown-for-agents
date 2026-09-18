@@ -278,6 +278,7 @@ def test_later_call_does_not_warn_for_earlier_literal(tmp_path):
 
     assert errors == []
     assert len(warnings) == 1
+    assert "open(f'{base}/b.txt')" in warnings[0]
 
 
 def test_dynamic_call_after_multiline_string_close_is_detected(tmp_path):
