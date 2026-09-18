@@ -123,7 +123,7 @@ fi
 # proxy_pass_trailers requires NGINX 1.27.2 or newer; older supported
 # binaries cannot load this fixture configuration at all.
 nginx_version_raw="$("${NGINX_BIN}" -v 2>&1 || true)"
-nginx_version_num="$(printf '%s' "${nginx_version_raw}" | sed -n 's/.*nginx\/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+nginx_version_num="$(printf '%s' "${nginx_version_raw}" | sed -n 's/.*nginx\/\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
 if [[ -z "${nginx_version_num}" ]]; then
     echo "ERROR: cannot determine the NGINX version from: ${nginx_version_raw}" >&2
     exit 2

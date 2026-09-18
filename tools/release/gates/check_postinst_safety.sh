@@ -288,6 +288,7 @@ mask_command_text() {
     local prev_last
     local next_ch
     local sub_depth=0
+    local evaluator
     local commandword
     # Command-position separator tail: start of text or a separator followed
     # by whitespace only.  Kept in a variable so the regex never collides

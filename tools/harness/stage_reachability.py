@@ -351,6 +351,7 @@ def _directly_broken_targets(
 def _broken_targets(
     dependencies: dict[str, list[str]], recipes: dict[str, list[tuple[int, str | None]]],
     root: Path | None = None,
+    uncertain_targets: set[str] | None = None,
 ) -> set[str]:
     """Targets whose prerequisites leave the declared graph, transitively.
 
@@ -363,6 +364,9 @@ def _broken_targets(
     """
     declared = set(dependencies) | set(recipes)
     broken = _directly_broken_targets(dependencies, root, declared)
+    # A target defined inside an unevaluated conditional branch has an
+    # uncertain prerequisite list, so nothing may certify it as reachable.
+    broken |= set(uncertain_targets or ())
     changed = True
     while changed:
         changed = False
@@ -442,6 +446,7 @@ def _poison_conditional_line(
     variables: dict[str, str],
     simple: set[str],
     unknown: set[str],
+    uncertain_targets: set[str],
     generation: dict[str, int],
     recipes: dict[str, list[tuple[int, str | None]]],
 ) -> None:
@@ -464,7 +469,7 @@ def _poison_conditional_line(
     # The branch may or may not run, so both the recipe and the prerequisite
     # list of the target are uncertain: a target whose conditional
     # prerequisite is discarded could otherwise be certified as reachable.
-    unknown.add(redefined[0])
+    uncertain_targets.add(redefined[0])
     generation[redefined[0]] = generation.get(redefined[0], 0) + 1
     recipes.setdefault(redefined[0], []).append(
         (generation[redefined[0]], None)
@@ -478,6 +483,7 @@ def _make_nodes(
     dict[str, list[tuple[int, str | None]]],
     dict[str, str],
     set[str],
+    set[str],
 ]:
     """Collect target prerequisites and recipes from the root Makefile."""
     dependencies: dict[str, list[str]] = {}
@@ -488,6 +494,7 @@ def _make_nodes(
     conditionals = 0
     simple: set[str] = set()
     unknown: set[str] = set()
+    uncertain_targets: set[str] = set()
     for line in text.replace("\\\n", " ").splitlines():
         if _make_include_line(line):
             raise ValueError("cannot verify included makefile")
@@ -502,7 +509,8 @@ def _make_nodes(
             # Both are dropped here, before a later declaration could rely on
             # the value or the recipe from outside the branch.
             _poison_conditional_line(
-                line, variables, simple, unknown, generation, recipes
+                line, variables, simple, unknown, uncertain_targets,
+                generation, recipes
             )
             continue
         current = _consume_make_line(
@@ -517,7 +525,7 @@ def _make_nodes(
         )
     if conditionals:
         raise ValueError("unclosed make conditional")
-    return dependencies, recipes, variables, unknown
+    return dependencies, recipes, variables, unknown, uncertain_targets
 
 
 def _ignored_targets(dependencies: dict[str, list[str]]) -> set[str]:
@@ -551,9 +559,11 @@ def reachable_commands(makefile: str, entries: list[str], profile: str,
     When *root* is given, prerequisites that name existing files under it are
     satisfied leaves; without it, only declared targets satisfy prerequisites.
     """
-    dependencies, recipes, variables, unknown = _make_nodes(makefile)
+    dependencies, recipes, variables, unknown, uncertain_targets = (
+        _make_nodes(makefile)
+    )
     ignored = _ignored_targets(dependencies)
-    broken = _broken_targets(dependencies, recipes, root)
+    broken = _broken_targets(dependencies, recipes, root, uncertain_targets)
     pending = list(entries)
     visited: set[str] = set()
     reached: list[str] = []

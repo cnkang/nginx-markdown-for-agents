@@ -370,11 +370,15 @@ def _comment_starts_at(segment: str, index: int) -> bool:
 
 def _redirect_here(segment: str, index: int) -> bool:
     """True when an unquoted ``>>`` at *index* redirects to $GITHUB_OUTPUT."""
-    if index > 0 and segment[index - 1] in "023456789>":
-        # `2>>`, `0>>`, or a third `>` name a different descriptor: only a
-        # plain stdout append (`>>`) or its explicit form (`1>>`) redirects
-        # to $GITHUB_OUTPUT.
+    if index > 0 and segment[index - 1] == ">":
         return False
+    if index > 0 and segment[index - 1].isdigit():
+        start = index - 1
+        if start == 0 or segment[start - 1] in " \t;|&(":
+            # A descriptor digit that begins a token (`2>> ...`, `; 3>> ...`)
+            # names a different descriptor; a digit embedded in a value
+            # (`enabled=2>>`) is plain text and may still append stdout.
+            return False
     return (
         segment[index] == ">"
         and segment[index + 1] == ">"
