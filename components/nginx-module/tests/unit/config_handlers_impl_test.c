@@ -540,6 +540,14 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
             } else if (*(fmt + 2) == 'z') {
                 uval = va_arg(ap, size_t);
                 fmt += 3;
+            } else if (*(fmt + 2) == 'd' || *(fmt + 2) == 'D'
+                       || *(fmt + 2) == 'L' || *(fmt + 2) == 'A') {
+                uval = va_arg(ap, unsigned long);
+                fmt += 3;
+            } else if ((*(fmt + 2) >= 'a' && *(fmt + 2) <= 'z')
+                       || (*(fmt + 2) >= 'A' && *(fmt + 2) <= 'Z')) {
+                /* An unknown size letter must not be misread as text. */
+                abort();
             } else {
                 uval = va_arg(ap, unsigned int);
                 fmt += 2;
