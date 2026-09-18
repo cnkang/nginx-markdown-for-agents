@@ -36,7 +36,7 @@ streaming definition and updated threshold.
 
 ## Decision
 
-When the operator selects `auto`, the RFC 0008 section 2.1 policy applies:
+When the operator selects `auto`, the RFC 0008 sections 2.1–2.2 policy applies:
 
 1. Under `markdown_streaming auto`, every response that clears the hard
    eligibility gates is a streaming candidate. `conversion_memory` and the
