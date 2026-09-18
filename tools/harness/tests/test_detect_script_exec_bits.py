@@ -221,3 +221,43 @@ def test_bare_path_after_env_wrapper_requires_exec_bit(tmp_path):
     _add(repo, "tools/x.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 1
+
+
+def test_control_prefix_reference_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          if ./tools/x.sh --profile smoke; then\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_assignment_before_wrapper_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          FOO=1 env ./tools/x.sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_separator_attached_reference_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          cmd;./tools/x.sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_command_substitution_reference_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          x=$(./tools/x.sh)\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_exec_dash_a_argument_does_not_require_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          exec -a tools/x.sh /bin/sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 0
