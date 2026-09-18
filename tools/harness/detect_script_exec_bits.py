@@ -21,6 +21,31 @@ Only the git index mode is authoritative: the file must be recorded as
 100755.  Paths that are not tracked are skipped (the scratch-file gate
 covers those), and non-regular entries (symlinks) are skipped as well.
 
+Supported grammar (the unit-test suite is the normative spec)
+  1. `./relative/script` references: at line start, after a shell
+     separator (`;` `&&` `||` `|` `|&` `&` `(` `)` `{` `}`), after YAML
+     `run:` (block and single-line `- run:` forms), inside double-quoted
+     command substitutions and backticks, and as a quoted command word
+     (`"./script"` executes after quote removal).
+  2. bare `tools/...` style command words in the same positions, with
+     Make recipe prefixes (`@` `+` `-`) stripped.
+  3. execution wrappers (`env`, `exec`, `command`, `sudo`, `timeout`,
+     `nice`, `nohup`, `xargs`, `eval` — including their option arities
+     and `--`) and shell interpreters (`bash` `sh` `zsh` `dash`,
+     including `-c` command strings).
+  4. data positions are exempt: quoted arguments and assignment values,
+     `case` patterns, array-assignment elements, redirection targets,
+     `command -v` queries, arguments of any other command, interpreter
+     inputs, and continued pytest-style argument lists.
+
+Bounded scope: this gate is a focused scanner, not a full shell lexer.
+Forms outside the list above (for example escaped delimiters inside
+f-strings of surrounding syntax, exotic wrapper option arities) may be
+missed; the audit errs toward skip (no false release blocks).  The live
+scan of this repository covers every reference it uses.  When a new
+shell form enters the workflows, extend the scanner and its tests in
+the same change (the tests are the specification).
+
 Usage:
     python3 tools/harness/detect_script_exec_bits.py
 

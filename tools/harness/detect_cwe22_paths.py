@@ -26,6 +26,14 @@ Usage:
 Exit codes:
     0 — no findings (or only allowlisted patterns)
     1 — one or more findings requiring review
+
+Bounded scope for f-strings: an `open()` sits in executable code when it
+is inside a single-line f-string replacement field, or inside an open
+triple-quoted f-string whose running replacement-field depth (carried
+across lines) is above zero at that position.  Quoted field contents are
+audited through the same argument classifiers as ordinary calls.  Forms
+outside this model (for example escaped delimiters that shift field
+boundaries) may be missed; the unit-test suite is the normative spec.
 """
 
 from __future__ import annotations
