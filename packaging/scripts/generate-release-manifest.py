@@ -320,6 +320,17 @@ def build_manifest(
         if not detected_version and entry.get("version"):
             detected_version = entry["version"]
 
+    versioned = {
+        entry["version"] for entry in packages if entry.get("version")
+    }
+    if len(versioned) > 1:
+        print(
+            "ERROR: package artifacts disagree on the project version: "
+            + ", ".join(sorted(versioned)),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     if not detected_version:
         print("ERROR: Could not determine package version", file=sys.stderr)
         raise SystemExit(1)
