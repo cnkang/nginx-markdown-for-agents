@@ -119,6 +119,23 @@ if [[ ! -x "${NGINX_BIN}" ]]; then
     echo "NGINX_BIN is not executable: ${NGINX_BIN}" >&2
     exit 2
 fi
+
+# proxy_pass_trailers requires NGINX 1.27.2 or newer; older supported
+# binaries cannot load this fixture configuration at all.
+nginx_version_raw="$("${NGINX_BIN}" -v 2>&1 || true)"
+nginx_version_num="$(printf '%s' "${nginx_version_raw}" | sed -n 's/.*nginx\/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+if [[ -z "${nginx_version_num}" ]]; then
+    echo "ERROR: cannot determine the NGINX version from: ${nginx_version_raw}" >&2
+    exit 2
+fi
+version_at_least() {
+    local want="$1"
+    [[ "$(printf '%s\n%s\n' "${nginx_version_num}" "${want}" | sort -V | head -1)" == "${want}" ]]
+}
+if ! version_at_least "1.27.2"; then
+    echo "SKIP: upstream-trailer qualification requires NGINX >= 1.27.2; this binary is ${nginx_version_num}"
+    exit 0
+fi
 if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65534 )); then
     echo "PORT must be an integer between 1024 and 65534 (UPSTREAM_PORT=PORT+1): ${PORT}" >&2
     exit 2
@@ -209,11 +226,17 @@ http {
             proxy_pass http://trailer_backend/trailers;
             # Forward upstream trailers to the client on the raw path so the
             # sanity pass can prove the fixture really emits them.
+            proxy_http_version 1.1;
+            proxy_set_header Connection "te";
+            proxy_set_header TE "trailers";
             proxy_pass_trailers on;
         }
 
         location = /trailers-md {
             proxy_pass http://trailer_backend/trailers;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "te";
+            proxy_set_header TE "trailers";
             proxy_pass_trailers on;
             proxy_set_header Accept "text/markdown";
             markdown_filter on;
