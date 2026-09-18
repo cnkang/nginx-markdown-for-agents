@@ -890,6 +890,41 @@ class TestGateNamePattern:
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == set()
 
+    def test_gate_equality_needs_the_literal_true_on_the_other_side(self) -> None:
+        """`ref == <anything but literal true>` compares the value without
+        requiring it, so it must not count as positive wiring."""
+        assert not secret_scope_module._references_gate(
+            "steps.gate.outputs.enabled == inputs.mode", "gate", {"enabled"}
+        )
+        assert not secret_scope_module._references_gate(
+            'steps.gate.outputs.enabled == "true_or_more"',
+            "gate",
+            {"enabled"},
+        )
+        assert secret_scope_module._references_gate(
+            "steps.gate.outputs.enabled == 'true'", "gate", {"enabled"}
+        )
+
+    def test_descriptor_and_name_prefixed_redirects_do_not_count(self) -> None:
+        """`2>>` and `$GITHUB_OUTPUT_BACKUP` are not stdout appends to the
+        gate output, so the wrapped gate must not be certified."""
+        for line in (
+            'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
+        ):
+            pass
+        lines = [
+            'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
+            '  echo text=1 2>> "$GITHUB_OUTPUT"\n',
+            'fi\n',
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 3) == set()
+        lines = [
+            'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
+            '  echo text=1 >> "$GITHUB_OUTPUT_BACKUP"\n',
+            'fi\n',
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 3) == set()
+
     def test_escaped_separators_are_literal_arguments(self) -> None:
         """`\\;` outside quotes is an argument, not a command separator:
         the gate must come from the echo that owns the redirection."""

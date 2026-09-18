@@ -256,6 +256,7 @@ rc3_stub="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub3.XXXXXX")"
 rc3_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc3.XXXXXX")"
 mkdir -p "${rc3_src}/src"
 printf 'static void f(void) {}\n' >"${rc3_src}/src/caller.c"
+real_grep="$(command -v grep)"
 cat >"${rc3_stub}/grep" <<'STUB'
 #!/bin/bash
 for arg in "$@"; do
@@ -264,11 +265,11 @@ for arg in "$@"; do
         exit 3
     fi
 done
-exec /usr/bin/grep "$@"
+exec "${STUB_REAL_GREP:?}" "$@"
 STUB
 chmod +x "${rc3_stub}/grep"
 exit_code=0
-PATH="${rc3_stub}:${PATH}" bash "${DETECTOR}" "${rc3_src}" >"${rc3_src}/out.txt" 2>&1 || exit_code=$?
+STUB_REAL_GREP="${real_grep}" PATH="${rc3_stub}:${PATH}" bash "${DETECTOR}" "${rc3_src}" >"${rc3_src}/out.txt" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed scanning' "${rc3_src}/out.txt"; then
     pass "a grep exit code above 1 aborts as a setup failure"
 else
