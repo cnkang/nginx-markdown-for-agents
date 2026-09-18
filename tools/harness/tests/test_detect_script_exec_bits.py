@@ -213,3 +213,11 @@ def test_command_v_query_does_not_require_exec_bit(tmp_path):
     _add(repo, "tools/x.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 0
+
+
+def test_bare_path_after_env_wrapper_requires_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          env tools/x.sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
