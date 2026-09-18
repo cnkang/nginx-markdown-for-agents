@@ -811,10 +811,6 @@ def _classify_open_match(
     if (prev_char.isalnum() or prev_char == "_") and matched.startswith("open"):
         return prev_char, "skip"
     if prev_nonspace == ".":
-        if re.match(
-            r"os\.$", line[max(0, look - 2):look + 1]
-        ):
-            return prev_char, "duplicate"
         return prev_char, "receiver"
     if (prev_char.isalnum() or prev_char == "_") and matched.startswith("os."):
         return prev_char, "receiver"

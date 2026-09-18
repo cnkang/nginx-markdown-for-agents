@@ -24,7 +24,7 @@ def _advance_scan(
     if in_comment:
         return index + 1, quote, char != "\n"
     if quote:
-        if char == "\\" and quote == '"' and index + 1 < len(script):
+        if char == "\\" and index + 1 < len(script):
             return index + 2, quote, False
         return index + 1, "" if char == quote else quote, False
     if char == "#":
@@ -178,4 +178,17 @@ def test_braces_inside_comments_do_not_close_the_block() -> None:
 
     blocks = _conflicting_location_blocks(script)
 
+    assert len(blocks) == 1
+
+def test_escaped_single_quote_inside_location_argument_is_skipped() -> None:
+    """A backslash escapes the following character inside single quotes too,
+    so an escaped quote cannot terminate the scanner's quote state."""
+    escaped = chr(92) + "'"
+    script = (
+        "location ~ 'a" + escaped + "b{' {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(script)
     assert len(blocks) == 1
