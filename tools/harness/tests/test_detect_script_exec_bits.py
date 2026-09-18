@@ -165,3 +165,27 @@ def test_argument_token_is_not_a_command_word(tmp_path):
     _add(repo, "tools/y.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 0
+
+
+def test_direct_reference_as_argument_is_not_flagged(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          echo ./tools/x.sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_direct_reference_after_separator_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          cd sub && ./tools/x.sh\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_command_wrapper_requires_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          command ./tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
