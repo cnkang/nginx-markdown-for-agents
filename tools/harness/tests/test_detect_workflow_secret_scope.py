@@ -931,6 +931,7 @@ class TestGateNamePattern:
             '>> "$GITHUB_OUTPUT/foo"',
             '>> "${GITHUB_OUTPUT}-BACKUP"',
             '>> "$GITHUB_OUTPUT.foo"',
+            '>> "$GITHUB_OUTPUT:BACKUP"',
         )
         for redirect in spellings:
             lines = [
@@ -949,6 +950,13 @@ class TestGateNamePattern:
             'echo gate=true \\; echo ready=go >> "$GITHUB_OUTPUT"\n'
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == {"gate"}
+
+    def test_a_comment_after_a_separator_cannot_fabricate_gates(self) -> None:
+        """';#' starts a comment, so the commented echo cannot publish a gate."""
+        lines = [
+            'true;# c; echo fake=1 >> "$GITHUB_OUTPUT"' + chr(92) + 'n',
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == set()
 
     def test_separators_inside_a_comment_cannot_fabricate_gates(self) -> None:
         """Text after an unquoted `#` is not executable: a chained fake gate

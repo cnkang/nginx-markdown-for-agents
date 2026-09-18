@@ -572,6 +572,19 @@ if [[ -n "$mask_fn" ]]; then
         fail "mask still blanks a quoted argument outside command position" "got: $masked"
     fi
 
+    masked=$(mask_command_text 'eval "sed -i x f"')
+    if [[ "$masked" == *"sed -i x f"* ]]; then
+        pass "mask keeps an eval double-quoted command string visible"
+    else
+        fail "mask keeps an eval double-quoted command string visible" "got '$masked'"
+    fi
+    masked=$(mask_command_text 'sudo -u root 'sed'')
+    if [[ "$masked" == *"sudo -u root sed"* ]]; then
+        pass "mask keeps a quoted command word after a wrapper operand visible"
+    else
+        fail "mask keeps a quoted command word after a wrapper operand visible" "got '$masked'"
+    fi
+
     masked="$(mask_command_text "bash -c 'sed -i x f'")"
     if [[ "$masked" == "bash -c 'sed -i x f'" ]]; then
         pass "mask keeps an evaluator's single-quoted command string visible"
