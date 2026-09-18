@@ -21,7 +21,9 @@ SONAR_SECRET_EXPRESSION = re.compile(
 )
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
-GITHUB_OUTPUT_RE = re.compile(r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?")
+GITHUB_OUTPUT_RE = re.compile(
+    r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?(?![A-Za-z0-9_])"
+)
 # A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
 # (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
 # NAME=value assignment after `echo`.  The value tail is anchored by the
@@ -368,6 +370,11 @@ def _comment_starts_at(segment: str, index: int) -> bool:
 
 def _redirect_here(segment: str, index: int) -> bool:
     """True when an unquoted ``>>`` at *index* redirects to $GITHUB_OUTPUT."""
+    if index > 0 and segment[index - 1] in "023456789>":
+        # `2>>`, `0>>`, or a third `>` name a different descriptor: only a
+        # plain stdout append (`>>`) or its explicit form (`1>>`) redirects
+        # to $GITHUB_OUTPUT.
+        return False
     return (
         segment[index] == ">"
         and segment[index + 1] == ">"
@@ -518,14 +525,16 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
     negative a separate, real occurrence.
     """
     after = if_value[match.end():]
-    stripped = after.lstrip()
+    stripped = after.lstrip().lstrip("}\"'" + "'")
     if stripped.startswith("!="):
         return True
-    if (
-        stripped.startswith("==")
-        and stripped[2:].lstrip().lstrip("'\"").startswith("false")
-    ):
-        return True
+    if stripped.startswith("=="):
+        operand = stripped[2:].lstrip()
+        if not re.match(r"(?:'true'|\"true\"|true)(?![A-Za-z0-9_])", operand):
+            # `ref == X` is a positive requirement only when X is the literal
+            # true.  A false literal, a property, or any other expression
+            # compares the gate's value without requiring it.
+            return True
 
     before = if_value[: match.start()]
     if re.search(r"!\s*(?:\(+\s*)?$", before):

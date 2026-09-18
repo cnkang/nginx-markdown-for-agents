@@ -441,14 +441,21 @@ def _poison_conditional_line(
     line: str,
     variables: dict[str, str],
     simple: set[str],
+    unknown: set[str],
     generation: dict[str, int],
     recipes: dict[str, list[tuple[int, str | None]]],
 ) -> None:
-    """Discard uncertain assignments and recipes from a conditional branch."""
+    """Discard uncertain assignments and recipes from a conditional branch.
+
+    The name joins *unknown*: the branch may or may not run, so a target
+    that references the variable must stay uncertifiable instead of
+    resolving to either branch value.
+    """
     poisoned = _assignment(_strip_assignment_prefixes(line.strip()))
     if poisoned is not None:
         variables.pop(poisoned[0], None)
         simple.discard(poisoned[0])
+        unknown.add(poisoned[0])
     redefined = _target(line.strip())
     if redefined is None:
         return
@@ -491,7 +498,7 @@ def _make_nodes(
             # Both are dropped here, before a later declaration could rely on
             # the value or the recipe from outside the branch.
             _poison_conditional_line(
-                line, variables, simple, generation, recipes
+                line, variables, simple, unknown, generation, recipes
             )
             continue
         current = _consume_make_line(
