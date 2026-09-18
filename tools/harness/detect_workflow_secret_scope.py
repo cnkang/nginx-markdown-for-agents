@@ -37,7 +37,7 @@ GITHUB_OUTPUT_RE = re.compile(
 # unquoted command segments first, so a quoted value that contains
 # separators cannot fabricate a gate assignment.
 GATE_NAME_RE = re.compile(
-    r'^\s*(?:then\s+)?echo(?:\s+-[A-Za-z-]+)*\s+["\']?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>'
+    r'^\s*(?:then\s+)?echo(?: -[A-Za-z]+)?\s+["\']?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>'
 )
 STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
