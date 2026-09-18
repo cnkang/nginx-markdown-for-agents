@@ -34,6 +34,28 @@ def _advance_scan(
     return index + 1, "", False
 
 
+def _mask_step(
+    script: str, index: int, quote: str, in_comment: bool
+) -> tuple[int, str, bool, bool]:
+    """One masking step; returns (next index, quote, comment, blank this char)."""
+    char = script[index]
+    if in_comment:
+        if char == "\n":
+            return index + 1, quote, False, False
+        return index + 1, quote, True, True
+    if quote:
+        if char == "\\" and index + 1 < len(script):
+            return index + 2, quote, False, False
+        if char == quote:
+            return index + 1, "", False, False
+        return index + 1, quote, False, False
+    if char == "#":
+        return index + 1, "", True, True
+    if char in "\"'":
+        return index + 1, char, False, False
+    return index + 1, "", False, False
+
+
 def _mask_comments(script: str) -> str:
     """Blank comment text (quote-aware) so only active content is matched."""
     out = list(script)
@@ -41,28 +63,11 @@ def _mask_comments(script: str) -> str:
     in_comment = False
     index = 0
     while index < len(script):
-        char = script[index]
-        if in_comment:
-            if char == "\n":
-                in_comment = False
-            else:
-                out[index] = " "
-            index += 1
-            continue
-        if quote:
-            if char == "\\" and index + 1 < len(script):
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            index += 1
-            continue
-        if char == "#":
-            in_comment = True
-            out[index] = " "
-        elif char in "\"'":
-            quote = char
-        index += 1
+        index, quote, in_comment, blank = _mask_step(
+            script, index, quote, in_comment
+        )
+        if blank:
+            out[index - 1] = " "
     return "".join(out)
 
 
