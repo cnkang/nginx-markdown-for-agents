@@ -4141,9 +4141,9 @@ test_zlib_like_raw_deflate_prefix_fails_closed(void)
     compressed = ngx_palloc(&tp.pool, compressed_size);
     TEST_ASSERT(compressed != NULL, "ambiguous fixture allocation");
 
-    /* First raw stored block: LEN=0x0a9c, NLEN=0xf563; the trailing empty
-     * stored block completes the raw stream.  The 78 9c prefix is also a
-     * valid zlib header, so the streaming sniff commits to wrapped mode. */
+    /* The 78 9c prefix is also a valid zlib header, so the streaming sniff
+     * commits to wrapped mode; the bytes that follow do not form a valid
+     * wrapped stream, so the feed must end in a format error. */
     compressed[0] = 0x78;
     compressed[1] = 0x9c;
     compressed[2] = 0x0a;

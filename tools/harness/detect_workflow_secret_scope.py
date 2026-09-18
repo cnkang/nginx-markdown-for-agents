@@ -525,7 +525,7 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
     negative a separate, real occurrence.
     """
     after = if_value[match.end():]
-    stripped = after.lstrip().lstrip("}\"'" + "'")
+    stripped = after.lstrip().lstrip("}\"'" + "'").lstrip()
     if stripped.startswith("!="):
         return True
     if stripped.startswith("=="):
