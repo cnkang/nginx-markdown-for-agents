@@ -251,6 +251,32 @@ else
 fi
 rm -rf "${per_stub_dir}" "${per_api_tmp}" "${per_api_src}"
 
+# 2c. Any grep exit code above 1 must abort the scan as a setup failure.
+rc3_stub="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub3.XXXXXX")"
+rc3_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc3.XXXXXX")"
+mkdir -p "${rc3_src}/src"
+printf 'static void f(void) {}\n' >"${rc3_src}/src/caller.c"
+cat >"${rc3_stub}/grep" <<'STUB'
+#!/bin/bash
+for arg in "$@"; do
+    if [[ "$arg" == *ngx_http_markdown_forward_headers* ]]; then
+        echo "grep: simulated failure" >&2
+        exit 3
+    fi
+done
+exec /usr/bin/grep "$@"
+STUB
+chmod +x "${rc3_stub}/grep"
+exit_code=0
+PATH="${rc3_stub}:${PATH}" bash "${DETECTOR}" "${rc3_src}" >"${rc3_src}/out.txt" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed scanning' "${rc3_src}/out.txt"; then
+    pass "a grep exit code above 1 aborts as a setup failure"
+else
+    fail "a grep exit code above 1 aborts as a setup failure" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${rc3_src}/out.txt" | head -c 120)"
+fi
+rm -rf "${rc3_stub}" "${rc3_src}"
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1
