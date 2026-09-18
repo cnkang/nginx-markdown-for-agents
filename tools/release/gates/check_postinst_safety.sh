@@ -332,6 +332,11 @@ mask_command_text() {
                     # A double-quoted command word (`"sed"`) is executable
                     # text at a command position: keep it visible.
                     out+="$span"
+                elif [[ "$out" =~ (^|[^A-Za-z0-9_])(eval|sh|bash|dash|env)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                    # An evaluator command executes its double-quoted
+                    # argument as a command string: keep the span and its
+                    # double-quote delimiters visible.
+                    out+="\"$span\""
                 elif [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
                     # Keep a double-quoted span whose substitutions run.
                     out+='"'"$span"'"'

@@ -584,6 +584,12 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps an extreme nested substitution visible (conservative direction)" "got '$masked'"
     fi
+    masked="$(mask_command_text 'bash -c "sed -i x f"')"
+    if [[ "$masked" == *'"sed -i x f"'* ]]; then
+        pass "mask keeps an evaluator's double-quoted command string visible"
+    else
+        fail "mask keeps an evaluator's double-quoted command string visible" "got '$masked'"
+    fi
     masked="$(mask_command_text '"$(sed "s/a/b/" f)"')"
     if [[ "$masked" == *'sed'* ]]; then
         pass "mask keeps a nested external command word visible"
