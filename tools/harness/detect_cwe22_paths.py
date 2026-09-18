@@ -896,7 +896,9 @@ def _scan_single_open_match(
         # extractor cannot resolve (f-string, concatenation, call
         # result, Path() wrap) is an unaudited sink, not a skip: a
         # dynamic expression may embed user-derived components.
-        if _has_complex_open_argument(line, state.open_quote):
+        if _has_complex_open_argument(
+            line[open_match.start():segment_end], state.open_quote
+        ):
             _emit_unaudited_warning(match_warnings, state.rel, lineno)
         return match_errors, match_warnings
 

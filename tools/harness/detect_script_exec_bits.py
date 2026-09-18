@@ -36,14 +36,36 @@ from pathlib import Path
 
 SCRIPT_SUFFIX = re.compile(r"\.(sh|py)$")
 DIRECT_REF = re.compile(r"(?:^|[\s;&|(])\./([A-Za-z0-9_./-]+\.(?:sh|py))(?=[\s;&|)]|$)")
-BARE_REF = re.compile(r"^([A-Za-z0-9_-]+/(?:[A-Za-z0-9_./-]+)\.(?:sh|py))(?=[\s;&|)]|$)")
-INTERPRETER_PREFIX = re.compile(r"(?:^|[\s;&|(])(?:bash|sh|zsh|dash|python|python3|env|exec|command)\s+$")
+BARE_REF = re.compile(
+    r"(?:^|[\s;&|(])([A-Za-z0-9_-]+/(?:[A-Za-z0-9_./-]+)\.(?:sh|py))(?=[\s;&|)]|$)"
+)
+# bash/sh/... open the script as input and work without the bit; env and
+# exec run the script itself, so they keep the strict requirement.
+INTERPRETERS = ("bash", "sh", "zsh", "dash", "python", "python3")
+INTERPRETER_PREFIX = re.compile(
+    r"(?:^|[\s;&|(])(?:bash|sh|zsh|dash|python|python3)\s+$"
+)
+SEGMENT_SPLIT = re.compile(r"(?:;|&&|\|\||\||\()")
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def _bare_is_command_word(line: str, match: re.Match[str]) -> bool:
-    """True when the bare path is the command word, not an argument."""
-    prefix = line[: match.start(1)].strip()
-    return not prefix.split() or line.startswith("\t") or "run:" in prefix
+    """True when the bare path is the command word, not an argument.
+
+    Recognizes a bare `tools/...` style path at a command position: the
+    start of the line, after a shell separator, after YAML `run:` (also
+    the `- run:` list form), or after leading environment assignments.
+    """
+    segment = SEGMENT_SPLIT.split(line[: match.start()])[-1].strip()
+    segment = segment.removeprefix("- ").strip()
+    if segment.startswith("run:"):
+        segment = segment[4:].strip()
+    tokens = segment.split()
+    if not tokens:
+        return True
+    if tokens[0] in INTERPRETERS:
+        return False
+    return all(ASSIGNMENT.match(token) for token in tokens)
 
 
 def _line_refs(line: str, continuation: bool) -> list[str]:
@@ -55,13 +77,15 @@ def _line_refs(line: str, continuation: bool) -> list[str]:
     refs = [
         match.group(1)
         for match in DIRECT_REF.finditer(line)
-        if not INTERPRETER_PREFIX.search(line[: match.start()])
+        if not INTERPRETER_PREFIX.search(line[: match.start() + 1])
     ]
     if continuation:
         return refs
-    bare = BARE_REF.match(line)
-    if bare and _bare_is_command_word(line, bare):
-        refs.append(bare.group(1))
+    refs.extend(
+        match.group(1)
+        for match in BARE_REF.finditer(line)
+        if _bare_is_command_word(line, match)
+    )
     return refs
 
 
