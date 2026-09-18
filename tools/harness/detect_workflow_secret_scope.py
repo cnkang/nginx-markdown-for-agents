@@ -21,8 +21,13 @@ SONAR_SECRET_EXPRESSION = re.compile(
 )
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
 # A run body publishes a gating value to the step output file.
+# Exactly the four spellings that write the real output file: quoted or
+# bare, braced or not.  The trailing lookahead rejects any suffix that
+# would turn the expansion into a different word (`$GITHUB_OUTPUT-BACKUP`,
+# `$GITHUB_OUTPUT/foo`, `$GITHUB_OUTPUT.foo`, `$GITHUB_OUTPUT_BACKUP`).
 GITHUB_OUTPUT_RE = re.compile(
-    r">>\s*\"?\$\{?GITHUB_OUTPUT\}?\"?(?![A-Za-z0-9_])"
+    r">>\s*(?:\"\$\{GITHUB_OUTPUT\}\"|\"\$GITHUB_OUTPUT\""
+    r"|\$\{GITHUB_OUTPUT\}|\$GITHUB_OUTPUT)(?![A-Za-z0-9_./-])"
 )
 # A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
 # (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
@@ -378,10 +383,13 @@ def _redirect_here(segment: str, index: int) -> bool:
         return False
     if index > 0 and segment[index - 1].isdigit():
         start = index - 1
+        while start > 0 and segment[start - 1].isdigit():
+            start -= 1
         if start == 0 or segment[start - 1] in " \t;|&(":
-            # A descriptor digit that begins a token (`2>> ...`, `; 3>> ...`)
-            # names a different descriptor; a digit embedded in a value
-            # (`enabled=2>>`) is plain text and may still append stdout.
+            # A descriptor token that begins at a word boundary (`2>> ...`,
+            # `10>> ...`, `; 3>> ...`) names a different descriptor; digits
+            # embedded in a value (`enabled=2>>`) stay plain text and may
+            # still append stdout.
             return False
     return (
         segment[index] == ">"
