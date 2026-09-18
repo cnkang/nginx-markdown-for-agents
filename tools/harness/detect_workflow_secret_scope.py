@@ -427,7 +427,7 @@ def _unquoted_redirect(segment: str) -> int | None:
             quote = char
             index += 1
             continue
-        if char == "\\" and index + 1 < length:
+        if char == "\\":
             index += 2
             continue
         if char == "#" and _comment_starts_at(segment, index):
