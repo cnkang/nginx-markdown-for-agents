@@ -216,8 +216,10 @@ wins.
 Parsing a body fails in four scenarios:
 
 - Empty input: Returns `ConversionError::InvalidInput`
-- Unsupported charset label: Returns `ConversionError::EncodingError`
-  (the module cannot map the label to a supported encoding)
+- Unsupported charset label in the Content-Type declaration: Returns
+  `ConversionError::EncodingError` (the module cannot map the label to a
+  supported encoding). An unsupported label in the HTML meta tag skips
+  instead, as described below
 - Invalid bytes for the declared charset: Returns `ConversionError::EncodingError`
 - Invalid UTF-8 bytes (declared or detected charset is UTF-8): Returns
   `ConversionError::EncodingError`

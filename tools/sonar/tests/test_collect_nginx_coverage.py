@@ -29,10 +29,20 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     ):
         depth = 1
         index = match.end()
+        quote = ""
         while index < len(script) and depth > 0:
-            if script[index] == "{":
+            char = script[index]
+            if quote:
+                if char == "\\" and index + 1 < len(script):
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = ""
+            elif char in "\"'":
+                quote = char
+            elif char == "{":
                 depth += 1
-            elif script[index] == "}":
+            elif char == "}":
                 depth -= 1
             index += 1
         blocks.append(script[match.start():index])

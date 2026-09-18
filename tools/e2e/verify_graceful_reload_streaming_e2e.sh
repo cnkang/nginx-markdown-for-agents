@@ -115,7 +115,7 @@ docker run -d --name "${CONTAINER}" \
 ready=0
 for _ in $(seq 1 50); do
     if curl -sS -H 'Accept: text/markdown' "${ENDPOINT}" 2>/dev/null \
-        | grep -q TAILMARKERPRESENT; then
+        | grep TAILMARKERPRESENT >/dev/null; then
         ready=1
         break
     fi
