@@ -37,8 +37,7 @@ The configuration uses template variables injected by the CI matrix:
 | `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NGINX_VERSION_CEIL` | Exclusive upper bound of the pinned NGINX version (X.Y.Z -> X.Y.Z+1) required by the DEB dependency interval | `1.26.4` |
-| `RPM_NGINX_EVR` | Exact RPM dependency epoch/version/release | `1:1.26.3` |
-| `RPM_NGINX_EVR_CEIL` | Exclusive upper RPM EVR bound for dependency checks | `1:1.26.4` |
+| `NGINX_VERSION` | Exact upstream version for the RPM dependency floor (the `%pre` scriptlet enforces the exact version) | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
 ### Building Packages Locally
@@ -51,8 +50,7 @@ export NGINX_VERSION_CEIL="$(awk 'BEGIN {
   split(ARGV[1], parts, ".");
   printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
 }' "${NGINX_VERSION}")"
-export RPM_NGINX_EVR="1:${NGINX_VERSION}"
-export RPM_NGINX_EVR_CEIL="1:${NGINX_VERSION_CEIL}"
+export NGINX_VERSION="1.26.3"
 export NFPM_ARCH="amd64"
 
 # Render the maintainer scripts before nFPM copies them into the package.

@@ -81,6 +81,13 @@ const _: () = assert!(
         && Eligibility::IneligibleConfig as u8 == ELIGIBILITY_VARIANT_COUNT - 1,
     "Eligibility discriminants must stay contiguous 0..ELIGIBILITY_VARIANT_COUNT"
 );
+/* Middle discriminants are part of the same FFI contract: pin a sample at
+ * compile time so a reorder fails the build, not a runtime test. */
+const _: () = assert!(Eligibility::IneligibleMethod as u8 == 1);
+const _: () = assert!(Eligibility::IneligibleStatus as u8 == 2);
+const _: () = assert!(Eligibility::IneligibleSize as u8 == 4);
+const _: () = assert!(Eligibility::IneligibleStreaming as u8 == 5);
+const _: () = assert!(Eligibility::IneligibleRange as u8 == 7);
 
 impl Eligibility {
     /// Stable reason string for logging/metrics (matches the C strings).

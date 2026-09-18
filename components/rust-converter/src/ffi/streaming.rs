@@ -545,10 +545,13 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
 /// Use this function when the conversion must be abandoned (e.g. client
 /// abort or unrecoverable error). This always consumes the handle.
 ///
-/// This is the only continuation that is valid after a failed
+/// This is the primary continuation after a failed
 /// [`markdown_streaming_feed`] (any non-`ERROR_SUCCESS` return), and it also
 /// releases a handle poisoned by a caught panic: poisoning only blocks
-/// further conversion work, never the free path.
+/// further conversion work, never the free path. After
+/// `ERROR_POST_COMMIT` (8) the commit contract additionally allows
+/// [`markdown_streaming_safe_finish`] to finalize the already-committed
+/// response; every other failure stays abort-only.
 ///
 /// Passing NULL is a safe no-op.
 ///

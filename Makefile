@@ -933,8 +933,6 @@ release-gates-check-070:
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
-				rpm_nginx_evr="$${RPM_NGINX_EVR:-$$nginx_version}"; \
-				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
@@ -948,12 +946,12 @@ release-gates-check-070:
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager deb \
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" RPM_NGINX_EVR_CEIL="$$rpm_nginx_evr_ceil" NFPM_ARCH="$$nfpm_arch" \
+					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \

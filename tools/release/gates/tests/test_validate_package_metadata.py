@@ -396,8 +396,7 @@ class TestReleaseGateSnippetExpectations:
         snippet matching.
         """
         assert "nginx (>= ${NGINX_VERSION})" not in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx >= ${RPM_NGINX_EVR}" in validator.NFPM_REQUIRED_SNIPPETS
-        assert "nginx < ${RPM_NGINX_EVR_CEIL}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx >= ${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
 
         nfpm_content = validator.NFPM_CONFIG.read_text(encoding="utf-8")
         contract_ok, contract_errors = validator.validate_nfpm_deb_dependency_contract(
