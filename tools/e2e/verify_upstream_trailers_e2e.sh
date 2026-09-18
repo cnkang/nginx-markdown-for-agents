@@ -130,7 +130,10 @@ if [[ -z "${nginx_version_num}" ]]; then
 fi
 version_at_least() {
     local want="$1"
-    [[ "$(printf '%s\n%s\n' "${nginx_version_num}" "${want}" | sort -V | head -1)" == "${want}" ]]
+    if [[ "$(printf '%s\n%s\n' "${nginx_version_num}" "${want}" | sort -V | head -1)" == "${want}" ]]; then
+        return 0
+    fi
+    return 1
 }
 if ! version_at_least "1.27.2"; then
     echo "SKIP: upstream-trailer qualification requires NGINX >= 1.27.2; this binary is ${nginx_version_num}"
