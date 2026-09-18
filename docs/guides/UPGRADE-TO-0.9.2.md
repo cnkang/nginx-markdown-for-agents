@@ -943,9 +943,11 @@ sudo nginx -t || {
   # report the manual-start diagnostic instead of silently continuing.
   if [[ "$systemd_managed" -eq 1 ]]; then
     if ! sudo systemctl start nginx; then
-      helper_status=0
+      helper_status=1
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
-        restore_previous_module_and_config || helper_status=$?
+        if restore_previous_module_and_config; then
+          helper_status=0
+        fi
       fi
       if [[ "$helper_status" -eq 0 ]]; then
         echo "INFO: the recovery helper restored and restarted the previous module and configuration" >&2
@@ -956,9 +958,11 @@ sudo nginx -t || {
     fi
   else
     if ! sudo nginx; then
-      helper_status=0
+      helper_status=1
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
-        restore_previous_module_and_config || helper_status=$?
+        if restore_previous_module_and_config; then
+          helper_status=0
+        fi
       fi
       if [[ "$helper_status" -eq 0 ]]; then
         echo "INFO: the recovery helper restored and restarted the previous module and configuration" >&2
