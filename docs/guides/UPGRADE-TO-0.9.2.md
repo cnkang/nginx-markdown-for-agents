@@ -941,7 +941,7 @@ sudo nginx -t || {
   # defines it; a standalone run of this block cannot define it, so it must
   # report the manual-start diagnostic instead of silently continuing.
   if [[ "$systemd_managed" -eq 1 ]]; then
-    if ! sudo systemctl start nginx; then
+    if ! sudo systemctl start nginx || ! nginx_master_running; then
       helper_status=1
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
         if restore_previous_module_and_config; then
@@ -956,7 +956,7 @@ sudo nginx -t || {
       exit 1
     fi
   else
-    if ! sudo nginx; then
+    if ! sudo nginx || ! nginx_master_running; then
       helper_status=1
       if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
         if restore_previous_module_and_config; then
@@ -979,17 +979,10 @@ sudo nginx -t || {
 # previous module and pre-migration configuration: the recovery helper lives in
 # the final upgrade block below, so the fallback here restores both halves
 # explicitly when it is not yet available.
-start_new_master() {
-  if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx || return 1
-  else
-    sudo nginx || return 1
-  fi
-  # A successful start command is not proof the MASTER is up: confirm the
-  # master process itself (systemd MainPID, or the configured PID file)
-  # with a bounded probe before continuing.  The caller's recovery block
-  # performs the rollback when this function returns nonzero.
-  local master_up=0
+# Bounded probe: is the NGINX MASTER process running?  systemd units are
+# checked through MainPID (numeric, and its command must be nginx); without
+# systemd the configured PID file must hold a live nginx process.
+nginx_master_running() {
   local probe_pid
   local pid_file="${NGINX_PID_FILE:-/run/nginx.pid}"
   for _ in $(seq 1 30); do
@@ -997,8 +990,7 @@ start_new_master() {
       probe_pid="$(sudo systemctl show nginx --property MainPID --value 2>/dev/null || true)"
       if [[ -n "$probe_pid" && "$probe_pid" != "0" ]] \
           && ps -p "$probe_pid" -o comm= 2>/dev/null | grep -qx nginx; then
-        master_up=1
-        break
+        return 0
       fi
     elif [[ -s "$pid_file" ]]; then
       probe_pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -1007,15 +999,27 @@ start_new_master() {
         *)
           if kill -0 "$probe_pid" 2>/dev/null \
               && ps -p "$probe_pid" -o comm= 2>/dev/null | grep -qx nginx; then
-            master_up=1
-            break
+            return 0
           fi
           ;;
       esac
     fi
     sleep 1
   done
-  if [[ "$master_up" -ne 1 ]]; then
+  return 1
+}
+
+
+start_new_master() {
+  if [[ "$systemd_managed" -eq 1 ]]; then
+    sudo systemctl start nginx || return 1
+  else
+    sudo nginx || return 1
+  fi
+  # A successful start command is not proof the MASTER is up: confirm the
+  # master process itself with the bounded probe before continuing.  The
+  # caller's recovery block performs the rollback on a nonzero return.
+  if ! nginx_master_running; then
     echo "ERROR: the NGINX master did not come up after the start command; start NGINX manually and check the error log" >&2
     return 1
   fi

@@ -66,6 +66,23 @@ def test_dotted_unvalidated_open_receiver_is_reported(tmp_path):
     assert warnings == []
 
 
+def test_space_padded_dotted_receiver_is_reported(tmp_path):
+    """`receiver . open()` must not evade the path sink check."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(args):\n"
+        "    with user_path . open(encoding='utf-8') as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "user_path" in errors[0]
+    assert warnings == []
+
+
 def test_comment_open_call_is_not_reported(tmp_path):
     """A commented-out open() example must not be treated as a sink."""
     source_path = tmp_path / "fixture.py"

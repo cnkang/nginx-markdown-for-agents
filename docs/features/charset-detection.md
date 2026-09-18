@@ -171,7 +171,8 @@ and transcodes any other `encoding_rs`-supported charset (for example
 ISO-8859-1, Windows-1252, Shift_JIS) into owned UTF-8 before HTML parsing.
 Invalid UTF-8 bytes in a UTF-8-declared response, a charset label in the
 Content-Type declaration that no supported encoding matches, or a byte
-sequence invalid for the declared charset make the conversion fail. The
+sequence invalid for the declared charset make the conversion fail with
+`ConversionError::EncodingError`. The
 configured `markdown_error_policy` then decides whether the request fails
 closed or the module serves the original HTML. An unsupported label in the HTML meta tag does not
 fail the conversion: the cascade skips it and continues. `encoding_rs`

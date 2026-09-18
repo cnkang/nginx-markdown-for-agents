@@ -264,7 +264,10 @@ def _apply_assignment(
         # Appending to a simple variable expands the tail right here.
         variables[name] = variables.get(name, "") + " " + expanded
         return
+    # An append to a recursive or unresolved variable cannot be expanded
+    # here: the name joins the unknown set so references stay uncertifiable.
     _drop(name, variables, simple)
+    unknown.add(name)
 
 
 def _record_target(

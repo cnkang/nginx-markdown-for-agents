@@ -954,7 +954,7 @@ class TestGateNamePattern:
     def test_a_comment_after_a_separator_cannot_fabricate_gates(self) -> None:
         """';#' starts a comment, so the commented echo cannot publish a gate."""
         lines = [
-            'true;# c; echo fake=1 >> "$GITHUB_OUTPUT"' + chr(92) + 'n',
+            'true;# c; echo fake=1 >> "$GITHUB_OUTPUT"\n',
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == set()
 
