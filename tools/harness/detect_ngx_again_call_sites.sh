@@ -87,7 +87,7 @@ while IFS= read -r -d '' file; do
         GREP_TEMPS+=("$grep_matches")
         grep_rc=0
         grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
-        if [[ "$grep_rc" -eq 2 ]]; then
+        if [[ "$grep_rc" -gt 1 ]]; then
             echo "ERROR: grep failed scanning $file for $api()" >&2
             rm -f "$grep_matches"
             exit 2
