@@ -257,14 +257,37 @@ def _is_ascii_identifier_character(character: str) -> bool:
 
 
 def _receiver_start(line: str, end: int) -> int:
+    """Walk back over a dotted receiver, tolerating spaces around each dot.
+
+    Walking backwards, a run of spaces belongs to the receiver only when it
+    sits directly right of a dot (``receiver . open``) or directly left of
+    one (``receiver . open``); a space anywhere else ends the receiver.
+    """
     start = end
-    while start > 0 and line[start - 1] in " \t":
-        start -= 1
-    while start > 0 and (
-        _is_ascii_identifier_character(line[start - 1])
-        or line[start - 1] == "."
-    ):
-        start -= 1
+    after_dot = False
+    while start > 0:
+        char = line[start - 1]
+        if char in " \t":
+            right = line[start] if start < len(line) else ""
+            if after_dot or right == ".":
+                start -= 1
+                continue
+            look = start
+            while look > 0 and line[look - 1] in " \t":
+                look -= 1
+            if look > 0 and line[look - 1] == ".":
+                start = look
+                continue
+            break
+        if char == ".":
+            start -= 1
+            after_dot = True
+            continue
+        if _is_ascii_identifier_character(char):
+            start -= 1
+            after_dot = False
+            continue
+        break
     return start
 
 
@@ -272,8 +295,9 @@ def _is_valid_receiver(receiver: str) -> bool:
     if not receiver:
         return False
     return all(
-        segment and _is_ascii_identifier_start(segment[0])
-        and all(_is_ascii_identifier_character(c) for c in segment[1:])
+        (stripped := segment.strip())
+        and _is_ascii_identifier_start(stripped[0])
+        and all(_is_ascii_identifier_character(c) for c in stripped[1:])
         for segment in receiver.split(".")
     )
 

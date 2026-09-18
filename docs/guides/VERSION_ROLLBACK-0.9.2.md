@@ -407,8 +407,24 @@ if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet ngin
 fi
 
 if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
-  # systemd-managed NGINX: stop the unit so the unit state and the master
-  # shutdown stay consistent, then wait for a confirmed shutdown.
+  # systemd-managed NGINX: confirm the unit's MainPID is the NGINX master
+  # before stopping, so a unit tracking an unexpected process cannot be
+  # mistaken for a clean shutdown.
+  main_pid="$(sudo systemctl show nginx --property MainPID --value 2>/dev/null)" \
+      || { echo "cannot read the nginx unit MainPID — investigate before continuing" >&2; exit 1; }
+  case "${main_pid}" in
+    ''|*[!0-9]*)
+      echo "unusable systemd MainPID '${main_pid}' — investigate before continuing" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${main_pid}" -eq 0 ] \
+      || ! ps -p "${main_pid}" -o comm= 2>/dev/null | grep -qx nginx; then
+    echo "systemd MainPID ${main_pid} is not the NGINX master — investigate before continuing" >&2
+    exit 1
+  fi
+  # stop the unit so the unit state and the master shutdown stay
+  # consistent, then wait for a confirmed shutdown.
   sudo systemctl stop nginx
   drain_status=0
   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
