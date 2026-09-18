@@ -343,6 +343,12 @@ def _split_shell_segments(line: str) -> list[str]:
             current.append(line[index:])
             index = length
             continue
+        if char == "\\" and index + 1 < length:
+            # An escaped character outside quotes is literal text: `\;` and
+            # friends are arguments, not command separators.
+            current.append(line[index:index + 2])
+            index += 2
+            continue
         separator = _separator_length(line, index)
         if separator:
             segments.append("".join(current))
@@ -397,6 +403,9 @@ def _unquoted_redirect(segment: str) -> int | None:
         if char in "'\"":
             quote = char
             index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            index += 2
             continue
         if char == "#" and _comment_starts_at(segment, index):
             break
