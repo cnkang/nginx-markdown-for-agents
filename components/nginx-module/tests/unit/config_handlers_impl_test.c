@@ -544,10 +544,10 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                 uval = va_arg(ap, unsigned int);
                 fmt += 3;
             } else if (*(fmt + 2) == 'D') {
-                uval = va_arg(ap, ngx_uint_t);
+                uval = va_arg(ap, uint32_t);
                 fmt += 3;
             } else if (*(fmt + 2) == 'L') {
-                uval = va_arg(ap, unsigned long);
+                uval = va_arg(ap, uint64_t);
                 fmt += 3;
             } else if (*(fmt + 2) == 'A') {
                 uval = va_arg(ap, ngx_atomic_uint_t);

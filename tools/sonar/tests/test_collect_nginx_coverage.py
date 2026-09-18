@@ -56,6 +56,15 @@ def _mask_step(
     return index + 1, "", False, False
 
 
+def _inside_quote(script: str, index: int) -> bool:
+    """True when *index* sits inside a quoted string of *script*."""
+    quote = ""
+    cursor = 0
+    while cursor < index:
+        cursor, quote, _, _ = _mask_step(script, cursor, quote, False)
+    return bool(quote)
+
+
 def _mask_comments(script: str) -> str:
     """Blank comment text (quote-aware) so only active content is matched."""
     out = list(script)
@@ -108,6 +117,10 @@ def _conflicting_location_blocks(script: str) -> list[str]:
         r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s{]+)\s*\{",
         masked,
     ):
+        if _inside_quote(masked, match.start()):
+            # A `location`-shaped string inside a quoted value is text, not
+            # a configuration block.
+            continue
         index = _scan_block_end(masked, match.end())
         blocks.append(masked[match.start():index])
     return [
@@ -244,3 +257,19 @@ def test_escaped_single_quote_inside_location_argument_is_skipped() -> None:
     )
     blocks = _conflicting_location_blocks(script)
     assert len(blocks) == 1
+
+def test_location_shaped_text_inside_quotes_is_not_scanned() -> None:
+    """A `location /fake {` string inside a quoted value is text, not a
+    configuration block; only the active block is reported."""
+    script = (
+        "map $http_user_agent $note {\n"
+'    default "location /fake {";\n'
+        "}\n"
+        "location /real {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(script)
+    assert len(blocks) == 1
+    assert "markdown_streaming force;" in blocks[0]

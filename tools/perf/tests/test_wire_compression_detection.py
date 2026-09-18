@@ -43,3 +43,8 @@ def test_truncated_zlib_stream_is_not_compressed():
 
 def test_gzip_magic_is_still_detected():
     assert _is_wire_compressed(b"\x1f\x8b" + b"\x00" * 8)
+
+def test_stream_expanding_past_the_output_budget_is_compressed():
+    """A body whose decode exceeds the output budget is compressed data;
+    stream completion is not required for the classification."""
+    assert _is_wire_compressed(zlib.compress(b"A" * (33 << 20)))
