@@ -799,6 +799,12 @@ jobs:
           REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
             ./tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh
 
+      - name: Run upstream-trailer native qualification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: |
+          ./tools/e2e/verify_upstream_trailers_e2e.sh --nginx-bin "${NGINX_BIN}" --port 18119
+
       - name: Run compatibility contract suites
         # The removed-directive / upgrade-rollback contract tests require a
         # module-enabled binary in the shared canonical allowlist location.
