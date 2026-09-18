@@ -279,7 +279,7 @@ def _wrapper_resolves_to_path(wrapper: str, rest: list[str]) -> bool:
 EVAL_PREFIX = re.compile(
     r"(?:^|[\s;&|(])(?:eval|(?:bash|sh|zsh|dash)\s+-c)\s+$"
 )
-EVAL_STRING_RE = re.compile(r"(['\"])(.*?)\1")
+EVAL_STRING_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 
 SSQ_SPAN_RE = re.compile(r"'[^']*'")
@@ -322,7 +322,7 @@ def _eval_string_refs(line: str) -> list[str]:
             or (tokens and tokens[0] in SHELL_INTERPRETERS and tokens[1:] == ["-c"])
         ):
             continue
-        refs.extend(_line_refs(match.group(2), False))
+        refs.extend(_line_refs(match.group(0)[1:-1], False))
     return refs
 
 
