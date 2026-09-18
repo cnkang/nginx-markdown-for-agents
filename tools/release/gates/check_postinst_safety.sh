@@ -328,7 +328,7 @@ mask_command_text() {
             fi
             if [[ "$ch" == '"' && "$sub_depth" -eq 0 ]]; then
                 if [[ "$out" =~ $sep_re ]] \
-                    || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                    || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)([[:space:]]+[^[:space:]]+)*[[:space:]]+$ ]]; then
                     # A double-quoted command word (`"sed"`) is executable
                     # text at a command position: keep it visible.
                     out+="$span"
@@ -379,7 +379,7 @@ mask_command_text() {
             evaluator=0
             commandword=0
             if [[ "$out" =~ $sep_re ]] \
-                || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)([[:space:]]+[^[:space:]]+)*[[:space:]]+$ ]]; then
                 # Shell quoting is also valid around a command word
                 # (`'sed' -i ...`): the span names the command that runs,
                 # so its text must stay visible without the quotes.

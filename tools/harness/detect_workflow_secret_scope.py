@@ -27,7 +27,7 @@ SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN
 # `$GITHUB_OUTPUT/foo`, `$GITHUB_OUTPUT.foo`, `$GITHUB_OUTPUT_BACKUP`).
 GITHUB_OUTPUT_RE = re.compile(
     r">>\s*(?:\"\$\{GITHUB_OUTPUT\}\"|\"\$GITHUB_OUTPUT\""
-    r"|\$\{GITHUB_OUTPUT\}|\$GITHUB_OUTPUT)(?![A-Za-z0-9_./-])"
+    r"|\$\{GITHUB_OUTPUT\}|\$GITHUB_OUTPUT)(?=$|[ 	;|&)])"
 )
 # A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
 # (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
@@ -374,7 +374,7 @@ def _split_shell_segments(line: str) -> list[str]:
 
 def _comment_starts_at(segment: str, index: int) -> bool:
     """True when the unquoted ``#`` at *index* begins a comment."""
-    return index == 0 or segment[index - 1] in " \t"
+    return index == 0 or segment[index - 1] in " \t;|&()"
 
 
 def _redirect_here(segment: str, index: int) -> bool:
