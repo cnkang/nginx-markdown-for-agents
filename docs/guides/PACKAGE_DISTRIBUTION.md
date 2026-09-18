@@ -300,7 +300,9 @@ curl -fsSLO "${BASE_URL}/release-manifest.json"
 #    signature under an unauthenticated key proves integrity, not project
 #    authenticity.
 : "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
-VALIDSIG="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+GPG_STATUS="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null)" \
+    || { echo "ERROR: GPG verification failed" >&2; exit 1; }
+VALIDSIG="$(printf '%s\n' "${GPG_STATUS}" \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1

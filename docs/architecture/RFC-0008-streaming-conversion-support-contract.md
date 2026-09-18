@@ -155,9 +155,12 @@ conversion eligibility:
 - `markdown_front_matter on` requires the full-buffer engine
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
-- a content type matched by `markdown_stream_excluded_types`
+- a content type matched by `markdown_stream_excluded_types` (routed to the
+  bounded full-buffer engine)
 
-Everything else is a streaming candidate. The module applies codec routing separately.
+Everything else is a streaming candidate. The module applies codec routing
+separately. The canonical check ordering and the exclusion routing live in
+[streaming-check-order.md](streaming-check-order.md).
 Failures that occur after the module selects the streaming path fall into two classes,
 checked in this order:
 
