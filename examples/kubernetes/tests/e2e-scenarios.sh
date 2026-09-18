@@ -837,15 +837,19 @@ scenario_rollback() {
     log_scenario "4. Rollback — Execute rollout undo and verify previous version restored"
 
     # Record current image/env before rollback
-    local pre_rollback_env rollback_container_index container_names
+    local pre_rollback_env rollback_container_index rollback_container_name container_names
     container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    rollback_container_index="$(resolve_deployment_container_index "$container_names")" \
-        || {
-        log_error "cannot resolve the deployment's container index before rollback"
+    rollback_container_index="$(resolve_deployment_container_index "$container_names")"
+    rollback_container_name=""
+    if [[ -n "$rollback_container_index" ]]; then
+        rollback_container_name="$(printf '%s\n' "$container_names" | sed -n "$((rollback_container_index + 1))p")"
+    fi
+    if [[ -z "$rollback_container_index" || "$rollback_container_name" != "$DEPLOYMENT_NAME" ]]; then
+        log_error "the deployment does not expose the expected container before rollback; cannot read its environment"
         return 1
-    }
+    fi
     pre_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
         -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
