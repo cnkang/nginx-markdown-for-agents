@@ -107,10 +107,10 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
             /* Deterministic LCG: poor compressibility keeps the wire size
              * close to the decoded size, so only the budget can bind. */
             let mut state = (src.get(2).copied().unwrap_or(0) as u32) | 1;
-            while payload.len() < size {
+            payload.resize_with(size, || {
                 state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                payload.push((state >> 24) as u8);
-            }
+                (state >> 24) as u8
+            });
             (gzip_compress(&payload), None)
         }
         5 => {

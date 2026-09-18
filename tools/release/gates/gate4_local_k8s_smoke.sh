@@ -271,7 +271,7 @@ validate_helm_template() {
         printf '%s\n' "$repo_only_out" >&2
         return 1
     fi
-    if ! grep -qE "image\\.(tag|digest)" <<< "$repo_only_out"; then
+    if ! grep -qE 'image\.(tag|digest)' <<< "$repo_only_out"; then
         fail "repository-only render failed without naming image.tag/image.digest"
         printf '%s\n' "$repo_only_out" >&2
         return 1

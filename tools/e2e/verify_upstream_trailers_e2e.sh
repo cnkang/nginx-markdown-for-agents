@@ -130,7 +130,14 @@ if [[ -z "${nginx_version_num}" ]]; then
 fi
 version_at_least() {
     local want="$1"
-    if [[ "$(printf '%s\n%s\n' "${nginx_version_num}" "${want}" | sort -V | head -1)" == "${want}" ]]; then
+    if awk -v have="${nginx_version_num}" -v want="${want}" 'BEGIN {
+            split(have, h, "."); split(want, w, ".");
+            for (i = 1; i <= 3; i++) {
+                if ((h[i] + 0) > (w[i] + 0)) exit 0;
+                if ((h[i] + 0) < (w[i] + 0)) exit 1;
+            }
+            exit 0;
+        }'; then
         return 0
     fi
     return 1
@@ -292,15 +299,15 @@ curl -sf --raw -D "${md_headers}" -o "${md_body}" \
     -H 'Accept: text/markdown' \
     "http://127.0.0.1:${PORT}/trailers-md" || md_status=$?
 
-if [[ "${md_status}" -eq 0 ]]; then
-    if ! grep -qi '^Content-Type: *text/markdown' "${md_headers}"; then
-        fail "converted response is missing the text/markdown content type"
-        exit 1
-    fi
-    pass "converted request succeeds"
-else
+if [[ "${md_status}" -ne 0 ]]; then
     fail "converted request failed (curl rc=${md_status})"
+    exit 1
 fi
+if ! grep -qi '^Content-Type: *text/markdown' "${md_headers}"; then
+    fail "converted response is missing the text/markdown content type"
+    exit 1
+fi
+pass "converted request succeeds"
 
 if grep -qiE '^(trailer|digest|content-digest|repr-digest|content-md5):' "${md_headers}"; then
     fail "converted response still carries trailer/digest family headers"
