@@ -403,7 +403,9 @@ The following scenarios bypass conversion entirely:
 - Response is not convertible HTML.
 - Response exceeds `markdown_limits conversion_memory=` and current policy does not allow
   streaming to bypass this limit.
-- Response is a hard-excluded streaming content type.
+- Response is a content type excluded from conversion entirely (the
+  content-type allowlist). A `markdown_stream_excluded_types` match does
+  not bypass: it routes to the bounded full-buffer engine (Section 2.2).
 - Request did not pass Accept negotiation or UA policy.
 - Authenticated request excluded by `markdown_auth_policy deny`.
 - Upstream status code is not in the convertible range.

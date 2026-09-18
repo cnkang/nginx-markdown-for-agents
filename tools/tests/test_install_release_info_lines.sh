@@ -25,7 +25,11 @@ pass() {
 
 fail() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
-    printf '  FAIL: %s\n' "$1" >&2
+    if [[ -n "${2:-}" ]]; then
+        printf '  FAIL: %s - %s\n' "$1" "$2" >&2
+    else
+        printf '  FAIL: %s\n' "$1" >&2
+    fi
     return 0
 }
 

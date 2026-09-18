@@ -578,6 +578,13 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps an eval double-quoted command string visible" "got '$masked'"
     fi
+    masked=$(mask_command_text "echo \'sed -i x f\' end")
+    if [[ "$masked" == *"sed -i x f"* ]]; then
+        pass "mask keeps text around an escaped quote visible"
+    else
+        fail "mask keeps text around an escaped quote visible" "got '$masked'"
+    fi
+
     masked="$(mask_command_text "sudo -u root 'sed'")"
     if [[ "$masked" == *"sudo -u root sed"* ]]; then
         pass "mask keeps a quoted command word after a wrapper operand visible"
