@@ -43,6 +43,7 @@ BARE_REF = re.compile(
 # wrappers run the script itself, so they keep the strict requirement.
 INTERPRETERS = ("bash", "sh", "zsh", "dash", "python", "python3")
 EXEC_WRAPPERS = ("env", "exec", "command")
+CONTROL_PREFIXES = ("if", "then", "elif", "while", "until", "do", "else", "!")
 SEGMENT_SPLIT = re.compile(r"(?:;|&&|\|\||\||\()")
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
@@ -59,32 +60,45 @@ def _command_word_at(line: str, match_start: int) -> bool:
     requires the executable bit.
     """
     segment = SEGMENT_SPLIT.split(line[:match_start])[-1].strip()
+    segment = segment.removesuffix("./")
     segment = segment.removeprefix("- ").strip()
     if segment.startswith("run:"):
         segment = segment[4:].strip()
     tokens = segment.split()
+    while tokens and tokens[0] in CONTROL_PREFIXES:
+        tokens = tokens[1:]
+    while tokens and ASSIGNMENT.match(tokens[0]):
+        tokens = tokens[1:]
     if not tokens:
         return True
     if tokens[0] in INTERPRETERS:
         return False
     if tokens[0] in EXEC_WRAPPERS:
-        rest = tokens[1:]
-        if tokens[0] == "command" and rest[:1] in (["-v"], ["-V"]):
-            # A `command -v` query does not execute the script.
-            return False
-        index = 0
-        while index < len(rest) and (
-            rest[index].startswith("-") or ASSIGNMENT.match(rest[index])
-        ):
-            index += 1
-        rest = rest[index:]
-        if not rest:
-            return True
-        # Only a trailing execution wrapper still resolves to the
-        # script; an interpreter or any other command makes the path
-        # its argument instead.
-        return rest[0] in EXEC_WRAPPERS
-    return all(ASSIGNMENT.match(token) for token in tokens)
+        return _wrapper_resolves_to_path(tokens[0], tokens[1:])
+    return False
+
+
+def _wrapper_resolves_to_path(wrapper: str, rest: list[str]) -> bool:
+    """True when *rest* still makes *wrapper* execute the referenced path."""
+    if wrapper == "command" and rest[:1] in (["-v"], ["-V"]):
+        # A `command -v` query does not execute the script.
+        return False
+    index = 0
+    consumed_argument = False
+    while index < len(rest) and (
+        rest[index].startswith("-") or ASSIGNMENT.match(rest[index])
+    ):
+        if wrapper == "exec" and rest[index] == "-a":
+            # `exec -a NAME cmd`: the next token is NAME, so a path
+            # here is the wrapper's argument, not a command.
+            consumed_argument = True
+        index += 1
+    rest = rest[index:]
+    if not rest:
+        return not consumed_argument
+    # Only a trailing execution wrapper still resolves to the script;
+    # an interpreter or any other command makes the path its argument.
+    return rest[0] in EXEC_WRAPPERS
 
 
 def _line_refs(line: str, continuation: bool) -> list[str]:
@@ -96,14 +110,14 @@ def _line_refs(line: str, continuation: bool) -> list[str]:
     refs = [
         match.group(1)
         for match in DIRECT_REF.finditer(line)
-        if _command_word_at(line, match.start())
+        if _command_word_at(line, match.start(1))
     ]
     if continuation:
         return refs
     refs.extend(
         match.group(1)
         for match in BARE_REF.finditer(line)
-        if _command_word_at(line, match.start())
+        if _command_word_at(line, match.start(1))
     )
     return refs
 
