@@ -261,3 +261,20 @@ def test_a_receiver_ending_in_os_is_classified_as_a_method_call(tmp_path):
     assert any("myos" in e for e in errors)
     assert any("someos" in e for e in errors)
     assert warnings == []
+
+
+def test_later_call_does_not_warn_for_earlier_literal(tmp_path):
+    """A dynamic argument on a later call must not mark an earlier call on
+    the same line as unaudited, and the warning is emitted exactly once."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):\n"
+        "    a = open('notes.txt'); b = open(f'{base}/b.txt')\n"
+        "    return a, b\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1

@@ -60,7 +60,7 @@ def _workflow(repo: Path, body: str) -> None:
 def test_direct_reference_without_exec_bit_fails(tmp_path):
     repo = _make_repo(tmp_path)
     _workflow(repo, "          ./tools/x.sh --flag\n")
-    _add(repo, "tools/x.sh", 0o644)
+    _add(repo, "tools/x.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 1
     assert "tools/x.sh" in result.stdout
@@ -70,7 +70,7 @@ def test_direct_reference_without_exec_bit_fails(tmp_path):
 def test_direct_reference_with_exec_bit_passes(tmp_path):
     repo = _make_repo(tmp_path)
     _workflow(repo, "          ./tools/x.sh --flag\n")
-    _add(repo, "tools/x.sh", 0o755)
+    _add(repo, "tools/x.sh", 0o700)
     result = _run(repo)
     assert result.returncode == 0
     assert "OK" in result.stdout
@@ -79,7 +79,7 @@ def test_direct_reference_with_exec_bit_passes(tmp_path):
 def test_interpreter_prefix_does_not_require_exec_bit(tmp_path):
     repo = _make_repo(tmp_path)
     _workflow(repo, "          bash tools/x.sh --flag\n")
-    _add(repo, "tools/x.sh", 0o644)
+    _add(repo, "tools/x.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 0
 
@@ -87,7 +87,7 @@ def test_interpreter_prefix_does_not_require_exec_bit(tmp_path):
 def test_bare_makefile_recipe_reference_fails(tmp_path):
     repo = _make_repo(tmp_path)
     (repo / "Makefile").write_text("t:\n\ttools/z.sh\n", encoding="utf-8")
-    _add(repo, "tools/z.sh", 0o644)
+    _add(repo, "tools/z.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 1
     assert "tools/z.sh" in result.stdout
@@ -107,6 +107,61 @@ def test_pytest_continuation_argument_does_not_require_exec_bit(tmp_path):
         "t:\n\tpython3 -m pytest \\\n\t\ttools/t.py \\\n\t\t-q --tb=short\n",
         encoding="utf-8",
     )
-    _add(repo, "tools/t.py", 0o644, content="def test_x():\n    assert True\n")
+    _add(repo, "tools/t.py", 0o600, content="def test_x():\n    assert True\n")
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_bash_prefixed_direct_reference_does_not_require_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          bash ./tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_env_wrapper_still_requires_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          env ./tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_inline_run_label_reference_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / ".github" / "workflows" / "w.yml").write_text(
+        "jobs:\n  x:\n    steps:\n      - name: t\n        run: tools/x.sh --flag\n",
+        encoding="utf-8",
+    )
+    _add(repo, "tools/x.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "tools/x.sh" in result.stdout
+
+
+def test_reference_after_separator_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          cd sub && tools/z.sh\n")
+    _add(repo, "tools/z.sh", 0o600)
+    result = _run(repo)
+    assert result.returncode == 1
+
+
+def test_interpreter_argument_is_not_a_command_word(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / ".github" / "workflows" / "w.yml").write_text(
+        "jobs:\n  x:\n    steps:\n      - name: t\n        run: python3 tools/y.py\n",
+        encoding="utf-8",
+    )
+    _add(repo, "tools/y.py", 0o600, content="print('x')\n")
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_argument_token_is_not_a_command_word(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          echo tools/y.sh\n")
+    _add(repo, "tools/y.sh", 0o600)
     result = _run(repo)
     assert result.returncode == 0
