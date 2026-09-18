@@ -455,6 +455,18 @@ gen_removed_line() {
       GEN_LINE="markdown_prune_protection_selectors${ws}${arg};"
       GEN_TOKEN="markdown_prune_protection_selectors"
       ;;
+    markdown_profile)
+      prng_pick balanced strict_cache streaming_first
+      arg="${PRNG_PICK}"
+      GEN_LINE="markdown_profile${ws}${arg};"
+      GEN_TOKEN="markdown_profile"
+      ;;
+    markdown_streaming_zero_copy)
+      prng_pick on off ON Off
+      arg="${PRNG_PICK}"
+      GEN_LINE="markdown_streaming_zero_copy${ws}${arg};"
+      GEN_TOKEN="markdown_streaming_zero_copy"
+      ;;
     markdown_accept_wildcard)
       # Removed *value* of a retained directive: markdown_accept wildcard.
       GEN_LINE="markdown_accept${ws}wildcard;"

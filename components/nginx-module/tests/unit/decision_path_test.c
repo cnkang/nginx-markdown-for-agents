@@ -339,6 +339,8 @@ test_decision_path_struct_init(void)
     dp.reason_code = "skipped_accept";
     dp.stage = "eligibility";
     dp.duration_ms = 0;
+    TEST_ASSERT(strcmp(dp.reason_code, "skipped_accept") == 0,
+        "skip path: reason_code is the registry string");
 
     TEST_ASSERT(
         strcmp(dp.accept_result,

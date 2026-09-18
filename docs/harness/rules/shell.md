@@ -138,7 +138,7 @@ run_case || rc=$?
       #    allowlist in the detector, not by this filter.
       if printf '%s\n' "${_shell_lines}" \
           | grep -E "${_pcre_needle}" \
-          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[^a-zA-Z0-9_-])=\~([^a-zA-Z0-9_-]|$)|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
           | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
          echo "FAIL: prohibited PCRE regex classes found in ${_detector}" >&2
          exit 1
@@ -148,7 +148,7 @@ run_case || rc=$?
       #    by step 0: they use Python re semantics.
       if printf '%s\n' "${_shell_lines}" \
           | grep -E "${_bre_needle}" \
-          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
+          | grep -E 'grep|sed|awk|egrep|(^|[^a-zA-Z0-9_-])rg([^a-zA-Z0-9_-]|$)|perl|pattern=|regex=|(^|[^a-zA-Z0-9_-])=\~([^a-zA-Z0-9_-]|$)|(^|[[:space:]]|[;|&({])[A-Za-z_][A-Za-z0-9_]*=' \
           | grep -vE '^[[:space:]]*(#|//)' >/dev/null 2>&1; then
          echo "FAIL: BRE-only grouping syntax found in ${_detector}" >&2
          exit 1

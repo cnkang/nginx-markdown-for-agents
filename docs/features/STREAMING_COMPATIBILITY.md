@@ -20,7 +20,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | `conversion_memory` budget | ✅ | ✅ | Hard cumulative input-size cap shared by buffered and streaming paths; the same value also funds the full-buffer generated-output budget and transient scratch allocations (see [Parser Budget](PARSER_BUDGET.md)) |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
-| Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
+| Front matter (YAML) | ✅ | ❌ | `markdown_front_matter on` routes to the bounded full-buffer engine (RFC-0008 section 2.2) |
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
 | Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer replays a deflate format error as raw from the start; streaming locks its deflate decoder classification from the first two bytes of the stream and reports a format error (no framing retry) for misclassified streams; streaming since 0.9.1 |

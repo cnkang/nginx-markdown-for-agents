@@ -551,7 +551,9 @@ def _zlib_stream_completes(
         while pending:
             produced += len(decoder.decompress(pending, 65536))
             if produced > output_budget:
-                return False
+                # A body that expands past the budget is compressed data;
+                # stream completion is not required for the classification.
+                return True
             pending = decoder.unconsumed_tail
     except zlib.error:
         return False

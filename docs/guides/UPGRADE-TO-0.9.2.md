@@ -1852,6 +1852,12 @@ if ! sudo nginx -t; then
       exit 1
     }
   fi
+  # A successful start command is not proof the master is up: confirm the
+  # master process itself before reporting the rollback restart complete.
+  if ! nginx_master_running; then
+    echo "ERROR: no NGINX master is running after the rollback restart; the previous module and configuration are in place and validated. Start NGINX manually and check the error log" >&2
+    exit 1
+  fi
   exit 1
 fi
 # Recovery helpers for the start below and the post-start checks that follow
