@@ -572,6 +572,13 @@ if [[ -n "$mask_fn" ]]; then
         fail "mask still blanks a quoted argument outside command position" "got: $masked"
     fi
 
+    masked="$(mask_command_text 'echo "a #b" && sed -i x f')"
+    if [[ "$masked" == *"sed"* ]]; then
+        pass "a # inside a quoted span does not hide the command after it"
+    else
+        fail "a # inside a quoted span does not hide the command after it" "got '$masked'"
+    fi
+
     masked=$(mask_command_text 'eval "sed -i x f"')
     if [[ "$masked" == *"sed -i x f"* ]]; then
         pass "mask keeps an eval double-quoted command string visible"
