@@ -39,8 +39,17 @@ Publication and artifact availability are separate release gates.
    fi
 
    if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
-     # systemd-managed NGINX: stop the unit so the unit state and the master
-     # shutdown stay consistent, then wait for a confirmed shutdown.
+     # systemd-managed NGINX: confirm the unit's MainPID is the NGINX master
+     # before stopping, so a unit tracking an unexpected process cannot be
+     # mistaken for a clean shutdown.
+     main_pid="$(sudo systemctl show nginx --property MainPID --value 2>/dev/null || true)"
+     if [ -n "${main_pid}" ] && [ "${main_pid}" != "0" ] \
+         && ! ps -p "${main_pid}" -o comm= 2>/dev/null | grep -qx nginx; then
+       echo "systemd MainPID ${main_pid} is not the NGINX master — investigate before continuing" >&2
+       exit 1
+     fi
+     # stop the unit so the unit state and the master shutdown stay
+     # consistent, then wait for a confirmed shutdown.
      sudo systemctl stop nginx
      drain_status=0
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
@@ -50,6 +59,12 @@ Publication and artifact availability are separate release gates.
      # failed unit) must not be treated as a confirmed stop.
      if [ "$drain_status" -ne 0 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
+       exit 1
+     fi
+     # The unit can report inactive while a master keeps running: wait until
+     # no NGINX master process remains before the module is replaced.
+     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
+       echo "NGINX master processes still running after the unit stopped — investigate before continuing" >&2
        exit 1
      fi
    else
@@ -174,8 +189,17 @@ Publication and artifact availability are separate release gates.
    fi
 
    if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
-     # systemd-managed NGINX: stop the unit so the unit state and the master
-     # shutdown stay consistent, then wait for a confirmed shutdown.
+     # systemd-managed NGINX: confirm the unit's MainPID is the NGINX master
+     # before stopping, so a unit tracking an unexpected process cannot be
+     # mistaken for a clean shutdown.
+     main_pid="$(sudo systemctl show nginx --property MainPID --value 2>/dev/null || true)"
+     if [ -n "${main_pid}" ] && [ "${main_pid}" != "0" ] \
+         && ! ps -p "${main_pid}" -o comm= 2>/dev/null | grep -qx nginx; then
+       echo "systemd MainPID ${main_pid} is not the NGINX master — investigate before continuing" >&2
+       exit 1
+     fi
+     # stop the unit so the unit state and the master shutdown stay
+     # consistent, then wait for a confirmed shutdown.
      sudo systemctl stop nginx
      drain_status=0
      timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done' \
@@ -185,6 +209,12 @@ Publication and artifact availability are separate release gates.
      # failed unit) must not be treated as a confirmed stop.
      if [ "$drain_status" -ne 0 ] || [ "$(sudo systemctl is-active nginx 2>/dev/null)" != "inactive" ]; then
        echo "NGINX did not stop within 30s — investigate before continuing" >&2
+       exit 1
+     fi
+     # The unit can report inactive while a master keeps running: wait until
+     # no NGINX master process remains before the module is replaced.
+     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
+       echo "NGINX master processes still running after the unit stopped — investigate before continuing" >&2
        exit 1
      fi
    else
