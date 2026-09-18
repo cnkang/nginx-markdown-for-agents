@@ -677,6 +677,7 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
 	PYTHONPATH=. python3 tools/harness/detect_ffi_dead_exports.py --check
 	bash tools/harness/detect_ifdef_guard_visibility.sh
+	python3 tools/harness/detect_script_exec_bits.py
 	bash tools/harness/detect_workflow_input_injection.sh
 	bash tools/harness/detect_hardcoded_http_status.sh
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
@@ -722,6 +723,7 @@ test-harness:
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
 	bash tools/ci/test_verify_official_nginx_docker_binding.sh
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/docs/tests/ -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/sonar/tests/ -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
