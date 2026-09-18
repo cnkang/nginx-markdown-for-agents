@@ -871,8 +871,12 @@ scenario_rollback() {
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
     post_container_index="$(resolve_deployment_container_index "$post_container_names")"
-    if [[ -z "$post_container_index" ]]; then
-        log_error "cannot resolve the restored deployment's container index"
+    local restored_container_name=""
+    if [[ -n "$post_container_index" ]]; then
+        restored_container_name="$(printf '%s\n' "$post_container_names" | sed -n "$((post_container_index + 1))p")"
+    fi
+    if [[ -z "$post_container_index" || "$restored_container_name" != "$DEPLOYMENT_NAME" ]]; then
+        log_error "the restored deployment does not expose the expected container; cannot read its environment"
         return 1
     fi
     post_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
