@@ -32,6 +32,7 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_postinst_safety.sh"
 PASS_COUNT=0
 FAIL_COUNT=0
 TMPDIR_TEST=""
+mask_fn_file=""
 SEPARATOR='========================================================================'
 
 # ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ cleanup() {
     if [[ -n "$TMPDIR_TEST" && -d "$TMPDIR_TEST" ]]; then
         rm -rf "$TMPDIR_TEST"
     fi
-    if [[ -n "${mask_fn_file:-}" ]]; then
+    if [[ -n "${mask_fn_file:-}" && "$mask_fn_file" == "$TMPDIR_TEST"/* ]]; then
         rm -f "$mask_fn_file"
     fi
     return 0
@@ -499,7 +500,7 @@ fi
 # The `;#`, `|#` and `&#` forms must be blotted out so a later command scan
 # never reads comment prose as an executed command.  The function is
 # extracted from the checker itself so the test exercises the real source.
-mask_fn_file="$(mktemp)"
+mask_fn_file="$(mktemp "$TMPDIR_TEST/mask-fn.XXXXXX")"
 sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT" > "$mask_fn_file"
 if [[ -s "$mask_fn_file" ]]; then
     # shellcheck source=/dev/null

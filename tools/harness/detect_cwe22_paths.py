@@ -770,6 +770,71 @@ class _OpenScanState:
     rel: str
     strict: bool
     open_quote: str | None = None
+    multiline_fstring: bool = False
+    fstring_depth: int = 0
+
+
+FSTRING_TRIPLE_OPEN = re.compile("(?:[fF][rR]?|[rR][fF])(" + chr(34) * 3 + "|" + chr(39) * 3 + ")")
+
+def _advance_quote_state(state: _OpenScanState, line: str) -> None:
+    """Advance the multiline-quote state and track f-prefixed literals.
+
+    A triple-quoted f-string keeps replacement fields executable across
+    lines, so the state records when the still-open literal was opened by
+    an f-prefixed delimiter.
+    """
+    state.open_quote = _multiline_quote_after(line, state.open_quote)
+    if state.open_quote is None:
+        state.multiline_fstring = False
+        state.fstring_depth = 0
+        return
+    opener = FSTRING_TRIPLE_OPEN.search(line)
+    if opener:
+        # Opening line: only the text after the delimiter can hold
+        # replacement fields, and the depth starts fresh.
+        state.multiline_fstring = True
+        state.fstring_depth = _replacement_depth(line, opener.end(), len(line))
+    elif state.multiline_fstring:
+        # Continuation line: inherit the carried field depth.
+        state.fstring_depth = _replacement_depth(
+            line, 0, len(line), state.fstring_depth
+        )
+
+
+def _executable_fstring_position(
+    state: _OpenScanState, line: str, pos: int,
+) -> bool:
+    """True when *pos* sits inside an executable f-string field.
+
+    Covers single-line f-strings and open multiline f-strings whose
+    replacement field is on the current line.
+    """
+    if _in_fstring_expression(line, pos):
+        return True
+    return (
+        state.multiline_fstring
+        and _replacement_depth(line, 0, pos, state.fstring_depth) > 0
+    )
+
+
+def _call_span_end(line: str, open_start: int) -> int:
+    """End of the balanced call starting at *open_start*.
+
+    A nested call inside the argument list stays within the span, so the
+    outer call's own dynamic argument is not hidden by it.
+    """
+    depth = 0
+    index = open_start
+    while index < len(line):
+        char = line[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return len(line)
 
 
 def _scan_open_calls(
@@ -798,7 +863,7 @@ def _scan_open_calls(
         open_matches = list(OPEN_CALL_RE.finditer(line))
         if not open_matches:
             # Keep tracking docstring state even without open() text.
-            state.open_quote = _multiline_quote_after(line, state.open_quote)
+            _advance_quote_state(state, line)
             continue
 
         # Evaluate the string state at the matched open() offset, not at
@@ -814,7 +879,7 @@ def _scan_open_calls(
             warnings.extend(match_warnings)
         # Advance the multiline-quote state exactly once per line, after
         # all matches are processed.
-        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        _advance_quote_state(state, line)
 
     return errors, warnings
 
@@ -850,6 +915,58 @@ def _classify_open_match(
     return prev_char, "builtin"
 
 
+FSTRING_OPEN = re.compile(r"(?:[fF][rR]?|[rR][fF])(['\"])")
+
+
+def _fstring_closed_before(
+    line: str, opener: re.Match[str], quote: str, pos: int,
+) -> bool:
+    """True when the f-string owned by *opener* closes before *pos*."""
+    cursor = opener.end()
+    if line.startswith(quote * 2, cursor):
+        # Triple-quoted literal: the closing delimiter is three quotes.
+        cursor += 2
+        closing = quote * 3
+    else:
+        closing = quote
+    found = line.find(closing, cursor)
+    return found != -1 and found < pos
+
+
+def _replacement_depth(
+    line: str, start: int, pos: int, initial: int = 0,
+) -> int:
+    """Brace depth of replacement fields between *start* and *pos*."""
+    depth = initial
+    index = start
+    while index < pos:
+        if line.startswith("{{", index) or line.startswith("}}", index):
+            index += 2
+            continue
+        if line[index] == "{":
+            depth += 1
+        elif line[index] == "}":
+            depth = max(0, depth - 1)
+        index += 1
+    return depth
+
+
+def _in_fstring_expression(line: str, pos: int) -> bool:
+    """True when *pos* sits inside an f-string replacement field.
+
+    A replacement field is executable code even though the scan sees an
+    open string literal, so live calls inside it must still be audited.
+    """
+    depth = 0
+    for opener in FSTRING_OPEN.finditer(line):
+        if opener.start() >= pos:
+            break
+        if _fstring_closed_before(line, opener, opener.group(1), pos):
+            continue
+        depth = _replacement_depth(line, opener.end(), pos)
+    return depth > 0
+
+
 def _scan_single_open_match(
     open_match: re.Match[str],
     match_idx: int,
@@ -874,6 +991,13 @@ def _scan_single_open_match(
         # A comment line cannot contain a live call.
         return match_errors, match_warnings
 
+    fstring_expression = in_string and _executable_fstring_position(
+        state, line, open_match.start()
+    )
+    if fstring_expression:
+        # An f-string replacement field is executable code: audit the
+        # call instead of treating it as literal string text.
+        in_string = False
     if in_string or in_comment:
         # The call itself sits inside a string literal or a trailing
         # comment (for example after a multiline string closes), so it
@@ -911,12 +1035,17 @@ def _scan_single_open_match(
         # dynamic expression may embed user-derived components.
         # The probe scans only this call's segment, so the quote state
         # must be recomputed at the match: a multiline string may close
-        # earlier on the same line, leaving the call in live code.
-        quote_at_match = _multiline_quote_after(
-            line[: open_match.start()], state.open_quote
+        # earlier on the same line, leaving the call in live code.  A
+        # call inside an f-string replacement field is code, so no quote
+        # state applies.
+        quote_at_match = (
+            None
+            if fstring_expression
+            else _multiline_quote_after(line[: open_match.start()], state.open_quote)
         )
+        span_end = _call_span_end(line, open_match.start())
         if _has_complex_open_argument(
-            line[open_match.start():segment_end], quote_at_match
+            line[open_match.start():span_end], quote_at_match
         ):
             _emit_unaudited_warning(
                 match_warnings,
