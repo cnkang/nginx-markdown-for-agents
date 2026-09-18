@@ -890,6 +890,14 @@ class TestGateNamePattern:
         ]
         assert secret_scope_module._published_gates(lines, 0, 1) == set()
 
+    def test_escaped_separators_are_literal_arguments(self) -> None:
+        """`\\;` outside quotes is an argument, not a command separator:
+        the gate must come from the echo that owns the redirection."""
+        lines = [
+            'echo gate=true \\; echo ready=go >> "$GITHUB_OUTPUT"\n'
+        ]
+        assert secret_scope_module._published_gates(lines, 0, 1) == {"gate"}
+
     def test_separators_inside_a_comment_cannot_fabricate_gates(self) -> None:
         """Text after an unquoted `#` is not executable: a chained fake gate
         hidden in the comment must not be reported."""
