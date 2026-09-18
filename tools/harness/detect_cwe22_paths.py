@@ -256,38 +256,40 @@ def _is_ascii_identifier_character(character: str) -> bool:
     )
 
 
-def _receiver_start(line: str, end: int) -> int:
-    """Walk back over a dotted receiver, tolerating spaces around each dot.
+def _receiver_step(line: str, start: int, after_dot: bool) -> tuple[int, bool] | None:
+    """One backwards step over a dotted receiver; None ends the walk.
 
-    Walking backwards, a run of spaces belongs to the receiver only when it
-    sits directly right of a dot (``receiver . open``) or directly left of
-    one (``receiver . open``); a space anywhere else ends the receiver.
+    A run of spaces belongs to the receiver only when it sits directly right
+    of a dot (``receiver . open``) or directly left of one; a space anywhere
+    else ends the receiver.
     """
+    char = line[start - 1]
+    if char in " \t":
+        right = line[start] if start < len(line) else ""
+        if after_dot or right == ".":
+            return start - 1, after_dot
+        look = start
+        while look > 0 and line[look - 1] in " \t":
+            look -= 1
+        if look > 0 and line[look - 1] == ".":
+            return look, after_dot
+        return None
+    if char == ".":
+        return start - 1, True
+    if _is_ascii_identifier_character(char):
+        return start - 1, False
+    return None
+
+
+def _receiver_start(line: str, end: int) -> int:
+    """Walk back over a dotted receiver, tolerating spaces around each dot."""
     start = end
     after_dot = False
     while start > 0:
-        char = line[start - 1]
-        if char in " \t":
-            right = line[start] if start < len(line) else ""
-            if after_dot or right == ".":
-                start -= 1
-                continue
-            look = start
-            while look > 0 and line[look - 1] in " \t":
-                look -= 1
-            if look > 0 and line[look - 1] == ".":
-                start = look
-                continue
+        step = _receiver_step(line, start, after_dot)
+        if step is None:
             break
-        if char == ".":
-            start -= 1
-            after_dot = True
-            continue
-        if _is_ascii_identifier_character(char):
-            start -= 1
-            after_dot = False
-            continue
-        break
+        start, after_dot = step
     return start
 
 
