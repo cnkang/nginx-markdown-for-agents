@@ -119,8 +119,8 @@ if [[ ! -x "${NGINX_BIN}" ]]; then
     echo "NGINX_BIN is not executable: ${NGINX_BIN}" >&2
     exit 2
 fi
-if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65533 )); then
-    echo "PORT must be an integer between 1024 and 65533: ${PORT}" >&2
+if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65534 )); then
+    echo "PORT must be an integer between 1024 and 65534 (UPSTREAM_PORT=PORT+1): ${PORT}" >&2
     exit 2
 fi
 
