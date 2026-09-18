@@ -131,9 +131,11 @@ before/after examples.
   the lowercase renaming.
 - Decompression (deflate): the full-buffer decoder replays a zlib-wrapped
   RFC 1950 format error as raw RFC 1951 from the start, while the streaming
-  decoder commits to the framing implied by the first two bytes and fails
-  open for a misclassified stream — streaming cannot replay committed
-  bytes. The divergence is deliberate and pinned by tests on both paths.
+  decoder commits to the framing implied by the first two bytes and, for a
+  misclassified stream, fails with a decompression error that follows the
+  configured `markdown_error_policy` (only the pass policy forwards the
+  original response) — streaming cannot replay committed bytes. The
+  divergence is deliberate and pinned by tests on both paths.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect

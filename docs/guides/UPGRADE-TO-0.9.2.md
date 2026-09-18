@@ -981,23 +981,34 @@ sudo nginx -t || {
 # explicitly when it is not yet available.
 start_new_master() {
   if [[ "$systemd_managed" -eq 1 ]]; then
-    sudo systemctl start nginx
+    sudo systemctl start nginx || return 1
   else
-    sudo nginx
+    sudo nginx || return 1
   fi
-  # A successful start command is not proof the master is up: confirm a
-  # running NGINX master with a bounded probe before continuing.
-  local liveness=0
+  # A successful start command is not proof the MASTER is up: confirm the
+  # master process itself (systemd MainPID, or the configured PID file)
+  # with a bounded probe before continuing.  The caller's recovery block
+  # performs the rollback when this function returns nonzero.
+  local master_up=0
+  local probe_pid
+  local pid_file="${NGINX_PID_FILE:-/run/nginx.pid}"
   for _ in $(seq 1 30); do
-    if pgrep -x nginx >/dev/null 2>&1; then
-      liveness=1
+    if [[ "$systemd_managed" -eq 1 ]]; then
+      probe_pid="$(sudo systemctl show nginx --property MainPID --value 2>/dev/null || true)"
+      if [[ -n "$probe_pid" && "$probe_pid" != "0" ]] \
+          && ps -p "$probe_pid" -o comm= 2>/dev/null | grep -qx nginx; then
+        master_up=1
+        break
+      fi
+    elif [[ -s "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+      master_up=1
       break
     fi
     sleep 1
   done
-  if [[ "$liveness" -ne 1 ]]; then
-    echo "ERROR: no NGINX master is running after the start command; start NGINX manually and check the error log" >&2
-    exit 1
+  if [[ "$master_up" -ne 1 ]]; then
+    echo "ERROR: the NGINX master did not come up after the start command; start NGINX manually and check the error log" >&2
+    return 1
   fi
 }
 if ! start_new_master; then
