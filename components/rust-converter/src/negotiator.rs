@@ -292,6 +292,12 @@ mod tests {
     }
 
     #[test]
+    fn test_markdown_higher_q() {
+        let r = negotiate("text/markdown;q=0.9, text/html;q=0.8");
+        assert_eq!(r, NegotiationResult::Convert);
+    }
+
+    #[test]
     fn test_html_higher_q() {
         let r = negotiate("text/html;q=0.9, text/markdown;q=0.8");
         assert_eq!(
