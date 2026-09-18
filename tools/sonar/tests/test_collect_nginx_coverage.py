@@ -11,6 +11,33 @@ STREAMING_FAILURE_CACHE_SCRIPT = (
 )
 
 
+def _scan_block_end(script: str, index: int) -> int:
+    """Return the index just past the block starting at the opening brace.
+
+    Braces inside quoted text do not change the depth, and a backslash
+    escapes the following character inside double quotes (matching the
+    NGINX configuration parser closely enough for location scanning).
+    """
+    depth = 1
+    quote = ""
+    while index < len(script) and depth > 0:
+        char = script[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(script):
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+    return index
+
+
 def _conflicting_location_blocks(script: str) -> list[str]:
     """Return generated locations that violate the streaming/cache contract.
 
@@ -27,24 +54,7 @@ def _conflicting_location_blocks(script: str) -> list[str]:
         r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s{]+)\s*\{",
         script,
     ):
-        depth = 1
-        index = match.end()
-        quote = ""
-        while index < len(script) and depth > 0:
-            char = script[index]
-            if quote:
-                if char == "\\" and index + 1 < len(script):
-                    index += 2
-                    continue
-                if char == quote:
-                    quote = ""
-            elif char in "\"'":
-                quote = char
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-            index += 1
+        index = _scan_block_end(script, match.end())
         blocks.append(script[match.start():index])
     return [
         block
