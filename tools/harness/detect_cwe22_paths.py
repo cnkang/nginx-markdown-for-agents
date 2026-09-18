@@ -873,7 +873,7 @@ def _scan_single_open_match(
         else len(line)
     )
     _, kind = _classify_open_match(open_match, line)
-    if kind in ("skip", "duplicate"):
+    if kind == "skip":
         return match_errors, match_warnings
     if kind == "receiver":
         # Scope receiver extraction to this match's segment (from the

@@ -28,6 +28,8 @@
 #   - markdown_dynconf_dry_run
 #   - markdown_prune_selectors
 #   - markdown_prune_protection_selectors
+#   - markdown_profile
+#   - markdown_streaming_zero_copy
 # Removed directive value:
 #   - markdown_accept wildcard
 #

@@ -412,7 +412,7 @@ while IFS= read -r match; do
     # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
     skip_fixture=0
     for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
-        if [[ "$file" == *"$exempt"* ]]; then
+        if [[ "$file" == "$exempt" || "$file" == "./$exempt" ]]; then
             skip_fixture=1
             break
         fi
@@ -484,7 +484,7 @@ while IFS= read -r match; do
     # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
     skip_fixture=0
     for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
-        if [[ "$file" == *"$exempt"* ]]; then
+        if [[ "$file" == "$exempt" || "$file" == "./$exempt" ]]; then
             skip_fixture=1
             break
         fi
@@ -616,7 +616,7 @@ while IFS= read -r match; do
     # Fixture tests embed the defect shape on purpose; see FIXTURE_EXEMPT_FILES.
     skip_fixture=0
     for exempt in ${FIXTURE_EXEMPT_FILES[@]+"${FIXTURE_EXEMPT_FILES[@]}"}; do
-        if [[ "$file" == *"$exempt"* ]]; then
+        if [[ "$file" == "$exempt" || "$file" == "./$exempt" ]]; then
             skip_fixture=1
             break
         fi
