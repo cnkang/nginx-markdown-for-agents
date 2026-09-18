@@ -57,10 +57,11 @@ Default to `auto` mode per RFC 0008 section 2.1:
    then uses the bounded full-buffer engine, or bypasses the filter when
    the response is not eligible for conversion at all.
 
-The operator may override this default with `markdown_streaming off`
-(full-buffer only) or `markdown_streaming force` (selects streaming for
-every eligible response, see ADR-0023 for the exact contract term).
-`markdown_streaming auto` retains the default policy.
+The 0.6.0-era implicit default was `auto`. 0.9.2 resolves an unset
+`markdown_streaming` to `off` (full-buffer only). Operators opt back in
+with `markdown_streaming auto` (prefer streaming when legal) or
+`markdown_streaming force` (selects streaming for every eligible response,
+see ADR-0023 for the exact contract term).
 
 **`markdown_cache_validation full` interaction (0.9.2 contract, see
 ADR-0023):** `markdown_cache_validation full` combined with
