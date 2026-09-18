@@ -429,6 +429,26 @@ mod tests {
         }
     }
 
+    /// RFC 3986 section 5.2: a dot reference against a base whose path is
+    /// empty resolves to "/" and does NOT inherit the base query (the
+    /// reference defines a path, so `T.query = R.query`), while a
+    /// same-document reference with an empty path DOES inherit it.
+    #[test]
+    fn query_only_base_reference_legs() {
+        assert_eq!(
+            resolve_reference("https://h?a=1", ".").as_deref(),
+            Some("https://h/")
+        );
+        assert_eq!(
+            resolve_reference("https://h?a=1", "").as_deref(),
+            Some("https://h?a=1")
+        );
+        assert_eq!(
+            resolve_reference("https://h?a=1", "#f").as_deref(),
+            Some("https://h?a=1#f")
+        );
+    }
+
     /// Opaque and non-http schemes are returned byte-for-byte: the resolver
     /// has no path semantics for them and must not rewrite the address.
     #[test]

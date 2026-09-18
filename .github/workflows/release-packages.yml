@@ -756,7 +756,6 @@ jobs:
           esac
 
           # Artifact filenames per 0.9.x release package naming and layout conventions
-          RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -764,21 +763,18 @@ jobs:
           # the exclusive upper bound of the exact upstream version (X.Y.Z →
           # X.Y.Z+1), so the DEB dependency interval accepts distro revisions
           # of the pinned version while refusing any next-patch NGINX upgrade
-          # that would break the dynamic module ABI.  RPM_NGINX_EVR_CEIL must
-          # be derived AFTER the ceil is computed (it expands the variable).
+          # that would break the dynamic module ABI.  RPM dependencies use the
+          # epoch-free version floor with the %pre exact-version guard.
           NGINX_VERSION_CEIL="$(
             awk 'BEGIN {
               split(ARGV[1], parts, ".");
               printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
             }' "${NGINX_VERSION}"
           )"
-          RPM_NGINX_EVR_CEIL="1:${NGINX_VERSION_CEIL}"
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
             echo "NGINX_VERSION_CEIL=${NGINX_VERSION_CEIL}"
-            echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}"
-            echo "RPM_NGINX_EVR_CEIL=${RPM_NGINX_EVR_CEIL}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"
             echo "DEB_FILENAME=${DEB_FILENAME}"
@@ -794,7 +790,6 @@ jobs:
 
           echo "PKG_VERSION=${PKG_VERSION}" >&2
           echo "NGINX_VERSION=${NGINX_VERSION}" >&2
-          echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}" >&2
           echo "NFPM_ARCH=${NFPM_ARCH}" >&2
           echo "DEB_FILENAME=${DEB_FILENAME}" >&2
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2

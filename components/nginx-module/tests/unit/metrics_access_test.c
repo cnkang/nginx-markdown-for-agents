@@ -553,6 +553,15 @@ test_peer_text_is_loopback_table(void)
                     (const u_char *) "2127.0.0.1", 10) == 0,
                 "a value merely containing 127. is not loopback");
     TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.0.0.256", 11) == 0,
+                "an out-of-range final octet is not a loopback quad");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "127.256.0.1", 11) == 0,
+                "an out-of-range middle octet is not a loopback quad");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
+                    (const u_char *) "999.0.0.1", 9) == 0,
+                "an out-of-range first octet is not a loopback quad");
+    TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
                     (const u_char *) "127.", 4) == 0,
                 "a bare 127. prefix without the quad is not loopback");
     TEST_ASSERT(ngx_http_markdown_peer_text_is_loopback(
