@@ -250,7 +250,7 @@ sudo nginx -t && sudo nginx -s reload
 # failed nginx -T must fail the check explicitly instead of being masked
 # by partial output.
 NGINX_T_OUTPUT="$(sudo nginx -T 2>&1)" || { echo "nginx -T failed; cannot verify the active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
-printf '%s\n' "${NGINX_T_OUTPUT}" | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so' \
+printf '%s\n' "${NGINX_T_OUTPUT}" | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;' \
   || { echo "load_module-missing: no active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
 ```
 

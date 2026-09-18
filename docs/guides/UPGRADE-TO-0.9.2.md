@@ -1000,9 +1000,18 @@ start_new_master() {
         master_up=1
         break
       fi
-    elif [[ -s "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-      master_up=1
-      break
+    elif [[ -s "$pid_file" ]]; then
+      probe_pid="$(cat "$pid_file" 2>/dev/null || true)"
+      case "$probe_pid" in
+        ''|*[!0-9]*|0) ;;
+        *)
+          if kill -0 "$probe_pid" 2>/dev/null \
+              && ps -p "$probe_pid" -o comm= 2>/dev/null | grep -qx nginx; then
+            master_up=1
+            break
+          fi
+          ;;
+      esac
     fi
     sleep 1
   done
@@ -1024,7 +1033,10 @@ if ! start_new_master; then
         sudo systemctl stop nginx || true
         if ! timeout 30 sh -c '
           while :; do
-            sudo systemctl is-active --quiet nginx || break
+            sudo systemctl is-active --quiet nginx
+            status=$?
+            if [ "$status" -eq 3 ]; then break; fi
+            if [ "$status" -ne 0 ]; then exit 2; fi
             sleep 1
           done
         '; then

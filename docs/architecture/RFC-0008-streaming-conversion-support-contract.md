@@ -137,7 +137,11 @@ the hard eligibility gates and a bounded internal pipeline. There is no
 replacement threshold directive and no size heuristic.
 
 In `auto` mode, every response that clears the eligibility gates and
-passes the pre-selection guards below is a **streaming candidate**. Response size is not part of the decision and there is
+passes the pre-selection guards below is a **streaming candidate**. A
+policy other than `auto`/`force` (`off`) and a
+`markdown_stream_excluded_types` match are not streaming candidates: the
+module routes those responses to the bounded full-buffer engine, and a
+response that is not eligible for conversion is never converted at all. Response size is not part of the decision and there is
 no internal candidate boundary: the module treats an unknown-length response
 and a response with a known `Content-Length` alike.
 
