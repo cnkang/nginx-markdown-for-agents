@@ -403,10 +403,10 @@ expect_standard_unknown_rejection 5 "markdown_prune_protection_selectors rejecte
   "markdown_prune_protection_selectors \"nav\";"
 
 echo "--- Development-line retirements (0.9.2) ---" >&2
-expect_standard_unknown_rejection 6 "markdown_profile rejected as unknown directive" \
+expect_standard_unknown_rejection 8 "markdown_profile rejected as unknown directive" \
   "markdown_profile" \
   "markdown_profile balanced;"
-expect_standard_unknown_rejection 7 "markdown_streaming_zero_copy rejected as unknown directive" \
+expect_standard_unknown_rejection 9 "markdown_streaming_zero_copy rejected as unknown directive" \
   "markdown_streaming_zero_copy" \
   "markdown_streaming_zero_copy on;"
 

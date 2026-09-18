@@ -2734,9 +2734,7 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
 /*
  * Prevalidate every part a list restore will visit so that no state is
  * mutated unless the whole restore can complete.  A malformed part (one
- * whose count exceeds the captured budget — except the snapshotted tail,
- * which appends legitimately grow and which the structural restore later
- * truncates back to its captured shape — one larger than the list
+ * whose count exceeds the captured budget, one larger than the list
  * capacity, or a non-empty part with no element storage) fails this walk,
  * and a geometry that cannot reproduce the captured entry count fails it
  * too: the caller then reports NGX_ERROR after the chain boundary has
@@ -2755,11 +2753,9 @@ ngx_http_markdown_304_restore_prevalidate(ngx_list_t *list,
      * state is mutated unless the whole restore can complete.  A part
      * larger than the list capacity, or one that cannot hold table
      * entries, is malformed and fails closed.  A count beyond the
-     * captured budget is malformed too — EXCEPT on the snapshotted
-     * tail: appends grow it after the snapshot, and the structural
-     * restore below rolls it back to its captured shape before any
-     * entry is copied, so its growth is exactly what a rollback
-     * discards.
+     * captured budget is malformed too — the captured tail included:
+     * the caller truncates it to its captured shape before this walk
+     * runs.
      *
      * The element-storage size check applies only when entries are
      * actually copied: an empty snapshot (entry_count == 0) performs a
@@ -2788,24 +2784,21 @@ ngx_http_markdown_304_restore_prevalidate(ngx_list_t *list,
         {
             return NGX_ERROR;
         }
-        if (part->nelts > snapshot->entry_count - restored
-            && part != snapshot->original_last)
+        if (part->nelts > snapshot->entry_count - restored)
         {
             return NGX_ERROR;
         }
         if (part == snapshot->original_last) {
             /*
-             * The captured tail may only have GROWN since the snapshot,
-             * and the parts before it must account for exactly the
-             * non-tail share of the captured count: the structural
-             * restore below rolls the tail back to its captured size,
-             * so any other geometry would leave fewer entries than the
-             * snapshot promises.
+             * The caller truncated the tail to its captured shape before
+             * this walk ran, so only the parts before it can still
+             * disagree: they must account for exactly the non-tail share
+             * of the captured count, or the restore would leave fewer
+             * entries than the snapshot promises.
              */
-            if (part->nelts < snapshot->original_last_nelts
-                || restored
-                   != snapshot->entry_count
-                      - snapshot->original_last_nelts)
+            if (restored
+                != snapshot->entry_count
+                   - snapshot->original_last_nelts)
             {
                 return NGX_ERROR;
             }

@@ -33,6 +33,9 @@ def test_module_listener_port_is_consistent_across_chart_surfaces() -> None:
         "deployment containerPort": _port(r"containerPort:\s*(\d+)", deployment),
         "configmap listen": _port(r"^\s*listen\s+(\d+);", configmap),
         "configmap proxy_pass": _port(r"127\.0\.0\.1:(\d+)", configmap),
+        "configmap sidecar guard": _port(
+            r"sidecar\.port\)\s*(\d+)\)", configmap
+        ),
         "schema reserved const": _port(r'"not":\s*\{\s*"const":\s*(\d+)', schema),
     }
 
