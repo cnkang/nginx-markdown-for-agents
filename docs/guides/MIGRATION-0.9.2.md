@@ -11,7 +11,8 @@ shrank to 20 active directives. The seven names retired in 0.9.2 — the five
 removed by the pre-LTS convergence plus `markdown_profile` and
 `markdown_streaming_zero_copy` — are no longer registered, so `nginx -t`
 reports NGINX's standard "unknown directive" error for them too, and the
-replacement table below names the migration target for each. That table
+replacement table below names the migration target for each (or records
+that none exists). That table
 covers the five convergence removals. The two development-line retirements
 each have a dedicated section below.
 

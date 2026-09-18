@@ -298,6 +298,13 @@ mask_command_text() {
     while [[ "$i" -lt "$n" ]]; do
         ch="${text:$i:1}"
         if [[ -z "$quote" ]]; then
+            if [[ "$ch" == '\' && -n "${text:$((i + 1)):1}" ]]; then
+                # An escaped character outside quotes is literal text:
+                # \' must not open a quoted span.
+                out+="$ch${text:$((i + 1)):1}"
+                i=$((i + 2))
+                continue
+            fi
             if [[ "$ch" == "'" || "$ch" == '"' ]]; then
                 quote="$ch"
                 span=""

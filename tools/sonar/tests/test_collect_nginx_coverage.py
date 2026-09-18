@@ -34,6 +34,38 @@ def _advance_scan(
     return index + 1, "", False
 
 
+def _mask_comments(script: str) -> str:
+    """Blank comment text (quote-aware) so only active content is matched."""
+    out = list(script)
+    quote = ""
+    in_comment = False
+    index = 0
+    while index < len(script):
+        char = script[index]
+        if in_comment:
+            if char == "\n":
+                in_comment = False
+            else:
+                out[index] = " "
+            index += 1
+            continue
+        if quote:
+            if char == "\\" and index + 1 < len(script):
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char == "#":
+            in_comment = True
+            out[index] = " "
+        elif char in "\"'":
+            quote = char
+        index += 1
+    return "".join(out)
+
+
 def _scan_block_end(script: str, index: int) -> int:
     """Return the index just past the block starting at the opening brace.
 
@@ -65,13 +97,14 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     # Accept every NGINX location modifier before the URI.  Without them an
     # exact (`= /x`) or prefix-modified (`^~ /x`, `~ /x`, `~* /x`) location is
     # silently skipped, and a conflicting block inside one would go unreported.
+    masked = _mask_comments(script)
     for match in re.finditer(
         r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?"
         r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s{]+)\s*\{",
-        script,
+        masked,
     ):
-        index = _scan_block_end(script, match.end())
-        blocks.append(script[match.start():index])
+        index = _scan_block_end(masked, match.end())
+        blocks.append(masked[match.start():index])
     return [
         block
         for block in blocks
@@ -179,6 +212,20 @@ def test_braces_inside_comments_do_not_close_the_block() -> None:
     blocks = _conflicting_location_blocks(script)
 
     assert len(blocks) == 1
+
+def test_commented_location_block_is_not_scanned() -> None:
+    """A commented location block must not be matched or flagged."""
+    script = (
+        "# location /x {\n"
+        "#     markdown_streaming force;\n"
+        "#     markdown_cache_validation full;\n"
+        "# }\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert blocks == []
+
 
 def test_escaped_single_quote_inside_location_argument_is_skipped() -> None:
     """A backslash escapes the following character inside single quotes too,

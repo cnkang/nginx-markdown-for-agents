@@ -282,6 +282,7 @@ fi
 raw_headers="${BUILDROOT}/raw-headers.txt"
 raw_body="${BUILDROOT}/raw-body.bin"
 if curl -sf --raw -D "${raw_headers}" -o "${raw_body}" \
+    -H 'TE: trailers' -H 'Connection: TE' \
     "http://127.0.0.1:${PORT}/trailers-raw" \
     && grep -qi '^Trailer: *Digest' "${raw_headers}" \
     && grep -q 'Digest: sha-256=' "${raw_body}"; then
@@ -297,6 +298,7 @@ md_body="${BUILDROOT}/md-body.bin"
 md_status=0
 curl -sf --raw -D "${md_headers}" -o "${md_body}" \
     -H 'Accept: text/markdown' \
+    -H 'TE: trailers' -H 'Connection: TE' \
     "http://127.0.0.1:${PORT}/trailers-md" || md_status=$?
 
 if [[ "${md_status}" -ne 0 ]]; then
