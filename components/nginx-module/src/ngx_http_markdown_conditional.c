@@ -2724,9 +2724,12 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
  * tail, which appends legitimately grow and which the structural restore
  * truncates back to its captured shape — a part larger than the list
  * capacity, or a non-empty part with no element storage) fails a
- * PREVALIDATION walk before anything is mutated: the restore then returns
- * NGX_ERROR and the list stays exactly as it was found, so a failed rollback
- * is reported instead of being applied partially.
+ * PREVALIDATION walk.  The chain boundary (tail link and captured tail
+ * count) is truncated first because it cannot fail; if the walk then
+ * rejects the list, the restore returns NGX_ERROR with the chain already
+ * rolled back to the captured shape, so no post-snapshot part stays
+ * reachable and a failed rollback is reported instead of being applied
+ * partially.
  */
 /*
  * Prevalidate every part a list restore will visit so that no state is
@@ -2736,7 +2739,9 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
  * truncates back to its captured shape — one larger than the list
  * capacity, or a non-empty part with no element storage) fails this walk,
  * and a geometry that cannot reproduce the captured entry count fails it
- * too: the caller then reports NGX_ERROR with the list unchanged.
+ * too: the caller then reports NGX_ERROR after the chain boundary has
+ * already been truncated to the captured shape (no post-snapshot part
+ * stays reachable).
  */
 static ngx_int_t
 ngx_http_markdown_304_restore_prevalidate(ngx_list_t *list,
@@ -2840,16 +2845,25 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         return NGX_OK;
     }
 
-    if (ngx_http_markdown_304_restore_prevalidate(list, snapshot)
-        != NGX_OK)
-    {
-        return NGX_ERROR;
-    }
-
+    /*
+     * Truncate the chain boundary FIRST: appends made after the snapshot
+     * may have allocated new parts past the captured tail (and reset its
+     * count/link), and a later failure must never leave them reachable.
+     * This step cannot fail; the prevalidation below then validates the
+     * restored geometry before any entry value is copied, so a malformed
+     * list still reports NGX_ERROR — on a chain already truncated to the
+     * captured shape instead of one retaining post-snapshot parts.
+     */
     list->last = snapshot->original_last;
     if (snapshot->original_last != NULL) {
         snapshot->original_last->nelts = snapshot->original_last_nelts;
         snapshot->original_last->next = snapshot->original_last_next;
+    }
+
+    if (ngx_http_markdown_304_restore_prevalidate(list, snapshot)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
     }
 
     if (snapshot->entry_count == 0 || snapshot->entries == NULL) {
