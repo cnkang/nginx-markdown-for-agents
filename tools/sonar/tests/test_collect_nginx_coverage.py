@@ -11,36 +11,46 @@ STREAMING_FAILURE_CACHE_SCRIPT = (
 )
 
 
+def _advance_scan(
+    script: str, index: int, quote: str, in_comment: bool
+) -> tuple[int, str, bool]:
+    """Consume one character for the block scanner.
+
+    Returns the (next index, quote state, comment state) triple.  Inside an
+    unclosed double quote a backslash escapes the following character; a
+    ``#`` outside quotes starts a comment that runs to the end of the line.
+    """
+    char = script[index]
+    if in_comment:
+        return index + 1, quote, char != "\n"
+    if quote:
+        if char == "\\" and quote == '"' and index + 1 < len(script):
+            return index + 2, quote, False
+        return index + 1, "" if char == quote else quote, False
+    if char == "#":
+        return index + 1, "", True
+    if char in "\"'":
+        return index + 1, char, False
+    return index + 1, "", False
+
+
 def _scan_block_end(script: str, index: int) -> int:
     """Return the index just past the block starting at the opening brace.
 
-    Braces inside quoted text do not change the depth, and a backslash
-    escapes the following character inside double quotes (matching the
-    NGINX configuration parser closely enough for location scanning).
+    Braces inside quoted text or comments do not change the depth (matching
+    the NGINX configuration parser closely enough for location scanning).
     """
     depth = 1
     quote = ""
     in_comment = False
     while index < len(script) and depth > 0:
         char = script[index]
-        if in_comment:
-            if char == "\n":
-                in_comment = False
-        elif quote:
-            if char == "\\" and quote == '"' and index + 1 < len(script):
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-        elif char == "#":
-            in_comment = True
-        elif char in "\"'":
-            quote = char
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-        index += 1
+        index, quote, in_comment = _advance_scan(script, index, quote, in_comment)
+        if not quote and not in_comment:
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
     return index
 
 
@@ -155,3 +165,17 @@ def test_escaped_quote_delimiters_in_location_arguments_are_detected() -> None:
     blocks = _conflicting_location_blocks(script)
 
     assert len(blocks) == 2
+
+def test_braces_inside_comments_do_not_close_the_block() -> None:
+    """A `# }` comment must not terminate the scan early: the real closing
+    brace still bounds the block, so the directives stay visible."""
+    script = (
+        "location /x { # } looks closed here\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert len(blocks) == 1
