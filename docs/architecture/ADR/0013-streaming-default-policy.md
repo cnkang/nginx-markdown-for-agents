@@ -48,7 +48,7 @@ Default to `auto` mode per RFC 0008 section 2.1:
    it with no replacement, and the remaining tuning limits are
    `markdown_limits` keys. Under the active Config V2 surface
    `markdown_streaming off|auto|force` is the only processing-path
-   selector; the `markdown_limits` keys remain active resource-tuning
+   selector. The `markdown_limits` keys remain active resource-tuning
    directives.
 2. Chunked transfer encoding and a missing `Content-Length` do not change
    the path. Those responses face the same eligibility gates as any other
