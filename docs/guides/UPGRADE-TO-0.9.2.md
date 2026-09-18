@@ -985,12 +985,57 @@ start_new_master() {
   else
     sudo nginx
   fi
+  # A successful start command is not proof the master is up: confirm a
+  # running NGINX master with a bounded probe before continuing.
+  local liveness=0
+  for _ in $(seq 1 30); do
+    if pgrep -x nginx >/dev/null 2>&1; then
+      liveness=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$liveness" -ne 1 ]]; then
+    echo "ERROR: no NGINX master is running after the start command; start NGINX manually and check the error log" >&2
+    exit 1
+  fi
 }
 if ! start_new_master; then
   echo "ERROR: NGINX did not start with the 0.9.2 module; restoring the previous module and the pre-migration configuration" >&2
   if declare -F restore_previous_module_and_config >/dev/null 2>&1; then
     restore_previous_module_and_config || true
   else
+    # A failed start can leave a live master behind: stop it and verify the
+    # shutdown before swapping the module, so the swap never races a live
+    # process.
+    if pgrep -x nginx >/dev/null 2>&1; then
+      if [[ "$systemd_managed" -eq 1 ]]; then
+        sudo systemctl stop nginx || true
+        if ! timeout 30 sh -c '
+          while :; do
+            sudo systemctl is-active --quiet nginx || break
+            sleep 1
+          done
+        '; then
+          echo "ERROR: NGINX did not stop before the module swap; investigate" >&2
+          exit 1
+        fi
+      else
+        sudo nginx -s quit || true
+        if ! timeout 30 sh -c '
+          while :; do
+            pgrep -x nginx >/dev/null 2>&1
+            status=$?
+            if [ "$status" -eq 1 ]; then break; fi
+            if [ "$status" -ne 0 ]; then exit 2; fi
+            sleep 1
+          done
+        '; then
+          echo "ERROR: NGINX master did not stop before the module swap; investigate" >&2
+          exit 1
+        fi
+      fi
+    fi
     if ! sudo cp -a "${MODULE_BACKUP}" "${MODULES_DIR}/.ngx_http_markdown_filter_module.so.start-failed"; then
       echo "ERROR: could not stage the previous module from ${MODULE_BACKUP}; restore manually from ${MODULE_BACKUP} and ${CONFIG_BACKUP_DIR}/tree" >&2
       exit 1

@@ -166,7 +166,8 @@ conversion eligibility:
   bounded full-buffer engine)
 
 A streaming candidate is an eligible response that passes every
-pre-selection guard above. The module applies codec routing separately. The
+pre-selection guard above, including the `markdown_streaming` policy
+requirement. The module applies codec routing separately. The
 canonical check ordering and the exclusion routing live in
 [streaming-check-order.md](streaming-check-order.md).
 Failures that occur after the module selects the streaming path fall into two classes,

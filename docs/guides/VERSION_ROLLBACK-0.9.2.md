@@ -73,8 +73,16 @@ Publication and artifact availability are separate release gates.
      fi
      # The unit can report inactive while a master keeps running: wait until
      # no NGINX master process remains before the module is replaced.
-     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
-       echo "NGINX master processes still running after the unit stopped — investigate before continuing" >&2
+     if ! timeout 30 sh -c '
+       while :; do
+         pgrep -x nginx >/dev/null 2>&1
+         status=$?
+         if [ "$status" -eq 1 ]; then break; fi
+         if [ "$status" -ne 0 ]; then exit 2; fi
+         sleep 1
+       done
+     '; then
+       echo "NGINX master processes still running (or pgrep failed) after the unit stopped — investigate before continuing" >&2
        exit 1
      fi
    else
@@ -233,8 +241,16 @@ Publication and artifact availability are separate release gates.
      fi
      # The unit can report inactive while a master keeps running: wait until
      # no NGINX master process remains before the module is replaced.
-     if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
-       echo "NGINX master processes still running after the unit stopped — investigate before continuing" >&2
+     if ! timeout 30 sh -c '
+       while :; do
+         pgrep -x nginx >/dev/null 2>&1
+         status=$?
+         if [ "$status" -eq 1 ]; then break; fi
+         if [ "$status" -ne 0 ]; then exit 2; fi
+         sleep 1
+       done
+     '; then
+       echo "NGINX master processes still running (or pgrep failed) after the unit stopped — investigate before continuing" >&2
        exit 1
      fi
    else
@@ -406,8 +422,16 @@ if [ "${SYSTEMD_OWNS_NGINX}" -eq 1 ]; then
   fi
   # The unit can report inactive while a master keeps running: wait until
   # no NGINX master process remains before the module is replaced.
-  if ! timeout 30 sh -c 'while pgrep -x nginx >/dev/null 2>&1; do sleep 1; done'; then
-    echo "NGINX master processes still running after the unit stopped — investigate before continuing" >&2
+  if ! timeout 30 sh -c '
+    while :; do
+      pgrep -x nginx >/dev/null 2>&1
+      status=$?
+      if [ "$status" -eq 1 ]; then break; fi
+      if [ "$status" -ne 0 ]; then exit 2; fi
+      sleep 1
+    done
+  '; then
+    echo "NGINX master processes still running (or pgrep failed) after the unit stopped — investigate before continuing" >&2
     exit 1
   fi
 else

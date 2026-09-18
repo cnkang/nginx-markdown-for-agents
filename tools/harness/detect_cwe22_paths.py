@@ -801,12 +801,18 @@ def _classify_open_match(
     match itself is handled through the builtin branch.
     """
     prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
+    prev_nonspace = " "
+    look = open_match.start() - 1
+    while look >= 0 and line[look] in " \t":
+        look -= 1
+    if look >= 0:
+        prev_nonspace = line[look]
     matched = open_match.group()
     if (prev_char.isalnum() or prev_char == "_") and matched.startswith("open"):
         return prev_char, "skip"
-    if prev_char == ".":
+    if prev_nonspace == ".":
         if re.match(
-            r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]
+            r"os\.$", line[max(0, look - 2):look + 1]
         ):
             return prev_char, "duplicate"
         return prev_char, "receiver"

@@ -31,7 +31,9 @@ GITHUB_OUTPUT_RE = re.compile(
 # linear on adversarial lines.  _published_gates() splits the line into
 # unquoted command segments first, so a quoted value that contains
 # separators cannot fabricate a gate assignment.
-GATE_NAME_RE = re.compile(r'^\s*echo\s+"?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>')
+GATE_NAME_RE = re.compile(
+    r'^\s*echo\s+["\']?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>'
+)
 STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
@@ -267,8 +269,10 @@ def _step_if_value(lines: list[str], start: int, end: int) -> str:
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
                 # A YAML flow scalar wraps the whole condition; the wrapping
                 # quotes are YAML syntax, not expression syntax, so strip
-                # them before polarity analysis.
-                value = value[1:-1]
+                # them and unescape doubled occurrences of the same quote
+                # before polarity analysis.
+                quote = value[0]
+                value = value[1:-1].replace(quote * 2, quote)
             return value
         return _fold_block_scalar(lines, index, end)
     return ""
