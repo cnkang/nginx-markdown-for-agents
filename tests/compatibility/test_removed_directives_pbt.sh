@@ -17,7 +17,7 @@
 #   (1) `nginx -t` exits non-zero (the removed item is never silently accepted),
 #   and
 #   (2) the `nginx -t` output matches the item's frozen contract:
-#       - the five removed directives fail with NGINX's standard
+#       - the seven removed directives fail with NGINX's standard
 #         `unknown directive` error naming the directive;
 #       - the removed value `markdown_accept wildcard` carries the explicit
 #         migration phrase.
@@ -99,7 +99,7 @@ TRUSTED_NGINX_PATHS=(
   "/opt/homebrew/sbin/nginx"
 )
 
-# Standard error for the five removed directives: NGINX reports an unknown
+# Standard error for the seven removed directives: NGINX reports an unknown
 # directive and the message must name the directive that was used.
 STANDARD_UNKNOWN_MARKER='unknown directive'
 # The removed value keeps a migration message; match its stable phrase rather
@@ -389,7 +389,7 @@ gen_removed_line() {
   local sel_b=""
   local sel_c=""
 
-  # Default contract for the five removed directives; the removed value case
+  # Default contract for the seven removed directives; the removed value case
   # overrides it with the migration oracle.
   GEN_ORACLE="unknown"
 

@@ -202,9 +202,11 @@ WARNING_COUNT=$(echo "$COMPILE_OUTPUT" | grep -ci 'warning:' || true)
 
 if [[ "$WARNING_COUNT" -eq 0 ]]; then
     echo "PASS: No compiler warnings detected"
+    WARNING_STATUS="PASS"
 else
     echo "FAIL: $WARNING_COUNT compiler warning line(s) in the unit build"
     echo "$COMPILE_OUTPUT" | grep -i 'warning:' | head -10
+    WARNING_STATUS="FAIL"
     FAIL=1
 fi
 echo ""
