@@ -540,9 +540,17 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
             } else if (*(fmt + 2) == 'z') {
                 uval = va_arg(ap, size_t);
                 fmt += 3;
-            } else if (*(fmt + 2) == 'd' || *(fmt + 2) == 'D'
-                       || *(fmt + 2) == 'L' || *(fmt + 2) == 'A') {
+            } else if (*(fmt + 2) == 'd') {
+                uval = va_arg(ap, unsigned int);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'D') {
+                uval = va_arg(ap, ngx_uint_t);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'L') {
                 uval = va_arg(ap, unsigned long);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'A') {
+                uval = va_arg(ap, ngx_atomic_uint_t);
                 fmt += 3;
             } else if ((*(fmt + 2) >= 'a' && *(fmt + 2) <= 'z')
                        || (*(fmt + 2) >= 'A' && *(fmt + 2) <= 'Z')) {
