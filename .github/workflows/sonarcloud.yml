@@ -241,7 +241,7 @@ jobs:
           # The scanner action parses this string into argv (no shell), so the
           # values must be inlined.  Dispatch values therefore come only from
           # the regex-validated outputs of "Validate manual PR analysis
-          # inputs" (^[0-9]+$ / ^[A-Za-z0-9_][A-Za-z0-9_./-]*$), never from raw
+          # inputs" (^[1-9][0-9]*$ / ^[A-Za-z0-9_][A-Za-z0-9_./-]*$), never from raw
           # inputs.* text that could smuggle extra scanner arguments.
           args: >
             -Dproject.settings=.sonarcloud.properties

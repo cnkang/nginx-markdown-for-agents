@@ -680,6 +680,38 @@ fi
 
 rm -f "${wf_dir}/block-with-quoted.yml"
 
+# Test 20: a key-shaped line inside a block scalar must not reset the tracked
+# with: key -- the scalar content is opaque text, so both the branch-shaped
+# line itself and a later command input stay judged under the real key.
+cat >"${wf_dir}/with-scalar-keys.yml" <<'Y'
+name: with-scalar-keys
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'branch'
+        required: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        uses: example/action@0000000000000000000000000000000000000000
+        with:
+          args: >-
+            branch: ${{ inputs.branch }}
+            -Dsonar.pullrequest.key=${{ inputs.branch }}
+Y
+"${DETECTOR[@]}" "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] && grep -Fq "with:" "${output_file}"; then
+    pass "key-shaped lines inside a block scalar cannot hide command inputs"
+else
+    fail "key-shaped lines inside a block scalar cannot hide command inputs" "expected exit 1 + diagnostic, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/with-scalar-keys.yml"
+
 # Test 19: no arguments must succeed under bash 3.2 with set -euo pipefail
 # (the bare "$@" list is treated as unset there; the ${1+"$@"} guard keeps
 # the default workflow directory in use and the run clean).

@@ -54,7 +54,7 @@ jobs:
             echo "::error::The ref input must not contain internal whitespace or control characters" >&2
             exit 1
           fi
-          if [[ ! "${REQUESTED_REF}" =~ ^(refs/(heads|tags|pull)/[A-Za-z0-9._/-]+|[A-Za-z0-9][A-Za-z0-9._/-]*|[0-9a-f]{7,40})$ ]]; then
+          if [[ ! "${REQUESTED_REF}" =~ ^(refs/(heads|tags|pull)/[A-Za-z0-9._/-]+|[0-9a-f]{7,40}|[A-Za-z0-9][A-Za-z0-9._/-]*)$ ]]; then
             echo "::error::The ref input must be a branch, tag, or commit SHA (letters, digits, '.', '_', '-', '/')" >&2
             exit 1
           fi

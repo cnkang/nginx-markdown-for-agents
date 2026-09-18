@@ -73,6 +73,10 @@ before/after examples.
   response through `markdown_error_policy`. `fail_closed` rejects with the
   internal default status, and `status <429|503>` stores that code in the
   effective configuration. No separate reject-action symbol exists in 0.9.2.
+- **Token estimation uses one effective ratio.** The clamped
+  characters-per-token value feeds both the header estimate and the body
+  estimate, so a configured ratio outside the accepted range cannot skew one
+  path relative to the other.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
 - **Runtime configuration removed.** Move dynamic settings to static directives
