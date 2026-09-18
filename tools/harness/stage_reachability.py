@@ -461,6 +461,10 @@ def _poison_conditional_line(
         return
     if redefined[0] == IGNORE_TARGET:
         raise ValueError("cannot verify conditional .IGNORE scope")
+    # The branch may or may not run, so both the recipe and the prerequisite
+    # list of the target are uncertain: a target whose conditional
+    # prerequisite is discarded could otherwise be certified as reachable.
+    unknown.add(redefined[0])
     generation[redefined[0]] = generation.get(redefined[0], 0) + 1
     recipes.setdefault(redefined[0], []).append(
         (generation[redefined[0]], None)
