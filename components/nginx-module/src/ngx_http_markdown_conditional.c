@@ -3013,7 +3013,7 @@ ngx_http_markdown_send_conditional_header(ngx_http_request_t *r,
     }
 
     if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_http_markdown_304_snapshot_restore(r, snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, snapshot);
         return rc;
     }
 
@@ -3056,7 +3056,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: 304 auth Cache-Control update failed");
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -3124,7 +3124,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
         if (rc != NGX_OK) {
-            ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+            (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
             return NGX_ERROR;
         }
 
@@ -3139,7 +3139,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * checks.  Any failure restores the exact upstream representation. */
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -3243,13 +3243,13 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: 412 auth Cache-Control update failed");
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 

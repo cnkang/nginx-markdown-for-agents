@@ -943,6 +943,19 @@ class TestGateNamePattern:
                 redirect
             )
 
+    def test_then_and_flag_echo_forms_publish_gates(self) -> None:
+        """`then echo` continuations and `echo -n` must still be recognized
+        as gate publishers (the anchoring must not fail them closed)."""
+        for prefix in ("then echo", "echo -n", "echo"):
+            lines = [
+                'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
+                "  " + prefix + ' text=1 >> "$GITHUB_OUTPUT"\n',
+                "fi\n",
+            ]
+            assert secret_scope_module._published_gates(lines, 0, 3) == {"text"}, (
+                prefix
+            )
+
     def test_escaped_separators_are_literal_arguments(self) -> None:
         """`\\;` outside quotes is an argument, not a command separator:
         the gate must come from the echo that owns the redirection."""

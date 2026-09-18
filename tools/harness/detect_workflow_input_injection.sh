@@ -102,6 +102,7 @@ while IFS= read -r -d '' file; do
     in_with_block=0
     with_indent=0
     with_key=""
+    with_scalar_indent=-1
     steps_indent=-1
     in_reusable_job=0
 
@@ -147,6 +148,7 @@ while IFS= read -r -d '' file; do
             in_with_block=1
             with_indent=$indent_len
             with_key=""
+            with_scalar_indent=-1
             in_run_block=0
             continue
         fi
@@ -167,8 +169,21 @@ while IFS= read -r -d '' file; do
             if [[ "$indent_len" -le "$with_indent" ]]; then
                 in_with_block=0
                 with_key=""
+                with_scalar_indent=-1
+            elif [[ "$with_scalar_indent" -ge 0 \
+                    && "$indent_len" -gt "$with_scalar_indent" ]]; then
+                # Block-scalar content (key: | / key: >-) is opaque text: it
+                # neither judges interpolation nor refreshes the tracked key,
+                # so a `branch:`-shaped content line can no longer impersonate
+                # a structured input and hide a later command input.
+                :
             elif [[ "$line" =~ ^[[:space:]]*${KEYQ}([A-Za-z0-9_.-]+)${KEYQ}: ]]; then
                 with_key="${BASH_REMATCH[1]}"
+                with_scalar_indent=-1
+                with_scalar_key_re="^[[:space:]]*${KEYQ}[A-Za-z0-9_.-]+${KEYQ}:[[:space:]]*[|>][-+]?([0-9][-+]?)?([[:space:]]*#.*)?\$"
+                if [[ "$line" =~ $with_scalar_key_re ]]; then
+                    with_scalar_indent=$indent_len
+                fi
             fi
         fi
 
