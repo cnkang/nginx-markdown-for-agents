@@ -290,6 +290,10 @@ curl -sf --raw -D "${md_headers}" -o "${md_body}" \
     "http://127.0.0.1:${PORT}/trailers-md" || md_status=$?
 
 if [[ "${md_status}" -eq 0 ]]; then
+    if ! grep -qi '^Content-Type: *text/markdown' "${md_headers}"; then
+        fail "converted response is missing the text/markdown content type"
+        exit 1
+    fi
     pass "converted request succeeds"
 else
     fail "converted request failed (curl rc=${md_status})"
