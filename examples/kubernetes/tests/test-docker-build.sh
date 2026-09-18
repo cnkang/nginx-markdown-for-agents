@@ -240,12 +240,17 @@ test_docker_build() {
 
     local build_output
     local build_rc
+    local module_ref_args=()
+
+    if [[ -n "${MODULE_REF}" ]]; then
+        module_ref_args=(--build-arg "MODULE_REF=${MODULE_REF}")
+    fi
 
     build_output="$(docker build \
         -f "$DOCKERFILE" \
         --build-arg "MODULE_REPO=${MODULE_REPO}" \
         --build-arg "MODULE_SHA=${MODULE_SHA}" \
-        ${MODULE_REF:+--build-arg "MODULE_REF=${MODULE_REF}"} \
+        "${module_ref_args[@]}" \
         -t "$IMAGE_TAG" \
         "$BUILD_CONTEXT" 2>&1)" || build_rc=$?
 
