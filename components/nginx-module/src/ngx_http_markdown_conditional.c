@@ -2761,6 +2761,12 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     {
         return NGX_ERROR;
     }
+    if (snapshot->original_last_nelts > snapshot->entry_count
+        || (snapshot->original_last == NULL
+            && snapshot->original_last_nelts != 0))
+    {
+        return NGX_ERROR;
+    }
     restored = 0;
     original_last_seen = 0;
     for (ngx_list_part_t *part = &list->part;
@@ -2778,6 +2784,21 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
             return NGX_ERROR;
         }
         if (part == snapshot->original_last) {
+            /*
+             * The captured tail may only have GROWN since the snapshot,
+             * and the parts before it must account for exactly the
+             * non-tail share of the captured count: the structural
+             * restore below rolls the tail back to its captured size,
+             * so any other geometry would leave fewer entries than the
+             * snapshot promises.
+             */
+            if (part->nelts < snapshot->original_last_nelts
+                || restored
+                   != snapshot->entry_count
+                      - snapshot->original_last_nelts)
+            {
+                return NGX_ERROR;
+            }
             original_last_seen = 1;
         }
         restored += part->nelts;
@@ -2819,6 +2840,16 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
             entries[i] = snapshot->entries[restored].saved;
             restored++;
         }
+    }
+
+    /*
+     * The copy must have restored every captured entry: a shorter walk
+     * would mean the structural restore left fewer entries than the
+     * snapshot, so the list would silently lose state.  (The bound also
+     * proves the loop never read past snapshot->entries.)
+     */
+    if (restored != snapshot->entry_count) {
+        return NGX_ERROR;
     }
 
     return NGX_OK;
