@@ -817,8 +817,10 @@ def _executable_fstring_position(
     Covers single-line f-strings and open multiline f-strings whose
     replacement field is on the current line.
     """
-    if _in_fstring_expression(line, pos):
-        return True
+    if state.open_quote is None:
+        # No multiline literal is open: only a same-line f-string can
+        # put this position into executable code.
+        return _in_fstring_expression(line, pos)
     return (
         state.multiline_fstring
         and _replacement_depth(line, 0, pos, state.fstring_depth) > 0
