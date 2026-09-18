@@ -20,14 +20,20 @@ def _scan_block_end(script: str, index: int) -> int:
     """
     depth = 1
     quote = ""
+    in_comment = False
     while index < len(script) and depth > 0:
         char = script[index]
-        if quote:
+        if in_comment:
+            if char == "\n":
+                in_comment = False
+        elif quote:
             if char == "\\" and quote == '"' and index + 1 < len(script):
                 index += 2
                 continue
             if char == quote:
                 quote = ""
+        elif char == "#":
+            in_comment = True
         elif char in "\"'":
             quote = char
         elif char == "{":

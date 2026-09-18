@@ -136,8 +136,8 @@ active in 0.9.2. Current selection uses `markdown_streaming auto`, which applies
 the hard eligibility gates and a bounded internal pipeline. There is no
 replacement threshold directive and no size heuristic.
 
-In `auto` mode, every response that clears the eligibility gates is a
-**streaming candidate**. Response size is not part of the decision and there is
+In `auto` mode, every response that clears the eligibility gates and
+passes the pre-selection guards below is a **streaming candidate**. Response size is not part of the decision and there is
 no internal candidate boundary: the module treats an unknown-length response
 and a response with a known `Content-Length` alike.
 
