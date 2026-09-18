@@ -1,0 +1,112 @@
+"""Unit tests for detect_script_exec_bits.py.
+
+Each case builds a throwaway git repository, records the script with a
+known mode in the index, and runs the detector against it.  The detector
+must fail only when an executable-style reference meets a non-executable
+index mode.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+DETECTOR = Path(__file__).resolve().parent.parent / "detect_script_exec_bits.py"
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"},
+    )
+
+
+def _make_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / "tools").mkdir()
+    _git(repo, "init", "-q")
+    return repo
+
+
+def _add(repo: Path, rel: str, mode: int, content: str = "#!/usr/bin/env bash\nexit 0\n") -> None:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    os.chmod(path, mode)
+    _git(repo, "add", "--", rel)
+
+
+def _run(repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(DETECTOR)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _workflow(repo: Path, body: str) -> None:
+    (repo / ".github" / "workflows" / "w.yml").write_text(
+        "jobs:\n  x:\n    steps:\n      - name: t\n        run: |\n" + body,
+        encoding="utf-8",
+    )
+
+
+def test_direct_reference_without_exec_bit_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          ./tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o644)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "tools/x.sh" in result.stdout
+    assert "100644" in result.stdout
+
+
+def test_direct_reference_with_exec_bit_passes(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          ./tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o755)
+    result = _run(repo)
+    assert result.returncode == 0
+    assert "OK" in result.stdout
+
+
+def test_interpreter_prefix_does_not_require_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          bash tools/x.sh --flag\n")
+    _add(repo, "tools/x.sh", 0o644)
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_bare_makefile_recipe_reference_fails(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / "Makefile").write_text("t:\n\ttools/z.sh\n", encoding="utf-8")
+    _add(repo, "tools/z.sh", 0o644)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "tools/z.sh" in result.stdout
+
+
+def test_untracked_script_is_skipped(tmp_path):
+    repo = _make_repo(tmp_path)
+    _workflow(repo, "          ./tools/new.sh\n")
+    (repo / "tools" / "new.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    result = _run(repo)
+    assert result.returncode == 0
+
+
+def test_pytest_continuation_argument_does_not_require_exec_bit(tmp_path):
+    repo = _make_repo(tmp_path)
+    (repo / "Makefile").write_text(
+        "t:\n\tpython3 -m pytest \\\n\t\ttools/t.py \\\n\t\t-q --tb=short\n",
+        encoding="utf-8",
+    )
+    _add(repo, "tools/t.py", 0o644, content="def test_x():\n    assert True\n")
+    result = _run(repo)
+    assert result.returncode == 0
