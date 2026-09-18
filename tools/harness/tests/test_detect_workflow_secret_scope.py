@@ -921,6 +921,27 @@ class TestGateNamePattern:
         ]
         assert secret_scope_module._published_gates(lines, 0, 3) == set()
 
+    def test_near_miss_output_redirections_do_not_count(self) -> None:
+        """`10>>`, `$GITHUB_OUTPUT-BACKUP`, and path-suffixed expansions do
+        not write the real output file, so the wrapped gate must not be
+        certified."""
+        spellings = (
+            '10>> "$GITHUB_OUTPUT"',
+            '>> "$GITHUB_OUTPUT-BACKUP"',
+            '>> "$GITHUB_OUTPUT/foo"',
+            '>> "${GITHUB_OUTPUT}-BACKUP"',
+            '>> "$GITHUB_OUTPUT.foo"',
+        )
+        for redirect in spellings:
+            lines = [
+                'if [[ "${{ steps.gate.outputs.enabled }}" == \'true\' ]]; then\n',
+                "  echo text=1 " + redirect + "\n",
+                "fi\n",
+            ]
+            assert secret_scope_module._published_gates(lines, 0, 3) == set(), (
+                redirect
+            )
+
     def test_escaped_separators_are_literal_arguments(self) -> None:
         """`\\;` outside quotes is an argument, not a command separator:
         the gate must come from the echo that owns the redirection."""
