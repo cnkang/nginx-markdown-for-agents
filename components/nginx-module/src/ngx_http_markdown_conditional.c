@@ -2859,8 +2859,13 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
         return NGX_ERROR;
     }
 
-    if (snapshot->entry_count == 0 || snapshot->entries == NULL) {
+    if (snapshot->entry_count == 0) {
         return NGX_OK;
+    }
+    if (snapshot->entries == NULL) {
+        /* A non-empty snapshot without captured entries cannot be restored:
+         * reported instead of silently skipping the value copy. */
+        return NGX_ERROR;
     }
 
     restored = 0;

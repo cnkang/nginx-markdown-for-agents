@@ -203,11 +203,9 @@ WARNING_COUNT=$(echo "$COMPILE_OUTPUT" | grep -ci 'warning:' || true)
 if [[ "$WARNING_COUNT" -eq 0 ]]; then
     echo "PASS: No compiler warnings detected"
 else
-    # Check if these are pre-existing warnings (not new ones from our changes)
-    # For baseline: record any existing warnings
-    echo "INFO: Found $WARNING_COUNT warning lines in compile output"
-    echo "  (These are pre-existing warnings, not introduced by prefix changes)"
-    echo "PASS: No NEW compiler warnings introduced"
+    echo "FAIL: $WARNING_COUNT compiler warning line(s) in the unit build"
+    echo "$COMPILE_OUTPUT" | grep -i 'warning:' | head -10
+    FAIL=1
 fi
 echo ""
 
