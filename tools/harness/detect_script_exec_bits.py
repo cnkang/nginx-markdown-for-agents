@@ -68,7 +68,22 @@ def _command_word_at(line: str, match_start: int) -> bool:
     if tokens[0] in INTERPRETERS:
         return False
     if tokens[0] in EXEC_WRAPPERS:
-        return True
+        rest = tokens[1:]
+        if tokens[0] == "command" and rest[:1] in (["-v"], ["-V"]):
+            # A `command -v` query does not execute the script.
+            return False
+        index = 0
+        while index < len(rest) and (
+            rest[index].startswith("-") or ASSIGNMENT.match(rest[index])
+        ):
+            index += 1
+        rest = rest[index:]
+        if not rest:
+            return True
+        # Only a trailing execution wrapper still resolves to the
+        # script; an interpreter or any other command makes the path
+        # its argument instead.
+        return rest[0] in EXEC_WRAPPERS
     return all(ASSIGNMENT.match(token) for token in tokens)
 
 

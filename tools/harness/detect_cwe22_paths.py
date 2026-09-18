@@ -867,6 +867,12 @@ def _scan_single_open_match(
         # A comment line cannot contain a live call.
         return match_errors, match_warnings
 
+    if in_string or in_comment:
+        # The call itself sits inside a string literal or a trailing
+        # comment (for example after a multiline string closes), so it
+        # is not live code and no probe may scan it.
+        return match_errors, match_warnings
+
     segment_end = (
         open_matches[match_idx + 1].start()
         if match_idx + 1 < len(open_matches)
@@ -906,11 +912,6 @@ def _scan_single_open_match(
             line[open_match.start():segment_end], quote_at_match
         ):
             _emit_unaudited_warning(match_warnings, state.rel, lineno)
-        return match_errors, match_warnings
-
-    if in_string or in_comment:
-        # A simple identifier inside a docstring or trailing comment
-        # is still not a call.
         return match_errors, match_warnings
 
     call_errors, call_warnings = _classify_open_call(
