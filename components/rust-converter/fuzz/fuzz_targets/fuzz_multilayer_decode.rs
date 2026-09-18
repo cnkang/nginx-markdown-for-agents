@@ -93,7 +93,7 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
         4 => {
             /* Absolute-budget case: an incompressible payload whose decoded
              * size strictly exceeds MAX_OUTPUT, so the 100x ratio ceiling
-             * cannot bind first and the classifier must report the absolute
+             * cannot bind first and the absolute budget path is exercised
              * budget. */
             let overrun = 1
                 + u32::from_le_bytes([
@@ -117,7 +117,7 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
         5 => {
             /* Ratio-ceiling case: a highly compressible payload whose decoded
              * size stays inside the absolute budget but exceeds 100x the wire
-             * size, so the classifier must report the ratio ceiling. */
+             * size, so the ratio ceiling path is exercised. */
             let size = 200_000
                 + u32::from_le_bytes([
                     src.first().copied().unwrap_or(0),
