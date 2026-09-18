@@ -1227,14 +1227,14 @@ test_send_304_failure_with_full_tail_truncates_new_part(void)
     for (int i = 0; i < 32; i++) {
         add_header(&r->headers_out.headers, "X-Filler", "value");
     }
+    original_etag = add_header(&r->headers_out.headers, "ETag",
+                               "\"upstream\"");
+    r->headers_out.etag = original_etag;
     while (r->headers_out.headers.last->nelts
            < r->headers_out.headers.nalloc)
     {
         add_header(&r->headers_out.headers, "X-Filler", "value");
     }
-    original_etag = add_header(&r->headers_out.headers, "ETag",
-                               "\"upstream\"");
-    r->headers_out.etag = original_etag;
     total_before = 0;
     for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL; part = part->next)
@@ -1246,6 +1246,8 @@ test_send_304_failure_with_full_tail_truncates_new_part(void)
      * failed rollback. */
     tail = r->headers_out.headers.last;
     TEST_ASSERT(tail->next == NULL, "fixture tail starts unlinked");
+    TEST_ASSERT(total_before <= NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES,
+                "fixture entry count stays within the snapshot cap");
 
     /* Snapshot succeeds; the mutation appends run (allocating a new part
      * past the full captured tail), then the header reply fails so the
