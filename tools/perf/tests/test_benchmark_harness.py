@@ -403,7 +403,10 @@ def test_compressed_probe_rejects_content_encoding(encoding):
     assert "content_encoding" in result["failure_reason"]
 
 
-@pytest.mark.parametrize("body", [b"\x1f\x8bcompressed", b"\x78\x9ccompressed"])
+@pytest.mark.parametrize(
+    "body",
+    [b"\x1f\x8bcompressed", zlib.compress(b"compressed")],
+)
 def test_compressed_probe_rejects_wire_compressed_body(body):
     result = validate_response_probe(
         status=200,
