@@ -22,13 +22,11 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: 0.9.2 is currently a development candidate. At the
-> time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
-> image, or Helm repository entry gets asserted. The prebuilt and Helm commands
-> below are release-time templates and must only run after the project
-> publishes the artifacts and verifies them independently. For the current
-> candidate, build from the exact branch commit or use locally produced
-> artifacts.
+> Publication status: 0.9.2 shipped (2026-09-19). The release carries the
+> `v0.9.2` tag, GitHub Release, package checksums, and signed artifacts.
+> Verify checksums and signatures as described below before you install
+> prebuilt packages. Helm repository publication, where offered, stays
+> separate from this release.
 
 Choose the upgrade method matching your deployment:
 
@@ -2175,6 +2173,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status updated for the published v0.9.2 |
 | 0.9.2 | 2026-09-17 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
 | 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
 | 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
