@@ -1361,6 +1361,10 @@ jobs:
     name: Official NGINX Docker Release Gate
     needs: [release-gate]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
+    # The called workflow's jobs request contents: read, so this calling job
+    # must grant it: a call cannot exceed the calling job's permissions.
+    permissions:
+      contents: read
     uses: ./.github/workflows/official-nginx-docker.yml
     with:
       module_repo: ${{ github.server_url }}/${{ github.repository }}.git
