@@ -340,6 +340,9 @@ def check_no_hardcoded_release_tags(text: str, document_label: str) -> list[str]
     return errors
 
 
+BASH_FENCE = "```bash"
+
+
 def _current_release_version() -> str | None:
     """Return the newest released version from the changelog."""
     changelog = ROOT / "CHANGELOG.md"
@@ -364,8 +367,8 @@ def check_apt_verification_example() -> list[str]:
         return ["packaging/repo/apt/README.md: canonical release verification section missing"]
     start = text.index(marker)
     try:
-        fence = text.index("```bash", start)
-        end = text.index("```", fence + len("```bash"))
+        fence = text.index(BASH_FENCE, start)
+        end = text.index("```", fence + len(BASH_FENCE))
     except ValueError:
         return [
             "packaging/repo/apt/README.md: verification section has no "

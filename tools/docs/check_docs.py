@@ -28,7 +28,8 @@ from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
 ARCHIVE_SEGMENT = "docs/archive/"
-MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
+CHINESE_README = "README_zh-CN.md"
+MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", CHINESE_README}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 SPEC_INDEX_RE = re.compile(
@@ -272,7 +273,7 @@ def check_english_policy(files: list[Path]) -> list[str]:
     """
     errors: list[str] = []
     for f in files:
-        if f.name == "README_zh-CN.md":
+        if f.name == CHINESE_README:
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
         for line_no, line in enumerate(text.splitlines(), 1):
@@ -972,7 +973,7 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
 
 RELEASE_SURFACE_FILES = (
     "README.md",
-    "README_zh-CN.md",
+    CHINESE_README,
     "docs/project/PROJECT_STATUS.md",
     "docs/project/VERSION_PLANNING.md",
     "docs/guides/INSTALLATION.md",
@@ -1012,6 +1013,19 @@ def _push_heading(stack: list[tuple[int, bool]], level: int, mentions: bool) -> 
     return any(seen for _lvl, seen in stack)
 
 
+def _split_heading(line: str) -> tuple[int, str] | None:
+    """Return (level, text) for an ATX heading line, or None."""
+    if not line.startswith("#"):
+        return None
+    hashes = len(line) - len(line.lstrip("#"))
+    if not 1 <= hashes <= 6:
+        return None
+    rest = line[hashes:]
+    if not rest.startswith((" ", "\t")):
+        return None
+    return hashes, rest.strip()
+
+
 def _contextual_blocks(
     text: str,
     history: set[str],
@@ -1039,15 +1053,16 @@ def _contextual_blocks(
             flush()
             continue
         stripped = line.strip()
-        heading = re.match(r"^ {0,3}(#{1,6})\s+(.*)$", stripped)
+        heading = _split_heading(stripped)
         if heading is not None:
             flush()
-            mentions = version_pattern.search(heading.group(2)) is not None
-            context = _push_heading(stack, len(heading.group(1)), mentions)
+            level, heading_text = heading
+            mentions = version_pattern.search(heading_text) is not None
+            context = _push_heading(stack, level, mentions)
             if mentions:
                 # The heading text itself is a claim: a candidate-declaring
                 # heading must not slip through unbeaten.
-                blocks.append((heading.group(2), True))
+                blocks.append((heading_text, True))
             continue
         if not stripped or line in history:
             flush()
@@ -1119,7 +1134,7 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
     notes_text = _without_fenced_blocks(
         path.read_text(encoding="utf-8", errors="ignore")
     )
-    status = re.search(r"^\*\*Status\*\*:\s*(?P<value>.+?)\s*$", notes_text, re.MULTILINE)
+    status = re.search(r"^\*\*Status\*\*:(?P<value>.*)$", notes_text, re.MULTILINE)
     if status is None:
         return [f"{rel}: missing release status for released {version}"]
     value = " ".join(status.group("value").split()).casefold()
