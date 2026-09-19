@@ -7,7 +7,7 @@ or narrowly scopes conversion **without replacing the binary**, see
 
 ## Overview
 
-This guide covers rolling back the 0.9.2 development candidate to a prior
+This guide covers rolling back the released 0.9.2 to a prior
 release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
 on-disk data migration. Rolling back the module binary restores the 0.9.1
@@ -664,6 +664,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-19 | Kang | Release finalization: overview wording updated for the released v0.9.2 |
 | 0.9.2 | 2026-09-17 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |
 | 0.9.2 | 2026-08-24 | Kang | Both shutdown blocks reuse the guarded systemd-detection logic with manual-master verification; MODULES_DIR fallback no longer guesses the first existing directory and requires explicit configuration |
 | 0.9.2 | 2026-08-15 | Kang | Modules path derived from nginx -V; bounded shutdown loop; metric-family difference table |

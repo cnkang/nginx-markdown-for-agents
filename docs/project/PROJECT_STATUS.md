@@ -28,15 +28,16 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.2
 
-**Status:** Development release line. 0.9.1 is the latest released patch.
-0.9.2 is the current development line. 0.9.2 is the final pre-1.0 breaking
-release, with the public configuration surface reduced to 20 active directives
-and the five removed names dropped from the command table, retired profile/conflict FFI snapshots
-removed, and the bundled FFI ABI at version 3. Development version metadata is
-0.9.2. The release tag, GitHub Release, package assets, and checksums remain
-pending until the blocking gates pass.
+**Status:** Stable release. 0.9.2 is the latest released version, published
+2026-09-19. 0.9.2 is the final pre-1.0 breaking release: the public
+configuration surface shrank to 20 active directives with the seven
+highlighted retired names (a subset of the removal inventory) dropped from
+the command table, the retired profile/conflict FFI snapshots are gone, and
+the bundled FFI ABI sits at version 3. See the removal inventory in the
+[0.9.2 release notes](../releases/0.9.2-release-notes.md). The release ships
+with the tag, GitHub Release, package assets, and checksums.
 
-#### 0.9.2 (current development)
+#### 0.9.2 (current release)
 
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
@@ -49,7 +50,7 @@ pending until the blocking gates pass.
   `decompression_events_total`, `build_info`).
   This replaces the legacy multi-format, per-path, shadow, and debug families.
 - **Directive convergence and ABI 3**: The release freezes 20 active directives
-  and drops the five removed names from the command table. The runtime
+  and drops the seven removed names from the command table. The runtime
   dynconf subsystem and custom selectors are gone, and the bundled Rust/C FFI
   ABI moves to version 3.
 - **Release-gates-check-092**: Additive on 091, adds public-surface drift
@@ -216,12 +217,11 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current
-development version is 0.9.2. 0.9.1 remains the latest released patch until
-the 0.9.2 release tag and release gates are complete. It is a
+released version is 0.9.2 (published 2026-09-19). It is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
-metric families, reason registry, diagnostics JSON v2), advances the bundled
+metric families, reason registry, diagnostics JSON v3), advances the bundled
 FFI boundary to ABI 3, and moves
 the musl dynamic-module build before publication, on top of the 0.9.1
 streaming-decompression and zero-copy foundation.
@@ -413,7 +413,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
-development line and 0.9.1 is the latest released patch. The project provides
+released line (published 2026-09-19). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 bounded full-buffer default, explicit streaming opt-in, bounded-memory
 processing, and a repo-owned validation harness. Release readiness remains tied
@@ -429,12 +429,11 @@ the active release documentation.
 - Multi-platform support (macOS, Linux, Docker)
 
 ### Current State
-The team has implemented and tested the core feature set. Production and release
-readiness remain pending: release assets and the required verification
-evidence (performance baselines, SonarCloud scan on the final SHA, and the
-full release-gate suite) stay blocked until all release gates pass. The focus
-is on operational validation, performance optimization, and community feedback
-integration.
+The team has implemented and tested the core feature set. 0.9.2 shipped on
+2026-09-19 after the release assets and the required verification evidence
+(performance baselines, SonarCloud scan on the final SHA, and the full
+release-gate suite) passed. The focus is on operational validation,
+performance optimization, and community feedback integration.
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
 - **Install**: Follow the [INSTALLATION](../guides/INSTALLATION.md) guide
@@ -448,6 +447,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-19 | Kang | Release finalization: 0.9.2 marked as the stable release and published across the status page |
 | 0.9.2 | 2026-08-24 | Kang | Trimmed historical release recaps and kept the active status page linked to release notes and the changelog |
 | 0.9.2 | 2026-08-15 | Kang | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
 | 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |

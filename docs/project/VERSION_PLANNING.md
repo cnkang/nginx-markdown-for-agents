@@ -1,4 +1,4 @@
-# Version Planning: v0.9.2 Development and v1.0 Freeze
+# Version Planning: v0.9.2 Release and v1.0 Freeze
 
 ## Purpose
 
@@ -9,10 +9,10 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current development release line, building on the v0.9.1
-  baseline-consolidation and compatibility-reset release.
-- Development version metadata is already 0.9.2, release publication, tag,
-  assets, and checksums remain pending release-gate evidence.
+- v0.9.2 is the current released line (published 2026-09-19), building on
+  the v0.9.1 baseline-consolidation and compatibility-reset release.
+- Release version metadata is 0.9.2. The release shipped with the tag,
+  assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
@@ -49,10 +49,10 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Release Evidence
 
-v0.9.2 remains a development candidate until the exact branch head passes
-the release-gates-check-092 evidence chain and the release artifacts get
-reviewed. Passing local gates alone does not declare a published stable
-release.
+The exact branch head passed the release-gates-check-092 evidence chain,
+and the team reviewed the release artifacts before publication. v0.9.2 is a
+published stable release. Passing local gates alone does not declare a
+published stable release.
 
 ## Historical v0.9.1 baseline
 
@@ -63,7 +63,7 @@ for the current plan, not an active release objective.
 
 ## v1.0 Contract Freeze
 
-After the project publishes v0.9.2, v1.0 preparation is a stabilization phase rather
+With v0.9.2 published, v1.0 preparation is a stabilization phase rather
 than another baseline reset.
 
 ### Freeze Rules
@@ -153,6 +153,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-19 | Kang | Release finalization: current release state and release evidence updated for the published v0.9.2 |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
 | 0.9.1 | 2026-07-14 | Codex | Replaced obsolete 0.4-to-0.6 planning with the final pre-v1.0 baseline, freeze, and post-v1.0 compatibility contract |
