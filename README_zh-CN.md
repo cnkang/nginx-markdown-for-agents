@@ -7,8 +7,8 @@
 > HTML 进，Markdown 出。
 > 客户端请求时返回，或者由你决定何时提供。
 
-> 当前版本线：v0.9.2 是开发候选版本，尚未发布。
-> 这是 v1.0 前最后一次破坏性版本。v0.9.2 发布前，请使用已发布的标签安装。
+> 当前版本线：v0.9.2 已正式发布（2026-09-19）。
+> 这是 v1.0 前最后一次破坏性版本，请使用 v0.9.2 标签安装。
 
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
 表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
@@ -78,7 +78,8 @@ HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](
 
 ## 0.9.2 配置要点
 
-0.9.2 将公共配置冻结为 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以
+0.9.2 将公共配置冻结为 20 条有效指令；所列七个退役名称（五个收敛名称加上
+`markdown_profile` 与 `markdown_streaming_zero_copy`）已不再注册，`nginx -t` 会以
 NGINX 标准的 `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
 请显式配置行为，使 `nginx -T` 能展示运维人员选择的设置。
 
@@ -149,10 +150,12 @@ curl -sS -D - -o /dev/null \
 
 ## 0.9.2 的变化
 
-0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
+0.9.2 是破坏性发布版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-- 0.9.2 冻结 20 条有效指令；本次收敛移除的 5 个名称已不再注册，`nginx -t` 会以 NGINX 标准的
-  `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
+- 0.9.2 冻结 20 条有效指令。所列七个退役名称——移除清单中的常用子集，即五个收敛名称加上
+  `markdown_profile` 与 `markdown_streaming_zero_copy`——已不再注册，`nginx -t` 会以 NGINX
+  标准的 `unknown directive` 报错，替换目标见
+  [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
   profile、OTel、按路径指标、shadow mode 和其他旧指令不再是有效配置。
   迁移后运行 `nginx -t`。
 - 运行时动态配置文件、watcher、dry-run 提升和 last-known-good 快照已移除。
