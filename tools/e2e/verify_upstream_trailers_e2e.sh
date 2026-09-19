@@ -143,7 +143,7 @@ version_at_least() {
     return 1
 }
 if ! version_at_least "1.27.2"; then
-    echo "SKIP: upstream-trailer qualification requires NGINX >= 1.27.2; this binary is ${nginx_version_num}"
+    echo "N/A: upstream trailer forwarding requires NGINX >= 1.27.2; this binary is ${nginx_version_num} (qualification not applicable)"
     exit 0
 fi
 if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65534 )); then
