@@ -450,6 +450,25 @@ fn scenario_response(
             true,
         );
     }
+    if path == "/md-off/html" {
+        /* The filter-off path must observe the module's sanitization, so the
+         * source response carries an explicit public cache policy even for
+         * requests that carry an auth cookie. */
+        return plain_response_with_headers(
+            method,
+            200,
+            "",
+            vec![
+                ("Content-Type".to_string(), "text/html".to_string()),
+                (
+                    "Cache-Control".to_string(),
+                    "public, max-age=60".to_string(),
+                ),
+                ("ETag".to_string(), "\"upstream-auth-etag-001\"".to_string()),
+            ],
+            "<h1>fixture html</h1>",
+        );
+    }
     if path == "/md/html" {
         return md_html_response(state, method, headers);
     }

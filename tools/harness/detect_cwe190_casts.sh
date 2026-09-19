@@ -119,7 +119,15 @@ readonly SAFE_CAST_ALLOWLIST=(
 echo "--- Pattern (c): direct ngx_parse_size() + (size_t) cast ---" >&2
 
 # Search for ngx_parse_size followed eventually by (size_t) cast
-# without the size-safe parse wrapper in between.
+# without the size-safe parse wrapper in between.  The scan is captured
+# first so a grep failure (rc>1) aborts instead of reading as "clean".
+parse_raw_rc=0
+parse_raw="$(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null)" || parse_raw_rc=$?
+if [[ "$parse_raw_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR} for ngx_parse_size cast candidates" >&2
+    exit 2
+fi
+parse_scan="$(printf '%s\n' "$parse_raw" | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)"
 parse_size_hits=0
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
@@ -151,7 +159,7 @@ while IFS= read -r match; do
         fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rnE '\bngx_parse_size\b.*\(size_t|\(size_t.*\bngx_parse_size\b' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
+done <<< "$parse_scan"
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2
@@ -170,6 +178,13 @@ narrow_hits=0
 readonly NARROW_SAFE_ALLOWLIST=(
     $'ngx_http_markdown_decompression.c\tavail_out.*uInt.*output_size.*used\toutput_size already clamped to UINT_MAX by grow_output_buffer upstream'
 )
+narrow_raw_rc=0
+narrow_raw="$(grep -rnE '\((uint32_t|uint8_t|uInt|int)\)[[:space:]]*\(' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null)" || narrow_raw_rc=$?
+if [[ "$narrow_raw_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR} for narrowing casts" >&2
+    exit 2
+fi
+narrow_scan="$(printf '%s\n' "$narrow_raw" | grep -vE 'sizeof|offsetof|NGX_HTTP_MARKDOWN_' || true)"
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
@@ -213,9 +228,15 @@ while IFS= read -r match; do
         warnings=$((warnings + 1))
     fi
     narrow_hits=$((narrow_hits + 1))
-done < <(grep -rnE '\((uint32_t|uint8_t|uInt|int)\)[[:space:]]*\(' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE 'sizeof|offsetof|NGX_HTTP_MARKDOWN_' || true)
+done <<< "$narrow_scan"
 
 # Also check specific known-dangerous patterns: (size_t) NGX_ERROR
+ngx_error_scan_rc=0
+ngx_error_scan="$(grep -rn '(size_t) NGX_ERROR' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null)" || ngx_error_scan_rc=$?
+if [[ "$ngx_error_scan_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR} for (size_t) NGX_ERROR" >&2
+    exit 2
+fi
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
@@ -239,7 +260,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — (size_t) NGX_ERROR: negative ssize_t cast to size_t" >&2
     errors=$((errors + 1))
     narrow_hits=$((narrow_hits + 1))
-done < <(grep -rn '(size_t) NGX_ERROR' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done <<< "$ngx_error_scan"
 
 if [[ "$narrow_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2
@@ -252,6 +273,12 @@ echo "--- Pattern (a): ssize_t/ngx_int_t → (size_t) without guard ---" >&2
 ssize_hits=0
 # Detect (size_t) explicit casts of ssize_t-typed variables
 # (common names: parsed, raw, rc, n) and also = ngx_parse_size assignments
+ssize_scan_rc=0
+ssize_scan="$(grep -rnE '\(size_t\)[[:space:]]*[A-Za-z_]' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null)" || ssize_scan_rc=$?
+if [[ "$ssize_scan_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR} for ssize_t casts" >&2
+    exit 2
+fi
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
@@ -398,7 +425,7 @@ while IFS= read -r match; do
         warnings=$((warnings + 1))
     fi
     ssize_hits=$((ssize_hits + 1))
-done < <(grep -rnE '\(size_t\)[[:space:]]*[A-Za-z_]' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done <<< "$ssize_scan"
 
 if [[ "$ssize_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2
@@ -430,6 +457,12 @@ readonly PTR_SUB_SAFE_ALLOWLIST=(
 )
 
 ptr_sub_hits=0
+ptr_sub_scan_rc=0
+ptr_sub_scan="$(grep -rnE '\(size_t\)[[:space:]]*\([a-zA-Z_][a-zA-Z0-9_.>]*[[:space:]]*-[[:space:]]*[a-zA-Z_][a-zA-Z0-9_.>]*\)' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null)" || ptr_sub_scan_rc=$?
+if [[ "$ptr_sub_scan_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR} for pointer-subtraction casts" >&2
+    exit 2
+fi
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
         continue
@@ -472,7 +505,7 @@ while IFS= read -r match; do
         warnings=$((warnings + 1))
     fi
     ptr_sub_hits=$((ptr_sub_hits + 1))
-done < <(grep -rnE '\(size_t\)[[:space:]]*\([a-zA-Z_][a-zA-Z0-9_.>]*[[:space:]]*-[[:space:]]*[a-zA-Z_][a-zA-Z0-9_.>]*\)' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done <<< "$ptr_sub_scan"
 
 if [[ "$ptr_sub_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2

@@ -23,6 +23,7 @@
 # Exit codes:
 #   0 — no findings (advisory by default)
 #   1 — usage error or findings in --strict mode
+#   2 — scan setup failure (temp file, creation, enumeration, or unreadable source)
 
 set -euo pipefail
 
@@ -30,6 +31,7 @@ SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${REPO_ROOT}/components/nginx-module/src"
 STRICT=0
+. "${SCRIPT_DIR}/collect_files.sh"
 
 for arg in "$@"; do
     case "$arg" in
@@ -52,20 +54,38 @@ done
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: directory not found: $SRC_DIR" >&2
-    exit 1
+    exit 2
 fi
 
 findings=0
+file_list="$(mktemp "${TMPDIR:-/tmp}/hardcoded-status-files.XXXXXX")" || {
+    echo "ERROR: cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) 2>/dev/null; then
+    echo "ERROR: cannot enumerate source files in $SRC_DIR" >&2
+    exit 2
+fi
 
 # Pattern: return NGX_HTTP_BAD_GATEWAY or return NGX_HTTP_INTERNAL_SERVER_ERROR
 # in files that contain reject/error handling code
 
 # Preserve paths containing whitespace: iterate NUL-delimited find output.
-while IFS= read -r -d '' file || [[ -n "$file" ]]; do
+while IFS= read -r -d '' file; do
     [[ -n "$file" ]] || continue
     rel_path="${file#${REPO_ROOT}/}"
 
     # Use grep to find return statements with hardcoded status codes
+    context_rc=0
+    grep -qE 'reject|on_error|fail_open|precommit_error|postcommit_error|stream_on_error' "$file" 2>/dev/null || context_rc=$?
+    if [[ "$context_rc" -eq 2 ]]; then
+        echo "ERROR: cannot read source file $file" >&2
+        exit 2
+    fi
+    if [[ "$context_rc" -ne 0 ]]; then
+        continue
+    fi
     # Skip lines containing conf->error_status
     while IFS= read -r match; do
         line_num="${match%%:*}"
@@ -73,7 +93,7 @@ while IFS= read -r -d '' file || [[ -n "$file" ]]; do
         # Strip leading whitespace for display
         trimmed="${line_text#"${line_text%%[![:space:]]*}"}"
 
-        # Skip comment lines (starting with /* or * or //)
+        # Skip comment lines (starting with /*, * or //)
         case "$trimmed" in
             /*|\**|//*) continue ;;
             *) ;;
@@ -109,9 +129,7 @@ while IFS= read -r -d '' file || [[ -n "$file" ]]; do
         fi
 
     done < <(grep -nE 'return.*NGX_HTTP_(BAD_GATEWAY|INTERNAL_SERVER_ERROR)' "$file" || true)
-done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0 2>/dev/null \
-    | xargs -0 grep -lE 'reject|on_error|fail_open|precommit_error|postcommit_error|stream_on_error' 2>/dev/null \
-    | tr '\n' '\0' || true)
+done < "$file_list"
 
 if [[ $findings -gt 0 ]]; then
     if [[ $STRICT -eq 1 ]]; then

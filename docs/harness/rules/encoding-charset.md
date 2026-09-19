@@ -109,8 +109,10 @@ Verification:
   input bytes and selects `MAX_WBITS` for zlib-wrapped streams and
   `-MAX_WBITS` for raw RFC 1951 streams.
 - Verify raw RFC 1951 coverage exists for BOTH decoders: the Rust decoder
-  retries a zero-output RFC 1950 format error as raw RFC 1951 (full-buffer),
-  and the C fallback covers raw deflate when the zlib probe fails. Keep the
+  retries a zero-output RFC 1950 format error as raw RFC 1951, the C
+  full-buffer fallback replays a wrapped format error as raw RFC 1951
+  (including after partial output), and the C fallback covers raw deflate
+  when the zlib probe fails. Keep the
   existing zlib-wrapped streaming checks unchanged.
 - Verify gzip concatenated-member tests cover one feed, a boundary between
   feeds, a boundary inside a feed, a truncated later member, and cumulative

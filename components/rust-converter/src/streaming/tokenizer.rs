@@ -455,6 +455,12 @@ pub(crate) struct BudgetedStreamingTokenizer {
 
 impl BudgetedStreamingTokenizer {
     /// Construct a tokenizer whose conservative reservation fits in `total`.
+    ///
+    /// When `total` is too small to cover the fixed reservation plus any
+    /// tracked input, the tokenizer is still constructed, but every non-empty
+    /// [`feed_next`](Self::feed_next) fails closed with
+    /// [`ConversionError::BudgetExceeded`] (`tokenizer_reservation`) instead
+    /// of parsing with an under-provisioned envelope.
     pub fn new(total: usize) -> Self {
         let maximum_tracked_input =
             TOKENIZER_MAX_TOKEN_BYTES.saturating_add(TOKENIZER_BATCH_TARGET_BYTES);

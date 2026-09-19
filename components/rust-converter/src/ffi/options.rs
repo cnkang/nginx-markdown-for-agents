@@ -74,16 +74,15 @@ pub(crate) struct DecodedOptions<'a> {
     /// generated Markdown output, and the true streaming path combines it
     /// with `streaming_budget` as the lower non-zero working-set cap.
     pub(crate) memory_budget: u64,
-    /// Raw chars-per-token from FFI options (before normalization).
-    /// Retained for diagnostics/logging; all estimation paths use
-    /// [`effective_chars_per_token`](Self::effective_chars_per_token).
-    #[allow(dead_code)]
-    pub(crate) chars_per_token: f32,
-    /// Normalized chars-per-token clamped to a sane range [1.0, 100.0].
-    /// All token estimation paths (full-buffer and streaming)
-    /// must use this value to avoid divergent behavior when the raw
-    /// FFI `chars_per_token` decodes to a non-positive or
-    /// pathological value.
+    /// Chars-per-token ratio used by **every** token-estimation path.
+    ///
+    /// The heuristic is `ceil(chars / ratio)`; the value is the built-in
+    /// [`DEFAULT_CHARS_PER_TOKEN`] (4.0), already normalized by
+    /// [`clamp_chars_per_token`].  The C `MarkdownOptions` struct has no
+    /// chars-per-token field (the 0.9.2 ABI freeze removed it), so this is a
+    /// constant for the whole 96-byte layout — but it stays a single named
+    /// output so the estimator has one source instead of two values that can
+    /// drift apart.
     pub(crate) effective_chars_per_token: f32,
     /// Parse-specific timeout.  When non-zero, the parser uses this
     /// deadline instead of the general `timeout`.  Falls back to
@@ -253,7 +252,6 @@ pub(crate) fn decode_options(
         streaming_budget: options.streaming_budget,
         prune_noise,
         memory_budget: options.memory_budget,
-        chars_per_token: raw_cpt,
         effective_chars_per_token: clamp_chars_per_token(raw_cpt),
         parse_timeout,
         parser_memory_budget: options.parser_memory_budget,
@@ -306,10 +304,10 @@ mod tests {
 
     #[test]
     fn test_chars_per_token_default() {
-        /* Token estimation uses the fixed 4.0 ratio. */
+        /* Token estimation uses the fixed 4.0 ratio — the single decoded
+         * output (`effective_chars_per_token`) must carry it. */
         let options = test_options();
         let decoded = decode_options(&options).unwrap();
-        assert_f32_eq(decoded.chars_per_token, 4.0);
         assert_f32_eq(decoded.effective_chars_per_token, 4.0);
     }
 

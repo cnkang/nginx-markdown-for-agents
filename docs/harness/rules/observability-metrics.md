@@ -248,11 +248,18 @@ Required:
   condition.  Do not weaken the guard in a secondary path — if the primary
   path requires `rc == OK`, the resume path must also require `rc == OK`, not
   merely `rc != ERROR`.
-- In NGINX filter context specifically, `NGX_AGAIN` means "suspended /
-  backpressure — bytes not yet delivered" and must not count as a
-  successful send for observability.  Only `NGX_OK` and `NGX_DONE` confirm
-  downstream acceptance.  When `NGX_AGAIN` occurs, defer the gauge write to
-  the resume path where the pending chain drains with a confirmed success code.
+- In NGINX filter context specifically, split the meaning of `NGX_AGAIN` by
+  filter phase.  In the header chain, `NGX_AGAIN` means the write filter
+  accepted the header block: the headers crossed the module boundary, so
+  publish the commit latches and defer success-only delivery gauges to the
+  resume path (see Rule 72 for the canonical latch contract).  In the body
+  chain, `NGX_AGAIN` means suspend/backpressure — bytes not yet delivered —
+  and never latches terminal delivery.  Header acceptance is not downstream
+  delivery: an accepted header block confirms only that the headers crossed
+  the module boundary.  Only `NGX_OK` and `NGX_DONE` confirm completed
+  downstream delivery of the body and the terminal state.  When `NGX_AGAIN`
+  occurs, defer the gauge write to the resume path where the pending chain
+  drains with a confirmed success code.
 - **All exit paths from a multi-path operation must apply symmetric
   observability semantics.** If one post-commit send-failure path records
   `postcommit_error_total + failed_total + reason_code`, every other

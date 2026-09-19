@@ -421,6 +421,27 @@ impl StructuralStateMachine {
         Ok(())
     }
 
+    /// Fence language of the code block in progress, when one is open.
+    ///
+    /// The emitter syncs this value while content accumulates so the
+    /// budget reservation includes the language bytes before the exit
+    /// action repeats them.
+    pub(crate) fn current_code_language(&self) -> Option<&str> {
+        /* Nested contexts (inline markup inside the block) sit above the
+         * CodeBlock slot; any CodeBlock(Some) still on the stack means
+         * the block is open, so search from the top for the nearest
+         * language instead of inspecting only the top slot. */
+        self.stack
+            .iter()
+            .rev()
+            .find_map(|context| match context {
+                StructuralContext::CodeBlock(Some(lang)) => Some(Some(lang.as_str())),
+                StructuralContext::CodeBlock(None) => Some(None),
+                _ => None,
+            })
+            .flatten()
+    }
+
     /// Process an HTML end tag, pop the corresponding structural context if present, and update
     /// internal nesting/tracking state accordingly.
     ///

@@ -296,6 +296,17 @@ def validate_manifest(
                     )
                 continue
             package_entries.append(pkg)
+            entry_version = pkg.get("version")
+            if pkg.get("format") in ("deb", "rpm") and not entry_version:
+                errors.append(
+                    f"{prefix}: deb/rpm entries must declare a non-empty version"
+                )
+                continue
+            if entry_version and entry_version != version:
+                errors.append(
+                    f"{prefix}: package version {entry_version} does not "
+                    f"match the manifest version {version}"
+                )
             # dynamic-module tarballs carry nginx_version/libc/arch instead of
             # a project version (their name encodes the NGINX version, not the
             # release version).  Require the version key for deb/rpm only, and

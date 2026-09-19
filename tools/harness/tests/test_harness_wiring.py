@@ -88,6 +88,23 @@ def test_c_hooks_also_fire_for_header_implementations(hook_id: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "components/rust-converter/src/ffi.rs",
+        "components/rust-converter/include/markdown_converter.h",
+        "components/rust-converter/cbindgen.toml",
+        "components/nginx-module/src/markdown_converter.h",
+    ],
+)
+def test_ffi_header_hook_covers_every_abi_surface(path: str) -> None:
+    """Top-level FFI and generated-header edits must not silently skip sync."""
+    import re
+
+    pattern = _hooks()["ffi-header-sync"]["files"]
+    assert re.search(pattern, path), path
+
+
+@pytest.mark.parametrize(
     "command,detector",
     [
         (["bash", "tools/harness/detect_pool_free.sh"], "pool/free"),
@@ -168,6 +185,46 @@ def test_pool_free_parse_failure_is_not_a_clean_scan(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 2, result.stderr
+
+
+@pytest.mark.parametrize(
+    "detector",
+    [
+        "detect_ffi_fat_pointer_transfer.sh",
+        "detect_ffi_panic_safety.sh",
+        "detect_ngx_again_call_sites.sh",
+        "detect_workflow_input_injection.sh",
+        "detect_backpressure_resume.sh",
+        "detect_decompression_budget.sh",
+        "detect_c_pure_logic.sh",
+        "detect_ffi_struct_init.sh",
+        "detect_hardcoded_http_status.sh",
+        "detect_shell_hygiene.sh",
+    ],
+)
+def test_blocking_shell_detectors_fail_closed_on_find_error(
+    tmp_path: Path, detector: str
+) -> None:
+    """A broken file enumeration must be distinct from a clean scan."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "find").write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    (fake_bin / "find").chmod(0o755)
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}")
+
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "tools/harness" / detector), str(scan_dir)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 2, f"{detector}: {result.stdout}{result.stderr}"
+    assert "cannot enumerate" in (result.stdout + result.stderr).lower()
 
 
 def test_orphan_detector_refuses_a_file_argument(tmp_path: Path) -> None:

@@ -25,12 +25,52 @@ jobs:
       contents: read
     outputs:
       targets: ${{ steps.resolve.outputs.targets }}
+      checkout_ref: ${{ steps.ref.outputs.checkout_ref }}
     steps:
+      - name: Validate ref input
+        id: ref
+        env:
+          REQUESTED_REF: ${{ github.event.inputs.ref || '' }}
+          DEFAULT_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Dispatch inputs are operator text; validate the shape before the
+          # value reaches actions/checkout and `git fetch` so it cannot smuggle
+          # arbitrary expressions or extra arguments.
+          #
+          # Trim only leading/trailing whitespace.  Deleting every whitespace
+          # character would rewrite 'feature branch' into 'featurebranch',
+          # which then satisfies the ref regex below and silently checks out
+          # the wrong ref; internal whitespace or control characters are
+          # rejected instead (C9).
+          REQUESTED_REF="${REQUESTED_REF#"${REQUESTED_REF%%[![:space:]]*}"}"
+          REQUESTED_REF="${REQUESTED_REF%"${REQUESTED_REF##*[![:space:]]}"}"
+          if [[ -z "${REQUESTED_REF}" ]]; then
+            echo "checkout_ref=${DEFAULT_REF}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${REQUESTED_REF}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::The ref input must not contain internal whitespace or control characters" >&2
+            exit 1
+          fi
+          if [[ ! "${REQUESTED_REF}" =~ ^(refs/(heads|tags|pull)/[A-Za-z0-9._/-]+|[0-9a-f]{7,40}|[A-Za-z0-9][A-Za-z0-9._/-]*)$ ]]; then
+            echo "::error::The ref input must be a branch, tag, or commit SHA (letters, digits, '.', '_', '-', '/')" >&2
+            exit 1
+          fi
+          case "${REQUESTED_REF}" in
+            -*)
+              echo "::error::The ref input must not start with '-'" >&2
+              exit 1
+              ;;
+          esac
+          echo "checkout_ref=${REQUESTED_REF}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event.inputs.ref || github.ref }}
+          ref: ${{ steps.ref.outputs.checkout_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -505,13 +545,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event.inputs.ref || github.ref }}
+          ref: ${{ needs.resolve-matrix.outputs.checkout_ref }}
 
       - name: Checkout repository (Alpine arm64 fallback)
         if: ${{ steps.js_actions_support.outputs.supported != 'true' }}
         env:
           REPO_URL: https://github.com/${{ github.repository }}.git
-          CHECKOUT_REF: ${{ github.event.inputs.ref || github.ref }}
+          CHECKOUT_REF: ${{ needs.resolve-matrix.outputs.checkout_ref }}
         run: |
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git init .
@@ -843,7 +883,7 @@ jobs:
           MATRIX_TARGET_NAME: ${{ matrix.target.name }}
           MATRIX_TARGET_RUNNER: ${{ matrix.target.runner }}
           MATRIX_TARGET_CONTAINER: ${{ matrix.target.container || 'none' }}
-          SUMMARY_REF: ${{ github.event.inputs.ref || github.ref }}
+          SUMMARY_REF: ${{ needs.resolve-matrix.outputs.checkout_ref }}
           SUMMARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
           INSTALL_EXIT: ${{ steps.install.outputs.install_exit }}
           VALIDATE_OUTCOME: ${{ steps.validate_outcome.conclusion }}

@@ -70,11 +70,11 @@ def _write_tmp_json(data, suffix=".json"):
 def _make_baseline(tiers=None):
     """
     Create a baseline metrics payload for performance comparison tests.
-    
+
     Parameters:
         tiers (dict | None): Optional mapping of tier names to metric values. A default
             "small" tier is used when this value is omitted or empty.
-    
+
     Returns:
         dict: A baseline payload containing schema metadata, platform information, and
             tiered performance metrics.
@@ -100,10 +100,10 @@ def _make_baseline(tiers=None):
 def _make_current(tiers=None):
     """
     Create a current measurement report for use in tests.
-    
+
     Parameters:
         tiers (dict, optional): Tier metrics to include in the report. Defaults to representative metrics for the ``small`` tier; an empty mapping also uses these defaults.
-    
+
     Returns:
         dict: A measurement report containing schema metadata, a timestamp, commit identifier, platform, and tier metrics.
     """

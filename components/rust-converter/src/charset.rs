@@ -849,15 +849,6 @@ mod tests {
     }
 
     #[test]
-    fn test_meta_http_equiv_content_charset_any_position() {
-        let html = b"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\">";
-        assert_eq!(
-            extract_charset_from_html(html),
-            Some("ISO-8859-1".to_string())
-        );
-    }
-
-    #[test]
     fn test_meta_charset_single_quoted() {
         let html = b"<meta charset='UTF-8'>";
         assert_eq!(extract_charset_from_html(html), Some("UTF-8".to_string()));

@@ -16,7 +16,11 @@
 #
 #   (1) `nginx -t` exits non-zero (the removed item is never silently accepted),
 #   and
-#   (2) the `nginx -t` output names the removed item AND signals a migration.
+#   (2) the `nginx -t` output matches the item's frozen contract:
+#       - the seven removed directives fail with NGINX's standard
+#         `unknown directive` error naming the directive;
+#       - the removed value `markdown_accept wildcard` carries the explicit
+#         migration phrase.
 #
 # Removed directives (Property 14; Requirements 8.1, 8.2, 10.2):
 #   - markdown_dynamic_config
@@ -24,6 +28,8 @@
 #   - markdown_dynconf_dry_run
 #   - markdown_prune_selectors
 #   - markdown_prune_protection_selectors
+#   - markdown_profile
+#   - markdown_streaming_zero_copy
 # Removed directive value:
 #   - markdown_accept wildcard
 #
@@ -52,11 +58,11 @@
 #       [--seed N] [--dry-run] [--keep-artifacts] [-h|--help]
 #
 # Exit codes:
-#   0 - All generated iterations rejected with a migration message (or, under
-#       --dry-run, all generated configs are well-formed and the iteration
-#       count invariant holds)
+#   0 - All generated iterations rejected with the expected error shape (or,
+#       under --dry-run, all generated configs are well-formed and the
+#       iteration count invariant holds)
 #   1 - One or more iterations accepted a removed item, or rejected it without
-#       a migration message
+#       the expected error wording
 #   2 - Usage error or missing prerequisites
 #
 
@@ -93,11 +99,12 @@ TRUSTED_NGINX_PATHS=(
   "/opt/homebrew/sbin/nginx"
 )
 
-# A removed item is considered rejected "with migration guidance" when the
-# nginx -t error output signals a migration. Matching the migration signal (not
-# only the directive name) prevents an unrelated syntax error that happens to
-# mention the directive from counting as a valid migration rejection.
-MIGRATION_MARKERS='removed|migrat|no longer|static config'
+# Standard error for the seven removed directives: NGINX reports an unknown
+# directive and the message must name the directive that was used.
+STANDARD_UNKNOWN_MARKER='unknown directive'
+# The removed value keeps a migration message; match its stable phrase rather
+# than loose words so an unrelated failure cannot satisfy the oracle.
+WILDCARD_MIGRATION_MARKER='markdown_accept wildcard.*was removed in 0\.9\.2'
 
 TESTS_RUN=0
 TESTS_PASSED=0
@@ -372,6 +379,7 @@ gen_selector_token() {
 # Called directly (never in `$(...)`) so PRNG state persists (see PRNG note).
 GEN_LINE=""
 GEN_TOKEN=""
+GEN_ORACLE=""
 gen_removed_line() {
   local which=""
   local ws=""
@@ -381,12 +389,18 @@ gen_removed_line() {
   local sel_b=""
   local sel_c=""
 
+  # Default contract for the seven removed directives; the removed value case
+  # overrides it with the migration oracle.
+  GEN_ORACLE="unknown"
+
   prng_pick \
     markdown_dynamic_config \
     markdown_dynamic_config_path \
     markdown_dynconf_dry_run \
     markdown_prune_selectors \
     markdown_prune_protection_selectors \
+    markdown_profile \
+    markdown_streaming_zero_copy \
     markdown_accept_wildcard
   which="${PRNG_PICK}"
 
@@ -443,10 +457,23 @@ gen_removed_line() {
       GEN_LINE="markdown_prune_protection_selectors${ws}${arg};"
       GEN_TOKEN="markdown_prune_protection_selectors"
       ;;
+    markdown_profile)
+      prng_pick balanced strict_cache streaming_first
+      arg="${PRNG_PICK}"
+      GEN_LINE="markdown_profile${ws}${arg};"
+      GEN_TOKEN="markdown_profile"
+      ;;
+    markdown_streaming_zero_copy)
+      prng_pick on off ON Off
+      arg="${PRNG_PICK}"
+      GEN_LINE="markdown_streaming_zero_copy${ws}${arg};"
+      GEN_TOKEN="markdown_streaming_zero_copy"
+      ;;
     markdown_accept_wildcard)
       # Removed *value* of a retained directive: markdown_accept wildcard.
       GEN_LINE="markdown_accept${ws}wildcard;"
       GEN_TOKEN="markdown_accept|wildcard"
+      GEN_ORACLE="migration"
       ;;
     *)
       # Defensive default (Rule 18): treat an unexpected draw as a failure so a
@@ -577,9 +604,16 @@ run_iteration() {
     log_fail "iteration ${idx} [${placement}] '${directive_line}': nginx -t failed but did not name '${removed_token}': $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     return 0
   fi
-  if ! grep -Eiq "${MIGRATION_MARKERS}" "${log_file}" 2>/dev/null; then
-    log_fail "iteration ${idx} [${placement}] '${directive_line}': rejected without a migration message: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
-    return 0
+  if [[ "${GEN_ORACLE}" == "migration" ]]; then
+    if ! grep -Eq "${WILDCARD_MIGRATION_MARKER}" "${log_file}" 2>/dev/null; then
+      log_fail "iteration ${idx} [${placement}] '${directive_line}': rejected without the migration phrase: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
+      return 0
+    fi
+  else
+    if ! grep -Eqi "${STANDARD_UNKNOWN_MARKER}" "${log_file}" 2>/dev/null; then
+      log_fail "iteration ${idx} [${placement}] '${directive_line}': rejected without the standard '${STANDARD_UNKNOWN_MARKER}' wording: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
+      return 0
+    fi
   fi
   TESTS_PASSED=$((TESTS_PASSED + 1))
   return 0
@@ -591,7 +625,7 @@ if [[ "${DRY_RUN}" -ne 1 ]]; then
   resolve_nginx_bin || exit 2
 fi
 
-TMPDIR_BASE="$(mktemp -d /tmp/removed-directives-pbt.XXXXXX)"
+TMPDIR_BASE="$(mktemp -d /tmp/md-compat-pbt.XXXXXX)"
 
 cleanup_tmpdir() {
   if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then

@@ -134,8 +134,8 @@ def _load_manifest(path: Path) -> dict[str, dict[str, Any]]:
     if not manifest_path.exists():
         return {}
     try:
-        data = json.loads(manifest_path.read_bytes())
-    except (json.JSONDecodeError, OSError) as exc:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         raise RuntimeError(
             f"Cannot read exception manifest {manifest_path}: {exc}"
         ) from exc

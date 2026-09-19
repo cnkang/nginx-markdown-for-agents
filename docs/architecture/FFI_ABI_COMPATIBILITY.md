@@ -31,7 +31,8 @@ The earlier reset:
   helpers, Rust decision/error-policy wrappers, standalone URL checks,
   diagnostics-schema accessors, convenience constructors, and redundant
   streaming finish/free/reason helpers, and
-- retains `markdown_decide_conditional` and `markdown_decide_base_url` as the
+- retains `markdown_negotiate_accept`, `markdown_decide_eligibility`,
+  `markdown_decide_conditional`, and `markdown_decide_base_url` as the
   complete production decision interfaces.
 
 These changes are intentionally breaking at the internal FFI boundary. The
@@ -45,12 +46,12 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 3
-MARKDOWN_HEADER_HASH = 0x6a9422edb868dfb3
+MARKDOWN_HEADER_HASH = 0x3c0f5905129bb0db
 MARKDOWN_SYMBOL_SET_HASH = 0x2cdb1bf77b851cc1
 MARKDOWN_LAYOUT_FINGERPRINT = 0x3621270dffd69355
 
 markdown_abi_version() -> 3
-markdown_abi_header_hash() -> 0x6a9422edb868dfb3
+markdown_abi_header_hash() -> 0x3c0f5905129bb0db
 markdown_abi_symbol_set_hash() -> 0x2cdb1bf77b851cc1
 markdown_abi_layout_fingerprint() -> 0x3621270dffd69355
 ```
@@ -61,6 +62,14 @@ result with its generated-header constant. Each independent mismatch logs a
 critical configuration error. If any tuple element mismatches, startup fails
 with `NGX_ERROR`. This 4-tuple handshake runs before the module installs its
 header and body filters or invokes any business FFI call.
+
+`tools/release/gates/compute_abi_fingerprints.py` recomputes the three
+fingerprints from the checked-in header, the Rust export modules, and the
+layout-check `_Static_assert` set. Run it after any header or export change and
+paste its output into `abi.rs`, then update the values here. The Rust tests in
+`ffi/exports.rs` (`abi_header_hash_matches_constant` and its two siblings) pin
+the constants to the accessor returns, so a drift fails `make test-rust`
+before it can reach a release.
 
 The three fingerprint values detect drift even when the numeric ABI version
 stays unchanged:

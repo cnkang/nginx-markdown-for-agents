@@ -90,6 +90,25 @@ ngx_module_t ngx_http_markdown_filter_module = {
  * copy_filter while placing the representation-selecting header hook before
  * not_modified.  Both entries share this translation unit and the primary
  * module remains the owner of configuration and worker lifecycle state.
+ *
+ * Stability: NGINX assigns one module-array position per module type, so a
+ * single module entry cannot hold two independent runtime positions.  The
+ * two-entry registration is therefore structural, not incidental — the
+ * ordering constraints are:
+ *
+ *   - the HEADER hook must run before ngx_http_not_modified_filter_module,
+ *     because that core filter turns a matching conditional request into a
+ *     304 before this module can decide the converted representation; and
+ *   - the BODY hook must run after ngx_http_copy_filter_module, because that
+ *     core filter is what materializes file-backed upstream buffers.
+ *
+ * See docs/architecture/filter-ordering.md (filter chain model and
+ * registration order) for the runtime ordering contract, and
+ * components/nginx-module/config for the per-link-mode registration that
+ * realizes it (dynamic order list: body hook, copy_filter, primary module,
+ * slice; static: body hook in HTTP_AUX_FILTER, primary in HTTP_INIT_FILTER).
+ * Do not collapse the two entries into one: doing so silently drops one of
+ * the two constraints.
  */
 static ngx_http_module_t ngx_http_markdown_body_filter_module_ctx = {
     NULL,                                   /* preconfiguration */

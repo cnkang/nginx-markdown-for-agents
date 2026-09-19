@@ -117,8 +117,14 @@ def _table_blocks(lines: list[str]) -> list[tuple[int, str]]:
     index = 0
     section = ""
     while index < len(lines):
-        if lines[index].lstrip().startswith("#"):
-            section = lines[index].lstrip("# ").strip().lower()
+        stripped = lines[index].lstrip()
+        if stripped.startswith("#"):
+            # Only H1/H2 headings reset the section: a deeper heading
+            # between "Document Updates" and its table must not lift the
+            # boilerplate exemption.
+            heading_level = len(stripped) - len(stripped.lstrip("#"))
+            if heading_level <= 2:
+                section = stripped.lstrip("# ").strip().lower()
 
         table = _table_block_at(lines, index)
         if table is None:

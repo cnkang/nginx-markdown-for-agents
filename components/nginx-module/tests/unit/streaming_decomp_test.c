@@ -4109,6 +4109,69 @@ test_malformed_zlib_formats_are_classified(void)
 
 
 /*
+ * A valid raw stored-block stream can begin with bytes that satisfy the zlib
+ * header check.  The streaming path commits to the wrapped interpretation
+ * after the first two bytes and cannot replay, so this input must be
+ * classified as a format error (and fail open through the configured error
+ * policy); the full-buffer path decodes the same bytes via its raw retry.
+ * The divergence is deliberate and pinned on both sides.
+ */
+static void
+test_zlib_like_raw_deflate_prefix_fails_closed(void)
+{
+    enum {
+        raw_payload_size = 0x0a9c,
+        compressed_size = raw_payload_size + 10
+    };
+    test_pool_t                           tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                               *compressed;
+    u_char                               *out;
+    size_t                                out_len;
+    ngx_int_t                             rc;
+
+    TEST_SUBSECTION("zlib-like raw deflate prefix fails closed");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, 0);
+    TEST_ASSERT(decomp != NULL,
+        "ambiguous deflate decompressor should be created");
+
+    compressed = ngx_palloc(&tp.pool, compressed_size);
+    TEST_ASSERT(compressed != NULL, "ambiguous fixture allocation");
+
+    /* The 78 9c prefix is also a valid zlib header, so the streaming sniff
+     * commits to wrapped mode; the bytes that follow do not form a valid
+     * wrapped stream, so the feed must end in a format error. */
+    compressed[0] = 0x78;
+    compressed[1] = 0x9c;
+    compressed[2] = 0x0a;
+    compressed[3] = 0x63;
+    compressed[4] = 0xf5;
+    memset(compressed + 5, 0, raw_payload_size);
+    compressed[5 + raw_payload_size] = 0x01;
+    compressed[6 + raw_payload_size] = 0x00;
+    compressed[7 + raw_payload_size] = 0x00;
+    compressed[8 + raw_payload_size] = 0xff;
+    compressed[9 + raw_payload_size] = 0xff;
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_size,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "misclassified raw deflate must fail closed as a format error");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    TEST_PASS("zlib-like raw deflate prefix classified as a format error");
+}
+
+
+/*
  * Feed-time partial deflate is not terminal.  Once the HTTP response reaches
  * EOF, finish must classify both raw and zlib-wrapped incomplete streams as
  * truncated input.
@@ -5952,6 +6015,7 @@ main(void)
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_malformed_zlib_formats_are_classified();
+    test_zlib_like_raw_deflate_prefix_fails_closed();
     test_truncated_deflate_formats_are_classified_at_finish();
     test_gzip_members_in_one_feed();
     test_gzip_empty_member_after_exact_budget();

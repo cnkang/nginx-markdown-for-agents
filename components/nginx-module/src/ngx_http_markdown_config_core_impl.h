@@ -943,13 +943,15 @@ ngx_http_markdown_parse_filter_flag(ngx_str_t *value, ngx_flag_t *enabled)
  *
  * Uses effective_conf to read enabled/enabled_source, ensuring consistency
  * with the request-local snapshot.  When no request-local effective view is
- * available, falls back to live conf values.  Request-pool failure while
- * binding the optional dynconf snapshot does not clear an already-captured
- * effective view.
+ * available, falls back to live conf values.  The request-local view is
+ * bound once at header-filter time (bind-once invariant); a later binding
+ * attempt never clears an already-captured effective view, so the first
+ * captured projection stays authoritative for the request.
  *
  * For NGX_HTTP_MARKDOWN_ENABLED_COMPLEX, evaluates the complex variable
- * at runtime; conf->enabled_complex is not a dynconf-mutable field and
- * is read directly from conf.
+ * at runtime; there is no runtime configuration overlay, so every field
+ * including conf->enabled_complex is read directly from the merged static
+ * conf.
  *
  * @param r    The active NGINX request; may be NULL for non-request contexts.
  * @param conf Module location configuration; must be non-NULL for meaningful results.

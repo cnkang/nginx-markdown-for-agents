@@ -3,20 +3,21 @@
 # Format: HASH  IDENTIFIER
 # (two spaces between hash and identifier, like sha256sum output)
 #
-# Source provenance must come from this recorded metadata, not from a digest
-# computed during the release run: a digest that a release job derives from a
-# live download anchors nothing, and GitHub's generated tag archives are not
-# guaranteed to stay byte-identical, so the same tag can yield a different
-# digest later.
+# This file is an audit trail for the source bundle a release publishes. The
+# required provenance source is the release manifest, which records the digest
+# of the bundle the release workflow built from the released commit. The entry
+# here lets a reviewed, independent re-download of the published bundle
+# confirm later that the bytes still match.
 #
 # Record an entry after the tag is published, with the maintainer script (the
 # entry lands in a later commit, so the tag's own tree is unaffected):
 #   bash packaging/scripts/record-source-archive-digest.sh v0.9.2
-# The script downloads the tag archive, requires it to match any existing
-# entry, and writes the reviewed line into this file. Commit the result.
+# The script downloads the published source bundle by default. Pass
+# --github-archive only for releases published before the workflow built its
+# own bundle. It never overwrites a differing entry.
 #
-# The release workflow looks the tag up here and records the digest it finds in
-# the release manifest. It warns, without failing, when the tag has no entry yet,
-# because an entry can only be created after the run publishes the archive.
+# The release workflow compares any recorded entry with the digest of the
+# bundle it built and fails on disagreement. A missing entry does not block a
+# tag release or warn during it.
 #
 # Identifier convention: source-<tag>          (e.g. source-v0.9.2)

@@ -99,6 +99,40 @@ fi
 # Remove reject.c for next test
 rm -f "${src_dir}/reject.c"
 
+# Test 2b: comment forms that mention the status must all be skipped.  The
+# detector reads each return-matching line's leading token, so a // comment
+# (as well as /* and * continuation lines) is documentation, not live code.
+# Regression: the // arm was dropped when the case pattern was rewritten and
+# comment lines were reported as advisory findings.
+for comment_form in slash block star; do
+    case "${comment_form}" in
+        slash) comment_line='    // return NGX_HTTP_BAD_GATEWAY; legacy note' ;;
+        block) comment_line='    /* return NGX_HTTP_BAD_GATEWAY; block note */' ;;
+        star)  comment_line='    * return NGX_HTTP_INTERNAL_SERVER_ERROR; continuation' ;;
+        *)     comment_line='' ;;
+    esac
+    rm -f "${src_dir}"/*.c
+    {
+        printf 'ngx_int_t\n'
+        printf 'ngx_http_markdown_reject_or_fail_open(ngx_conf_t *cf)\n'
+        printf '{\n'
+        printf '%s\n' "${comment_line}"
+        printf '    return NGX_OK;\n'
+        printf '}\n'
+    } >"${src_dir}/comment_form.c"
+
+    output_file="${tmp_dir}/comment_${comment_form}.out"
+    exit_code=0
+    ${DETECTOR} "${src_dir}" >"${output_file}" 2>&1 || exit_code=$?
+    if [[ ${exit_code} -eq 0 ]] && ! grep -q "WARN" "${output_file}"; then
+        pass "${comment_form} comment form is skipped (no findings)"
+    else
+        fail "${comment_form} comment form is skipped (no findings)" \
+            "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+    fi
+done
+rm -f "${src_dir}"/*.c
+
 # Test 3: Empty directory -> PASS
 empty_dir="${tmp_dir}/empty"
 mkdir -p "${empty_dir}"

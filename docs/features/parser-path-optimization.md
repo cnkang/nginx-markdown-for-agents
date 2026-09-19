@@ -364,7 +364,9 @@ The `FusedNormalizer` struct replaces the two-pass normalize-then-copy pattern
 for large documents. It applies normalization rules incrementally as each line
 appends:
 
-- Tracks fenced code block state (triple-backtick delimiters).
+- Tracks fenced code block state. A run of three or more backticks or tildes
+  opens a block. A closing run must use the same character and reach at least
+  the opening length.
 - Collapses consecutive blank lines to a single blank line.
 - Trims trailing whitespace from each line.
 - Normalizes inline whitespace (collapses multiple spaces) outside code blocks,

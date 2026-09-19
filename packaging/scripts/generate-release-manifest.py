@@ -303,11 +303,33 @@ def build_manifest(
     detected_version = version
     for f in all_files:
         entry = parse_package(f, expected_version=expected_package_version)
+        if (
+            expected_package_version
+            and entry.get("version")
+            and entry["version"] != expected_package_version
+        ):
+            print(
+                f"ERROR: {f.name} carries version {entry['version']}, "
+                f"expected {expected_package_version}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         packages.append(entry)
         # dynamic-module tarballs carry nginx_version/libc/arch instead of a
         # project version; only deb/rpm entries can supply the version.
         if not detected_version and entry.get("version"):
             detected_version = entry["version"]
+
+    versioned = {
+        entry["version"] for entry in packages if entry.get("version")
+    }
+    if len(versioned) > 1:
+        print(
+            "ERROR: package artifacts disagree on the project version: "
+            + ", ".join(sorted(versioned)),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     if not detected_version:
         print("ERROR: Could not determine package version", file=sys.stderr)

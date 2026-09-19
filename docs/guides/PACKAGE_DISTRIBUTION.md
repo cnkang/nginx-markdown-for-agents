@@ -197,7 +197,8 @@ Every release includes a `release-manifest.json` providing structured metadata
 about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
 source archive hash (for tag releases), and GitHub Actions workflow metadata.
 
-The `integrity-checksums` CI job generates the manifest and includes it
+The `integrity-checksums` CI job of `release-packages.yml` generates the
+manifest and includes it
 in `SHA256SUMS`. The release then signs the `SHA256SUMS` file as
 `SHA256SUMS.asc` for tag releases, providing a chain of custody:
 
@@ -224,12 +225,14 @@ curl -fsSL -H "Accept: application/json" -o release-manifest.json \
 
 ## GPG Signature Verification
 
-For a published GitHub Release, the `release-binaries` workflow publishes a
+For a published GitHub Release, the `release-packages` workflow publishes a
 detached ASCII-armored signature file (`SHA256SUMS.asc`) alongside
-`SHA256SUMS`. The signing job checks out the exact commit resolved by the
-workflow's prepare job, so the signing script and release metadata come from
-the same immutable source revision. Manual runs only publish the signature
-when the requested ref is a version tag (`v...`).
+`SHA256SUMS`. Its `integrity-signature` job runs only on a tag push, checks out
+the exact commit resolved by the workflow's prepare job, so the signing script
+and release metadata come from the same immutable source revision, and signs
+the checksum manifest inside the protected `release-signing` environment.
+`release-binaries` never signs anything: it is a manual rebuild tool that
+uploads workflow artifacts only.
 The `release-signing` environment secrets are therefore mandatory for a
 published release. The workflow fails closed rather than publishing an
 unsigned release asset.
@@ -261,18 +264,19 @@ gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 
 ### Verifying the Signature
 
-Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify:
+Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify against the
+independently authenticated fingerprint — a bare `gpg --verify` exit
+status, or a "Good signature" line under an unauthenticated key, proves
+integrity only, not project authenticity:
 
 ```bash
-gpg --verify SHA256SUMS.asc SHA256SUMS
-```
-
-A successful verification produces output similar to:
-
-```text
-gpg: Signature made Mon 01 Jan 2026 12:00:00 AM UTC
-gpg:                using RSA key <KEY_ID>
-gpg: Good signature from "nginx-markdown-for-agents release signing key"
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
+GPG_STATUS="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null)" \
+    || { echo "ERROR: GPG verification failed" >&2; exit 1; }
+VALIDSIG="$(printf '%s\n' "${GPG_STATUS}" \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 ```
 
 If verification fails with `BAD signature`, do not trust the checksums or
@@ -292,8 +296,17 @@ curl -fsSLO "${BASE_URL}/SHA256SUMS.asc"
 curl -fsSLO "${BASE_URL}/${PACKAGE_FILE}"
 curl -fsSLO "${BASE_URL}/release-manifest.json"
 
-# 2. Verify GPG signature on the checksum file
-gpg --verify SHA256SUMS.asc SHA256SUMS
+# 2. Verify GPG signature on the checksum file, then confirm the signing key
+#    against the independently authenticated full fingerprint. A valid
+#    signature under an unauthenticated key proves integrity, not project
+#    authenticity.
+: "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
+GPG_STATUS="$(gpg --batch --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null)" \
+    || { echo "ERROR: GPG verification failed" >&2; exit 1; }
+VALIDSIG="$(printf '%s\n' "${GPG_STATUS}" \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 
 # 3. Verify the package: require exactly one manifest entry for the
 #    requested package, then check its checksum (same awk validation as

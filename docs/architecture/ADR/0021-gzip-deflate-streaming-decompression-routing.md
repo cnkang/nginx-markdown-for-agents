@@ -8,6 +8,17 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 > 0.9.2 public deflate contract accepts zlib-wrapped RFC 1950 (the
 > HTTP-standard form) and raw RFC 1951 as a legacy-server compatibility
 > fallback. The sniffing decision below is the contract on every decode path.
+>
+> **Divergence note:** the full-buffer path may replay a wrapped attempt as
+> raw after a format error (the decoder keeps the input), while the streaming
+> path commits to one framing after the first two bytes and cannot replay:
+> a misclassified stream raises a format error (no framing retry) and
+> then flows through the configured error policy.  Deployments whose
+> upstreams emit ambiguous raw-deflate prefixes keep `markdown_streaming off`
+> so the full-buffer trial decoding serves those responses.  The divergence
+> is deliberate and each path pins its behavior in tests
+> (`test_deflate_raw_zlib_like_prefix_after_wrapped_output`,
+> `test_zlib_like_raw_deflate_prefix_fails_closed`).
 
 ## Context
 

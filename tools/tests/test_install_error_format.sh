@@ -252,11 +252,108 @@ run_hiding_python3_with_fake_nginx() {
   shim_dir="$(cat "$shim_info")"
   rm -f "$shim_info"
 
+  # Reuse install.sh's own trust rules for the candidate path instead of
+  # assuming any executable under a "system" root will be accepted: the
+  # installer additionally resolves the path (canonicalize_path +
+  # is_trusted_nginx_path) and, when running as root, requires every
+  # component to be root-owned and non-writable by group/other
+  # (is_secure_trusted_path).  A candidate that would fail those checks
+  # produces a NGINX_BIN trust error instead of the missing-python3 error
+  # this test asserts, so such a candidate is skipped rather than used.
+  # The same applies to the resolution itself: install.sh rejects a symlink
+  # whose target escapes the trusted roots, so this probe must follow the
+  # final component too.  Resolving only the directory (as "cd dir && pwd
+  # -P" does) would test the symlink's own path instead of the real file
+  # install.sh ends up validating.
+  canonicalize_candidate() {
+    # Mirrors install.sh canonicalize_path (same shape, including the
+    # 40-hop symlink budget): resolve the parent directory physically, then
+    # follow a final-component symlink until the path names a real file.
+    local path="$1"
+    local dir="" file="" target="" i=0
+    if [[ -z "$path" ]]; then
+      return 1
+    fi
+    if [[ "$path" != /* ]]; then
+      path="$(pwd)/$path"
+    fi
+    if ! dir="$(cd "$(dirname "$path")" 2>/dev/null && pwd -P)"; then
+      return 1
+    fi
+    file="$(basename "$path")"
+    while [[ -L "$dir/$file" ]]; do
+      if [[ $i -ge 40 ]]; then
+        return 1
+      fi
+      if ! target="$(readlink "$dir/$file" 2>/dev/null)"; then
+        return 1
+      fi
+      [[ -n "$target" ]] || return 1
+      if [[ "$target" != /* ]]; then
+        target="$dir/$target"
+      fi
+      if ! dir="$(cd "$(dirname "$target")" 2>/dev/null && pwd -P)"; then
+        return 1
+      fi
+      file="$(basename "$target")"
+      i=$((i + 1))
+    done
+    printf '%s/%s\n' "$dir" "$file"
+    return 0
+  }
+
+  candidate_is_usable() {
+    local candidate="$1"
+    local resolved
+    resolved="$(canonicalize_candidate "$candidate")" || return 1
+    [[ -f "$resolved" && -x "$resolved" ]] || return 1
+    # Same root allowlist as install.sh TRUSTED_NGINX_ROOTS (subset that a
+    # test host can plausibly provide).
+    case "$resolved" in
+      /usr/sbin/*|/usr/bin/*|/sbin/*|/bin/*|/usr/local/sbin/*|/usr/local/bin/*|\
+      /opt/homebrew/sbin/*|/opt/homebrew/bin/*|\
+      /usr/local/nginx/sbin/*|/opt/nginx/sbin/*|/usr/share/nginx/sbin/*) ;;
+      *) return 1 ;;
+    esac
+    if [[ "${EUID}" -eq 0 ]]; then
+      # is_secure_trusted_path equivalent: every component root-owned and
+      # not group/other-writable.
+      local component=""
+      local current="/"
+      local owner="" mode=""
+      local remainder="${resolved#/}"
+      while [[ -n "$remainder" ]]; do
+        if [[ "$remainder" == */* ]]; then
+          component="${remainder%%/*}"
+          remainder="${remainder#*/}"
+        else
+          component="$remainder"
+          remainder=""
+        fi
+        [[ -n "$component" ]] || continue
+        current="${current%/}/${component}"
+        # Ask GNU stat (-c) first: on Linux `stat -f` means "filesystem
+        # status" and succeeds with an unrelated value, so a BSD-first probe
+        # would read garbage there instead of falling through.  macOS rejects
+        # -c and falls through to the BSD form.
+        owner="$(stat -c '%u' "$current" 2>/dev/null || stat -f '%u' "$current" 2>/dev/null)" || return 1
+        [[ "$owner" == "0" ]] || return 1
+        mode="$(stat -c '%a' "$current" 2>/dev/null || stat -f '%Lp' "$current" 2>/dev/null)" || return 1
+        [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+        if (( (8#$mode & 8#22) == 0 )); then
+          continue
+        fi
+        return 1
+      done
+    fi
+    return 0
+  }
+
   trusted_nginx=""
   for candidate in /usr/sbin/nginx /usr/bin/nginx /sbin/nginx /bin/nginx \
     /usr/local/sbin/nginx /usr/local/bin/nginx /opt/homebrew/sbin/nginx \
     /opt/homebrew/bin/nginx; do
-    if [[ -x "$candidate" ]]; then
+    if [[ -x "$candidate" ]] && candidate_is_usable "$candidate"; then
       trusted_nginx="$candidate"
       break
     fi
@@ -265,7 +362,7 @@ run_hiding_python3_with_fake_nginx() {
     rm -f "$stderr_file" "$stdout_file"
     rm -rf "$shim_dir"
     _PYTHON3_HIDDEN_SKIPPED=1
-    skip "python3 hidden — no trusted system nginx executable available"
+    skip "python3 hidden — no nginx candidate passes install.sh's trust checks"
     return 0
   fi
 

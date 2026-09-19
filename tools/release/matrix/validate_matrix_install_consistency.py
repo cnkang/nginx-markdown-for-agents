@@ -51,7 +51,7 @@ def load_matrix(path: Path) -> list[dict]:
     Returns:
         list[dict]: Entries containing ``nginx``, ``os_type``, ``arch``, and
             ``support_tier`` fields.
-    
+
     Raises:
         ValueError: If the matrix cannot be read, parsed, normalized, or does not
             contain a valid ``entries`` list of dictionaries.

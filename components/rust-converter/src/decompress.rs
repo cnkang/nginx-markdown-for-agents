@@ -135,6 +135,21 @@ pub fn decompress_bounded(
     }
 }
 
+/// Read buffer size for [`read_bounded`].
+///
+/// The buffer is deliberately capped at one byte above the budget so an
+/// over-budget stream is detected in the same read that produces the
+/// overflow.  The `.max(1)` floor never changes the result today
+/// (`saturating_add(1)` is already at least 1 for every budget) but it keeps
+/// the non-empty invariant local: a zero-length read buffer would make
+/// `Read::read` return `Ok(0)` forever for readers that treat an empty
+/// buffer as EOF, which would spin this loop.  The floor is
+/// applied here, once, so both the caller-visible invariant and its regression
+/// test are about one expression.
+fn read_chunk_size(budget: usize) -> usize {
+    8192.min(budget.saturating_add(1)).max(1)
+}
+
 /// Read from a decoder into a budget-limited buffer.
 ///
 /// Returns the filled buffer on success, or an appropriate `DecompError`
@@ -150,7 +165,7 @@ fn read_bounded<R: Read>(
     ratio: u64,
 ) -> Result<Vec<u8>, DecompError> {
     let mut output = Vec::new();
-    let chunk_size = 8192.min(budget.saturating_add(1));
+    let chunk_size = read_chunk_size(budget);
     let mut buf = vec![0u8; chunk_size];
 
     /* Ratio ceiling applies to every non-empty compressed input. */
@@ -246,7 +261,8 @@ fn decompress_gzip(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResu
 
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
-            "empty input for gzip decompression".to_string(),
+            "empty gzip payload: the compressed body is missing entirely, not a stream truncated mid-way"
+                .to_string(),
         ));
     }
 
@@ -295,7 +311,8 @@ fn decompress_deflate(
 ) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
-            "empty input for deflate decompression".to_string(),
+            "empty deflate payload: the compressed body is missing entirely, not a stream truncated mid-way"
+                .to_string(),
         ));
     }
 
@@ -447,7 +464,8 @@ fn append_deflate_output(
 fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
-            "empty input for brotli decompression".to_string(),
+            "empty brotli payload: the compressed body is missing entirely, not a stream truncated mid-way"
+                .to_string(),
         ));
     }
 
@@ -460,6 +478,54 @@ fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompRe
 mod tests {
     use super::*;
     use crate::ffi::{MARKDOWN_FORMAT_BROTLI, MARKDOWN_FORMAT_DEFLATE, MARKDOWN_FORMAT_GZIP};
+
+    /// the `read_bounded` read buffer is never zero-length and never
+    /// larger than one byte past the budget.
+    ///
+    /// A zero-length buffer is a hang (readers that treat an empty buffer as
+    /// EOF return `Ok(0)` forever), which is what the `.max(1)` floor exists
+    /// to prevent; the `+1` keeps an over-budget stream detectable in the same
+    /// read that produces the overflow.
+    #[test]
+    fn read_chunk_size_is_always_nonzero_and_budget_bounded() {
+        assert_eq!(
+            read_chunk_size(0),
+            1,
+            "a zero budget must still allocate a 1-byte read buffer"
+        );
+        assert_eq!(read_chunk_size(1), 2, "one byte past the budget");
+        assert_eq!(read_chunk_size(8191), 8192);
+        assert_eq!(
+            read_chunk_size(8192),
+            8192,
+            "budget + 1 is clamped to the 8 KiB ceiling"
+        );
+        assert_eq!(read_chunk_size(usize::MAX / 2), 8192);
+
+        /* The floor is not an artifact of `saturating_add`: it holds across a
+         * sweep, including the values where the sum saturates. */
+        for budget in [
+            0usize,
+            1,
+            2,
+            4096,
+            8191,
+            8192,
+            100_000,
+            usize::MAX - 1,
+            usize::MAX,
+        ] {
+            let size = read_chunk_size(budget);
+            assert!(
+                size >= 1,
+                "read_chunk_size({budget}) produced a zero-length buffer"
+            );
+            assert!(
+                size <= 8192,
+                "read_chunk_size({budget}) exceeded the 8 KiB ceiling: {size}"
+            );
+        }
+    }
 
     /// Helper: compress data with gzip.
     fn gzip_compress(data: &[u8]) -> Vec<u8> {

@@ -12,6 +12,14 @@
 #   - ${{ inputs.* }} used directly inside run: blocks without env routing
 #   - ${{ github.event.* }} used directly inside run: blocks without env routing
 #   - ${{ steps.*.outputs.command }} used directly inside run: blocks
+#   - the same injection classes inside an action step's command-bearing with:
+#     inputs (args:, command:, script:, entrypoint:, options:, cli-args:,
+#     build-args:, exec:, cmd:).  Those values reach the action's command line
+#     the way a run block does, so "${{ inputs.* }}" there is the same
+#     command-injection surface.  Other with: keys
+#     (ref:, python-version:, tags:, title:, ...) are structured action inputs,
+#     not command lines, and are not judged here; step outputs inside a with:
+#     value are also out of scope for this detector.
 #
 # Allowlist: ${{ inputs.* }} used inside env: blocks is safe and not flagged.
 #   ${{ github.sha }}, ${{ github.ref }}, and ${{ github.event_name }} are
@@ -33,8 +41,11 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKFLOWS_DIR="${REPO_ROOT}/.github/workflows"
+. "${SCRIPT_DIR}/collect_files.sh"
 
-for arg in "$@"; do
+# `${1+"$@"}` keeps an argument-less invocation safe under `set -u` on
+# macOS bash 3.2, where a bare `"$@"` in a for-list is treated as unset.
+for arg in ${1+"$@"}; do
     case "$arg" in
         --help|-h)
             cat <<USAGE
@@ -56,6 +67,23 @@ if [[ ! -d "$WORKFLOWS_DIR" ]]; then
 fi
 
 findings=0
+file_list="$(mktemp "${TMPDIR:-/tmp}/workflow-input-files.XXXXXX")" || {
+    echo "ERROR: cannot create the workflow file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+
+if ! harness_collect_find0 "$file_list" "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null; then
+    echo "ERROR: cannot enumerate workflow files in $WORKFLOWS_DIR" >&2
+    exit 2
+fi
+
+# A quoted key ('with': / "with":) is the same YAML key as with:.  Accept
+# optional matching quotes everywhere a with key drives state so a quoted key
+# cannot silently bypass the input checks.  The fragments live in variables so
+# the quote characters survive bash source parsing.
+KEYQ="['\"]?"
+WITH_KEY="${KEYQ}with${KEYQ}"
 
 # Process each workflow YAML file
 while IFS= read -r -d '' file; do
@@ -64,6 +92,19 @@ while IFS= read -r -d '' file; do
     inline_run_command=0
     line_num=0
     run_indent=0
+    # Action-step `with:` tracking.  in_with_block marks that the
+    # current line is inside a step's with: mapping; with_indent is that
+    # mapping's key indentation; with_key tracks the innermost key so a nested
+    # command-bearing input (with: { args: >- ... }) is judged, while wiring
+    # keys (ref:, python-version:, tags:, ...) are not.  A reusable-workflow
+    # job's with: is wiring, not an action command line, and is excluded
+    # through in_reusable_job.
+    in_with_block=0
+    with_indent=0
+    with_key=""
+    with_scalar_indent=-1
+    steps_indent=-1
+    in_reusable_job=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
@@ -76,6 +117,75 @@ while IFS= read -r -d '' file; do
         while [[ "${line:indent_len:1}" == " " || "${line:indent_len:1}" == $'\t' ]]; do
             indent_len=$((indent_len + 1))
         done
+
+        # ── Action-step with: tracking ──
+        # A step's with: mapping is a sibling key of the step's uses: (written
+        # either `- with:` or an undashed `with:` indented under the step).
+        # A reusable-workflow job ALSO uses an undashed with: — at job-key
+        # indentation, shallower than the steps: key — and that one is wiring,
+        # not an action command line.  The steps: indent separates the two.
+        if [[ "$line" =~ ^[[:space:]]*steps:[[:space:]]*$ ]]; then
+            steps_indent=$indent_len
+        fi
+        if [[ "$line" =~ ^[[:space:]]*jobs:[[:space:]]*$ ]]; then
+            steps_indent=-1
+        fi
+        # Flow-style mappings keep the whole input map on one line, where the
+        # block tracker below cannot inspect individual keys; a command-bearing
+        # key with an input interpolation there would go unchecked.  Reject the
+        # form explicitly instead of silently missing it.
+        if [[ "$line" =~ ^[[:space:]]*(-[[:space:]]*)?${WITH_KEY}:[[:space:]]*\{ ]]; then
+            echo "ERROR: ${rel_path}:${line_num}: flow-style 'with:' mapping cannot be statically validated; use a block-style mapping" >&2
+            echo "  ${line}" >&2
+            echo "  Fix: expand the mapping to block style (one key per line) so command inputs can be checked" >&2
+            findings=$((findings + 1))
+            in_with_block=0
+            with_key=""
+            in_run_block=0
+            continue
+        fi
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*${WITH_KEY}:[[:space:]]*$ ]]; then
+            in_with_block=1
+            with_indent=$indent_len
+            with_key=""
+            with_scalar_indent=-1
+            in_run_block=0
+            continue
+        fi
+        if [[ "$line" =~ ^[[:space:]]*${WITH_KEY}:[[:space:]]*$ ]]; then
+            with_key=""
+            in_run_block=0
+            if [[ "$steps_indent" -ge 0 && "$indent_len" -gt "$steps_indent" ]]; then
+                in_with_block=1
+                with_indent=$indent_len
+            else
+                # Job-level with: of a reusable workflow — wiring, not a command.
+                in_with_block=0
+            fi
+            continue
+        fi
+        if [[ "$in_with_block" -eq 1 && -n "$line" ]]; then
+            # A line at or shallower than the with: key ends the mapping.
+            if [[ "$indent_len" -le "$with_indent" ]]; then
+                in_with_block=0
+                with_key=""
+                with_scalar_indent=-1
+            elif [[ "$with_scalar_indent" -ge 0 \
+                    && "$indent_len" -gt "$with_scalar_indent" ]]; then
+                # Block-scalar content (key: | / key: >-) is opaque text: it
+                # neither judges interpolation nor refreshes the tracked key,
+                # so a `branch:`-shaped content line can no longer impersonate
+                # a structured input and hide a later command input.
+                :
+            elif [[ "$line" =~ ^[[:space:]]*${KEYQ}([A-Za-z0-9_.-]+)${KEYQ}: ]]; then
+                with_key="${BASH_REMATCH[1]}"
+                with_scalar_indent=-1
+                with_scalar_key_re="^[[:space:]]*${KEYQ}[A-Za-z0-9_.-]+${KEYQ}:[[:space:]]*[|>][-+]?([0-9][-+]?)?([[:space:]]*#.*)?\$"
+                if [[ "$line" =~ $with_scalar_key_re ]]; then
+                    with_scalar_indent=$indent_len
+                fi
+            fi
+        fi
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
@@ -122,7 +232,7 @@ while IFS= read -r -d '' file; do
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*uses: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*id: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*if: ]] || \
-           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*with: ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*${WITH_KEY}: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*shell: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*working-directory: ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*timeout-minutes: ]] || \
@@ -155,10 +265,40 @@ while IFS= read -r -d '' file; do
             continue
         fi
 
+        # Action-step `with:` command inputs.  A command-bearing input
+        # (args:, command:, script:, entrypoint:, options:, cli-args:,
+        # build-args:, exec:, cmd:) is handed to the action's command line, so
+        # a direct ${{ inputs.* }} there -- in dot or bracket selector form --
+        # is the same command-injection surface as a run block.  Other with:
+        # keys are structured inputs (ref:, python-version:, tags:, ...) and
+        # are not judged here.
+        if [[ "$in_with_block" -eq 1 && -n "$line" ]]; then
+            case "$with_key" in
+                args|command|script|entrypoint|options|cli-args|build-args|exec|cmd)
+                    if [[ "$line" =~ \$\{\{[[:space:]]*inputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\]) ]]; then
+                        echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in an action 'with:' command input (${with_key}:)" >&2
+                        echo "  ${line}" >&2
+                        echo "  Fix: route through env: INPUT_VAR: \${{ inputs.var }}, validate it in a step, and pass the derived value" >&2
+                        findings=$((findings + 1))
+                    fi
+                    if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\]) ]]; then
+                        echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in an action 'with:' command input (${with_key}:)" >&2
+                        echo "  ${line}" >&2
+                        echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and validate it in a step" >&2
+                        findings=$((findings + 1))
+                    fi
+                    ;;
+                *)
+                    # Structured action input (ref:, python-version:, tags:, ...):
+                    # not a command line, so it is not judged here.
+                    ;;
+            esac
+        fi
+
         # Check for input interpolation inside run blocks
         if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
-            # Flag ${{ inputs.* }} inside run blocks
-            if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
+            # Flag ${{ inputs.* }} inside run blocks (dot or bracket selector)
+            if [[ "$line" =~ \$\{\{[[:space:]]*inputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ inputs.var }} and use \${INPUT_VAR} in shell" >&2
@@ -167,7 +307,7 @@ while IFS= read -r -d '' file; do
 
             # Flag ${{ github.event.* }} inside run blocks (except release.created_at etc)
             # github.event.inputs.* is user-controlled
-            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]]; then
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.inputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and use \${INPUT_VAR}" >&2
@@ -255,7 +395,7 @@ while IFS= read -r -d '' file; do
         fi
 
     done < "$file"
-done < <(find "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
+done < "$file_list"
 
 if [[ $findings -gt 0 ]]; then
     echo "FAIL: found ${findings} workflow input injection pattern(s)" >&2

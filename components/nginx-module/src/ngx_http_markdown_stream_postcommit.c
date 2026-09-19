@@ -1,8 +1,22 @@
 /*
  * Streaming Fallback State Machine — Post-commit Error Handler
  *
- * Implements safe-finish and abort paths for post-commit errors in
- * the streaming fallback state machine (streaming fallback state machine, tasks 5.1–5.4).
+ * Implements the post-commit error handling paths of the streaming
+ * fallback state machine (Component 5 of streaming fallback state machine
+ * design).  This file is compiled into the module in every build
+ * (streaming and non-streaming), but the streaming-only code below is
+ * reachable only when MARKDOWN_STREAMING_ENABLED is defined; in builds
+ * without streaming the translation unit still provides the postcommit
+ * metric recorders declared in the module header.
+ *
+ * Two groups live here and must not be confused:
+ *   - Production: safe_finish / abort / resume_pending / log and the
+ *     postcommit metric recorders, all called from
+ *     ngx_http_markdown_streaming_impl.h.
+ *   - Test-only: the post-commit HTML-signature guard
+ *     (ngx_http_markdown_stream_postcommit_guard) and its scanning
+ *     helpers.  No production caller exists; the guard is exercised by
+ *     tests/unit/stream_postcommit_test.c so the heuristic stays covered.
  *
  * Critical safety property — post-commit irreversibility:
  *   After headers or Markdown bytes are sent (COMMITTED state),
@@ -468,6 +482,11 @@ ngx_http_markdown_stream_postcommit_abort(
  *
  * Current implementation validates state preconditions and performs
  * a basic scan for HTML doctype/tag signatures.
+ *
+ * Test-only entry point: production post-commit handling relies on the
+ * state machine plus safe_finish/abort rather than this scan, so no
+ * production caller exists.  Unit tests drive the guard directly to keep
+ * the heuristic honest.
  *
  * Returns:
  *   NGX_OK    - Guard passes, output is safe to send

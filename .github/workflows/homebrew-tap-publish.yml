@@ -15,7 +15,11 @@ permissions:
 
 jobs:
   publish:
-    name: Update tap formula for ${{ github.event.release.tag_name || inputs.tag }}
+    # The tag is already routed through RELEASE_TAG and validated by the
+    # "Validate release tag" step; a raw ${{ }} interpolation here would only
+    # duplicate the value in the UI without adding information, so the job
+    # name stays static.
+    name: Update tap formula
     if: >-
       github.event_name == 'release' ||
       github.ref == format(

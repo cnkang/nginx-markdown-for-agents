@@ -103,6 +103,27 @@ else
     fail "path with spaces failed"
 fi
 
+# Test 8: A missing default scan directory is a hard error, not a clean scan.
+# The detector resolves REPO_ROOT from __file__, so this mirrors it
+# into a shim repo where tests/ is absent while the other defaults exist.
+echo "Test 8: Missing default scan directory is non-zero..."
+SHIM_REPO="${TMPDIR_TEST}/shim"
+mkdir -p "${SHIM_REPO}/tools/harness" "${SHIM_REPO}/tools/lib" \
+    "${SHIM_REPO}/packaging" "${SHIM_REPO}/skills"
+cp "${REPO_ROOT}/tools/harness/detect_regex_safety.py" \
+    "${SHIM_REPO}/tools/harness/detect_regex_safety.py"
+cp "${REPO_ROOT}"/tools/lib/*.py "${SHIM_REPO}/tools/lib/" 2>/dev/null || true
+if python3 "${SHIM_REPO}/tools/harness/detect_regex_safety.py" \
+    >"${TMPDIR_TEST}/m10.out" 2>&1; then
+    fail "missing default scan directory returned zero"
+else
+    if grep -q "default scan directory missing" "${TMPDIR_TEST}/m10.out"; then
+        pass "missing default scan directory is non-zero"
+    else
+        fail "missing default scan directory message absent"
+    fi
+fi
+
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then
     echo "All smoke tests passed."

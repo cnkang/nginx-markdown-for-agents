@@ -41,7 +41,7 @@ repos:
         entry: make check-headers
         language: system
         pass_filenames: false
-        files: ^components/rust-converter/src/ffi/
+        files: ^(components/rust-converter/(src/ffi\.rs|src/ffi/.*\.rs|include/.*\.h|cbindgen\.toml|reason_registry\.toml)|components/nginx-module/src/markdown_converter\.h)$
   # C code quality
   - repo: local
     hooks:
@@ -53,7 +53,7 @@ repos:
         pass_filenames: false
         # No always_run: the pattern below decides when this runs, so a commit
         # that touches none of those paths does not pay for the scan.
-        files: ^(tools/|packaging/|\.github/|Makefile|components/)
+        files: ^(AGENTS\.md|Makefile|\.pre-commit-config\.yaml|\.github/|\.clusterfuzzlite/|components/|docs/harness/|examples/|packaging/|scripts/|tests/|tools/|build\.sh$)
       - id: detect-pool-free
         name: detect pool/free mismatch
         # The detector reads one directory argument.  Naming it here keeps the
@@ -115,13 +115,13 @@ repos:
         entry: tools/harness/detect_ffi_fat_pointer_transfer.sh
         language: script
         pass_filenames: false
-        files: ^components/rust-converter/src/ffi/.*\.rs$
+        files: ^components/rust-converter/src/(ffi\.rs|ffi/.*\.rs)$
       - id: detect-ffi-panic-safety
         name: detect FFI panic safety
         entry: tools/harness/detect_ffi_panic_safety.sh
         language: script
         pass_filenames: false
-        files: ^components/rust-converter/src/ffi/.*\.rs$
+        files: ^components/rust-converter/src/(ffi\.rs|ffi/.*\.rs)$
 
   # Helm templates contain Go-template directives and are not standalone YAML.
   # Validate them through Helm rather than the generic YAML parser below.

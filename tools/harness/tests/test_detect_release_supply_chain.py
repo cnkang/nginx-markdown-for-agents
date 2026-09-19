@@ -20,6 +20,7 @@ sys.path.insert(0, str(TOOLS_DIR))
 from harness.detect_release_supply_chain import (  # noqa: E402
     check_homebrew_formula,
     check_ingress_builder,
+    check_ingress_smoke,
     check_official_nginx_builder,
     check_release_builder_digests,
     scan_repository,
@@ -193,6 +194,43 @@ class TestHomebrewFormula:
         )
         findings = check_homebrew_formula(text)
         assert len(findings) >= 1
+
+
+# ---------------------------------------------------------------------------
+# check_ingress_smoke — probe ordering
+# ---------------------------------------------------------------------------
+
+class TestIngressSmoke:
+    """check_ingress_smoke: the reachability probe needs an empty object store."""
+
+    def test_complete_smoke_passes(self):
+        """All required markers with init before the reachability fetch pass."""
+        text = (
+            "MODULE_SHA=\"$(git -C \"$BUILD_CONTEXT\" rev-parse --verify 'HEAD^{commit}')\"\n"
+            "grep -Eq '^[0-9a-f]{40}$' <<< \"${MODULE_SHA}\"\n"
+            "docker build --build-arg \"MODULE_SHA=${MODULE_SHA}\" -t ingress .\n"
+            "git -C \"$probe_dir\" init -q\n"
+            "git -C \"$probe_dir\" fetch --dry-run \"$MODULE_REPO\" \"$MODULE_SHA\"\n"
+        )
+        findings = check_ingress_smoke(text)
+        assert findings == []
+
+    def test_reversed_probe_order_fails(self):
+        """A fetch before the probe repository exists is a finding.
+
+        The fetch must run inside a freshly created, empty object store, so
+        init has to precede it in source order.
+        """
+        text = (
+            "MODULE_SHA=\"$(git -C \"$BUILD_CONTEXT\" rev-parse --verify 'HEAD^{commit}')\"\n"
+            "grep -Eq '^[0-9a-f]{40}$' <<< \"${MODULE_SHA}\"\n"
+            "docker build --build-arg \"MODULE_SHA=${MODULE_SHA}\" -t ingress .\n"
+            "git -C \"$probe_dir\" fetch --dry-run \"$MODULE_REPO\" \"$MODULE_SHA\"\n"
+            "git -C \"$probe_dir\" init -q\n"
+        )
+        findings = check_ingress_smoke(text)
+        assert len(findings) == 1
+        assert "before the reachability fetch" in findings[0].message
 
 
 # ---------------------------------------------------------------------------

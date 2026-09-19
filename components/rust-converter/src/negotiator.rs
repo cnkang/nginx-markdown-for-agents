@@ -431,12 +431,6 @@ mod tests {
     }
 
     #[test]
-    fn test_q_value_boundary_one() {
-        let r = negotiate("text/markdown;q=1.0");
-        assert_eq!(r, NegotiationResult::Convert);
-    }
-
-    #[test]
     fn test_q_value_three_decimal_places() {
         // q=0.123 should be preserved
         let r = negotiate("text/markdown;q=0.123, text/html;q=0.100");

@@ -161,9 +161,12 @@ from static NGINX configuration and the request filter variable.
 
 the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
 0.9.2: token estimation uses a fixed deterministic heuristic with a
-built-in 4.0 chars/token default, no provider brands.  The matching FFI
-fields (`llm_provider`, `chars_per_token_fixed`) stay retained temporarily
-for ABI stability until the final FFI freeze.
+built-in 4.0 chars/token default, no provider brands. No temporary FFI fields
+survive on either side of the boundary: `MarkdownOptions` has no
+chars-per-token input, and no `llm_provider` or `chars_per_token_fixed` field
+exists in the Rust ABI structs. The internal `DecodedOptions` keeps the value
+for diagnostics only, and it always resolves to the built-in
+`DEFAULT_CHARS_PER_TOKEN` of 4.0.
 
 ---
 
@@ -200,9 +203,9 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - runtime dynconf fields — removed in 0.9.2. No profile storage remains
-- `llm_provider`, `chars_per_token` — historical estimation tuning (directives
-  removed in 0.9.2. The final 1.0 compatibility freeze governs the retained
-  FFI fields)
+- `llm_provider`, `chars_per_token` — historical estimation tuning. The 0.9.2
+  release removed the directives together with their FFI fields, so no
+  retained field survives to govern
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 

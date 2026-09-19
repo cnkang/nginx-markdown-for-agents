@@ -65,6 +65,36 @@ def test_last_modified_time_strip_without_pointer_is_violation():
     assert "last_modified" in hits[0][4]
 
 
+def test_uncast_minus_one_time_strip_is_violation():
+    """The NGINX uncast form must be recognized.
+
+    ``LM_TIME_STRIP_RE`` required the ``(time_t)`` cast, so the idiomatic
+    uncast form silently counted as "not stripped" and the P-class violation
+    was missed.  The cast is now optional.
+    """
+    uncast = (
+        "static void\n"
+        "strip_validators(ngx_http_request_t *r)\n"
+        "{\n"
+        "    r->headers_out.last_modified_time = -1;\n"
+        "}\n"
+    )
+    hits = [f for f in findings_for(uncast) if f[3] == "P"]
+    assert len(hits) == 1
+    assert "last_modified" in hits[0][4]
+
+    # The cast form keeps working, and a non -1 assignment is not a strip.
+    assert module.LM_TIME_STRIP_RE.search(
+        "r->headers_out.last_modified_time = (time_t) -1;"
+    )
+    assert not module.LM_TIME_STRIP_RE.search(
+        "r->headers_out.last_modified_time = -2;"
+    )
+    assert not module.LM_TIME_STRIP_RE.search(
+        "r->headers_out.last_modified_time = NULL;"
+    )
+
+
 def test_last_modified_time_strip_requires_full_mirror_cleanup():
     # Time strip + typed pointer NULL but NO list invalidation: a duplicate
     # Last-Modified list entry would survive.  Triple invariant demands all

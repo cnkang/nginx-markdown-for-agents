@@ -10,7 +10,11 @@ license = "BSD-2-Clause"
 cargo-fuzz = true
 
 [dependencies]
-brotli = "8.0"
+# Brotli codec for the fuzz-side fixture compressor.  Kept on the same
+# major version as the converter's own `brotli` dependency (root
+# Cargo.toml), so the fuzz targets exercise the same codec generation as
+# the shipped archive instead of a silently divergent one.
+brotli = "9.0"
 flate2 = "1.0"
 libfuzzer-sys = "0.4"
 markup5ever_rcdom = "0.39"

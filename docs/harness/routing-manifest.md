@@ -106,6 +106,7 @@ Safety/engineering invariants always win. User-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-16 | Codex | Added Rule 73 continuation-comment and shell-surface completeness checks; mapped save/commit/push/CI wiring and fail-closed malformed-input handling |
 | 0.9.2 | 2026-08-19 | Kang | Retired dynamic-config routing for the 0.9.2 convergence: dropped the removed `verify-dynconf-convergence-e2e` command from the `runtime-e2e` family and marked the `dynamic-config-hot-reload` risk pack archived (no active triggers; static config routes through nginx-protocol-safety and docs-tooling-drift) |
 | 0.9.2 | 2026-08-11 | Kang | Recorded v092-gates, public-surface-drift, schema-drift, reason-codegen, and observation families |
 | 0.9.2 | 2026-08-06 | Kang | Added release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, and soak-qualification verification families (five generic pre-freeze release gates) |

@@ -16,13 +16,23 @@ MODULE_REF="${MODULE_REF:-main}"
 MODULE_SHA="${MODULE_SHA:-}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-}"
+ALLOW_UNVERIFIED_IMAGE_BINDING="${ALLOW_UNVERIFIED_IMAGE_BINDING:-0}"
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_NAME=""
 IMAGE_BUILT=0
 IMAGE_BINDING_ESTABLISHED=0
+IMAGE_BINDING_SOURCE=""
 CONTAINER_NAME=""
 TMP_DIR=""
 ACTUAL_NGINX_VERSION=""
+
+# OCI labels the reused image must carry before --skip-build can claim the
+# digest binding.  A local, stale, or hand-built image carries neither label,
+# so treating their absence as "not established" (rather than silently
+# accepting the image) is what keeps the release gate fail-closed.
+OCI_LABEL_REVISION="org.opencontainers.image.revision"
+OCI_LABEL_BASE_NAME="org.opencontainers.image.base.name"
+OCI_LABEL_BASE_DIGEST="org.opencontainers.image.base.digest"
 
 # usage displays command syntax, examples, and supported environment variables.
 usage() {
@@ -57,7 +67,12 @@ Environment variables:
   IMAGE_NAME  Default: nginx-markdown-official-check:<sanitized-tag>
   ARTIFACT_DIR Default: empty
   PORT        Default: 18080
-  SKIP_BUILD  Default: 0
+  SKIP_BUILD  Default: 0 (1 = reuse an image that carries the OCI labels
+              org.opencontainers.image.revision == MODULE_SHA and
+              org.opencontainers.image.base.digest == IMAGE_DIGEST; the run
+              fails closed when those labels are missing or disagree)
+  ALLOW_UNVERIFIED_IMAGE_BINDING Default: 0 (1 = local/non-gating runs only;
+              continue when --skip-build cannot prove the image binding)
   KEEP_IMAGE  Default: 0
 EOF
   return 0
@@ -121,6 +136,13 @@ while [[ $# -gt 0 ]]; do
       SKIP_BUILD=1
       shift
       ;;
+    --allow-unverified-image-binding)
+      # Local/CI escape hatch for images built without a Git context (no
+      # OCI revision label) or without BuildKit git labels.  A release gate
+      # must never pass this flag: the point of the check is to fail closed.
+      ALLOW_UNVERIFIED_IMAGE_BINDING=1
+      shift
+      ;;
     --keep-image)
       KEEP_IMAGE=1
       shift
@@ -173,6 +195,106 @@ need_cmd() {
   return 0
 }
 
+# Read one OCI image config label from a ``docker image inspect`` JSON payload.
+#
+# Args:
+#   $1 - path to the inspect JSON file
+#   $2 - label key (e.g. org.opencontainers.image.revision)
+#
+# Outputs:
+#   The label value on stdout, or nothing when absent/unreadable.
+#
+# Returns:
+#   0 when a non-empty value was printed, 1 otherwise.
+read_oci_label() {
+  local inspect_json="$1"
+  local label_key="$2"
+
+  [[ -s "${inspect_json}" ]] || return 1
+  python3 - "${inspect_json}" "${label_key}" <<'PY'
+import json
+import sys
+
+path, key = sys.argv[1], sys.argv[2]
+try:
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+
+records = payload if isinstance(payload, list) else [payload]
+for record in records:
+    if not isinstance(record, dict):
+        continue
+    config = record.get("Config")
+    if not isinstance(config, dict):
+        continue
+    labels = config.get("Labels")
+    if not isinstance(labels, dict):
+        continue
+    value = labels.get(key)
+    if isinstance(value, str) and value.strip():
+        print(value)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+# Decide whether a reused image may claim the matrix digest binding.
+#
+# The image is only bound to the reviewed candidate when its OCI labels say
+# so: the revision label must equal MODULE_SHA, and the base-image labels
+# must name IMAGE_REFERENCE and IMAGE_DIGEST.  Anything else (missing labels,
+# a local rebuild, a stale tag, or a different base) leaves the binding
+# unestablished, and the caller decides whether that is fatal.
+#
+# Globals read:
+#   OCI_LABEL_REVISION / OCI_LABEL_BASE_NAME / OCI_LABEL_BASE_DIGEST
+#   MODULE_SHA / IMAGE_REFERENCE / IMAGE_DIGEST
+#
+# Args:
+#   $1 - path to the ``docker image inspect`` JSON payload
+#
+# Outputs:
+#   A human-readable explanation on stdout and stderr.
+#
+# Returns:
+#   0 when the binding is established, 1 otherwise.
+verify_reused_image_binding() {
+  local inspect_json="$1"
+  local label_revision=""
+  local label_base_name=""
+  local label_base_digest=""
+
+  label_revision="$(read_oci_label "${inspect_json}" "${OCI_LABEL_REVISION}" || true)"
+  label_base_name="$(read_oci_label "${inspect_json}" "${OCI_LABEL_BASE_NAME}" || true)"
+  label_base_digest="$(read_oci_label "${inspect_json}" "${OCI_LABEL_BASE_DIGEST}" || true)"
+
+  echo "==> Reused image OCI labels:" >&2
+  echo "      ${OCI_LABEL_REVISION}=${label_revision:-<absent>}" >&2
+  echo "      ${OCI_LABEL_BASE_NAME}=${label_base_name:-<absent>}" >&2
+  echo "      ${OCI_LABEL_BASE_DIGEST}=${label_base_digest:-<absent>}" >&2
+
+  if [[ "${label_revision}" != "${MODULE_SHA}" ]]; then
+    echo "Image binding not established: ${OCI_LABEL_REVISION} '${label_revision:-<absent>}' != MODULE_SHA '${MODULE_SHA}'" >&2
+    return 1
+  fi
+  if [[ -z "${label_base_digest}" || "${label_base_digest}" != "${IMAGE_DIGEST}" ]]; then
+    echo "Image binding not established: ${OCI_LABEL_BASE_DIGEST} '${label_base_digest:-<absent>}' != IMAGE_DIGEST '${IMAGE_DIGEST}'" >&2
+    return 1
+  fi
+  # The base name label is optional in practice (BuildKit only records it when
+  # the frontend can resolve a registry name); when present it must still
+  # agree with the matrix reference.
+  if [[ -n "${label_base_name}" && "${label_base_name}" != "${IMAGE_REFERENCE}" ]]; then
+    echo "Image binding not established: ${OCI_LABEL_BASE_NAME} '${label_base_name}' != IMAGE_REFERENCE '${IMAGE_REFERENCE}'" >&2
+    return 1
+  fi
+
+  echo "Image binding established from OCI labels (${OCI_LABEL_REVISION}=${MODULE_SHA})" >&2
+  return 0
+}
+
 # Build the Docker image from the official NGINX source-build Dockerfile.
 #
 # Uses docker buildx when available for consistent multi-platform builds,
@@ -195,7 +317,13 @@ build_image() {
     build_cmd=(docker build)
   fi
 
+  # Self-attestation: stamp the same OCI labels the --skip-build path reads
+  # back, so an image built here carries its matrix binding and can be reused
+  # (e.g. by a later --skip-build verification) without loss of evidence.
   "${build_cmd[@]}" \
+    --label "${OCI_LABEL_REVISION}=${MODULE_SHA}" \
+    --label "${OCI_LABEL_BASE_NAME}=${IMAGE_REFERENCE}" \
+    --label "${OCI_LABEL_BASE_DIGEST}=${IMAGE_DIGEST}" \
     --build-arg "NGINX_IMAGE=${IMAGE_REFERENCE}@${IMAGE_DIGEST}" \
     --build-arg "MODULE_REPO=${MODULE_REPO}" \
     --build-arg "MODULE_REF=${MODULE_REF}" \
@@ -268,7 +396,7 @@ append_step_summary() {
     echo "- Actual NGINX version: \`${ACTUAL_NGINX_VERSION:-<not-checked>}\`"
     echo "- Image reference: \`${IMAGE_REFERENCE}\`"
     if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
-      echo "- Image digest: \`${IMAGE_DIGEST}\`"
+      echo "- Image digest: \`${IMAGE_DIGEST}\` (binding: ${IMAGE_BINDING_SOURCE:-build-input})"
     else
       echo "- Image digest binding: not established"
     fi
@@ -312,7 +440,7 @@ write_release_evidence() {
     printf 'image_reference=%s\n' "${IMAGE_REFERENCE}"
     if [[ "${IMAGE_BINDING_ESTABLISHED}" -eq 1 ]]; then
       printf 'image_digest=%s\n' "${IMAGE_DIGEST}"
-      printf 'image_digest_binding=build-input\n'
+      printf 'image_digest_binding=%s\n' "${IMAGE_BINDING_SOURCE:-build-input}"
     else
       printf 'image_digest_binding=not-established\n'
     fi
@@ -419,6 +547,32 @@ fi
 
 if [[ "${SKIP_BUILD}" -eq 1 ]]; then
   echo "==> Reusing prebuilt image ${IMAGE_NAME}"
+  # The reused image must prove it is the image built for this matrix row:
+  # the OCI labels carry the reviewed module revision and the pinned base
+  # digest.  Without that evidence the run is only exercising some local
+  # image, so the binding stays unestablished and the gate fails closed.
+  reused_inspect="${TMP_DIR}/reused-image.inspect.json"
+  if docker image inspect "${IMAGE_NAME}" >"${reused_inspect}" 2>/dev/null \
+    && verify_reused_image_binding "${reused_inspect}"; then
+    IMAGE_BINDING_ESTABLISHED=1
+    IMAGE_BINDING_SOURCE="oci-labels"
+  else
+    IMAGE_BINDING_ESTABLISHED=0
+    IMAGE_BINDING_SOURCE="not-established"
+    if [[ -n "${ARTIFACT_DIR}" ]]; then
+      cp "${reused_inspect}" "${ARTIFACT_DIR}/reused-image.inspect.json" 2>/dev/null || true
+    fi
+    if [[ "${ALLOW_UNVERIFIED_IMAGE_BINDING}" == "1" ]]; then
+      echo "WARNING: image binding could not be established from OCI labels; continuing because --allow-unverified-image-binding was given" >&2
+    else
+      echo "Image binding not established for reused image ${IMAGE_NAME}." >&2
+      echo "The --skip-build path only accepts an image that carries the reviewed" >&2
+      echo "module revision and pinned base digest as OCI labels.  Rebuild the" >&2
+      echo "image in this job (drop --skip-build) or pass" >&2
+      echo "--allow-unverified-image-binding for local, non-gating runs." >&2
+      exit 1
+    fi
+  fi
 else
   echo "==> Building image from ${IMAGE_REFERENCE}@${IMAGE_DIGEST}"
   build_image

@@ -200,7 +200,7 @@ def verdict_report(draw):
 def test_property4_measurement_report_roundtrip(report):
     """
     Verify that a measurement report remains unchanged and byte-stable after JSON roundtrips.
-    
+
     Parameters:
         report (dict): Measurement report data conforming to the expected schema.
     """
@@ -229,7 +229,7 @@ def test_property4_measurement_report_roundtrip(report):
 def test_property4_verdict_report_roundtrip(report):
     """
     Verify JSON roundtrip integrity and byte-level stability for a verdict report.
-    
+
     Parameters:
         report (dict): A verdict report conforming to the expected schema.
     """

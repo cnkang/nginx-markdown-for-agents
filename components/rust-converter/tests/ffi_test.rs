@@ -298,6 +298,69 @@ proptest! {
     }
 }
 
+// ============================================================================
+// Migrated proptest regression seeds
+// ============================================================================
+//
+// `proptest-regressions/ffi_test.txt` (and the sibling
+// `tests/ffi_test.proptest-regressions` file that preceded it) recorded a
+// shrunken counterexample for `prop_token_estimate_matches_markdown_output_formula`.
+// Integration tests build with `SourceParallel("proptest-regressions")`, and
+// proptest resolves that path by walking up from the test source until it
+// finds a `lib.rs` or `main.rs`; `tests/` has neither, so proptest prints
+// "failed to find lib.rs or main.rs" and never reads the seeds.  The seed is
+// kept here as a deterministic case instead.
+
+/// Seed `ae6ff0...`: `heading = "a"`, `paragraph = "0  a"`.
+///
+/// Property 25: `MarkdownResult.token_estimate` is
+/// `ceil(markdown_char_count / 4.0)` when estimation is enabled, and 0 when it
+/// is disabled.  The seed's paragraph carries a double space, which the
+/// converter collapses — the estimate must follow the *emitted* Markdown, not
+/// the input HTML, which is exactly the discrepancy the seed exposed.
+#[test]
+fn regression_seed_token_estimate_follows_emitted_markdown() {
+    for estimate_enabled in [true, false] {
+        let converter = markdown_converter_new();
+        assert!(!converter.is_null(), "Converter handle should be created");
+
+        let html = "<h1>a</h1><p>0  a</p>";
+
+        let mut options = ffi_test_default_options();
+        options.estimate_tokens = u8::from(estimate_enabled);
+
+        let mut result = ffi_test_empty_result();
+        ffi_markdown_convert(converter, html.as_ptr(), html.len(), &options, &mut result);
+
+        assert_eq!(
+            result.error_code, 0,
+            "seed HTML must convert (estimate_enabled={estimate_enabled})"
+        );
+        assert!(!result.markdown.is_null(), "Markdown should be returned");
+
+        let markdown = unsafe {
+            let slice = slice::from_raw_parts(result.markdown, result.markdown_len);
+            std::str::from_utf8(slice)
+                .expect("FFI markdown must be valid UTF-8")
+                .to_string()
+        };
+
+        if estimate_enabled {
+            let expected = (markdown.chars().count() as f32 / 4.0).ceil() as u32;
+            assert_eq!(
+                result.token_estimate, expected,
+                "estimate must track the emitted markdown {markdown:?}, \
+                 not the input HTML"
+            );
+        } else {
+            assert_eq!(result.token_estimate, 0);
+        }
+
+        ffi_markdown_result_free(&mut result);
+        ffi_markdown_converter_free(converter);
+    }
+}
+
 #[test]
 fn test_null_pointer_handling() {
     // Create converter

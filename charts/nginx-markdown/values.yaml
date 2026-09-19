@@ -161,6 +161,13 @@ metrics:
   enabled: false
   uri: "/_markdown_metrics"
   shmSize: "8m"
+  # When false (the default) the sidecar metrics port is NOT added to the
+  # application Service, so no rendered Service of any type (ClusterIP,
+  # NodePort, LoadBalancer) publishes the unauthenticated scrape endpoint
+  # outside the Pod network.  Enable this only when the Service type and the
+  # cluster's network policy make that exposure an explicit operator decision;
+  # otherwise scrape the Pod directly or add a dedicated ClusterIP Service.
+  expose: false
   # When sidecar.enabled=true the chart adds a metrics-scraper sidecar
   # container that fetches the loopback-only metrics endpoint and serves it
   # on a separate port, so Prometheus scraping does not require the module

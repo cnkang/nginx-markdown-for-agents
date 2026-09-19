@@ -1132,6 +1132,153 @@ test_send_304_etag_value_failure_restores_headers(void)
     TEST_PASS("304 ETag value failure rolls back all representation headers");
 }
 
+/* A failure after the ETag append must restore a grown multipart tail.
+ *
+ * The 304 snapshot may be taken while the last header-list part still has
+ * spare capacity; the ETag append then grows that part past its captured
+ * count.  The structural rollback truncates the part back to its captured
+ * shape, so the restore must accept the grown tail instead of aborting —
+ * an aborted rollback would leave the appended entry and the invalidated
+ * originals in the header list.
+ */
+static void
+test_send_304_multipart_etag_failure_restores_grown_tail(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_list_part_t          *tail;
+    ngx_uint_t                original_tail_nelts;
+    ngx_uint_t                total_before;
+    ngx_uint_t                total_after;
+    struct MarkdownResult     result;
+    static uint8_t             etag_data[] = "\"markdown\"";
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Multipart fixture: fill the embedded part, then let the next pushes
+     * expand into a second part that keeps spare capacity. */
+    g_list_grow = 1;
+    for (int i = 0; i < 32; i++) {
+        add_header(&r->headers_out.headers, "X-Filler", "value");
+    }
+    add_header(&r->headers_out.headers, "Digest", "sha-256=upstream");
+    g_list_grow = 0;
+    original_etag = add_header(&r->headers_out.headers, "ETag",
+                               "\"upstream\"");
+    r->headers_out.etag = original_etag;
+    tail = r->headers_out.headers.last;
+    original_tail_nelts = tail->nelts;
+    total_before = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_before += part->nelts;
+    }
+
+    /* Snapshot allocation succeeds; the ETag value copy must fail. */
+    g_pool_fail_at = g_pool_allocations + 1;
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "multipart ETag value failure returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.headers.last == tail,
+                "rollback must keep the original tail part");
+    TEST_ASSERT(tail->nelts == original_tail_nelts,
+                "rollback must truncate the grown tail back to its shape");
+    TEST_ASSERT(original_etag->hash == 1,
+                "rollback must restore the invalidated original ETag");
+    TEST_ASSERT(r->headers_out.etag == original_etag,
+                "rollback must restore the typed ETag pointer");
+    total_after = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_after += part->nelts;
+    }
+    TEST_ASSERT(total_after == total_before,
+                "rollback must drop the appended entry from the list");
+    TEST_PASS("multipart ETag failure restores the grown tail");
+}
+
+static void
+test_send_304_failure_with_full_tail_truncates_new_part(void)
+{
+    ngx_http_request_t       *r;
+    ngx_table_elt_t          *original_etag;
+    ngx_list_part_t          *tail;
+    ngx_uint_t                total_before;
+    ngx_uint_t                total_after;
+    struct MarkdownResult     result;
+    static uint8_t             etag_data[] = "\"markdown\"";
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    /* Fill the grown part to capacity so the next append MUST allocate a
+     * new part after the snapshot is taken. */
+    g_list_grow = 1;
+    for (int i = 0; i < 32; i++) {
+        add_header(&r->headers_out.headers, "X-Filler", "value");
+    }
+    original_etag = add_header(&r->headers_out.headers, "ETag",
+                               "\"upstream\"");
+    r->headers_out.etag = original_etag;
+    while (r->headers_out.headers.last->nelts
+           < r->headers_out.headers.nalloc)
+    {
+        add_header(&r->headers_out.headers, "X-Filler", "value");
+    }
+    total_before = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_before += part->nelts;
+    }
+    /* The tail that will be captured is the FULL part; its captured link
+     * is NULL, so a post-snapshot part must not stay reachable after a
+     * failed rollback. */
+    tail = r->headers_out.headers.last;
+    TEST_ASSERT(tail->next == NULL, "fixture tail starts unlinked");
+    TEST_ASSERT(total_before <= NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES,
+                "fixture entry count stays within the snapshot cap");
+
+    /* Snapshot succeeds; the mutation appends run (allocating a new part
+     * past the full captured tail), then the header reply fails so the
+     * rollback runs with that new part reachable.  The rollback must
+     * truncate the chain to the captured tail as its FIRST step, so no
+     * post-snapshot part can survive any later failure. */
+    g_send_header_rc = NGX_ERROR;
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    TEST_ASSERT(ngx_http_markdown_send_304(r, &result) == NGX_ERROR,
+                "header-reply failure with a full tail returns NGX_ERROR");
+    TEST_ASSERT(r->headers_out.headers.last == tail,
+                "failed rollback must end at the captured tail, not a new part");
+    TEST_ASSERT(tail->next == NULL,
+                "failed rollback must leave no post-snapshot part reachable");
+    total_after = 0;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL; part = part->next)
+    {
+        total_after += part->nelts;
+    }
+    TEST_ASSERT(total_after == total_before,
+                "failed rollback must restore the captured entry total");
+    g_list_grow = 0;
+    g_send_header_rc = NGX_OK;
+    TEST_PASS("failed 304 with a full tail truncates newly allocated parts");
+}
+
+
 static void
 test_send_304_vary_failure_restores_headers(void)
 {
@@ -4103,9 +4250,12 @@ test_304_snapshot_error_guards(void)
     TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
                     NULL, &list, &snapshot) == NGX_OK,
                 "304 snapshot accepts an empty list");
-    ngx_http_markdown_304_restore_list(&list, &snapshot);
-    ngx_http_markdown_304_restore_list(NULL, &snapshot);
-    ngx_http_markdown_304_restore_list(&list, NULL);
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &snapshot) == NGX_OK,
+                "304 restore accepts an empty snapshot on a zero-initialized list");
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(NULL, &snapshot) == NGX_OK,
+                "304 restore ignores a NULL list");
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, NULL) == NGX_OK,
+                "304 restore ignores a NULL snapshot");
 
     list.part.nelts = NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES + 1;
     TEST_ASSERT(ngx_http_markdown_304_snapshot_list(
@@ -4130,6 +4280,38 @@ test_304_snapshot_error_guards(void)
     restore_snapshot.entry_count = 1;
     restore_snapshot.entries = &saved_entry;
     g_pool_fail_at = (size_t) -1;
+    /* A nonempty snapshot still requires element storage on the target
+     * list; a zero-initialized list without any must fail closed. */
+    list.part.elts = NULL;
+    list.part.nelts = 0;
+    list.last = NULL;
+    TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &restore_snapshot)
+                    == NGX_ERROR,
+                "304 restore rejects a nonempty snapshot on a list without element storage");
+
+    /* A nonempty snapshot whose traversal never reaches original_last
+     * must fail closed before any mutation: accepting it would re-anchor
+     * the list to an unvalidated part. */
+    {
+        ngx_http_markdown_304_list_snapshot_t bad_snapshot;
+        ngx_list_part_t fake_last;
+
+        memset(&bad_snapshot, 0, sizeof(bad_snapshot));
+        memset(&fake_last, 0, sizeof(fake_last));
+        list.size = sizeof(ngx_table_elt_t);
+        list.nalloc = 4;
+        list.part.elts = &entry;
+        list.part.nelts = 1;
+        list.part.next = NULL;
+        list.last = &list.part;
+        bad_snapshot.entry_count = 1;
+        bad_snapshot.entries = &saved_entry;
+        bad_snapshot.original_last = &fake_last;
+        TEST_ASSERT(ngx_http_markdown_304_restore_list(&list, &bad_snapshot)
+                        == NGX_ERROR,
+                    "304 restore rejects a snapshot whose original_last is not in the chain");
+    }
+
     list.part.elts = NULL;
     list.part.nelts = 1;
     ngx_http_markdown_304_restore_list(&list, &restore_snapshot);
@@ -4160,6 +4342,8 @@ main(void)
     test_send_304_send_header_again();
     test_send_304_etag_failure_restores_headers();
     test_send_304_etag_value_failure_restores_headers();
+    test_send_304_multipart_etag_failure_restores_grown_tail();
+    test_send_304_failure_with_full_tail_truncates_new_part();
     test_send_304_vary_failure_restores_headers();
     test_send_304_auth_cache_control_failure_restores_headers();
 

@@ -7,10 +7,14 @@
 ## Overview
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
-shrank to 20 active directives. The five names removed by the pre-LTS
-convergence are no longer registered, so `nginx -t` reports NGINX's standard
-"unknown directive" error for them too, and the replacement table below names
-the migration target for each.
+shrank to 20 active directives. The seven names retired in 0.9.2 — the five
+removed by the pre-LTS convergence plus `markdown_profile` and
+`markdown_streaming_zero_copy` — are no longer registered, so `nginx -t`
+reports NGINX's standard "unknown directive" error for them too, and the
+replacement table below names the migration target for each (or records
+that none exists). That table
+covers the five convergence removals. The two development-line retirements
+each have a dedicated section below.
 
 After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 24 months.
@@ -145,6 +149,9 @@ markdown_profile balanced;
 markdown_limits conversion_memory=64m conversion_timeout=5s parser_timeout=5s max_inflight=64;
 markdown_cache_validation ims_only;
 markdown_error_policy pass;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
 
 ```nginx
@@ -155,6 +162,9 @@ markdown_profile strict_cache;
 markdown_limits conversion_memory=128m conversion_timeout=10s max_inflight=32;
 markdown_cache_validation full;
 markdown_error_policy pass;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
 
 ```nginx
@@ -166,7 +176,14 @@ markdown_streaming force;
 markdown_limits conversion_memory=256m conversion_timeout=30s streaming_buffer=16m max_inflight=128;
 markdown_error_policy pass;
 markdown_accept force;
+markdown_auth_policy allow;
+# markdown_flavor commonmark is unchanged: every 0.9.1 profile set it,
+# and 0.9.2 keeps commonmark as the default flavor.
 ```
+
+Every 0.9.1 profile set `auth_policy=allow`, and the 0.9.2 default is `deny`,
+so each mapping above sets `markdown_auth_policy allow;` explicitly to keep the
+profile's conversion behavior.
 
 These presets are recommendations, not equivalents. The 0.9.1 profiles
 shared one resource envelope: 8 MiB conversion memory, 2 s timeout, and
@@ -385,12 +402,14 @@ command table.
 
 ---
 
-## Removed 0.9.2 Directives (5)
+## Removed 0.9.2 Directives (5 convergence + 2 development-line)
 
 These directives were active in 0.9.1. The 0.9.2 pre-LTS convergence
-(LTS-R006/LTS-R009) removes them. Their names stay registered with an
-error-returning handler, so `nginx -t` fails with an explicit migration
-message naming the directive rather than a bare "unknown directive" error.
+(LTS-R006/LTS-R009) removes them. Their names are no longer registered, so
+`nginx -t` fails with NGINX's standard `unknown directive` error naming the
+directive. Earlier 0.9.2 development builds kept the names as reject-only
+entries with a module migration message, and the frozen contract drops that
+handler.
 Remove them from your configuration and rely on static config validated by
 `nginx -t` plus a reload.
 
@@ -525,7 +544,8 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
-| 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five explicit reject-only convergence entries. |
+| 0.9.2 | 2026-09-17 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
+| 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |
 | 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |

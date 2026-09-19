@@ -433,6 +433,14 @@ if grep -qi '^Trailer:' "${RAW_DIR}/trailer.hdr"; then
   echo "FAIL: Trailer declaration leaked to client on converted response" >&2
   exit 1
 fi
+# curl -D appends real trailers to the header dump after the header block, so a
+# leaked Content-Digest trailer lands in trailer.hdr, not in trailer.body.
+# Both files are checked: the body check alone would pass while the trailer
+# still reached the client.
+if grep -qi 'upstream-html-digest' "${RAW_DIR}/trailer.hdr"; then
+  echo "FAIL: upstream representation trailer leaked into the response header dump" >&2
+  exit 1
+fi
 if grep -qi 'upstream-html-digest' "${RAW_DIR}/trailer.body"; then
   echo "FAIL: upstream representation trailer leaked to client on converted response" >&2
   exit 1

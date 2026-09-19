@@ -119,6 +119,12 @@ static ngx_uint_t g_bypass_failopen_call_count = 0;
 static ngx_int_t g_conditional_return_rc = NGX_DECLINED;
 static ngx_int_t g_send_304_rc = NGX_OK;
 static ngx_uint_t g_release_inflight_call_count = 0;
+/*
+ * Snapshot of g_release_inflight_call_count taken inside the send_304 /
+ * send_412 stubs.  Proves the inflight release happened BEFORE the terminal
+ * response finalizer ran, not merely somewhere in the same call.
+ */
+static ngx_uint_t g_release_count_at_finalizer = 0;
 static ngx_int_t g_next_body_filter_rc = 0;
 static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
@@ -943,6 +949,8 @@ ngx_http_markdown_send_304(
 {
     UNUSED(r);
     UNUSED(result);
+    /* Record how many releases had happened when the finalizer ran. */
+    g_release_count_at_finalizer = g_release_inflight_call_count;
     return g_send_304_rc;
 }
 
@@ -950,6 +958,7 @@ ngx_int_t
 ngx_http_markdown_send_412(ngx_http_request_t *r)
 {
     UNUSED(r);
+    g_release_count_at_finalizer = g_release_inflight_call_count;
     return g_send_304_rc;
 }
 
@@ -1057,6 +1066,7 @@ reset_stub_state(void)
     g_conditional_return_rc = NGX_DECLINED;
     g_send_304_rc = NGX_OK;
     g_release_inflight_call_count = 0;
+    g_release_count_at_finalizer = 0;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_last_input = NULL;
     g_next_body_filter_call_count = 0;
@@ -2588,6 +2598,15 @@ test_conditional_match_propagates_terminal_done(void)
                 "conditional match returns terminal NGX_DONE");
     TEST_ASSERT(g_release_inflight_call_count == 1,
                 "conditional match releases inflight before finalization");
+    /*
+     * the release must happen BEFORE the terminal 304 finalizer runs,
+     * matching the sibling terminal paths (412, conversion error, conversion
+     * success).  The stub snapshots the release counter at finalizer entry, so
+     * moving the release after send_304() (or dropping it) fails here even
+     * though the end-of-call count would still be 1.
+     */
+    TEST_ASSERT(g_release_count_at_finalizer == 1,
+                "inflight slot must be released before the 304 finalizer runs");
     TEST_ASSERT(has_result == 0,
                 "conditional match does not expose a conversion result");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
@@ -2596,6 +2615,52 @@ test_conditional_match_propagates_terminal_done(void)
                 "conditional match clears source Last-Modified state");
 
     TEST_PASS("conditional match propagates terminal NGX_DONE");
+}
+
+/*
+ * Sibling check: the 412 terminal path must release the inflight slot
+ * before its finalizer too.  Both terminal paths share the release contract
+ * stated in the resolver, and a regression in one is easy to miss when only
+ * the 304 path is asserted.
+ */
+static void
+test_conditional_412_releases_inflight_before_finalizer(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_msec_t                elapsed_ms;
+    ngx_flag_t                has_result;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("conditional 412 releases inflight before finalization");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+
+    g_conditional_return_rc = NGX_HTTP_PRECONDITION_FAILED;
+    g_send_304_rc = NGX_DONE;   /* shared by the 412 stub */
+    r.buffered = NGX_HTTP_MARKDOWN_BUFFERED;
+    elapsed_ms = 3;
+    has_result = 0;
+
+    rc = ngx_http_markdown_resolve_conditional_result(
+        &r, &ctx, &conf, &result, &elapsed_ms, &has_result);
+
+    TEST_ASSERT(rc == NGX_DONE,
+                "412 precondition failure returns terminal NGX_DONE");
+    TEST_ASSERT(g_release_inflight_call_count == 1,
+                "412 path releases the inflight slot exactly once");
+    TEST_ASSERT(g_release_count_at_finalizer == 1,
+                "inflight slot must be released before the 412 finalizer runs");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+                "412 path clears module buffering before emitting headers");
+
+    TEST_PASS("conditional 412 releases inflight before finalization");
 }
 
 /* Legacy latency counters are exclusive per-band counts. */
@@ -2630,6 +2695,244 @@ test_metrics_legacy_histogram_preserves_exclusive_bands(void)
                 "legacy latency total remains available through histogram count");
 
     TEST_PASS("legacy histogram preserves exclusive bands");
+}
+
+/*
+ * The conversion-peak gauge must come from the collected snapshot, not from
+ * the live global metrics instance.  Reading the global would (a) disagree
+ * with every other field in the same document when the snapshot is a
+ * point-in-time copy and (b) report a non-zero peak for a zeroed snapshot.
+ * MUTATION SENSITIVITY: restoring the global read makes both assertions fail.
+ */
+static void
+test_metrics_conversion_peak_reads_snapshot_not_global(void)
+{
+    ngx_http_markdown_metrics_snapshot_t     snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+    ngx_http_markdown_metrics_t              global_metrics;
+    ngx_http_markdown_metrics_t             *saved_global;
+
+    TEST_SUBSECTION("conversion peak gauge reads the collected snapshot");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    memset(&global_metrics, 0, sizeof(global_metrics));
+
+    /* Point the shared global at a live instance with a different peak. */
+    saved_global = ngx_http_markdown_metrics;
+    global_metrics.perf.conversion_peak_memory_bytes = 4096;
+    ngx_http_markdown_metrics = &global_metrics;
+
+    snapshot.perf.conversion_peak_memory_bytes = 987654;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.conversion_peak_memory_bytes == 987654,
+                "v1 conversion peak must equal the snapshot value, not the global");
+
+    /* A zeroed snapshot must still yield a zero gauge even when the live
+     * global holds a non-zero peak. */
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.conversion_peak_memory_bytes == 0,
+                "zeroed snapshot must render a zero conversion peak");
+
+    /* The collector must copy the perf field into the snapshot. */
+    ngx_http_markdown_collect_metrics_snapshot(&snapshot);
+    TEST_ASSERT(snapshot.perf.conversion_peak_memory_bytes == 4096,
+                "collector must copy the global conversion peak into the snapshot");
+
+    ngx_http_markdown_metrics = saved_global;
+
+    TEST_PASS("conversion peak gauge reads the collected snapshot");
+}
+
+
+/*
+ * Rule 67 metric conservation under NON-ZERO inputs.
+ *
+ * to_v1() partitions conversion failures into three disjoint v1 outcomes:
+ *
+ *     failed_open   = results.failopen_count
+ *     aborted       = streaming.terminal_aborted_total
+ *     failed_closed = max(0, conversions_failed - failopen_count - aborted)
+ *
+ * The pre-existing histogram test drives this function with both deduction
+ * inputs still 0, so the saturating floors never execute.  This test drives
+ * every branch with non-zero values, including both floors independently and
+ * in the order that a per-path aborted counter would break.
+ *
+ * MUTATION SENSITIVITY:
+ *   (a) reading a live global / per-path counter for `aborted` instead of
+ *       snapshot.streaming.terminal_aborted_total fails case 5;
+ *   (b) deleting either saturating floor (unsigned subtraction) fails
+ *       cases 2 and 3 (case 2 wraps to a huge value, case 3 underflows on
+ *       the second deduction).
+ */
+static void
+test_metrics_v1_failure_outcome_conservation(void)
+{
+    ngx_http_markdown_metrics_snapshot_t     snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 failure-outcome conservation with non-zero inputs");
+
+    /*
+     * Case 1: exact partition.  10 failures = 3 fail-open + 5 closed + 2 aborted.
+     */
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    snapshot.results.failopen_count = 3;
+    snapshot.conversions_failed = 10;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot.streaming.terminal_aborted_total = 2;
+#endif
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.requests.failed_open == 3,
+                "exact partition: failed_open must mirror results.failopen_count");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_ASSERT(v1.requests.aborted == 2,
+                "exact partition: aborted must mirror terminal_aborted_total");
+    TEST_ASSERT(v1.requests.failed_closed == 5,
+                "exact partition: failed_closed must be failures minus the two deductions");
+    /*
+     * Identity 4: on an exact partition the three v1 components must sum back
+     * to the failure total.  This is the conservation property the detector
+     * (detect_metrics_event_conservation) guards at the source level.
+     */
+    TEST_ASSERT(v1.requests.failed_open + v1.requests.failed_closed
+                    + v1.requests.aborted
+                == snapshot.conversions_failed,
+                "exact partition: fail-open + closed + aborted must equal conversions_failed");
+#endif
+
+    /*
+     * Case 2: first floor.  conversions_failed (3) < failopen_count (5) must
+     * saturate to 0 rather than wrapping the unsigned subtraction.
+     */
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    snapshot.results.failopen_count = 5;
+    snapshot.conversions_failed = 3;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.requests.failed_open == 5,
+                "floor 1: failed_open still mirrors the fail-open counter");
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+                "floor 1: failures below fail-open must saturate to zero, not wrap");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    TEST_ASSERT(v1.requests.aborted == 0,
+                "floor 1: aborted must reflect the zeroed aborted counter");
+#endif
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Case 3: second floor and order-independence.  The two deductions are
+     * applied sequentially; with failures (5) >= failopen (3) the first
+     * subtraction succeeds (2) and only the aborted deduction (4) underflows.
+     * The result must saturate to 0 instead of wrapping, which is exactly what
+     * a single combined subtraction (failures - (failopen + aborted)) could
+     * not express and what a regression to per-path abort counters exposes.
+     */
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    snapshot.results.failopen_count = 3;
+    snapshot.conversions_failed = 5;
+    snapshot.streaming.terminal_aborted_total = 4;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+                "floor 2: a second deduction larger than the remainder must saturate to zero");
+    TEST_ASSERT(v1.requests.aborted == 4,
+                "floor 2: aborted still mirrors the aborted counter");
+
+    /*
+     * Case 5: regression anchor.  `aborted` must be derived ONLY from
+     * streaming.terminal_aborted_total.  The historical regression pointed it
+     * at a per-path abort counter (streaming_failure_postcommit_abort) that is
+     * non-zero here while the terminal counter stays 0: a wrong source makes
+     * the assertion below fail while a correct one passes.  The same snapshot
+     * also proves the deduction path reads the terminal counter, because
+     * failed_closed must NOT be reduced by the unrelated per-path value.
+     */
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(&v1, 0, sizeof(v1));
+    snapshot.conversions_failed = 6;
+    snapshot.results.failopen_count = 1;
+    snapshot.streaming.terminal_aborted_total = 0;
+    snapshot.streaming.streaming_failure_postcommit_abort = 4;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.requests.aborted == 0,
+                "aborted must come from terminal_aborted_total, not a per-path abort counter");
+    TEST_ASSERT(v1.requests.failed_closed == 5,
+                "failed_closed must not be reduced by an unrelated per-path abort counter");
+    TEST_ASSERT(v1.requests.failed_open == 1,
+                "regression anchor: failed_open unaffected by the abort counter source");
+#endif
+
+    TEST_PASS("v1 failure-outcome conservation holds with non-zero inputs");
+}
+
+
+/*
+ * C-side contract pin for the Rule 27 escape representation.
+ *
+ * The URL-destination escape contract changed on the Rust side (commit
+ * 459a0f72 made both engines emit BACKSLASH-escaped `<` and `>` inside the
+ * angle-bracket destination wrapper, replacing percent-encoding).  That
+ * commit touched only the rust-converter component and the C test suite had
+ * no assertion on either representation — so nothing on the C side pins what
+ * the module is contractually required to do with the bytes: deliver them
+ * through the buffered output path UNMODIFIED.
+ *
+ * This test encodes that obligation at the only boundary C owns.  Rule 27
+ * assigns escaping to the shared emitter (Rust); the C side must not add,
+ * strip, or rewrite escape bytes while buffering and emitting the converted
+ * Markdown.  Both representations are asserted as byte-exact round trips, so
+ * a future C-side "helpful" re-escape, unescape, or backslash-collapse
+ * regression fails here regardless of which representation Rust emits.
+ */
+static void
+test_escaped_destination_bytes_survive_c_buffer_roundtrip(void)
+{
+    ngx_http_markdown_buffer_t  buf;
+    static const char  new_contract[] =
+        "<https://example.com/path?a=1\\<b=2\\>c=3>";
+    static const char  control_escapes[] =
+        "<https://example.com/x\\n\\r\\t\\u005c>";
+    const char        *cases[2];
+    size_t             i;
+
+    TEST_SUBSECTION("escaped URL-destination bytes survive the C buffer round trip");
+
+    cases[0] = new_contract;
+    cases[1] = control_escapes;
+
+    for (i = 0; i < 2; i++) {
+        size_t len = strlen(cases[i]);
+
+        ngx_memzero(&buf, sizeof(buf));
+        TEST_ASSERT(ngx_http_markdown_buffer_init(&buf, len + 8, &g_pool)
+                        == NGX_OK,
+                    "buffer init must succeed");
+        TEST_ASSERT(ngx_http_markdown_buffer_append(&buf,
+                        (const u_char *) cases[i], len) == NGX_OK,
+                    "buffer append must succeed");
+        TEST_ASSERT(buf.size == len,
+                    "buffered size must equal the appended byte count");
+        TEST_ASSERT(memcmp(buf.data, cases[i], len) == 0,
+                    "buffered bytes must be byte-identical to the emitter output");
+
+        ngx_http_markdown_buffer_release(&buf);
+    }
+
+    TEST_PASS("escaped URL-destination bytes survive the C buffer round trip");
 }
 
 
@@ -2669,7 +2972,11 @@ main(void)
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
     test_conditional_match_propagates_terminal_done();
+    test_conditional_412_releases_inflight_before_finalizer();
     test_metrics_legacy_histogram_preserves_exclusive_bands();
+    test_metrics_conversion_peak_reads_snapshot_not_global();
+    test_metrics_v1_failure_outcome_conservation();
+    test_escaped_destination_bytes_survive_c_buffer_roundtrip();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

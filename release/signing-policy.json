@@ -47,6 +47,7 @@
       "attachment_name": "Embedded RPM PGP header signature",
       "digest_binding": "RPM header signature covers package content digest; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
+        "rpm --import packaging/nginx-markdown-for-agents-release.asc",
         "rpm -Kv \"${RPM_ARTIFACT_PATH}\"",
         "gpg --verify SHA256SUMS.asc SHA256SUMS"
       ],

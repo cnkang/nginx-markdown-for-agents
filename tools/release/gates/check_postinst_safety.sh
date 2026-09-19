@@ -266,6 +266,181 @@ skip_function_line() {
     return 1
 }
 
+
+# mask_command_text — blot out quoted spans and comments for command matching
+# Arguments: $1 = line
+# Returns: the masked line on stdout
+#
+# Single-quoted spans never execute, so their content is always masked.
+# Double-quoted spans are masked too — EXCEPT when they contain a command
+# substitution ($(...)) or a backtick, because those run their command
+# before the quoting context matters; hiding them would let the later
+# command scan miss an external command that resolves through PATH.
+mask_command_text() {
+    local text="$1"
+    local out=""
+    local i=0
+    local n=${#text}
+    local ch
+    local quote=""
+    local span=""
+    local fused
+    local prev_last
+    local next_ch
+    local sub_depth=0
+    local evaluator
+    local commandword
+    # Command-position separator tail: start of text or a separator followed
+    # by whitespace only.  Kept in a variable so the regex never collides
+    # with shell tokenization or static analysis.
+    local sep_re='(^|[;&|(])[[:space:]]*$'
+
+    while [[ "$i" -lt "$n" ]]; do
+        ch="${text:$i:1}"
+        if [[ -z "$quote" ]]; then
+            if [[ "$ch" == '\' && -n "${text:$((i + 1)):1}" ]]; then
+                # An escaped character outside quotes is literal text:
+                # \' must not open a quoted span.
+                out+="$ch${text:$((i + 1)):1}"
+                i=$((i + 2))
+                continue
+            fi
+            if [[ "$ch" == "'" || "$ch" == '"' ]]; then
+                quote="$ch"
+                span=""
+                sub_depth=0
+                i=$((i + 1))
+                continue
+            fi
+            out+="$ch"
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$quote" == '"' ]]; then
+            # A backslash escapes the next character: an escaped quote is
+            # literal text and cannot terminate the span (nor open a
+            # substitution).
+            if [[ "$ch" == '\' && -n "${text:$((i + 1)):1}" ]]; then
+                span+="$ch${text:$((i + 1)):1}"
+                i=$((i + 2))
+                continue
+            fi
+            # Track command-substitution nesting inside the double-quoted
+            # span: a quote inside $(...) belongs to the substitution's own
+            # context and does not terminate the surrounding span.
+            if [[ "$ch" == '$' && "${text:$((i + 1)):1}" == '(' ]]; then
+                sub_depth=$((sub_depth + 1))
+            elif [[ "$ch" == ')' && "$sub_depth" -gt 0 ]]; then
+                sub_depth=$((sub_depth - 1))
+            fi
+            if [[ "$ch" == '"' && "$sub_depth" -eq 0 ]]; then
+                if [[ "$out" =~ $sep_re ]] \
+                    || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)([[:space:]]+[^[:space:]]+)*[[:space:]]+$ ]]; then
+                    # A double-quoted command word (`"sed"`) is executable
+                    # text at a command position: keep it visible.
+                    out+="$span"
+                elif [[ "$out" =~ (^|[^A-Za-z0-9_])(eval|sh|bash|dash|env)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                    # An evaluator command executes its double-quoted
+                    # argument as a command string: keep the span and its
+                    # double-quote delimiters visible.
+                    out+="\"$span\""
+                elif [[ "$span" == *'$('* || "$span" == *'`'* ]]; then
+                    # Keep a double-quoted span whose substitutions run.
+                    out+='"'"$span"'"'
+                else
+                    # A span fused to adjacent word characters
+                    # (`NOTE="run "sed`) belongs to one shell word:
+                    # replacing it with a quote would invent a command
+                    # boundary the shell does not have.  A span that
+                    # stands alone keeps the old placeholder behavior.
+                    fused=0
+                    prev_last=""
+                    if [[ -n "$out" ]]; then
+                        prev_last="${out:${#out}-1:1}"
+                    fi
+                    next_ch="${text:$((i + 1)):1}"
+                    case "$prev_last" in
+                        ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
+                        *) fused=1 ;;
+                    esac
+                    case "$next_ch" in
+                        ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
+                        *) fused=1 ;;
+                    esac
+                    if [[ "$fused" -eq 1 ]]; then
+                        out+="x"
+                    else
+                        out+='"'
+                    fi
+                fi
+                quote=""
+                sub_depth=0
+                i=$((i + 1))
+                continue
+            fi
+            span+="$ch"
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$ch" == "$quote" ]]; then
+            evaluator=0
+            commandword=0
+            if [[ "$out" =~ $sep_re ]] \
+                || [[ "$out" =~ (^|[^A-Za-z0-9_])(sudo|doas|env|command|nohup|time|exec)([[:space:]]+[^[:space:]]+)*[[:space:]]+$ ]]; then
+                # Shell quoting is also valid around a command word
+                # (`'sed' -i ...`): the span names the command that runs,
+                # so its text must stay visible without the quotes.
+                commandword=1
+            fi
+            if [[ "$quote" == "'" ]] \
+                && [[ "$out" =~ (^|[^A-Za-z0-9_])(eval|sh|bash|dash|env)[[:space:]]+(-{1,2}[A-Za-z0-9_-]+[[:space:]]+)*$ ]]; then
+                # An evaluator command (eval/sh/bash/dash/env) executes its
+                # single-quoted argument as a command string, so the span is
+                # executable text and must stay visible with its quotes.
+                evaluator=1
+            fi
+            fused=0
+            prev_last=""
+            if [[ -n "$out" ]]; then
+                prev_last="${out:${#out}-1:1}"
+            fi
+            next_ch="${text:$((i + 1)):1}"
+            case "$prev_last" in
+                ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|';'|'|'|'&') ;;
+                *) fused=1 ;;
+            esac
+            case "$next_ch" in
+                ""|" "|$'\t'|'"'|"'"|'`'|'$'|'('|')'|';'|'|'|'&') ;;
+                *) fused=1 ;;
+            esac
+            if [[ "$commandword" -eq 1 ]]; then
+                out+="$span"
+            elif [[ "$evaluator" -eq 1 ]]; then
+                out+="'$span'"
+            elif [[ "$fused" -eq 1 ]]; then
+                out+="x"
+            else
+                out+="''"
+            fi
+            quote=""
+            i=$((i + 1))
+            continue
+        fi
+        span+="$ch"
+        i=$((i + 1))
+    done
+
+    # An unterminated quote keeps its tail verbatim: masking it would hide
+    # executable text.
+    if [[ -n "$quote" ]]; then
+        out+="$quote$span"
+    fi
+
+    out="$(printf '%s' "$out" | sed -E 's/(^|[[:space:];|&])#.*$/\1/')"
+    printf '%s' "$out"
+}
+
+
 # check_file — run all forbidden pattern checks against a single file
 # Arguments: $1 = file path
 # Returns: 0 always (violations tracked in VIOLATION_COUNT), 2 on file error
@@ -353,6 +528,65 @@ check_file() {
 
     rm -f "$stripped_tmp"
     return 0
+}
+
+# prologue_line_is_assignment_only — true when a prologue line stores a value
+# without running a command.
+#
+# An env-prefixed command ("LC_ALL=C sed -n ...") has the NAME=value shape but
+# resolves its command word through PATH, so it must end the prologue scan
+# exactly like any other statement.  A real assignment is NAME=value followed
+# by nothing, or by one or more further NAME=value pairs.
+#
+# Arguments: $1 = source line (top-level, already trimmed)
+# Outputs:   none
+# Returns:   0 when the line is assignment-only, 1 otherwise
+prologue_line_is_assignment_only() {
+    local text="$1"
+    local name_pattern='^[A-Za-z_][A-Za-z0-9_]*='
+    local value="" rest="" quote="" index=0 char=""
+
+    while [[ "$text" =~ $name_pattern ]]; do
+        rest="${text#*=}"
+        if [[ -z "$rest" ]]; then
+            return 0
+        fi
+        quote="${rest:0:1}"
+        if [[ "$quote" == '"' || "$quote" == "'" ]]; then
+            index=1
+            while [[ "$index" -lt "${#rest}" ]]; do
+                char="${rest:$index:1}"
+                if [[ "$char" == "$quote" ]]; then
+                    break
+                fi
+                index=$((index + 1))
+            done
+            if [[ "$index" -ge "${#rest}" ]]; then
+                # Unterminated quote: cannot prove this is assignment-only.
+                return 1
+            fi
+            text="${rest:$((index + 1))}"
+        else
+            # Process substitution executes a command: ``OUTPUT=<(hostname)``
+            # resolves hostname through PATH even though the line starts as
+            # an assignment, so it ends the prologue like other command
+            # execution.
+            if [[ "$rest" == *'<('* || "$rest" == *'>('* ]]; then
+                return 1
+            fi
+            # Unquoted value runs to the first whitespace.
+            value="${rest%%[[:space:]]*}"
+            text="${rest#"$value"}"
+        fi
+        # Only whitespace may remain before the next NAME=value pair (or the
+        # end of the line).
+        text="${text#"${text%%[![:space:]]*}"}"
+        if [[ -z "$text" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # check_trusted_path — verify that a top-level trusted PATH assignment
@@ -475,9 +709,16 @@ check_trusted_path() {
                 # Command substitution, backticks, or command separators in
                 # the line execute commands before the trusted PATH
                 # assignment, so they end the prologue.
-                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= \
-                    && "$line" != *'$('* && "$line" != *'`'* \
-                    && "$line" != *';'* && "$line" != *'&'* && "$line" != *'|'* ]]; then
+                #
+                # The assignment must also be assignment-ONLY: an env-prefixed
+                # command such as "LC_ALL=C sed ..." starts with a NAME=value
+                # shape but runs a PATH-resolved command, so it ends the
+                # prologue like any other statement.
+                if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] \
+                    && [[ "$line" != *'$('* && "$line" != *'`'* \
+                    && "$line" != *';'* && "$line" != *'&'* \
+                    && "$line" != *'|'* ]] \
+                    && prologue_line_is_assignment_only "$line"; then
                     :
                 else
                     break
@@ -501,11 +742,15 @@ check_trusted_path() {
             if [[ -z "$trimmed" || "$trimmed" == "#"* ]]; then
                 continue
             fi
-            if [[ "$line" != "$trimmed" ]]; then
-                # An indented line belongs to a block or a function body.
+            # Track function scope before the indentation check: an
+            # indented closing brace must still decrement the depth, or a
+            # later top-level PATH line reads as still inside a function.
+            if skip_function_line "$line" "$trimmed"; then
                 continue
             fi
-            if skip_function_line "$line" "$trimmed"; then
+            if [[ "$line" != "$trimmed" ]]; then
+                # An indented line that is not part of a function body
+                # belongs to a block.
                 continue
             fi
             case "$line" in
@@ -543,6 +788,11 @@ check_trusted_path() {
             continue
         fi
 
+        # Blot out quoted spans and trailing comments: prose inside a
+        # string or a comment must not read as an executed command.
+        local match_line
+        match_line="$(mask_command_text "$line")"
+
         # Check each known external command
         local cmd=""
         for cmd in "${external_cmds[@]}"; do
@@ -551,7 +801,7 @@ check_trusted_path() {
             # For single-word commands, match as standalone token
             case "$cmd" in
                 "command -v")
-                    if [[ "$line" =~ (^|[[:space:]\"\'\(;|&])command[[:space:]]+-v($|[[:space:]]) ]]; then
+                    if [[ "$match_line" =~ (^|[[:space:]\"\'\(;|&])command[[:space:]]+-v($|[[:space:]]) ]]; then
                         first_cmd_line=$line_num
                         break 2
                     fi
@@ -559,7 +809,7 @@ check_trusted_path() {
                 *)
                     # Match command at: start of line (with optional whitespace),
                     # after $( ), after ` `, after pipe, after semicolon, after &&/||
-                    if [[ "$line" =~ (^|[[:space:]\"\'\`\$\(;|&])${cmd}($|[[:space:];|&\)\>]) ]]; then
+                    if [[ "$match_line" =~ (^|[[:space:]\"\'\`\$\(;|&])${cmd}($|[[:space:];|&\)\>]) ]]; then
                         first_cmd_line=$line_num
                         break 2
                     fi

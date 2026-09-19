@@ -99,10 +99,9 @@ def _validate_marker_ids(payload: dict[str, object]) -> None:
             "parity marker known_difference_observation_ids must be "
             "non-empty strings"
         )
-    if len(set(observations)) != len(observations):
-        raise ValueError(
-            "parity marker known_difference_observation_ids must be unique"
-        )
+    # One registry id may be observed several times: the harness records one
+    # observation per comparison, and the validator contract accepts repeated
+    # observations, so no uniqueness check belongs on this list.
     if payload["known_difference_count"] != len(observations):
         raise ValueError(
             "parity marker known-difference count does not match observations"

@@ -251,16 +251,16 @@ impl StreamingSanitizer {
     /// Elements matching the prune config (nav, footer, aside, etc.) and
     /// their entire subtrees will be suppressed, equivalent to the
     /// full-buffer path's `should_prune_with_config()` behavior.
-    /// Install the Markdown flavor that governs GFM-only constructs.
-    pub fn set_flavor_gfm(&mut self, gfm: bool) {
-        self.gfm = gfm;
-    }
-
     pub fn with_prune_config(prune_config: PruneConfig) -> Self {
         Self {
             prune_config,
             ..Self::new()
         }
+    }
+
+    /// Install the Markdown flavor that governs GFM-only constructs.
+    pub fn set_flavor_gfm(&mut self, gfm: bool) {
+        self.gfm = gfm;
     }
 
     /// Creates a `StreamingSanitizer` configured with a custom maximum nesting depth.

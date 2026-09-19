@@ -11,6 +11,95 @@ STREAMING_FAILURE_CACHE_SCRIPT = (
 )
 
 
+def _advance_scan(
+    script: str, index: int, quote: str, in_comment: bool
+) -> tuple[int, str, bool]:
+    """Consume one character for the block scanner.
+
+    Returns the (next index, quote state, comment state) triple.  Inside an
+    unclosed double quote a backslash escapes the following character; a
+    ``#`` outside quotes starts a comment that runs to the end of the line.
+    """
+    char = script[index]
+    if in_comment:
+        return index + 1, quote, char != "\n"
+    if quote:
+        if char == "\\" and index + 1 < len(script):
+            return index + 2, quote, False
+        return index + 1, "" if char == quote else quote, False
+    if char == "#":
+        return index + 1, "", True
+    if char in "\"'":
+        return index + 1, char, False
+    return index + 1, "", False
+
+
+def _mask_step(
+    script: str, index: int, quote: str, in_comment: bool
+) -> tuple[int, str, bool, bool]:
+    """One masking step; returns (next index, quote, comment, blank this char)."""
+    char = script[index]
+    if in_comment:
+        if char == "\n":
+            return index + 1, quote, False, False
+        return index + 1, quote, True, True
+    if quote:
+        if char == "\\" and index + 1 < len(script):
+            return index + 2, quote, False, False
+        if char == quote:
+            return index + 1, "", False, False
+        return index + 1, quote, False, False
+    if char == "#":
+        return index + 1, "", True, True
+    if char in "\"'":
+        return index + 1, char, False, False
+    return index + 1, "", False, False
+
+
+def _inside_quote(script: str, index: int) -> bool:
+    """True when *index* sits inside a quoted string of *script*."""
+    quote = ""
+    cursor = 0
+    while cursor < index:
+        cursor, quote, _, _ = _mask_step(script, cursor, quote, False)
+    return bool(quote)
+
+
+def _mask_comments(script: str) -> str:
+    """Blank comment text (quote-aware) so only active content is matched."""
+    out = list(script)
+    quote = ""
+    in_comment = False
+    index = 0
+    while index < len(script):
+        index, quote, in_comment, blank = _mask_step(
+            script, index, quote, in_comment
+        )
+        if blank:
+            out[index - 1] = " "
+    return "".join(out)
+
+
+def _scan_block_end(script: str, index: int) -> int:
+    """Return the index just past the block starting at the opening brace.
+
+    Braces inside quoted text or comments do not change the depth (matching
+    the NGINX configuration parser closely enough for location scanning).
+    """
+    depth = 1
+    quote = ""
+    in_comment = False
+    while index < len(script) and depth > 0:
+        char = script[index]
+        index, quote, in_comment = _advance_scan(script, index, quote, in_comment)
+        if not quote and not in_comment:
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+    return index
+
+
 def _conflicting_location_blocks(script: str) -> list[str]:
     """Return generated locations that violate the streaming/cache contract.
 
@@ -22,18 +111,18 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     # Accept every NGINX location modifier before the URI.  Without them an
     # exact (`= /x`) or prefix-modified (`^~ /x`, `~ /x`, `~* /x`) location is
     # silently skipped, and a conflicting block inside one would go unreported.
+    masked = _mask_comments(script)
     for match in re.finditer(
-        r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?[^\s{]+\s*\{", script
+        r"location\s+(?:=\s+|\^~\s+|~\*\s+|~\s+)?"
+        r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s{]+)\s*\{",
+        masked,
     ):
-        depth = 1
-        index = match.end()
-        while index < len(script) and depth > 0:
-            if script[index] == "{":
-                depth += 1
-            elif script[index] == "}":
-                depth -= 1
-            index += 1
-        blocks.append(script[match.start():index])
+        if _inside_quote(masked, match.start()):
+            # A `location`-shaped string inside a quoted value is text, not
+            # a configuration block.
+            continue
+        index = _scan_block_end(masked, match.end())
+        blocks.append(masked[match.start():index])
     return [
         block
         for block in blocks
@@ -61,3 +150,126 @@ def test_streaming_failure_cache_runtime_avoids_rejected_combination() -> None:
     script = STREAMING_FAILURE_CACHE_SCRIPT.read_text(encoding="utf-8")
 
     assert not _conflicting_location_blocks(script)
+
+
+def test_quoted_regex_location_with_brace_is_parsed() -> None:
+    """A quoted regex location containing `{` must not truncate at the brace."""
+    config = (
+        "server {\n"
+        "    location /ok {\n"
+        "        markdown_streaming off;\n"
+        "    }\n"
+        '    location ~ "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(config)
+    assert len(blocks) == 1
+    assert '"^/v\\d{2}$"' in blocks[0]
+
+
+def test_quoted_brace_locations_without_conflict_stay_clean() -> None:
+    """Separate locations around a quoted brace must not merge into one."""
+    config = (
+        "server {\n"
+        '    location ~ "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "    }\n"
+        "    location /ok {\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    assert not _conflicting_location_blocks(config)
+
+
+def test_tilde_star_modifier_locations_are_parsed() -> None:
+    """A ~* (case-insensitive) location must be recognized."""
+    config = (
+        "server {\n"
+        '    location ~* "^/v\\d{2}$" {\n'
+        "        markdown_streaming force;\n"
+        "        markdown_cache_validation full;\n"
+        "    }\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(config)
+    assert len(blocks) == 1
+
+
+def test_escaped_quote_delimiters_in_location_arguments_are_detected() -> None:
+    """Quoted location arguments with escaped delimiters must not hide a
+    conflicting block from the scan."""
+    script = (
+        'location ~ "a\\"b" {\n'
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+        "location ~ 'c\\'d' {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert len(blocks) == 2
+
+def test_braces_inside_comments_do_not_close_the_block() -> None:
+    """A `# }` comment must not terminate the scan early: the real closing
+    brace still bounds the block, so the directives stay visible."""
+    script = (
+        "location /x { # } looks closed here\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert len(blocks) == 1
+
+def test_commented_location_block_is_not_scanned() -> None:
+    """A commented location block must not be matched or flagged."""
+    script = (
+        "# location /x {\n"
+        "#     markdown_streaming force;\n"
+        "#     markdown_cache_validation full;\n"
+        "# }\n"
+    )
+
+    blocks = _conflicting_location_blocks(script)
+
+    assert blocks == []
+
+
+def test_escaped_single_quote_inside_location_argument_is_skipped() -> None:
+    """A backslash escapes the following character inside single quotes too,
+    so an escaped quote cannot terminate the scanner's quote state."""
+    escaped = chr(92) + "'"
+    script = (
+        "location ~ 'a" + escaped + "b{' {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(script)
+    assert len(blocks) == 1
+
+def test_location_shaped_text_inside_quotes_is_not_scanned() -> None:
+    """A `location /fake {` string inside a quoted value is text, not a
+    configuration block; only the active block is reported."""
+    script = (
+        "map $http_user_agent $note {\n"
+'    default "location /fake {";\n'
+        "}\n"
+        "location /real {\n"
+        "    markdown_streaming force;\n"
+        "    markdown_cache_validation full;\n"
+        "}\n"
+    )
+    blocks = _conflicting_location_blocks(script)
+    assert len(blocks) == 1
+    assert "markdown_streaming force;" in blocks[0]

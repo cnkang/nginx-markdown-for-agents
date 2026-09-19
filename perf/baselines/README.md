@@ -60,7 +60,9 @@ release container at the candidate SHA before running the blocking gate. This
 is necessary because a Git commit cannot contain a baseline whose provenance
 hash is the hash of that same commit. The checked-in copy remains auditable
 context; the candidate-bound workflow artifact is the release comparison
-evidence.
+evidence. In short, `module-baseline-091` measures the predecessor comparison
+series captured at commit `0847c287c1b744a3f80b7b7fe6ccf3e897223377`, while the
+release path regenerates the 092 baseline at the candidate SHA.
 
 Provenance layers by object: `baseline_policy` carries policy provenance,
 top-level `module_benchmark` carries `platform`, `load_generator`,

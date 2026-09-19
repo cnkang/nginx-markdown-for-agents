@@ -36,6 +36,26 @@ ERREXIT_OFF_RE = re.compile(r"\bset\s+(?:\+[A-Za-z]*e[A-Za-z]*|\+o\s+errexit)")
 # or followed by ``||`` so failure is handled explicitly.
 _GUARDED_RE = re.compile(r"(^\s*if\s+|^\s*if\s*!|;\s*then|\|\|)")
 
+# ``cache_required_executable`` / ``cache_optional_executable`` fail with a
+# structured error inside the helper itself, so a *standalone* call is not an
+# unguarded risky command.  The exemption must not cover a line that chains
+# further commands: ``helper x y; rm -rf /`` would otherwise hide the whole
+# tail of the line from analysis.
+CACHE_HELPER_CALL_RE = re.compile(
+    r"^(?:cache_required_executable|cache_optional_executable)"
+    r"[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+[A-Za-z0-9._+-]+[ \t]*$"
+)
+
+
+def _is_complete_cache_helper_call(line: str) -> bool:
+    """True when *line* is exactly one complete cache-helper invocation.
+
+    Continuations (``;``, ``&&``, ``||``, ``|``) and redirections mean the
+    line contains more than the helper call, so the exemption does not apply
+    and the remaining commands are analyzed normally.
+    """
+    return CACHE_HELPER_CALL_RE.match(line) is not None
+
 
 def _classify_lines(lines: list[str]) -> list[str]:
     """Classify each source line as ``'shell'`` or ``'heredoc'``.
@@ -76,15 +96,196 @@ def _classify_lines(lines: list[str]) -> list[str]:
 
 # A bare assignment (VAR=... at line start) is not an invocation; anything
 # else that references awk with a quoted program is a helper context.
-_AWK_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[^\"'$]*$")
+#
+# The right-hand side may contain quotes and variable references, because a
+# line such as AWK_CMD="$AWK_BIN -f script.awk" merely stores a command for
+# later use.  What distinguishes an assignment from an env-prefixed command
+# (``LC_ALL=C awk ...``) is what follows the stored value: after the value is
+# consumed, an assignment line ends, while a command line continues.
+_ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Shell keywords and control operators that may precede the command word.
+# A procedural scan over this explicit set keeps the accepted tokens obvious.
+_LEADING_KEYWORD_TOKENS = frozenset(
+    {"if", "then", "elif", "else", "while", "until", "do", "time"}
+)
+_LEADING_OPERATORS = "!{("
+
+
+def _consume_assignment_value(text: str) -> str | None:
+    """Consume one assignment value and return the remainder, or None.
+
+    A double-quoted or single-quoted value runs to its matching quote; an
+    unquoted value runs to the first whitespace or command separator; an
+    empty value (``NAME=``) consumes nothing.  ``None`` means the value is
+    unterminated and the line cannot be classified as an assignment.
+    """
+    if not text:
+        return ""
+    quote = text[0]
+    if quote in "\"'":
+        index = 1
+        while index < len(text):
+            char = text[index]
+            if char == "\\" and quote == '"':
+                index += 2
+                continue
+            if char == quote:
+                return text[index + 1:]
+            index += 1
+        return None
+    match = re.match(r"[^\s;&|`]+", text)
+    if match is None:
+        return text
+    return text[match.end():]
+
+
+def _strip_leading_assignments(line: str) -> str:
+    """Return *line* with every leading ``NAME=value`` prefix removed."""
+    rest = line
+    while True:
+        name_match = _ASSIGNMENT_NAME_RE.match(rest)
+        if name_match is None:
+            return rest
+        remainder = _consume_assignment_value(rest[name_match.end():])
+        if remainder is None:
+            # An unterminated quoted value cannot be classified as a
+            # standalone assignment; treat the raw text as a command so the
+            # caller errs toward analysis, not toward exemption.
+            return rest
+        rest = remainder
+
+
+def _is_plain_assignment(line: str) -> bool:
+    """True when *line* is an assignment-only statement.
+
+    ``VAR=value`` (quoted, variable-expanded, or bare) is the whole line
+    here; if anything else follows the value, the line is an env-prefixed
+    command such as ``LC_ALL=C awk ...`` and is not an assignment.
+    """
+    if _ASSIGNMENT_NAME_RE.match(line) is None:
+        return False
+    return _strip_leading_assignments(line).strip() == ""
+
+
+def _blank_single_quoted(line: str) -> str:
+    """Blank single-quoted spans, keeping the quote marks and the layout.
+
+    Single-quoted text is fully inert: no substitution or separator runs
+    inside it, so command-position probes must not read it.  Double-quoted
+    spans are kept intact because ``$(...)`` and backticks still execute
+    there.
+    """
+    chars = list(line)
+    quoted = False
+    for index, char in enumerate(chars):
+        if char == "'":
+            quoted = not quoted
+            continue
+        if quoted:
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _separator_length(line: str, index: int) -> int | None:
+    """Length of an unquoted command separator at ``index``, else ``None``.
+
+    ``;`` and a single ``|`` are one character, ``&&`` consumes two, and a
+    lone ``&`` is ordinary text here (only ``&&`` splits a segment).
+    """
+    char = line[index]
+    if char == ";":
+        return 1
+    if char == "|":
+        return 1
+    if char == "&" and index + 1 < len(line) and line[index + 1] == "&":
+        return 2
+    return None
+
+
+def _split_command_segments(line: str) -> list[str]:
+    """Split a line on unquoted command separators (``;``, ``&&``, ``||``, ``|``).
+
+    Separators inside either quote form are literal text and must not split,
+    while the segments keep their quoting intact: a quoted command word such
+    as ``"$AWK_BIN"`` is still a command word.  A backslash escape inside
+    double quotes keeps its following character readable.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote is None:
+            separator = _separator_length(line, index)
+            if separator is not None:
+                segments.append("".join(current))
+                current = []
+                index += separator
+                continue
+            if char in "\"'":
+                quote = char
+        elif quote == '"' and char == "\\":
+            current.append(char)
+            if index + 1 < len(line):
+                current.append(line[index + 1])
+            index += 2
+            continue
+        elif char == quote:
+            quote = None
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    return segments
+
+
+def _strip_leading_keywords(candidate: str) -> str:
+    """Drop shell keywords and control operators before the command word."""
+    while True:
+        word = re.match(r"[A-Za-z]+", candidate)
+        if word is not None and word.group(0) in _LEADING_KEYWORD_TOKENS:
+            candidate = candidate[word.end():].lstrip()
+            continue
+        if candidate and candidate[0] in _LEADING_OPERATORS:
+            candidate = candidate[1:].lstrip()
+            continue
+        return candidate
+
+
+def _awk_in_command_position(line: str) -> bool:
+    """True when awk (or the cached $AWK_BIN) is this line's command word."""
+    # Command substitution executes its contents on this line even though the
+    # statement starts as an assignment: ``X=$(awk '...')`` runs awk.  Only
+    # single-quoted text is inert there, so quoted examples must not read as
+    # invocations while ``"$(awk ...)"`` still legitimately runs awk.
+    substitution_text = _blank_single_quoted(line)
+    if re.search(
+        r"\$\(\s*(?:awk|\$\{?AWK_BIN\}?)(?:\s|$)", substitution_text
+    ) is not None:
+        return True
+    if re.search(
+        r"`\s*(?:awk|\$\{?AWK_BIN\}?)(?:\s|$)", substitution_text
+    ) is not None:
+        return True
+
+    # Separators inside quotes are literal, so the split below is quoting
+    # aware; the segments keep their quoting for the command-word checks.
+    remainder = _strip_leading_assignments(line)
+    for segment in _split_command_segments(remainder):
+        candidate = _strip_leading_keywords(segment.strip())
+        candidate = candidate.lstrip("\"'")
+        if re.match(r"awk(?:\s|$)", candidate):
+            return True
+        if re.match(r"\$\{?AWK_BIN\}?(?:\s|$|\"|')", candidate):
+            return True
+    return False
 
 
 def _is_awk_invocation(prev: str) -> bool:
     """True when a line invokes awk as a command (not a plain assignment)."""
-    if _AWK_ASSIGN_RE.match(prev):
+    if not _awk_in_command_position(prev):
         return False
-    return ("awk " in prev or "${AWK_BIN}" in prev
-            or "$AWK_BIN" in prev) and ("'" in prev or '"' in prev)
+    return "'" in prev or '"' in prev
 
 
 def _is_inside_helper_or_awk(lines: list[str], index: int) -> bool:
@@ -141,8 +342,7 @@ def _check_risky_command(
     cmd_match = RISKY_COMMANDS_RE.search(stripped)
     if cmd_match is None:
         return None
-    if stripped.startswith(("cache_required_executable ",
-                            "cache_optional_executable ")):
+    if _is_complete_cache_helper_call(stripped):
         return None
     if _is_inside_helper_or_awk(lines, index):
         return None

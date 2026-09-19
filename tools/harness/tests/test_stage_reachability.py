@@ -123,6 +123,52 @@ def test_gate_declaration_selects_harness_ci():
     assert any(fnmatch.fnmatchcase(name, p) for p in yaml.safe_load(filters)["harness_tooling"])
 
 
+def test_ci_filters_cover_build_and_harness_support_surfaces() -> None:
+    """Changes to helper entrypoints must select their dependent CI jobs."""
+    import fnmatch
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    workflow = yaml.load(
+        (root / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    top_paths = set(workflow["on"]["pull_request"]["paths"])
+    assert "build.sh" in top_paths
+    assert ".clusterfuzzlite/**" in top_paths
+
+    filters_step = next(
+        step
+        for step in workflow["jobs"]["changes"]["steps"]
+        if step.get("id") == "filter"
+    )
+    filters = yaml.safe_load(filters_step["with"]["filters"])
+    required = {
+        "rust": [
+            "components/nginx-module/src/markdown_converter.h",
+            "tools/ci/coverage_gate.py",
+        ],
+        "nginx": [
+            "components/rust-converter/include/markdown_converter.h",
+            "tools/ci/coverage_gate.py",
+        ],
+        "e2e": ["tools/ci/verify_real_nginx_ims.sh"],
+        "harness_tooling": [
+            "tools/ci/coverage_gate.py",
+            "tools/ci/validate_required_workflow_contexts.py",
+            "tools/ci/test_validate_required_workflow_contexts.py",
+            "tools/ci/verify_real_nginx_ims.sh",
+            "build.sh",
+            ".clusterfuzzlite/**",
+        ],
+    }
+    for name, paths in required.items():
+        for path in paths:
+            assert any(fnmatch.fnmatchcase(path, pattern) for pattern in filters[name]), (
+                name,
+                path,
+            )
+
+
 @pytest.mark.parametrize("body", [
     "if false; then\n  make root\nfi",
     "cat <<EOF\nmake root\nEOF",
@@ -263,6 +309,56 @@ def test_prerequisites_expand_where_they_are_read() -> None:
     assert CHECK not in reached
 
 
+def test_a_prerequisite_open_at_read_time_expands_empty(tmp_path) -> None:
+    """A reference Make cannot resolve while reading expands to nothing."""
+    makefile = "root: $(LATER)\n" f"checked:\n\tpython3 {CHECK}\n" "LATER = checked\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK not in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_prerequisite_defined_before_its_line_still_expands(tmp_path) -> None:
+    """The positive counterpart: a resolvable reference keeps its value."""
+    makefile = "LATER = checked\n" "root: $(LATER)\n" f"checked:\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in dry
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_the_resolvable_sibling_of_an_open_reference_still_certifies(tmp_path) -> None:
+    """`root: good $(LATER)` builds `good`; the open reference adds nothing."""
+    makefile = f"root: good $(LATER)\ngood:\n\tpython3 {CHECK}\nLATER = checked\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in dry
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_an_existing_file_prerequisite_is_a_satisfied_leaf(tmp_path) -> None:
+    """A file that exists in the tree is a satisfied leaf prerequisite."""
+    (tmp_path / "Makefile").write_text("", encoding="utf-8")
+    makefile = "root: Makefile\n\tpython3 tools/check.py\n"
+
+    reached = reach.reachable_commands(
+        makefile, ["make root"], PROFILE, [], root=tmp_path
+    )
+
+    assert "tools/check.py" in reached
+
+
+def test_a_missing_file_prerequisite_still_breaks(tmp_path) -> None:
+    """A prerequisite that names nothing in the tree stays uncertifiable."""
+    makefile = "root: missing-file.xyz\n\tpython3 tools/check.py\n"
+
+    reached = reach.reachable_commands(
+        makefile, ["make root"], PROFILE, [], root=tmp_path
+    )
+
+    assert "tools/check.py" not in reached
+
+
 def test_the_last_recipe_wins() -> None:
     """Make drops an overridden recipe instead of running both."""
     overridden = f"root:\n\tpython3 {CHECK}\nroot:\n\t@echo OTHER\n"
@@ -305,6 +401,49 @@ def test_a_conditional_assignment_invalidates_the_earlier_value() -> None:
     assert CHECK not in reached
 
 
+def test_an_override_assignment_wins_like_make() -> None:
+    """`override LIST := other` replaces the earlier value."""
+    makefile = (
+        "LIST := checked\n"
+        "override LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_an_export_prefixed_assignment_is_read() -> None:
+    """`export LIST := other` assigns LIST, exactly as Make reads it."""
+    makefile = (
+        "LIST := checked\n"
+        "export LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_an_override_inside_a_branch_still_invalidates() -> None:
+    """A branch assignment with a prefix is poison like any other."""
+    makefile = (
+        "LIST := checked\n"
+        "ifeq (1,1)\noverride LIST := other\nendif\n"
+        "root: $(LIST)\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
 def test_an_operator_glued_to_an_operand_is_not_a_plain_command() -> None:
     """`||true` reaches the tokenizer as one word."""
     assert reach.command_words("python3 tools/harness/detect_example.py ||true") == []
@@ -326,6 +465,41 @@ def test_an_overridden_recipe_replaces_its_predecessor() -> None:
     assert CHECK not in reach.reachable_commands(overridden, ["make root"], PROFILE, [])
 
 
+def test_an_undeclared_prerequisite_makes_its_target_unknown(tmp_path) -> None:
+    """Make refuses `root: missing`; its recipe must not certify anything."""
+    makefile = f"root: missing\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_broken_prerequisite_propagates_to_its_dependents(tmp_path) -> None:
+    """A subtree reachable only through a broken target stays unknown."""
+    makefile = f"root: intermediate\nintermediate: missing\n\tpython3 {CHECK}\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_sibling_of_a_missing_prerequisite_is_not_certified(tmp_path) -> None:
+    """`root: good missing` runs neither branch, so nothing is proven."""
+    makefile = f"root: good missing\n\tpython3 {CHECK}\ngood:\n\t@true\n"
+
+    dry = _make_dry_run(tmp_path, makefile, "root")
+    assert "No rule to make target" in dry
+    assert CHECK not in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_a_fully_declared_graph_still_certifies(tmp_path) -> None:
+    """The positive counterpart: declared prerequisites keep the evidence."""
+    makefile = f"root: good\n\tpython3 {CHECK}\ngood:\n\t@true\n"
+
+    assert "No rule to make target" not in _make_dry_run(tmp_path, makefile, "root")
+    assert CHECK in reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
 def _make_dry_run(tmp_path, makefile: str, target: str) -> str:
     """What Make itself says it would run, for comparison."""
     import subprocess
@@ -334,7 +508,9 @@ def _make_dry_run(tmp_path, makefile: str, target: str) -> str:
     result = subprocess.run(
         ["make", "-n", target], cwd=tmp_path, capture_output=True, text=True, check=False
     )
-    return result.stdout
+    # Diagnostics ("No rule to make target ...") arrive on stderr; combine both
+    # streams so wording checks hold whichever stream a host's make uses.
+    return result.stdout + result.stderr
 
 
 def test_a_superseded_recipe_is_not_used_when_its_replacement_cannot_fail(tmp_path) -> None:
@@ -413,6 +589,16 @@ def test_an_interpreter_option_does_not_hide_the_script() -> None:
     assert sync._invocation_target(["python3", "tools/x.py"]) == "tools/x.py"
 
 
+def test_interpreter_value_and_separator_options_are_parsed_safely() -> None:
+    """Value-taking flags are consumed and ``--`` exposes the script."""
+    assert sync._invocation_target(["python3", "-I", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["python3", "-X", "utf8", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["python3", "-Xutf8", "tools/x.py"]) == "tools/x.py"
+    assert sync._invocation_target(["bash", "-O", "extglob", "tools/x.sh"]) == "tools/x.sh"
+    assert sync._invocation_target(["bash", "--", "tools/x.sh"]) == "tools/x.sh"
+    assert sync._invocation_target(["python3", "--unknown", "tools/x.py"]) is None
+
+
 def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
     """`endif_var := value` neither closes a branch nor opens a target."""
     open_branch = (
@@ -421,5 +607,139 @@ def test_a_name_that_looks_like_a_directive_is_not_one() -> None:
     )
     closed_branch = open_branch.replace("endif_var := value", "endif")
 
-    assert CHECK not in reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
+    with pytest.raises(ValueError, match="unclosed"):
+        reach.reachable_commands(open_branch, ["make root"], PROFILE, [])
     assert CHECK in reach.reachable_commands(closed_branch, ["make root"], PROFILE, [])
+
+
+def test_a_target_that_starts_with_a_conditional_word_is_not_a_directive() -> None:
+    """`ifeq-cache:`, `endif-clean:` and `else-clean:` are targets."""
+    makefile = (
+        "ifeq-cache:\n\t@true\n"
+        "endif-clean:\n\t@true\n"
+        "else-clean:\n\t@true\n"
+        "root: ifeq-cache\n\tpython3 " + CHECK + "\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
+
+
+def test_a_target_that_starts_with_include_is_not_an_include_directive() -> None:
+    """`include-deps:` and `sinclude-stubs:` are targets, not includes."""
+    makefile = (
+        "include-deps:\n\t@true\n"
+        "sinclude-stubs:\n\t@true\n"
+        "root: include-deps\n\tpython3 " + CHECK + "\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
+
+
+@pytest.mark.parametrize(
+    "makefile, message",
+    [
+        ("endif\nroot:\n\t@true\n", "unmatched"),
+        ("ifeq (1,1)\nroot:\n\t@true\n", "unclosed"),
+        ("include generated.mk\nroot:\n\t@true\n", "included"),
+    ],
+)
+def test_uncertain_makefile_structure_fails_closed(makefile: str, message: str) -> None:
+    """Malformed or split Makefiles cannot establish a stage edge."""
+    with pytest.raises(ValueError, match=message):
+        reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+
+def test_order_only_separator_is_not_a_prerequisite_token() -> None:
+    """`a | b` keeps both groups traversable and drops the bare `|` token."""
+    makefile = (
+        "root: left | right\n\tpython3 " + CHECK + "\n"
+        "left:\n\t@true\n"
+        "right:\n\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+
+    assert CHECK in reached
+
+
+def test_a_space_indented_assignment_is_read_like_make() -> None:
+    """GNU make ignores leading spaces; an indented reassignment wins."""
+    makefile = (
+        "LIST := checked\n"
+        "  LIST := other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK not in reached
+
+
+def test_a_shell_assignment_invalidates_its_variable() -> None:
+    """`LIST != cmd` cannot be evaluated here, so its earlier value is
+    dropped instead of certifying a command the build may not run."""
+    makefile = (
+        "LIST := checked\n"
+        "LIST != echo other\n"
+        "root: $(LIST)\n"
+        "other:\n\t@true\n"
+        f"checked:\n\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+    assert "true" not in reached
+
+    plain = makefile.replace("LIST != echo other\n", "")
+    assert CHECK in reach.reachable_commands(plain, ["make root"], PROFILE, [])
+
+
+def test_a_target_naming_a_shell_assigned_variable_is_uncertifiable() -> None:
+    """A prerequisite referencing a `!=` variable stays a literal token, so
+    the target is reported uncertifiable: its recipe is not certified
+    instead of the unknown prerequisite being silently blanked away."""
+    makefile = (
+        "LIST != echo other\n"
+        "root: $(LIST)\n"
+        f"\tpython3 {CHECK}\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
+def test_a_later_question_assignment_keeps_the_unknown_name() -> None:
+    """`NAME ?= value` is a no-op when GNU Make already considers NAME
+    defined (a `!=` assignment does count), so the unknown state must
+    survive and keep referencing targets uncertifiable."""
+    makefile = (
+        "LIST != echo other\n"
+        "LIST ?= checked\n"
+        "root: $(LIST)\n"
+        f"\tpython3 {CHECK}\n"
+        "checked:\n"
+        "\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert CHECK not in reached
+
+
+def test_a_space_indented_comment_keeps_the_recipe_open() -> None:
+    """An indented comment between recipe lines does not end the recipe."""
+    makefile = (
+        "root:\n"
+        f"\tpython3 {CHECK}\n"
+        "  # still the same recipe block\n"
+        "\t@true\n"
+    )
+
+    reached = reach.reachable_commands(makefile, ["make root"], PROFILE, [])
+    assert "true" in reached
+    assert CHECK in reached

@@ -8,6 +8,7 @@ import hashlib
 import io
 import math
 import re
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -530,12 +531,43 @@ def _probe_transport_failure(
     return None
 
 
+def _zlib_stream_completes(
+    body: bytes,
+    input_budget: int = 1 << 26,
+    output_budget: int = 1 << 25,
+) -> bool:
+    """True when *body* is a complete zlib stream within bounded costs.
+
+    The CMF/FLG invariant is only a preliminary filter — plain Markdown can
+    start with the same bytes.  The stream must decode and reach its end
+    marker, so a header alone, a truncated capture, or a non-zlib body is
+    rejected.  Input and output are bounded so a crafted header cannot force
+    unbounded work or memory.
+    """
+    decoder = zlib.decompressobj()
+    pending = body[:input_budget]
+    produced = 0
+    try:
+        while pending:
+            produced += len(decoder.decompress(pending, 65536))
+            if produced > output_budget:
+                # A body that expands past the budget is compressed data;
+                # stream completion is not required for the classification.
+                return True
+            pending = decoder.unconsumed_tail
+    except zlib.error:
+        return False
+    return decoder.eof
+
+
 def _is_wire_compressed(body: bytes) -> bool:
-    is_gzip = body.startswith(b"\x1f\x8b")
+    if body.startswith(b"\x1f\x8b"):
+        return True
     is_zlib = (
         len(body) >= 2
-        and body[0] == 0x78
-        and body[1] in (0x01, 0x5E, 0x9C, 0xDA)
+        and (body[0] & 0x0F) == 8
+        and (body[0] >> 4) <= 7
+        and ((body[0] << 8) | body[1]) % 31 == 0
     )
     # Brotli streams have no fixed magic number, but the Brotli window byte
     # starts with WBITS in the low 4 bits (1-24) and the stream typically
@@ -544,7 +576,7 @@ def _is_wire_compressed(body: bytes) -> bool:
     # it might be Brotli.  However, this is unreliable.  Instead, we rely on
     # content_encoding header detection above for Brotli — this function is
     # a secondary guard for gzip/zlib only.
-    return is_gzip or is_zlib
+    return is_zlib and _zlib_stream_completes(body)
 
 
 def _probe_content_failure(

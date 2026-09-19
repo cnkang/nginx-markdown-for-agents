@@ -68,11 +68,11 @@ NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
 LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
-.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers capability-check \
+.PHONY: all build rust-lib rust-lib-debug copy-headers check-headers generated-header-drift-check capability-check \
         install \
         test test-rust rust-fmt-check rust-clippy-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-streaming-conflict-pbt test-upgrade-rollback-contract test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
-        test-all-e2e test-all-coverage \
+        test-all-e2e test-all-coverage perf-gate-check security-static \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -98,13 +98,14 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
-        verify-subrequest-filter-ordering-native-e2e verify-non-streaming-module-e2e \
+        verify-subrequest-filter-ordering-native-e2e verify-upstream-trailers-native-e2e verify-non-streaming-module-e2e \
         verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help verify-module-version-mismatch-e2e verify-slow-reader-backpressure-e2e verify-realip-access-boundary-e2e \
         verify-helm-cluster-smoke-e2e verify-graceful-reload-streaming-e2e \
-        verify-auth-subrequest-observability-e2e
+        verify-auth-subrequest-observability-e2e \
+        ci-local-check release-gates-check-070-strict verify-real-nginx-ims-e2e
 
 all: build
 
@@ -135,6 +136,15 @@ copy-headers: rust-lib
 
 check-headers:
 	@cmp -s $(RUST_HEADER) $(NGINX_HEADER) && echo "Headers are in sync" || (echo "Header mismatch: run 'make copy-headers'" && exit 1)
+
+# CI regenerates both committed header copies and checks the worktree for
+# drift.  Keep the same check in the local aggregate and push profile so a
+# developer cannot accidentally leave a generated ABI header out of a commit.
+# The target regenerates into the gitignored target/ workspace and compares
+# against the working tree copies and the HEAD-committed copies, so two
+# identical-but-stale copies cannot pass the way a bare git diff would.
+generated-header-drift-check:
+	@python3 tools/harness/check_generated_header_drift.py
 
 capability-check:
 	@python3 tools/release/gates/verify_build_capabilities.py --source-root . --features "$(RUST_RELEASE_FEATURES)"
@@ -315,7 +325,8 @@ test-upgrade-rollback-contract:
 # test-all: aggregate every CI-checkable gate that can run on the current
 # host.  Mirrors the blocking jobs in .github/workflows/ci.yml:
 #   docs-check / harness-tooling / rust-quality / nginx-c-tests /
-#   release-092-contract-gates / matrix-release-tests
+#   release-092-contract-gates / matrix-release-tests / perf-smoke (the
+#   host-runnable subset through perf-gate-check) / security-static
 # Native-E2E jobs (runtime-regressions, brotli-build-matrix) and the
 # coverage gate need a module-enabled NGINX binary and are aggregated
 # separately: `make test-all-e2e NGINX_BIN=...` and
@@ -324,6 +335,7 @@ test-upgrade-rollback-contract:
 TEST_ALL_CORE := \
 	build \
 	check-headers \
+	generated-header-drift-check \
 	rust-fmt-check \
 	rust-clippy-check \
 	test-rust \
@@ -352,6 +364,8 @@ TEST_ALL_CORE := \
 	test-corpus-determinism \
 	complexity-check \
 	workflow-context-check \
+	perf-gate-check \
+	security-static \
 	license-check
 
 # ci-local-check runs the CI gate set through test-all, so the two entry points
@@ -377,9 +391,28 @@ ci-local-check:
 	@echo "module-enabled NGINX: use \`make pre-push-check\` for the profile a"
 	@echo "push has to complete, and report what ran as PASS / FAIL / NOT_RUN."
 	@echo "Checks that need a module-enabled NGINX binary:"
-	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tests/property/test_log_prefix_preservation.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/ci/verify_real_nginx_ims.sh"
 	@echo "  NGINX_BIN=<nginx-src>/objs/nginx bash tools/e2e/verify_encoding_chain_e2e.sh"
+	@echo "tests/property/test_log_prefix_preservation.sh needs no NGINX_BIN and no"
+	@echo "module-enabled binary: it compiles the stub unit suite and then runs"
+	@echo "'make coverage-c', so it needs lcov/gcov plus network access for the"
+	@echo "pinned Rust toolchain instead."
+
+
+# The perf-smoke job also builds the release binary and runs the baseline
+# generators; those steps stay CI-only.  This target covers the test-bearing
+# steps so a push cannot miss them.
+perf-gate-check:
+	@echo "=== perf-gate-check: host-runnable Perf Smoke Gate steps ==="
+	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
+		python3 -m pytest tools/perf/tests/ -q --tb=short; \
+	else \
+		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
+		exit 1; \
+	fi
+	bash tools/perf/tests/test_local_runner_output_paths.sh
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+
 
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
@@ -426,6 +459,7 @@ test-all-e2e:
 		set -e; \
 		$(MAKE) verify-real-nginx-ims-e2e; \
 		$(MAKE) verify-subrequest-filter-ordering-native-e2e; \
+		$(MAKE) verify-upstream-trailers-native-e2e; \
 	fi
 	$(MAKE) verify-non-streaming-module-e2e
 	@echo "=== test-all-e2e: ALL E2E SCENARIOS PASSED ==="
@@ -619,6 +653,7 @@ official-feature-manifest-generate:
 harness-security-checks:
 	python3 tools/ci/validate_required_workflow_contexts.py
 	python3 tools/harness/check_directive_registry_parity.py
+	python3 tools/harness/detect_continuation_comments.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
@@ -642,6 +677,7 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
 	PYTHONPATH=. python3 tools/harness/detect_ffi_dead_exports.py --check
 	bash tools/harness/detect_ifdef_guard_visibility.sh
+	python3 tools/harness/detect_script_exec_bits.py
 	bash tools/harness/detect_workflow_input_injection.sh
 	bash tools/harness/detect_hardcoded_http_status.sh
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
@@ -685,6 +721,11 @@ test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
+	bash tools/ci/test_verify_official_nginx_docker_binding.sh
+	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/docs/tests/ -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/sonar/tests/ -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
@@ -708,6 +749,11 @@ test-harness:
 	bash tools/harness/tests/test_detect_decompression_budget.sh
 	bash tools/harness/tests/test_detect_shell_hygiene.sh
 	bash tools/harness/tests/test_check_postinst_safety.sh
+	bash tools/harness/tests/test_detect_ci_supply_chain.sh
+	bash tools/harness/tests/test_detect_backpressure_resume.sh
+	bash tools/harness/tests/test_detect_finalize_return.sh
+	bash tools/harness/tests/test_detect_header_hash_filter.sh
+	bash tools/harness/tests/test_detect_version_consistency.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short
 
 workflow-context-check:
@@ -908,8 +954,6 @@ release-gates-check-070:
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
-				rpm_nginx_evr="$${RPM_NGINX_EVR:-1:$$nginx_version}"; \
-				rpm_nginx_evr_ceil="$${RPM_NGINX_EVR_CEIL:-1:$$nginx_version_ceil}"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
 				nfpm_config="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-nfpm.XXXXXX")"; \
@@ -923,12 +967,12 @@ release-gates-check-070:
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" NFPM_ARCH="$$nfpm_arch" \
+					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager deb \
 					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
 				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
-					RPM_NGINX_EVR="$$rpm_nginx_evr" RPM_NGINX_EVR_CEIL="$$rpm_nginx_evr_ceil" NFPM_ARCH="$$nfpm_arch" \
+					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
 					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \
@@ -1656,6 +1700,16 @@ verify-subrequest-filter-ordering-native-e2e:
 			bash tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18099; \
 	fi
 
+verify-upstream-trailers-native-e2e:
+	@if test "$(SKIP)" = "1"; then \
+		echo "SKIP: upstream-trailer native E2E skipped explicitly (SKIP=1)" >&2; \
+	elif test -z "$(NGINX_BIN)"; then \
+		echo "FAIL: upstream-trailer native E2E requires NGINX_BIN (NGINX_URL fixture mode not supported); set SKIP=1 to skip explicitly" >&2; \
+		exit 1; \
+	else \
+		bash tools/e2e/verify_upstream_trailers_e2e.sh --nginx-bin "$(NGINX_BIN)" --port 18119; \
+	fi
+
 # Non-streaming production-module linkage check — builds the Rust archive
 # without optional features, compiles and links every NGINX module source and
 # passes `nginx -t`.  Self-contained (downloads and builds its own NGINX), so
@@ -1778,6 +1832,7 @@ help:
 	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  pre-push-check           - Run the gates a push has to complete, with PASS/FAIL/NOT_RUN"
+	@echo "  generated-header-drift-check - Verify generated FFI headers are committed"
 	@echo "  harness-quick-checks     - Fast harness checks for comments, workflow inputs, continuations"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"

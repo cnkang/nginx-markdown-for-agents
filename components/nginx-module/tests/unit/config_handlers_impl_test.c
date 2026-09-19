@@ -55,6 +55,78 @@ static char ngx_conf_error[] = "ERROR";
 
 typedef intptr_t ngx_err_t;
 
+#ifndef NGX_CONF_TAKE1
+#define NGX_CONF_TAKE1 0x00000002
+#endif
+#ifndef NGX_CONF_TAKE2
+#define NGX_CONF_TAKE2 0x00000004
+#endif
+#ifndef NGX_CONF_TAKE12
+#define NGX_CONF_TAKE12 (NGX_CONF_TAKE1|NGX_CONF_TAKE2)
+#endif
+#ifndef NGX_CONF_NOARGS
+#define NGX_CONF_NOARGS 0x00000001
+#endif
+#ifndef NGX_CONF_1MORE
+#define NGX_CONF_1MORE 0x00000800
+#endif
+#ifndef NGX_CONF_FLAG
+#define NGX_CONF_FLAG 0x00000200
+#endif
+#ifndef NGX_CONF_ANY
+#define NGX_CONF_ANY 0x00001000
+#endif
+#ifndef NGX_HTTP_MAIN_CONF
+#define NGX_HTTP_MAIN_CONF 0x02000000
+#endif
+#ifndef NGX_HTTP_SRV_CONF
+#define NGX_HTTP_SRV_CONF 0x04000000
+#endif
+#ifndef NGX_HTTP_LOC_CONF
+#define NGX_HTTP_LOC_CONF 0x08000000
+#endif
+#ifndef NGX_HTTP_MAIN_CONF_OFFSET
+#define NGX_HTTP_MAIN_CONF_OFFSET 0
+#endif
+#ifndef NGX_HTTP_LOC_CONF_OFFSET
+#define NGX_HTTP_LOC_CONF_OFFSET 0
+#endif
+#ifndef ngx_null_string
+#define ngx_null_string { 0, NULL }
+#endif
+#ifndef ngx_null_command
+#define ngx_null_command { ngx_null_string, 0, NULL, 0, 0, NULL }
+#endif
+
+typedef struct {
+    ngx_str_t   name;
+    ngx_uint_t  value;
+} ngx_conf_enum_t;
+
+/*
+ * Generic slot setters referenced by the directive table in
+ * ngx_http_markdown_config_directives_impl.h.  The handlers under test are
+ * the module's own wrappers, so the generic NGINX setters are stubbed; they
+ * must still be defined because the table stores their addresses.
+ */
+static char *
+ngx_conf_set_flag_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return (char *) NGX_CONF_OK;
+}
+
+static char *
+ngx_conf_set_size_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    UNUSED(cf);
+    UNUSED(cmd);
+    UNUSED(conf);
+    return (char *) NGX_CONF_OK;
+}
+
 struct ngx_pool_s {
     int dummy;
 };
@@ -88,8 +160,12 @@ struct ngx_conf_s {
 };
 
 struct ngx_command_s {
-    ngx_str_t  name;
-    void      *post;
+    ngx_str_t   name;
+    ngx_uint_t  type;
+    char       *(*set)(ngx_conf_t *cf, struct ngx_command_s *cmd, void *conf);
+    ngx_uint_t  conf;
+    ngx_uint_t  offset;
+    void       *post;
 };
 
 struct ngx_module_s {
@@ -157,72 +233,6 @@ void
 ngx_http_markdown_diagnostics_enable_recording(void)
 {
     g_diagnostics_recording_requested = 1;
-}
-
-/*
- * Case-insensitive comparison of the first n bytes.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: low — logic is a direct transliteration of
- * ngx_ascii_strncasecmp in src/core/ngx_string.c; any future
- * change to the production locale handling or byte folding would
- * require a corresponding update here.
- *
- * Parameters:
- *   s1 - first byte string.
- *   s2 - second byte string.
- *   n  - number of leading bytes to compare.
- *
- * Return: 0 if all n bytes match case-insensitively; otherwise the
- *         difference between the lowercased mismatching bytes
- *         (s1[i] - s2[i]).
- *
- * Side effects: none.
- */
-static ngx_int_t
-ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
-{
-
-    for (size_t i = 0; i < n; i++) {
-        u_char c1;
-        u_char c2;
-
-        c1 = (u_char) tolower((unsigned char) s1[i]);
-        c2 = (u_char) tolower((unsigned char) s2[i]);
-
-        if (c1 != c2) {
-            return (ngx_int_t) c1 - (ngx_int_t) c2;
-        }
-    }
-
-    return 0;
-}
-
-/*
- * Length-bounded case-insensitive comparison delegating to
- * ngx_ascii_strncasecmp.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: low — thin wrapper; any change to the
- * production delegation target would require an update here.
- *
- * Parameters:
- *   s1 - first byte string.
- *   s2 - second byte string.
- *   n  - maximum number of bytes to compare.
- *
- * Return: value from ngx_ascii_strncasecmp.
- *
- * Side effects: none.
- */
-static ngx_int_t
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
-{
-    return ngx_ascii_strncasecmp(s1, s2, n);
 }
 
 /*
@@ -519,6 +529,73 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                 p += written;
             }
             fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 'u') {
+            unsigned long long uval;
+            int                written;
+            size_t             avail;
+
+            if (*(fmt + 2) == 'i') {
+                uval = va_arg(ap, ngx_uint_t);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'z') {
+                uval = va_arg(ap, size_t);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'd') {
+                uval = va_arg(ap, unsigned int);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'D') {
+                uval = va_arg(ap, uint32_t);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'L') {
+                uval = va_arg(ap, uint64_t);
+                fmt += 3;
+            } else if (*(fmt + 2) == 'A') {
+                uval = va_arg(ap, ngx_atomic_uint_t);
+                fmt += 3;
+            } else if ((*(fmt + 2) >= 'a' && *(fmt + 2) <= 'z')
+                       || (*(fmt + 2) >= 'A' && *(fmt + 2) <= 'Z')) {
+                /* An unknown size letter must not be misread as text. */
+                abort();
+            } else {
+                uval = va_arg(ap, unsigned int);
+                fmt += 2;
+            }
+            avail = (size_t) (end - p);
+            written = snprintf(p, avail, "%llu", uval);
+            if (written > 0) {
+                if ((size_t) written >= avail) {
+                    written = (int) avail - 1;
+                }
+                p += written;
+            }
+        } else if (*fmt == '%' && *(fmt + 1) == 'i') {
+            ngx_int_t ival = va_arg(ap, ngx_int_t);
+            int       written;
+            size_t    avail;
+
+            avail = (size_t) (end - p);
+            written = snprintf(p, avail, "%lld", (long long) ival);
+            if (written > 0) {
+                if ((size_t) written >= avail) {
+                    written = (int) avail - 1;
+                }
+                p += written;
+            }
+            fmt += 2;
+        } else if (*fmt == '%'
+                   && ((*(fmt + 1) >= 'A' && *(fmt + 1) <= 'Z')
+                       || (*(fmt + 1) >= 'a' && *(fmt + 1) <= 'z')))
+        {
+            /*
+             * Unrecognised conversion: abort instead of copying the
+             * characters.  Copying consumes no va_arg, so every later
+             * specifier would read a misaligned slot (the previous silent
+             * failure mode).  Only the letter conversions that the
+             * configuration logging code uses are implemented on purpose —
+             * extend this list with a matching va_arg branch before a new
+             * specifier appears in a test.
+             */
+            abort();
         } else if (*fmt == '"' && *(fmt + 1) == '%') {
             /* pass the literal quote character */
             *p++ = *fmt++;
@@ -550,28 +627,6 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
     UNUSED(cf);
     return module.dummy == ngx_http_core_module.dummy
         ? (void *) g_clcf : (void *) g_module_loc_conf;
-}
-
-/*
- * Returns the test instance of ngx_http_markdown_main_conf_t,
- * allowing main-conf handlers (e.g. ngx_http_markdown_trusted_proxies)
- * to read and write main-conf fields without linking the full NGINX
- * configuration infrastructure.
- *
- * Parameters:
- *   cf     - configuration context (unused).
- *   module - module identifier (unused).
- *
- * Return: pointer to g_main_conf.
- *
- * Side effects: none.
- */
-static void *
-ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
-{
-    UNUSED(cf);
-    UNUSED(module);
-    return &g_main_conf;
 }
 
 /*
@@ -649,6 +704,7 @@ markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
 }
 
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
+#include "../../src/ngx_http_markdown_config_directives_impl.h"
 
 static ngx_pool_t g_pool;
 /*
@@ -1399,6 +1455,51 @@ test_limits_handler(void)
 }
 
 /*
+ * Verify the decompression_ratio over-limit rejection renders both the
+ * numeric value and the directive name: the "%ui" conversion must consume
+ * its argument so the following "%V" still reads its own slot instead of
+ * desyncing the argument list.
+ *
+ * Return: void.
+ *
+ * Side effects: writes to g_conf_log_buf via the stub logger.
+ */
+static void
+test_decompression_ratio_limit_message(void)
+{
+    ngx_conf_t                       cf;
+    ngx_array_t                      args;
+    ngx_str_t                        values[2];
+    ngx_command_t                    cmd;
+    ngx_http_markdown_conf_t         mcf;
+    ngx_http_markdown_limits_seen_t  seen;
+    ngx_str_t                        val;
+    const char                      *rc;
+
+    TEST_SUBSECTION("decompression_ratio over-limit message");
+
+    set_arg(&cmd.name, "markdown_limits");
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "decompression_ratio=10001");
+
+    init_conf(&mcf);
+    ngx_memzero(&seen, sizeof(seen));
+    set_arg(&val, "10001");
+
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_apply_decompression_ratio_limit(
+        &cf, &cmd, &mcf, &val, &seen);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "ratio 10001 should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "value 10001 in") != NULL,
+        "the numeric ratio value must be rendered");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_limits") != NULL,
+        "the directive name must still occupy its argument slot");
+
+    TEST_PASS("decompression_ratio over-limit message rendered");
+}
+
+/*
  * Verify metrics handler installation and duplicate-handler rejection.
  *
  * Return: void.
@@ -1933,6 +2034,7 @@ main(void)
     test_conditional_and_log_verbosity_handlers();
     test_streaming_policy_handler();
     test_limits_handler();
+    test_decompression_ratio_limit_message();
     test_metrics_handlers();
     test_v080_stream_directive_handlers();
     test_parse_size_edge_cases();

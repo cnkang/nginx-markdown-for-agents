@@ -165,9 +165,46 @@ class TestSchemaContract:
 
 
 class TestCompatibilityDocument:
+    def test_os_type_alias_is_contract_specific(self):
+        """``os_type`` folds per contract: evidence -> os, compatibility -> libc.
+
+        The same legacy spelling means different canonical fields in the two
+        contracts, so the mapping must stay split.  This pins the documented
+        divergence so a future "unification" cannot silently change either
+        contract's identity.
+        """
+        assert normalize_matrix.LEGACY_ALIASES["os_type"] == "os"
+        assert normalize_matrix.COMPATIBILITY_ALIASES["os_type"] == "libc"
+
+        evidence = normalize_matrix.normalize_entry(
+            {
+                "nginx": "1.26.3",
+                "os_type": "almalinux9",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "rpm-package",
+                "feature_manifest_digest": "sha256:" + "0" * 64,
+                "abi_version": 3,
+            }
+        )
+        assert evidence["os"] == "almalinux9"
+        assert evidence["libc"] == "glibc"
+
+        compatibility = normalize_matrix.normalize_compatibility_entry(
+            {
+                "nginx": "1.26.3",
+                "os_type": "glibc",
+                "arch": "amd64",
+                "support_tier": "full",
+            }
+        )
+        assert compatibility["libc"] == "glibc"
+        assert "os" not in compatibility
+
     def test_compatibility_aliases_share_target_and_tier(self):
         doc = {
             "schema_version": "1.0",
+            "updated_at": "2026-09-18",
             "entries": [
                 {
                     "nginx": "1.26.3",
@@ -176,6 +213,8 @@ class TestCompatibilityDocument:
                     "arch": "amd64",
                     "artifact_type": "dynamic-module",
                     "support_tier": "full",
+                    "release_blocking": True,
+                    "owner_workflow": "release-packages",
                 }
             ],
         }
@@ -188,6 +227,11 @@ class TestCompatibilityDocument:
         # (arch: amd64 vs target: x86_64) share one identity.
         assert entry["target"] == "x86_64"
         assert entry["support_tier"] == "supported"
+        # The gating metadata survives normalization: the release workflow
+        # depends on release_blocking and owner_workflow to block publish.
+        assert entry["release_blocking"] is True
+        assert entry["owner_workflow"] == "release-packages"
+        assert normalized["updated_at"] == "2026-09-18"
 
     def test_compatibility_alias_disagreement_fails_closed(self):
         doc = {

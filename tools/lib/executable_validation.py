@@ -23,7 +23,8 @@ _APPROVED_EXECUTABLE_DIRS = (
 )
 
 # Executables that may be Rustup tool shims (resolved through ~/.cargo/bin).
-_RUSTUP_SHIM_TOOLS = frozenset({"cargo", "rustfmt"})
+# `rustc` belongs here too: the release gates resolve it the same way.
+_RUSTUP_SHIM_TOOLS = frozenset({"cargo", "rustc", "rustfmt"})
 _RUSTUP_DIR_NAME = ".rustup"
 
 
@@ -211,7 +212,14 @@ def _resolve_rustup_tool_shim(
     # specific toolchain root, not any installed toolchain.
     rustup_dispatcher = home / ".cargo" / "bin" / "rustup"
     try:
-        if resolved != rustup_dispatcher.resolve(strict=True):
+        dispatcher_resolved = rustup_dispatcher.resolve(strict=True)
+        try:
+            same_file = os.path.samefile(resolved, dispatcher_resolved)
+        except OSError:
+            same_file = False
+        # A hardlinked shim resolves to its own path, so accept it when the
+        # path is different but the file is the dispatcher itself.
+        if resolved != dispatcher_resolved and not same_file:
             return None
         toolchain_root = rustup_toolchains.resolve(strict=True)
         active = _active_rustup_toolchain()

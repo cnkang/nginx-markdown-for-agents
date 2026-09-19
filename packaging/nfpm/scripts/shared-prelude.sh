@@ -153,9 +153,15 @@ is_secure_path() {
         # sticky, other-writable transit directories such as /tmp (mode
         # 1777): the sticky bit restricts removal and replacement of
         # entries to their owner, so traversal stays safe.
+        # The exception is DIRECTORIES only.  A regular file can carry mode
+        # 1777 as well, and the sticky bit means nothing for one: any writer
+        # of the containing directory could replace it between this check and
+        # the later use.  Requiring -d keeps the transit-directory exception
+        # from clearing an other-writable file on the path.
         if (( (8#$mode & 8#22) != 0 )); then
-            if (( (8#$mode & 8#2) != 0 && (8#$mode & 8#1000) != 0 )); then
-                :
+            if [[ -d "$current" ]] \
+                && (( (8#$mode & 8#2) != 0 && (8#$mode & 8#1000) != 0 )); then
+                : # OK — sticky transit directory; replacement is owner-only
             else
                 return 1
             fi

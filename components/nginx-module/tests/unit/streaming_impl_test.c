@@ -2222,6 +2222,85 @@ test_send_output_error_and_deferred_paths(void)
 }
 
 /*
+ * the fail-open chain must declare ZERO deferred output bytes.
+ *
+ * `pending_meta.bytes` is the deferred output-byte count that
+ * resume_pending() drains into streaming.selection.output_bytes_total via
+ * account_pending_output().  send_output() sets it from the length it
+ * submitted; send_failopen_chain() submits an upstream/fail-open chain and
+ * therefore has no converted-output length to report, so it must clear the
+ * field rather than leave a stale value from an earlier buffered cycle.
+ *
+ * Discriminating setup: pre-load `pending_meta.bytes` with a non-zero value
+ * (as a previous send_output() NGX_AGAIN would have left it), then drive a
+ * fail-open chain into NGX_AGAIN.  If the producer does not clear the field,
+ * the stale count survives and resume_pending() adds it to the
+ * output-bytes counter — a double count.
+ *
+ * MUTATION SENSITIVITY: deleting the `pending_meta.bytes = 0` assignment in
+ * ngx_http_markdown_streaming_send_failopen_chain fails this test.
+ */
+static void
+test_failopen_chain_declares_zero_pending_bytes(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    ngx_pool_t                pool;
+    ngx_connection_t          conn;
+    ngx_log_t                 log;
+    ngx_event_t               read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_buf_t                 buf;
+    ngx_chain_t               chain;
+    ngx_int_t                 rc;
+    ngx_atomic_uint_t         output_bytes_before;
+
+    TEST_SUBSECTION("fail-open chain declares zero pending bytes");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ngx_memzero(&buf, sizeof(buf));
+    ngx_memzero(&chain, sizeof(chain));
+    chain.buf = &buf;
+    chain.next = NULL;
+    buf.pos = (u_char *) "abc";
+    buf.last = buf.pos + 3;
+    buf.memory = 1;
+
+    /* Stale deferred byte count from a hypothetical earlier buffered cycle. */
+    ctx.streaming.pending_meta.bytes = 4096;
+    ctx.streaming.pending_output = NULL;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_send_failopen_chain(&r, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "fail-open chain should propagate downstream backpressure");
+    TEST_ASSERT(ctx.streaming.pending_output == &chain,
+        "fail-open chain should install the submitted chain as pending output");
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
+        "fail-open chain should latch pending has_data");
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == 0,
+        "fail-open chain must declare zero deferred output bytes, not a stale count");
+
+    /* Drive the drain and prove the metric is not inflated by the stale value. */
+    output_bytes_before = metrics.streaming.selection.output_bytes_total;
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK, "pending fail-open chain should drain");
+    TEST_ASSERT(metrics.streaming.selection.output_bytes_total
+                    == output_bytes_before,
+        "draining a fail-open chain must not add stale bytes to output_bytes_total");
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == 0,
+        "drained pending bytes accounting must leave the field at zero");
+
+    TEST_PASS("fail-open chain declares zero pending bytes");
+}
+
+/*
  * Test fallback_to_fullbuffer success and error branches.  Verifies:
  * - fallback returns NGX_DECLINED, switches to full-buffer path,
  *   clears conversion_attempted, initialises main buffer, and marks
@@ -7474,6 +7553,7 @@ main(void)
     test_selection_size_independence();
     test_update_headers_paths();
     test_send_output_and_resume_paths();
+    test_failopen_chain_declares_zero_pending_bytes();
     test_send_output_error_and_deferred_paths();
     test_fallback_to_fullbuffer_paths();
     test_postcommit_and_precommit_error_paths();

@@ -45,7 +45,11 @@ mkdir -p "${FAKE_ROOT}/bin"
 
 # Symlink real commands needed by preinstall.sh into the sandbox.
 # Only link the fixed manifest — never recursive copy.
-for cmd in cat sed readlink rm rmdir printf basename stat; do
+# printf is deliberately absent: it is a shell builtin, so `command -v printf`
+# returns the bare name and `ln -sf printf .../usr/bin/printf` would create a
+# self-referential dangling symlink that only pollutes the sandbox.  The script
+# under test reaches the builtin through its shell.
+for cmd in cat sed readlink rm rmdir basename stat; do
     real_path="$(command -v "${cmd}" 2>/dev/null || true)"
     if [[ -n "${real_path}" ]]; then
         ln -sf "${real_path}" "${FAKE_ROOT}/usr/bin/${cmd}"

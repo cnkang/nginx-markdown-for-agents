@@ -66,6 +66,23 @@ def test_dotted_unvalidated_open_receiver_is_reported(tmp_path):
     assert warnings == []
 
 
+def test_space_padded_dotted_receiver_is_reported(tmp_path):
+    """`receiver . open()` must not evade the path sink check."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(args):\n"
+        "    with user_path . open(encoding='utf-8') as stream:\n"
+        "        return stream.read()\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "user_path" in errors[0]
+    assert warnings == []
+
+
 def test_comment_open_call_is_not_reported(tmp_path):
     """A commented-out open() example must not be treated as a sink."""
     source_path = tmp_path / "fixture.py"
@@ -201,3 +218,207 @@ def test_os_open_concatenated_argument_still_classified(tmp_path):
     assert len(errors) == 1
     assert "base" in errors[0]
     assert warnings == []
+
+
+def test_a_longer_identifier_ending_in_open_is_not_a_sink(tmp_path):
+    """popen/fdopen/reopen/Popen end in `open` but are not builtin
+    open()/os.open() calls, so they must not be reported."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "import os\n"
+        "import subprocess\n"
+        "def run(cmd, fd, p, mode):\n"
+        "    stream = os.popen(cmd)\n"
+        "    handle = os.fdopen(fd, mode)\n"
+        "    again = reopen(p, mode)\n"
+        "    proc = subprocess.Popen(cmd)\n"
+        "    return stream, handle, again, proc\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []
+
+
+def test_a_receiver_ending_in_os_is_classified_as_a_method_call(tmp_path):
+    """A receiver name that merely ends in `os` (myos.open, someos.open)
+    must be classified through the method-call path instead of being
+    skipped as a longer identifier."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(myos, someos, path):\n"
+        "    first = myos.open(path, 'r')\n"
+        "    second = someos.open(path, 'r')\n"
+        "    return first, second\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 2
+    assert any("myos" in e for e in errors)
+    assert any("someos" in e for e in errors)
+    assert warnings == []
+
+
+def test_later_call_does_not_warn_for_earlier_literal(tmp_path):
+    """A dynamic argument on a later call must not mark an earlier call on
+    the same line as unaudited, and the warning is emitted exactly once."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):\n"
+        "    a = open('notes.txt'); b = open(f'{base}/b.txt')\n"
+        "    return a, b\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert "open(f'{base}/b.txt')" in warnings[0]
+
+
+def test_dynamic_call_after_multiline_string_close_is_detected(tmp_path):
+    """A multiline string that closes earlier on the same line must not
+    leave the quote state stale and suppress the unaudited warning."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'doc = """first line\n'
+        'second line""" ; x = open(f"{base}/b.txt")\n',
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+
+
+def test_commented_dynamic_call_after_multiline_close_is_not_flagged(tmp_path):
+    """Comment text after a multiline string closes is not live code."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'doc = """first line\n'
+        'second line"""  # x = open(f"{base}/b.txt")\n',
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert warnings == []
+
+
+def test_fstring_expression_open_is_audited(tmp_path):
+    """An open() inside an f-string replacement field is live code."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'def load(user):\n'
+        '    return open(f"prefix-{open(user)}")\n',
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "not validated" in errors[0]
+    assert len(warnings) == 1
+
+
+def test_raw_fstring_expression_open_is_audited(tmp_path):
+    """An open() inside an fr-string replacement field is live code."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'def load(user):\n'
+        '    return open(fr"prefix-{open(user)}")\n',
+        encoding="utf-8",
+    )
+
+    errors, _ = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "not validated" in errors[0]
+
+
+def test_triple_quoted_fstring_expression_open_is_audited(tmp_path):
+    """An open() inside a triple-quoted f-string field is live code."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        'def load(user):\n'
+        '    return open(f"""{open(user)}/tail""")\n',
+        encoding="utf-8",
+    )
+
+    errors, _ = detector.check_file(source_path, strict=True)
+
+    assert len(errors) == 1
+    assert "not validated" in errors[0]
+
+
+def test_dynamic_call_inside_fstring_field_is_audited(tmp_path):
+    """An unresolvable call inside an f-string field is unaudited."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):\n"
+        "    return open(f\"{open(f'{base}/b')}\")\n",
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 2
+    assert all("dynamic expression" in w for w in warnings)
+
+
+def test_outer_dynamic_call_not_hidden_by_nested_open(tmp_path):
+    """A nested literal open() must not hide the outer dynamic argument."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "def load(base):" + chr(10) +
+        "    return open(f'prefix-{open(\"safe\")}/{user}')" + chr(10),
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert "dynamic expression" in warnings[0]
+
+
+def test_multiline_fstring_expression_open_is_audited(tmp_path):
+    """An open() inside a multiline f-string field is live code."""
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "value = f" + chr(34) * 3 + "head" + chr(10) +
+        "{open(user)} tail" + chr(34) * 3 + chr(10),
+        encoding="utf-8",
+    )
+
+    errors, warnings = detector.check_file(source_path, strict=True)
+
+    assert len(errors) >= 1
+    assert any("not validated" in item for item in errors)
+
+
+def test_split_multiline_fstring_field_open_is_audited(tmp_path):
+    """A replacement-field brace on its own line keeps the field live."""
+    QQ = chr(34) * 3
+    source_path = tmp_path / "fixture.py"
+    source_path.write_text(
+        "value = f" + QQ + "head" + chr(10) +
+        "{" + chr(10) +
+        "    open(user)" + chr(10) +
+        "} tail" + chr(10) +
+        QQ + chr(10),
+        encoding="utf-8",
+    )
+
+    errors, _ = detector.check_file(source_path, strict=True)
+
+    assert len(errors) >= 1
+    assert any("not validated" in item for item in errors)

@@ -1,16 +1,22 @@
 ---
 domain: build-safety
-rules: [56, 57, 58, 59, 70]
+rules: [56, 57, 58, 59, 70, 73]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
+  - "components/**/*.sh"
   - ".github/workflows/**"
   - "tools/**"
+  - "packaging/**/*.sh"
+  - "scripts/**/*.sh"
+  - "tests/**/*.sh"
+  - "examples/**/*.sh"
+  - ".clusterfuzzlite/**/*.sh"
   - "*.py"
   - "*.sh"
 ---
 
-# Build Safety Rules (56–59, 70)
+# Build Safety Rules (56–59, 70, 73)
 
 ## Rule 56: Orphan Comment Closers
 
@@ -148,3 +154,25 @@ Verification:
   audit; blocking harness gate.
 - `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
   mode wired into `.pre-commit-config.yaml`.
+
+## Rule 73: Continuation Comment and Surface Completeness
+
+**Principle**: The shell consumes a comment placed immediately after a backslash
+continuation as part of the continued command. Any option or value
+on the following line then disappears before the shell executes the command.
+The detector must inspect every repository shell surface and every workflow
+`run:` block, including root, component, test, example, packaging, tool, and
+ClusterFuzzLite scripts. Missing, unreadable, or structurally malformed inputs
+must fail the scan instead of producing an empty result.
+
+**Detection**: `python3 tools/harness/detect_continuation_comments.py`
+- Reports a comment followed by a deeper or same-indent likely argument.
+- Parses workflow jobs and steps, while allowing reusable-workflow jobs without
+  shell steps.
+- Rejects missing scan roots, malformed workflow shapes, and unreadable files.
+- Runs from `harness-quick-checks`, `harness-security-checks`, and
+  `test-harness`; the mapping records these entrypoints in
+  `docs/harness/routing-manifest.json`.
+
+**Verification**: `PYTHONPATH=. python3 -m pytest
+tools/harness/tests/test_detect_continuation_comments.py -q`

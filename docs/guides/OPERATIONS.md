@@ -613,7 +613,7 @@ grep "markdown:" /var/log/nginx/error.log | grep -E "outcome=failed_(open|closed
 
 4. **Monitor for improvement:**
 ```bash
-watch -n 30 'curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failed'
+watch -n 30 'curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep -E "outcome=\"(failed_.*|aborted)\""'
 ```
 
 5. **Document incident:**
@@ -1363,6 +1363,8 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | The improvement-monitoring watch command matches the quoted outcome label syntax the metrics renderer emits |
+| 0.9.2 | 2026-09-17 | Hermes | The improvement-monitoring loop now matches every failed outcome plus aborted, the same set the earlier diagnostic step uses |
 | 0.9.2 | 2026-09-01 | Hermes | Align failed-outcome queries and outcome field with aborted; memory_budget_exceeded refers only to conversion_memory; parser_budget maps to budget_exceeded |
 | 0.9.2 | 2026-08-24 | Hermes | memory_budget_exceeded log pattern description now refers only to memory-limit failures |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |

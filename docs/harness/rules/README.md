@@ -30,7 +30,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 37, 60 | E2E Runner | [e2e-runner.md](e2e-runner.md) | Rust-first E2E, parity, streaming config directive consistency |
 | 48 | Security Static Analysis & Supply Chain | [security-static-analysis.md](security-static-analysis.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard |
 | 55 | Version Consistency | [version-consistency.md](version-consistency.md) | source/chart/docs version sync, Rust baseline |
-| 56, 57, 58, 59, 70 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status, scratch-file hygiene |
+| 56, 57, 58, 59, 70, 73 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status, scratch-file hygiene, continuation comment and surface completeness |
 | 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | layered performance evidence provenance, evidence binding lifecycle, and matrix key normalization invariants |
 | FUZZ-001..007 | Fuzz Infrastructure | [fuzz-infrastructure.md](fuzz-infrastructure.md) | fuzz targets, CI fuzzing, corpus management |
 

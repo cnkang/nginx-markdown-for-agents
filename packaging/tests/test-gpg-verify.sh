@@ -115,7 +115,8 @@ trap 'rm -rf "$RPM_DIR"' EXIT
 # invocation would import into the user's real key store.
 GNUPGHOME="${RPM_DIR}/gnupg"
 export GNUPGHOME
-mkdir -m 700 -p "$GNUPGHOME"
+mkdir -p "$GNUPGHOME"
+chmod 700 "$GNUPGHOME"
 
 # --- Step 1: Download and verify GPG key ---
 

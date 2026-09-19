@@ -267,7 +267,12 @@ impl CharsetState {
             CharsetState::Resolved { decoder: None } => Ok(0),
             CharsetState::Resolved {
                 decoder: Some(decoder),
-            } => Ok(decoder.max_utf8_buffer_length(0).unwrap_or(64)),
+            } => {
+                // A zero-length sizing query cannot overflow for the
+                // supported decoders; the 64-byte fallback keeps a
+                // conservative bound should one ever report `None`.
+                Ok(decoder.max_utf8_buffer_length(0).unwrap_or(64))
+            }
             CharsetState::Failed(reason) => Err(ConversionError::EncodingError(reason.clone())),
             CharsetState::Pending {
                 header_charset,
@@ -558,6 +563,8 @@ impl CharsetState {
                 // last=true emits any trailing bytes buffered internally
                 // (e.g. incomplete multibyte sequences).
                 if let Some(mut dec) = decoder {
+                    // Same zero-length sizing as the upper-bound helper;
+                    // 64 bytes covers the largest pending flush.
                     let max_len = dec.max_utf8_buffer_length(0).unwrap_or(64);
                     let mut output = vec![0u8; max_len];
                     let (_result, _read, written, had_errors) =

@@ -16,6 +16,17 @@
 //! enabled. Bundled C consumers must use the header generated for the same
 //! feature set and ABI version as the linked Rust archive.
 //!
+//! # Error contract
+//!
+//! Once [`markdown_streaming_feed`] returns any code other than
+//! `ERROR_SUCCESS` (0), the handle must not be driven again by `feed` and
+//! never by `finalize`. After a post-commit failure (`ERROR_POST_COMMIT`,
+//! 8) the caller may instead close the handle with
+//! [`markdown_streaming_safe_finish`]; every other non-success return
+//! permits only [`markdown_streaming_abort`], which releases the handle.
+//! The full statement, including the poisoned-handle rule, lives on
+//! [`markdown_streaming_feed`].
+//!
 //! # Memory ownership
 //!
 //! The handle returned by [`markdown_streaming_new_with_code`] is owned by the C
@@ -95,11 +106,55 @@ fn effective_flush_threshold(raw: u32) -> usize {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only panic injection tag for streaming entry points.
+    ///
+    /// Kept separate from the `exports.rs` hook so a test can drive a panic
+    /// inside `markdown_streaming_feed`'s `catch_unwind` closure without
+    /// touching production code paths.
+    static TEST_PANIC_TAG: std::cell::Cell<Option<&'static str>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn set_test_panic_streaming(tag: Option<&'static str>) {
+    TEST_PANIC_TAG.with(|current| current.set(tag));
+}
+
+#[cfg(test)]
+fn test_should_panic(tag: &'static str) -> bool {
+    TEST_PANIC_TAG.with(|current| {
+        if current.get() == Some(tag) {
+            current.set(None);
+            true
+        } else {
+            false
+        }
+    })
+}
+
 /// Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
+///
+/// This type is deliberately **not** `#[repr(C)]`: the C side only ever holds
+/// the opaque `struct StreamingConverterHandle *` produced by
+/// [`markdown_streaming_new_with_code`], so private fields may be added
+/// without changing the ABI.
 pub struct StreamingConverterHandle {
     inner: StreamingConverter,
     generate_etag: bool,
     estimate_tokens: bool,
+    /// Set when an entry point caught a panic while this handle's inner
+    /// converter was being driven.
+    ///
+    /// A caught panic means the inner converter may be torn (a partially
+    /// updated charset tracker / emitter / state machine): the outer function
+    /// cannot roll those writes back.  The handle is therefore marked
+    /// **poisoned**, and every later conversion entry point fails closed with
+    /// `ERROR_INTERNAL` instead of driving possibly-torn state.  The handle
+    /// stays a live allocation throughout, so
+    /// [`markdown_streaming_abort`] can always release it.
+    poisoned: bool,
 }
 
 fn budget_from_streaming_total(streaming_budget: u64, memory_budget: u64) -> MemoryBudget {
@@ -142,7 +197,7 @@ fn markdown_streaming_new_impl(
     let mut converter = StreamingConverter::with_chars_per_token(
         decoded.conversion,
         budget,
-        decoded.chars_per_token,
+        decoded.effective_chars_per_token,
     );
     converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
     if !decoded.timeout.is_zero() {
@@ -160,6 +215,7 @@ fn markdown_streaming_new_impl(
         inner: converter,
         generate_etag: decoded.generate_etag,
         estimate_tokens: decoded.estimate_tokens,
+        poisoned: false,
     })))
 }
 
@@ -205,17 +261,18 @@ pub unsafe extern "C" fn markdown_streaming_new_with_code(
     }
 }
 
+/// Create a streaming handle for tests, or panic when construction fails.
+///
+/// The success path returns the owning pointer from
+/// [`markdown_streaming_new_impl`] directly, so no caller can observe a
+/// NULL construction path. Tests that read handle fields therefore
+/// dereference a pointer whose provenance is the allocated box, which
+/// keeps those direct field reads free of invalid-pointer findings.
 #[cfg(test)]
 unsafe fn new_streaming_handle_for_test(
     options: *const MarkdownOptions,
 ) -> *mut StreamingConverterHandle {
-    let mut handle = ptr::null_mut();
-    let rc = unsafe { markdown_streaming_new_with_code(options, &mut handle) };
-    if rc == ERROR_SUCCESS {
-        handle
-    } else {
-        ptr::null_mut()
-    }
+    markdown_streaming_new_impl(options).expect("test streaming handle construction must succeed")
 }
 
 /// Feed a chunk of HTML input and receive any ready Markdown output.
@@ -227,6 +284,39 @@ unsafe fn new_streaming_handle_for_test(
 ///
 /// On error, `*out_data` is set to NULL and `*out_len` to 0. The returned
 /// error code indicates the failure type.
+///
+/// # Consume-or-abort contract (any non-`ERROR_SUCCESS` return)
+///
+/// After **any** return code other than `ERROR_SUCCESS` (0) the caller MUST
+/// stop feeding: it MUST NOT call `feed` again.  What may follow depends on
+/// when the failure happened:
+///
+/// - a **pre-commit** failure (no output committed yet) may only continue
+///   through [`markdown_streaming_abort`], which releases the handle;
+/// - a **post-commit** failure (`ERROR_POST_COMMIT` (8)) may instead be
+///   closed with [`markdown_streaming_safe_finish`], which emits closing
+///   markers for the structures that were already committed and consumes the
+///   handle; if that closure fails (`POST_COMMIT_ABORT` (4)) the caller
+///   terminates through the abort path.
+///
+/// [`markdown_streaming_finalize`] is never valid after a failed `feed`.
+/// This mirrors the C layer's existing behavior: every non-zero `feed` result
+/// routes to an abort or safe-finish path that clears the handle, and a
+/// failed conversion never resumes on converter state the failure may have
+/// left torn.
+///
+/// `ERROR_INTERNAL` (99) is returned both for a caught panic **and** for a
+/// non-panicking `ConversionError::InternalError`; the caller must not infer
+/// which occurred. A caught panic additionally marks the handle *poisoned*
+/// (see below), but the abort-only rule applies to every non-zero code.
+///
+/// # Poisoned handles
+///
+/// If this call caught a panic, the handle is marked poisoned: any later
+/// `feed`, `finalize`, or `safe_finish` on it returns `ERROR_INTERNAL` (99)
+/// without touching the possibly-torn converter state, and the result/output
+/// slots are populated as a normal error return. The handle stays a live
+/// allocation, so [`markdown_streaming_abort`] always releases it.
 ///
 /// # Safety
 ///
@@ -244,7 +334,8 @@ unsafe fn new_streaming_handle_for_test(
 /// - `ERROR_POST_COMMIT` (8) for post-commit error
 /// - `ERROR_TIMEOUT` (3) for timeout
 /// - `ERROR_INVALID_INPUT` (5) for NULL handle or output pointers
-/// - `ERROR_INTERNAL` (99) for caught panics
+/// - `ERROR_INTERNAL` (99) for a caught panic, a non-panicking internal error,
+///   or a call on an already-poisoned handle
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_streaming_feed(
     handle: *mut StreamingConverterHandle,
@@ -273,6 +364,18 @@ pub unsafe extern "C" fn markdown_streaming_feed(
         // SAFETY: caller guarantees `handle` is a live pointer from `_new`.
         let handle_ref = unsafe { &mut *handle };
 
+        // A poisoned handle has torn converter state; fail closed without
+        // driving it.  The handle allocation itself stays live, so the
+        // caller's abort path must still release it.
+        if handle_ref.poisoned {
+            return ERROR_INTERNAL;
+        }
+
+        #[cfg(test)]
+        if test_should_panic("feed") {
+            panic!("test-injected panic in markdown_streaming_feed");
+        }
+
         let chunk: &[u8] = if data_len == 0 {
             &[]
         } else if data.is_null() {
@@ -299,7 +402,24 @@ pub unsafe extern "C" fn markdown_streaming_feed(
         }
     }));
 
-    result.unwrap_or(ERROR_INTERNAL)
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            /* A caught panic may have left the inner converter torn and the
+             * outer function cannot roll those writes back: mark the handle
+             * poisoned so every later entry point fails closed.  `handle` was
+             * validated non-NULL inside the closure before any panic source,
+             * but re-check defensively — the panic may have escaped before
+             * the null check in a future refactor. */
+            if !handle.is_null() {
+                // SAFETY: `handle` is a live pointer from `_new` per the FFI
+                // contract, and the `&mut` borrow taken inside the closure
+                // ended when `catch_unwind` returned.
+                unsafe { (*handle).poisoned = true };
+            }
+            ERROR_INTERNAL
+        }
+    }
 }
 
 /// Finalize a streaming conversion, consume the handle, and write the result.
@@ -310,6 +430,13 @@ pub unsafe extern "C" fn markdown_streaming_feed(
 /// If validation fails (NULL `handle` or NULL `result`), `ERROR_INVALID_INPUT`
 /// is returned and the handle is NOT consumed — the caller remains responsible
 /// for freeing or aborting it.
+///
+/// A handle poisoned by an earlier caught panic (`feed` returned
+/// `ERROR_INTERNAL` after a panic) is still consumed here, but the inner
+/// converter is not driven again: `result` receives `ERROR_INTERNAL` (99)
+/// and a diagnostic message instead of torn Markdown output. Callers that
+/// follow the `feed` consume-or-abort contract abort instead of finalizing,
+/// so this path exists only as a belt-and-suspenders guard.
 ///
 /// # Safety
 ///
@@ -357,6 +484,15 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
         let boxed = unsafe { Box::from_raw(handle) };
         let generate_etag = boxed.generate_etag;
         let estimate_tokens = boxed.estimate_tokens;
+        /* A poisoned handle has torn converter state from an earlier caught
+         * panic.  The handle is still consumed (the Box above owns it), but
+         * `finalize` is not driven on the torn converter: surface the same
+         * ERROR_INTERNAL the panic produced instead of torn output. */
+        if boxed.poisoned {
+            return Err(crate::error::ConversionError::InternalError(
+                "streaming converter handle is poisoned by an earlier panic".to_string(),
+            ));
+        }
         let streaming_result = boxed.inner.finalize()?;
         Ok::<_, crate::error::ConversionError>((streaming_result, generate_etag, estimate_tokens))
     }));
@@ -409,6 +545,14 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
 /// Use this function when the conversion must be abandoned (e.g. client
 /// abort or unrecoverable error). This always consumes the handle.
 ///
+/// This is the primary continuation after a failed
+/// [`markdown_streaming_feed`] (any non-`ERROR_SUCCESS` return), and it also
+/// releases a handle poisoned by a caught panic: poisoning only blocks
+/// further conversion work, never the free path. After
+/// `ERROR_POST_COMMIT` (8) the commit contract additionally allows
+/// [`markdown_streaming_safe_finish`] to finalize the already-committed
+/// response; every other failure stays abort-only.
+///
 /// Passing NULL is a safe no-op.
 ///
 /// # Safety
@@ -457,6 +601,13 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
 /// particular, a caught panic (`ERROR_INTERNAL`) can only occur after
 /// `Box::from_raw` has taken ownership, so the handle is consumed in that case.
 ///
+/// A handle poisoned by an earlier caught panic is consumed too, but the torn
+/// converter is not driven again: the call returns `POST_COMMIT_ABORT` (4)
+/// with a NULL/0 output buffer, which already means "caller must abort" — the
+/// same contract a failed safe finish has. Callers that follow the `feed`
+/// consume-or-abort contract never reach this call, so this is a
+/// belt-and-suspenders guard.
+///
 /// # Safety
 ///
 /// - `handle` must be a live pointer returned by
@@ -502,6 +653,14 @@ pub unsafe extern "C" fn markdown_streaming_safe_finish(
         // `Box::from_raw` takes ownership — the handle is always freed
         // regardless of success or failure.
         let boxed = unsafe { Box::from_raw(handle) };
+
+        /* Poisoned by an earlier caught panic: the handle is consumed (the
+         * Box above owns it), but safe_finish is not driven on torn state.
+         * POST_COMMIT_ABORT is the documented "caller must abort" outcome,
+         * so a poisoned handle cannot be mistaken for a graceful closure. */
+        if boxed.poisoned {
+            return POST_COMMIT_ABORT;
+        }
 
         // Attempt safe finish on the inner converter.
         match boxed.inner.safe_finish() {
@@ -877,7 +1036,9 @@ mod tests {
 
     #[test]
     fn test_streaming_null_options() {
-        let handle = unsafe { new_streaming_handle_for_test(ptr::null()) };
+        let mut handle: *mut StreamingConverterHandle = ptr::null_mut();
+        let rc = unsafe { markdown_streaming_new_with_code(ptr::null(), &mut handle) };
+        assert_eq!(rc, ERROR_INVALID_INPUT);
         assert!(handle.is_null(), "NULL options should return NULL handle");
     }
 
@@ -1281,6 +1442,81 @@ mod tests {
         /* Handle is consumed — no free/abort needed */
     }
 
+    /// A post-commit feed failure can be closed through the safe-finish path.
+    ///
+    /// Cross-boundary contract: the FFI docs route `ERROR_POST_COMMIT` to
+    /// `markdown_streaming_safe_finish` (rather than abort-only), so a
+    /// committed response can still emit valid closing Markdown.
+    #[test]
+    fn test_post_commit_error_routes_to_safe_finish() {
+        use crate::ffi::abi::{POST_COMMIT_ABORT, POST_COMMIT_SAFE_FINISH};
+
+        /* Pre-resolve the charset and force immediate flushing so the small
+        first chunk is processed and committed right away (a zero
+        flush_threshold selects the 16 KiB production default). */
+        let mut opts = test_options();
+        opts.flush_threshold = 1;
+        let content_type = b"text/html; charset=UTF-8";
+        opts.content_type = content_type.as_ptr();
+        opts.content_type_len = content_type.len();
+        let handle = unsafe { new_streaming_handle_for_test(&opts) };
+        assert!(!handle.is_null());
+
+        /* First chunk commits output. */
+        let first = b"<h1>Committed heading</h1><p>Body text.</p>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                first.as_ptr(),
+                first.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+        assert!(out_len > 0, "the first chunk must emit (and commit) output");
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+
+        /* An unsupported structure (SVG) after commit is the documented
+        post-commit divergence; tables stream fine under GFM. */
+        let second = b"<svg><circle cx='50' cy='50' r='40'/></svg>";
+        let mut out2_data: *mut u8 = ptr::null_mut();
+        let mut out2_len: usize = 0;
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                second.as_ptr(),
+                second.len(),
+                &mut out2_data,
+                &mut out2_len,
+            )
+        };
+        assert_eq!(
+            rc, ERROR_POST_COMMIT,
+            "a post-commit table must report ERROR_POST_COMMIT"
+        );
+        if !out2_data.is_null() {
+            unsafe { markdown_streaming_output_free(out2_data, out2_len) };
+        }
+
+        /* The documented post-commit continuation closes via safe_finish. */
+        let mut close_data: *mut u8 = ptr::null_mut();
+        let mut close_len: usize = 0;
+        let rc = unsafe { markdown_streaming_safe_finish(handle, &mut close_data, &mut close_len) };
+        assert!(
+            rc == POST_COMMIT_SAFE_FINISH || rc == POST_COMMIT_ABORT,
+            "safe_finish after a post-commit error must report a documented \
+             post-commit outcome, got {rc}"
+        );
+        if !close_data.is_null() && close_len > 0 {
+            unsafe { markdown_streaming_output_free(close_data, close_len) };
+        }
+    }
+
     /// Validates: Requirements 1.8 — NULL handle returns INVALID_INPUT.
     #[test]
     fn test_safe_finish_null_handle() {
@@ -1401,5 +1637,153 @@ mod tests {
 
         assert_eq!(POST_COMMIT_SAFE_FINISH, 3);
         assert_eq!(POST_COMMIT_ABORT, 4);
+    }
+
+    // ================================================================
+    // Poisoned-handle contract
+    // ================================================================
+
+    /// A caught panic in `feed` must mark the handle poisoned: the very next
+    /// `feed` returns `ERROR_INTERNAL` and writes the canonical empty output
+    /// pair, without driving the torn converter again.
+    #[test]
+    fn poisoned_handle_rejects_subsequent_feed() {
+        let opts = test_options();
+        let handle = unsafe { new_streaming_handle_for_test(&opts) };
+        assert!(!handle.is_null(), "new() should return a non-NULL handle");
+
+        /* Inject a panic inside feed's catch_unwind closure. */
+        set_test_panic_streaming(Some("feed"));
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 1;
+        let html = b"<p>poison</p>";
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_INTERNAL, "injected panic must surface as 99");
+        assert!(
+            unsafe { (*handle).poisoned },
+            "a caught panic must poison the handle"
+        );
+
+        /* The next feed must fail closed without touching torn state. */
+        let mut out_data2: *mut u8 = ptr::null_mut();
+        let mut out_len2: usize = 7;
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data2,
+                &mut out_len2,
+            )
+        };
+        assert_eq!(
+            rc, ERROR_INTERNAL,
+            "a poisoned handle must fail closed with ERROR_INTERNAL"
+        );
+        assert!(
+            out_data2.is_null(),
+            "poisoned feed must leave out_data NULL"
+        );
+        assert_eq!(out_len2, 0, "poisoned feed must zero out_len");
+
+        /* Abort must still be able to release the poisoned handle. */
+        unsafe { markdown_streaming_abort(handle) };
+    }
+
+    /// A poisoned handle must not be finalized into torn Markdown output: the
+    /// call still consumes the handle, but the result carries `ERROR_INTERNAL`.
+    #[test]
+    fn poisoned_handle_finalize_reports_internal_error() {
+        let opts = test_options();
+        let handle = unsafe { new_streaming_handle_for_test(&opts) };
+        assert!(!handle.is_null());
+
+        unsafe { (*handle).poisoned = true };
+
+        let mut result = zeroed_result();
+        let rc = unsafe { markdown_streaming_finalize(handle, &mut result) };
+        assert_eq!(
+            rc, ERROR_INTERNAL,
+            "finalize on a poisoned handle must return ERROR_INTERNAL"
+        );
+        assert_eq!(result.error_code, ERROR_INTERNAL);
+        assert!(
+            result.markdown.is_null(),
+            "poisoned finalize must not emit Markdown"
+        );
+        assert_eq!(result.markdown_len, 0);
+        assert!(
+            !result.error_message.is_null(),
+            "poisoned finalize must set a diagnostic message"
+        );
+
+        unsafe { markdown_result_free(&mut result) };
+    }
+
+    /// A poisoned handle must not be safe-finished either: it consumes the
+    /// handle and reports `POST_COMMIT_ABORT` (the documented abort-required
+    /// outcome) instead of pretending the structures closed.
+    #[test]
+    fn poisoned_handle_safe_finish_reports_abort() {
+        use crate::ffi::abi::POST_COMMIT_ABORT;
+
+        let opts = test_options();
+        let handle = unsafe { new_streaming_handle_for_test(&opts) };
+        assert!(!handle.is_null());
+
+        unsafe { (*handle).poisoned = true };
+
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 3;
+        let rc = unsafe { markdown_streaming_safe_finish(handle, &mut out_data, &mut out_len) };
+        assert_eq!(
+            rc, POST_COMMIT_ABORT,
+            "safe_finish on a poisoned handle must report POST_COMMIT_ABORT"
+        );
+        assert!(
+            out_data.is_null(),
+            "poisoned safe_finish must emit no bytes"
+        );
+        assert_eq!(out_len, 0);
+    }
+
+    /// Sanity: a healthy handle is not poisoned, and a successful feed leaves
+    /// it usable (the poison flag is only ever set on a caught panic).
+    #[test]
+    fn healthy_handle_is_not_poisoned() {
+        let opts = test_options();
+        let handle = unsafe { new_streaming_handle_for_test(&opts) };
+        assert!(!handle.is_null());
+        assert!(!unsafe { (*handle).poisoned });
+
+        let html = b"<h1>ok</h1>";
+        let mut out_data: *mut u8 = ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            markdown_streaming_feed(
+                handle,
+                html.as_ptr(),
+                html.len(),
+                &mut out_data,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS);
+        assert!(
+            !unsafe { (*handle).poisoned },
+            "a successful feed must not poison the handle"
+        );
+        if !out_data.is_null() {
+            unsafe { markdown_streaming_output_free(out_data, out_len) };
+        }
+        unsafe { markdown_streaming_abort(handle) };
     }
 }
