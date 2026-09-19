@@ -63,7 +63,7 @@ def _validate_project_status(
     if project_match is None:
         return [f"{path}: missing current release line {version}"]
     body = project_match.group("body")
-    status = re.search(r"^\*\*Status:\*\*[ \t]*(?P<value>.+)$", body, re.MULTILINE)
+    status = re.search(r"^\*\*Status:\*\*(?P<value>.*)$", body, re.MULTILINE)
     if status is None:
         return [f"{path}: missing **Status:** line for {version}"]
     value_text = " ".join(status.group("value").split())
@@ -87,7 +87,7 @@ def _fence_token(line: str) -> tuple[str, int, str] | None:
     if indent > 3:
         return None
     candidate = line[indent:]
-    if not (candidate.startswith("```") or candidate.startswith("~~~")):
+    if not candidate.startswith(("```", "~~~")):
         return None
     char = candidate[0]
     run = len(candidate) - len(candidate.lstrip(char))
