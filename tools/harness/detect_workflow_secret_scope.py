@@ -546,7 +546,7 @@ def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
         return True
     if stripped.startswith("=="):
         operand = stripped[2:].lstrip()
-        if not re.match(r"(?:'true'|\"true\"|true)(?![A-Za-z0-9_])", operand):
+        if not re.match(r"(?:'true'|\"true\"|true)(?!\w)", operand):
             # `ref == X` is a positive requirement only when X is the literal
             # true.  A false literal, a property, or any other expression
             # compares the gate's value without requiring it.

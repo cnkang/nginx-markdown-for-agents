@@ -87,7 +87,7 @@ CONTROL_PREFIXES = (
 SEGMENT_SPLIT = re.compile(r"(?:;|&&|&|\|&|\|\||\||\(|\)|\{|\})")
 REDIRECT_RE = re.compile(r"^\d*[<>]")
 QUOTED_SPAN_RE = re.compile(r"""\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'""")
-ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 
 
 def _is_data_context(line: str, path_start: int) -> bool:
@@ -105,7 +105,7 @@ def _is_data_context(line: str, path_start: int) -> bool:
         head = prefix[:opener].rstrip()
         token = head.split()[-1] if head.split() else ""
         if (
-            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=", token)
+            re.fullmatch(r"[A-Za-z_]\w*=", token)
             and ")" not in prefix[opener:]
         ):
             return True

@@ -854,11 +854,13 @@ class TestGateNamePattern:
         bare = secret_scope_module.GATE_NAME_RE.match(
             'echo gate=true >> "$GITHUB_OUTPUT"'
         )
-        assert bare is not None and bare.group(1) == "gate"
+        assert bare is not None
+        assert bare.group(1) == "gate"
         quoted = secret_scope_module.GATE_NAME_RE.match(
             'echo "enabled=true" >> "$GITHUB_OUTPUT"'
         )
-        assert quoted is not None and quoted.group(1) == "enabled"
+        assert quoted is not None
+        assert quoted.group(1) == "enabled"
 
     def test_a_chained_debug_echo_does_not_mask_the_ready_gate(self) -> None:
         """A debug echo chained before the gate echo must not supply the
