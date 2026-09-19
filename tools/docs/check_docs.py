@@ -1042,11 +1042,12 @@ def _contextual_blocks(
         heading = re.match(r"^ {0,3}(#{1,6})\s+(.*)$", stripped)
         if heading is not None:
             flush()
-            context = _push_heading(
-                stack,
-                len(heading.group(1)),
-                version_pattern.search(heading.group(2)) is not None,
-            )
+            mentions = version_pattern.search(heading.group(2)) is not None
+            context = _push_heading(stack, len(heading.group(1)), mentions)
+            if mentions:
+                # The heading text itself is a claim: a candidate-declaring
+                # heading must not slip through unbeaten.
+                blocks.append((heading.group(2), True))
             continue
         if not stripped or line in history:
             flush()
