@@ -63,7 +63,7 @@ def _validate_project_status(
     if project_match is None:
         return [f"{path}: missing current release line {version}"]
     body = project_match.group("body")
-    status = re.search(r"^\*\*Status:\*\*\s*(?P<value>.+)$", body, re.MULTILINE)
+    status = re.search(r"^\*\*Status:\*\*[ \t]*(?P<value>.+)$", body, re.MULTILINE)
     if status is None:
         return [f"{path}: missing **Status:** line for {version}"]
     value_text = " ".join(status.group("value").split())
@@ -81,34 +81,42 @@ def _validate_project_status(
     return []
 
 
+def _fence_token(line: str) -> tuple[str, int, str] | None:
+    """Return (char, run length, trailing text) for a fence-run line."""
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3:
+        return None
+    candidate = line[indent:]
+    if not (candidate.startswith("```") or candidate.startswith("~~~")):
+        return None
+    char = candidate[0]
+    run = len(candidate) - len(candidate.lstrip(char))
+    return char, run, candidate[run:]
+
+
 def _unfenced_lines(text: str) -> list[str]:
     """Return prose lines only; fenced examples cannot satisfy metadata checks.
 
-    A closing fence must use the same character and be at least as long as
-    the fence it closes.
+    A closing fence must use the same character, be at least as long as the
+    fence it closes, and carry no trailing text.
     """
     lines: list[str] = []
     open_fence: tuple[str, int] | None = None
     for line in text.splitlines():
-        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
-        if marker is not None:
-            run, rest = marker.group(1), marker.group(2)
-            char, length = run[0], len(run)
+        token = _fence_token(line)
+        if token is None:
             if open_fence is None:
-                # A backtick info string cannot contain a backtick.
-                if char == "`" and "`" in rest:
-                    lines.append(line)
-                    continue
-                open_fence = (char, length)
-            elif (
-                open_fence[0] == char
-                and length >= open_fence[1]
-                and rest.strip() == ""
-            ):
-                open_fence = None
+                lines.append(line)
             continue
+        char, run, rest = token
         if open_fence is None:
-            lines.append(line)
+            # A backtick info string cannot contain a backtick.
+            if char == "`" and "`" in rest:
+                lines.append(line)
+            else:
+                open_fence = (char, run)
+        elif open_fence[0] == char and run >= open_fence[1] and rest.strip() == "":
+            open_fence = None
     return lines
 
 
