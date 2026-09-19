@@ -30,6 +30,7 @@ import re
 import sys
 from pathlib import Path
 
+from check_docs import _without_fenced_blocks
 from _packaging_constants import (
     DEMO_DIRECTIVES_REQUIRING_COMMENTS,
     ENVIRONMENTS,
@@ -339,6 +340,83 @@ def check_no_hardcoded_release_tags(text: str, document_label: str) -> list[str]
     return errors
 
 
+def _current_release_version() -> str | None:
+    """Return the newest released version from the changelog."""
+    changelog = ROOT / "CHANGELOG.md"
+    if not changelog.is_file():
+        return None
+    match = re.search(
+        r"^ {0,3}##[ \t]+\[(\d+\.\d+\.\d+)\][ \t]*-[ \t]*\d{4}-\d{2}-\d{2}",
+        _without_fenced_blocks(changelog.read_text(encoding="utf-8", errors="ignore")),
+        re.MULTILINE,
+    )
+    return match.group(1) if match else None
+
+
+def check_apt_verification_example() -> list[str]:
+    """Check 15: The APT verification example matches the current release."""
+    readme = ROOT / "packaging" / "repo" / "apt" / "README.md"
+    if not readme.is_file():
+        return ["packaging/repo/apt/README.md is missing"]
+    text = readme.read_text(encoding="utf-8", errors="ignore")
+    marker = "Canonical release verification"
+    if marker not in text:
+        return ["packaging/repo/apt/README.md: canonical release verification section missing"]
+    start = text.index(marker)
+    try:
+        fence = text.index("```bash", start)
+        end = text.index("```", fence + len("```bash"))
+    except ValueError:
+        return [
+            "packaging/repo/apt/README.md: verification section has no "
+            "fenced bash block"
+        ]
+    # The section prose names the release too, so scan from the marker
+    # through the end of the fenced block.
+    block = text[start:end]
+    errors: list[str] = []
+    versions = set(re.findall(r"VERSION=v(\d+\.\d+\.\d+)", block))
+    versions |= set(re.findall(r"gh release view v(\d+\.\d+\.\d+)", block))
+    versions |= set(
+        re.findall(r"nginx-module-markdown-for-agents_(\d+\.\d+\.\d+)_nginx", block)
+    )
+    expected = _current_release_version()
+    if not versions:
+        errors.append("packaging/repo/apt/README.md: no release version in the verification example")
+    elif expected is not None and versions != {expected}:
+        errors.append(
+            "packaging/repo/apt/README.md: example versions "
+            f"{sorted(versions)} do not match the current release {expected}"
+        )
+    if (
+        "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/"
+        "${VERSION}"
+    ) not in block:
+        errors.append(
+            "packaging/repo/apt/README.md: BASE_URL must build the canonical "
+            "release download URL from ${VERSION}"
+        )
+    downloaded = re.search(r"curl -fsSLo (nginx-module-markdown-for-agents_\S+)", block)
+    sourced = re.search(
+        r"\$\{BASE_URL\}/(nginx-module-markdown-for-agents_\S+?)[\"']", block
+    )
+    selected = re.search(r'PACKAGE="(nginx-module-markdown-for-agents_[^"]+)"', block)
+    if downloaded is None or selected is None or sourced is None:
+        errors.append(
+            "packaging/repo/apt/README.md: the verification example must "
+            "include the curl download, its ${BASE_URL} source, and the "
+            "PACKAGE= selection"
+        )
+        return errors
+    names = {downloaded.group(1), sourced.group(1), selected.group(1)}
+    if len(names) != 1:
+        errors.append(
+            "packaging/repo/apt/README.md: download, source URL, and "
+            f"selection disagree: {sorted(names)}"
+        )
+    return errors
+
+
 def check_demo_config_exists() -> list[str]:
     """Check 14: Minimal demo config exists."""
     if not DEMO_CONFIG.exists():
@@ -444,6 +522,7 @@ def main() -> int:
                 package_distribution_text, "PACKAGE_DISTRIBUTION.md"
             ),
         ),
+        ("APT verification example version", check_apt_verification_example()),
     ]
 
     for _label, errs in checks:

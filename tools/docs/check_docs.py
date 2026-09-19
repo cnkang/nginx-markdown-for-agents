@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from datetime import date
 from urllib.parse import urlsplit
 
 
@@ -44,6 +45,13 @@ UNRELEASED_CHANGELOG_RE = re.compile(
     r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
     re.MULTILINE,
 )
+
+DATED_CHANGELOG_RE = re.compile(
+    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*"
+    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
+    re.MULTILINE,
+)
+VERSION_HEADING_PREFIX_RE = re.compile(r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]")
 
 
 def is_maintained_markdown(rel_path: str) -> bool:
@@ -319,6 +327,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     """
     version: str | None = None
     errors: list[str] = []
+    changelog = _without_fenced_blocks(changelog)
     for match in re.finditer(
         r"^ {0,3}##(?!#)[^\n]*$",
         changelog,
@@ -853,6 +862,310 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
     return blocks
 
 
+def _dated_heading(line: str) -> tuple[str, str] | None:
+    """Return (version, date) for a dated release heading."""
+    dated = DATED_CHANGELOG_RE.match(line)
+    if dated is None:
+        return None
+    return dated.group("version"), dated.group("date")
+
+
+def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
+    """Record an error for an impossible ISO date; return whether it is real."""
+    try:
+        date.fromisoformat(raw_date)
+    except ValueError:
+        errors.append(f"CHANGELOG.md: invalid release date {raw_date!r} in {line!r}")
+        return False
+    return True
+
+
+def _order_error(
+    previous: tuple[tuple[int, ...], str] | None,
+    current: tuple[tuple[int, ...], str],
+    line: str,
+) -> str | None:
+    """Return a descending-order error for an out-of-order release heading."""
+    if previous is None:
+        return None
+    if current[0] >= previous[0] or current[1] > previous[1]:
+        return (
+            "CHANGELOG.md: release headings are not in descending "
+            f"order at {line!r}"
+        )
+    return None
+
+
+def _classify_changelog_heading(
+    line: str,
+) -> tuple[str, str | None, str | None] | None:
+    """Classify a changelog heading line for the release-state scan."""
+    dated = _dated_heading(line)
+    if dated is not None:
+        return ("dated", dated[0], dated[1])
+    if UNRELEASED_CHANGELOG_RE.match(line) is not None:
+        return ("unreleased", None, None)
+    if VERSION_HEADING_PREFIX_RE.match(line) is not None:
+        return ("bad", None, None)
+    return None
+
+
+def _apply_dated_heading(
+    version: str | None,
+    previous: tuple[tuple[int, ...], str] | None,
+    line: str,
+    heading_version: str,
+    raw_date: str,
+    errors: list[str],
+    assign_version: bool,
+) -> tuple[str | None, tuple[tuple[int, ...], str] | None]:
+    """Fold one dated heading into the running release-state scan."""
+    if not _validated_date(raw_date, line, errors):
+        return version, previous
+    current = (tuple(int(part) for part in heading_version.split(".")), raw_date)
+    order_error = _order_error(previous, current, line)
+    if order_error is not None:
+        errors.append(order_error)
+    if assign_version:
+        version = heading_version
+    return version, current
+
+
+def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[str]]:
+    """Return (version, errors) for the newest released changelog entry.
+
+    The first version heading decides: a dated heading means the release is
+    final and its date must be a real ISO date, an unreleased heading means
+    the release-state checks run in the pre-release direction instead, and
+    any other version-style heading fails closed.  Dated headings must
+    descend by version and date so the first entry is the newest one.
+    """
+    version: str | None = None
+    errors: list[str] = []
+    first_seen = False
+    previous: tuple[tuple[int, ...], str] | None = None
+    changelog = _without_fenced_blocks(changelog)
+    for match in re.finditer(r"^ {0,3}##(?!#)[^\n]*$", changelog, re.MULTILINE):
+        line = match.group(0)
+        heading = _classify_changelog_heading(line)
+        if heading is None:
+            continue
+        first = not first_seen
+        first_seen = True
+        kind, heading_version, raw_date = heading
+        if kind == "bad":
+            errors.append(f"CHANGELOG.md: unrecognized release heading {line!r}")
+        elif kind == "dated":
+            version, previous = _apply_dated_heading(
+                version,
+                previous,
+                line,
+                heading_version,
+                raw_date,
+                errors,
+                assign_version=first,
+            )
+    if not first_seen:
+        errors.append("CHANGELOG.md: missing release heading")
+    return version, errors
+
+
+RELEASE_SURFACE_FILES = (
+    "README.md",
+    "README_zh-CN.md",
+    "docs/project/PROJECT_STATUS.md",
+    "docs/project/VERSION_PLANNING.md",
+    "docs/guides/INSTALLATION.md",
+    "docs/guides/UPGRADE-TO-{version}.md",
+    "docs/guides/VERSION_ROLLBACK-{version}.md",
+    "docs/guides/{version}-breaking-changes.md",
+    "docs/guides/MIGRATION-{version}.md",
+    "docs/development/{version}-implementation-plan.md",
+    "docs/releases/{version}-release-notes.md",
+    "docs/releases/{version}-upgrade-and-rollback.md",
+    "docs/releases/{version}-deployment-recommendation.md",
+    "packaging/repo/apt/README.md",
+    "CHANGELOG.md",
+    "docs/project/README.md",
+)
+
+# Wording that describes an unpublished or candidate state.  A released
+# version must not carry these claims next to its version string.
+_STALE_RELEASE_CLAIM_RE = re.compile(
+    r"(?:release|development)[- ]candidate"
+    r"|not (?:yet )?(?:published|released)"
+    r"|\bunpublished\b"
+    r"|\bunreleased\b"
+    r"|尚未发布"
+    r"|开发候选"
+    r"|(?:publication|release) pending"
+    r"|pending (?:publication|release)"
+    r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
+    re.IGNORECASE,
+)
+
+
+def _push_heading(stack: list[tuple[int, bool]], level: int, mentions: bool) -> bool:
+    """Open a heading of *level*; return the resulting version context."""
+    stack[:] = [(lvl, seen) for (lvl, seen) in stack if lvl < level]
+    stack.append((level, mentions))
+    return any(seen for _lvl, seen in stack)
+
+
+def _contextual_blocks(
+    text: str,
+    history: set[str],
+    version_pattern: "re.Pattern[str]",
+) -> list[tuple[str, bool]]:
+    """Return (block, version_context) pairs from prose.
+
+    A block's version context is true when any open ancestor heading (at a
+    shallower level, or its own section heading) names the released version,
+    so a child heading cannot hide a stale claim from its parent section.
+    """
+    blocks: list[tuple[str, bool]] = []
+    stack: list[tuple[int, bool]] = []
+    current: list[str] = []
+    context = False
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            blocks.append((" ".join(current), context))
+            current = []
+
+    for _lineno, line, is_fence in iter_lines_with_fences(text):
+        if is_fence:
+            flush()
+            continue
+        stripped = line.strip()
+        heading = re.match(r"^ {0,3}(#{1,6})\s+(.*)$", stripped)
+        if heading is not None:
+            flush()
+            context = _push_heading(
+                stack,
+                len(heading.group(1)),
+                version_pattern.search(heading.group(2)) is not None,
+            )
+            continue
+        if not stripped or line in history:
+            flush()
+            continue
+        current.append(stripped)
+    flush()
+    return blocks
+
+
+def _without_fenced_blocks(text: str) -> str:
+    """Blank fenced-block lines (markers and contents) keeping positions.
+
+    Claims live in prose: example commands inside fences must not trip the
+    stale-release scan, and their line positions must stay stable.
+    """
+    lines = text.splitlines()
+    blanked = set(range(1, len(lines) + 1))
+    for line_no, _line, is_fence in iter_lines_with_fences(text):
+        if not is_fence:
+            blanked.discard(line_no)
+    for line_no in blanked:
+        lines[line_no - 1] = ""
+    return "\n".join(lines)
+
+
+def _stable_claim_failures(rel: str, version: str, text: str) -> list[str]:
+    """Flag pre-release wording in blocks that mention the released version."""
+    failures: list[str] = []
+    version_pattern = re.compile(rf"\bv?{re.escape(version)}\b")
+    text = _without_fenced_blocks(text)
+    # Document Updates ledger rows record history, not current claims.
+    history = set(_document_update_table_lines(text))
+    # Headings delimit logical blocks: an adjacent heading pair must not
+    # merge into one claim block.
+    for block, context_version in _contextual_blocks(text, history, version_pattern):
+        if not context_version and not version_pattern.search(block):
+            continue
+        stale = _STALE_RELEASE_CLAIM_RE.search(block)
+        if stale is not None:
+            failures.append(
+                f"{rel}: released {version} described with pre-release "
+                f"wording {stale.group(0)!r} in: {block[:80]!r}"
+            )
+    return failures
+
+
+def _stable_surface_check(
+    changelog: str,
+    root: Path,
+) -> tuple[bool, list[str]]:
+    """Run the stable-surface scan; return whether it ran and its failures.
+
+    The scan targets the newest released version and stays inactive while a
+    newer unreleased entry sits on top of the changelog.
+    """
+    stable_version, parse_errors = _latest_dated_changelog_version(changelog)
+    if parse_errors:
+        return False, parse_errors
+    if stable_version is None:
+        return False, []
+    return True, check_stable_release_surfaces(root, stable_version)
+
+
+def _release_notes_status_failures(path: Path, version: str) -> list[str]:
+    """Require the release notes of a released version to carry a stable status."""
+    rel = f"docs/releases/{version}-release-notes.md"
+    if not path.is_file():
+        return [f"{rel}: missing release notes for released {version}"]
+    notes_text = _without_fenced_blocks(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    status = re.search(r"^\*\*Status\*\*:\s*(?P<value>.+?)\s*$", notes_text, re.MULTILINE)
+    if status is None:
+        return [f"{rel}: missing release status for released {version}"]
+    value = " ".join(status.group("value").split()).casefold()
+    if value != "stable release":
+        return [f"{rel}: released {version} carries status {status.group('value')!r}"]
+    return []
+
+
+def check_stable_release_surfaces(
+    root: Path,
+    version: str,
+    surface_rel_paths: tuple[str, ...] = RELEASE_SURFACE_FILES,
+) -> list[str]:
+    """Flag pre-release wording next to a released version string.
+
+    Any logical block that mentions the released version and also carries
+    candidate or unpublished wording fails, so a stale surface cannot
+    survive a stable release.
+    """
+    failures: list[str] = []
+    notes_rel = f"docs/releases/{version}-release-notes.md"
+    for template in surface_rel_paths:
+        rel = template.format(version=version)
+        if rel == notes_rel:
+            continue
+        path = root / rel
+        if not path.is_file():
+            failures.append(f"{rel}: missing release surface for {version}")
+            continue
+        failures.extend(
+            _stable_claim_failures(
+                rel, version, path.read_text(encoding="utf-8", errors="ignore")
+            )
+        )
+    notes = root / notes_rel
+    if notes.is_file():
+        # The release notes are scanned even when a caller passes a custom
+        # surface list: their prose must never hide a stale claim.
+        failures.extend(
+            _stable_claim_failures(
+                notes_rel, version, notes.read_text(encoding="utf-8", errors="ignore")
+            )
+        )
+    failures.extend(_release_notes_status_failures(notes, version))
+    return failures
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -886,6 +1199,8 @@ def main() -> int:
             release_notes_path,
         )
     )
+    stable_ran, stable_failures = _stable_surface_check(changelog, ROOT)
+    failures.extend(stable_failures)
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
@@ -905,6 +1220,10 @@ def main() -> int:
     print("- Internal reference policy (tracked paths/no 'spec X'): OK")
     print("- Operator configuration examples: OK")
     print("- Unreleased/stable release status consistency: OK")
+    print(
+        "- Stable release surface consistency: "
+        + ("OK" if stable_ran else "SKIPPED (no dated release in CHANGELOG)")
+    )
     print("- Duplicate canonical/mirror sync: OK")
     print("- Document Updates chronological order (descending): OK")
     print("- Release checklist states requirements only: OK")

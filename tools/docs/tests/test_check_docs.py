@@ -630,3 +630,342 @@ def test_an_invalid_fence_does_not_open_a_block() -> None:
     """A run of backticks only opens a block when it is a real fence."""
     assert docs_checker._starts_block("```bad`info") is False
     assert docs_checker._starts_block("```python") is True
+
+
+_SURFACE_FIXTURES = (
+    "README.md",
+    "README_zh-CN.md",
+    "docs/project/PROJECT_STATUS.md",
+    "docs/project/VERSION_PLANNING.md",
+    "docs/project/README.md",
+    "docs/guides/INSTALLATION.md",
+    "docs/guides/UPGRADE-TO-{version}.md",
+    "docs/guides/VERSION_ROLLBACK-{version}.md",
+    "docs/guides/{version}-breaking-changes.md",
+    "docs/guides/MIGRATION-{version}.md",
+    "docs/development/{version}-implementation-plan.md",
+    "docs/releases/{version}-upgrade-and-rollback.md",
+    "docs/releases/{version}-deployment-recommendation.md",
+    "packaging/repo/apt/README.md",
+    "CHANGELOG.md",
+)
+
+
+def _write_all_surfaces(root, version):
+    """Write a minimal compliant release-surface set for the default manifest."""
+    _write_stable_notes(root, version)
+    for template in _SURFACE_FIXTURES:
+        path = root / template.format(version=version)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"v{version} shipped on 2027-01-01.\n", encoding="utf-8")
+
+
+def _write_stable_notes(root, version):
+    notes = root / "docs" / "releases"
+    notes.mkdir(parents=True, exist_ok=True)
+    (notes / f"{version}-release-notes.md").write_text(
+        f"**Date**: 2026-01-01\n**Status**: Stable release\n", encoding="utf-8"
+    )
+
+
+def test_latest_dated_changelog_version_detects_released_line():
+    assert docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - 2026-01-01\n"
+    ) == ("1.2.3", [])
+    assert docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - Unreleased candidate\n"
+    ) == (None, [])
+
+
+def test_latest_dated_changelog_version_rejects_impossible_dates():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - 2026-99-99\n"
+    )
+    assert version is None
+    assert any("invalid release date" in error for error in errors)
+
+
+def test_latest_dated_changelog_version_rejects_unknown_headings():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - next milestone\n"
+    )
+    assert version is None
+    assert any("unrecognized release heading" in error for error in errors)
+
+
+def test_stable_release_surface_check_flags_stale_candidate_text(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "v9.9.9 is a development candidate and is not yet published.\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_stable_release_surface_check_accepts_released_text(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "v9.9.9 shipped on 2027-01-01 as the current release.\n",
+        encoding="utf-8",
+    )
+    _write_stable_notes(tmp_path, "9.9.9")
+    assert (
+        docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ("README.md",))
+        == []
+    )
+
+
+def test_stable_release_surface_check_ignores_history_table_rows(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "update.md").write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Author | Changes |\n"
+        "|---------|------|--------|---------|\n"
+        "| 9.9.9 | 2027-01-01 | Kang | Release-candidate matrix entries are not downloads |\n",
+        encoding="utf-8",
+    )
+    _write_stable_notes(tmp_path, "9.9.9")
+    assert (
+        docs_checker.check_stable_release_surfaces(
+            tmp_path, "9.9.9", ("docs/update.md",)
+        )
+        == []
+    )
+
+
+def test_stable_release_surface_check_flags_unreleased_wording(tmp_path):
+    for phrase in ("v9.9.9 remains unreleased", "v9.9.9 stays unpublished"):
+        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+        errors = docs_checker.check_stable_release_surfaces(
+            tmp_path, "9.9.9", ("README.md",)
+        )
+        assert any("pre-release wording" in error for error in errors), phrase
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_stable_surface_check_skips_while_unreleased(tmp_path):
+    ran, failures = docs_checker._stable_surface_check(
+        "## [1.2.4] - Unreleased candidate\n", tmp_path
+    )
+    assert ran is False
+    assert failures == []
+
+
+def test_stable_surface_check_runs_for_dated_release(tmp_path):
+    _write_all_surfaces(tmp_path, "1.2.3")
+    ran, failures = docs_checker._stable_surface_check(
+        "## [1.2.3] - 2026-01-01\n", tmp_path
+    )
+    assert ran is True
+    assert failures == []
+
+
+def test_stable_surface_check_flags_missing_notes(tmp_path):
+    ran, failures = docs_checker._stable_surface_check(
+        "## [1.2.3] - 2026-01-01\n", tmp_path
+    )
+    assert ran is True
+    assert any("missing release notes" in error for error in failures)
+
+
+def test_stable_surface_check_flags_missing_surfaces(tmp_path):
+    _write_stable_notes(tmp_path, "1.2.3")
+    ran, failures = docs_checker._stable_surface_check(
+        "## [1.2.3] - 2026-01-01\n", tmp_path
+    )
+    assert ran is True
+    assert any("missing release surface" in error for error in failures)
+
+
+def test_stable_surface_check_flags_pending_publication_wording(tmp_path):
+    for phrase in ("v9.9.9 release pending", "pending publication of v9.9.9"):
+        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+        errors = docs_checker.check_stable_release_surfaces(
+            tmp_path, "9.9.9", ("README.md",)
+        )
+        assert any("pre-release wording" in error for error in errors), phrase
+
+
+def test_release_notes_status_flags_development_candidate(tmp_path):
+    notes = tmp_path / "docs" / "releases"
+    notes.mkdir(parents=True)
+    (notes / "9.9.9-release-notes.md").write_text(
+        "# Release Notes: 9.9.9 Development Candidate\n**Status**: Development candidate\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ())
+    assert any("carries status" in error for error in errors), errors
+
+
+def test_release_notes_status_requires_stable_release(tmp_path):
+    notes = tmp_path / "docs" / "releases"
+    notes.mkdir(parents=True)
+    notes_file = notes / "9.9.9-release-notes.md"
+    notes_file.write_text("**Status**: Stable Release\n", encoding="utf-8")
+    assert docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ()) == []
+    notes_file.write_text("# Notes without a status line\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ())
+    assert any("missing release status" in error for error in errors), errors
+
+
+def test_latest_dated_changelog_version_validates_all_dated_headings():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - 2026-01-01\n## [1.2.2] - 2026-99-99\n"
+    )
+    assert version == "1.2.3"
+    assert any("invalid release date" in error for error in errors)
+
+
+def test_stable_surface_check_scans_changelog_prose(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [9.9.9] - 2027-01-01\n\n9.9.9 is not yet published.\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("CHANGELOG.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_stable_surface_check_ignores_lower_unreleased_heading(tmp_path):
+    _write_all_surfaces(tmp_path, "1.2.3")
+    ran, failures = docs_checker._stable_surface_check(
+        "## [1.2.3] - 2026-01-01\n## [1.2.2] - Unreleased\n", tmp_path
+    )
+    assert ran is True
+    assert failures == []
+
+
+def test_stable_surface_check_scans_changelog_by_default(tmp_path):
+    _write_all_surfaces(tmp_path, "9.9.9")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [9.9.9] - 2027-01-01\n\n9.9.9 is not yet published.\n",
+        encoding="utf-8",
+    )
+    ran, failures = docs_checker._stable_surface_check(
+        "## [9.9.9] - 2027-01-01\n", tmp_path
+    )
+    assert ran is True
+    assert any("pre-release wording" in failure for failure in failures), failures
+
+
+def test_release_surface_manifest_covers_release_docs():
+    for template in (
+        "docs/releases/{version}-upgrade-and-rollback.md",
+        "docs/releases/{version}-deployment-recommendation.md",
+        "docs/releases/{version}-implementation-plan.md".replace(
+            "docs/releases", "docs/development"
+        ),
+    ):
+        assert template in docs_checker.RELEASE_SURFACE_FILES
+
+
+def test_latest_dated_changelog_version_requires_a_heading():
+    version, errors = docs_checker._latest_dated_changelog_version("no headings\n")
+    assert version is None
+    assert any("missing release heading" in error for error in errors)
+
+
+def test_stable_surface_check_fails_closed_without_heading(tmp_path):
+    ran, failures = docs_checker._stable_surface_check("", tmp_path)
+    assert ran is False
+    assert any("missing release heading" in failure for failure in failures)
+
+
+def test_latest_dated_changelog_version_requires_descending_order():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [0.9.1] - 2026-07-01\n## [0.9.2] - 2026-09-01\n"
+    )
+    assert version == "0.9.1"
+    assert any("descending order" in error for error in errors)
+
+
+def test_stable_surface_check_carries_version_across_blocks(tmp_path):
+    notes = tmp_path / "docs" / "releases"
+    notes.mkdir(parents=True)
+    (notes / "9.9.9-release-notes.md").write_text(
+        "# Release Notes: 9.9.9\n**Status**: Stable release\n\n"
+        "The release is not yet published.\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ()
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_latest_dated_changelog_version_ignores_lower_dated_after_unreleased():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.2.4] - Unreleased candidate\n## [1.2.3] - 2026-01-01\n"
+    )
+    assert version is None
+
+
+def test_release_surface_manifest_includes_project_index():
+    assert "docs/project/README.md" in docs_checker.RELEASE_SURFACE_FILES
+
+
+def test_stable_claim_failures_ignore_fenced_examples(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "README.md").write_text(
+        "v9.9.9 shipped.\n\n```bash\n# 9.9.9 is not yet published\n```\n",
+        encoding="utf-8",
+    )
+    assert (
+        docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ("README.md",))
+        == []
+    )
+
+
+def test_stable_claim_failures_flag_not_released_wording(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "README.md").write_text("v9.9.9 is not released yet.\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_stable_claim_failures_inherit_parent_heading_context(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "README.md").write_text(
+        "## 9.9.9 release\n\n### Details\n\nThe build is not yet published.\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), errors
+
+
+def test_release_notes_status_ignores_fenced_examples(tmp_path):
+    notes = tmp_path / "docs" / "releases"
+    notes.mkdir(parents=True)
+    (notes / "9.9.9-release-notes.md").write_text(
+        "**Status**: Stable release\n\n```text\n**Status**: Development candidate\n```\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_stable_release_surfaces(tmp_path, "9.9.9", ()) == []
+
+
+def test_latest_dated_changelog_version_ignores_fenced_headings():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "```md\n## [9.9.9] - Unreleased\n```\n## [0.9.2] - 2026-09-19\n"
+    )
+    assert version == "0.9.2"
+    assert errors == []
+
+
+def test_stable_claim_failures_flag_pending_claims(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    for phrase in ("9.9.9 is pending", "v9.9.9 release is still pending"):
+        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+        errors = docs_checker.check_stable_release_surfaces(
+            tmp_path, "9.9.9", ("README.md",)
+        )
+        assert any("pre-release wording" in error for error in errors), phrase
