@@ -26,6 +26,14 @@ Usage:
 Exit codes:
     0 — no findings (or only allowlisted patterns)
     1 — one or more findings requiring review
+
+Bounded scope for f-strings: an `open()` sits in executable code when it
+is inside a single-line f-string replacement field, or inside an open
+triple-quoted f-string whose running replacement-field depth (carried
+across lines) is above zero at that position.  Quoted field contents are
+audited through the same argument classifiers as ordinary calls.  Forms
+outside this model (for example escaped delimiters that shift field
+boundaries) may be missed; the unit-test suite is the normative spec.
 """
 
 from __future__ import annotations
@@ -256,15 +264,40 @@ def _is_ascii_identifier_character(character: str) -> bool:
     )
 
 
+def _receiver_step(line: str, start: int, after_dot: bool) -> tuple[int, bool] | None:
+    """One backwards step over a dotted receiver; None ends the walk.
+
+    A run of spaces belongs to the receiver only when it sits directly right
+    of a dot (``receiver . open``) or directly left of one; a space anywhere
+    else ends the receiver.
+    """
+    char = line[start - 1]
+    if char in " \t":
+        right = line[start] if start < len(line) else ""
+        if after_dot or right == ".":
+            return start - 1, after_dot
+        look = start
+        while look > 0 and line[look - 1] in " \t":
+            look -= 1
+        if look > 0 and line[look - 1] == ".":
+            return look, after_dot
+        return None
+    if char == ".":
+        return start - 1, True
+    if _is_ascii_identifier_character(char):
+        return start - 1, False
+    return None
+
+
 def _receiver_start(line: str, end: int) -> int:
+    """Walk back over a dotted receiver, tolerating spaces around each dot."""
     start = end
-    while start > 0 and line[start - 1] in " \t":
-        start -= 1
-    while start > 0 and (
-        _is_ascii_identifier_character(line[start - 1])
-        or line[start - 1] == "."
-    ):
-        start -= 1
+    after_dot = False
+    while start > 0:
+        step = _receiver_step(line, start, after_dot)
+        if step is None:
+            break
+        start, after_dot = step
     return start
 
 
@@ -272,8 +305,9 @@ def _is_valid_receiver(receiver: str) -> bool:
     if not receiver:
         return False
     return all(
-        segment and _is_ascii_identifier_start(segment[0])
-        and all(_is_ascii_identifier_character(c) for c in segment[1:])
+        (stripped := segment.strip())
+        and _is_ascii_identifier_start(stripped[0])
+        and all(_is_ascii_identifier_character(c) for c in stripped[1:])
         for segment in receiver.split(".")
     )
 
@@ -715,13 +749,20 @@ def _has_complex_open_argument(
     return False
 
 
-def _emit_unaudited_warning(warnings: list[str], rel: str, lineno: int) -> None:
-    """Report an unresolved dynamic open() argument as unaudited."""
+def _emit_unaudited_warning(
+    warnings: list[str], rel: str, lineno: int, call_text: str = "",
+) -> None:
+    """Report an unresolved dynamic open() argument as unaudited.
+
+    *call_text* names the exact call the warning belongs to, so a line
+    carrying several open() calls cannot misattribute the finding.
+    """
+    suffix = f" — call: {call_text}" if call_text else ""
     warnings.append(
         f"  WARNING {rel}:{lineno} — open() path argument is a "
         f"dynamic expression the detector cannot statically "
         f"resolve; review the expression for user-derived "
-        f"components and pass it through validate_read_path()"
+        f"components and pass it through validate_read_path(){suffix}"
     )
 
 
@@ -737,6 +778,73 @@ class _OpenScanState:
     rel: str
     strict: bool
     open_quote: str | None = None
+    multiline_fstring: bool = False
+    fstring_depth: int = 0
+
+
+FSTRING_TRIPLE_OPEN = re.compile("(?:[fF][rR]?|[rR][fF])(" + chr(34) * 3 + "|" + chr(39) * 3 + ")")
+
+def _advance_quote_state(state: _OpenScanState, line: str) -> None:
+    """Advance the multiline-quote state and track f-prefixed literals.
+
+    A triple-quoted f-string keeps replacement fields executable across
+    lines, so the state records when the still-open literal was opened by
+    an f-prefixed delimiter.
+    """
+    state.open_quote = _multiline_quote_after(line, state.open_quote)
+    if state.open_quote is None:
+        state.multiline_fstring = False
+        state.fstring_depth = 0
+        return
+    opener = FSTRING_TRIPLE_OPEN.search(line)
+    if opener:
+        # Opening line: only the text after the delimiter can hold
+        # replacement fields, and the depth starts fresh.
+        state.multiline_fstring = True
+        state.fstring_depth = _replacement_depth(line, opener.end(), len(line))
+    elif state.multiline_fstring:
+        # Continuation line: inherit the carried field depth.
+        state.fstring_depth = _replacement_depth(
+            line, 0, len(line), state.fstring_depth
+        )
+
+
+def _executable_fstring_position(
+    state: _OpenScanState, line: str, pos: int,
+) -> bool:
+    """True when *pos* sits inside an executable f-string field.
+
+    Covers single-line f-strings and open multiline f-strings whose
+    replacement field is on the current line.
+    """
+    if state.open_quote is None:
+        # No multiline literal is open: only a same-line f-string can
+        # put this position into executable code.
+        return _in_fstring_expression(line, pos)
+    return (
+        state.multiline_fstring
+        and _replacement_depth(line, 0, pos, state.fstring_depth) > 0
+    )
+
+
+def _call_span_end(line: str, open_start: int) -> int:
+    """End of the balanced call starting at *open_start*.
+
+    A nested call inside the argument list stays within the span, so the
+    outer call's own dynamic argument is not hidden by it.
+    """
+    depth = 0
+    index = open_start
+    while index < len(line):
+        char = line[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return len(line)
 
 
 def _scan_open_calls(
@@ -765,7 +873,7 @@ def _scan_open_calls(
         open_matches = list(OPEN_CALL_RE.finditer(line))
         if not open_matches:
             # Keep tracking docstring state even without open() text.
-            state.open_quote = _multiline_quote_after(line, state.open_quote)
+            _advance_quote_state(state, line)
             continue
 
         # Evaluate the string state at the matched open() offset, not at
@@ -781,9 +889,92 @@ def _scan_open_calls(
             warnings.extend(match_warnings)
         # Advance the multiline-quote state exactly once per line, after
         # all matches are processed.
-        state.open_quote = _multiline_quote_after(line, state.open_quote)
+        _advance_quote_state(state, line)
 
     return errors, warnings
+
+
+def _classify_open_match(
+    open_match: re.Match[str],
+    line: str,
+) -> tuple[str, str]:
+    """Classify one open() match as skip, duplicate, receiver or builtin.
+
+    A longer identifier ending in `open` (popen, fdopen, reopen, Popen) is
+    not a builtin open()/os.open() call.  A receiver match is either a
+    method call `receiver.open(...)` or a name that merely ends in `os`
+    (`someos.open(...)`), where the regex match begins at the `os.` inside
+    the receiver.  For a plain `os.open()` the call produces a SECOND,
+    dot-preceded match — that duplicate is skipped because the `os.open`
+    match itself is handled through the builtin branch.
+    """
+    prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
+    prev_nonspace = " "
+    look = open_match.start() - 1
+    while look >= 0 and line[look] in " \t":
+        look -= 1
+    if look >= 0:
+        prev_nonspace = line[look]
+    matched = open_match.group()
+    if (prev_char.isalnum() or prev_char == "_") and matched.startswith("open"):
+        return prev_char, "skip"
+    if prev_nonspace == ".":
+        return prev_char, "receiver"
+    if (prev_char.isalnum() or prev_char == "_") and matched.startswith("os."):
+        return prev_char, "receiver"
+    return prev_char, "builtin"
+
+
+FSTRING_OPEN = re.compile(r"(?:[fF][rR]?|[rR][fF])(['\"])")
+
+
+def _fstring_closed_before(
+    line: str, opener: re.Match[str], quote: str, pos: int,
+) -> bool:
+    """True when the f-string owned by *opener* closes before *pos*."""
+    cursor = opener.end()
+    if line.startswith(quote * 2, cursor):
+        # Triple-quoted literal: the closing delimiter is three quotes.
+        cursor += 2
+        closing = quote * 3
+    else:
+        closing = quote
+    found = line.find(closing, cursor)
+    return found != -1 and found < pos
+
+
+def _replacement_depth(
+    line: str, start: int, pos: int, initial: int = 0,
+) -> int:
+    """Brace depth of replacement fields between *start* and *pos*."""
+    depth = initial
+    index = start
+    while index < pos:
+        if line.startswith("{{", index) or line.startswith("}}", index):
+            index += 2
+            continue
+        if line[index] == "{":
+            depth += 1
+        elif line[index] == "}":
+            depth = max(0, depth - 1)
+        index += 1
+    return depth
+
+
+def _in_fstring_expression(line: str, pos: int) -> bool:
+    """True when *pos* sits inside an f-string replacement field.
+
+    A replacement field is executable code even though the scan sees an
+    open string literal, so live calls inside it must still be audited.
+    """
+    depth = 0
+    for opener in FSTRING_OPEN.finditer(line):
+        if opener.start() >= pos:
+            break
+        if _fstring_closed_before(line, opener, opener.group(1), pos):
+            continue
+        depth = _replacement_depth(line, opener.end(), pos)
+    return depth > 0
 
 
 def _scan_single_open_match(
@@ -810,20 +1001,28 @@ def _scan_single_open_match(
         # A comment line cannot contain a live call.
         return match_errors, match_warnings
 
+    fstring_expression = in_string and _executable_fstring_position(
+        state, line, open_match.start()
+    )
+    if fstring_expression:
+        # An f-string replacement field is executable code: audit the
+        # call instead of treating it as literal string text.
+        in_string = False
+    if in_string or in_comment:
+        # The call itself sits inside a string literal or a trailing
+        # comment (for example after a multiline string closes), so it
+        # is not live code and no probe may scan it.
+        return match_errors, match_warnings
+
     segment_end = (
         open_matches[match_idx + 1].start()
         if match_idx + 1 < len(open_matches)
         else len(line)
     )
-    prev_char = line[open_match.start() - 1] if open_match.start() > 0 else " "
-    if prev_char == ".":
-        # Method call `receiver.open(...)`.  The OPEN_CALL_RE match
-        # sits on the `open` token; os.open() produces a SECOND,
-        # dot-preceded match inside the same call — skip that
-        # duplicate (the `os.open` match starts at `os` and is
-        # handled through the builtin branch).
-        if re.match(r"os\.$", line[max(0, open_match.start() - 3):open_match.start()]):
-            return match_errors, match_warnings
+    _, kind = _classify_open_match(open_match, line)
+    if kind == "skip":
+        return match_errors, match_warnings
+    if kind == "receiver":
         # Scope receiver extraction to this match's segment (from the
         # receiver start through the next open() match) so an earlier
         # call on the same line cannot mis-attribute this one's
@@ -844,13 +1043,26 @@ def _scan_single_open_match(
         # extractor cannot resolve (f-string, concatenation, call
         # result, Path() wrap) is an unaudited sink, not a skip: a
         # dynamic expression may embed user-derived components.
-        if _has_complex_open_argument(line, state.open_quote):
-            _emit_unaudited_warning(match_warnings, state.rel, lineno)
-        return match_errors, match_warnings
-
-    if in_string or in_comment:
-        # A simple identifier inside a docstring or trailing comment
-        # is still not a call.
+        # The probe scans only this call's segment, so the quote state
+        # must be recomputed at the match: a multiline string may close
+        # earlier on the same line, leaving the call in live code.  A
+        # call inside an f-string replacement field is code, so no quote
+        # state applies.
+        quote_at_match = (
+            None
+            if fstring_expression
+            else _multiline_quote_after(line[: open_match.start()], state.open_quote)
+        )
+        span_end = _call_span_end(line, open_match.start())
+        if _has_complex_open_argument(
+            line[open_match.start():span_end], quote_at_match
+        ):
+            _emit_unaudited_warning(
+                match_warnings,
+                state.rel,
+                lineno,
+                line[open_match.start():segment_end].strip()[:80],
+            )
         return match_errors, match_warnings
 
     call_errors, call_warnings = _classify_open_call(

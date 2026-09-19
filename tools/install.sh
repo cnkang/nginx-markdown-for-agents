@@ -1315,6 +1315,10 @@ repo_name = os.environ.get("REPO_NAME", "")
 ref_name = os.environ.get("REF_NAME", "main")
 
 if not all([asset_name, os_type, arch, nginx_version, repo_name]):
+    # The shell reader assigns RELEASE_INFO[0..5] positionally.
+    print("")
+    print("")
+    print("")
     print("")
     print("")
     print("")

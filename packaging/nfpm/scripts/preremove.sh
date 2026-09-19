@@ -23,7 +23,10 @@ set -euo pipefail
 # Constants
 ##############################################################################
 
-MODULE_REFERENCE_PATTERN='^[[:space:]]*load_module[[:space:]]+"?[^;]*ngx_http_markdown_filter_module\.so"?[[:space:]]*;'
+# The path may carry no quote, a double quote, or a single quote: all three
+# are legal load_module arguments, so an unquoted-or-double-quoted-only class
+# let a single-quoted directive slip past the removal guard.
+MODULE_REFERENCE_PATTERN='^[[:space:]]*load_module[[:space:]]+["'"'"']?[^;]*ngx_http_markdown_filter_module\.so["'"'"']?[[:space:]]*;'
 FORCE_REMOVE_SENTINEL="/etc/nginx/markdown-module-force-remove"
 # One-shot, content-bound forced-removal acknowledgement: the sentinel file
 # must contain exactly this token (operator-written when acknowledging a

@@ -946,7 +946,10 @@ pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
 /// become a Rust `str`; the FFI/parser boundary rejects malformed UTF-8 before
 /// this helper is reached.
 pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
-    if url.chars().any(|ch| ch == '\0' || ch.is_control()) {
+    /* `char::is_control()` covers the whole Unicode Cc category, which
+     * includes NUL (U+0000), so no separate `ch == '\0'` term is needed —
+     * checked explicitly below in tests so the coverage cannot regress. */
+    if url.chars().any(char::is_control) {
         return true;
     }
     let trimmed = url.trim();
@@ -1028,6 +1031,12 @@ pub(crate) fn escape_markdown_destination(url: &str) -> Cow<'_, str> {
     let mut escaped = String::with_capacity(capacity);
     escaped.push('<');
     for ch in url.chars() {
+        /* Each match arm expands to exactly two characters, which is why
+         * `markdown_destination_escaped_capacity` charges 2 bytes per
+         * `<`, `>`, `\`, `\n`, `\r`, and `\t`; the two must stay in step.
+         * Control characters outside this list still pass through — the
+         * sanitizer (`sanitize_url_value`) rejects them upstream, and the
+         * full-buffer/streaming emitters share this one representation. */
         match ch {
             '<' => escaped.push_str("\\<"),
             '>' => escaped.push_str("\\>"),
@@ -1304,6 +1313,71 @@ mod url_validation_tests {
     #[test]
     fn test_url_with_null_byte() {
         assert!(url_contains_control_chars("https://example.com/\0path"));
+    }
+
+    /// `is_dangerous_url_value` relies on `char::is_control` to cover NUL, so
+    /// pin the coverage that the removed `ch == '\0'` term used to provide.
+    #[test]
+    fn test_is_dangerous_url_value_rejects_nul_via_is_control() {
+        assert!(
+            '\0'.is_control(),
+            "NUL must be in the Unicode Cc category that char::is_control covers"
+        );
+        assert!(is_dangerous_url_value("https://example.com/\0path"));
+        assert!(is_dangerous_url_value("javascript:\0alert(1)"));
+        assert!(sanitize_url_value("https://example.com/\0path").is_none());
+        /* Neighbours on both sides of NUL are rejected too, so the check is
+         * a category test and not a single-codepoint special case. */
+        for code in [0x01u32, 0x1f, 0x7f] {
+            let text = format!("https://example.com/{}path", char::from_u32(code).unwrap());
+            assert!(
+                is_dangerous_url_value(&text),
+                "U+{code:04X} must be rejected"
+            );
+        }
+        /* An ordinary URL still passes. */
+        assert!(!is_dangerous_url_value("https://example.com/path"));
+    }
+
+    /// The two-character escape arms in `escape_markdown_destination` must
+    /// stay in step with the capacity accounting in
+    /// `markdown_destination_escaped_capacity`: a mismatch either over-reserves
+    /// (harmless) or under-reserves (a reallocation the caller budgeted
+    /// against).  This pins each escapable character to exactly two emitted
+    /// characters — the property the capacity formula charges 2 bytes for —
+    /// and checks the reported capacity covers the produced string.
+    #[test]
+    fn test_destination_escape_arms_are_two_chars_and_fit_capacity() {
+        for ch in ['<', '>', '\\', '\n', '\r', '\t'] {
+            /* The URL is the escapable character alone: the wrapper adds the
+             * `<`/`>` pair, so the result must be exactly four characters
+             * (wrapper, two-char escape, wrapper). */
+            let url = ch.to_string();
+            let capacity = markdown_destination_escaped_capacity(&url)
+                .expect("capacity must be computable for a small URL");
+            let escaped = escape_markdown_destination(&url);
+            assert_eq!(
+                escaped.chars().count(),
+                1 + 2 + 1,
+                "escaping {ch:?} must expand one char to two inside the wrapper: {escaped:?}"
+            );
+            assert!(
+                escaped.len() <= capacity,
+                "escaped {ch:?} needs {} bytes but capacity reported {capacity}",
+                escaped.len()
+            );
+        }
+    }
+
+    /// The escape arms above are the only characters the wrapper treats
+    /// specially; everything else is copied verbatim (1:1 in bytes).
+    #[test]
+    fn test_destination_escape_leaves_other_chars_verbatim() {
+        let url = "https://example.com/a(1)/b?c=d#e";
+        assert_eq!(
+            escape_markdown_destination(url).as_ref(),
+            "<https://example.com/a(1)/b?c=d#e>"
+        );
     }
 
     #[test]

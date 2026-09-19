@@ -336,9 +336,11 @@ test_decision_path_struct_init(void)
     dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-    dp.reason_code = "SKIP_ACCEPT";
+    dp.reason_code = "skipped_accept";
     dp.stage = "eligibility";
     dp.duration_ms = 0;
+    TEST_ASSERT(strcmp(dp.reason_code, "skipped_accept") == 0,
+        "skip path: reason_code is the registry string");
 
     TEST_ASSERT(
         strcmp(dp.accept_result,

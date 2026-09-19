@@ -9,6 +9,7 @@
 #   - markdown_diagnostics on; (enabled in nginx.conf)
 #   - allow directive configured for test client IP
 #   - curl available
+#   - python3 available (HEAD body probe)
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
 #
 # Test Scenario:
@@ -39,15 +40,6 @@ NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 DIAGNOSTICS_PATH="/nginx-markdown/diagnostics"
 PASS_COUNT=0
 FAIL_COUNT=0
-HEAD_BODY_FILE=""
-
-cleanup() {
-    if [[ -n "$HEAD_BODY_FILE" ]]; then
-        rm -f "$HEAD_BODY_FILE"
-    fi
-    return 0
-}
-trap cleanup EXIT
 
 pass() {
     local msg="$1"
@@ -64,6 +56,11 @@ fail() {
 check_prerequisites() {
     if ! command -v curl >/dev/null 2>&1; then
         echo "Error: curl is required" >&2
+        exit 2
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 is required for the HEAD body probe" >&2
         exit 2
     fi
 
@@ -231,14 +228,59 @@ case "$HEAD_CODE" in
         ;;
 esac
 
-HEAD_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/diagnostics-head.XXXXXX")"
-HEAD_BODY_SIZE="-1"
+HEAD_BODY_SIZE=""
 HEAD_REQUEST_RC=0
-curl -sf -o "$HEAD_BODY_FILE" -X HEAD \
-    "${NGINX_URL}${DIAGNOSTICS_PATH}" >/dev/null 2>&1 \
-    || HEAD_REQUEST_RC=$?
-if [[ "$HEAD_REQUEST_RC" -eq 0 ]]; then
-    HEAD_BODY_SIZE="$(wc -c < "$HEAD_BODY_FILE" | tr -d '[:space:]')"
+HEAD_BODY_SIZE="$(python3 - "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null <<'PROBE'
+import socket
+import ssl
+import sys
+import time
+import urllib.parse
+
+parsed = urllib.parse.urlparse(sys.argv[1])
+path = parsed.path or "/"
+if parsed.query:
+    path += "?" + parsed.query
+host = parsed.hostname or "localhost"
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
+try:
+    raw_sock = socket.create_connection((host, port), timeout=10)
+    if parsed.scheme == "https":
+        context = ssl.create_default_context()
+        sock = context.wrap_socket(raw_sock, server_hostname=host)
+    else:
+        sock = raw_sock
+    with sock:
+        request = "HEAD {0} HTTP/1.1\r\nHost: {1}\r\nConnection: close\r\n\r\n".format(
+            path, parsed.netloc
+        )
+        sock.sendall(request.encode("ascii"))
+        deadline = time.monotonic() + 10
+        max_bytes = 1 << 20
+        data = b""
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or len(data) > max_bytes:
+                print("-1")
+                sys.exit(0)
+            sock.settimeout(remaining)
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+except OSError:
+    print("-1")
+    sys.exit(0)
+
+head_end = data.find(b"\r\n\r\n")
+if head_end < 0 or not data.startswith(b"HTTP/"):
+    print("-1")
+else:
+    print(len(data) - head_end - 4)
+PROBE
+)" || HEAD_REQUEST_RC=$?
+if [[ "$HEAD_REQUEST_RC" -ne 0 || -z "$HEAD_BODY_SIZE" ]]; then
+    HEAD_BODY_SIZE="-1"
 fi
 
 if [[ "$HEAD_BODY_SIZE" -gt 0 ]]; then
@@ -246,7 +288,7 @@ if [[ "$HEAD_BODY_SIZE" -gt 0 ]]; then
 elif [[ "$HEAD_BODY_SIZE" -lt 0 ]]; then
     fail "HEAD response body size could not be measured"
 else
-    pass "HEAD response has no body content (${HEAD_BODY_SIZE} bytes downloaded)"
+    pass "HEAD response has no body content (${HEAD_BODY_SIZE} bytes after headers)"
 fi
 
 # --- Summary ---

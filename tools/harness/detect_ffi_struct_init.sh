@@ -28,8 +28,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
-REPO_ROOT="${SCRIPT_DIR}/../.."
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 # Structs that have Rust-provided init helpers
 GUARDED_STRUCTS=(
@@ -42,12 +43,42 @@ GUARDED_STRUCTS=(
 
 violations=0
 
+if [[ ! -d "${SRC_DIR}" || ! -r "${SRC_DIR}" ]]; then
+    echo "ERROR: source directory is missing or not readable: ${SRC_DIR}" >&2
+    exit 2
+fi
+file_list="$(mktemp "${TMPDIR:-/tmp}/ffi-struct-files.XXXXXX")" || {
+    echo "ERROR: cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+# Test translation units are excluded at enumeration time: fixture files
+# intentionally embed ngx_memzero/memset shapes to exercise this detector, so
+# auditing them reports the fixture as a production violation (pre-rc9 the
+# exclusion lived on each per-file grep; the NUL-safe collector switch dropped
+# it for Phase 2).
+if ! harness_collect_find0 "$file_list" "${SRC_DIR}" \
+    \( -name '*.c' -o -name '*.h' \) -type f ! -name '*_test.c' 2>/dev/null; then
+    echo "ERROR: cannot enumerate source files in ${SRC_DIR}" >&2
+    exit 2
+fi
+
 # ── Phase 1: Direct struct-name on memzero/memset line ──
+memzero_raw_rc=0
+memzero_raw="$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null)" \
+    || memzero_raw_rc=$?
+if [[ "$memzero_raw_rc" -gt 1 ]]; then
+    echo "ERROR: grep failed scanning ${SRC_DIR}" >&2
+    exit 2
+fi
+# The filters run on the captured text once; the per-struct loop below only
+# narrows the already-captured lines, so the recursive scan is not repeated
+# per guarded struct.
+memzero_clean="$(printf '%s\n' "$memzero_raw" \
+    | grep -v "_test\.c" \
+    | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' || true)"
 for struct in "${GUARDED_STRUCTS[@]}"; do
-    matches=$(grep -rn -E "ngx_memzero|memset" "${SRC_DIR}" 2>/dev/null \
-        | grep -v "_test\\.c" \
-        | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
-        | grep -i "${struct}" || true)
+    matches="$(printf '%s\n' "$memzero_clean" | grep -i "${struct}" || true)"
     if [[ -n "${matches}" ]]; then
         echo "VIOLATION [phase1]: Direct memset/ngx_memzero on ${struct}:" >&2
         echo "${matches}" >&2
@@ -59,19 +90,25 @@ done
 # For each production source file, find declarations of guarded structs,
 # extract variable names, then check if those variables are passed to
 # ngx_memzero/memset anywhere in the same file.
-while IFS= read -r src_file; do
+while IFS= read -r -d '' src_file; do
     for struct in "${GUARDED_STRUCTS[@]}"; do
         # Find variable declarations: "struct <Name> <varname>",
         # "struct <Name> *<varname>", or typedef aliases such as
         # "<Name> <varname>".
         # Extract variable names from declarations
-        var_names=$(grep -nE "(struct[[:space:]]+)?${struct}[[:space:]]+\**[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*" "${src_file}" 2>/dev/null \
+        names_raw_rc=0
+        names_raw="$(grep -nE "(struct[[:space:]]+)?${struct}[[:space:]]+\**[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*" "${src_file}" 2>/dev/null)" \
+            || names_raw_rc=$?
+        if [[ "$names_raw_rc" -gt 1 ]]; then
+            echo "ERROR: grep failed reading ${src_file} for ${struct} declarations" >&2
+            exit 2
+        fi
+        var_names="$(printf '%s\n' "$names_raw" \
             | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)|typedef|#include' \
             | sed -E -n \
                 -e 's/.*struct[[:space:]]+'"${struct}"'[[:space:]]+\**[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*).*/\1/p' \
                 -e 's/.*(^|[^a-zA-Z0-9_])'"${struct}"'[[:space:]]+\**[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*).*/\2/p' \
-            | sort -u \
-            || true)
+            | sort -u || true)"
         if [[ -z "${var_names}" ]]; then
             continue
         fi
@@ -84,11 +121,18 @@ while IFS= read -r src_file; do
             # Look for: ngx_memzero(&varname, sizeof(varname)) or
             #           ngx_memzero(&varname, sizeof(*varname)) or
             #           memset(&varname, 0, sizeof(varname))
-            memzero_hits=$(grep -n -E "ngx_memzero|memset" "${src_file}" 2>/dev/null \
-                | grep -v "_test\\.c" \
+            memzero_raw_rc=0
+            memzero_raw="$(grep -n -E "ngx_memzero|memset" "${src_file}" 2>/dev/null)" \
+                || memzero_raw_rc=$?
+            if [[ "$memzero_raw_rc" -gt 1 ]]; then
+                echo "ERROR: grep failed reading ${src_file} for ${varname} memzero calls" >&2
+                exit 2
+            fi
+            memzero_hits="$(printf '%s\n' "$memzero_raw" \
+                | grep -v "_test\.c" \
                 | grep -vE '(^|:)[0-9]+:[[:space:]]*(/\*|\*|//)' \
                 | grep -E "[&*][[:space:]]*${varname}([^a-zA-Z0-9_]|$)" \
-                | grep "sizeof" || true)
+                | grep "sizeof" || true)"
             if [[ -n "${memzero_hits}" ]]; then
                 echo "VIOLATION [phase2]: ngx_memzero/memset on ${struct} variable '${varname}' in ${src_file}:" >&2
                 echo "${memzero_hits}" >&2
@@ -96,7 +140,7 @@ while IFS= read -r src_file; do
             fi
         done <<< "${var_names}"
     done
-done < <(find "${SRC_DIR}" -name '*.c' -o -name '*.h' | grep -v "_test\\.c" | sort)
+done < "$file_list"
 
 if [[ ${violations} -gt 0 ]]; then
     echo >&2

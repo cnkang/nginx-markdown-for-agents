@@ -24,12 +24,12 @@ from collections import deque
 import subprocess
 import sys
 from dataclasses import dataclass
-
-from pre_push_gates import load_gates
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+
+from tools.ci.pre_push_gates import load_gates
 
 
 @dataclass
@@ -102,8 +102,27 @@ def _changed_files(base: str) -> list[str] | None:
     return [name for name in out.split("\0") if name]
 
 
-C_BUILD_PREFIXES = ("components/nginx-module/",)
-C_BUILD_FILES = ("Makefile",)
+# Keep this list explicit: it is the local counterpart of the CI C-test
+# dependency surface.  A selector that only recognizes C translation units can
+# skip GCC after an ABI/header or gate-control change, which is exactly when
+# compiler parity is most useful.
+C_BUILD_PREFIXES = (
+    "components/nginx-module/",
+    "components/rust-converter/src/ffi/",
+)
+C_BUILD_FILES = (
+    "Makefile",
+    "build.sh",
+    "components/rust-converter/cbindgen.toml",
+    "components/rust-converter/reason_registry.toml",
+    "components/rust-converter/src/ffi.rs",
+    "components/rust-converter/include/markdown_converter.h",
+    "components/nginx-module/src/markdown_converter.h",
+    "tools/ci/pre_push_profile.py",
+    "tools/ci/pre_push_gates.py",
+    "tools/ci/pre_push_gates.json",
+    "tools/ci/test_pre_push_profile.py",
+)
 C_BUILD_SUFFIXES = (".sh", ".mk")
 
 
@@ -185,7 +204,7 @@ def _select(gates: list[Gate], changed: list[str]) -> list[Outcome]:
     for gate in gates:
         if gate.needs_c_change and not c_changed:
             outcomes.append(
-                Outcome(gate, "NOT_RUN", "no C source changed in this push")
+                Outcome(gate, "NOT_RUN", "no C/build-control input changed in this push")
             )
             continue
         outcomes.append(_run(gate))

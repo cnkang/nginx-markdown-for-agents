@@ -7,6 +7,7 @@ on:
     paths:
       - "AGENTS.md"
       - "CHANGELOG.md"
+      - "build.sh"
       - "components/**"
       - "schemas/**"
       - "tools/**"
@@ -29,6 +30,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - ".clusterfuzzlite/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
@@ -39,6 +41,7 @@ on:
     paths:
       - "AGENTS.md"
       - "CHANGELOG.md"
+      - "build.sh"
       - "components/**"
       - "schemas/**"
       - "tools/**"
@@ -61,6 +64,7 @@ on:
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
+      - ".clusterfuzzlite/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
@@ -160,10 +164,14 @@ jobs:
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'
+              - 'components/nginx-module/src/markdown_converter.h'
+              - 'tools/ci/coverage_gate.py'
               - 'rust-toolchain.toml'
             nginx:
               - 'components/nginx-module/**'
               - 'Makefile'
+              - 'components/rust-converter/include/markdown_converter.h'
+              - 'tools/ci/coverage_gate.py'
             e2e:
               - 'components/nginx-module/**'
               - 'components/rust-converter/**'
@@ -171,6 +179,7 @@ jobs:
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
               - 'tools/ci/verify_non_streaming_nginx_module.sh'
+              - 'tools/ci/verify_real_nginx_ims.sh'
               - 'Makefile'
             perf:
               - 'components/rust-converter/**'
@@ -201,6 +210,12 @@ jobs:
               - 'tools/ci/pre_push_gates.py'
               - 'tools/ci/pre_push_gates.json'
               - 'tools/ci/test_pre_push_profile.py'
+              - 'tools/ci/coverage_gate.py'
+              - 'tools/ci/validate_required_workflow_contexts.py'
+              - 'tools/ci/test_validate_required_workflow_contexts.py'
+              - 'tools/ci/verify_real_nginx_ims.sh'
+              - 'build.sh'
+              - '.clusterfuzzlite/**'
               - 'tools/sonar/**'
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
@@ -213,6 +228,16 @@ jobs:
               # checks, so a change there must re-run the gate.
               - 'tools/complexity/**'
               - 'tools/build_release/**'
+              # Rule 73 audits every tracked shell surface and Rule 61 audits
+              # the baselines, so a change to a packaging script, a
+              # compatibility test, an example script or a baseline must
+              # re-run the harness gate that reads it.  Without these the
+              # audit would never see the change it exists to judge.
+              - 'tools/**/*.sh'
+              - 'packaging/**/*.sh'
+              - 'tests/**/*.sh'
+              - 'examples/kubernetes/**/*.sh'
+              - 'perf/baselines/**'
               - '.github/workflows/**'
             contract_gates:
               - 'schemas/**'
@@ -774,6 +799,12 @@ jobs:
           REQUIRE_FILTER_ORDERING_ALL=1 REQUIRE_AUTH_SUBREQUEST=1 \
             ./tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh
 
+      - name: Run upstream-trailer native qualification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: |
+          ./tools/e2e/verify_upstream_trailers_e2e.sh --nginx-bin "${NGINX_BIN}" --port 18119
+
       - name: Run compatibility contract suites
         # The removed-directive / upgrade-rollback contract tests require a
         # module-enabled binary in the shared canonical allowlist location.
@@ -810,7 +841,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [on, off]
+        # Quoted so every YAML 1.1 loader reads the mode names, not booleans:
+        # PyYAML's safe_load turns an unquoted on/off into True/False, and a
+        # consumer that string-compares the mode would then misread it.
+        mode: ["on", "off"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -317,10 +317,10 @@ def _cmd_detect_platform(_args: argparse.Namespace) -> int:
 def _cmd_extract_baseline(args: argparse.Namespace) -> int:
     """
     Create a baseline report from a measurement report and write it to the specified output path.
-    
+
     Parameters:
         args (argparse.Namespace): Contains the input measurement path, optional platform override, and output path.
-    
+
     Returns:
         int: `0` after the baseline is written successfully.
     """

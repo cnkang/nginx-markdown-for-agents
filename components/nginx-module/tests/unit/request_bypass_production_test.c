@@ -58,19 +58,58 @@ static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
         } \
     } while (0)
 
+/*
+ * Log sinks.  NGINX's ngx_log_* macros compile their format and arguments
+ * away in non-debug builds, so a stub that ignores them leaves production
+ * variables "set but not used" only in the test translation unit.  Consume
+ * every argument through a never-executed sink call (same idiom as
+ * tests/include/nginx_stubs/ngx_core.h) so the test build reports the
+ * production warning surface, not an artifact of the stub.
+ */
+static void
+ngx_http_markdown_test_log_sink(const char *fmt, ...)
+{
+    (void) fmt;
+}
+
 #ifdef ngx_log_error
 #undef ngx_log_error
 #endif
 #define ngx_log_error(level, log, err, fmt, ...) \
-    do { (void) (level); (void) (log); (void) (err); } while (0)
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink((fmt), ##__VA_ARGS__); } \
+    } while (0)
 
-#define ngx_log_debug0(...) ((void) 0)
-#define ngx_log_debug1(...) ((void) 0)
-#define ngx_log_debug2(...) ((void) 0)
-#define ngx_log_debug3(...) ((void) 0)
-#define ngx_log_debug4(...) ((void) 0)
-#define ngx_log_debug5(...) ((void) 0)
-#define ngx_log_debug6(...) ((void) 0)
+#define ngx_log_debug0(level, log, err, fmt) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink(fmt); } } while (0)
+#define ngx_log_debug1(level, log, err, fmt, a1) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink(fmt, (a1)); } } while (0)
+#define ngx_log_debug2(level, log, err, fmt, a1, a2) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink(fmt, (a1), (a2)); } } while (0)
+#define ngx_log_debug3(level, log, err, fmt, a1, a2, a3) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink(fmt, (a1), (a2), (a3)); } \
+    } while (0)
+#define ngx_log_debug4(level, log, err, fmt, a1, a2, a3, a4) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { ngx_http_markdown_test_log_sink(fmt, (a1), (a2), (a3), (a4)); } \
+    } while (0)
+#define ngx_log_debug5(level, log, err, fmt, a1, a2, a3, a4, a5) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { \
+             ngx_http_markdown_test_log_sink(fmt, (a1), (a2), (a3), (a4), (a5)); \
+         } \
+    } while (0)
+#define ngx_log_debug6(level, log, err, fmt, a1, a2, a3, a4, a5, a6) \
+    do { (void) (level); (void) (log); (void) (err); \
+         if (0) { \
+             ngx_http_markdown_test_log_sink(fmt, (a1), (a2), (a3), (a4), (a5), \
+                                             (a6)); \
+         } \
+    } while (0)
 
 #define ngx_memzero(dst, n)       memset((dst), 0, (n))
 #define ngx_memcpy(dst, src, n)   memcpy((dst), (src), (n))
@@ -207,6 +246,10 @@ ngx_module_t ngx_http_core_module = { 0 };
 #define ngx_http_get_module_main_conf(request, module) (NULL)
 
 static struct MarkdownConverterHandle *ngx_http_markdown_converter;
+
+/* Shared empty-string literal read by the conversion failure logger
+ * (owned by module_state_impl.h in production). */
+u_char ngx_http_markdown_empty_string[] = "";
 
 static ngx_http_variable_value_t *
 ngx_http_get_variable(ngx_http_request_t *r, ngx_str_t *name,

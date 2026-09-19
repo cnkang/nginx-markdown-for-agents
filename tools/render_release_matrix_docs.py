@@ -259,6 +259,24 @@ def _validate_basic_entry(index: int, entry: dict[str, Any]) -> list[str]:
             f"Entry {index}: release_blocking must be boolean, "
             f"got {type(blocking).__name__}"
         )
+    digest = entry.get("feature_manifest_digest")
+    if not isinstance(digest, str) or re.fullmatch(
+        r"sha256:[0-9a-f]{64}", digest
+    ) is None:
+        errors.append(
+            f"Entry {index}: feature_manifest_digest must be "
+            f"'sha256:<64 lowercase hex>', got {digest!r}"
+        )
+    abi_version = entry.get("abi_version")
+    if (
+        not isinstance(abi_version, int)
+        or isinstance(abi_version, bool)
+        or abi_version <= 0
+    ):
+        errors.append(
+            f"Entry {index}: abi_version must be a positive integer, "
+            f"got {abi_version!r}"
+        )
     return errors
 
 

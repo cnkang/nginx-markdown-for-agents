@@ -46,7 +46,9 @@ CLI contract:
   --fail-on-review    Implies --strict and additionally exits 1 on REVIEW
                       findings.  Use this gate when the repository should not
                       ship any unreviewed dynamic/unknown regex.
-  Default (neither)   Advisory: exit 0 regardless of findings.
+  Default (neither)   Advisory: exit 0 regardless of findings; scan errors
+                      (read failures, parse errors) still exit 1, because an
+                      incomplete scan is never a pass.
 
 This is a heuristic detector (no full NFA analysis).  It flags known-bad
 structural patterns and dynamic injection risks.  False positives should be
@@ -4443,12 +4445,46 @@ def _scan_shell_file(
 
 
 def _should_exclude(path: Path, repo_root: Path) -> bool:
+    """Return whether a path lies in an excluded directory.
+
+    The check runs on both the literal path and its resolved form: a symlink
+    whose target sits in an excluded directory (node_modules, target, ...)
+    must be excluded the same way the target itself would be — otherwise the
+    exclusion is bypassed at the file-name level.
+    """
+    for candidate in (path, path.resolve()):
+        try:
+            rel = candidate.relative_to(repo_root)
+        except ValueError:
+            continue
+        if any(part in _EXCLUDE_DIRS for part in rel.parts):
+            return True
+    return False
+
+
+def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
+    """Return whether a resolved path stays inside the given root."""
     try:
-        rel = path.relative_to(repo_root)
+        resolved.relative_to(repo_root)
     except ValueError:
         return False
-    parts = rel.parts
-    return any(part in _EXCLUDE_DIRS for part in parts)
+    return True
+
+
+def _containment_root(
+    valid_dirs: list[Path], args: argparse.Namespace,
+) -> Path:
+    """Return the root that scanned files must resolve inside.
+
+    For an explicit --path/--directory the requested root is the contract, so
+    a scan of an external fixture directory still works while symlinks that
+    escape *that* root are still refused.  Under the default scope the
+    repository root is the contract.
+    """
+    if (args.path or args.directory) and valid_dirs:
+        requested = valid_dirs[0]
+        return requested if requested.is_dir() else requested.parent
+    return REPO_ROOT
 
 
 def _collect_dir_files(
@@ -4470,6 +4506,38 @@ def _collect_dir_files(
     return files
 
 
+def _record_symlinked_dirs(
+    scan_dir: Path, errors: list[ScanError],
+) -> None:
+    """Record symlinked directories encountered under a scan dir.
+
+    ``rglob`` does not descend symbolic-link directories (Python 3.11-3.13),
+    so files reachable only through a symlinked directory are silently
+    unscanned.  A warning listing the links makes that invisible gap visible;
+    the default traversal behaviour is unchanged.
+    """
+    try:
+        entries = sorted(scan_dir.rglob("*"))
+    except OSError as e:
+        errors.append(ScanError(
+            file_path=str(scan_dir), line=0,
+            message=f"cannot enumerate scan directory: {e}",
+        ))
+        return
+    for entry in entries:
+        try:
+            if entry.is_symlink() and entry.is_dir():
+                errors.append(ScanError(
+                    file_path=str(entry), line=0,
+                    message=(
+                        "symlinked directory is not descended by the scan; "
+                        "files reachable only through it are unscanned"
+                    ),
+                ))
+        except OSError:
+            continue
+
+
 def _deduplicate_files(files: list[Path]) -> list[Path]:
     seen: set[Path] = set()
     unique: list[Path] = []
@@ -4483,11 +4551,44 @@ def _deduplicate_files(files: list[Path]) -> list[Path]:
 
 def _collect_files(
     scan_dirs: list[Path], repo_root: Path,
-) -> list[Path]:
+    containment_root: Path | None = None,
+) -> tuple[list[Path], list[ScanError]]:
+    """Collect scannable files plus the containment/symlink diagnostics.
+
+    Every candidate is checked for containment on its resolved path, relative
+    to *containment_root* — the repository root for the default scope, or the
+    explicitly requested scan root when the caller passed --path/--directory.
+    A symlink escaping the requested root would otherwise pull external file
+    text into the report, contradicting the read-path policy the resolver
+    (``validate_read_path``) already enforces.  Out-of-root candidates are
+    skipped and recorded; symlinked directories are recorded as visible
+    warnings because ``rglob`` does not descend them.
+    """
     files: list[Path] = []
+    errors: list[ScanError] = []
+    root = (containment_root or repo_root).resolve()
+    repo_root = repo_root.resolve()
     for scan_dir in scan_dirs:
-        files.extend(_collect_dir_files(scan_dir, repo_root))
-    return _deduplicate_files(files)
+        if scan_dir.is_dir():
+            _record_symlinked_dirs(scan_dir, errors)
+        candidates = _collect_dir_files(scan_dir, repo_root)
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            try:
+                rel = str(candidate.relative_to(repo_root))
+            except ValueError:
+                rel = str(candidate)
+            if not _within_repo_root(resolved, root):
+                errors.append(ScanError(
+                    file_path=rel, line=0,
+                    message=(
+                        f"skipped: resolves outside the scan root "
+                        f"({resolved})"
+                    ),
+                ))
+                continue
+            files.append(candidate)
+    return _deduplicate_files(files), errors
 
 
 # ---------------------------------------------------------------------------
@@ -4524,13 +4625,28 @@ def _resolve_scan_dirs(args: argparse.Namespace) -> tuple[list[Path], int | None
 def _validate_scan_dirs(
     scan_dirs: list[Path], args: argparse.Namespace,
 ) -> tuple[list[Path], int | None]:
+    """Validate scan roots; a missing default directory is a hard error.
+
+    When no path/directory was requested, the default scope is the contract:
+    a renamed or moved directory silently narrows the scan surface and CI
+    stays green.  Each default directory must therefore exist — a missing one
+    is ``ERROR: default scan directory missing`` and a non-zero exit — so an
+    empty result always means "clean", never "did not look".
+    """
     valid_dirs: list[Path] = []
+    explicit_scope = bool(args.path or args.directory)
     for d in scan_dirs:
         if d.is_dir() or d.is_file():
             valid_dirs.append(d)
-        elif args.path or args.directory:
+        elif explicit_scope:
             print(
                 f"ERROR: scan path does not exist: {d}",
+                file=sys.stderr,
+            )
+            return [], 1
+        else:
+            print(
+                f"ERROR: default scan directory missing: {d}",
                 file=sys.stderr,
             )
             return [], 1
@@ -4623,6 +4739,15 @@ def _compute_exit_code(
             review_count,
             ' REVIEW finding(s) require attention (non-blocking in --strict mode)',
         )
+    if parse_error_count > 0:
+        # Scan errors are never advisory: an incomplete scan must not be
+        # reported with the same shape as a clean pass (the empty-file-list
+        # guard above fails closed for the same reason).
+        print(
+            f"FAIL: {parse_error_count} scan error(s)",
+            file=sys.stderr,
+        )
+        return 1
     if error_count > 0:
         print(
             f"WARN: {error_count} blocking finding(s) (advisory)",
@@ -4695,12 +4820,36 @@ def main() -> int:
     if exit_code is not None:
         return exit_code
 
-    files = _collect_files(valid_dirs, REPO_ROOT)
+    files, collect_errors = _collect_files(
+        valid_dirs, REPO_ROOT, _containment_root(valid_dirs, args),
+    )
     if not files:
-        print("OK: no files to scan", file=sys.stderr)
-        return 0
+        # Containment/symlink diagnostics are printed even when nothing was
+        # collected — an empty scan that hid a refused path would be the same
+        # fail-open the empty-list guard exists to prevent.
+        _output_results([], collect_errors, args)
+        if collect_errors:
+            print(
+                f"FAIL: {len(collect_errors)} scan error(s)",
+                file=sys.stderr,
+            )
+            return 1
+        # An empty file list is only a clean result when an explicit scope
+        # legitimately has nothing to scan.  Under the default scope it means
+        # the scan surface vanished (renamed directory, wrong checkout), so it
+        # must not be reported with the same shape as "clean".
+        if args.path or args.directory:
+            print("OK: no files to scan", file=sys.stderr)
+            return 0
+        print(
+            "ERROR: no files to scan under the default scope "
+            f"({', '.join(_DEFAULT_SCAN_DIRS)})",
+            file=sys.stderr,
+        )
+        return 1
 
     all_findings, all_errors = _scan_files(files)
+    all_errors = collect_errors + all_errors
     _output_results(all_findings, all_errors, args)
     return _compute_exit_code(all_findings, all_errors, args)
 

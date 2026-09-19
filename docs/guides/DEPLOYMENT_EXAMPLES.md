@@ -301,6 +301,10 @@ presets spell out the retained directives so they remain auditable in
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
+    # max_inflight is http-context only: the module rejects it in server
+    # and location blocks.
+    markdown_limits max_inflight=64;
+
     upstream backend {
         server 127.0.0.1:8080;
     }
@@ -311,7 +315,7 @@ http {
         markdown_cache_validation ims_only;
         markdown_streaming auto;
         markdown_limits conversion_memory=64m conversion_timeout=30s
-            parser_timeout=10s max_inflight=64;
+            parser_timeout=10s;
 
         location /docs/ {
             markdown_filter on;
@@ -334,6 +338,10 @@ load_module modules/ngx_http_markdown_filter_module.so;
 http {
     markdown_trusted_proxies 10.0.0.0/8 172.16.0.0/12;
 
+    # max_inflight is http-context only: the module rejects it in server
+    # and location blocks.
+    markdown_limits max_inflight=32;
+
     upstream backend {
         server 127.0.0.1:8080;
     }
@@ -344,7 +352,7 @@ http {
         markdown_cache_validation full;
         markdown_streaming off;
         markdown_limits conversion_memory=128m conversion_timeout=10s
-            parser_timeout=10s max_inflight=32;
+            parser_timeout=10s;
 
         location /docs/ {
             markdown_filter on;
@@ -366,6 +374,10 @@ overhead.
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
+    # max_inflight is http-context only: the module rejects it in server
+    # and location blocks.
+    markdown_limits max_inflight=128;
+
     upstream backend {
         server 127.0.0.1:8080;
     }
@@ -377,7 +389,7 @@ http {
         markdown_cache_validation off;
         markdown_streaming force;
         markdown_limits conversion_memory=256m conversion_timeout=30s
-            parser_timeout=10s streaming_buffer=16m max_inflight=128;
+            parser_timeout=10s streaming_buffer=16m;
 
         location /api/docs/ {
             markdown_filter on;
@@ -396,6 +408,11 @@ Different paths can use different explicit policies via NGINX inheritance:
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
+    # max_inflight is http-context only: the module rejects it in server
+    # and location blocks. It is a worker-wide bound, so one value covers
+    # every location below.
+    markdown_limits max_inflight=64;
+
     upstream docs_backend { server 127.0.0.1:8080; }
     upstream api_backend  { server 127.0.0.1:9090; }
 
@@ -405,14 +422,14 @@ http {
         markdown_cache_validation ims_only;
         markdown_streaming auto;
         markdown_limits conversion_memory=64m conversion_timeout=30s
-            parser_timeout=10s max_inflight=64;
+            parser_timeout=10s;
 
         # Public docs: full caching for CDN
         location /docs/ {
             markdown_cache_validation full;
             markdown_streaming off;
             markdown_limits conversion_memory=128m conversion_timeout=10s
-                parser_timeout=10s max_inflight=32;
+                parser_timeout=10s;
             markdown_filter on;
             proxy_pass http://docs_backend;
         }
@@ -423,7 +440,7 @@ http {
             markdown_cache_validation off;
             markdown_streaming force;
             markdown_limits conversion_memory=256m conversion_timeout=30s
-                parser_timeout=10s streaming_buffer=16m max_inflight=128;
+                parser_timeout=10s streaming_buffer=16m;
             markdown_filter on;
             proxy_pass http://api_backend;
         }
@@ -583,6 +600,7 @@ Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Presets moved max_inflight into the http block; the module accepts it there only |
 | 0.9.2 | 2026-08-24 | Kang | Bot-targeted verification block now sends an explicit non-bot User-Agent and explains why HTML passes through |
 | 0.9.2 | 2026-08-18 | Hermes | Split long sentence in bot-list management guidance |
 | 0.9.0 | 2026-06-28 | Kang | Added profile-based deployment examples (balanced, strict_cache, streaming_first, mixed profiles per location) |

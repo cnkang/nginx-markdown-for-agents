@@ -49,6 +49,7 @@ typedef struct {
 typedef struct {
     ngx_atomic_uint_t backpressure_resume_total;
     ngx_atomic_uint_t backpressure_resume_failure_total;
+    ngx_atomic_uint_t conversion_peak_memory_bytes;
 } ngx_http_markdown_metrics_performance_snapshot_t;
 
 typedef struct {
@@ -471,6 +472,8 @@ ngx_http_markdown_collect_performance_snapshot(
         metrics->perf.backpressure_resume_total;
     snapshot->perf.backpressure_resume_failure_total =
         metrics->perf.backpressure_resume_failure_total;
+    snapshot->perf.conversion_peak_memory_bytes =
+        metrics->perf.conversion_peak_memory_bytes;
 }
 
 /**
@@ -614,8 +617,24 @@ ngx_http_markdown_metrics_to_v1(
     latency_count = v1->duration_full_buffer.count
         + v1->duration_streaming.count;
     if (latency_count == 0) {
-        /* Legacy counters are exclusive per-band counts, so map them directly
-         * to the matching v1 bands before the renderer accumulates thresholds. */
+        /*
+         * v1-first rule: the engine-specific v1 histograms are authoritative
+         * and are consumed whenever EITHER carries observations (latency_count
+         * > 0).  The legacy exclusive-band counters are a fallback for a
+         * snapshot whose v1 histograms are still empty, and they are dropped
+         * once any v1 observation exists.  A rolling pulse that resets a v1
+         * histogram while legacy counters still hold pre-reset tallies
+         * therefore discards those legacy tallies by design: mixing the two
+         * generations would double-count bands the v1 producer already
+         * reported, and the window they describe is no longer current.
+         *
+         * Legacy counters are exclusive per-band counts, so map them directly
+         * to the matching v1 bands before the renderer accumulates thresholds.
+         * Only the three bands the legacy producer actually records are
+         * populated; the remaining v1 bands stay zero and the renderer's
+         * cumulative accumulation leaves them at the preceding band's value
+         * (the legacy producer never observed those thresholds).
+         */
         v1->duration_full_buffer.buckets[2] =
             snapshot->conversion_latency.le_10ms;
         v1->duration_full_buffer.buckets[5] =
@@ -633,12 +652,13 @@ ngx_http_markdown_metrics_to_v1(
     v1->output_bytes = snapshot->output_bytes;
     /*
      * The conversion peak is a conversion-wide gauge, not a streaming one, so it
-     * is populated in every build from the field the recorder maintains.
+     * is populated in every build from the collected snapshot (which the
+     * recorder fills from the same perf field).  Reading the snapshot rather
+     * than the live global keeps the rendered value consistent with the rest
+     * of the document and honors the zeroed-snapshot contract.
      */
-    if (ngx_http_markdown_metrics != NULL) {
-        v1->conversion_peak_memory_bytes =
-            ngx_http_markdown_metrics->perf.conversion_peak_memory_bytes;
-    }
+    v1->conversion_peak_memory_bytes =
+        snapshot->perf.conversion_peak_memory_bytes;
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->output_bytes += snapshot->streaming.selection.output_bytes_total;
 #endif

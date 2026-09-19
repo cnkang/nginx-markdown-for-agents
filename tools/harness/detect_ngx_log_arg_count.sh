@@ -19,10 +19,22 @@
 set -euo pipefail
 
 SRC_DIR="components/nginx-module/src"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "  [ngx-log-args] Source directory not found: $SRC_DIR" >&2
     exit 0
+fi
+
+file_list="$(mktemp "${TMPDIR:-/tmp}/ngx-log-files.XXXXXX")" || {
+    echo "  [ngx-log-args] Cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$file_list"' EXIT
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name '*.c' -o -name '*.h' \) -type f 2>/dev/null; then
+    echo "  [ngx-log-args] Cannot enumerate source files in $SRC_DIR" >&2
+    exit 2
 fi
 
 VIOLATIONS=0
@@ -202,7 +214,6 @@ done < <(
     # Join continuation lines and prefix with file:line.
     # Two cases: explicit backslash continuation, and implicit multi-line
     # function calls (open paren without close on same line).
-    find "$SRC_DIR" \( -name '*.c' -o -name '*.h' \) -print0 2>/dev/null |
     while IFS= read -r -d '' f; do
         awk '
             /\\$/ {
@@ -234,7 +245,7 @@ done < <(
                 }
             }
         ' "$f"
-    done |
+    done < "$file_list" |
     grep -E 'ngx_log_(debug|error)[0-8]' || true
 )
 

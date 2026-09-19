@@ -492,20 +492,59 @@ def _parse_document_update_version(
     return (tuple(numeric), remainder)
 
 
-def _document_update_table_lines(content: str) -> list[str]:
-    """Extract the first table under a Document Updates heading."""
-    match = re.search(r"^## Document Updates\s*$", content, re.MULTILINE | re.IGNORECASE)
-    if match is None:
-        return []
+_DOCUMENT_UPDATES_HEADING_RE = re.compile(
+    r"^ {0,3}## Document Updates[ \t]*$", re.MULTILINE | re.IGNORECASE
+)
+# A heading of level one or two closes the section.  A deeper heading
+# (`### ...`) stays inside it, so a table filed under a sub-heading is still
+# part of the same ledger.
+_DOCUMENT_UPDATES_SECTION_END_RE = re.compile(r"^ {0,3}#{1,2}(?:\s|$)", re.MULTILINE)
 
-    table_lines: list[str] = []
-    for line in content[match.end() :].splitlines():
-        stripped = line.strip()
-        if stripped.startswith("|"):
-            table_lines.append(line)
-        elif table_lines or stripped.startswith("#"):
-            break
-    return table_lines
+
+def _document_updates_section(content: str) -> str:
+    """Return the text from the Document Updates heading to the next H2."""
+    match = _DOCUMENT_UPDATES_HEADING_RE.search(content)
+    if match is None:
+        return ""
+    remainder = content[match.end() :]
+    end = _DOCUMENT_UPDATES_SECTION_END_RE.search(remainder)
+    return remainder if end is None else remainder[: end.start()]
+
+
+def _document_update_tables(content: str) -> list[list[str]]:
+    """Return every Markdown table inside the Document Updates section.
+
+    Reading only the first table let a second table in the same section carry
+    any row order unnoticed, so each contiguous run of table rows is returned
+    as its own table.  A table placed under this heading is ledger data by
+    definition, which is what makes the ordering contract enforceable.
+    """
+    tables: list[list[str]] = []
+    current: list[str] = []
+    for line in _document_updates_section(content).splitlines():
+        if line.strip().startswith("|"):
+            current.append(line)
+            continue
+        if current:
+            tables.append(current)
+            current = []
+    if current:
+        tables.append(current)
+    return tables
+
+
+def _document_update_table_lines(content: str) -> list[str]:
+    """Extract every table row under a Document Updates heading.
+
+    The union of the section's tables: the ignore-set consumers treat a line
+    returned here as recorded history rather than prose, and every ledger
+    table in the section is history.
+    """
+    return [
+        line
+        for table_lines in _document_update_tables(content)
+        for line in table_lines
+    ]
 
 
 def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
@@ -543,7 +582,12 @@ def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
 
 
 def check_document_updates_order(files: list[Path]) -> list[str]:
-    """Verify Document Updates tables use descending version/date order."""
+    """Verify every Document Updates table uses descending version/date order.
+
+    The whole section is checked, not just its first table: a second table in
+    the same section is part of the same ledger, so it is held to the same
+    ordering contract.
+    """
     errors: list[str] = []
 
     for f in files:
@@ -552,14 +596,15 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
         except OSError:
             continue
 
-        if not _document_update_rows_are_sorted(
-            _document_update_table_lines(content)
+        for table_number, table_lines in enumerate(
+            _document_update_tables(content), 1
         ):
-            errors.append(
-                f"{f}: '## Document Updates' table rows must be maintained "
-                "in descending chronological order (highest version and "
-                "newest date on top)"
-            )
+            if not _document_update_rows_are_sorted(table_lines):
+                errors.append(
+                    f"{f}: '## Document Updates' table {table_number} rows must "
+                    "be maintained in descending chronological order (highest "
+                    "version and newest date on top)"
+                )
 
     return errors
 

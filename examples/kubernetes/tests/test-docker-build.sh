@@ -19,6 +19,9 @@
 #   -t, --tag TAG           Image tag to use (default: nginx-markdown-test:latest)
 #   -c, --context PATH      Docker build context (default: repository root)
 #   --module-sha SHA        Reviewed full module commit (default: context HEAD)
+#   --module-ref REF        Commit ref the build forwards alongside the reviewed
+#                           --module-sha; it complements that value and does
+#                           not replace it
 #   --no-cleanup            Keep the built image after test (default: remove)
 #   -h, --help              Show this help message
 #
@@ -46,6 +49,8 @@
 #
 # NOTES:
 #   - Requires: docker (or compatible runtime like podman)
+#   - Requires: git with network access to MODULE_REPO, used to prove the
+#     reviewed commit is remotely fetchable before the build starts
 #   - macOS bash 3.2 compatible (no bash 4+ features)
 #   - Messages to stderr; only final PASS/FAIL summary to stdout
 #
@@ -65,6 +70,7 @@ IMAGE_TAG="nginx-markdown-test:latest"
 BUILD_CONTEXT=""
 MODULE_SHA=""
 MODULE_REPO="${MODULE_REPO:-https://github.com/cnkang/nginx-markdown-for-agents.git}"
+MODULE_REF="${MODULE_REF:-}"
 CLEANUP="yes"
 RUNTIME_CONTAINER=""
 PASS_COUNT=0
@@ -155,9 +161,52 @@ resolve_module_sha() {
         return 2
     fi
 
-    if ! git -C "$BUILD_CONTEXT" fetch --dry-run "$MODULE_REPO" \
-        "$MODULE_SHA" >/dev/null 2>&1; then
+    # Reachability is a property of the REMOTE, so the probe must not inherit
+    # the build context's object store.  `git -C "$BUILD_CONTEXT" fetch
+    # --dry-run` answers "present locally OR served by the remote": inside a
+    # worktree it returns 0 for a commit that was never pushed, and the
+    # Dockerfile's `git fetch --depth 1 origin ${MODULE_SHA}` then fails
+    # mid-build.  An empty object store drops the local half, so only a commit
+    # the remote actually serves passes.  It also works from a source tarball
+    # with no .git directory at all, which the context-relative probe could
+    # not handle even when MODULE_SHA was passed explicitly.
+    if ! command -v git >/dev/null 2>&1; then
+        log_error "git is required to verify MODULE_SHA reachability"
+        return 2
+    fi
+    local probe_dir
+    local probe_rc=0
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/module-sha-probe.XXXXXX")" || {
+        log_error "Cannot create a temporary probe repository"
+        return 2
+    }
+    if ! git -C "$probe_dir" init -q 2>/dev/null; then
+        log_error "Cannot initialize the temporary probe repository: $probe_dir"
+        rm -rf "$probe_dir"
+        return 2
+    fi
+    probe_rc=0
+    # Probe reachability from the isolated empty object store, mirroring the
+    # image build's resolution: the exact MODULE_SHA first, then an
+    # explicitly provided MODULE_REF, verifying the resolved commit is
+    # exactly MODULE_SHA before accepting.
+    git -C "$probe_dir" fetch --dry-run "$MODULE_REPO" "$MODULE_SHA" \
+        >/dev/null 2>&1 || probe_rc=$?
+    if [[ "$probe_rc" -ne 0 && -n "$MODULE_REF" ]]; then
+        probe_rc=0
+        git -C "$probe_dir" fetch -q "$MODULE_REPO" "$MODULE_REF" \
+            >/dev/null 2>&1 || probe_rc=$?
+        if [[ "$probe_rc" -eq 0 ]]; then
+            fetched="$(git -C "$probe_dir" rev-parse "FETCH_HEAD^{commit}" 2>/dev/null)" || fetched=""
+            if [[ "$fetched" != "$MODULE_SHA" ]]; then
+                probe_rc=1
+            fi
+        fi
+    fi
+    rm -rf "$probe_dir"
+    if [[ "$probe_rc" -ne 0 ]]; then
         log_error "MODULE_SHA ${MODULE_SHA} is not reachable from MODULE_REPO ${MODULE_REPO}"
+        log_error "Push the reviewed commit, pass a published one with --module-sha, or pass the commit by ref with --module-ref"
         return 2
     fi
     return 0
@@ -191,11 +240,17 @@ test_docker_build() {
 
     local build_output
     local build_rc
+    local module_ref_args=()
+
+    if [[ -n "${MODULE_REF}" ]]; then
+        module_ref_args=(--build-arg "MODULE_REF=${MODULE_REF}")
+    fi
 
     build_output="$(docker build \
         -f "$DOCKERFILE" \
         --build-arg "MODULE_REPO=${MODULE_REPO}" \
         --build-arg "MODULE_SHA=${MODULE_SHA}" \
+        "${module_ref_args[@]}" \
         -t "$IMAGE_TAG" \
         "$BUILD_CONTEXT" 2>&1)" || build_rc=$?
 
@@ -303,6 +358,7 @@ error_log /tmp/markdown-http.error;
 events { worker_connections 64; }
 http {
     markdown_filter on;
+    default_type text/html;
     server {
         listen 8080;
         root /tmp/markdown-html;
@@ -462,6 +518,14 @@ parse_args() {
                     return 2
                 fi
                 MODULE_SHA="$2"
+                shift 2
+                ;;
+            --module-ref)
+                if [[ "$#" -lt 2 ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 2
+                fi
+                MODULE_REF="$2"
                 shift 2
                 ;;
             --no-cleanup)

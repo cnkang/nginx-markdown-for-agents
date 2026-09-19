@@ -81,11 +81,6 @@ ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
         return NULL;
     }
 
-    if (size > (size_t) -1
-        - sizeof(ngx_http_markdown_full_brotli_allocation_t))
-    {
-        return NULL;
-    }
     total = sizeof(ngx_http_markdown_full_brotli_allocation_t) + size;
     if (ngx_http_markdown_full_brotli_reserve(
             ctx->counter, ctx->limit, total) != NGX_OK)

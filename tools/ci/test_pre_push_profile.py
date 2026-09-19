@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 # Run with PYTHONPATH=tools/ci, the way the aggregate entry runs the other
@@ -53,6 +54,33 @@ def test_c_changes_select_the_gcc_gate() -> None:
     assert outcomes[0].status == "PASS"
 
 
+def test_abi_and_gate_control_changes_select_the_gcc_gate() -> None:
+    """ABI and selector inputs must receive real-GCC coverage too."""
+    gate = profile.Gate("real GCC C unit suite", ["true"], needs_c_change=True)
+
+    for path in (
+        "components/rust-converter/src/ffi.rs",
+        "components/rust-converter/include/markdown_converter.h",
+        "components/nginx-module/src/markdown_converter.h",
+        "tools/ci/pre_push_gates.json",
+    ):
+        outcomes = profile._select([gate], changed=[path])
+        assert outcomes[0].status == "PASS", path
+
+
+def test_module_entrypoint_can_be_run_with_python_m() -> None:
+    """The documented module invocation must not depend on PYTHONPATH hacks."""
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.ci.pre_push_profile", "--list"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_shared_declaration_is_strict() -> None:
     """Invalid data cannot become a different command or selection condition."""
     import pytest
@@ -65,6 +93,8 @@ def test_shared_declaration_is_strict() -> None:
                     [{**valid, "command": []}], [{**valid, "requires_nginx": None}]):
         with pytest.raises(ValueError):
             validate_gates(invalid)
+    with pytest.raises(ValueError):
+        validate_gates([{**valid, "unexpected": True}])
 
 
 def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys, tmp_path):
@@ -139,3 +169,38 @@ def test_a_gate_that_cannot_start_fails_the_profile(monkeypatch, capsys, tmp_pat
     # main() parses argv[1:], so the program name comes first.
     assert profile.main(["pre_push_profile", "--base", "base"]) == 1
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_rule_66_manifest_patterns_cover_the_selector_surface() -> None:
+    """Every selector that can trigger the gate resolves to a manifest claim.
+
+    Forward: each C_BUILD entry must match at least one rule-66 pattern, so a
+    change the profile runs GCC for is also claimed by the routing manifest.
+    Reverse: non-triggers must stay unclaimed, so the manifest cannot
+    overstate coverage.
+    """
+    import fnmatch
+
+    manifest = json.loads(
+        (REPO_ROOT / "docs/harness/routing-manifest.json").read_text(encoding="utf-8")
+    )
+    entry = next(e for e in manifest["rule_checks"] if e["rule"] == "66")
+    patterns = entry["files"]
+
+    def claimed(path: str) -> bool:
+        return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+
+    for prefix in profile.C_BUILD_PREFIXES:
+        assert claimed(prefix + "probe.c"), prefix
+        assert claimed(prefix + "nested/probe.rs"), prefix
+    for path in profile.C_BUILD_FILES:
+        assert claimed(path), path
+    for suffix in profile.C_BUILD_SUFFIXES:
+        assert claimed(f"tools/ci/probe{suffix}"), suffix
+
+    for path in (
+        "docs/harness/core.md",
+        "components/rust-converter/src/converter.rs",
+        "tools/ci/check_checks.py",
+    ):
+        assert not claimed(path), path

@@ -125,7 +125,17 @@ pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     if *len_field == 0 {
         // Non-NULL pointer with a zero length cannot be reconstructed into
         // a valid boxed slice; clear the pointer defensively instead of
-        // dereferencing invalid parts.
+        // dereferencing invalid parts.  The allocation referenced by the
+        // pointer leaks by design (see the function-level docs), so surface
+        // the inconsistent pair in debug builds: it means a caller-side
+        // (data, len) corruption that would otherwise be invisible in
+        // production.  Release builds keep the silent defensive behavior.
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "free_buffer: inconsistent (ptr, len) pair — non-NULL pointer with \
+             len == 0; leaking the allocation and clearing the pointer (caller-side \
+             corruption of an FFI result buffer)"
+        );
         *ptr_field = ptr::null_mut();
         return;
     }

@@ -284,6 +284,11 @@ run_module_behavior_smoke() {
     local vary_ok=0
     local body_ok=0
     local diagnostics_ok=0
+    # Set when only some of the three EXPECTED_* release identity variables are
+    # present.  That is a harness configuration error, not a module defect, and
+    # it must fail with its own message instead of the generic contract
+    # mismatch below (which would send the operator hunting for a module bug).
+    local diagnostics_harness_incomplete=0
     local i=0
 
     curl_bin="$(command -v curl 2>/dev/null || true)"
@@ -392,6 +397,20 @@ CONF
     fi
     info "Positive module request verified Content-Type, Vary, and Markdown body"
 
+    # A partially configured harness is its own failure mode and must be
+    # reported even when the diagnostics request itself did not succeed;
+    # detect it before the request so the signal cannot be masked.
+    if [[ -n "${EXPECTED_SOURCE_SHA:-}" \
+        || -n "${EXPECTED_RUST_VERSION:-}" \
+        || -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+        if [[ -z "${EXPECTED_SOURCE_SHA:-}" \
+            || -z "${EXPECTED_RUST_VERSION:-}" \
+            || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+            diagnostics_ok=0
+            diagnostics_harness_incomplete=1
+        fi
+    fi
+
     info "Reading diagnostics from the loaded package module..."
     if "$curl_bin" -fsS -o "$diagnostics_file" \
         http://127.0.0.1:19999/nginx-markdown/diagnostics; then
@@ -400,13 +419,9 @@ CONF
             diagnostics_ok=1
         fi
         if [[ -n "${EXPECTED_SOURCE_SHA:-}" \
-            || -n "${EXPECTED_RUST_VERSION:-}" \
-            || -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
-            if [[ -z "${EXPECTED_SOURCE_SHA:-}" \
-                || -z "${EXPECTED_RUST_VERSION:-}" \
-                || -z "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
-                diagnostics_ok=0
-            elif ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
+            && -n "${EXPECTED_RUST_VERSION:-}" \
+            && -n "${EXPECTED_FEATURE_MANIFEST_DIGEST:-}" ]]; then
+            if ! grep -Fq '"build_kind":"release"' "$diagnostics_file" \
                 || ! grep -Fq "\"source_sha\":\"${EXPECTED_SOURCE_SHA}\"" \
                     "$diagnostics_file" \
                 || ! grep -Fq "\"rust_version\":\"${EXPECTED_RUST_VERSION}\"" \
@@ -422,6 +437,12 @@ CONF
     kill "$nginx_pid" 2>/dev/null || true
     wait "$nginx_pid" 2>/dev/null || true
 
+    # Report a partially configured harness as itself: a caller who exports one
+    # release identity variable must set all three, and a generic contract
+    # mismatch message hides that.
+    if [[ "$diagnostics_harness_incomplete" -eq 1 ]]; then
+        die "Release identity harness is only partially configured: EXPECTED_SOURCE_SHA, EXPECTED_RUST_VERSION, and EXPECTED_FEATURE_MANIFEST_DIGEST must be set together (set all three or none)"
+    fi
     if [[ "$diagnostics_ok" -ne 1 ]]; then
         die "Diagnostics response did not match the expected module contract"
     fi

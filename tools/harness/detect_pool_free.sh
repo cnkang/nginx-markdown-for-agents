@@ -46,6 +46,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 # Exit convention: 0 = the scan completed and found nothing, 1 = violations
 # found, 2 = the scan could not be completed.  A missing directory is not a clean
@@ -99,7 +100,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/markdown-pool-free.XXXXXX")" || {
 file_list="${work_dir}/files.list"
 awk_out="${work_dir}/awk.out"
 trap 'rm -rf "${work_dir}"' EXIT
-if ! find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0 | sort -z >"$file_list"; then
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \); then
     echo "ERROR: cannot enumerate ${SRC_DIR}; the scan did not run" >&2
     exit 2
 fi

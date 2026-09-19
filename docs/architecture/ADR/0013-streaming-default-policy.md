@@ -11,6 +11,10 @@
 never selects the streaming path. The threshold only nominates streaming
 candidates. `conversion_memory` plus the remaining eligibility gates still
 decide the path (see the Decision section).
+**Amended**: 2026-09-17 — the active 0.9.2 contract applies no size
+threshold. The threshold nomination described in the previous amendment
+is historical. Every response that clears the eligibility gates is a
+streaming candidate, regardless of its size.
 **Context**: v0.8.0 True Streaming Contract
 
 ## Context
@@ -18,10 +22,12 @@ decide the path (see the Decision section).
 The streaming engine can operate in several modes: always-off (full-buffer
 only), always-on (streaming for all responses), or auto (select streaming or
 full-buffer based on response characteristics). RFC 0008 section 2.1 defines
-the core engine switch and section 2.2 defines the automatic streaming
-threshold for `auto` mode, where responses exceeding a size threshold or using
-chunked transfer encoding target the streaming path, while smaller responses
-remain on the full-buffer path.
+the core engine switch and section 2.2 defined the automatic streaming
+threshold for `auto` mode in the 0.8.0 era. Under that historical rule,
+responses exceeding a size threshold or using chunked transfer encoding
+targeted the streaming path. Smaller responses stayed on the full-buffer
+path. The active 0.9.2 contract applies no size threshold (see the
+2026-09-17 Amendment above).
 
 ADR-0007 established streaming-as-default with auto mode in 0.6.0. This ADR
 extends that decision with the 0.8.0 true streaming contract semantics from
@@ -30,26 +36,32 @@ streaming definition and updated threshold.
 
 ## Decision
 
-Default to `auto` mode per RFC 0008 section 2.1:
+When the operator selects `auto`, the RFC 0008 sections 2.1–2.2 policy applies:
 
-1. Responses with `Content-Length` >= the internal streaming size
-   threshold (target default: 1m) become streaming candidates.  The module
-   selects the true streaming path only after `conversion_memory` and the
-   other eligibility gates pass (RFC 0008 section 2.2).  Size alone never
-   selects the streaming path.  The threshold is an internal constant, not
-   an operator-facing configuration knob.
-   `markdown_stream_threshold` is historical wording from this ADR's era:
-   under the active Config V2 surface only `markdown_streaming
-   off|auto|force` remains a directive.
-2. Responses with chunked transfer encoding (no `Content-Length`) or absent
-   `Content-Length` become streaming candidates (subject to additional
-   eligibility checks per RFC 0008 section 2.2).
-3. All other responses use the full-buffer path.
+1. Under `markdown_streaming auto`, every response that clears the hard
+   eligibility gates is a streaming candidate. `conversion_memory` and the
+   remaining gates decide the path (RFC 0008 section 2.2). Response size is
+   not part of the decision, and no size threshold is active. The 0.8.0-era
+   internal threshold (nominal default: 1m) is historical and distinct from
+   the former `markdown_stream_threshold` directive. That directive was
+   operator-facing in 0.8.0 with a default of 1m. The 0.9.2 release removed
+   it with no replacement, and the remaining tuning limits are
+   `markdown_limits` keys. Under the active Config V2 surface
+   `markdown_streaming off|auto|force` is the only processing-path
+   selector. The `markdown_limits` keys remain active resource-tuning
+   directives.
+2. Chunked transfer encoding and a missing `Content-Length` do not change
+   the path. Those responses face the same eligibility gates as any other
+   response (RFC 0008 section 2.2).
+3. A response that fails a gate is not a streaming candidate. The module
+   then uses the bounded full-buffer engine, or bypasses the filter when
+   the response is not eligible for conversion at all.
 
-The operator may override this default with `markdown_streaming off`
-(full-buffer only) or `markdown_streaming force` (selects streaming for
-every eligible response, see ADR-0023 for the exact contract term).
-`markdown_streaming auto` retains the default policy.
+The 0.6.0-era implicit default was `auto`. 0.9.2 resolves an unset
+`markdown_streaming` to `off` (full-buffer only). Operators opt back in
+with `markdown_streaming auto` (prefer streaming when legal) or
+`markdown_streaming force` (selects streaming for every eligible response,
+see ADR-0023 for the exact contract term).
 
 **`markdown_cache_validation full` interaction (0.9.2 contract, see
 ADR-0023):** `markdown_cache_validation full` combined with
@@ -62,8 +74,13 @@ are streaming-compatible.
 
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code
-path: only responses large enough to materially benefit from bounded-memory
-conversion enter the streaming path targeted by the 0.8.0 release.
+path: under the 0.8.0-era threshold rule, only responses large enough to
+materially benefit from bounded-memory conversion became streaming candidates
+for the path targeted by the 0.8.0 release. That threshold rule is historical.
+The active 0.9.2 contract applies no size threshold: `markdown_streaming auto`
+makes every response that clears the remaining eligibility gates a streaming
+candidate, independent of response length (see the 2026-09-17 Amendment
+above).
 
 ## Consequences
 
@@ -71,43 +88,46 @@ conversion enter the streaming path targeted by the 0.8.0 release.
 
 - Large responses target bounded-memory streaming automatically
   without operator intervention
-- With the default profile, small responses retain the simpler full-buffer
-  path, avoiding state machine overhead for trivial conversions
+- Under the 0.8.0-era threshold rule, small responses kept the simpler
+  full-buffer path, avoiding state machine overhead for trivial conversions
 - Only the `off|auto|force` value semantics survive under the renamed
   `markdown_streaming` directive. This is not a general
   configuration-level backward-compatibility claim. The project removed the
   `markdown_streaming_engine` directive. The parser
   rejects configurations that still reference it.
-  Under `markdown_streaming auto`, responses with a known `Content-Length`
-  below 1m (including the former 32K-1m range) use the full-buffer path.
-  Sizes at or above 1m, chunked responses, and responses without a known
-  `Content-Length` remain streaming candidates
+  Under the 0.8.0-era threshold rule, responses with a known `Content-Length`
+  below 1m (including the former 32K-1m range) used the full-buffer path.
+  That threshold rule is historical. The active 0.9.2 contract makes every
+  response that clears the remaining eligibility gates a streaming
+  candidate, independent of size
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with
   the 0.8.0 true streaming contract
-- Conservative threshold (1m) reduces risk during initial 0.8.0 development
+- The conservative 0.8.0-era threshold (1m) reduced risk during initial
+  0.8.0 development
 
 ### Negative Consequences
 
 - Auto-mode adds a decision branch at request time, slightly increasing code
   complexity
-- Operators must understand the threshold semantics to debug engine selection
-  in production
-- The higher threshold (1m vs 32K) means fewer responses enter the streaming
-  path compared to the 0.6.0 baseline until the team tunes the threshold down in
-  subsequent releases
+- Under the 0.8.0-era threshold rule, operators had to understand the
+  threshold semantics to debug engine selection in production
+- That threshold meant fewer responses entered the streaming path compared
+  to the 0.6.0 baseline. The active 0.9.2 contract applies no size threshold.
 
 ## Alternatives Considered
 
 - **Always-on streaming**: rejected because small responses do not benefit
   from streaming overhead and the full-buffer path is simpler and equally
-  correct for them.
+  correct for them. That rationale is historical. The active 0.9.2 contract
+  applies no size threshold.
 - **Opt-in only (off by default)**: rejected because most deployments with
   large responses would need explicit configuration, reducing out-of-the-box
   value.
 - **Retain 32K threshold from 0.6.0**: rejected for 0.8.0 because a lower
-  threshold increases risk during initial true streaming development. The
-  higher 1m threshold targets only genuinely large responses while the
-  streaming path hardens.
+  threshold increased risk during initial true streaming development. The
+  higher 1m threshold targeted only genuinely large responses while the
+  streaming path hardened. That threshold rule is historical. The active
+  0.9.2 contract applies no size threshold.
 
 ## References
 

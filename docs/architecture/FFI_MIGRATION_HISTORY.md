@@ -46,7 +46,7 @@ release metadata and is not a substitute for this ABI identifier.
 | `markdown_decide_error_behavior`, `markdown_error_to_reason_code` | No production caller | C error policy plus active reason accessors |
 | `markdown_validate_url`, `markdown_is_dangerous_url` | No production caller | Rust converter's internal URL validation |
 | `markdown_get_diagnostics_schema`, `markdown_free_diagnostics` | Separate Rust specimen drifted from the C endpoint | C diagnostics renderer and schema document |
-| `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | Corresponding `_new_with_code` exports |
+| `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | In v0.9.1, `markdown_incremental_new_with_code` and `markdown_streaming_new_with_code`. The incremental family left the boundary in 0.9.2 (see below) |
 | `markdown_streaming_finish`, `markdown_streaming_free`, `markdown_streaming_reason` | No production caller; duplicated finalize/abort/error-code paths | `finalize`, `abort`, `safe_finish`, and return codes |
 
 ## Final v0.9.2 removals
@@ -54,6 +54,7 @@ release metadata and is not a substitute for this ABI identifier.
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
 | Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration, while Rust exposes only production APIs consumed by C, covering request-path decisions only: the runtime dynamic-configuration parser was removed in 0.9.2 |
+| `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | The whole incremental conversion surface left with the `IncrementalConverter` type; the streaming API replaced its use case | Removed; no one-to-one replacement exists. Consumers migrate to the streaming API lifecycle (`markdown_streaming_*`) documented in `FFI_ABI_COMPATIBILITY.md` and [RFC-0008-streaming-conversion-support-contract.md](RFC-0008-streaming-conversion-support-contract.md) |
 
 ## Shared struct policy
 

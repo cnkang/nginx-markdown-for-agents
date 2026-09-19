@@ -610,10 +610,13 @@ ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
  *     - X-Markdown-Tokens header allocation and value formatting
  *     - Cache-Control in-place value rewrite (auth) with allocation
  *     A bounded transaction snapshot is taken before the first operation.
- *     Helpers may use inert list slots or in-place auth rewrites
- *     during prepare, but ANY failure restores the snapshot exactly.
- *     Rust-owned plan resources are freed and `header_plan_apply_error` is
- *     logged.
+ *     Prepare is therefore NOT a no-mutation phase: the plan apply
+ *     invalidates matching entries (hash==0, removed from the response)
+ *     and the helpers rewrite or append entries.  Those mutations are
+ *     permitted only because the snapshot precedes them: ANY failure
+ *     restores the snapshot exactly, leaving the pre-conversion
+ *     representation intact.  Rust-owned plan resources are freed and
+ *     `header_plan_apply_error` is logged on the failure path.
  *
  *   COMMIT PHASE — pointer/scalar assignment only, zero allocations,
  *     unconditional success after successful prepare:
@@ -1213,8 +1216,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     ngx_memzero(&prep, sizeof(ngx_http_markdown_fullcov_prepared_t));
 
     /* ================================================================
-     * PREPARE PHASE: all fallible operations, no r->headers_out mutation
-     * (except inert hash==0 pushes which are observably no-op).
+     * PREPARE PHASE: all fallible operations plus the plan-driven
+     * invalidations.  This phase is NOT free of r->headers_out mutation:
+     * the FFI plan apply invalidates matching entries (Content-Type /
+     * Content-Encoding / Content-Length set to hash==0) and later helpers
+     * rewrite or append entries.  Those mutations are safe because the
+     * bounded transaction snapshot above was taken first: every failure
+     * below restores the snapshot exactly before returning, so an
+     * aborted prepare leaves the pre-conversion representation intact.
      * ================================================================ */
 
     /* FFI plan (Content-Type/Encoding/Length delete-all, ETag placeholder). */

@@ -31,8 +31,12 @@ CANONICAL_REASON_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 EVENT_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 VALID_OUTCOMES = {"converted", "skipped", "failed_open", "failed_closed",
                   "aborted"}
+# Mirrors the stage set in tools/reason-codegen/generate.py.  The retired
+# runtime hot-reload overlay owned a "dynconf" stage, and the generator never
+# accepted that value: keeping it here let an entry pass these tests while
+# codegen rejected it.
 VALID_STAGES = {"eligibility", "decompression", "parsing", "conversion",
-                "precommit", "postcommit", "delivery", "dynconf"}
+                "precommit", "postcommit", "delivery"}
 VALID_ERROR_ORIGINS = {"allocation", "downstream", "invariant", "format",
                        "truncated", "timeout", "memory_budget", "internal",
                        "none"}
@@ -168,7 +172,7 @@ def test_registry_metadata_is_valid():
 
 
 @given(reason_key=REASON_KEYS_STRATEGY)
-@settings(max_examples=200)
+@settings(derandomize=True, max_examples=200)
 def test_every_reason_key_is_canonical(reason_key):
     """Generated reason strings remain lowercase bounded snake_case."""
 
@@ -185,7 +189,7 @@ def test_registry_covers_all_request_states():
 
 
 @given(reason_key=REASON_KEYS_STRATEGY, verbosity=VERBOSITY_STRATEGY)
-@settings(max_examples=200)
+@settings(derandomize=True, max_examples=200)
 def test_verbosity_gating_uses_outcome_metadata(reason_key, verbosity):
     """Info/debug emit all outcomes; warn/error emit failures only."""
 
@@ -194,7 +198,7 @@ def test_verbosity_gating_uses_outcome_metadata(reason_key, verbosity):
 
 
 @given(reason_key=REASON_KEYS_STRATEGY)
-@settings(max_examples=100)
+@settings(derandomize=True, max_examples=100)
 def test_nginx_log_level_uses_outcome_metadata(reason_key):
     """Failure outcomes use WARN and all other outcomes use INFO."""
 
@@ -203,7 +207,7 @@ def test_nginx_log_level_uses_outcome_metadata(reason_key):
 
 
 @given(on_error=st.sampled_from(["pass", "reject"]))
-@settings(max_examples=50)
+@settings(derandomize=True, max_examples=50)
 def test_error_policy_selects_distinct_terminal_reasons(on_error):
     """Pass and reject retain distinct canonical terminal outcomes."""
 
@@ -229,7 +233,7 @@ def test_error_policy_selects_distinct_terminal_reasons(on_error):
     accept=st.sampled_from(["text/markdown", "*/*", "-"]),
     status=st.sampled_from([200, 304, 500]),
 )
-@settings(max_examples=200)
+@settings(derandomize=True, max_examples=200)
 def test_emitted_log_has_required_canonical_fields(
     reason_key,
     method,
@@ -265,7 +269,7 @@ def test_emitted_log_has_required_canonical_fields(
 
 
 @given(reason_key=REASON_KEYS_STRATEGY)
-@settings(max_examples=100)
+@settings(derandomize=True, max_examples=100)
 def test_debug_log_adds_only_bounded_context(reason_key):
     """Debug fields are present only in debug output and remain bounded."""
 

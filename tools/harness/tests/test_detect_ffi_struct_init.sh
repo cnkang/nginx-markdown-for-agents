@@ -101,6 +101,43 @@ else
 fi
 
 rm -f "${src_dir}/typedef_violation.c"
+# Test translation units are excluded from the scan: fixture files embed the
+# defect shape on purpose, so flagging them would report fixtures as
+# production violations.  The paired production file below proves the
+# exclusion is scoped to *_test.c and does not silence real sources.
+cat >"${src_dir}/fixture_test.c" <<'C'
+void f(void) {
+    struct MarkdownResult result;
+    ngx_memzero(&result, sizeof(result));
+}
+C
+output_file="${tmp_dir}/test_unit_excluded.out"
+exit_code=0
+run_detector "${src_dir}" "${output_file}" || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]] && ! grep -q "fixture_test.c" "${output_file}"; then
+    pass "test translation unit (*_test.c) is not audited"
+else
+    fail "test translation unit (*_test.c) is not audited" \
+        "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+fi
+
+cat >"${src_dir}/production_control.c" <<'C'
+void f(void) {
+    struct MarkdownResult result;
+    ngx_memzero(&result, sizeof(result));
+}
+C
+output_file="${tmp_dir}/production_control.out"
+exit_code=0
+run_detector "${src_dir}" "${output_file}" || exit_code=$?
+if [[ "${exit_code}" -ne 0 ]] && grep -q "production_control.c" "${output_file}"; then
+    pass "production file alongside a *_test.c fixture is still audited"
+else
+    fail "production file alongside a *_test.c fixture is still audited" \
+        "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
+fi
+rm -f "${src_dir}/fixture_test.c" "${src_dir}/production_control.c"
+
 cat >"${src_dir}/clean_helper.c" <<'C'
 void f(void) {
     MarkdownResult result;
@@ -127,6 +164,34 @@ else
     fail "allows typedef alias declaration initialized through helper" \
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
+
+# Fail-closed: a failing recursive scan aborts with exit 2.  A PATH stub
+# makes grep fail deterministically, so the case behaves the same for
+# privileged and unprivileged users (chmod-based traps do not stop root).
+scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/ffi-scan.XXXXXX")"
+real_grep="$(command -v grep)"
+mkdir -p "${scan_dir}/src" "${scan_dir}/bin"
+printf 'struct MarkdownOptions opts;\n' >"${scan_dir}/src/readable.c"
+cat >"${scan_dir}/bin/grep" <<STUB
+#!/bin/bash
+for arg in "\$@"; do
+    if [[ "\$arg" == -*r* ]]; then
+        echo "grep: simulated recursive scan failure" >&2
+        exit 2
+    fi
+done
+exec "${real_grep}" "\$@"
+STUB
+chmod +x "${scan_dir}/bin/grep"
+exit_code=0
+PATH="${scan_dir}/bin:${PATH}" bash "${DETECTOR}" "${scan_dir}/src" >"${scan_dir}/out.txt" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed' "${scan_dir}/out.txt"; then
+    pass "a failing recursive scan aborts with exit 2"
+else
+    fail "a failing recursive scan aborts with exit 2" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${scan_dir}/out.txt" | head -c 120)"
+fi
+rm -rf "${scan_dir}"
 
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2

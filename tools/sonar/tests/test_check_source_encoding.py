@@ -133,6 +133,16 @@ class TestCheckerCLI:
 class TestCheckerAdversarialInputs:
     """Validate path, binary, and generated-root contracts in isolation."""
 
+    def test_manifest_rejects_non_utf8_bytes(self, tmp_path: Path) -> None:
+        """A manifest that is not valid UTF-8 must raise the documented
+        manifest RuntimeError, not leak a UnicodeDecodeError."""
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+        manifest = tmp_path / "manifest.json"
+        manifest.write_bytes(b"\xff{}")
+        with pytest.raises(RuntimeError, match="Cannot read exception manifest"):
+            checker._load_manifest(Path("manifest.json"))
+
     def test_manifest_rejects_escape_and_empty_contract_fields(self, tmp_path: Path) -> None:
         checker = load_checker_module()
         checker.REPO_ROOT = tmp_path

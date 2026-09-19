@@ -133,6 +133,24 @@ def test_removed_production_symbol_is_blocked_in_untracked_file(tmp_path: Path) 
     assert any("new_config.rs" in error and "production symbol" in error for error in errors)
 
 
+def test_removed_stream_symbol_regex_is_horizontal_whitespace_only() -> None:
+    """The separator must not span a line break.
+
+    ``\\s`` matched the newline, so adjacent lines that merely ended with
+    "stream" and began with ".engine" were reported as a symbol reference.
+    The tightened pattern keeps every inline form (including spaces and tabs
+    around the dot) and STREAM_ENGINE.
+    """
+    regex = detector.REMOVED_STREAM_SYMBOL_RE
+    assert regex.search("let engine = stream.engine;")
+    assert regex.search("stream . engine")
+    assert regex.search("stream\t.\tengine")
+    assert regex.search("STREAM_ENGINE")
+    # A newline between the tokens is two separate lines, not one symbol.
+    assert not regex.search("stream\n.engine")
+    assert not regex.search("stream\n   .engine")
+
+
 def test_chart_legacy_engine_key_is_blocked(tmp_path: Path) -> None:
     _write_valid_fixture(tmp_path)
     _write(

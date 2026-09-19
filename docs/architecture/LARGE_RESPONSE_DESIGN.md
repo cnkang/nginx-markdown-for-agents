@@ -57,6 +57,13 @@ Response enters the header/body filter chain
         +--- force --------> Streaming Path when all hard gates pass
 ```
 
+Two distinct gate families surround this diagram. A response that is not
+eligible for conversion never reaches the selector: the decision chain
+forwards it unchanged (pass-through, see the design principles above). The
+`Hard eligibility gates` box below the `auto` arm holds the streaming
+pre-selection guards. When one of those guards fails, the response stays
+eligible for conversion and falls back to bounded full-buffer handling.
+
 ### Full-Buffer Path
 
 No changes. The module buffers the complete response body, optionally
@@ -219,6 +226,9 @@ The `incremental` feature is off by default. The 0.9.2 release removed the incre
 
 ### Rust Interface
 
+The 0.9.2 release deleted the `IncrementalConverter` Rust interface and its
+`incremental` Cargo feature (`f71fd8f2`). The 0.8.x builds declared them as:
+
 ```rust
 #[cfg(feature = "incremental")]
 pub struct IncrementalConverter { /* internal state */ }
@@ -230,6 +240,11 @@ impl IncrementalConverter {
     pub fn finalize(self) -> Result<MarkdownResult, ConversionError>;
 }
 ```
+
+That interface is a historical record only. No 0.9.2 build defines or links
+it. The same release removed the `llm_adapter` Rust module together with its
+temporary FFI fields `llm_provider` and `chars_per_token_fixed`, so token
+estimation now uses the fixed built-in 4.0 chars/token heuristic.
 
 ### State Machine
 

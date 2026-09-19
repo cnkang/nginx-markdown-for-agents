@@ -30,9 +30,14 @@ metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus
 installable while a plain NGINX patch upgrade no longer satisfies the
 dependency — the package manager keeps the module and NGINX versions in lock
 step. The RPM metadata additionally requires the `nginx-rX.Y.Z` capability
-published by the official nginx.org NGINX package, alongside the epoch-aware
-closed version bounds. RPM therefore rejects a same-version package that does
-not provide the expected NGINX package ABI capability before installation.
+published by the official nginx.org NGINX package, alongside an
+epoch-flexible floor (`nginx >= X.Y.Z`). Omitting the epoch is deliberate:
+RPM's dependency comparison treats an omitted epoch as epoch 0, so a package
+whose epoch is higher satisfies the floor even when its version component is
+below X.Y.Z — the floor is not version-scoped across epochs. The `%pre`
+scriptlet performs the exact-version check at install time. RPM therefore rejects a
+same-version package that does not provide the expected NGINX package ABI
+capability before installation.
 **Runtime compatibility is only verified for the exact NGINX versions listed
 in the build matrix below**. Loading the module on any other NGINX version
 will fail with a version mismatch before signature checks. Install the
@@ -117,6 +122,15 @@ rebuild tool for existing releases). For the 0.9.2 release cycle the
 never runs on release publication. Both workflows consume the same
 `tools/release-matrix.json` rows, so the matrix rows are the single source of
 truth for which musl versions and architectures ship.
+
+### Checksum signature ownership
+
+`release-packages.yml` is the publishing workflow, and it also owns the detached
+`SHA256SUMS.asc` signature: its `integrity-signature` job runs on a tag push
+inside the protected `release-signing` environment before publication.
+`release-binaries.yml` builds and verifies archives only. It uploads workflow
+artifacts and never signs or publishes release assets, so a `SHA256SUMS.asc`
+on a GitHub Release always comes from the canonical publication path.
 
 ---
 
@@ -381,6 +395,7 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Checksum-signature ownership clarified: release-packages.yml signs, release-binaries.yml never does |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that compatibility-matrix coverage does not imply a published package asset; made artifact names version-neutral templates. |
 | 0.9.1 | 2026-07-17 | Kang | Consolidated build matrix references to prevent version conflicts with dynamic support matrix for v0.9.1. |
 | 0.8.3 | 2026-06-26 | Kang | Updated artifact naming examples to 0.8.3 |

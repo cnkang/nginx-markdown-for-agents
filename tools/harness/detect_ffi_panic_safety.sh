@@ -62,6 +62,7 @@ SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR=""
 STRICT=0
+. "${SCRIPT_DIR}/collect_files.sh"
 
 for arg in "$@"; do
     case "$arg" in
@@ -141,7 +142,11 @@ is_exempt() {
 #    This map is reused by the delegated_catch check.
 
 map_file="${TMPDIR:-/tmp}/ffi_panic_map.$$"
-trap 'rm -f "$map_file" >/dev/null 2>&1' EXIT
+file_list="$(mktemp "${TMPDIR:-/tmp}/ffi-panic-files.XXXXXX")" || {
+    echo "ERROR: cannot create the file list" >&2
+    exit 2
+}
+trap 'rm -f "$map_file" "$file_list" >/dev/null 2>&1' EXIT
 
 : >"$map_file"
 
@@ -152,9 +157,13 @@ if [[ ! -d "$SRC_DIR" || ! -r "$SRC_DIR" ]]; then
     exit 1
 fi
 rs_files=()
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" -type f -name '*.rs' 2>/dev/null; then
+    echo "ERROR: cannot enumerate Rust files in ${SRC_DIR}" >&2
+    exit 2
+fi
 while IFS= read -r -d '' rs_file; do
     rs_files+=("$rs_file")
-done < <(find "$SRC_DIR" -type f -name '*.rs' -print0 2>/dev/null)
+done < "$file_list"
 if [[ ${#rs_files[@]} -eq 0 ]]; then
     echo "PASS: no Rust source files found in ${SRC_DIR}" >&2
     exit 0

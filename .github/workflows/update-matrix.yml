@@ -231,8 +231,8 @@ jobs:
         env:
           REPO_URL: https://github.com/${{ github.repository }}
         run: |
-          echo "::warning::Matrix update branch pushed, but automatic PR creation is blocked."
-          echo "::warning::Open ${REPO_URL}/pull/new/auto/update-matrix to finish the update manually."
+          echo "::warning::Automatic PR creation for the matrix update did not complete."
+          echo "::warning::Check whether the auto/update-matrix branch was pushed (${REPO_URL}/tree/auto/update-matrix) and finish the update manually if needed."
 
       - name: Remind maintainer review for release matrix PR
         if: steps.create_pr.outputs.pull-request-number != ''

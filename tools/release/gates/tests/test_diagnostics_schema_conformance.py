@@ -136,6 +136,9 @@ class TestTopLevelStructure:
     def test_unknown_top_level_field_is_still_rejected(self, doc, added):
         """A new top-level field must fail: additive state belongs in extensions."""
         assume(added not in doc)
+        # `extensions` is the reserved additive container, not an unknown
+        # field; the payload test above already covers its acceptance.
+        assume(added != "extensions")
         doc[added] = {"some": "value"}
         _invalid(doc)
 

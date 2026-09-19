@@ -52,6 +52,8 @@ plain_output="$(
     NGINX_URL=http://fixture TEST_PATH=/markdown GUNZIP_TEST_PATH=/gunzip \
     bash "${FILTER_ORDERING_SCRIPT}" 2>&1
 )"
+# The values are consumed through the quoted eval expressions below.
+# shellcheck disable=SC2034
 plain_status=$?
 strict_output="$(
     PATH="${FAKE_CURL_DIR}:${PATH}" \
@@ -59,6 +61,8 @@ strict_output="$(
     NGINX_URL=http://fixture TEST_PATH=/markdown GUNZIP_TEST_PATH=/gunzip \
     REQUIRE_FILTER_ORDERING_ALL=1 bash "${FILTER_ORDERING_SCRIPT}" 2>&1
 )"
+# The values are consumed through the quoted eval expressions below.
+# shellcheck disable=SC2034
 strict_status=$?
 set -e
 

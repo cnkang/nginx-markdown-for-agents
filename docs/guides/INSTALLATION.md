@@ -122,6 +122,10 @@ Use the authenticated release-bound sequence in [Shortest Success Path](#2-short
 Optional safety switch for NGINX-upgrade scenarios with stale module snippets:
 
 ```bash
+# RELEASE_TAG and INSTALLER are set by the sequence above; this block repeats
+# the definitions so it also runs on its own.
+RELEASE_TAG="<published-release-tag>"
+INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
 sudo env AUTO_DISABLE_STALE_MODULE=1 VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
@@ -1387,6 +1391,8 @@ This is the standard path. The install script runs with `sudo` and auto-detects 
 
 ```bash
 # After completing the authenticated release-bound download and verification:
+RELEASE_TAG="<published-release-tag>"
+INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
 sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
@@ -1669,6 +1675,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Reinstall example blocks define RELEASE_TAG and INSTALLER inline so each block runs on its own |
 | 0.9.2 | 2026-08-24 | Kang | DEB/RPM download commands now save responses to their intended artifact file names with curl -o options; AUTO_DISABLE_STALE_MODULE is passed through sudo env alongside VERSION |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that Linux package commands require published tag assets and checksums; release-candidate matrix entries are not downloadable packages. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |

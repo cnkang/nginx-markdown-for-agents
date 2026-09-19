@@ -72,7 +72,11 @@ echo ""
 # Updated 2026-09-08: 338 — Spec 62 removes the retired runtime dynconf
 # watcher and its 21 associated log sites.  The remaining count is the
 # reviewed static-convergence baseline for this checkout.
-BASELINE_LOG_SITES=334
+# Updated 2026-09-17: 336 — the release-hardening round adds two fail-closed
+# commit diagnostics, both with the canonical `markdown:` prefix:
+# ngx_http_markdown_stream_commit_remove_representation_metadata failure
+# (+1 NGX_LOG_ERR) and the 304 headers-list rollback failure (+1 NGX_LOG_ERR).
+BASELINE_LOG_SITES=336
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0
@@ -198,12 +202,12 @@ WARNING_COUNT=$(echo "$COMPILE_OUTPUT" | grep -ci 'warning:' || true)
 
 if [[ "$WARNING_COUNT" -eq 0 ]]; then
     echo "PASS: No compiler warnings detected"
+    WARNING_STATUS="PASS"
 else
-    # Check if these are pre-existing warnings (not new ones from our changes)
-    # For baseline: record any existing warnings
-    echo "INFO: Found $WARNING_COUNT warning lines in compile output"
-    echo "  (These are pre-existing warnings, not introduced by prefix changes)"
-    echo "PASS: No NEW compiler warnings introduced"
+    echo "FAIL: $WARNING_COUNT compiler warning line(s) in the unit build"
+    echo "$COMPILE_OUTPUT" | grep -i 'warning:' | head -10
+    WARNING_STATUS="FAIL"
+    FAIL=1
 fi
 echo ""
 

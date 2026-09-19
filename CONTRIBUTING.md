@@ -208,8 +208,13 @@ Follow the Conventional Commits specification:
 - `docs`: Documentation changes
 - `style`: Code style changes (formatting and similar adjustments)
 - `refactor`: Code refactoring
+- `perf`: Performance improvements
 - `test`: Adding or updating tests
+- `build`: Build system or dependency changes
+- `ci`: Continuous integration and workflow changes
 - `chore`: Maintenance tasks
+- `release`: Release preparation and version bumps
+- `revert`: Reverting a previous commit
 
 **Examples:**
 ```
@@ -229,6 +234,17 @@ memory leaks and ensure complete conversion.
 
 Fixes #456
 ```
+
+### Release-Candidate Close-Out
+
+During the release-candidate close-out phase, keep each follow-up commit to
+one topic. Squash a series of fixups for the same topic into one commit before
+you push, so the candidate history reads as a sequence of complete changes.
+
+Do not rewrite a multi-topic commit that is already on the candidate branch.
+A rewrite would invalidate the candidate SHA that release evidence binds to,
+and review threads would lose their anchors. Follow the rule from the next
+commit onward instead, and note the deviation in the pull request.
 
 ## Testing Requirements
 
@@ -270,7 +286,7 @@ make -C components/nginx-module/tests unit-eligibility
 ### Test Coverage
 
 - Aim for >80% code coverage for new code
-- Critical paths should have >95% coverage
+- Critical paths must keep >=90% line coverage (`COVERAGE_CRITICAL_MIN`, enforced by `tools/ci/coverage_gate.py`)
 - Include edge cases and error conditions
 
 ## Continuous Integration

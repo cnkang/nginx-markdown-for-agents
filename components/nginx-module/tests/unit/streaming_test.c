@@ -1,11 +1,18 @@
 /*
  * Test: streaming
- *   decompression, body filter chunk processing, backpressure,
- *   Pre-Commit fallback, Post-Commit error handling, config parsing,
- *   output chain construction, size limit, and timeout.
+ *   policy selection, input disposition and pending input, post-commit error
+ *   routing, config parsing, output chain construction, pre-commit strategy
+ *   routing, metrics, and preservation baselines.
  *
  * Feature: nginx-streaming-runtime-and-ffi
- * Validates: decompression safety through backpressure handling
+ *
+ * Scope note: every test kept here exercises a local decision mirror or a
+ * literal contract (see the mirror helpers at the top of the file).  Tests
+ * that only re-asserted hand-copied literals were removed in the 0.9.2
+ * round-2 test-integrity cleanup; the real-call coverage for those
+ * behaviors lives in streaming_impl_test.c, streaming_decomp_test.c,
+ * stream_commit_test.c, config_handlers_impl_test.c, and
+ * streaming_metrics_increment_test.c.
  *
  * All tests are gated with MARKDOWN_STREAMING_ENABLED.
  */
@@ -37,6 +44,23 @@ main(void)
 
 #else /* MARKDOWN_STREAMING_ENABLED */
 
+/*
+ * Production FFI contract header (generated from the Rust side).
+ *
+ * The streaming-gated error codes used by the mirror tests below are taken
+ * from this header instead of being hand-copied: a Rust-side renumbering now
+ * breaks this translation unit at compile/run time instead of drifting
+ * silently.  The `streaming` unit target already supplies
+ * -DMARKDOWN_STREAMING_ENABLED and -I../../rust-converter/include, which is
+ * all this header needs.
+ *
+ * ngx_http_markdown_ffi_layout_check.h also brings the inline ABI-gate
+ * helpers, so the code-value pins below are exercised through a real
+ * production symbol rather than a local literal.
+ */
+#include "../../src/ngx_http_markdown_ffi_layout_check.h"
+#include "../../src/ngx_http_markdown_directive_names.h"
+
 /* Minimal nginx type definitions for testing */
 typedef intptr_t        ngx_int_t;
 typedef uintptr_t       ngx_uint_t;
@@ -49,7 +73,6 @@ typedef size_t          ngx_msec_t;
 #define NGX_AGAIN      -2
 #define NGX_DONE       -4
 #define NGX_DECLINED   -5
-#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 
 #define NGX_HTTP_GET    2
 #define NGX_HTTP_HEAD   4
@@ -65,18 +88,6 @@ typedef size_t          ngx_msec_t;
 #define POLICY_AUTO   1
 #define POLICY_FORCE  2
 
-#define COMMIT_PRE   0
-#define COMMIT_POST  1
-
-/* Error codes (mirror Rust FFI) */
-#define ERROR_SUCCESS            0
-#define ERROR_TIMEOUT            3
-#define ERROR_MEMORY_LIMIT       4
-#define ERROR_BUDGET_EXCEEDED    6
-#define ERROR_STREAMING_FALLBACK 7
-#define ERROR_POST_COMMIT        8
-#define ERROR_INTERNAL           99
-
 /* On-error policy */
 #define ON_ERROR_PASS    0
 #define ON_ERROR_REJECT  1
@@ -85,9 +96,6 @@ typedef size_t          ngx_msec_t;
 #define CONDITIONAL_FULL_SUPPORT         0
 #define CONDITIONAL_IF_MODIFIED_SINCE    1
 #define CONDITIONAL_DISABLED             2
-
-/* Streaming budget default: 2 MiB */
-#define STREAMING_BUDGET_DEFAULT  (2 * 1024 * 1024)
 
 /* ================================================================
  * Lightweight stubs for streaming policy selection tests
@@ -131,51 +139,20 @@ static void test_policy_on_sse(void);
 static void test_policy_auto_large_cl(void);
 static void test_policy_auto_small_cl(void);
 static void test_policy_auto_no_cl(void);
-static void test_decomp_null_safety(void);
-static void test_decomp_empty_input(void);
-static void test_chunk_processing_empty(void);
-static void test_chunk_processing_size_limit(void);
-static void test_backpressure_flag(void);
-static void test_precommit_fallback(void);
-static void test_postcommit_error(void);
-static void test_postcommit_error_ignores_on_error_policy(void);
-static void test_postcommit_error_debug_log_details(void);
 static void test_postcommit_error_various_error_codes(void);
-static void test_config_budget_default(void);
 static void test_config_policy_values(void);
 static void test_output_chain_last_buf(void);
 static void test_output_chain_flush(void);
-static void test_size_limit_precommit(void);
-static void test_size_limit_postcommit(void);
-static void test_timeout_precommit(void);
 static int test_precommit_route(uint32_t error_code, ngx_uint_t on_error);
 
 /* Bug condition exploration test prototypes */
-static void test_fallback_return_value_on_error(void);
-static void test_decomp_incomplete_inflate_error(void);
-static void test_finalize_tail_feed_error(void);
 static void test_config_invalid_static_value(void);
+static void test_production_header_bindings(void);
 
 /* Streaming headers policy test prototypes. */
-static void test_commit_boundary_removes_content_length(void);
-static void test_commit_boundary_removes_content_encoding(void);
-static void test_commit_boundary_skips_content_encoding_no_decomp(void);
-static void test_streaming_no_cl_and_chunked_coexist(void);
-static void test_precommit_no_header_modification(void);
-static void test_commit_boundary_strips_upstream_etag(void);
-static void test_precommit_all_failopen_paths_record_metrics(void);
 static void test_init_failure_respects_error_policy(void);
-static void test_streaming_failopen_increments_global_counter(void);
 
 /* Preservation test prototypes (non-bug-condition baseline) */
-static void test_preserve_normal_feed_returns_ok(void);
-static void test_preserve_fallback_buffer_fail(void);
-static void test_preserve_small_data_complete(void);
-static void test_preserve_empty_input_ok(void);
-static void test_preserve_exceeds_max_size(void);
-static void test_preserve_tail_feed_success(void);
-static void test_preserve_no_tail_data(void);
-static void test_preserve_no_decompression(void);
 static void test_preserve_valid_static_values(void);
 static void test_policy_rejects_variable_expression(void);
 static void test_preserve_duplicate_directive(void);
@@ -540,98 +517,6 @@ test_policy_auto_no_cl(void)
 }
 
 
-/* ================================================================
- * 14.2 Streaming decompression unit tests
- * Feature: nginx-streaming-runtime-and-ffi, decompression safety
- * ================================================================ */
-
-static void
-test_decomp_null_safety(void)
-{
-    TEST_SUBSECTION("Decompression: NULL parameter safety");
-
-    /*
-     * Verify that the decompressor creation logic
-     * handles NULL pool gracefully. We test the
-     * conceptual contract here since we cannot call
-     * the real NGINX pool-based function.
-     */
-    TEST_ASSERT(1, "NULL pool should return NULL");
-    TEST_PASS("Decompression NULL safety verified");
-}
-
-static void
-test_decomp_empty_input(void)
-{
-    TEST_SUBSECTION("Decompression: empty input is no-op");
-
-    /*
-     * An empty chunk (len=0) should produce no output
-     * and return success.
-     */
-    const u_char *out_data = NULL;
-    size_t        out_len = 0;
-
-    /* Simulate: empty input produces empty output */
-    TEST_ASSERT(out_data == NULL && out_len == 0,
-        "Empty input should produce no output");
-    TEST_PASS("Empty decompression input handled");
-}
-
-/* ================================================================
- * 14.3 Streaming body filter chunk processing
- * Feature: nginx-streaming-runtime-and-ffi, chunk processing
- * ================================================================ */
-
-static void
-test_chunk_processing_empty(void)
-{
-    TEST_SUBSECTION("Chunk processing: empty buffer is no-op");
-
-    /*
-     * An empty buffer (pos == last) should be skipped
-     * without calling feed().
-     */
-    u_char  data[1] = {0};
-    size_t  feed_len;
-
-    /* Simulate: pos == last means zero-length chunk */
-    feed_len = 0;
-    TEST_ASSERT(feed_len == 0,
-        "Empty buffer should produce zero feed length");
-    TEST_PASS("Empty chunk processing verified");
-
-    UNUSED(data);
-}
-
-static void
-test_chunk_processing_size_limit(void)
-{
-    size_t  total_input;
-    size_t  max_size;
-
-    TEST_SUBSECTION(
-        "Chunk processing: cumulative size limit check");
-
-    total_input = 0;
-    max_size = 1024;
-
-    /* Simulate feeding chunks that exceed max_size */
-    total_input += 512;
-    TEST_ASSERT(total_input <= max_size,
-        "First chunk should be within limit");
-
-    total_input += 600;
-    TEST_ASSERT(total_input > max_size,
-        "Cumulative input should exceed limit");
-    TEST_PASS("Size limit tracking works");
-}
-
-/* ================================================================
- * 14.4 Backpressure handling
- * Feature: nginx-streaming-runtime-and-ffi, backpressure handling
- * ================================================================ */
-
 typedef struct {
     ngx_uint_t  commit_state;
     void       *pending_output;
@@ -639,114 +524,18 @@ typedef struct {
     size_t      total_output_bytes;
 } test_streaming_ctx_t;
 
-static void
-test_backpressure_flag(void)
-{
-    unsigned int  buffered;
-
-    TEST_SUBSECTION("Backpressure: buffered flag management");
-
-    buffered = 0;
-
-    /* Simulate NGX_AGAIN: set buffered flag */
-    buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
-        "Buffered flag should be set on NGX_AGAIN");
-
-    /* Simulate resume: clear buffered flag */
-    buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
-        "Buffered flag should be cleared on resume");
-    TEST_PASS("Backpressure flag management works");
-}
-
-static void
-test_backpressure_deferred_finalize_resume(void)
-{
-    unsigned int  buffered;
-    int           finalize_decomp_rc;
-    int           finalize_after_pending;
-    const void   *pending_output;
-    int           finalize_called;
-
-    TEST_SUBSECTION(
-        "Backpressure: deferred finalize resumes after drain");
-
-    buffered = 0;
-    finalize_decomp_rc = NGX_AGAIN;
-    finalize_after_pending = 0;
-    pending_output = (const void *) 0x1;
-    finalize_called = 0;
-
-    TEST_ASSERT(pending_output != NULL,
-        "Pending output should start non-NULL in backpressure simulation");
-
-    /*
-     * Simulate finalize_request() receiving NGX_AGAIN from
-     * finalize_decomp(): mark finalize as pending and keep
-     * buffered state so resume_pending() will re-enter.
-     */
-    if (finalize_decomp_rc == NGX_AGAIN) {
-        finalize_after_pending = 1;
-        buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-    }
-
-    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
-        "Buffered flag should remain set while finalize is pending");
-    TEST_ASSERT(finalize_after_pending == 1,
-        "Finalize should be deferred after decomp NGX_AGAIN");
-
-    /* Simulate pending output drained in resume_pending(). */
-    pending_output = NULL;
-    if (pending_output == NULL && finalize_after_pending) {
-        finalize_after_pending = 0;
-        finalize_called = 1;
-    }
-
-    TEST_ASSERT(finalize_called == 1,
-        "Finalize should resume after pending output drains");
-    TEST_ASSERT(finalize_after_pending == 0,
-        "Deferred finalize marker should clear after resume");
-
-    /*
-     * Complementary branch: finalize_decomp does not return NGX_AGAIN.
-     * No deferred-finalize marker and no markdown buffered flag should be set.
-     */
-    buffered = 0;
-    finalize_decomp_rc = NGX_OK;
-    finalize_after_pending = 0;
-    pending_output = (const void *) 0x1;
-    finalize_called = 0;
-
-    TEST_ASSERT(pending_output != NULL,
-        "Pending output should be initialized in non-NGX_AGAIN simulation");
-
-    if (finalize_decomp_rc == NGX_AGAIN) {
-        finalize_after_pending = 1;
-        buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-    }
-
-    TEST_ASSERT((buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
-        "Buffered flag should stay clear when finalize_decomp_rc != NGX_AGAIN");
-    TEST_ASSERT(finalize_after_pending == 0,
-        "Finalize should not be deferred when finalize_decomp_rc != NGX_AGAIN");
-    TEST_ASSERT(finalize_called == 0,
-        "Finalize resume callback should not run in non-NGX_AGAIN branch");
-    TEST_PASS("Deferred finalize resume behavior works");
-}
 
 /* ================================================================
- * 14.4b Input Disposition + Pending Input Chain
+ * 14.4b Pending Input Chain
  * Feature: nginx-streaming-runtime-and-ffi, backpressure input lifecycle
  *
- * Validates: disposition decoupling, pending_input enqueue/detach/clear,
- * terminal_seen capture, lost-continuation prevention.
+ * Validates: pending_input enqueue with terminal_seen capture and the
+ * empty-chain predicate.  Disposition decoupling, detach/clear, and
+ * lost-continuation prevention are exercised against the real
+ * implementation in streaming_impl_test.c
+ * (test_pending_input_production_lifecycle and the resume/backpressure
+ * paths), so the literal mirrors for those were removed here.
  * ================================================================ */
-
-/* Input disposition constants (mirror module header) */
-#define INPUT_CONSUMED  0
-#define INPUT_RETAIN    1
-#define INPUT_TERMINAL  2
 
 /* Minimal pending_input simulation struct */
 typedef struct {
@@ -756,46 +545,6 @@ typedef struct {
     ngx_uint_t  links;
     ngx_flag_t  terminal_seen;
 } test_pending_input_t;
-
-
-static void
-test_input_disposition_default_consumed(void)
-{
-    ngx_uint_t  disposition;
-
-    TEST_SUBSECTION(
-        "Input disposition: default is CONSUMED");
-
-    disposition = INPUT_CONSUMED;
-    TEST_ASSERT(disposition == INPUT_CONSUMED,
-        "Default disposition should be CONSUMED");
-    TEST_PASS("Default disposition is CONSUMED");
-}
-
-
-static void
-test_input_disposition_retain_for_failopen(void)
-{
-    ngx_uint_t  disposition;
-    ngx_flag_t  eligible;
-    ngx_flag_t  failopen_delivery_pending;
-
-    TEST_SUBSECTION(
-        "Input disposition: RETAIN on fail-open NGX_AGAIN");
-
-    eligible = 0;
-    failopen_delivery_pending = 1;
-
-    if (!eligible && failopen_delivery_pending) {
-        disposition = INPUT_RETAIN;
-    } else {
-        disposition = INPUT_CONSUMED;
-    }
-
-    TEST_ASSERT(disposition == INPUT_RETAIN,
-        "Fail-open NGX_AGAIN should set RETAIN disposition");
-    TEST_PASS("Fail-open NGX_AGAIN sets RETAIN");
-}
 
 
 static void
@@ -817,40 +566,6 @@ test_pending_input_enqueue_terminal_capture(void)
     TEST_ASSERT(pi.terminal_seen == 1,
         "terminal_seen should be set when last_buf link enqueued");
     TEST_PASS("terminal_seen captured during enqueue");
-}
-
-
-static void
-test_pending_input_clear_resets_state(void)
-{
-    test_pending_input_t  pi;
-
-    TEST_SUBSECTION(
-        "Pending input: clear resets all state");
-
-    pi.head = (void *) 0x1;
-    pi.tail = (void *) 0x2;
-    pi.bytes = 1024;
-    pi.links = 3;
-    pi.terminal_seen = 1;
-
-    pi.head = NULL;
-    pi.tail = NULL;
-    pi.bytes = 0;
-    pi.links = 0;
-    pi.terminal_seen = 0;
-
-    TEST_ASSERT(pi.head == NULL,
-        "head should be NULL after clear");
-    TEST_ASSERT(pi.tail == NULL,
-        "tail should be NULL after clear");
-    TEST_ASSERT(pi.bytes == 0,
-        "bytes should be 0 after clear");
-    TEST_ASSERT(pi.links == 0,
-        "links should be 0 after clear");
-    TEST_ASSERT(pi.terminal_seen == 0,
-        "terminal_seen should be 0 after clear");
-    TEST_PASS("Pending input clear resets all state");
 }
 
 
@@ -877,533 +592,20 @@ test_pending_input_empty_check(void)
 }
 
 
-static void
-test_lost_continuation_two_link(void)
-{
-    ngx_uint_t  disposition;
-    ngx_flag_t  cl1_consumed;
-    ngx_flag_t  cl2_enqueued;
-    ngx_flag_t  cl2_pos_unchanged;
-    ngx_flag_t  terminal_seen;
-    ngx_flag_t  finalize_after_pending;
-
-    TEST_SUBSECTION(
-        "Lost continuation: two-link chain, cl1 NGX_AGAIN");
-
-    /*
-     * Simulate: cl1 -> cl2(last_buf)
-     * cl1 feed -> output -> downstream NGX_AGAIN
-     * CONSUMED disposition: advance cl1.pos, enqueue cl2.
-     */
-    disposition = INPUT_CONSUMED;
-    cl1_consumed = 0;
-    cl2_enqueued = 0;
-    cl2_pos_unchanged = 1;
-    terminal_seen = 0;
-    finalize_after_pending = 0;
-
-    if (disposition == INPUT_CONSUMED) {
-        cl1_consumed = 1;
-        cl2_enqueued = 1;
-        cl2_pos_unchanged = 1;
-        terminal_seen = 1;
-    }
-
-    TEST_ASSERT(cl1_consumed == 1,
-        "cl1 should be consumed (pos advanced)");
-    TEST_ASSERT(cl2_enqueued == 1,
-        "cl2 should be enqueued to pending_input");
-    TEST_ASSERT(cl2_pos_unchanged == 1,
-        "cl2 pos should be unchanged (not yet fed to Rust)");
-    TEST_ASSERT(terminal_seen == 1,
-        "terminal_seen should be captured from cl2");
-    TEST_ASSERT(finalize_after_pending == 0,
-        "finalize_after_pending should NOT be set (terminal_seen handles it)");
-    TEST_PASS("Two-link lost continuation handled correctly");
-}
-
-
-static void
-test_failopen_retain_preserves_pos(void)
-{
-    ngx_uint_t  disposition;
-    ngx_flag_t  source_pos_advanced;
-    ngx_flag_t  pending_output_intact;
-    ngx_flag_t  finalize_after_pending;
-
-    TEST_SUBSECTION(
-        "Fail-open RETAIN: source buf.pos preserved");
-
-    /*
-     * Simulate: precommit error -> failopen -> downstream NGX_AGAIN.
-     * The clone shares ngx_buf_t with the source.  RETAIN means
-     * do NOT advance source pos.
-     */
-    disposition = INPUT_RETAIN;
-    source_pos_advanced = 0;
-    pending_output_intact = 1;
-    finalize_after_pending = 0;
-
-    if (disposition == INPUT_RETAIN) {
-        source_pos_advanced = 0;
-        pending_output_intact = 1;
-        finalize_after_pending = 0;
-    }
-
-    TEST_ASSERT(source_pos_advanced == 0,
-        "Source buf.pos should NOT be advanced on RETAIN");
-    TEST_ASSERT(pending_output_intact == 1,
-        "Pending fail-open output should see intact bytes");
-    TEST_ASSERT(finalize_after_pending == 0,
-        "finalize_after_pending should NOT be set on fail-open RETAIN");
-    TEST_PASS("Fail-open RETAIN preserves source buf");
-}
-
-
-static void
-test_ngxdone_resume_continues(void)
-{
-    ngx_int_t   rc;
-    ngx_flag_t  delivery_ok;
-    ngx_flag_t  continued;
-
-    TEST_SUBSECTION(
-        "NGX_DONE resume: state machine continues");
-
-    rc = NGX_DONE;
-    delivery_ok = (rc == NGX_OK || rc == NGX_DONE) ? 1 : 0;
-    continued = 0;
-
-    if (rc == NGX_AGAIN || rc == NGX_ERROR) {
-        continued = 0;
-    } else if (!delivery_ok) {
-        continued = 0;
-    } else {
-        continued = 1;
-    }
-
-    TEST_ASSERT(delivery_ok == 1,
-        "NGX_DONE should be delivery_ok");
-    TEST_ASSERT(continued == 1,
-        "State machine should continue after NGX_DONE");
-    TEST_PASS("NGX_DONE resume continues state machine");
-}
-
-
-static void
-test_multi_again_loop_each_input_once(void)
-{
-    /*
-     * Simulate: cl1 -> cl2 -> cl3(last_buf)
-     * Each feed produces output that hits NGX_AGAIN.
-     * Each drain succeeds, then the next input is fed.
-     * Assert each input fed exactly once, one last_buf, no duplicate finalize.
-     */
-    ngx_uint_t  feed_count = 0;
-    ngx_uint_t  finalize_count = 0;
-    ngx_int_t   rc;
-    int         i;
-
-    TEST_SUBSECTION(
-        "Multi-NGX_AGAIN: each input fed once, one finalize");
-
-    for (i = 0; i < 3; i++) {
-        /* feed input i */
-        feed_count++;
-        /* output NGX_AGAIN */
-        rc = NGX_AGAIN;
-        TEST_ASSERT(rc == NGX_AGAIN,
-            "Output must suspend before the drain succeeds");
-        /* drain OK */
-        rc = NGX_OK;
-        TEST_ASSERT(rc == NGX_OK,
-            "Successful drain should resume pending input");
-        /* process pending_input */
-        if (i < 2) {
-            /* not terminal, continue */
-        }
-    }
-
-    /* terminal_seen triggers finalize once */
-    if (feed_count == 3) {
-        finalize_count = 1;
-    }
-
-    TEST_ASSERT(feed_count == 3,
-        "Each of 3 inputs should be fed exactly once");
-    TEST_ASSERT(finalize_count == 1,
-        "Finalize should happen exactly once");
-    TEST_PASS("Multi-NGX_AGAIN loop correct");
-}
-
-
-static void
-test_terminal_on_queued_link(void)
-{
-    /*
-     * Simulate: cl1 -> cl2 -> cl3(last_buf)
-     * cl1 feed -> NGX_AGAIN (CONSUMED)
-     * cl2 and cl3 enqueued to pending_input.
-     * terminal_seen captured from cl3.
-     * After drain + feed cl2 + drain + feed cl3, finalize.
-     * Assert terminal_seen captured, finalize not premature.
-     */
-    ngx_flag_t  terminal_seen = 0;
-    ngx_flag_t  finalize_called = 0;
-    ngx_uint_t  links_enqueued = 0;
-    ngx_uint_t  step;
-
-    TEST_SUBSECTION(
-        "Terminal on queued link: deferred EOF preservation");
-
-    /* cl1 consumed, cl2+cl3 enqueued */
-    links_enqueued = 2;
-    terminal_seen = 1;  /* from cl3 */
-
-    /* After drain, feed cl2 -> not terminal */
-    for (step = 0; step < links_enqueued; step++) {
-        if (step < links_enqueued - 1) {
-            /* not last, no finalize */
-        }
-    }
-
-    /* After all pending_input consumed, terminal_seen triggers finalize */
-    if (links_enqueued == 0 && terminal_seen) {
-        finalize_called = 1;
-    }
-    /* Simulate the full cycle: links_enqueued decremented to 0 */
-    links_enqueued = 0;
-    if (links_enqueued == 0 && terminal_seen) {
-        finalize_called = 1;
-    }
-
-    TEST_ASSERT(terminal_seen == 1,
-        "terminal_seen should be captured from cl3");
-    TEST_ASSERT(finalize_called == 1,
-        "Finalize should be called after all pending input consumed");
-    TEST_PASS("Terminal on queued link preserved correctly");
-}
-
-
-static void
-test_compressed_streaming_backpressure(void)
-{
-    /*
-     * Compressed input: cl1 -> cl2(last_buf)
-     * cl1 feed: decompressed by decomp, fed to Rust, NGX_AGAIN.
-     * cl2 is raw compressed, enqueued to pending_input (NOT decompressed).
-     * After drain, cl2 fed through process_chunk which decompresses it.
-     * Assert: cl2 decompressed exactly once, decompressor state preserved.
-     */
-    ngx_flag_t  cl2_decompressed = 0;
-    ngx_flag_t  decomp_state_preserved = 1;
-    ngx_uint_t  decomp_count = 0;
-    ngx_flag_t  cl2_in_pending_input = 0;
-
-    TEST_SUBSECTION(
-        "Compressed streaming: raw input queued, decompressed on resume");
-
-    /* cl1 consumed (decompressed + fed to Rust) */
-    cl2_in_pending_input = 1;
-
-    /* After drain, cl2 processed through process_chunk */
-    if (cl2_in_pending_input) {
-        decomp_count++;
-        cl2_decompressed = 1;
-    }
-
-    TEST_ASSERT(cl2_in_pending_input == 1,
-        "cl2 (raw compressed) should be enqueued, not decompressed bytes");
-    TEST_ASSERT(cl2_decompressed == 1,
-        "cl2 should be decompressed exactly once on resume");
-    TEST_ASSERT(decomp_count == 1,
-        "Decompressor should run exactly once for cl2");
-    TEST_ASSERT(decomp_state_preserved == 1,
-        "Decompressor state should be preserved across backpressure");
-    TEST_PASS("Compressed streaming backpressure correct");
-}
-
-
-static void
-test_client_abort_with_pending_state(void)
-{
-    /*
-     * pending_output != NULL, pending_input != NULL, handle != NULL.
-     * Client abort triggers cleanup.
-     * Assert: handle freed once, pending_output freed, pending_input
-     * cleared, no double free.
-     */
-    ngx_flag_t  handle_freed = 0;
-    ngx_flag_t  pending_output_freed = 0;
-    ngx_flag_t  pending_input_cleared = 0;
-    ngx_flag_t  double_free = 0;
-
-    TEST_SUBSECTION(
-        "Client abort: cleanup with pending output + input + handle");
-
-    /* Simulate cleanup */
-    handle_freed = 1;
-    pending_output_freed = 1;
-    pending_input_cleared = 1;
-    /* Links are pool-allocated, freed with pool destruction — no double free */
-    double_free = 0;
-
-    TEST_ASSERT(handle_freed == 1,
-        "Rust handle should be freed on abort");
-    TEST_ASSERT(pending_output_freed == 1,
-        "Pending output chain should be freed on abort");
-    TEST_ASSERT(pending_input_cleared == 1,
-        "Pending input should be cleared on abort");
-    TEST_ASSERT(double_free == 0,
-        "No double free (links freed by pool, bufs by NGINX)");
-    TEST_PASS("Client abort cleanup correct");
-}
-
-
-static void
-test_future_input_while_pending_output(void)
-{
-    /*
-     * pending_output != NULL (from prior NGX_AGAIN).
-     * body_filter(new_in) arrives.
-     * Assert: new_in enqueued to pending_input (NOT rejected),
-     * Rust feed count unchanged, return NGX_AGAIN.
-     */
-    ngx_flag_t  new_input_enqueued = 0;
-    ngx_flag_t  rust_feed_called = 0;
-    ngx_int_t   rc;
-
-    TEST_SUBSECTION(
-        "Future input while pending output: enqueue, don't reject");
-
-    /* Simulate: body_filter entry sees pending_has_data + in != NULL */
-    new_input_enqueued = 1;
-    rust_feed_called = 0;
-    rc = NGX_AGAIN;
-
-    TEST_ASSERT(new_input_enqueued == 1,
-        "New input should be enqueued to pending_input");
-    TEST_ASSERT(rust_feed_called == 0,
-        "Rust feed should NOT be called while pending_output exists");
-    TEST_ASSERT(rc == NGX_AGAIN,
-        "Should return NGX_AGAIN (not lose input)");
-    TEST_PASS("Future input enqueued correctly");
-}
-
-/* ================================================================
- * 14.5 Pre-Commit fallback
- * Feature: nginx-streaming-runtime-and-ffi, pre-commit fallback / ETag stripping
- * ================================================================ */
-
-static void
-test_precommit_fallback(void)
-{
-    ngx_uint_t  commit_state;
-    int         handle_alive;
-
-    TEST_SUBSECTION("Pre-Commit fallback: state transitions");
-
-    commit_state = COMMIT_PRE;
-
-    /* Simulate FALLBACK signal in Pre-Commit */
-    TEST_ASSERT(commit_state == COMMIT_PRE,
-        "Should be in Pre-Commit state");
-
-    /* Fallback: release handle, switch path */
-    handle_alive = 0;
-
-    TEST_ASSERT(handle_alive == 0,
-        "Handle should be released after fallback");
-    TEST_PASS("Pre-Commit fallback transitions correct");
-}
-
 /* ================================================================
  * 14.6 Post-Commit error handling
  * Feature: nginx-streaming-runtime-and-ffi, post-commit error handling
  *
- * Validates: post-commit error always fail-closed through debug log fields
+ * Validates: post-commit failure classification and per-code routing for
+ * the expected post-commit error codes.
+ *
+ * The "always fail-closed regardless of error_policy" behavior and the
+ * post-commit success/failure metrics are covered by real-call tests in
+ * streaming_impl_test.c (test_postcommit_and_precommit_error_paths) and
+ * postcommit_metrics_accounting_test.c; the literals that re-asserted
+ * those same claims were removed here.
  * ================================================================ */
 
-static void
-test_postcommit_error(void)
-{
-    ngx_uint_t  commit_state;
-    int         empty_last_buf_sent;
-    unsigned    postcommit_errors;
-    unsigned    failed_total;
-
-    TEST_SUBSECTION("Post-Commit error: abort + empty last_buf");
-
-    commit_state = COMMIT_POST;
-    postcommit_errors = 0;
-    failed_total = 0;
-
-    /* Simulate error in Post-Commit */
-    TEST_ASSERT(commit_state == COMMIT_POST,
-        "Should be in Post-Commit state");
-
-    /* Error handling: abort handle, send empty last_buf */
-    empty_last_buf_sent = 1;
-    postcommit_errors++;
-    failed_total++;
-
-    TEST_ASSERT(empty_last_buf_sent == 1,
-        "Empty last_buf should be sent");
-    TEST_ASSERT(postcommit_errors == 1,
-        "Post-Commit error counter should increment");
-    TEST_ASSERT(failed_total == 1,
-        "Failed total counter should increment");
-    TEST_PASS("Post-Commit error handling correct");
-}
-
-
-/*
- * Verify post-commit error is always fail-closed regardless
- * of error_policy config value.
- *
- * Validates: post-commit ignores on_error policy
- */
-static void
-test_postcommit_error_ignores_on_error_policy(void)
-{
-    ngx_uint_t  on_error;
-    ngx_uint_t  commit_state;
-    int         abort_called;
-    int         empty_last_buf_sent;
-    unsigned    postcommit_errors;
-    unsigned    failed_total;
-
-    TEST_SUBSECTION(
-        "Post-Commit error ignores error_policy");
-
-    /*
-     * Test with error_policy = pass.
-     * Post-commit must still fail-closed.
-     */
-    on_error = ON_ERROR_PASS;
-    commit_state = COMMIT_POST;
-    postcommit_errors = 0;
-    failed_total = 0;
-
-    UNUSED(on_error);
-
-    /*
-     * Simulate handle_postcommit_error behavior:
-     * it does NOT check on_error at all.
-     */
-    abort_called = 1;
-    postcommit_errors++;
-    failed_total++;
-    empty_last_buf_sent = 1;
-
-    TEST_ASSERT(commit_state == COMMIT_POST,
-        "Should be in Post-Commit state");
-    TEST_ASSERT(abort_called == 1,
-        "Handle should be aborted (pass policy)");
-    TEST_ASSERT(empty_last_buf_sent == 1,
-        "Empty last_buf sent despite pass policy");
-    TEST_ASSERT(postcommit_errors == 1,
-        "postcommit_error_total incremented");
-    TEST_ASSERT(failed_total == 1,
-        "failed_total incremented");
-
-    /*
-     * Test with error_policy = reject.
-     * Post-commit must still fail-closed (same behavior).
-     */
-    on_error = ON_ERROR_REJECT;
-    postcommit_errors = 0;
-    failed_total = 0;
-
-    UNUSED(on_error);
-
-    abort_called = 1;
-    postcommit_errors++;
-    failed_total++;
-    empty_last_buf_sent = 1;
-
-    TEST_ASSERT(abort_called == 1,
-        "Handle should be aborted (reject policy)");
-    TEST_ASSERT(empty_last_buf_sent == 1,
-        "Empty last_buf sent despite reject policy");
-    TEST_ASSERT(postcommit_errors == 1,
-        "postcommit_error_total incremented (reject)");
-    TEST_ASSERT(failed_total == 1,
-        "failed_total incremented (reject)");
-
-    TEST_PASS(
-        "Post-Commit always fail-closed, "
-        "error_policy ignored");
-}
-
-
-/*
- * Verify post-commit error debug log includes bytes_sent,
- * error_code, and chunks_processed.
- *
- * Validates: debug log includes bytes_sent/error_code/chunks
- */
-static void
-test_postcommit_error_debug_log_details(void)
-{
-    size_t      bytes_sent;
-    uint32_t    error_code;
-    ngx_uint_t  chunks;
-
-    TEST_SUBSECTION(
-        "Post-Commit error debug log details");
-
-    /*
-     * Simulate a post-commit error scenario with
-     * known statistics. The debug log should include
-     * bytes_sent, error_code, and chunks_processed.
-     */
-    bytes_sent = 4096;
-    error_code = ERROR_TIMEOUT;
-    chunks = 5;
-
-    /*
-     * Verify the values are representable in the
-     * format specifiers used by ngx_log_debug3:
-     *   bytes_sent=%uz  (size_t)
-     *   error_code=%ui  (ngx_uint_t from uint32_t)
-     *   chunks=%ui      (ngx_uint_t)
-     */
-    TEST_ASSERT(bytes_sent > 0,
-        "bytes_sent should be non-zero for "
-        "post-commit scenario");
-    TEST_ASSERT((ngx_uint_t) error_code == ERROR_TIMEOUT,
-        "error_code should cast to ngx_uint_t");
-    TEST_ASSERT(chunks > 0,
-        "chunks_processed should be non-zero");
-
-    /* Test with zero bytes (edge case: error on first chunk) */
-    bytes_sent = 0;
-    error_code = ERROR_INTERNAL;
-    chunks = 0;
-
-    TEST_ASSERT(bytes_sent == 0,
-        "bytes_sent can be zero (error on first chunk)");
-    TEST_ASSERT((ngx_uint_t) error_code == ERROR_INTERNAL,
-        "error_code internal cast correct");
-    TEST_ASSERT(chunks == 0,
-        "chunks can be zero");
-
-    /* Test with large values */
-    bytes_sent = 10 * 1024 * 1024;
-    error_code = ERROR_MEMORY_LIMIT;
-    chunks = 1000;
-
-    TEST_ASSERT(bytes_sent == 10 * 1024 * 1024,
-        "Large bytes_sent representable");
-    TEST_ASSERT((ngx_uint_t) error_code == ERROR_MEMORY_LIMIT,
-        "error_code memory limit cast correct");
-    TEST_ASSERT(chunks == 1000,
-        "Large chunk count representable");
-
-    TEST_PASS(
-        "Post-Commit debug log fields validated");
-}
 
 /*
  * Simulate ngx_http_markdown_streaming_handle_postcommit_error() behavior
@@ -1495,6 +697,13 @@ test_postcommit_error_various_error_codes(void)
 /* ================================================================
  * 14.7 Configuration directive parsing
  * Feature: nginx-streaming-runtime-and-ffi
+ *
+ * Validates: markdown_streaming policy token parsing through the local
+ * mirror of the closed value set.
+ *
+ * The 2 MiB streaming-budget default is asserted against the production
+ * macro by config_core_impl_test.c and effective_conf_test.c; the local
+ * copy of that default was removed here.
  * ================================================================ */
 
 static size_t
@@ -1538,15 +747,6 @@ parse_streaming_budget(const char *value)
     return result;
 }
 
-static void
-test_config_budget_default(void)
-{
-    TEST_SUBSECTION("Config: streaming_budget default");
-
-    TEST_ASSERT(STREAMING_BUDGET_DEFAULT == 2 * 1024 * 1024,
-        "Default budget should be 2 MiB");
-    TEST_PASS("Default budget is 2 MiB");
-}
 
 static void
 test_config_policy_values(void)
@@ -1637,557 +837,19 @@ test_output_chain_flush(void)
     TEST_PASS("Output chain flush flags correct");
 }
 
-/* ================================================================
- * 14.9 Size limit and timeout
- * Feature: nginx-streaming-runtime-and-ffi, size limit and timeout
- * ================================================================ */
-
-static void
-test_size_limit_precommit(void)
-{
-    size_t      total_input;
-    size_t      max_size;
-    ngx_uint_t  commit_state;
-    ngx_uint_t  on_error;
-
-    TEST_SUBSECTION("Size limit: Pre-Commit + pass policy");
-
-    total_input = 0;
-    max_size = 1024;
-    commit_state = COMMIT_PRE;
-    on_error = ON_ERROR_PASS;
-
-    total_input += 1025;
-
-    TEST_ASSERT(total_input > max_size,
-        "Input should exceed max_size");
-    TEST_ASSERT(commit_state == COMMIT_PRE,
-        "Should be in Pre-Commit");
-    TEST_ASSERT(on_error == ON_ERROR_PASS,
-        "Policy should be pass (fail-open)");
-    TEST_PASS("Size limit Pre-Commit pass policy verified");
-}
-
-static void
-test_size_limit_postcommit(void)
-{
-    size_t      total_input;
-    size_t      max_size;
-    ngx_uint_t  commit_state;
-    int         empty_last_buf_sent;
-
-    TEST_SUBSECTION("Size limit: Post-Commit terminates");
-
-    total_input = 0;
-    max_size = 1024;
-    commit_state = COMMIT_POST;
-    empty_last_buf_sent = 0;
-
-    total_input += 1025;
-
-    /* Post-Commit: send empty last_buf */
-    if (total_input > max_size
-        && commit_state == COMMIT_POST)
-    {
-        empty_last_buf_sent = 1;
-    }
-
-    TEST_ASSERT(empty_last_buf_sent == 1,
-        "Post-Commit size limit should send empty last_buf");
-    TEST_PASS("Size limit Post-Commit termination verified");
-}
-
-static void
-test_timeout_precommit(void)
-{
-    uint32_t    error_code;
-    ngx_uint_t  commit_state;
-    ngx_uint_t  on_error;
-    int         eligible;
-
-    TEST_SUBSECTION("Timeout: Pre-Commit + pass policy");
-
-    error_code = ERROR_TIMEOUT;
-    commit_state = COMMIT_PRE;
-    on_error = ON_ERROR_PASS;
-    eligible = 1;
-
-    /* Pre-Commit timeout with pass policy: fail-open */
-    if (error_code == ERROR_TIMEOUT
-        && commit_state == COMMIT_PRE
-        && on_error == ON_ERROR_PASS)
-    {
-        eligible = 0;
-    }
-
-    TEST_ASSERT(eligible == 0,
-        "Timeout in Pre-Commit + pass should fail-open");
-    TEST_PASS("Timeout Pre-Commit pass policy verified");
-}
 
 /* ================================================================
  * 15.6 Streaming Headers Policy
  * Feature: streaming-failure-cache-semantics
  *
- * Validates: commit boundary header modifications
+ * Validates: fail-open / init-failure routing through the unified
+ *            error policy
  *
- * These tests verify the streaming headers strategy:
- * - Commit_Boundary removes Content-Length
- * - Commit_Boundary removes Content-Encoding (if decompressed)
- * - Content-Length and Transfer-Encoding: chunked never coexist
- * - Pre_Commit_Phase does not modify response headers
+ * The commit-boundary header modifications (Content-Length strip,
+ * Content-Encoding removal, chunked coexistence, Pre-Commit header
+ * immutability) are covered by real-call tests in stream_commit_test.c
+ * and streaming_impl_test.c; the literal re-assertions were removed here.
  * ================================================================ */
-
-/* Forward declarations for streaming headers tests */
-static void test_commit_boundary_removes_content_length(void);
-static void test_commit_boundary_removes_content_encoding(void);
-static void test_commit_boundary_skips_content_encoding_no_decomp(void);
-static void test_streaming_no_cl_and_chunked_coexist(void);
-static void test_precommit_no_header_modification(void);
-
-
-/*
- * Verify that the commit boundary removes Content-Length
- * and sets content_length_n to -1.
- *
- * The streaming update_headers function calls
- * ngx_http_clear_content_length(r) and sets
- * r->headers_out.content_length_n = -1.
- *
- * Validates: commit boundary removes Content-Length
- */
-static void
-test_commit_boundary_removes_content_length(void)
-{
-    long        content_length_n;
-    int         cl_cleared;
-    ngx_flag_t  chunked;
-
-    TEST_SUBSECTION(
-        "Commit boundary removes Content-Length");
-
-    /*
-     * Simulate upstream response with Content-Length set.
-     * At commit boundary, streaming_update_headers must:
-     * 1. Clear Content-Length header
-     * 2. Set content_length_n = -1
-     * 3. Enable chunked transfer
-     *
-     * Initial upstream state: content_length_n=50000,
-     * cl_cleared=0, chunked=0.
-     * After commit boundary:
-     */
-    cl_cleared = 1;
-    content_length_n = -1;
-    chunked = 1;
-
-    TEST_ASSERT(cl_cleared == 1,
-        "Content-Length header should be cleared");
-    TEST_ASSERT(content_length_n == -1,
-        "content_length_n should be -1 after clear");
-    TEST_ASSERT(chunked == 1,
-        "chunked flag should be enabled");
-
-    /*
-     * Edge case: Content-Length was already -1 (unknown).
-     * Commit boundary still applies the same sequence.
-     */
-    cl_cleared = 1;
-    content_length_n = -1;
-    chunked = 1;
-
-    TEST_ASSERT(cl_cleared == 1,
-        "Content-Length clear operation remains idempotent");
-    TEST_ASSERT(content_length_n == -1,
-        "Already-unknown CL stays -1 after clear");
-    TEST_ASSERT(chunked == 1,
-        "chunked enabled even when CL was unknown");
-
-    TEST_PASS(
-        "Commit boundary removes Content-Length "
-        "correctly");
-}
-
-
-/*
- * Verify that the commit boundary removes Content-Encoding
- * when decompression was performed.
- *
- * The streaming update_headers function checks
- * ctx->decompression.needed and calls
- * ngx_http_markdown_remove_content_encoding(r).
- *
- * Validates: commit boundary removes Content-Encoding (conditional)
- */
-static void
-test_commit_boundary_removes_content_encoding(void)
-{
-    ngx_flag_t  decompression_needed;
-    int         ce_removed;
-
-    TEST_SUBSECTION(
-        "Commit boundary removes Content-Encoding "
-        "(decompressed)");
-
-    /*
-     * Scenario: upstream sent gzip-compressed HTML,
-     * streaming decompressor was active.
-     */
-    decompression_needed = 1;
-    ce_removed = 0;
-
-    /* Simulate commit boundary logic */
-    if (decompression_needed) {
-        ce_removed = 1;
-    }
-
-    TEST_ASSERT(ce_removed == 1,
-        "Content-Encoding should be removed when "
-        "decompression was needed");
-    TEST_PASS(
-        "Commit boundary removes Content-Encoding "
-        "after decompression");
-}
-
-
-/*
- * Verify that Content-Encoding is NOT removed when
- * decompression was not needed (upstream sent uncompressed).
- *
- * Validates: commit boundary removes Content-Encoding (conditional removal)
- */
-static void
-test_commit_boundary_skips_content_encoding_no_decomp(void)
-{
-    ngx_flag_t  decompression_needed;
-    int         ce_removed;
-
-    TEST_SUBSECTION(
-        "Commit boundary skips Content-Encoding "
-        "(no decompression)");
-
-    decompression_needed = 0;
-    ce_removed = 0;
-
-    /* Simulate commit boundary logic */
-    if (decompression_needed) {
-        ce_removed = 1;
-    }
-
-    TEST_ASSERT(ce_removed == 0,
-        "Content-Encoding should NOT be removed when "
-        "decompression was not needed");
-    TEST_PASS(
-        "Content-Encoding preserved when no "
-        "decompression");
-}
-
-
-/*
- * Verify that Content-Length and Transfer-Encoding: chunked
- * never coexist in streaming mode.
- *
- * The streaming update_headers function first clears
- * Content-Length (setting content_length_n = -1), then
- * enables chunked (r->chunked = 1). This ordering ensures
- * they never coexist.
- *
- * Validates: Content-Length and chunked never coexist
- */
-static void
-test_streaming_no_cl_and_chunked_coexist(void)
-{
-    long        content_length_n;
-    ngx_flag_t  chunked;
-    int         cl_and_chunked_coexist;
-
-    TEST_SUBSECTION(
-        "Streaming: Content-Length and chunked "
-        "never coexist");
-
-    /*
-     * Simulate the exact sequence from
-     * streaming_update_headers():
-     * 1. ngx_http_clear_content_length(r)
-     * 2. r->headers_out.content_length_n = -1
-     * 3. r->chunked = 1
-     *
-     * Initial upstream state: content_length_n=50000,
-     * chunked=0.  After streaming header update:
-     */
-
-    /* Step 1-2: clear Content-Length */
-    content_length_n = -1;
-
-    /* Step 3: enable chunked */
-    chunked = 1;
-
-    /* Verify mutual exclusion */
-    cl_and_chunked_coexist =
-        (content_length_n >= 0 && chunked);
-
-    TEST_ASSERT(cl_and_chunked_coexist == 0,
-        "Content-Length and chunked must not coexist");
-    TEST_ASSERT(content_length_n == -1,
-        "Content-Length must be cleared (-1)");
-    TEST_ASSERT(chunked == 1,
-        "chunked must be enabled");
-
-    /*
-     * Verify the invariant holds for various initial
-     * Content-Length values.
-     */
-    {
-        long  initial_cls[] = {0, 1, 1024, 999999, -1};
-
-        for (size_t i = 0; i < ARRAY_SIZE(initial_cls); i++) {
-            /*
-             * Regardless of initial CL value
-             * (initial_cls[i]), the streaming header
-             * update always produces the same result.
-             */
-            content_length_n = initial_cls[i];
-            TEST_ASSERT(content_length_n == initial_cls[i],
-                "Parameterized case must apply initial CL");
-            content_length_n = -1;
-            chunked = 1;
-
-            cl_and_chunked_coexist =
-                (content_length_n >= 0 && chunked);
-
-            TEST_ASSERT(cl_and_chunked_coexist == 0,
-                "CL/chunked mutual exclusion must hold "
-                "for all initial CL values");
-        }
-    }
-
-    TEST_PASS(
-        "Content-Length and chunked never coexist");
-}
-
-
-/*
- * Verify that Pre_Commit_Phase does not modify any
- * response headers.
- *
- * Headers are only modified at the Commit_Boundary
- * (when first non-empty output is produced). During
- * Pre_Commit_Phase, the streaming body filter processes
- * chunks through the Rust engine without touching headers.
- *
- * Validates: pre-commit phase does not modify headers
- */
-static void
-test_precommit_no_header_modification(void)
-{
-    ngx_uint_t  commit_state;
-    int         headers_modified;
-    int         headers_forwarded;
-    long        original_content_length;
-    long        current_content_length;
-    int         original_chunked;
-    int         current_chunked;
-
-    TEST_SUBSECTION(
-        "Pre-Commit phase does not modify headers");
-
-    /*
-     * Simulate Pre-Commit phase: streaming handle is
-     * created, chunks are fed to Rust, but no output
-     * has been produced yet.
-     */
-    commit_state = COMMIT_PRE;
-    headers_modified = 0;
-    headers_forwarded = 0;
-
-    /* Capture original header state */
-    original_content_length = 50000;
-    original_chunked = 0;
-    current_content_length = original_content_length;
-    current_chunked = original_chunked;
-
-    /*
-     * Simulate processing chunks in Pre-Commit:
-     * - feed() returns empty output (no commit yet)
-     * - headers must remain untouched
-     */
-    TEST_ASSERT(commit_state == COMMIT_PRE,
-        "Should be in Pre-Commit state");
-
-    /* Verify headers are unchanged */
-    TEST_ASSERT(
-        current_content_length == original_content_length,
-        "Content-Length must not change in Pre-Commit");
-    TEST_ASSERT(
-        current_chunked == original_chunked,
-        "chunked flag must not change in Pre-Commit");
-    TEST_ASSERT(headers_modified == 0,
-        "No headers should be modified in Pre-Commit");
-    TEST_ASSERT(headers_forwarded == 0,
-        "Headers should not be forwarded in Pre-Commit");
-
-    /*
-     * Verify that even after multiple feed() calls
-     * with empty output, headers remain unchanged.
-     */
-    {
-        for (int feed_count = 0; feed_count < 5;
-             feed_count++)
-        {
-            /* Simulate feed() returning empty output */
-            TEST_ASSERT(commit_state == COMMIT_PRE,
-                "Still in Pre-Commit after empty feeds");
-            TEST_ASSERT(
-                current_content_length
-                    == original_content_length,
-                "CL unchanged after multiple empty feeds");
-        }
-    }
-
-    /*
-     * Now simulate commit boundary: first non-empty
-     * output triggers header modification.
-     */
-    commit_state = COMMIT_POST;
-    current_content_length = -1;
-    current_chunked = 1;
-    headers_modified = 1;
-    headers_forwarded = 1;
-
-    TEST_ASSERT(commit_state == COMMIT_POST,
-        "Should transition to Post-Commit");
-    TEST_ASSERT(current_content_length == -1,
-        "CL should be cleared at commit boundary");
-    TEST_ASSERT(current_chunked == 1,
-        "chunked should be enabled at commit boundary");
-    TEST_ASSERT(headers_modified == 1,
-        "Headers should be modified at commit boundary");
-    TEST_ASSERT(headers_forwarded == 1,
-        "Headers should be forwarded at commit boundary");
-
-    TEST_PASS(
-        "Pre-Commit preserves headers, "
-        "Commit_Boundary modifies them");
-}
-
-
-/*
- * Verify that the commit boundary strips any upstream ETag.
- *
- * When the upstream response includes an ETag header (e.g.,
- * from a CDN or origin server), the streaming commit boundary
- * must clear it.  The upstream ETag applies to the HTML body,
- * not the transformed Markdown body, so forwarding it would
- * break cache semantics.
- *
- * Validates: upstream ETag stripped at commit boundary, pre-commit fallback / ETag stripping
- */
-static void
-test_commit_boundary_strips_upstream_etag(void)
-{
-    int  upstream_etag_present;
-    int  etag_cleared = 0;
-    int  etag_after_commit;
-
-    TEST_SUBSECTION(
-        "Commit boundary strips upstream ETag");
-
-    /*
-     * Scenario: upstream sent ETag: "upstream-etag-v1"
-     * on the HTML response.  At commit boundary,
-     * streaming_update_headers must call
-     * ngx_http_markdown_set_etag(r, NULL, 0) to clear
-     * the upstream ETag from response headers.
-     */
-    upstream_etag_present = 1;
-    etag_after_commit = 1;
-
-    /* Simulate commit boundary ETag clearing */
-    if (upstream_etag_present) {
-        etag_cleared = 1;
-        etag_after_commit = 0;
-    }
-
-    TEST_ASSERT(etag_cleared == 1,
-        "Upstream ETag should be cleared at "
-        "commit boundary");
-    TEST_ASSERT(etag_after_commit == 0,
-        "No ETag should remain after commit boundary");
-
-    /*
-     * Edge case: upstream had no ETag.
-     * Clearing a non-existent ETag is a no-op.
-     * set_etag(NULL, 0) is safe even when no ETag exists.
-     */
-    etag_after_commit = 0;
-    etag_cleared = 1;
-
-    TEST_ASSERT(etag_cleared == 1,
-        "ETag clear operation should be safe when ETag is absent");
-    TEST_ASSERT(etag_after_commit == 0,
-        "No ETag after commit when upstream had none");
-
-    TEST_PASS(
-        "Commit boundary strips upstream ETag");
-}
-
-
-/*
- * Verify that all pre-commit fail-open paths record
- * the streaming_precommit_failopen event and
- * increment precommit_failopen_total.
- *
- * This covers decompression failure, size overflow,
- * prebuffer exhaustion, and feed errors — all of which
- * must be observable by operators.
- *
- * Validates: all pre-commit fail-open paths record metrics
- */
-static void
-test_precommit_all_failopen_paths_record_metrics(void)
-{
-    unsigned  failopen_total;
-    unsigned  failed_total;
-
-    TEST_SUBSECTION(
-        "All pre-commit fail-open paths record metrics");
-
-    failopen_total = 0;
-    failed_total = 0;
-
-    /*
-     * Simulate 4 different pre-commit error types,
-     * all with error_policy = pass.
-     * Each must increment both counters.
-     */
-
-    /* Decompression failure */
-    failopen_total++;
-    failed_total++;
-
-    /* Size overflow */
-    failopen_total++;
-    failed_total++;
-
-    /* Prebuffer exhaustion */
-    failopen_total++;
-    failed_total++;
-
-    /* Feed error (non-FALLBACK) */
-    failopen_total++;
-    failed_total++;
-
-    TEST_ASSERT(failopen_total == 4,
-        "All 4 error types should increment "
-        "precommit_failopen_total");
-    TEST_ASSERT(failed_total == 4,
-        "All 4 error types should increment "
-        "failed_total");
-
-    TEST_PASS(
-        "All pre-commit fail-open paths "
-        "record metrics");
-}
 
 
 /*
@@ -2200,121 +862,40 @@ test_init_failure_respects_error_policy(void)
 {
     ngx_uint_t  error_policy;
     int         route;
-    ngx_int_t   result;
 
     TEST_SUBSECTION(
         "Init-time failure respects "
         "error_policy");
 
     /*
-     * Reject policy must fail closed.
+     * Reject policy must fail closed: the route helper classifies
+     * the error as fail-closed (2).
      */
     error_policy = ON_ERROR_REJECT;
 
     route = test_precommit_route(ERROR_INTERNAL,
         error_policy);
-    if (route == 2) {
-        result = NGX_ERROR;
-    } else {
-        result = NGX_DECLINED;
-    }
 
-    TEST_ASSERT(result == NGX_ERROR,
+    TEST_ASSERT(route == 2,
         "Init failure with error_policy=reject "
-        "must fail-closed");
+        "must route fail-closed");
 
     /*
-     * Pass policy must fail open.
+     * Pass policy must fail open: the route helper classifies the
+     * error as fail-open (1).
      */
     error_policy = ON_ERROR_PASS;
 
     route = test_precommit_route(ERROR_INTERNAL,
         error_policy);
-    if (route == 2) {
-        result = NGX_ERROR;
-    } else {
-        result = NGX_DECLINED;
-    }
 
-    TEST_ASSERT(result == NGX_DECLINED,
+    TEST_ASSERT(route == 1,
         "Init failure with error_policy=pass "
-        "must fail-open");
+        "must route fail-open");
 
     TEST_PASS(
         "Init-time failures respect "
         "the unified error_policy");
-}
-
-
-/*
- * Verify that streaming fail-open increments the global
- * failopen_count in addition to the streaming-specific
- * precommit_failopen_total counter.
- *
- * This ensures existing Prometheus dashboards that rely
- * on nginx_markdown_failopen_total and the derived
- * nginx_markdown_passthrough_total continue to account
- * for streaming fail-open events.
- *
- * Validates: stable failopen_count metric semantics
- */
-static void
-test_streaming_failopen_increments_global_counter(void)
-{
-    unsigned  streaming_failopen;
-    unsigned  global_failopen;
-
-    TEST_SUBSECTION(
-        "Streaming fail-open increments global "
-        "failopen_count");
-
-    streaming_failopen = 0;
-    global_failopen = 0;
-
-    /*
-     * Simulate a streaming pre-commit fail-open.
-     * Both counters must increment.
-     */
-    streaming_failopen++;
-    global_failopen++;
-
-    TEST_ASSERT(streaming_failopen == 1,
-        "streaming.precommit_failopen_total "
-        "should be 1");
-    TEST_ASSERT(global_failopen == 1,
-        "failopen_count should also be 1");
-
-    /* Second fail-open event */
-    streaming_failopen++;
-    global_failopen++;
-
-    TEST_ASSERT(streaming_failopen == 2,
-        "streaming.precommit_failopen_total "
-        "should accumulate");
-    TEST_ASSERT(global_failopen == 2,
-        "failopen_count should accumulate");
-
-    /*
-     * Verify reject path does NOT increment
-     * global failopen_count.
-     */
-    {
-        unsigned  reject_total = 0;
-        unsigned  saved_global = global_failopen;
-
-        reject_total++;
-        /* global_failopen NOT incremented */
-
-        TEST_ASSERT(reject_total == 1,
-            "precommit_reject_total should be 1");
-        TEST_ASSERT(global_failopen == saved_global,
-            "failopen_count must NOT increment "
-            "on reject");
-    }
-
-    TEST_PASS(
-        "Streaming fail-open increments "
-        "global failopen_count");
 }
 
 
@@ -2332,9 +913,6 @@ test_streaming_failopen_increments_global_counter(void)
  * ================================================================ */
 
 /* Forward declarations for 15.9 tests */
-static void test_config_on_error_legal_values(void);
-static void test_config_on_error_default_value(void);
-static void test_config_on_error_inheritance(void);
 static void test_config_on_error_invalid_values(void);
 
 static void test_precommit_strategy_fallback_pass(void);
@@ -2354,172 +932,6 @@ static void test_metrics_precommit_failopen(void);
 static void test_metrics_precommit_reject(void);
 static void test_metrics_postcommit_error(void);
 static void test_metrics_failed_total(void);
-
-
-/*
- * Verify that resolved pass/reject values map to distinct constants.
- *
- * Validates: error_policy legal values and default
- */
-static void
-test_config_on_error_legal_values(void)
-{
-    TEST_SUBSECTION(
-        "Runtime: unified error_policy values");
-
-    /*
-     * ON_ERROR_PASS and ON_ERROR_REJECT must be distinct
-     * and match the streaming decision state's encoding.
-     */
-    TEST_ASSERT(ON_ERROR_PASS == 0,
-        "ON_ERROR_PASS should be 0");
-    TEST_ASSERT(ON_ERROR_REJECT == 1,
-        "ON_ERROR_REJECT should be 1");
-    TEST_ASSERT(ON_ERROR_PASS != ON_ERROR_REJECT,
-        "pass and reject must be distinct values");
-
-    /*
-     * Runtime lookup: "pass" -> ON_ERROR_PASS,
-     * "reject" -> ON_ERROR_REJECT.
-     */
-    {
-        struct {
-            const char  *name;
-            ngx_uint_t   value;
-        } enum_table[] = {
-            { "pass",   ON_ERROR_PASS },
-            { "reject", ON_ERROR_REJECT }
-        };
-
-        for (size_t i = 0; i < ARRAY_SIZE(enum_table);
-             i++)
-        {
-            TEST_ASSERT(
-                enum_table[i].name != NULL,
-                "Enum entry name should not be NULL");
-            TEST_ASSERT(
-                enum_table[i].value == i,
-                "Enum value should match index");
-        }
-    }
-
-    TEST_PASS(
-        "unified error_policy runtime values accepted");
-}
-
-
-/*
- * Verify that the default value is pass (ON_ERROR_PASS = 0).
- *
- * The merge logic uses:
- *   ngx_conf_merge_uint_value(conf->on_error,
- *       prev->on_error,
- *       NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
- *
- * Validates: error_policy legal values and default (default = pass)
- */
-static void
-test_config_on_error_default_value(void)
-{
-    ngx_uint_t  error_policy;
-
-    TEST_SUBSECTION(
-        "Runtime: error_policy default value");
-
-    /*
-     * Simulate unset config: NGX_CONF_UNSET_UINT
-     * triggers the default in merge.
-     */
-    error_policy = (ngx_uint_t) -1;  /* UNSET */
-
-    /* Simulate merge with default */
-    if (error_policy == (ngx_uint_t) -1) {
-        error_policy = ON_ERROR_PASS;
-    }
-
-    TEST_ASSERT(error_policy == ON_ERROR_PASS,
-        "Default error_policy should be pass (0)");
-
-    /*
-     * Verify the default constant matches the module
-     * header definition.
-     */
-    TEST_ASSERT(ON_ERROR_PASS == 0,
-        "ON_ERROR_PASS constant should be 0");
-
-    TEST_PASS(
-        "error_policy defaults to pass");
-}
-
-
-/*
- * Verify config inheritance: child inherits from parent
- * when not explicitly set.
- *
- * Validates: error_policy config inheritance
- */
-static void
-test_config_on_error_inheritance(void)
-{
-    ngx_uint_t  parent_on_error;
-    ngx_uint_t  child_on_error;
-
-    TEST_SUBSECTION(
-        "Runtime: error_policy inheritance");
-
-    /*
-     * Scenario 1: Parent = reject, child = unset.
-     * Child should inherit reject from parent.
-     */
-    parent_on_error = ON_ERROR_REJECT;
-    child_on_error = (ngx_uint_t) -1;  /* UNSET */
-
-    /* Simulate ngx_conf_merge_uint_value */
-    if (child_on_error == (ngx_uint_t) -1) {
-        child_on_error = parent_on_error;
-    }
-
-    TEST_ASSERT(child_on_error == ON_ERROR_REJECT,
-        "Child should inherit reject from parent");
-
-    /*
-     * Scenario 2: Parent = pass, child = reject.
-     * Child's explicit value should override parent.
-     */
-    parent_on_error = ON_ERROR_PASS;
-    child_on_error = ON_ERROR_REJECT;
-
-    /* No merge needed: child is already set */
-    if (child_on_error == (ngx_uint_t) -1) {
-        child_on_error = parent_on_error;
-    }
-
-    TEST_ASSERT(child_on_error == ON_ERROR_REJECT,
-        "Child explicit value should override parent");
-
-    /*
-     * Scenario 3: Parent = unset, child = unset.
-     * Both should get the default (pass).
-     */
-    parent_on_error = (ngx_uint_t) -1;
-    child_on_error = (ngx_uint_t) -1;
-
-    /* Merge parent with global default */
-    if (parent_on_error == (ngx_uint_t) -1) {
-        parent_on_error = ON_ERROR_PASS;
-    }
-
-    /* Merge child with parent */
-    if (child_on_error == (ngx_uint_t) -1) {
-        child_on_error = parent_on_error;
-    }
-
-    TEST_ASSERT(child_on_error == ON_ERROR_PASS,
-        "Both unset should resolve to default pass");
-
-    TEST_PASS(
-        "error_policy inheritance works");
-}
 
 
 /*
@@ -3743,376 +2155,6 @@ test_precommit_memory_limit_budget_parity(void)
 }
 
 
-/* ================================================================
- * TTFB Gauge Regression Tests
- *
- * Validates that the TTFB latch in send_output and
- * resume_pending correctly distinguishes non-empty data
- * chains from empty terminal last_buf chains.
- *
- * Validates: Rule 23 (observability contract integrity)
- * ================================================================ */
-
-/* Forward declarations for TTFB tests */
-static void test_ttfb_empty_lastbuf_no_record(void);
-static void test_ttfb_nonempty_pending_records(void);
-
-
-/*
- * Verify that an empty terminal last_buf chain drained
- * through resume_pending does NOT write TTFB.
- *
- * Scenario: send_deferred_lastbuf() sends (NULL, 0, last_buf=1),
- * downstream returns NGX_AGAIN, chain goes to pending_output.
- * On resume, drain succeeds (NGX_OK) but the chain is empty.
- * TTFB must NOT be recorded.
- */
-static void
-test_ttfb_empty_lastbuf_no_record(void)
-{
-    ngx_flag_t  ttfb_recorded;
-    ngx_int_t   drain_rc;
-    int         buf_has_data;
-
-    TEST_SUBSECTION(
-        "TTFB: empty last_buf drain does not "
-        "record TTFB");
-
-    ttfb_recorded = 0;
-    drain_rc = NGX_OK;
-
-    /* Simulate: pending chain is empty terminal last_buf */
-    buf_has_data = 0;  /* buf->last == buf->pos */
-
-    /*
-     * Mirror the resume_pending guard:
-     *   (rc == NGX_OK || rc == NGX_DONE)
-     *   && out->buf->last > out->buf->pos
-     */
-    if (!ttfb_recorded
-        && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
-        && buf_has_data)
-    {
-        ttfb_recorded = 1;
-    }
-
-    TEST_ASSERT(ttfb_recorded == 0,
-        "TTFB must NOT be recorded for empty "
-        "last_buf drain");
-
-    TEST_PASS(
-        "Empty last_buf drain does not write TTFB");
-}
-
-
-/*
- * Verify that a non-empty pending chain drained through
- * resume_pending DOES write TTFB on success.
- *
- * Scenario: send_output() sends non-empty data, downstream
- * returns NGX_AGAIN, chain goes to pending_output.
- * On resume, drain succeeds (NGX_OK) and chain has data.
- * TTFB must be recorded.
- */
-static void
-test_ttfb_nonempty_pending_records(void)
-{
-    ngx_flag_t  ttfb_recorded;
-    ngx_int_t   drain_rc;
-    int         buf_has_data;
-
-    TEST_SUBSECTION(
-        "TTFB: non-empty pending drain records TTFB");
-
-    ttfb_recorded = 0;
-    drain_rc = NGX_OK;
-
-    /* Simulate: pending chain has real Markdown data */
-    buf_has_data = 1;  /* buf->last > buf->pos */
-
-    if (!ttfb_recorded
-        && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
-        && buf_has_data)
-    {
-        ttfb_recorded = 1;
-    }
-
-    TEST_ASSERT(ttfb_recorded == 1,
-        "TTFB must be recorded for non-empty "
-        "pending drain");
-
-    /* Verify one-shot: second drain should not re-record */
-    {
-        ngx_flag_t  was_recorded;
-
-        was_recorded = ttfb_recorded;
-        drain_rc = NGX_OK;
-        buf_has_data = 1;
-
-        /* Guard won't fire because ttfb_recorded == 1 */
-        if (!ttfb_recorded
-            && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
-            && buf_has_data)
-        {
-            ttfb_recorded = 2;  /* would indicate double-record */
-        }
-
-        TEST_ASSERT(ttfb_recorded == was_recorded,
-            "TTFB latch is one-shot, no double record");
-    }
-
-    /* Verify NGX_ERROR does not record */
-    {
-        ngx_flag_t  fresh_ttfb;
-
-        fresh_ttfb = 0;
-        drain_rc = NGX_ERROR;
-        buf_has_data = 1;
-
-        if (!fresh_ttfb
-            && (drain_rc == NGX_OK || drain_rc == NGX_DONE)
-            && buf_has_data)
-        {
-            fresh_ttfb = 1;
-        }
-
-        TEST_ASSERT(fresh_ttfb == 0,
-            "TTFB must NOT be recorded on NGX_ERROR");
-    }
-
-    TEST_PASS(
-        "Non-empty pending drain records TTFB "
-        "correctly");
-}
-
-
-/* ================================================================
- * Bug Condition Exploration Tests (preservation bugfix)
- *
- * These tests encode EXPECTED (correct) behavior for 4 bugs
- * found during streaming code review. They are designed to
- * FAIL on unfixed code, confirming the bugs exist.
- *
- * Uses a soft-assert pattern so all 4 bugs can be checked
- * in a single run. The final assertion at the end ensures
- * the test binary exits non-zero if any bug was confirmed.
- *
- * Validates: fallback return value correctness, error_policy legal values and default,
- *            decomp inflate loop completeness, tail feed error handling,
- *            invalid static value rejection at parse time
- * ================================================================ */
-
-static int  bug_exploration_failures = 0;
-
-#define BUG_EXPECT_FAIL(condition, message) \
-    do { \
-        if (!(condition)) { \
-            fprintf(stderr, \
-                "  ✗ BUG CONFIRMED: %s\n" \
-                "    at %s:%d\n" \
-                "    condition: %s\n", \
-                message, __FILE__, __LINE__, \
-                #condition); \
-            bug_exploration_failures++; \
-        } \
-    } while (0)
-
-
-/*
- * Bug 1: fallback_to_fullbuffer() returns NGX_OK after
- * successful path switch, causing the streaming loop to
- * continue processing subsequent buffers on a NULL handle.
- *
- * This test simulates the fallback logic and asserts the
- * return value should be NGX_DECLINED (expected behavior).
- * On unfixed code, the function returns NGX_OK, so this
- * test will FAIL.
- *
- * **Validates: fallback return value correctness**
- */
-static void
-test_fallback_return_value_on_error(void)
-{
-    ngx_int_t   fallback_rc;
-    uint32_t    feed_rc;
-
-    TEST_SUBSECTION(
-        "Bug 1: fallback_to_fullbuffer return value");
-
-    /*
-     * Bug condition:
-     * - feed returns ERROR_STREAMING_FALLBACK
-     * - fallback succeeds (buffer init/append OK)
-     * - path switches to PATH_FULLBUFFER
-     */
-    feed_rc = ERROR_STREAMING_FALLBACK;
-
-    TEST_ASSERT(feed_rc == ERROR_STREAMING_FALLBACK,
-        "Feed should return FALLBACK signal");
-
-    /*
-     * The actual return value from the real function.
-     * After fix: NGX_DECLINED (correct)
-     *
-     * We mirror the real function's return here.
-     * The real function now ends with "return NGX_DECLINED;"
-     */
-    fallback_rc = NGX_DECLINED;  /* mirrors fixed code */
-
-    /*
-     * EXPECTED BEHAVIOR assertion:
-     * fallback_to_fullbuffer() should return NGX_DECLINED
-     * so process_chunk() propagates non-OK to the main
-     * loop, which then exits the streaming loop.
-     *
-     * This WILL FAIL on unfixed code (returns NGX_OK).
-     */
-    BUG_EXPECT_FAIL(fallback_rc == NGX_DECLINED,
-        "fallback_to_fullbuffer should return "
-        "NGX_DECLINED after successful path switch "
-        "(Bug 1: returns NGX_OK instead)");
-}
-
-
-/*
- * Bug 2: decomp_feed() only calls inflate() once. When
- * the output buffer fills but input remains (avail_in > 0),
- * the residual compressed data is silently discarded.
- *
- * This test constructs a high compression ratio scenario
- * and asserts that all data is decompressed. On unfixed
- * code, only a single inflate() worth of output is produced.
- *
- * **Validates: decomp inflate loop completeness**
- */
-static void
-test_decomp_incomplete_inflate_error(void)
-{
-    size_t  compressed_len;
-    size_t  expected_decompressed_len;
-    size_t  initial_buf_size;
-    size_t  actual_output_len;
-    size_t  avail_in_after;
-
-    TEST_SUBSECTION(
-        "Bug 2: decomp single inflate data loss");
-
-    /*
-     * Scenario: high compression ratio data
-     * - 1 KB compressed -> 20 KB decompressed
-     * - Initial buffer estimate: 4x input = 4 KB
-     * - Single inflate produces 4 KB, but 16 KB remains
-     */
-    compressed_len = 1024;
-    expected_decompressed_len = 20480;  /* 20 KB */
-    initial_buf_size = compressed_len * 4;  /* 4 KB */
-
-    /*
-     * Simulate fixed inflate loop behavior:
-     * - Loop calls inflate() repeatedly
-     * - When avail_out == 0 and avail_in > 0, buffer
-     *   is expanded (2x) and inflate continues
-     * - Loop exits when avail_in == 0 or Z_STREAM_END
-     * - All input is consumed, output is complete
-     *
-     * Whether initial buffer is smaller or larger than
-     * expected output, the loop produces complete output.
-     */
-    actual_output_len = expected_decompressed_len;
-    avail_in_after = 0;
-
-    UNUSED(initial_buf_size);
-
-    TEST_ASSERT(avail_in_after == 0,
-        "avail_in should be 0 after inflate loop "
-        "(all input consumed)");
-
-    /*
-     * EXPECTED BEHAVIOR assertion:
-     * decomp_feed() should loop inflate() until
-     * avail_in == 0, producing complete output.
-     *
-     * This WILL FAIL on unfixed code (only 4 KB output
-     * instead of 20 KB).
-     */
-    BUG_EXPECT_FAIL(
-        actual_output_len == expected_decompressed_len,
-        "decomp_feed should produce complete "
-        "decompressed output via inflate loop "
-        "(Bug 2: only single inflate, data lost)");
-}
-
-
-/*
- * Bug 3: finalize_request() ignores tail feed error codes.
- * When decomp_finish() produces tail data and the subsequent
- * markdown_streaming_feed() returns a non-SUCCESS error,
- * the error is silently ignored and finalize continues.
- *
- * **Validates: tail feed error handling**
- */
-static void
-test_finalize_tail_feed_error(void)
-{
-    uint32_t  tail_feed_rc;
-    int       error_handled;
-
-    TEST_SUBSECTION(
-        "Bug 3: finalize tail feed error ignored");
-
-    /*
-     * Scenario: tail feed returns ERROR_STREAMING_FALLBACK
-     */
-    tail_feed_rc = ERROR_STREAMING_FALLBACK;
-    error_handled = 0;
-
-    /*
-     * Simulate fixed finalize_request() logic:
-     * Now handles non-SUCCESS tail feed errors —
-     * FALLBACK triggers on_error policy handling,
-     * other errors handled per commit state.
-     */
-    if (tail_feed_rc == ERROR_SUCCESS) {
-        /* Normal path: send output */
-    } else {
-        /* Fixed code: error is now handled */
-        error_handled = 1;
-    }
-
-    TEST_ASSERT(tail_feed_rc != ERROR_SUCCESS,
-        "Tail feed should return non-SUCCESS error");
-
-    /*
-     * EXPECTED BEHAVIOR assertion:
-     * When tail feed returns non-SUCCESS, the error
-     * should be handled (not ignored).
-     *
-     * After fix: error_handled == 1 (PASS).
-     */
-    BUG_EXPECT_FAIL(error_handled == 1,
-        "Tail feed FALLBACK error should be handled "
-        "(Bug 3: error silently ignored in finalize)");
-
-    /*
-     * Scenario 2: tail feed returns ERROR_POST_COMMIT
-     */
-    tail_feed_rc = ERROR_POST_COMMIT;
-    error_handled = 0;
-
-    if (tail_feed_rc == ERROR_SUCCESS) {
-        /* Normal path */
-    } else {
-        /* Fixed code: calls handle_postcommit_error */
-        error_handled = 1;
-    }
-
-    BUG_EXPECT_FAIL(error_handled == 1,
-        "Tail feed POST_COMMIT error should call "
-        "handle_postcommit_error "
-        "(Bug 3: error silently ignored)");
-}
-
-
 /*
  * Regression: markdown_streaming rejects invalid static values.
  *
@@ -4186,379 +2228,6 @@ test_config_invalid_static_value(void)
  *              valid static values accepted, variable expressions compile,
  *              duplicate directive -> 'is duplicate'**
  * ================================================================ */
-
-
-/*
- * Bug 1 Preservation: Normal streaming feed (ERROR_SUCCESS)
- * causes process_chunk to return NGX_OK.
- *
- * When feed returns SUCCESS, process_chunk handles the output
- * and returns NGX_OK so the main loop continues consuming
- * buffers. This behavior must not change after the fix.
- *
- * **Validates: post-commit ignores on_error policy**
- */
-static void
-test_preserve_normal_feed_returns_ok(void)
-{
-    uint32_t   feed_rc;
-    ngx_int_t  process_chunk_rc;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 1: normal feed returns NGX_OK");
-
-    /*
-     * Simulate normal streaming: feed returns SUCCESS,
-     * process_chunk returns NGX_OK to continue the loop.
-     */
-    feed_rc = ERROR_SUCCESS;
-
-    TEST_ASSERT(feed_rc == ERROR_SUCCESS,
-        "Feed should return SUCCESS for normal data");
-
-    /*
-     * In the real code, when feed_rc == ERROR_SUCCESS,
-     * process_chunk handles output and returns NGX_OK.
-     * This is the non-bug path — no fallback triggered.
-     */
-    process_chunk_rc = NGX_OK;
-
-    TEST_ASSERT(process_chunk_rc == NGX_OK,
-        "process_chunk should return NGX_OK on "
-        "normal SUCCESS feed");
-    TEST_PASS(
-        "Normal feed -> process_chunk returns NGX_OK");
-}
-
-
-/*
- * Bug 1 Preservation: fallback_to_fullbuffer returns
- * NGX_ERROR when buffer initialization fails.
- *
- * When the prebuffer transfer fails (buffer_init or
- * buffer_append returns error), fallback_to_fullbuffer
- * returns NGX_ERROR. This error path must not change.
- *
- * **Validates: post-commit error always fail-closed**
- */
-static void
-test_preserve_fallback_buffer_fail(void)
-{
-    ngx_int_t  buffer_init_rc;
-    ngx_int_t  fallback_rc;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 1: fallback buffer init failure");
-
-    /*
-     * Simulate fallback where buffer_init fails.
-     * The real function returns NGX_ERROR in this case.
-     */
-    buffer_init_rc = NGX_ERROR;
-
-    TEST_ASSERT(buffer_init_rc == NGX_ERROR,
-        "Buffer init should fail in this scenario");
-
-    /*
-     * When buffer init fails, fallback_to_fullbuffer
-     * returns NGX_ERROR immediately. This is the error
-     * path that must remain unchanged after the fix.
-     */
-    fallback_rc = NGX_ERROR;
-
-    TEST_ASSERT(fallback_rc == NGX_ERROR,
-        "fallback_to_fullbuffer should return "
-        "NGX_ERROR when buffer init fails");
-    TEST_PASS(
-        "Fallback buffer failure -> NGX_ERROR preserved");
-}
-
-
-/*
- * Bug 2 Preservation: Small data where single inflate
- * is sufficient produces complete output.
- *
- * When compressed data is small enough that a single
- * inflate() call consumes all input (avail_in == 0),
- * decomp_feed produces complete output. This is the
- * non-bug path that must remain unchanged.
- *
- * **Validates: conditional if_modified_since_only allows streaming**
- */
-static void
-test_preserve_small_data_complete(void)
-{
-    size_t  compressed_len;
-    size_t  expected_decompressed_len;
-    size_t  initial_buf_size;
-    size_t  actual_output_len;
-    size_t  avail_in_after;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 2: small data single inflate OK");
-
-    /*
-     * Scenario: low compression ratio data
-     * - 1 KB compressed -> 2 KB decompressed
-     * - Initial buffer estimate: 4x input = 4 KB
-     * - Single inflate produces 2 KB, avail_in == 0
-     */
-    compressed_len = 1024;
-    expected_decompressed_len = 2048;  /* 2 KB */
-    initial_buf_size = compressed_len * 4;  /* 4 KB */
-
-    /*
-     * Single inflate is sufficient: output fits in
-     * initial buffer, all input consumed.
-     */
-    TEST_ASSERT(
-        initial_buf_size >= expected_decompressed_len,
-        "Initial buffer should be large enough");
-
-    actual_output_len = expected_decompressed_len;
-    avail_in_after = 0;
-
-    TEST_ASSERT(avail_in_after == 0,
-        "avail_in should be 0 after single inflate "
-        "(all input consumed)");
-    TEST_ASSERT(
-        actual_output_len == expected_decompressed_len,
-        "Output should be complete for small data");
-    TEST_PASS(
-        "Small data -> complete output preserved");
-}
-
-
-/*
- * Bug 2 Preservation: Empty input returns NGX_OK.
- *
- * When in_data is NULL or in_len is 0, decomp_feed
- * returns NGX_OK with no output. This early-return
- * path must remain unchanged.
- *
- * **Validates: conditional disabled allows streaming**
- */
-static void
-test_preserve_empty_input_ok(void)
-{
-    size_t           in_len;
-    const u_char    *out_data;
-    size_t           out_len;
-    ngx_int_t        rc;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 2: empty input returns NGX_OK");
-
-    /*
-     * Simulate decomp_feed with empty input.
-     * The real function checks in_data == NULL || in_len == 0
-     * and returns NGX_OK with out_data = NULL, out_len = 0.
-     */
-    in_len = 0;
-    out_data = NULL;
-    out_len = 0;
-
-    /* Mirror the early-return logic */
-    if (in_len == 0) {
-        rc = NGX_OK;
-    } else {
-        rc = NGX_ERROR;  /* should not reach here */
-    }
-
-    TEST_ASSERT(rc == NGX_OK,
-        "Empty input should return NGX_OK");
-    TEST_ASSERT(out_data == NULL && out_len == 0,
-        "Empty input should produce no output");
-    TEST_PASS("Empty input -> NGX_OK preserved");
-}
-
-
-/*
- * Bug 2 Preservation: Exceeding max_decompressed_size
- * returns NGX_ERROR.
- *
- * When total decompressed bytes exceed the configured
- * limit, decomp_feed returns NGX_ERROR. This size
- * limit enforcement must remain unchanged.
- *
- * **Validates: conditional if_modified_since_only allows streaming**
- */
-static void
-test_preserve_exceeds_max_size(void)
-{
-    size_t     total_decompressed;
-    size_t     max_decompressed_size;
-    size_t     produced;
-    ngx_int_t  rc;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 2: max size exceeded -> NGX_ERROR");
-
-    /*
-     * Simulate decomp_feed where decompressed output
-     * exceeds the max_decompressed_size limit.
-     */
-    max_decompressed_size = 4096;
-    total_decompressed = 4000;
-    produced = 200;  /* pushes total to 4200 > 4096 */
-
-    total_decompressed += produced;
-
-    /* Mirror the size limit check */
-    if (max_decompressed_size > 0
-        && total_decompressed > max_decompressed_size)
-    {
-        rc = NGX_ERROR;
-    } else {
-        rc = NGX_OK;
-    }
-
-    TEST_ASSERT(total_decompressed > max_decompressed_size,
-        "Total should exceed max size");
-    TEST_ASSERT(rc == NGX_ERROR,
-        "Exceeding max size should return NGX_ERROR");
-    TEST_PASS(
-        "Max size exceeded -> NGX_ERROR preserved");
-}
-
-
-/*
- * Bug 3 Preservation: Tail feed returning ERROR_SUCCESS
- * with output data sends normally.
- *
- * When decomp_finish produces tail data and the subsequent
- * feed returns SUCCESS with output, the output is sent
- * downstream. This normal path must remain unchanged.
- *
- * **Validates: tail feed SUCCESS sends output**
- */
-static void
-test_preserve_tail_feed_success(void)
-{
-    uint32_t        tail_feed_rc;
-    const u_char   *out_data;
-    size_t          out_len;
-    int             output_sent;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 3: tail feed SUCCESS sends output");
-
-    /*
-     * Simulate finalize_request where decomp_finish
-     * produces tail data and feed returns SUCCESS.
-     */
-    tail_feed_rc = ERROR_SUCCESS;
-    out_data = (const u_char *) "tail output";
-    out_len = 11;
-    output_sent = 0;
-
-    /*
-     * Mirror the real finalize logic:
-     * if (feed_rc == ERROR_SUCCESS && out_data != NULL
-     *     && out_len > 0) -> send output
-     */
-    if (tail_feed_rc == ERROR_SUCCESS
-        && out_data != NULL && out_len > 0)
-    {
-        output_sent = 1;
-    }
-
-    TEST_ASSERT(output_sent == 1,
-        "Tail feed SUCCESS with data should send output");
-    TEST_PASS(
-        "Tail feed SUCCESS -> output sent preserved");
-}
-
-
-/*
- * Bug 3 Preservation: decomp_finish with no tail data
- * goes directly to finalize.
- *
- * When decomp_finish returns NGX_OK but produces no
- * output (decomp_data == NULL or decomp_len == 0),
- * the code skips the tail feed and goes straight to
- * markdown_streaming_finalize. This must remain unchanged.
- *
- * **Validates: no tail data -> direct finalize**
- */
-static void
-test_preserve_no_tail_data(void)
-{
-    ngx_int_t        decomp_finish_rc;
-    const u_char    *decomp_data;
-    size_t           decomp_len;
-    int              tail_feed_called;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 3: no tail data -> direct finalize");
-
-    /*
-     * Simulate decomp_finish producing no output.
-     */
-    decomp_finish_rc = NGX_OK;
-    decomp_data = NULL;
-    decomp_len = 0;
-    tail_feed_called = 0;
-
-    /*
-     * Mirror the real logic:
-     * if (rc == NGX_OK && decomp_data != NULL
-     *     && decomp_len > 0) -> call feed
-     * else -> skip to finalize
-     */
-    if (decomp_finish_rc == NGX_OK
-        && decomp_data != NULL && decomp_len > 0)
-    {
-        tail_feed_called = 1;
-    }
-
-    TEST_ASSERT(tail_feed_called == 0,
-        "No tail data should skip tail feed");
-    TEST_PASS(
-        "No tail data -> direct finalize preserved");
-}
-
-
-/*
- * Bug 3 Preservation: When decompression is not needed,
- * decomp_finish is skipped entirely.
- *
- * When ctx->decompression.needed is false, the entire
- * decomp_finish block is skipped and we go straight to
- * markdown_streaming_finalize. This must remain unchanged.
- *
- * **Validates: no decompression -> skip decomp**
- */
-static void
-test_preserve_no_decompression(void)
-{
-    int  decompression_needed;
-    int  decomp_finish_called;
-
-    TEST_SUBSECTION(
-        "Preserve Bug 3: no decompression -> skip decomp");
-
-    /*
-     * Simulate request where decompression is not needed.
-     */
-    decompression_needed = 0;
-    decomp_finish_called = 0;
-
-    /*
-     * Mirror the real logic:
-     * if (ctx->decompression.needed
-     *     && ctx->streaming.decompressor != NULL)
-     * -> call decomp_finish
-     */
-    if (decompression_needed) {
-        decomp_finish_called = 1;
-    }
-
-    TEST_ASSERT(decomp_finish_called == 0,
-        "decomp_finish should not be called");
-    TEST_PASS(
-        "No decompression -> skip decomp preserved");
-}
 
 
 /*
@@ -4689,6 +2358,69 @@ test_preserve_duplicate_directive(void)
 
 
 /* ================================================================
+ * Production-header bindings (0.9.2 round-2 test integrity)
+ *
+ * This suite formerly carried hand-copied constant tables (error codes,
+ * the markdown_streaming directive name).  Those mirrors were replaced by
+ * a direct include of the generated production headers at the top of this
+ * file, and this test keeps the binding honest at run time: it calls the
+ * production ABI-gate helpers and asserts the values this suite depends
+ * on.  If the Rust side renumbers a streaming error code or renames the
+ * directive, this test and the mirror assertions below fail together.
+ *
+ * Validates: FFI error-code/ABI binding and directive-registry binding
+ * for the streaming surface.
+ * ================================================================ */
+
+static void
+test_production_header_bindings(void)
+{
+    TEST_SUBSECTION(
+        "Production FFI header bindings (error codes, ABI gate, "
+        "directive name)");
+
+    /* Streaming-gated FFI codes this suite routes on. */
+    TEST_ASSERT(ERROR_TIMEOUT == 3,
+        "ERROR_TIMEOUT must match the production FFI header");
+    TEST_ASSERT(ERROR_MEMORY_LIMIT == 4,
+        "ERROR_MEMORY_LIMIT must match the production FFI header");
+    TEST_ASSERT(ERROR_BUDGET_EXCEEDED == 6,
+        "ERROR_BUDGET_EXCEEDED must match the production FFI header");
+    TEST_ASSERT(ERROR_STREAMING_FALLBACK == 7,
+        "ERROR_STREAMING_FALLBACK must match the production FFI header");
+    TEST_ASSERT(ERROR_POST_COMMIT == 8,
+        "ERROR_POST_COMMIT must match the production FFI header");
+    TEST_ASSERT(ERROR_SUCCESS == 0 && ERROR_INTERNAL == 99,
+        "ERROR_SUCCESS/ERROR_INTERNAL must match the production "
+        "FFI header");
+
+    /* Real production ABI gate: accept the bundled version, reject a
+     * mismatched one, and require the full 4-tuple handshake. */
+    TEST_ASSERT(ngx_http_markdown_ffi_abi_matches(MARKDOWN_ABI_VERSION),
+        "ABI gate must accept the bundled ABI version");
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_matches(MARKDOWN_ABI_VERSION + 1),
+        "ABI gate must reject a mismatched ABI version");
+    TEST_ASSERT(ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "full 4-tuple ABI handshake must pass with the header values");
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH ^ 1,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "header-hash mismatch must fail the ABI handshake");
+
+    /* Directive registry: the name this suite's config mirrors use must
+     * be the production spelling from the canonical registry header. */
+    TEST_ASSERT(strcmp(NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING,
+        "markdown_streaming") == 0,
+        "markdown_streaming directive name must match the production "
+        "registry header");
+
+    TEST_PASS("production header bindings verified");
+}
+
+
+/* ================================================================
  * main
  * ================================================================ */
 
@@ -4712,71 +2444,28 @@ main(void)
     test_policy_auto_small_cl();
     test_policy_auto_no_cl();
 
-    TEST_SECTION("14.2 Streaming Decompression");
-    test_decomp_null_safety();
-    test_decomp_empty_input();
-
-    TEST_SECTION("14.3 Body Filter Chunk Processing");
-    test_chunk_processing_empty();
-    test_chunk_processing_size_limit();
-
-    TEST_SECTION("14.4 Backpressure Handling");
-    test_backpressure_flag();
-    test_backpressure_deferred_finalize_resume();
 
     TEST_SECTION("14.4b Input Disposition + Pending Input");
-    test_input_disposition_default_consumed();
-    test_input_disposition_retain_for_failopen();
     test_pending_input_enqueue_terminal_capture();
-    test_pending_input_clear_resets_state();
     test_pending_input_empty_check();
-    test_lost_continuation_two_link();
-    test_failopen_retain_preserves_pos();
-    test_ngxdone_resume_continues();
-    test_multi_again_loop_each_input_once();
-    test_terminal_on_queued_link();
-    test_compressed_streaming_backpressure();
-    test_client_abort_with_pending_state();
-    test_future_input_while_pending_output();
 
-    TEST_SECTION("14.5 Pre-Commit Fallback");
-    test_precommit_fallback();
 
     TEST_SECTION("14.6 Post-Commit Error Handling");
-    test_postcommit_error();
-    test_postcommit_error_ignores_on_error_policy();
-    test_postcommit_error_debug_log_details();
     test_postcommit_error_various_error_codes();
 
     TEST_SECTION("14.7 Configuration Directive Parsing");
-    test_config_budget_default();
     test_config_policy_values();
 
     TEST_SECTION("14.8 Output Chain Construction");
     test_output_chain_last_buf();
     test_output_chain_flush();
 
-    TEST_SECTION("14.9 Size Limit and Timeout");
-    test_size_limit_precommit();
-    test_size_limit_postcommit();
-    test_timeout_precommit();
 
     TEST_SECTION("15.6 Streaming Headers Policy");
-    test_commit_boundary_removes_content_length();
-    test_commit_boundary_removes_content_encoding();
-    test_commit_boundary_skips_content_encoding_no_decomp();
-    test_streaming_no_cl_and_chunked_coexist();
-    test_precommit_no_header_modification();
-    test_commit_boundary_strips_upstream_etag();
-    test_precommit_all_failopen_paths_record_metrics();
     test_init_failure_respects_error_policy();
-    test_streaming_failopen_increments_global_counter();
 
     TEST_SECTION(
         "15.9.1 Unified Error Policy Runtime Encoding");
-    test_config_on_error_legal_values();
-    test_config_on_error_default_value();
-    test_config_on_error_inheritance();
     test_config_on_error_invalid_values();
 
     TEST_SECTION(
@@ -4806,43 +2495,17 @@ main(void)
     test_metrics_deferred_lastbuf_again_then_ok();
     test_metrics_deferred_lastbuf_again_then_error();
 
-    TEST_SECTION(
-        "17.1 TTFB Gauge Regression");
-    test_ttfb_empty_lastbuf_no_record();
-    test_ttfb_nonempty_pending_records();
-
-    TEST_SECTION("Bug 1 Preservation (Baseline)");
-    test_preserve_normal_feed_returns_ok();
-    test_preserve_fallback_buffer_fail();
-
-    TEST_SECTION("Bug 2 Preservation (Baseline)");
-    test_preserve_small_data_complete();
-    test_preserve_empty_input_ok();
-    test_preserve_exceeds_max_size();
-
-    TEST_SECTION("Bug 3 Preservation (Baseline)");
-    test_preserve_tail_feed_success();
-    test_preserve_no_tail_data();
-    test_preserve_no_decompression();
 
     TEST_SECTION("Bug 4 Preservation (Baseline)");
     test_preserve_valid_static_values();
     test_policy_rejects_variable_expression();
     test_preserve_duplicate_directive();
 
-    TEST_SECTION("Bug Condition Exploration (preservation bugfix)");
-    test_fallback_return_value_on_error();
-    test_decomp_incomplete_inflate_error();
-    test_finalize_tail_feed_error();
-    test_config_invalid_static_value();
+    TEST_SECTION("Production-header bindings (test integrity)");
+    test_production_header_bindings();
 
-    if (bug_exploration_failures > 0) {
-        printf("\n========================================\n");
-        printf("Bug exploration: %d bug(s) confirmed\n",
-            bug_exploration_failures);
-        printf("========================================\n\n");
-        return 1;
-    }
+    TEST_SECTION("Bug Condition Exploration (preservation bugfix)");
+    test_config_invalid_static_value();
 
     printf("\n========================================\n");
     printf("All streaming tests passed!\n");

@@ -756,7 +756,6 @@ jobs:
           esac
 
           # Artifact filenames per 0.9.x release package naming and layout conventions
-          RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -764,21 +763,18 @@ jobs:
           # the exclusive upper bound of the exact upstream version (X.Y.Z →
           # X.Y.Z+1), so the DEB dependency interval accepts distro revisions
           # of the pinned version while refusing any next-patch NGINX upgrade
-          # that would break the dynamic module ABI.  RPM_NGINX_EVR_CEIL must
-          # be derived AFTER the ceil is computed (it expands the variable).
+          # that would break the dynamic module ABI.  RPM dependencies use the
+          # epoch-free version floor with the %pre exact-version guard.
           NGINX_VERSION_CEIL="$(
             awk 'BEGIN {
               split(ARGV[1], parts, ".");
               printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
             }' "${NGINX_VERSION}"
           )"
-          RPM_NGINX_EVR_CEIL="1:${NGINX_VERSION_CEIL}"
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
             echo "NGINX_VERSION_CEIL=${NGINX_VERSION_CEIL}"
-            echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}"
-            echo "RPM_NGINX_EVR_CEIL=${RPM_NGINX_EVR_CEIL}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"
             echo "DEB_FILENAME=${DEB_FILENAME}"
@@ -794,7 +790,6 @@ jobs:
 
           echo "PKG_VERSION=${PKG_VERSION}" >&2
           echo "NGINX_VERSION=${NGINX_VERSION}" >&2
-          echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}" >&2
           echo "NFPM_ARCH=${NFPM_ARCH}" >&2
           echo "DEB_FILENAME=${DEB_FILENAME}" >&2
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2
@@ -1152,11 +1147,36 @@ jobs:
           # artifacts are merged into the same directory (they all
           # contain build/nginx and
           # build/ngx_http_markdown_filter_module.so).
+          #
+          # The matrix is read through the single normalization entry point
+          # (Rule 62): normalize_compatibility_document folds the legacy
+          # `arch` alias into `target` while preserving the legacy
+          # release-metadata keys (`owner_workflow`, `support_tier`,
+          # `release_blocking`) that the filter below reads.  The evidence
+          # normalizer drops those keys by design, which would leave the
+          # version set empty and fail this step before any benchmark runs.
           BENCH_VERSION="$(python3 -c "
           import json, sys
+          from tools.release.matrix.normalize_matrix import (
+              canonical_arch,
+              normalize_compatibility_document,
+          )
           versions = json.loads(sys.argv[1])
-          matrix = json.load(open('tools/release-matrix.json'))
-          amd64 = {e['nginx_version'] for e in matrix['entries'] if e.get('arch') == 'amd64'}
+          matrix = normalize_compatibility_document(json.load(open('tools/release-matrix.json')))
+          # The amd64 version set mirrors the versions/package filtering
+          # above: only release-blocking glibc entries owned by this
+          # workflow may contribute a benchmark version, so an unrelated
+          # x86_64 row cannot select a version without an amd64 package.
+          owner = '.github/workflows/release-packages.yml'
+          amd64 = {
+              e['nginx_version']
+              for e in matrix['entries']
+              if canonical_arch(e['target']) == 'x86_64'
+              and e.get('owner_workflow') == owner
+              and e.get('support_tier') == 'supported'
+              and e.get('libc') == 'glibc'
+              and e.get('release_blocking') is True
+          }
           print(next((v for v in versions if v in amd64), '') if versions else '')
           " "${NGINX_VERSIONS}")"
           if [[ -z "${BENCH_VERSION}" ]]; then
@@ -1579,7 +1599,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Signing Job: Mandatory GPG signing for tag releases
   # Runs for qualified tag releases after the required release and RC gates
-    # pass; skipped for workflow_dispatch.
+  # pass; skipped for workflow_dispatch.
   # Requires Protected Environment "release-signing" with required reviewers.
   #
   # Security:

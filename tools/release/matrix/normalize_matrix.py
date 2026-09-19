@@ -58,6 +58,22 @@ CANONICAL_ENTRY_KEYS = [
 OPTIONAL_ENTRY_KEYS = frozenset({"image_ref", "image_digest"})
 
 # Legacy aliases: alias -> canonical key.
+#
+# NOTE on ``os_type``: the two contracts use the same legacy spelling for
+# different canonical fields, so the mapping is contract-specific and the two
+# dicts below must not be merged.
+#
+#   * Evidence matrix (this repo's `tools/release-matrix.json`): ``os_type``
+#     is a distro/OS family alias and folds to ``os``; the C library is
+#     carried by the canonical ``libc`` key.
+#   * Compatibility matrix: the legacy document used ``os_type`` to mean the
+#     C library, so it folds to ``libc`` (see COMPATIBILITY_ALIASES).
+#
+# ``schemas/release-matrix.schema.json`` documents the legacy evidence shape
+# (``os_type`` -> ``os``), and the compatibility contract is described in the
+# compatibility-matrix generator.  Consumers must go through
+# ``normalize_entry`` for evidence rows and ``normalize_compatibility_entry``
+# for compatibility rows; reading ``os_type`` directly is undefined for both.
 LEGACY_ALIASES = {
     "nginx": "nginx_version",
     "os_type": "os",
@@ -108,6 +124,9 @@ COMPATIBILITY_TOP_LEVEL_KEYS = frozenset(
     }
 )
 
+# Compatibility-contract aliases: alias -> canonical key.  ``os_type`` means
+# the C library here (see the note on LEGACY_ALIASES); it is intentionally NOT
+# imported from that dict.
 COMPATIBILITY_ALIASES = {
     "nginx": "nginx_version",
     "os_type": "libc",

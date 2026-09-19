@@ -178,6 +178,22 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
 
+    def test_wrong_version_package_fails(self):
+        """A .deb whose embedded version differs from --version must fail
+        instead of shipping a mismatched package in the manifest."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.7.0_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234def5678",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
+        ])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("carries version 0.7.0, expected 0.8.3", result.stderr)
+
     def test_semver_prerelease_and_build_metadata(self):
         self._write_package(
             "nginx-module-markdown-for-agents_1.2.3-alpha+001_nginx-1.28.0_amd64.deb"

@@ -6,6 +6,20 @@ The unified error policy determines how the module handles conversion failures a
 runtime. A single directive `markdown_error_policy` covers all error paths
 (full-buffer, streaming, overload) with consistent semantics.
 
+Two documented exceptions override that policy, and
+[RFC-0008](RFC-0008-streaming-conversion-support-contract.md) section 2.2 is the
+authoritative description of both:
+
+- **Capability fallback ignores the policy.** When the streaming engine reports
+  `ERROR_STREAMING_FALLBACK`, the module returns the response to the bounded
+  full-buffer engine regardless of the configured `markdown_error_policy`. The
+  failure never reaches the pass/status/fail-closed decision.
+- **Header snapshot rollback failure is fail-closed.** When the module cannot
+  restore the header snapshot, it aborts the conversion and returns the
+  configured error status. This path always fails closed and logs at CRIT
+  level with `fail-open disabled`, because the module can no longer restore the
+  header state.
+
 ## Directive
 
 ```nginx
@@ -71,11 +85,15 @@ Both actions preserve these safety invariants:
 decide_error_behavior(class, policy) → behavior
 ```
 
-1. If the failure is post-commit:
+1. If the failure is a header-snapshot rollback failure
+   (`HEADER_SNAPSHOT_RESTORE_FAILED`, surfaced as `header_plan_apply_error`),
+   the module rejects the request with the configured error status. This case
+   never applies the general pre-commit policy.
+2. If the failure is post-commit:
    - `Pass` -> `SafeFinish`, falling back to `Abort`
    - `FailClosed` or `Status(n)` -> `Abort`
-2. Otherwise, including `header_plan_apply_error`, apply the configured
-   pre-commit policy:
+3. Otherwise, including any `header_plan_apply_error` that is not a
+   rollback failure, apply the configured pre-commit policy:
    - `Pass` → `PassThrough`
    - `Status(n)` → `ReturnStatus(n)`
    - `FailClosed` → `ReturnStatus(502)`

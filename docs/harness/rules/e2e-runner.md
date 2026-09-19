@@ -129,8 +129,10 @@ Naming clarity:
   probes, assertion labels, comments) in the same changeset.
 
 Verification:
-- `python3 tools/harness/detect_e2e_streaming_config.py`
-- `python3 tools/harness/detect_e2e_streaming_config.py --strict` (CI-blocking mode)
+- `python3 tools/harness/detect_e2e_streaming_config.py --strict`
+  (CI-blocking mode: exits 1 on findings or on any scan error. Omit the
+  directory argument to scan the repository root, exactly as the Makefile
+  targets `detect-e2e-streaming-config` do.)
 - `python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q`
 - `bash tools/harness/tests/test_detect_e2e_streaming_config.sh`
 - Visual inspection: every location block with `markdown_cache_validation full`

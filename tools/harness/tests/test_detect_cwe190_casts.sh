@@ -364,6 +364,34 @@ else
         "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
+# Fail-closed: a failing recursive scan aborts with exit 2.  A PATH stub
+# makes grep fail deterministically, so the case behaves the same for
+# privileged and unprivileged users (chmod-based traps do not stop root).
+scan_root="$(mktemp -d "${TMPDIR:-/tmp}/cwe190-scan.XXXXXX")"
+real_grep="$(command -v grep)"
+mkdir -p "${scan_root}/src" "${scan_root}/bin"
+printf 'int ok;\n' >"${scan_root}/src/readable.c"
+cat >"${scan_root}/bin/grep" <<STUB
+#!/bin/bash
+for arg in "\$@"; do
+    if [[ "\$arg" == -*r* ]]; then
+        echo "grep: simulated recursive scan failure" >&2
+        exit 2
+    fi
+done
+exec "${real_grep}" "\$@"
+STUB
+chmod +x "${scan_root}/bin/grep"
+exit_code=0
+PATH="${scan_root}/bin:${PATH}" bash "${DETECTOR}" "${scan_root}/src" >"${scan_root}/out.txt" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed' "${scan_root}/out.txt"; then
+    pass "a failing recursive scan aborts with exit 2"
+else
+    fail "a failing recursive scan aborts with exit 2" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${scan_root}/out.txt" | head -c 120)"
+fi
+rm -rf "${scan_root}"
+
 printf '\n  Results: %d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     exit 1

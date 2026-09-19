@@ -28,9 +28,20 @@ markdown_filter;            # Error: missing value
 
 ---
 
-### 2. markdown_limits conversion_memory=<size> (size)
+### 2. markdown_limits conversion_memory=<size> (composite key=value)
 
 > **0.9.0**: the release retired `markdown_max_size`. Use `markdown_limits conversion_memory=`.
+>
+> This key is **not** a plain size slot. The module parses it through its own
+> `markdown_limits` grammar: each argument is a `key=value` token, and
+> `conversion_memory` dispatches to `ngx_http_markdown_apply_conversion_memory_limit`
+> (`config_handlers_impl.h`), which calls the module's own `parse_size` and
+> enforces the 64k..1g range (`NGX_HTTP_MARKDOWN_LIMITS_SIZE_MIN` .. `_MAX`).
+> The built-in `ngx_conf_set_size_slot` handler applies only to
+> `markdown_metrics_shm_size`. `max_inflight` is part of the same grammar but
+> is http-context only: the handler rejects any other context with
+> `"max_inflight" may only be configured in the http context`, so keep that key
+> in the `http` block.
 
 **Valid configurations:**
 ```nginx
@@ -50,7 +61,7 @@ markdown_limits conversion_memory;          # Error: missing value
 **Expected behavior:**
 - Default: 64m (64 megabytes)
 - Context: http, server, location
-- Validation: must be positive integer with optional suffix (k, m, g)
+- Validation: must be positive integer with optional suffix (k, m, g) and within 64k..1g
 
 ---
 
@@ -76,7 +87,7 @@ markdown_limits conversion_timeout;           # Error: missing value
 **Expected behavior:**
 - Default: 30s (30000 milliseconds)
 - Context: http, server, location
-- Validation: must be positive integer with optional suffix (ms, s, m, h)
+- Validation: must be positive integer with optional suffix (ms, s, m, h) and within 1ms..1h
 
 ---
 
@@ -493,9 +504,11 @@ acceptance with real NGINX startup checks (`nginx -t`) in an integration setup.
    - No custom validation needed
 
 2. **Size directives**:
-   - Use `ngx_conf_set_size_slot` built-in handler
-   - Automatically parses k, m, g suffixes
-   - Validates positive values
+   - `markdown_metrics_shm_size` uses the `ngx_conf_set_size_slot` built-in handler
+   - The `markdown_limits` keys use the module's own `parse_size` helper inside
+     the composite `key=value` grammar, with the 64k..1g range enforced per key
+   - Both paths accept the k, m, and g suffixes
+   - Both paths reject non-positive values
 
 3. **Time directives**:
    - Use `ngx_conf_set_msec_slot` built-in handler
@@ -554,6 +567,7 @@ This implementation satisfies the following requirements:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | conversion_memory expected behavior states the 64k..1g range and conversion_timeout states the 1ms..1h range |
 | 0.9.2 | 2026-08-08 | Kang | Fixed markdown_limits key names (conversion_memory, conversion_timeout); marked markdown_buffer_chunked removed in 0.9.2 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

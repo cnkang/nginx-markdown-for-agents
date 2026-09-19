@@ -11,7 +11,12 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
-    {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+    {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled .Values.metrics.expose }}
+    # Merged into the application Service only on an explicit opt-in: this
+    # Service type is operator-controlled, so a NodePort or LoadBalancer type
+    # would publish the sidecar's unauthenticated scrape endpoint outside the
+    # cluster.  metrics.expose defaults to false; scrape the Pod directly or
+    # add a dedicated ClusterIP Service instead of widening this one.
     - port: {{ .Values.metrics.sidecar.port }}
       targetPort: metrics
       protocol: TCP

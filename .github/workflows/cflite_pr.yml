@@ -60,6 +60,8 @@ jobs:
         run: |
           mkdir -p ./out
           if ! find ./out -maxdepth 1 -type f -name '*.sarif' -print -quit | grep -q .; then
+            # The SARIF schema key is a literal JSON key, not shell input.
+            # shellcheck disable=SC2016
             printf '%s\n' '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"ClusterFuzzLite"}},"results":[]}]}' > ./out/pr-fuzz-empty.sarif
           fi
 

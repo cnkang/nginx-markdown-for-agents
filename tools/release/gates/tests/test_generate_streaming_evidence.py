@@ -27,15 +27,19 @@ def test_parse_marker_accepts_harness_partition() -> None:
     assert _parse_marker(_marker())["known_difference_ids"] == ["DIFF-001"]
 
 
-def test_parse_marker_rejects_repeated_observation_for_one_registry_id() -> None:
+def test_parse_marker_accepts_repeated_observation_for_one_registry_id() -> None:
+    """The harness records one observation per comparison, so a registry id may
+    repeat; the validator contract accepts repeated observations."""
     output = _marker(
         total_comparisons=3,
         identical_count=1,
         known_difference_count=2,
         known_difference_observation_ids=["DIFF-001", "DIFF-001"],
     )
-    with pytest.raises(ValueError):
-        _parse_marker(output)
+
+    parsed = _parse_marker(output)
+
+    assert parsed["known_difference_observation_ids"] == ["DIFF-001", "DIFF-001"]
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,13 @@
 #!/bin/bash
 #
 # test_detect_shell_hygiene.sh - Fixture tests for detect_shell_hygiene.sh
-# pattern (f): $? inside negated conditional bodies (Rules 11/18).
+#
+# Covers pattern (f): $? inside negated conditional bodies (Rules 11/18), and
+# patterns (a)-(e): missing explicit return, stdout diagnostics, single-bracket
+# tests, case-without-default, and curl -X HEAD.  Each pattern gets one
+# positive (defect) and one negative (clean) fixture, plus a fake-grep
+# regression that pins the fail-closed scan contract: a recursive grep that
+# exits 2 must produce a non-zero detector result, never a silent PASS.
 #
 # Adversarial fixtures reproduce the dead-branch defect shape:
 #   if ! run_case; then rc=$?    <- $? reads the NEGATED status
@@ -225,6 +231,230 @@ if ! probe; then
 fi
 EOF
 assert_detector_clean "${TMPDIR_TEST}/case7" "nested conditional header refreshes status"
+
+# ---------------------------------------------------------------------------
+# Patterns (a)-(e): each gets one defect fixture and one clean fixture.
+#
+# The fixtures live in their own directories so a positive fixture's findings
+# cannot mask a negative fixture's cleanliness (the detector scans a whole
+# directory tree).
+# ---------------------------------------------------------------------------
+
+# Helper: assert that a fixture directory is clean for a given needle.  The
+# per-pattern assertions use dedicated helpers below so each failure message
+# names the pattern under test.
+assert_pattern_flags() {
+    local fixture="$1"
+    local needle="$2"
+    local label="$3"
+    run_detector "${fixture}"
+    if [[ "${DETECTOR_RC}" -ne 0 ]] && [[ "${DETECTOR_OUTPUT}" == *"${needle}"* ]]; then
+        echo "  PASS: ${label} flagged"
+    else
+        echo "  FAIL: ${label} not flagged (rc=${DETECTOR_RC})" >&2
+        failures=$((failures + 1))
+    fi
+    return 0
+}
+
+assert_pattern_clean() {
+    local fixture="$1"
+    local needle="$2"
+    local label="$3"
+    run_detector "${fixture}"
+    if [[ "${DETECTOR_RC}" -ne 0 ]]; then
+        echo "  FAIL: ${label} detector exited ${DETECTOR_RC}" >&2
+        failures=$((failures + 1))
+    elif [[ "${DETECTOR_OUTPUT}" == *"${needle}"* ]]; then
+        echo "  FAIL: ${label} wrongly flagged: ${DETECTOR_OUTPUT}" >&2
+        failures=$((failures + 1))
+    else
+        echo "  PASS: ${label} clean"
+    fi
+    return 0
+}
+
+# ── Pattern (a): function without an explicit return ──
+mkdir -p "${TMPDIR_TEST}/pat_a_pos" "${TMPDIR_TEST}/pat_a_neg"
+cat > "${TMPDIR_TEST}/pat_a_pos/missing_return.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+report() {
+    echo "reporting"
+}
+report
+EOF
+cat > "${TMPDIR_TEST}/pat_a_neg/explicit_return.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+report() {
+    echo "reporting"
+    return 0
+}
+report
+EOF
+assert_pattern_flags "${TMPDIR_TEST}/pat_a_pos" "no explicit return statement" \
+    "pattern (a) function without return"
+assert_pattern_clean "${TMPDIR_TEST}/pat_a_neg" "no explicit return statement" \
+    "pattern (a) function with return"
+
+# ── Pattern (b): diagnostic message on stdout instead of stderr ──
+mkdir -p "${TMPDIR_TEST}/pat_b_pos" "${TMPDIR_TEST}/pat_b_neg"
+cat > "${TMPDIR_TEST}/pat_b_pos/stdout_diag.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+probe() {
+    echo "WARNING: probe degraded"
+    return 0
+}
+probe
+EOF
+cat > "${TMPDIR_TEST}/pat_b_neg/stderr_diag.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+probe() {
+    echo "WARNING: probe degraded" >&2
+    return 0
+}
+probe
+EOF
+assert_pattern_flags "${TMPDIR_TEST}/pat_b_pos" "diagnostic message on stdout" \
+    "pattern (b) diagnostic on stdout"
+assert_pattern_clean "${TMPDIR_TEST}/pat_b_neg" "diagnostic message on stdout" \
+    "pattern (b) diagnostic on stderr"
+
+# ── Pattern (c): single-bracket [ ] instead of [[ ]] ──
+mkdir -p "${TMPDIR_TEST}/pat_c_pos" "${TMPDIR_TEST}/pat_c_neg"
+cat > "${TMPDIR_TEST}/pat_c_pos/single_bracket.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ "${MODE}" = "strict" ]; then
+    echo "strict" >&2
+fi
+EOF
+cat > "${TMPDIR_TEST}/pat_c_neg/double_bracket.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+if [[ "${MODE}" = "strict" ]]; then
+    echo "strict" >&2
+fi
+EOF
+assert_pattern_flags "${TMPDIR_TEST}/pat_c_pos" "use '[[ ]]' instead of '[ ]'" \
+    "pattern (c) single-bracket test"
+assert_pattern_clean "${TMPDIR_TEST}/pat_c_neg" "use '[[ ]]' instead of '[ ]'" \
+    "pattern (c) double-bracket test"
+
+# ── Pattern (d): case statement without a default *) clause ──
+mkdir -p "${TMPDIR_TEST}/pat_d_pos" "${TMPDIR_TEST}/pat_d_neg"
+cat > "${TMPDIR_TEST}/pat_d_pos/no_default.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+case "${MODE}" in
+    strict)
+        echo "strict" >&2
+        ;;
+    lenient)
+        echo "lenient" >&2
+        ;;
+esac
+EOF
+cat > "${TMPDIR_TEST}/pat_d_neg/with_default.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+case "${MODE}" in
+    strict)
+        echo "strict" >&2
+        ;;
+    *)
+        echo "unknown mode" >&2
+        exit 2
+        ;;
+esac
+EOF
+assert_pattern_flags "${TMPDIR_TEST}/pat_d_pos" "case statement missing default" \
+    "pattern (d) case without default"
+assert_pattern_clean "${TMPDIR_TEST}/pat_d_neg" "case statement missing default" \
+    "pattern (d) case with default"
+
+# ── Pattern (e): curl -X HEAD instead of --head / -I ──
+mkdir -p "${TMPDIR_TEST}/pat_e_pos" "${TMPDIR_TEST}/pat_e_neg"
+cat > "${TMPDIR_TEST}/pat_e_pos/method_override.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+curl -s -X HEAD http://example.invalid/ >/dev/null
+EOF
+cat > "${TMPDIR_TEST}/pat_e_neg/head_option.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+curl -s --head http://example.invalid/ >/dev/null
+EOF
+assert_pattern_flags "${TMPDIR_TEST}/pat_e_pos" "instead of 'curl -X HEAD'" \
+    "pattern (e) curl -X HEAD"
+assert_pattern_clean "${TMPDIR_TEST}/pat_e_neg" "instead of 'curl -X HEAD'" \
+    "pattern (e) curl --head"
+
+# ---------------------------------------------------------------------------
+# Scan-failure contract: a recursive grep that fails hard (rc=2) must
+# make the detector non-zero.  Before the fix the (b)/(c)/(e) feeds dropped
+# grep's status with `2>/dev/null || true`, so an unreadable tree produced
+# "PASS: no shell hygiene findings" and exit 0 — a silent fail-open.
+# ---------------------------------------------------------------------------
+fake_bin="${TMPDIR_TEST}/fakebin"
+mkdir -p "${fake_bin}"
+real_grep="$(command -v grep 2>/dev/null || true)"
+cat > "${fake_bin}/grep" << 'EOF'
+#!/bin/bash
+# Recursive invocations fail hard; everything else delegates to realgrep.
+for a in "$@"; do
+    case "$a" in
+        --) break ;;
+        -rnE|-rn|-r|-R|-rE|--recursive) echo "grep: fake recursive failure" >&2; exit 2 ;;
+    esac
+done
+exec __REAL_GREP_BIN__ "$@"
+EOF
+sed -e "s|__REAL_GREP_BIN__|${real_grep}|" "${fake_bin}/grep" > "${fake_bin}/grep.tmp"
+mv "${fake_bin}/grep.tmp" "${fake_bin}/grep"
+chmod +x "${fake_bin}/grep"
+
+failopen_fixture="${TMPDIR_TEST}/failopen"
+mkdir -p "${failopen_fixture}"
+cat > "${failopen_fixture}/defects.sh" << 'EOF'
+#!/bin/bash
+probe() {
+    echo "ERROR: diagnostic on stdout"
+    return 0
+}
+probe
+curl -X HEAD http://example.invalid/ >/dev/null
+EOF
+
+# The fixture must be detected when grep works, so the regression below cannot
+# pass vacuously on an empty scan.
+run_detector "${failopen_fixture}"
+if [[ "${DETECTOR_RC}" -eq 1 ]]; then
+    echo "  PASS: control run detects the fixture defects (exit 1)"
+else
+    echo "  FAIL: control run did not detect fixture defects (exit ${DETECTOR_RC})" >&2
+    failures=$((failures + 1))
+fi
+
+grep_status_output=""
+grep_status_rc=0
+if grep_status_output="$(PATH="${fake_bin}:${PATH}" \
+    bash "${SCRIPT_DIR}/../detect_shell_hygiene.sh" "${failopen_fixture}" 2>&1)"; then
+    grep_status_rc=0
+else
+    grep_status_rc=$?
+fi
+if [[ "${grep_status_rc}" -ne 0 ]] \
+    && [[ "${grep_status_output}" == *"grep scan failed"* ]]; then
+    echo "  PASS: failing recursive grep is a hard error (exit ${grep_status_rc})" >&2
+else
+    echo "  FAIL: failing recursive grep was hidden (exit ${grep_status_rc})" >&2
+    echo "        output: ${grep_status_output}" >&2
+    failures=$((failures + 1))
+fi
 
 # A detector crash must not be mistaken for a clean result.  This exercises
 # the shared status capture path with a deliberately missing executable.

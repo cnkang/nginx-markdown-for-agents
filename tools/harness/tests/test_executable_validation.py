@@ -29,27 +29,32 @@ def test_literal_bin_entry_is_trusted_when_bin_is_a_symlink() -> None:
     assert module._is_under(literal_bin, roots)
 
 
-def test_rustup_dispatcher_returns_active_toolchain_executable(tmp_path, monkeypatch):
-    """A Rustup dispatcher resolves to the selected tool, not the shim."""
+@pytest.mark.parametrize("name", ["cargo", "rustc", "rustfmt"])
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, name, link_kind):
+    """Every approved Rustup shim, symlinked or hardlinked, resolves to the tool."""
     home = tmp_path
     cargo_bin = home / ".cargo" / "bin"
     dispatcher = cargo_bin / "rustup"
-    shim = cargo_bin / "cargo"
+    shim = cargo_bin / name
     tool = (
         home
         / ".rustup"
         / "toolchains"
         / "stable-x86_64-unknown-linux-gnu"
         / "bin"
-        / "cargo"
+        / name
     )
     cargo_bin.mkdir(parents=True)
     tool.parent.mkdir(parents=True)
     dispatcher.write_text("dispatcher", encoding="utf-8")
     dispatcher.chmod(0o755)
-    tool.write_text("cargo", encoding="utf-8")
+    tool.write_text(name, encoding="utf-8")
     tool.chmod(0o755)
-    shim.symlink_to(dispatcher)
+    if link_kind == "symlink":
+        shim.symlink_to(dispatcher)
+    else:
+        shim.hardlink_to(dispatcher)
 
     monkeypatch.setattr(module.Path, "home", lambda: home)
     monkeypatch.setattr(module.shutil, "which", lambda _name: str(shim))
@@ -60,4 +65,4 @@ def test_rustup_dispatcher_returns_active_toolchain_executable(tmp_path, monkeyp
         lambda: "stable-x86_64-unknown-linux-gnu",
     )
 
-    assert module.resolve_approved_executable("cargo") == str(tool)
+    assert module.resolve_approved_executable(name) == str(tool)

@@ -235,6 +235,11 @@ resolve_deployment_container_index() {
     local name_index
     local container_name
 
+    if [[ -z "$DEPLOYMENT_NAME" ]]; then
+        log_error "deployment name is not set; cannot resolve its container index"
+        return 1
+    fi
+
     name_index=0
     while IFS= read -r container_name; do
         if [[ "$container_name" == "$DEPLOYMENT_NAME" ]]; then
@@ -244,8 +249,8 @@ resolve_deployment_container_index() {
         name_index=$((name_index + 1))
     done <<< "$container_names"
 
-    printf '0\n'
-    return 0
+    log_error "container '${DEPLOYMENT_NAME}' is not present in the deployment spec; refusing to default to container index 0"
+    return 1
 }
 
 # Build a JSON Patch for the named ConfigMap volume and its first mount.
@@ -375,7 +380,8 @@ ensure_deployment_configmap_mount() {
     container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
-    container_index="$(resolve_deployment_container_index "$container_names")"
+    container_index="$(resolve_deployment_container_index "$container_names")" \
+        || return 1
 
     mount_index=-1
     mount_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
@@ -574,9 +580,8 @@ $DEPLOYMENT_NAME")"
         return 1
     fi
 
-    container_index="$(resolve_deployment_container_index "sidecar")"
-    if [[ "$container_index" != "0" ]]; then
-        log_error "Missing container name fallback returned '$container_index', expected 0"
+    if resolve_deployment_container_index "sidecar" >/dev/null 2>&1; then
+        log_error "an unmatched deployment name must fail container resolution"
         return 1
     fi
 
@@ -758,7 +763,8 @@ scenario_config_update() {
         fi
         log_info "nginx -T verification passed for updated config"
     else
-        log_info "no pod found for nginx -T verification; skipping strict check"
+        log_error "no pod found for nginx -T verification after rollout"
+        return 1
     fi
 
     # Run smoke test to verify functionality after config change
@@ -831,11 +837,19 @@ scenario_rollback() {
     log_scenario "4. Rollback — Execute rollout undo and verify previous version restored"
 
     # Record current image/env before rollback
-    local pre_rollback_env rollback_container_index container_names
+    local pre_rollback_env rollback_container_index rollback_container_name container_names
     container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" -n "$NAMESPACE" \
         -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
         2>/dev/null)"
     rollback_container_index="$(resolve_deployment_container_index "$container_names")"
+    rollback_container_name=""
+    if [[ -n "$rollback_container_index" ]]; then
+        rollback_container_name="$(printf '%s\n' "$container_names" | sed -n "$((rollback_container_index + 1))p")"
+    fi
+    if [[ -z "$rollback_container_index" || "$rollback_container_name" != "$DEPLOYMENT_NAME" ]]; then
+        log_error "the deployment does not expose the expected container before rollback; cannot read its environment"
+        return 1
+    fi
     pre_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
         -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
@@ -852,11 +866,26 @@ scenario_rollback() {
     # Wait for rollout to complete
     wait_for_rollout "$DEPLOYMENT_NAME" || return 1
 
-    # Verify the rollback took effect (env should differ from pre-rollback)
-    local post_rollback_env
+    # Verify the rollback took effect (env should differ from pre-rollback).
+    # Re-read the restored revision's container list: container order can
+    # differ between revisions, so re-resolve the index before reading env.
+    local post_rollback_env post_container_names post_container_index
+    post_container_names="$(kubectl get deployment "$DEPLOYMENT_NAME" \
+        -n "$NAMESPACE" \
+        -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' \
+        2>/dev/null)"
+    post_container_index="$(resolve_deployment_container_index "$post_container_names")"
+    local restored_container_name=""
+    if [[ -n "$post_container_index" ]]; then
+        restored_container_name="$(printf '%s\n' "$post_container_names" | sed -n "$((post_container_index + 1))p")"
+    fi
+    if [[ -z "$post_container_index" || "$restored_container_name" != "$DEPLOYMENT_NAME" ]]; then
+        log_error "the restored deployment does not expose the expected container; cannot read its environment"
+        return 1
+    fi
     post_rollback_env="$(kubectl get deployment "$DEPLOYMENT_NAME" \
         -n "$NAMESPACE" \
-        -o jsonpath="{.spec.template.spec.containers[${rollback_container_index}].env}" 2>/dev/null)" || true
+        -o jsonpath="{.spec.template.spec.containers[${post_container_index}].env}" 2>/dev/null)" || true
     log_info "Post-rollback env: $post_rollback_env"
 
     if [ "$pre_rollback_env" = "$post_rollback_env" ]; then

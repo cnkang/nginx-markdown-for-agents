@@ -136,27 +136,44 @@ active in 0.9.2. Current selection uses `markdown_streaming auto`, which applies
 the hard eligibility gates and a bounded internal pipeline. There is no
 replacement threshold directive and no size heuristic.
 
-In `auto` mode, every response that clears the eligibility gates is a
-**streaming candidate**. Response size is not part of the decision and there is
-no internal candidate boundary: an unknown-length response and a response with a
-the module treats a known `Content-Length` alike.
+In `auto` mode, every response that clears the eligibility gates and
+passes the pre-selection guards below is a **streaming candidate**. A
+policy other than `auto`/`force` (`off`) and a
+`markdown_stream_excluded_types` match are not streaming candidates: the
+module routes those responses to the bounded full-buffer engine, and a
+response that is not eligible for conversion is never converted at all. Response size is not part of the decision and there is
+no internal candidate boundary: the module treats an unknown-length response
+and a response with a known `Content-Length` alike.
 
 A response that is **not eligible for conversion** is never converted at all:
 the module bypasses the filter and forwards the upstream response. A response
-that is eligible for conversion but **not a streaming candidate**, the module converts it
-with the bounded full-buffer engine instead.
+that is eligible for conversion but fails one of the pre-selection guards below
+falls back to the bounded full-buffer engine instead.
 
 `ngx_http_markdown_select_processing_path()` decides between the two conversion
-engines on these pre-selection guards alone:
+engines on these pre-selection guards alone, evaluated once the response passes
+conversion eligibility:
 
 - the configured `markdown_streaming` policy is `auto` or `force`. `off`, unset,
   and out-of-range values resolve to bounded full-buffer
 - `markdown_front_matter on` requires the full-buffer engine
+- NGINX rejects the `markdown_streaming force` plus
+  `markdown_cache_validation full` combination at configuration load
+  (`nginx -t`) because the streaming path cannot generate a
+  transformed-representation ETag. `markdown_streaming auto` with `full`
+  logs a warning, the module blocks streaming at runtime (reason
+  `streaming_block_full_cache_validation`), and each request runs on the
+  full-buffer path
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
-- content types excluded by the configuration
+- a content type matched by `markdown_stream_excluded_types` (routed to the
+  bounded full-buffer engine)
 
-Everything else is a streaming candidate. The module applies codec routing separately.
+A streaming candidate is an eligible response that passes every
+pre-selection guard above, including the `markdown_streaming` policy
+requirement. The module applies codec routing separately. The
+canonical check ordering and the exclusion routing live in
+[streaming-check-order.md](streaming-check-order.md).
 Failures that occur after the module selects the streaming path fall into two classes,
 checked in this order:
 
@@ -347,9 +364,12 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- `markdown_streaming auto` and the response is eligible for conversion but is
-  not a streaming candidate. A response that is not eligible for conversion is
-  never converted, so it is not a fallback case.
+- a section 2.2 pre-selection guard routes an otherwise eligible response to
+  the bounded full-buffer engine (for example `markdown_stream_excluded_types`
+  or a policy other than `auto`/`force`). The guard selects the engine: a
+  response that fails it runs on the bounded full-buffer engine and is not a
+  streaming candidate. A response that is not eligible for conversion is
+  never converted, so it is not a fallback case either.
 
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is
@@ -383,7 +403,9 @@ The following scenarios bypass conversion entirely:
 - Response is not convertible HTML.
 - Response exceeds `markdown_limits conversion_memory=` and current policy does not allow
   streaming to bypass this limit.
-- Response is a hard-excluded streaming content type.
+- Response is a content type excluded from conversion entirely (the
+  content-type allowlist). A `markdown_stream_excluded_types` match does
+  not bypass: it routes to the bounded full-buffer engine (Section 2.2).
 - Request did not pass Accept negotiation or UA policy.
 - Authenticated request excluded by `markdown_auth_policy deny`.
 - Upstream status code is not in the convertible range.

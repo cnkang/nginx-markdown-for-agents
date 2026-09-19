@@ -36,6 +36,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 # Advisory by default: report candidates but exit 0 so the detector can
 # run in normal CI without hard-blocking on reviewable patterns.
@@ -78,7 +79,23 @@ tmp_violations=$(mktemp)
 # ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
 # ${arr[@]+...} idiom (Rule 11).
 GREP_TEMPS=()
-trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+file_list="$(mktemp "${TMPDIR:-/tmp}/uninitialized-struct-files.XXXXXX")" || {
+    echo "ERROR: cannot create the source file list" >&2
+    exit 2
+}
+trap 'rm -f "$tmp_violations" "$file_list" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+
+if [[ "$explicit_scan_dir" -eq 1 ]]; then
+    if ! harness_collect_find0 "$file_list" "$SCAN_DIR" -type f 2>/dev/null; then
+        echo "ERROR: cannot enumerate files in $SCAN_DIR" >&2
+        exit 2
+    fi
+else
+    if ! harness_collect_find0 "$file_list" "$SCAN_DIR" \( -path '*/tests/*' -o -path '*/src/*' \) -type f 2>/dev/null; then
+        echo "ERROR: cannot enumerate files in $SCAN_DIR" >&2
+        exit 2
+    fi
+fi
 
 while IFS= read -r -d '' file; do
     case "$file" in
@@ -160,13 +177,7 @@ while IFS= read -r -d '' file; do
         done < "$grep_matches"
         rm -f "$grep_matches"
     done
-done < <(if [[ "$explicit_scan_dir" -eq 1 ]]; then
-    # An explicitly provided directory is scanned without the src/tests
-    # path filter so callers can point the detector at any C source tree.
-    find "$SCAN_DIR" -type f -print0
-else
-    find "$SCAN_DIR" \( -path '*/tests/*' -o -path '*/src/*' \) -type f -print0
-fi)
+done < "$file_list"
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 

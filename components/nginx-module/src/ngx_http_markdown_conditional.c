@@ -2700,7 +2700,134 @@ ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
     return NGX_OK;
 }
 
-static void
+/*
+ * Restore one outgoing header list from its snapshot.
+ *
+ * The snapshot stores a full VALUE COPY of every entry (`saved` is an
+ * ngx_table_elt_t by value) plus the original `last` part pointer and that
+ * part's original nelts/next.  The rollback is therefore atomic and needs no
+ * deep copy of the backing storage:
+ *
+ *   - Restoring `list->last` first re-anchors the list at the part that was
+ *     current when the snapshot was taken, and `nelts`/`next` roll that part
+ *     back to its snapshot-time shape.  Entries pushed into that same part
+ *     after the snapshot stop being reachable immediately — no free is
+ *     required, because the part's element storage is pool memory that lives
+ *     for the whole request.
+ *   - The per-entry loop then re-copies each saved value over its element.
+ *     Entry data (key/value bytes, hash, pointer fields) was captured by
+ *     value, so a mutated or invalidated entry is restored byte-for-byte.
+ *
+ * Both steps combine into an all-or-nothing result: the only mutation that can
+ * be observed by a later reader is a fully restored list.  A malformed part
+ * (a part whose count exceeds the captured budget — except the snapshotted
+ * tail, which appends legitimately grow and which the structural restore
+ * truncates back to its captured shape — a part larger than the list
+ * capacity, or a non-empty part with no element storage) fails a
+ * PREVALIDATION walk.  The chain boundary (tail link and captured tail
+ * count) is truncated first because it cannot fail; if the walk then
+ * rejects the list, the restore returns NGX_ERROR with the chain already
+ * rolled back to the captured shape, so no post-snapshot part stays
+ * reachable and a failed rollback is reported instead of being applied
+ * partially.
+ */
+/*
+ * Prevalidate every part a list restore will visit so that no state is
+ * mutated unless the whole restore can complete.  A malformed part (one
+ * whose count exceeds the captured budget, one larger than the list
+ * capacity, or a non-empty part with no element storage) fails this walk,
+ * and a geometry that cannot reproduce the captured entry count fails it
+ * too: the caller then reports NGX_ERROR after the chain boundary has
+ * already been truncated to the captured shape (no post-snapshot part
+ * stays reachable).
+ */
+static ngx_int_t
+ngx_http_markdown_304_restore_prevalidate(ngx_list_t *list,
+    const ngx_http_markdown_304_list_snapshot_t *snapshot)
+{
+    ngx_uint_t        restored;
+    ngx_uint_t        original_last_seen;
+
+    /*
+     * Prevalidate every part the copy loop below will visit so that no
+     * state is mutated unless the whole restore can complete.  A part
+     * larger than the list capacity, or one that cannot hold table
+     * entries, is malformed and fails closed.  A count beyond the
+     * captured budget is malformed too — the captured tail included:
+     * the caller truncates it to its captured shape before this walk
+     * runs.
+     *
+     * The element-storage size check applies only when entries are
+     * actually copied: an empty snapshot (entry_count == 0) performs a
+     * structural restore alone, so a zero-initialized list with no
+     * storage is a valid input for it.
+     */
+    if (snapshot->entry_count != 0
+        && list->size < sizeof(ngx_table_elt_t))
+    {
+        return NGX_ERROR;
+    }
+    if (snapshot->original_last_nelts > snapshot->entry_count
+        || (snapshot->original_last == NULL
+            && snapshot->original_last_nelts != 0))
+    {
+        return NGX_ERROR;
+    }
+    restored = 0;
+    original_last_seen = 0;
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL && restored < snapshot->entry_count;
+         part = part->next)
+    {
+        if (part->nelts > list->nalloc
+            || (part->nelts != 0 && part->elts == NULL))
+        {
+            return NGX_ERROR;
+        }
+        if (part->nelts > snapshot->entry_count - restored)
+        {
+            return NGX_ERROR;
+        }
+        if (part == snapshot->original_last) {
+            /*
+             * The caller truncated the tail to its captured shape before
+             * this walk ran, so only the parts before it can still
+             * disagree: they must account for exactly the non-tail share
+             * of the captured count, or the restore would leave fewer
+             * entries than the snapshot promises.
+             */
+            if (restored
+                != snapshot->entry_count
+                   - snapshot->original_last_nelts)
+            {
+                return NGX_ERROR;
+            }
+            original_last_seen = 1;
+        }
+        restored += part->nelts;
+    }
+
+    /*
+     * After the list-structure restore the reachable entry count must
+     * match the snapshot exactly; a truncated chain would silently drop
+     * snapshotted entries, so report it instead of applying a partial
+     * restore.  A nonempty snapshot must also reach its captured tail:
+     * original_last re-anchors the list, so accepting a chain that never
+     * contains it would attach the list to an unvalidated part.
+     */
+    if (restored < snapshot->entry_count
+        || (snapshot->entry_count != 0
+            && snapshot->original_last != NULL
+            && !original_last_seen))
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_markdown_304_restore_list(ngx_list_t *list,
     const ngx_http_markdown_304_list_snapshot_t *snapshot)
 {
@@ -2708,17 +2835,37 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     ngx_uint_t        restored;
 
     if (list == NULL || snapshot == NULL) {
-        return;
+        return NGX_OK;
     }
 
+    /*
+     * Truncate the chain boundary FIRST: appends made after the snapshot
+     * may have allocated new parts past the captured tail (and reset its
+     * count/link), and a later failure must never leave them reachable.
+     * This step cannot fail; the prevalidation below then validates the
+     * restored geometry before any entry value is copied, so a malformed
+     * list still reports NGX_ERROR — on a chain already truncated to the
+     * captured shape instead of one retaining post-snapshot parts.
+     */
     list->last = snapshot->original_last;
     if (snapshot->original_last != NULL) {
         snapshot->original_last->nelts = snapshot->original_last_nelts;
         snapshot->original_last->next = snapshot->original_last_next;
     }
 
-    if (snapshot->entry_count == 0 || snapshot->entries == NULL) {
-        return;
+    if (ngx_http_markdown_304_restore_prevalidate(list, snapshot)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (snapshot->entry_count == 0) {
+        return NGX_OK;
+    }
+    if (snapshot->entries == NULL) {
+        /* A non-empty snapshot without captured entries cannot be restored:
+         * reported instead of silently skipping the value copy. */
+        return NGX_ERROR;
     }
 
     restored = 0;
@@ -2726,20 +2873,40 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
          part != NULL && restored < snapshot->entry_count;
          part = part->next)
     {
-        if (part->nelts > snapshot->entry_count - restored
-            || (part->nelts != 0 && part->elts == NULL))
-        {
-            return;
-        }
-
         entries = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             entries[i] = snapshot->entries[restored].saved;
             restored++;
         }
     }
+
+    /*
+     * The copy must have restored every captured entry: a shorter walk
+     * would mean the structural restore left fewer entries than the
+     * snapshot, so the list would silently lose state.  (The bound also
+     * proves the loop never read past snapshot->entries.)
+     */
+    if (restored != snapshot->entry_count) {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
 }
 
+/*
+ * Snapshot every outgoing field that a 304/412 rewrite may touch.
+ *
+ * Scalar and pointer fields are captured by value; the two header LISTS are
+ * captured through ngx_http_markdown_304_snapshot_list(), which copies every
+ * live entry by value plus the original `last` part shape (see
+ * ngx_http_markdown_304_restore_list() for the rollback correctness
+ * rationale: value copy + nelts rollback is sound because entry storage is
+ * request-pool memory that outlives the rollback).
+ *
+ * Because the snapshot owns a value copy of each entry, every mutation made
+ * by ngx_http_markdown_send_304()/send_412() on a snapshotted entry is
+ * undoable from this structure alone, with no additional bookkeeping.
+ */
 static ngx_int_t
 ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
     ngx_http_markdown_304_snapshot_t *snapshot)
@@ -2785,12 +2952,14 @@ ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-static void
+static ngx_int_t
 ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
     const ngx_http_markdown_304_snapshot_t *snapshot)
 {
+    ngx_int_t  rc;
+
     if (r == NULL || snapshot == NULL) {
-        return;
+        return NGX_OK;
     }
 
     r->headers_out.status = snapshot->status;
@@ -2812,10 +2981,22 @@ ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
     r->allow_ranges = snapshot->allow_ranges;
     r->header_only = snapshot->header_only;
 
-    ngx_http_markdown_304_restore_list(&r->headers_out.headers,
+    rc = ngx_http_markdown_304_restore_list(&r->headers_out.headers,
         &snapshot->headers_snapshot);
-    ngx_http_markdown_304_restore_list(&r->headers_out.trailers,
-        &snapshot->trailers_snapshot);
+    if (ngx_http_markdown_304_restore_list(&r->headers_out.trailers,
+            &snapshot->trailers_snapshot) != NGX_OK)
+    {
+        rc = NGX_ERROR;
+    }
+
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 304 rollback failure: a headers-list part "
+                      "failed validation, restore aborted");
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
 }
 
 static ngx_int_t
@@ -2830,7 +3011,7 @@ ngx_http_markdown_send_conditional_header(ngx_http_request_t *r,
     }
 
     if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_http_markdown_304_snapshot_restore(r, snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, snapshot);
         return rc;
     }
 
@@ -2873,7 +3054,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: 304 auth Cache-Control update failed");
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -2941,7 +3122,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
         if (rc != NGX_OK) {
-            ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+            (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
             return NGX_ERROR;
         }
 
@@ -2956,7 +3137,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * checks.  Any failure restores the exact upstream representation. */
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -3060,13 +3241,13 @@ ngx_http_markdown_send_412(ngx_http_request_t *r)
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: 412 auth Cache-Control update failed");
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        (void) ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 

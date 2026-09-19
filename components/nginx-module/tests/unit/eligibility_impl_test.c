@@ -347,6 +347,55 @@ test_marshalling_fidelity(void)
     TEST_PASS("Marshalling fidelity correct");
 }
 
+/*
+ * The configured content-type allowlist is marshalled into a pool-allocated
+ * FFIStr array sized by `nelts * sizeof(struct FFIStr)`.  A wrapped
+ * multiplication would hand ngx_palloc a too-small region that the element
+ * loop then overruns, so the wrapper must reject an element count that
+ * cannot be scaled before allocating, and report the safe skip outcome
+ * (NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG) instead of allocating or reading
+ * out of bounds.
+ *
+ * MUTATION SENSITIVITY: removing the division precheck in
+ * ngx_http_markdown_marshal_str_array() makes this test allocate (the test
+ * allocator would receive the wrapped size) and fail the return-code
+ * assertion.
+ */
+static void
+test_marshal_str_array_rejects_overflowing_count(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_conf_t conf;
+    ngx_array_t              types;
+
+    TEST_SUBSECTION("marshal_str_array rejects an overflowing element count");
+
+    init_conf(&conf);
+    memset(&types, 0, sizeof(types));
+    types.size = sizeof(ngx_str_t);
+    /* nelts * sizeof(struct FFIStr) would wrap size_t. */
+    types.nelts = (ngx_uint_t) (((size_t) -1) / sizeof(struct FFIStr)) + 1;
+
+    init_base_request(&r);
+    r.headers_out.status = NGX_HTTP_OK;
+    set_str(&r.headers_out.content_type, "text/html");
+    conf.routing.content_types = &types;
+
+    reset_ffi_capture();
+    g_palloc_offset = 0;
+
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
+            == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+        "overflowing allowlist count must fall back to the config skip outcome");
+    TEST_ASSERT(g_call_count == 0,
+                "the eligibility FFI must not be called with an unmarshalled allowlist");
+    TEST_ASSERT(g_palloc_offset == 0,
+                "no pool allocation may be attempted for an overflowing count");
+
+    TEST_PASS("Overflowing element count is rejected before allocation");
+}
+
 
 /*
  * Thin-wrapper: each u8 returned by the FFI maps to the matching enum.
@@ -592,6 +641,7 @@ main(void)
 
     test_method_get_head_equivalent();
     test_marshalling_fidelity();
+    test_marshal_str_array_rejects_overflowing_count();
     test_u8_to_enum_mapping();
     test_null_inputs_fail_open();
     test_eligibility_string_all_values();

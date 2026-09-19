@@ -1906,3 +1906,103 @@ proptest! {
         );
     }
 }
+
+// ============================================================================
+// Migrated proptest regression seeds
+// ============================================================================
+//
+// `proptest-regressions/optimization_properties.txt` (and the sibling
+// `tests/optimization_properties.proptest-regressions` file that preceded it)
+// recorded shrunken counterexamples for this file.  Integration tests build
+// with `SourceParallel("proptest-regressions")`, and proptest resolves that
+// path by walking up from the test source until it finds a `lib.rs` or
+// `main.rs`; `tests/` has neither, so proptest prints
+// "failed to find lib.rs or main.rs" and silently never reads these seeds.
+// The historical inputs are therefore kept here as deterministic cases that
+// always run, which is what the seed file was meant to guarantee.
+//
+// Each case pins the exact input proptest shrank to and the invariant the
+// property asserted, so a future regression fails on the same input rather
+// than depending on a seed file being replayed.
+
+/// Seed `136ea3...`: `children = [(false, "header", "0")]`.
+///
+/// Property: non-noise-region HTML is deterministic, well formed, and
+/// preserves the content element's text.
+#[test]
+fn regression_seed_non_noise_children_single_header() {
+    let children = [(false, "header".to_string(), "0".to_string())];
+    let html = build_non_noise_html(&children);
+    let converter = MarkdownConverter::new();
+
+    let dom1 = parse_html(html.as_bytes()).expect("parse pass 1");
+    let dom2 = parse_html(html.as_bytes()).expect("parse pass 2");
+    let out1 = converter.convert(&dom1).expect("convert pass 1");
+    let out2 = converter.convert(&dom2).expect("convert pass 2");
+
+    assert_eq!(out1, out2, "seed input must stay deterministic");
+    assert!(!out1.trim().is_empty(), "content must not vanish");
+    assert!(out1.ends_with('\n'), "output must end with a newline");
+    assert!(
+        out1.contains('0'),
+        "content text must be preserved: {out1:?}"
+    );
+}
+
+/// Seed `cd3464...`: `content_elements = [("header", "aa")]`,
+/// `noise_elements = [("nav", "aaAAa")]`.
+///
+/// Property: pruning is limited to the pruned subtree — content outside the
+/// noise region survives and the region's own text never leaks.
+#[test]
+fn regression_seed_noise_region_does_not_touch_content() {
+    let content = [("header".to_string(), "aa".to_string())];
+    let noise = [("nav".to_string(), "aaAAa".to_string())];
+    let html = build_html_with_noise_regions(&content, &noise);
+
+    let converter = MarkdownConverter::new();
+    let dom = parse_html(html.as_bytes()).expect("parse");
+    let output = converter.convert(&dom).expect("convert");
+
+    assert!(
+        output.contains("aa"),
+        "content outside the noise region must survive: {output:?}"
+    );
+    assert!(
+        !output.contains("aaAAa"),
+        "noise region text must not appear: {output:?}"
+    );
+}
+
+/// Seed `7b7726...`: `disqualifier = "table"`, `content = "0  aA"`.
+///
+/// Property: HTML with a disqualifying element still converts via the normal
+/// path, and the content outside that element is preserved.  Note the seed
+/// text carries *two* consecutive spaces: the converter normalizes runs of
+/// whitespace, so the invariant is checked on the token sequence rather than
+/// on the literal string.
+#[test]
+fn regression_seed_table_disqualifier_preserves_content() {
+    let content = "0  aA";
+    let html = format!(
+        "<html><body><p>{c}</p><table><tr><td>cell</td></tr></table></body></html>",
+        c = escape_html(content),
+    );
+
+    let converter = MarkdownConverter::new();
+    let dom = parse_html(html.as_bytes()).expect("parse");
+    let output = converter
+        .convert(&dom)
+        .expect("disqualifying HTML must convert via the normal path");
+
+    let tokens: Vec<&str> = output.split_whitespace().collect();
+    assert!(
+        tokens.contains(&"0") && tokens.contains(&"aA"),
+        "content tokens outside the table must survive whitespace \
+         normalization: {output:?}"
+    );
+    assert!(
+        output.contains("cell"),
+        "the table cell must still be rendered: {output:?}"
+    );
+}

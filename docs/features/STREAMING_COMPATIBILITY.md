@@ -20,10 +20,10 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | `conversion_memory` budget | ✅ | ✅ | Hard cumulative input-size cap shared by buffered and streaming paths; the same value also funds the full-buffer generated-output budget and transient scratch allocations (see [Parser Budget](PARSER_BUDGET.md)) |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
-| Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
+| Front matter (YAML) | ✅ | ❌ | `markdown_front_matter on` routes to the bounded full-buffer engine (RFC-0008 section 2.2) |
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
-| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
+| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer replays a deflate format error as raw from the start; streaming locks its deflate decoder classification from the first two bytes of the stream and reports a format error (no framing retry) for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
 
 For an empty wire body, an identity-only `Content-Encoding` chain remains
@@ -42,7 +42,14 @@ compressed response.
 ### ETag and conditional requests
 
 Full-buffer mode computes an ETag from the complete Markdown output and supports
-`If-None-Match` / `If-Modified-Since` for 304 responses. Streaming mode commits
+`If-None-Match` / `If-Modified-Since` for 304 responses. For a converted
+response, only the Markdown ETag drives the 304 decision, and only when
+`markdown_cache_validation` is `full`: the source
+`Last-Modified` value is deliberately not an input, and the conversion clears
+that header. With `ims_only` a converted response never produces a 304 through
+the transformed representation, and `off` disables conditional handling for
+it. Source `Last-Modified` / `If-Modified-Since` validation therefore
+applies to pass-through responses only. Streaming mode commits
 the response headers before the full output is available, so ETag generation
 and `If-None-Match`-based conditional validation are not possible.
 
@@ -153,6 +160,7 @@ fallback.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-17 | Hermes | Scope the converted-response ETag/304 statement to `markdown_cache_validation = full`; `ims_only` never 304s a converted response through the transformed representation and `off` disables conditional handling for it |
 | 0.9.2 | 2026-09-07 | Kang | Split the post-commit fail-open outcome: later gzip-member failures finish the remaining Markdown safely; only impossible-safe-finish failures abort with truncated output |
 | 0.9.2 | 2026-08-24 | Kang | Corrected the parser_budget budget row: the bound covers both paths (full-buffer pre-parse estimate plus streaming enforcement), not streaming only |
 | 0.9.2 | 2026-08-19 | Hermes | Document the accepted no-ETag-for-streaming constraint (full-buffer vs streaming path divergence, user-confirmed) |

@@ -78,8 +78,11 @@ Key characteristics:
 - `markdown_streaming force` (**forced**) — all eligible responses stream.
 - `markdown_cache_validation off` (**forced**) — no caching overhead. Streaming
   responses cannot carry an ETag.
-- `markdown_accept force` — converts regardless of the Accept header, which
-  covers AI crawlers that do not send `text/markdown`.
+- `markdown_accept wildcard` in the historical record — the retired profile
+  set the converter's `AcceptMode::Wildcard`, so the profile produced the
+  streamed response regardless of the Accept header. The wildcard value retired
+  with the profile system, and 0.9.2 `markdown_accept` accepts only `strict` or
+  `force` (`config_handlers_impl.h`).
 
 ---
 

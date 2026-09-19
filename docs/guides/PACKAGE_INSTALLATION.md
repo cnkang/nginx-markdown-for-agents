@@ -149,8 +149,13 @@ sudo rpm -Uvh "./${PKG}"
 sudo nginx -t
 # Confirm the active configuration contains an active load_module directive
 # for the canonical module filename (a filename mention elsewhere, for
-# example inside a comment, does not load anything).
-sudo nginx -T 2>&1 | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;'
+# example inside a comment, does not load anything). The explicit status
+# check keeps a missing match (grep exit 1) from being ignored.
+# The exit status is captured separately: a failed nginx -T must fail the
+# check explicitly instead of being masked by partial output.
+NGINX_T_OUTPUT="$(sudo nginx -T 2>&1)" || { echo "nginx -T failed; cannot verify the active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
+printf '%s\n' "${NGINX_T_OUTPUT}" | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;' \
+  || { echo "load_module-missing: no active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
 ```
 
 Install the module binary using the canonical NGINX dynamic-module name:
@@ -239,7 +244,14 @@ Reload after validation, and confirm the module loads:
 
 ```bash
 sudo nginx -t && sudo nginx -s reload
-sudo nginx -T 2>&1 | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so'
+# The explicit status check keeps a missing load_module match from being
+# swallowed: without it grep exit status 1 is discarded and the check
+# reports success.  The exit status of nginx -T is captured separately: a
+# failed nginx -T must fail the check explicitly instead of being masked
+# by partial output.
+NGINX_T_OUTPUT="$(sudo nginx -T 2>&1)" || { echo "nginx -T failed; cannot verify the active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
+printf '%s\n' "${NGINX_T_OUTPUT}" | grep -E '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_markdown_filter_module\.so[[:space:]]*;' \
+  || { echo "load_module-missing: no active load_module entry for ngx_http_markdown_filter_module.so" >&2; exit 1; }
 ```
 
 Loading the module does not change any response on its own: conversion stays

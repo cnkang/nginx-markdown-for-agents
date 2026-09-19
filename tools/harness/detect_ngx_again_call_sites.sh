@@ -35,6 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+. "${SCRIPT_DIR}/collect_files.sh"
 
 if [[ ! -d "$SRC_DIR" ]]; then
     echo "ERROR: Source directory not found: $SRC_DIR" >&2
@@ -51,12 +52,27 @@ NGX_AGAIN_APIS=(
     ngx_http_markdown_streaming_resume_pending
 )
 
-tmp_violations=$(mktemp)
+tmp_violations="$(mktemp)" || {
+    echo "ERROR: cannot create the violations file" >&2
+    exit 2
+}
 # Bash 3.2 + set -u: an empty GREP_TEMPS would make a bare
 # ${GREP_TEMPS[@]} expansion in the trap abort; guard with the
-# ${arr[@]+...} idiom (Rule 11).
+# ${arr[@]+...} idiom (Rule 11).  The same guard covers file_list,
+# which does not exist yet when the trap is installed — the trap is
+# armed before the second scratch file is created so a failure there
+# still cleans up the first.
 GREP_TEMPS=()
-trap 'rm -f "$tmp_violations" ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+trap 'rm -f "$tmp_violations" ${file_list:+"$file_list"} ${GREP_TEMPS[@]+"${GREP_TEMPS[@]}"}' EXIT
+file_list="$(mktemp "${TMPDIR:-/tmp}/ngx-again-files.XXXXXX")" || {
+    echo "ERROR: cannot create the file list" >&2
+    exit 2
+}
+
+if ! harness_collect_find0 "$file_list" "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f 2>/dev/null; then
+    echo "ERROR: cannot enumerate C source files in $SRC_DIR" >&2
+    exit 2
+fi
 
 while IFS= read -r -d '' file; do
     for api in "${NGX_AGAIN_APIS[@]}"; do
@@ -64,11 +80,14 @@ while IFS= read -r -d '' file; do
         # grep exits 1 when a file has no call; that is the expected
         # no-match result.  Any other grep failure (exit 2) or a failure
         # inside the loop body must propagate under set -euo pipefail.
-        grep_matches="$(mktemp)"
+        grep_matches="$(mktemp)" || {
+            echo "ERROR: cannot create the per-API grep file for $file" >&2
+            exit 2
+        }
         GREP_TEMPS+=("$grep_matches")
         grep_rc=0
         grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null > "$grep_matches" || grep_rc=$?
-        if [[ "$grep_rc" -eq 2 ]]; then
+        if [[ "$grep_rc" -gt 1 ]]; then
             echo "ERROR: grep failed scanning $file for $api()" >&2
             rm -f "$grep_matches"
             exit 2
@@ -165,7 +184,7 @@ while IFS= read -r -d '' file; do
         done < "$grep_matches"
         rm -f "$grep_matches"
     done
-done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
+done < "$file_list"
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 

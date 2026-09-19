@@ -12,6 +12,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+GATE_KEYS = frozenset(
+    {"name", "command", "needs_c_change", "requires_nginx"}
+)
+
+
 def validate_gates(value: object) -> list[dict]:
     """Reject malformed declarations instead of coercing commands or flags."""
     if not isinstance(value, list) or not value:
@@ -27,6 +32,9 @@ def _validated_gate(entry: object, names: set[str]) -> dict:
     """Return one validated gate, recording its name for the uniqueness check."""
     if not isinstance(entry, dict):
         raise ValueError("each gate must be an object")
+    unknown = sorted(set(entry) - GATE_KEYS)
+    if unknown:
+        raise ValueError(f"gate has unknown field(s): {', '.join(unknown)}")
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip() or name in names:
         raise ValueError("gate names must be non-empty and unique")
@@ -58,5 +66,12 @@ def load_gates(path: Path) -> list[dict]:
 
     validated = validate_read_path(str(path))
     source = Path(validated)
-    data = json.loads(source.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+    def reject_nonfinite(value: str) -> None:
+        raise ValueError(f"non-finite JSON number is not allowed: {value}")
+
+    data = json.loads(
+        source.read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_object,
+        parse_constant=reject_nonfinite,
+    )
     return validate_gates(data)

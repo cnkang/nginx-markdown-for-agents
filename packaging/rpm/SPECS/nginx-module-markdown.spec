@@ -8,9 +8,12 @@ URL:            https://github.com/cnkang/nginx-markdown-for-agents
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       nginx-r%{nginx_version}
-Requires:       nginx >= 1:%{nginx_version}
+Requires:       nginx >= %{nginx_version}
 Requires:       bash
-Conflicts:      nginx >= 1:%{nginx_version_ceil}
+# %pre resolves /usr/bin/sed by fixed path to parse `nginx -v` and fails the
+# transaction when it is missing, so the dependency is declared rather than
+# left to the assumed base-system package set.
+Requires:       sed
 
 %description
 NGINX dynamic filter module that converts HTML responses to Markdown
@@ -22,7 +25,8 @@ WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
 checks. The RPM dependency requires the nginx.org nginx-r%{nginx_version}
-capability in addition to the epoch-aware version bounds. A package that
+capability in addition to the epoch-flexible version floor. The %pre
+scriptlet enforces the exact version at install time. A package that
 merely reports the same version without the expected ABI capability is
 rejected before installation. It will NOT work with distro-provided,
 vendor-patched, OpenResty, Tengine, or custom-built NGINX binaries, or with
@@ -97,7 +101,8 @@ NGINX_BIN=/usr/sbin/nginx
 SED_BIN=/usr/bin/sed
 # $1==1 during install, $1==2 during upgrade; erase uses %preun with $1==0,
 # so %pre never runs on erase. Tolerate a missing nginx binary (the RPM
-# dependencies still enforce the capability and floor/ceiling).
+# dependencies still enforce the capability and floor; the exact-version
+# check below enforces the built-against version).
 if [ -x "$NGINX_BIN" ]; then
     if [ ! -x "$SED_BIN" ]; then
         echo "ERROR: trusted sed executable not found at $SED_BIN" >&2

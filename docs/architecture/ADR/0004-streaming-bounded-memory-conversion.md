@@ -6,34 +6,35 @@ Historical baseline (v0.8.0). The bounded streaming engine described here is
 the active second engine in current releases. See
 [ADR-0011](./0011-true-streaming-contract.md) and the streaming
 configuration guide for the current defaults and policy (`markdown_streaming
-auto` with a per-request streaming memory budget that is independent of
-total document size).
+off` by default, so bounded full-buffer stays the engine unless an operator
+writes `markdown_streaming auto` or `force` explicitly, and the per-request
+streaming memory budget is independent of total document size).
 
-## Context
+## Context (historical — as of the v0.8.0 baseline)
 
-The project currently uses full buffering as the primary runtime model (ADR-0002), with an optional "incremental" path for large responses.
+At the time of this decision the project used full buffering as the primary runtime model (ADR-0002), with an optional "incremental" path for large responses.
 
-Today, that incremental path is still not true streaming:
+At that point the incremental path was still not true streaming:
 
-1. NGINX side still buffers the full response body before conversion.
-2. Rust-side `IncrementalConverter` still accumulates all input internally and converts on `finalize`.
-3. The parser relies on a full-document DOM model (`html5ever` + `RcDom`), which creates document-size-proportional memory growth.
+1. The NGINX side still buffered the full response body before conversion.
+2. The Rust-side `IncrementalConverter` accumulated all input internally and converted on `finalize`.
+3. The parser relied on a full-document DOM model (`html5ever` + `RcDom`), which created document-size-proportional memory growth.
 
 As a result:
 
-- Large responses can cause high peak memory and latency spikes.
-- The current hard guard (64 MiB incremental input ceiling) protects stability but does not solve the architecture limit.
-- Simply increasing the size ceiling would increase OOM and denial-of-service risk.
+- Large responses could cause high peak memory and latency spikes.
+- The hard guard of that era (64 MiB incremental input ceiling) protected stability but did not solve the architecture limit.
+- Simply increasing the size ceiling would have increased OOM and denial-of-service risk.
 
-We need a path to true streaming conversion that:
+The project needed a path to true streaming conversion that:
 
-- keeps memory bounded per request,
-- preserves operational safety,
-- and remains compatible with existing fail-open expectations where technically possible.
+- kept memory bounded per request,
+- preserved operational safety,
+- and remained compatible with existing fail-open expectations where technically possible.
 
 ## Decision
 
-Adopt a dual-engine architecture and introduce an opt-in streaming path with explicit commit semantics.
+The decision adopted a dual-engine architecture and an opt-in streaming path with explicit commit semantics, as recorded in the historical baseline (v0.8.0). See the Status section above for the engines and defaults that apply in current releases.
 
 ### 1) Dual Engine Architecture
 
@@ -220,7 +221,7 @@ No silent fallback or silent truncation is acceptable.
 - Request lifecycle: `../REQUEST_LIFECYCLE.md`
 - Large response design: `../LARGE_RESPONSE_DESIGN.md`
 - Performance baselines: `../../testing/PERFORMANCE_BASELINES.md`
-- Current incremental implementation: `../../../components/rust-converter/src/incremental.rs`
+- Historical incremental implementation: the former `components/rust-converter/src/incremental.rs` module (removed in 0.9.2, no replacement)
 - Current parser implementation: `../../../components/rust-converter/src/parser.rs`
 - NGINX payload buffering path: `../../../components/nginx-module/src/ngx_http_markdown_payload_impl.h`
 - NGINX conversion execution path: `../../../components/nginx-module/src/ngx_http_markdown_conversion_impl.h`

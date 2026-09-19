@@ -28,8 +28,10 @@ Usage:
     python3 tools/harness/detect_e2e_streaming_config.py [directory] [--strict]
 
 Exit codes:
-    0 — no findings (or, in non-strict mode, findings reported as warnings)
+    0 — no findings and no scan errors (findings alone are advisory in
+        non-strict mode)
     1 — findings in --strict mode, scan errors in --strict mode, or usage error
+    2 — scan errors in non-strict mode: an incomplete scan is never a pass
 """
 
 from __future__ import annotations
@@ -1466,12 +1468,18 @@ def main() -> int:
             f"config(s) (advisory)",
             file=sys.stderr,
         )
-    elif errors:
+    if errors:
+        # Scan errors are never advisory: an unreadable or unparseable file
+        # means part of the tree was never judged, so a zero exit would let a
+        # broken scan pass for a clean one.  Exit 2 keeps the code distinct
+        # from the findings/strict failure (1).
         print(
-            f"WARN: {len(errors)} scan error(s) encountered (advisory)",
+            f"FAIL: {len(errors)} scan error(s) encountered "
+            f"(incomplete scan; rerun with --strict for the blocking form)",
             file=sys.stderr,
         )
-    else:
+        return 2
+    if not findings:
         print("OK: no contradictory E2E streaming configs found", file=sys.stderr)
     return 0
 

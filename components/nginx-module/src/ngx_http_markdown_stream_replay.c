@@ -1,10 +1,18 @@
 /*
  * Streaming Fallback State Machine — Replay Buffer Implementation
  *
- * Tracks bytes buffered during pre-commit streaming to enable HTML
- * passthrough fallback.  If replay buffer overflows before header
- * commit, the decision engine is notified via the replay_available
- * flag and forces a decision (commit, full-buffer, or reject).
+ * Test-only helpers for the pre-commit replay buffer used by the streaming
+ * fallback state machine's unit tests (tests/unit/stream_replay_test.c and
+ * the streaming_impl harness).
+ *
+ * Production streaming no longer routes pre-commit fallback through this
+ * file: the fail-open replay buffer is owned directly by the request
+ * context (ctx->streaming.failopen_replay_buf) and driven by
+ * ngx_http_markdown_streaming_append_replay_chunk() in
+ * ngx_http_markdown_streaming_impl.h.  Nothing in the compiled module calls
+ * the ngx_http_markdown_stream_replay_* functions below; they are kept so
+ * the state machine's init/append/overflow/cleanup semantics stay covered
+ * by unit tests.  Do not treat them as a production code path.
  *
  * Rule 43: backing store uses ngx_alloc/ngx_free exclusively.
  * Rule 38: init/append failure semantics → precommit_error.
@@ -30,6 +38,10 @@ ngx_http_markdown_stream_replay_grow(size_t current_capacity,
  * Registers a pool cleanup so the ngx_alloc'd backing store is
  * automatically freed when the request ends, regardless of which
  * code path terminates the request.
+ *
+ * Test-only entry point: maintained as the reference init/overflow
+ * semantics for unit tests; production fail-open replay uses
+ * ctx->streaming.failopen_replay_buf directly.
  *
  * Returns:
  *   NGX_OK    - Buffer initialized, ready for append
@@ -242,6 +254,10 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx)
  * buffer at that copy.  The buffer is marked as memory-resident
  * (not file-backed) and last_buf=1 so downstream filters know
  * this is the complete replayed response body.
+ *
+ * Test-only entry point: production fail-open copies and sends
+ * ctx->streaming.failopen_replay_buf itself, so this helper is called only
+ * from unit tests.
  *
  * Returns:
  *   Non-NULL chain link on success

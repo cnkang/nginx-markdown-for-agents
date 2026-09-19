@@ -171,6 +171,14 @@ jobs:
           file: ./examples/docker/Dockerfile.official-nginx-source-build
           load: true
           tags: nginx-markdown-official-check:${{ matrix.docker_tag }}
+          # Self-attestation for the reused-image verification: the
+          # --skip-build path reads these OCI labels back via `docker image
+          # inspect` and only claims the matrix binding when the revision and
+          # base digest match.  Without the labels that step fails closed.
+          labels: |
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.base.name=${{ matrix.image_ref }}
+            org.opencontainers.image.base.digest=${{ matrix.image_digest }}
           build-args: |
             NGINX_IMAGE=${{ matrix.image_ref }}@${{ matrix.image_digest }}
             MODULE_REPO=${{ steps.source.outputs.repo }}

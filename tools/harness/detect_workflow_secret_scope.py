@@ -14,11 +14,32 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_ROOT = REPO_ROOT / ".github" / "workflows"
-SECRET_EXPRESSION = re.compile(r"\$\{\{\s*secrets\.\w+\s*\}\}")
+SONAR_WORKFLOW_PATH = ".github/workflows/sonarcloud.yml"
+SECRET_EXPRESSION = re.compile(r"\$\{\{\s*secrets(\.\w+|\[[^]]*\])\s*\}\}")
 SONAR_SECRET_EXPRESSION = re.compile(
     r"\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}"
 )
 SONAR_TOKEN_LINE = re.compile(r"^\s*SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}\s*$")
+# A run body publishes a gating value to the step output file.
+# Exactly the four spellings that write the real output file: quoted or
+# bare, braced or not.  The trailing lookahead rejects any suffix that
+# would turn the expansion into a different word (`$GITHUB_OUTPUT-BACKUP`,
+# `$GITHUB_OUTPUT/foo`, `$GITHUB_OUTPUT.foo`, `$GITHUB_OUTPUT_BACKUP`).
+GITHUB_OUTPUT_RE = re.compile(
+    r">>\s*(?:\"\$\{GITHUB_OUTPUT\}\"|\"\$GITHUB_OUTPUT\""
+    r"|\$\{GITHUB_OUTPUT\}|\$GITHUB_OUTPUT)(?=$|[ 	;|&)])"
+)
+# A gate publication echo: on a line that also redirects to $GITHUB_OUTPUT
+# (checked separately by GITHUB_OUTPUT_RE), capture the NAME of the first
+# NAME=value assignment after `echo`.  The value tail is anchored by the
+# single `>>` literal, so no quantifiers overlap and the pattern stays
+# linear on adversarial lines.  _published_gates() splits the line into
+# unquoted command segments first, so a quoted value that contains
+# separators cannot fabricate a gate assignment.
+GATE_NAME_RE = re.compile(
+    r'^\s*(?:then\s+)?echo(?: -[A-Za-z]+)?\s+["\']?([A-Za-z_][A-Za-z0-9_-]*)=[^\n]*>>'
+)
+STEP_CHILD_KEY_RE = re.compile(r"^\s+([A-Za-z0-9_-]+):(.*)$")
 
 
 @dataclass(frozen=True)
@@ -100,7 +121,7 @@ def _step_name(lines: list[str], token_index: int) -> str | None:
 
 def check_sonar_token_steps(text: str) -> list[Finding]:
     """Require SONAR_TOKEN only in the presence check and pinned scanners."""
-    path = ".github/workflows/sonarcloud.yml"
+    path = SONAR_WORKFLOW_PATH
     lines = text.splitlines()
     secret_occurrences = sum(
         len(SONAR_SECRET_EXPRESSION.findall(line)) for line in lines
@@ -145,6 +166,525 @@ def check_sonar_token_steps(text: str) -> list[Finding]:
     return findings
 
 
+def _step_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    """Return (start, end) index pairs for each YAML step list item."""
+    starts = [
+        (index, len(match.group(1)))
+        for index, line in enumerate(lines)
+        if (match := re.match(r"^(\s*)-\s+\S", line))
+    ]
+    blocks: list[tuple[int, int]] = []
+    for start, indent in starts:
+        end = len(lines)
+        for index in range(start + 1, len(lines)):
+            if not lines[index].strip():
+                continue
+            current = len(lines[index]) - len(lines[index].lstrip())
+            if current <= indent:
+                end = index
+                break
+        blocks.append((start, end))
+    return blocks
+
+
+def _step_id(lines: list[str], start: int, end: int) -> str | None:
+    """Return a step's ``id:`` value, or None when the step has no id."""
+    for index in range(start, end):
+        match = re.match(r"^\s+id:\s*(\S+)\s*$", lines[index])
+        if match:
+            return match.group(1)
+    return None
+
+
+def _step_structural_lines(
+    lines: list[str], start: int, end: int
+) -> list[tuple[int, int]]:
+    """Return (index, indent) pairs for the step's YAML structure lines.
+
+    A block scalar (``run: |``, ``if: >-``, and their chomping variants)
+    owns every following line that is more indented than its key, so those
+    lines are skipped: a heredoc or script line that happens to look like
+    ``key: value`` must never be read as YAML.  The dash line itself can
+    open a scalar (``- run: |``); its body ends at the first line that is
+    not deeper than the key.
+    """
+    body_indent: int | None = None
+    leading = re.match(r"^(\s*)-[^\n]*?:\s*[|>]", lines[start])
+    if leading is not None:
+        body_indent = len(leading.group(1)) + 3
+
+    structural: list[tuple[int, int]] = []
+    for index in range(start + 1, end):
+        line = lines[index]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if body_indent is not None:
+            if indent >= body_indent:
+                continue
+            body_indent = None
+        match = STEP_CHILD_KEY_RE.match(line)
+        if match is None:
+            continue
+        if match.group(2).strip()[:1] in (">", "|"):
+            body_indent = indent + 1
+        structural.append((index, indent))
+    return structural
+
+
+def _step_child_indent(lines: list[str], start: int, end: int) -> int | None:
+    """Indentation of the step's direct child keys, from the first key line."""
+    structural = _step_structural_lines(lines, start, end)
+    return structural[0][1] if structural else None
+
+
+def _fold_block_scalar(lines: list[str], index: int, end: int) -> str:
+    """Join a block-scalar value that continues on more-indented lines."""
+    key_indent = len(lines[index]) - len(lines[index].lstrip())
+    collected: list[str] = []
+    for follower in range(index + 1, end):
+        if not lines[follower].strip():
+            continue
+        indent = len(lines[follower]) - len(lines[follower].lstrip())
+        if indent <= key_indent:
+            break
+        collected.append(lines[follower].strip())
+    return " ".join(collected)
+
+
+def _step_if_value(lines: list[str], start: int, end: int) -> str:
+    """Return the step's own ``if:`` value from its block, else ``""``.
+
+    Only a key at the step's direct-child indentation counts, and lines
+    owned by a block scalar are never treated as YAML: an ``if:`` nested
+    under ``env:``/``with:`` or a script line inside ``run: |`` does not
+    gate the step.  Block scalars (``if: >-``) are folded into one string
+    because the condition then continues on the following lines.
+    """
+    structural = _step_structural_lines(lines, start, end)
+    if not structural:
+        return ""
+    child_indent = structural[0][1]
+    for index, indent in structural:
+        match = STEP_CHILD_KEY_RE.match(lines[index])
+        if match is None or match.group(1) != "if" or indent != child_indent:
+            continue
+        value = match.group(2).strip()
+        if value and value[0] not in ">|":
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                # A YAML flow scalar wraps the whole condition; the wrapping
+                # quotes are YAML syntax, not expression syntax, so strip
+                # them and unescape doubled occurrences of the same quote
+                # before polarity analysis.
+                quote = value[0]
+                value = value[1:-1].replace(quote * 2, quote)
+            return value
+        return _fold_block_scalar(lines, index, end)
+    return ""
+
+
+def _presence_block(
+    blocks: list[tuple[int, int]],
+    lines: list[str],
+) -> tuple[int, int] | None:
+    """Return the step block that carries the token presence check."""
+    return next(
+        (
+            (start, end)
+            for start, end in blocks
+            if any(SONAR_TOKEN_LINE.match(lines[i]) for i in range(start, end))
+        ),
+        None,
+    )
+
+
+def _separator_length(line: str, index: int) -> int:
+    """Length of the unquoted command separator at *index* (0 when none)."""
+    if line.startswith("&&", index) or line.startswith("||", index):
+        return 2
+    if line[index] in ";|&":
+        return 1
+    return 0
+
+
+def _consume_quoted(
+    line: str, index: int, quote: str, current: list[str]
+) -> tuple[str, int]:
+    """Consume one character inside *quote*, appending it to *current*.
+
+    A backslash-escaped character inside double quotes is literal text: it
+    is appended together with its escape and cannot close the quote.
+    """
+    char = line[index]
+    current.append(char)
+    if char == "\\" and quote == '"' and index + 1 < len(line):
+        current.append(line[index + 1])
+        return quote, index + 2
+    if char == quote:
+        return "", index + 1
+    return quote, index + 1
+
+
+def _split_shell_segments(line: str) -> list[str]:
+    """Split a shell line on unquoted command separators.
+
+    Separators inside single- or double-quoted text are content, not command
+    boundaries, so a quoted gate value cannot fabricate a segment that the
+    anchored gate pattern would accept.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    index = 0
+    length = len(line)
+    while index < length:
+        char = line[index]
+        if quote:
+            quote, index = _consume_quoted(line, index, quote, current)
+            continue
+        if char in "'\"":
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if char == "#" and _comment_starts_at(line, index):
+            # A comment is not executable text: keep its remainder attached
+            # to the current segment and stop scanning, so separators inside
+            # the comment cannot fabricate another command segment.
+            current.append(line[index:])
+            index = length
+            continue
+        if char == "\\" and index + 1 < length:
+            # An escaped character outside quotes is literal text: `\;` and
+            # friends are arguments, not command separators.
+            current.append(line[index:index + 2])
+            index += 2
+            continue
+        separator = _separator_length(line, index)
+        if separator:
+            segments.append("".join(current))
+            current = []
+            index += separator
+            continue
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    return segments
+
+
+def _comment_starts_at(segment: str, index: int) -> bool:
+    """True when the unquoted ``#`` at *index* begins a comment."""
+    return index == 0 or segment[index - 1] in " \t;|&()"
+
+
+def _redirect_here(segment: str, index: int) -> bool:
+    """True when an unquoted ``>>`` at *index* redirects to $GITHUB_OUTPUT."""
+    if index > 0 and segment[index - 1] == ">":
+        return False
+    if index > 0 and segment[index - 1].isdigit():
+        start = index - 1
+        while start > 0 and segment[start - 1].isdigit():
+            start -= 1
+        if start == 0 or segment[start - 1] in " \t;|&(":
+            # A descriptor token that begins at a word boundary (`2>> ...`,
+            # `10>> ...`, `; 3>> ...`) names a different descriptor; digits
+            # embedded in a value (`enabled=2>>`) stay plain text and may
+            # still append stdout.
+            return False
+    return (
+        segment[index] == ">"
+        and segment[index + 1] == ">"
+        and GITHUB_OUTPUT_RE.match(segment, index) is not None
+    )
+
+
+def _advance_in_quote(segment: str, index: int, quote: str) -> tuple[str, int]:
+    """Advance one character inside *quote*; returns the (quote, next) pair."""
+    char = segment[index]
+    if char == "\\" and quote == '"' and index + 1 < len(segment):
+        return quote, index + 2
+    if char == quote:
+        return "", index + 1
+    return quote, index + 1
+
+
+def _unquoted_redirect(segment: str) -> int | None:
+    """Index of the ``>>`` that redirects outside quotes and comments.
+
+    A ``>>`` inside a quoted string is literal text, and a ``>>`` after an
+    unquoted ``#`` lives in a comment; neither performs a redirection, so a
+    scanner that accepted them could certify a gate the shell never writes.
+    """
+    quote = ""
+    index = 0
+    length = len(segment)
+    while index < length - 1:
+        char = segment[index]
+        if quote:
+            quote, index = _advance_in_quote(segment, index, quote)
+            continue
+        if char in "'\"":
+            quote = char
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if char == "#" and _comment_starts_at(segment, index):
+            break
+        if _redirect_here(segment, index):
+            return index
+        index += 1
+    return None
+
+
+def _published_gates(lines: list[str], start: int, end: int) -> set[str]:
+    """Return the step outputs the presence check publishes for gating.
+
+    A line may chain several commands (``echo "debug=1"; echo "ready=go"
+    >> "$GITHUB_OUTPUT"``): only the echo that owns the redirect may name
+    the gate, so the line is split into unquoted command segments before
+    the anchored gate pattern runs.
+    """
+    names: set[str] = set()
+    for index in range(start, end):
+        line = lines[index]
+        if not GITHUB_OUTPUT_RE.search(line):
+            continue
+        for segment in _split_shell_segments(line):
+            redirect = _unquoted_redirect(segment)
+            if redirect is None:
+                continue
+            # Match the gate pattern against the prefix that ends at that
+            # redirection, so a `>>` inside quotes or a comment after it
+            # cannot donate or receive the match.
+            match = GATE_NAME_RE.match(segment[: redirect + 2])
+            if match:
+                names.add(match.group(1))
+    return names
+
+
+def _mask_quoted(if_value: str) -> str:
+    """Blot out quoted-literal content, keeping positions (GitHub syntax).
+
+    Quoted strings cannot contain operators that matter for the disjunction
+    scan, and GitHub escapes a quote by doubling it — so single- and
+    double-quoted runs and their literal content all become spaces.
+    """
+    out: list[str] = []
+    quote = ""
+    index = 0
+    length = len(if_value)
+    while index < length:
+        char = if_value[index]
+        if quote:
+            if char == quote:
+                if index + 1 < length and if_value[index + 1] == quote:
+                    out.append("  ")
+                    index += 2
+                    continue
+                quote = ""
+            out.append(" ")
+        else:
+            if char in "'\"":
+                quote = char
+            out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _has_top_level_disjunction(if_value: str) -> bool:
+    """Return whether a ``||`` sits outside parentheses (quotes masked)."""
+    depth = 0
+    for char in _mask_quoted(if_value):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == "|" and depth == 0:
+            return True
+    return False
+
+
+def _optional_in_disjunction(if_value: str, match: re.Match[str]) -> bool:
+    """Return whether a disjunction can bypass this reference occurrence.
+
+    The occurrence counts only as a member of the top-level ``&&`` chain:
+    a ``||`` outside every parenthesized group (``ref || a``) runs the step
+    without the gate, and an occurrence that only appears inside parentheses
+    cannot be proven required.  A disjunction nested inside parentheses
+    under a top-level ``&&`` (``<gate> && (a || b)``) leaves the gate
+    required.  Conditions without any ``||`` are never bypassed here; the
+    parenthesis depth is measured at the occurrence's own position, so
+    repeated references are classified independently.
+    """
+    if "||" not in if_value:
+        return False
+    if _has_top_level_disjunction(if_value):
+        return True
+
+    masked = _mask_quoted(if_value)
+    prefix = masked[: match.start()]
+    return prefix.count("(") > prefix.count(")")
+
+
+def _reference_negated(if_value: str, match: re.Match[str]) -> bool:
+    """Return whether this unquoted reference occurrence is negated.
+
+    The text right after the reference covers ``!=`` and ``== false``
+    comparisons (including quoted ``'false'``); the text right before
+    covers unary ``!``, negated ``contains(`` forms, and comparison
+    operators whose left operand precedes the reference (``x !=
+    <ref>``, ``false == <ref>``).  Both run over the full remaining text,
+    so distant operators (long folded spacing) still count, and they read
+    at mask-verified positions — a literal shaped like a negation cannot
+    negative a separate, real occurrence.
+    """
+    after = if_value[match.end():]
+    stripped = after.lstrip().lstrip("}\"'" + "'").lstrip()
+    if stripped.startswith("!="):
+        return True
+    if stripped.startswith("=="):
+        operand = stripped[2:].lstrip()
+        if not re.match(r"(?:'true'|\"true\"|true)(?!\w)", operand):
+            # `ref == X` is a positive requirement only when X is the literal
+            # true.  A false literal, a property, or any other expression
+            # compares the gate's value without requiring it.
+            return True
+
+    before = if_value[: match.start()]
+    if re.search(r"!\s*(?:\(+\s*)?$", before):
+        return True
+    if re.search(r"!\s*=\s*$", before):
+        return True
+    if re.search(r"==\s*$", before):
+        # The reference is the RIGHT operand of an equality.  That is a
+        # positive requirement only when the left operand is the literal
+        # true (`true == ref`); any other left operand (a property
+        # reference such as `inputs.false`, a dynamic expression) merely
+        # compares the gate's value, so it is not wiring.
+        if not re.search(
+            r"(?<![\w.])(?:'true'|\"true\"|true)\s*==\s*$", before
+        ):
+            return True
+    if re.search(r"!\s*contains\(\s*$", before):
+        return True
+    return False
+
+
+def _references_gate(if_value: str, step_id: str, gates: set[str]) -> bool:
+    """Return whether an ``if:`` value requires a published step output.
+
+    Only a positive, required check counts as wiring.  A negated comparison
+    of the gate (``!= 'true'``, an equality against false, a negated
+    ``contains`` call, or a unary ``!`` on the reference itself) runs it
+    when the gate did NOT pass, and a disjunction that can bypass the
+    reference (``<gate> || a``) makes the gate optional — none of those
+    count.  A negation of some *other* predicate in a conjunction
+    (``!cancelled() && <gate>``) or a disjunction nested under it
+    (``<gate> && (a || b)``) leaves the gate required and still counts, as
+    does ``always()`` combined with the gate (it only overrides the
+    cancellation default; the conjunction still requires the gate).
+
+    References are matched on the quote-masked value and each unquoted
+    occurrence is judged on its own polarity, so text inside a literal can
+    neither fabricate wiring nor neutralise a real reference.
+    """
+    masked = _mask_quoted(if_value)
+    for gate in gates:
+        ref = rf"steps\.{re.escape(step_id)}\.outputs\.{re.escape(gate)}\b"
+        for match in re.finditer(ref, masked):
+            if _reference_negated(if_value, match):
+                continue
+            if _optional_in_disjunction(if_value, match):
+                continue
+            return True
+    return False
+
+
+def _scanner_blocks(
+    blocks: list[tuple[int, int]],
+    lines: list[str],
+    presence_start: int,
+) -> list[tuple[int, int]]:
+    """Return the token-consuming step blocks other than the presence check."""
+    return [
+        (start, end)
+        for start, end in blocks
+        if start != presence_start
+        and any(SONAR_TOKEN_LINE.match(lines[i]) for i in range(start, end))
+    ]
+
+
+def _ungated_scanner_findings(
+    lines: list[str],
+    scanners: list[tuple[int, int]],
+    step_id: str,
+    gates: set[str],
+) -> list[Finding]:
+    """Return one finding per token-consuming step not gated on the output."""
+    findings: list[Finding] = []
+    for block_start, block_end in scanners:
+        if _references_gate(
+            _step_if_value(lines, block_start, block_end), step_id, gates,
+        ):
+            continue
+        findings.append(
+            Finding(
+                SONAR_WORKFLOW_PATH,
+                block_start + 1,
+                f"token-consuming step is not gated on "
+                f"steps.{step_id}.outputs.*: an unset token must skip the "
+                f"scan, not run it unguarded",
+            )
+        )
+    return findings
+
+
+def check_sonar_gate_wiring(text: str) -> list[Finding]:
+    """Require the presence check to gate both scanner steps.
+
+    The documented skip contract (BUILD_INSTRUCTIONS.md: an unset token skips
+    the scan) depends on the presence check publishing a step output and every
+    later token-consuming scanner step being gated on it.  A presence check
+    that merely exits — the drifted `if [ -z "$SONAR_TOKEN" ]; then exit 0; fi`
+    shape — leaves the scanners ungated because nothing references the check.
+
+    This reads the run body and the ``if:`` conditions the token-scope check
+    itself does not judge, so the fixture cannot drift silently.
+    """
+    lines = text.splitlines()
+    if not any(SONAR_TOKEN_LINE.match(line) for line in lines):
+        return []
+
+    blocks = _step_blocks(lines)
+    presence = _presence_block(blocks, lines)
+    if presence is None:
+        return []
+
+    start, end = presence
+    step_id = _step_id(lines, start, end)
+    gates = _published_gates(lines, start, end)
+
+    if not gates or step_id is None:
+        return [
+            Finding(
+                SONAR_WORKFLOW_PATH,
+                start + 1,
+                "the token presence check must publish a gating step output "
+                "(id: plus a $GITHUB_OUTPUT assignment); an exit-only check "
+                "leaves the scanner steps ungated",
+            )
+        ]
+
+    return _ungated_scanner_findings(
+        lines,
+        _scanner_blocks(blocks, lines, start),
+        step_id,
+        gates,
+    )
+
+
 def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
     """Scan all workflow files, failing closed on read errors."""
     findings: list[Finding] = []
@@ -161,6 +701,7 @@ def scan_workflows(root: Path = WORKFLOW_ROOT) -> list[Finding]:
         if path.name == "sonarcloud.yml":
             seen_sonarcloud = True
             findings.extend(check_sonar_token_steps(text))
+            findings.extend(check_sonar_gate_wiring(text))
     if not seen_sonarcloud:
         findings.append(
             Finding(

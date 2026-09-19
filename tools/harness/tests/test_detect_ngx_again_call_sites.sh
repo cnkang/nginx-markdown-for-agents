@@ -170,6 +170,114 @@ else
         "exit=${exit_code}; output=$(tr '\n' ' ' <"${output_file}")"
 fi
 
+# 5. Abort path: a scratch-file failure exits 2 without leaking temp files.
+stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub.XXXXXX")"
+abort_tmp="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-abort.XXXXXX")"
+abort_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc.XXXXXX")"
+mkdir -p "${abort_src}/src"
+real_mktemp="$(command -v mktemp)"
+cat >"${stub_dir}/mktemp" <<'STUB'
+#!/bin/bash
+if [[ "${1:-}" == *ngx-again-files* ]]; then
+    exit 1
+fi
+if [[ $# -eq 0 ]]; then
+    exec "${STUB_REAL_MKTEMP:?}" "${TMPDIR:?}/tmp.XXXXXX"
+fi
+exec "${STUB_REAL_MKTEMP:?}" "$@"
+STUB
+chmod +x "${stub_dir}/mktemp"
+
+exit_code=0
+STUB_REAL_MKTEMP="${real_mktemp}" PATH="${stub_dir}:${PATH}" TMPDIR="${abort_tmp}" \
+    bash "${DETECTOR}" "${abort_src}" >"${abort_tmp}/detector.out" 2>&1 || exit_code=$?
+leaked="$(find "${abort_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
+if [[ "${exit_code}" -eq 2 ]] \
+    && grep -q 'cannot create the file list' "${abort_tmp}/detector.out" \
+    && [[ "${leaked}" -eq 0 ]]; then
+    pass "a scratch-file failure exits 2 without leaking temp files"
+else
+    fail "a scratch-file failure exits 2 without leaking temp files" \
+        "exit=${exit_code}; leaked=${leaked}"
+fi
+rm -rf "${stub_dir}" "${abort_tmp}" "${abort_src}"
+
+# 2b. Per-API scratch-file failure: the per-API grep file allocation is the
+# third scratch file the detector creates (after the violations file and the
+# file list).  A failure there must exit 2 with a setup error instead of
+# reading as a violation, and it must not leak temp files.
+per_stub_dir="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub2.XXXXXX")"
+per_api_tmp="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-api.XXXXXX")"
+per_api_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc2.XXXXXX")"
+mkdir -p "${per_api_src}/src"
+cat >"${per_api_src}/src/caller.c" <<'C'
+static ngx_int_t
+caller(ngx_http_request_t *r)
+{
+    return ngx_http_markdown_forward_headers(r);
+}
+C
+cat >"${per_stub_dir}/mktemp" <<'STUB'
+#!/bin/bash
+counter="${MKTEMP_BARE_COUNTER:?}"
+if [[ $# -eq 0 ]]; then
+    n=0
+    [[ -f "$counter" ]] && n="$(cat "$counter")"
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$counter"
+    if [[ "$n" -ge 2 ]]; then
+        echo "mktemp: simulated per-API allocation failure" >&2
+        exit 1
+    fi
+    exec "${STUB_REAL_MKTEMP:?}" "${TMPDIR:?}/tmp.XXXXXX"
+fi
+exec "${STUB_REAL_MKTEMP:?}" "$@"
+STUB
+chmod +x "${per_stub_dir}/mktemp"
+
+exit_code=0
+STUB_REAL_MKTEMP="${real_mktemp}" MKTEMP_BARE_COUNTER="${per_api_tmp}/bare.count" \
+    PATH="${per_stub_dir}:${PATH}" \
+    TMPDIR="${per_api_tmp}" \
+    bash "${DETECTOR}" "${per_api_src}" >"${per_api_tmp}/detector.out" 2>&1 || exit_code=$?
+leaked="$(find "${per_api_tmp}" -type f -name 'tmp.*' | wc -l | tr -d ' ')"
+if [[ "${exit_code}" -eq 2 ]] \
+    && grep -q 'cannot create the per-API grep file' "${per_api_tmp}/detector.out" \
+    && [[ "${leaked}" -eq 0 ]]; then
+    pass "a per-API scratch-file failure exits 2 without leaking temp files"
+else
+    fail "a per-API scratch-file failure exits 2 without leaking temp files" \
+        "exit=${exit_code}; leaked=${leaked}"
+fi
+rm -rf "${per_stub_dir}" "${per_api_tmp}" "${per_api_src}"
+
+# 2c. Any grep exit code above 1 must abort the scan as a setup failure.
+rc3_stub="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-stub3.XXXXXX")"
+rc3_src="$(mktemp -d "${TMPDIR:-/tmp}/ngx-again-asrc3.XXXXXX")"
+mkdir -p "${rc3_src}/src"
+printf 'static void f(void) {}\n' >"${rc3_src}/src/caller.c"
+real_grep="$(command -v grep)"
+cat >"${rc3_stub}/grep" <<'STUB'
+#!/bin/bash
+for arg in "$@"; do
+    if [[ "$arg" == *ngx_http_markdown_forward_headers* ]]; then
+        echo "grep: simulated failure" >&2
+        exit 3
+    fi
+done
+exec "${STUB_REAL_GREP:?}" "$@"
+STUB
+chmod +x "${rc3_stub}/grep"
+exit_code=0
+STUB_REAL_GREP="${real_grep}" PATH="${rc3_stub}:${PATH}" bash "${DETECTOR}" "${rc3_src}" >"${rc3_src}/out.txt" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 2 ]] && grep -q 'ERROR: grep failed scanning' "${rc3_src}/out.txt"; then
+    pass "a grep exit code above 1 aborts as a setup failure"
+else
+    fail "a grep exit code above 1 aborts as a setup failure" \
+        "exit=${exit_code}; out=$(tr '\n' ' ' <"${rc3_src}/out.txt" | head -c 120)"
+fi
+rm -rf "${rc3_stub}" "${rc3_src}"
+
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     printf '\nFAIL: %s test(s) failed.\n' "${FAIL_COUNT}" >&2
     exit 1

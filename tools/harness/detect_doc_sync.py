@@ -85,7 +85,10 @@ TEXT_SUFFIXES = {
     ".toml", ".txt", ".yaml", ".yml",
 }
 REMOVED_STREAM_SYMBOL_RE = re.compile(
-    r"\bstream\s*\.\s*engine\b|\bSTREAM_ENGINE\b"
+    # Horizontal whitespace only: a line break between the tokens is not a
+    # symbol reference, and \s would match the newline, turning two adjacent
+    # lines ("stream\n.engine") into a false positive.
+    r"\bstream[ \t]*\.[ \t]*engine\b|\bSTREAM_ENGINE\b"
 )
 
 

@@ -154,3 +154,69 @@ def test_main_distinguishes_malformed_ruleset_payload(
 
     assert gate.main() == 1
     assert "malformed ruleset payload" in capsys.readouterr().err
+
+
+def test_omitted_bypass_actors_is_distinguished_from_absent_ruleset(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A ruleset missing bypass_actors reports the scope problem, not a ruleset gap.
+
+    ``bypass_actors`` is only present in the per-ruleset detail payload when
+    the token can read it; the failure is still closed, but the diagnostic
+    must point at token scope instead of asking for a ruleset that already
+    exists.
+    """
+    ruleset = _ruleset()
+    del ruleset["bypass_actors"]  # detail payload omits the field
+    monkeypatch.setattr(gate, "_list_rulesets", lambda _repo: [ruleset])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["verify_tag_ref_protection.py", "--repo", "cnkang/example"],
+    )
+
+    assert gate.main() == 1
+    stderr = capsys.readouterr().err
+    assert "bypass_actors' was omitted" in stderr
+    assert "token" in stderr
+    assert "no active tag ruleset protects" not in stderr
+
+
+def test_absent_tag_ruleset_keeps_the_configuration_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A repository without a v* tag ruleset keeps the original failure text."""
+    branch_only = _ruleset(target="branch", bypass_actors=[])
+    monkeypatch.setattr(gate, "_list_rulesets", lambda _repo: [branch_only])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["verify_tag_ref_protection.py", "--repo", "cnkang/example"],
+    )
+
+    assert gate.main() == 1
+    assert "no active tag ruleset protects" in capsys.readouterr().err
+
+
+def test_bypass_actor_helpers_classify_each_shape() -> None:
+    """The bypass helpers separate verified-empty, unverifiable, and non-empty."""
+    verified = _ruleset(bypass_actors=[])
+    assert gate._bypass_actors_unverifiable(verified) is False
+    assert gate._ruleset_matches_tag_contract_except_bypass(verified) is False
+
+    non_empty = _ruleset(bypass_actors=[{"actor_id": 1}])
+    assert gate._bypass_actors_unverifiable(non_empty) is False
+    assert gate._ruleset_matches_tag_contract_except_bypass(non_empty) is False
+
+    omitted = _ruleset_without_bypass_actors()
+    assert gate._bypass_actors_unverifiable(omitted) is True
+    assert gate._ruleset_matches_tag_contract_except_bypass(omitted) is True
+
+    nulled = _ruleset(bypass_actors=None)
+    assert gate._bypass_actors_unverifiable(nulled) is True
+
+    # A ruleset that is not a v* tag ruleset is never reported as merely
+    # unverifiable: the contract failure is a real configuration gap.
+    branch_only = _ruleset_without_bypass_actors()
+    branch_only["target"] = "branch"
+    assert gate._ruleset_matches_tag_contract_except_bypass(branch_only) is False
