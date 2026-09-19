@@ -1074,7 +1074,7 @@ impl StreamingConverter {
         if generated_markdown {
             if let StateMachineAction::Text(text) = &action {
                 self.emitter
-                    .process_trusted_text(text)
+                    .process_trusted_text(text, &self.state_machine)
                     .map_err(|e| self.wrap_error(e))?;
             } else {
                 self.emitter
