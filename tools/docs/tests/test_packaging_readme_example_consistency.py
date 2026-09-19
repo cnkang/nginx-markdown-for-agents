@@ -67,3 +67,14 @@ def test_apt_example_builds_urls_from_the_version_variable() -> None:
     assert "releases/download/${VERSION}" in block, (
         "BASE_URL must build the download URL from ${VERSION}"
     )
+
+
+def test_apt_example_carries_every_version_source() -> None:
+    block = _verification_block()
+    assert re.search(r"VERSION=v\d+\.\d+\.\d+", block), "VERSION= assignment missing"
+    assert re.search(r"gh release view v\d+\.\d+\.\d+", block), (
+        "gh release view reference missing"
+    )
+    assert re.search(r"nginx-module-markdown-for-agents_\d+\.\d+\.\d+_nginx", block), (
+        "artifact filename missing"
+    )

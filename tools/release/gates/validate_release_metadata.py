@@ -90,13 +90,21 @@ def _unfenced_lines(text: str) -> list[str]:
     lines: list[str] = []
     open_fence: tuple[str, int] | None = None
     for line in text.splitlines():
-        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
         if marker is not None:
-            run = marker.group(1)
+            run, rest = marker.group(1), marker.group(2)
             char, length = run[0], len(run)
             if open_fence is None:
+                # A backtick info string cannot contain a backtick.
+                if char == "`" and "`" in rest:
+                    lines.append(line)
+                    continue
                 open_fence = (char, length)
-            elif open_fence[0] == char and length >= open_fence[1]:
+            elif (
+                open_fence[0] == char
+                and length >= open_fence[1]
+                and rest.strip() == ""
+            ):
                 open_fence = None
             continue
         if open_fence is None:

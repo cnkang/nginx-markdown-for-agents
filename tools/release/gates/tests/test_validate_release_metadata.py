@@ -194,3 +194,18 @@ def test_version_argument_must_be_a_plain_version() -> None:
     )
     assert result.returncode == 1
     assert "--version must look like X.Y.Z" in result.stderr
+
+
+def test_fence_close_with_trailing_text_does_not_close() -> None:
+    """A closer with trailing text is not a closing fence per CommonMark."""
+    from tools.release.gates.validate_release_metadata import _release_note_field
+
+    text = (
+        "```\n"
+        "**Date**: 2026-07-28\n"
+        "```no-close\n"
+        "**Status**: Stable release\n"
+        "```\n"
+    )
+    assert _release_note_field(text, "Date") is None
+    assert _release_note_field(text, "Status") is None
