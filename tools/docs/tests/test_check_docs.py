@@ -969,3 +969,13 @@ def test_stable_claim_failures_flag_pending_claims(tmp_path):
             tmp_path, "9.9.9", ("README.md",)
         )
         assert any("pre-release wording" in error for error in errors), phrase
+
+
+def test_stable_claim_failures_flag_candidate_headings(tmp_path):
+    _write_stable_notes(tmp_path, "9.9.9")
+    for heading in ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate"):
+        (tmp_path / "README.md").write_text(heading + "\n", encoding="utf-8")
+        errors = docs_checker.check_stable_release_surfaces(
+            tmp_path, "9.9.9", ("README.md",)
+        )
+        assert any("pre-release wording" in error for error in errors), heading

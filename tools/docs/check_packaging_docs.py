@@ -375,19 +375,31 @@ def check_apt_verification_example() -> list[str]:
     # through the end of the fenced block.
     block = text[start:end]
     errors: list[str] = []
-    versions = set(re.findall(r"VERSION=v(\d+\.\d+\.\d+)", block))
-    versions |= set(re.findall(r"gh release view v(\d+\.\d+\.\d+)", block))
-    versions |= set(
-        re.findall(r"nginx-module-markdown-for-agents_(\d+\.\d+\.\d+)_nginx", block)
-    )
+    sources = {
+        "VERSION= assignment": set(
+            re.findall(r"VERSION=v(\d+\.\d+\.\d+)", block)
+        ),
+        "gh release view reference": set(
+            re.findall(r"gh release view v(\d+\.\d+\.\d+)", block)
+        ),
+        "artifact filename": set(
+            re.findall(
+                r"nginx-module-markdown-for-agents_(\d+\.\d+\.\d+)_nginx", block
+            )
+        ),
+    }
     expected = _current_release_version()
-    if not versions:
-        errors.append("packaging/repo/apt/README.md: no release version in the verification example")
-    elif expected is not None and versions != {expected}:
-        errors.append(
-            "packaging/repo/apt/README.md: example versions "
-            f"{sorted(versions)} do not match the current release {expected}"
-        )
+    for label, found in sources.items():
+        if not found:
+            errors.append(
+                f"packaging/repo/apt/README.md: the verification example has "
+                f"no {label}"
+            )
+        elif expected is not None and found != {expected}:
+            errors.append(
+                f"packaging/repo/apt/README.md: {label} versions "
+                f"{sorted(found)} do not match the current release {expected}"
+            )
     if (
         "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/"
         "${VERSION}"
