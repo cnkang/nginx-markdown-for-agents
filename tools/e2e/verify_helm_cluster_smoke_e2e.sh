@@ -155,10 +155,18 @@ fi
 
 # Request the Service, not the pod's loopback interface: a forwarding port on
 # the host keeps the Service selector, port, and endpoints in the request path,
-# so a miswired Service fails this smoke instead of silently passing.
+# so a miswired Service fails this smoke instead of silently passing.  The
+# forwarding target is the Service's own http port, resolved from its spec, so
+# the check follows the chart's configured port instead of assuming one.
+SVC_PORT="$(kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
+    get service "${SVC}" -o jsonpath='{.spec.ports[?(@.name=="http")].port}')"
+if [[ -z "${SVC_PORT}" ]]; then
+    echo "ERROR: Service ${SVC} does not expose the named http port" >&2
+    exit 1
+fi
 PF_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
-    port-forward "service/${SVC}" "${PF_PORT}:8080" >"${WORK_DIR}/port-forward.log" 2>&1 &
+    port-forward "service/${SVC}" "${PF_PORT}:${SVC_PORT}" >"${WORK_DIR}/port-forward.log" 2>&1 &
 PF_PID=$!
 
 forward_ready=0

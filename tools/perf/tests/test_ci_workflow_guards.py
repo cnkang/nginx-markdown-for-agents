@@ -14,6 +14,21 @@ from pathlib import Path
 
 import yaml
 
+# The benchmark container receives no GITHUB_WORKSPACE and mounts the
+# checkout at /workspace, so its candidate binding is pinned to this exact
+# supported form; any other form (including repository-selection arguments)
+# must fail the guard.
+CANDIDATE_SHA_BINDING = 'CANDIDATE_SHA="$(git -c safe.directory=/workspace rev-parse HEAD)"'
+BENCHMARK_CONTAINER_MARKER = "bash -se <<'CONTAINER_SCRIPT'"
+BENCHMARK_SCRIPT = "tools/perf/run_module_benchmark.sh"
+
+
+def _benchmark_container_script(workflow: str) -> str:
+    """The heredoc block of the benchmark container step."""
+    start = workflow.index(BENCHMARK_CONTAINER_MARKER)
+    end = workflow.index("CONTAINER_SCRIPT", start + len(BENCHMARK_CONTAINER_MARKER))
+    return workflow[start:end]
+
 
 def _ci_workflow_text() -> str:
     repo_root = Path(__file__).resolve().parents[3]
@@ -197,9 +212,16 @@ def test_release_gate_generates_candidate_bound_092_baseline() -> None:
         "make release-perf-evidence-blocking BASELINE_VERSION=092"
     )
     assert benchmark < gate
+    container_script = _benchmark_container_script(workflow)
+    assert BENCHMARK_SCRIPT in container_script, (
+        "expected the benchmark to run inside its CONTAINER_SCRIPT block"
+    )
+    assert CANDIDATE_SHA_BINDING in container_script, (
+        "CANDIDATE_SHA must be bound to the checkout HEAD in the benchmark "
+        "container script"
+    )
     for snippet in (
         '--env GITHUB_RUN_ATTEMPT',
-        'CANDIDATE_SHA="$(git rev-parse HEAD)"',
         "tools/perf/validate_module_probe_artifacts.py",
         "tools/perf/finalize_module_baseline.py",
         '--source-git-commit "${CANDIDATE_SHA}"',
@@ -211,6 +233,29 @@ def test_release_gate_generates_candidate_bound_092_baseline() -> None:
         "EVIDENCE_GATE_BENCHMARK_REPORT="
         "perf/baselines/module-baseline-092-raw.json"
     ) in workflow
+
+
+def test_benchmark_candidate_binding_rejects_deviations() -> None:
+    """Only the exact in-container binding satisfies the guard."""
+    open_marker = "bash -se <<'CONTAINER_SCRIPT'\n"
+    close_marker = "CONTAINER_SCRIPT\n"
+
+    def block_of(body: str) -> str:
+        return _benchmark_container_script(open_marker + body + close_marker)
+
+    good = block_of(
+        BENCHMARK_SCRIPT + "\n" + CANDIDATE_SHA_BINDING + "\n"
+    )
+    assert BENCHMARK_SCRIPT in good
+    assert CANDIDATE_SHA_BINDING in good
+    assert CANDIDATE_SHA_BINDING not in _benchmark_container_script(
+        open_marker + BENCHMARK_SCRIPT + "\n" + close_marker + CANDIDATE_SHA_BINDING
+    )
+    wrong = block_of(
+        BENCHMARK_SCRIPT + "\n"
+        + 'CANDIDATE_SHA="$(git -C /elsewhere rev-parse HEAD)"\n'
+    )
+    assert CANDIDATE_SHA_BINDING not in wrong
 
 
 # ---------------------------------------------------------------------------

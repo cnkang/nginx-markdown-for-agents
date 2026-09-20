@@ -215,6 +215,14 @@ approved by the release owner after qualification. The package workflow rejects
 an older commit that is merely an ancestor of `main`, even when that commit
 passed its own checks.
 
+The release-gate job also verifies that the repository's tag ruleset covers
+`v*` release tags with deletion and update protection. Reading a ruleset's
+bypass list requires repository administration scope, which the workflow token
+does not carry, so the check reads it with the `RELEASE_RULESET_TOKEN`
+repository secret: a fine-grained personal access token with
+`Administration: read` on this repository. Without that secret the check fails
+closed and the release cannot proceed.
+
 Download the manifest from the same GitHub Release page:
 
 ```bash

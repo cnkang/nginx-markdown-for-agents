@@ -278,7 +278,9 @@ def build_summary(parity: dict[str, object], *, allow_dirty: bool) -> dict[str, 
     if status and not allow_dirty:
         raise RuntimeError(
             "git worktree is dirty; candidate-bound evidence requires a clean "
-            "checkout (use --allow-dirty only for local diagnostics)"
+            "checkout (use --allow-dirty only for local diagnostics). Dirty "
+            "entries:\n"
+            + status
         )
     registry_path = REPO_ROOT / EXPECTED_REGISTRY_PATH
     corpus_path = REPO_ROOT / EXPECTED_CORPUS_ROOT

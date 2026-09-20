@@ -724,6 +724,7 @@ test-harness:
 	bash tools/ci/test_verify_official_nginx_docker_binding.sh
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_release_build_context.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/docs/tests/ -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/sonar/tests/ -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh

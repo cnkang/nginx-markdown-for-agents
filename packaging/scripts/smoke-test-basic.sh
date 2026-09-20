@@ -572,6 +572,17 @@ case "$PKG_FORMAT" in
             > /etc/apt/sources.list.d/nginx.list \
             || die "Failed to add nginx.org repository"
 
+        # Prefer the nginx.org build: the module is compiled against
+        # nginx.org's exact-version ABI, and distro packages carry higher
+        # package revisions (for example 1.24.0-2ubuntu7.18) that win the
+        # version comparison, so an unpinned install silently selects the
+        # distro build and the module's exact-version guard then refuses it.
+        cat > /etc/apt/preferences.d/nginx-org.pref <<'EOF'
+Package: nginx*
+Pin: origin nginx.org
+Pin-Priority: 1001
+EOF
+
         apt-get update -qq >>"${INSTALL_LOG}" 2>&1 || die "apt-get update (post-repo) failed"
 
         # Install NGINX from nginx.org

@@ -46,7 +46,10 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
-from lib.executable_validation import resolve_approved_executable  # noqa: E402
+from lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+    resolve_rustup_tool_shim,
+)
 
 SCHEMA_VERSION = "release.fuzz-qualification.v1"
 DEFAULT_MANIFEST = "artifacts/release/0.9.2/blocking-fuzz-target-manifest.json"
@@ -344,9 +347,19 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
     return by_target
 
 
+def _resolve_fuzz_cargo() -> str | None:
+    """Cargo for ``+nightly`` work: the Rustup shim, not the concrete binary.
+
+    ``resolve_approved_executable`` returns the concrete active-toolchain
+    binary, which rejects ``+toolchain`` directives; fuzz qualification needs
+    the shim so Rustup resolves the nightly toolchain.
+    """
+    return resolve_rustup_tool_shim("cargo")
+
+
 def _cargo_fuzz_available() -> bool:
     """Return whether the cargo +nightly toolchain can be invoked."""
-    cargo = resolve_approved_executable("cargo")
+    cargo = _resolve_fuzz_cargo()
     if cargo is None:
         return False
     try:
@@ -361,10 +374,10 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
-    cargo = resolve_approved_executable("cargo")
+    cargo = _resolve_fuzz_cargo()
     if cargo is None:
         return {"returncode": -1, "stdout": "",
-                "stderr": "spawn failed: cargo not found"}
+                "stderr": "spawn failed: Rustup cargo shim not found"}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
         cargo, "+nightly", "fuzz", "run", validated_target, "--", *flags

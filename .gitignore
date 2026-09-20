@@ -56,6 +56,14 @@ components/nginx-module/tests/**/*.pid
 
 # Performance test temporary reports (baselines are version-controlled)
 perf/reports/
+
+# Canonical benchmark runtime staged into the release-gate checkout
+# (the workflow downloads the benchmark NGINX and module artifacts here)
+module-runtime/
+
+# Release asset staging (the publish job downloads release assets here
+# before uploading them to the GitHub Release)
+release-assets/
 # Local ad-hoc perf completeness reports (temporary diagnostics)
 perf_completeness_*.json
 
