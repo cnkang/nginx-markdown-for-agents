@@ -61,7 +61,23 @@ FUZZ_CRATE_DIR = REPO_ROOT / "components" / "rust-converter"
 
 SKIP_ENV = "RELEASE_GATE_ALLOW_SKIP_FUZZ"
 TIME_CONTINUATION_CEILING = 3600
+# Total time the executions-floor chase may spend per target.  Bounding the
+# chase keeps a pathologically slow target from consuming the release job's
+# budget until CI kills the job before the validator can emit its record.
+TIME_CONTINUATION_BUDGET = 1800
+# Shared fuzz envelope for the whole real-mode run.  The per-target budgets
+# multiply across the fourteen blocking targets, so a single monotonic
+# deadline bounds the whole fuzz phase; exhausted targets fail fast with a
+# reason and the record is still emitted instead of CI killing the job
+# before it exists (release-gate timeout: 360 minutes).
+FUZZ_JOB_BUDGET = 13800
 MAX_FUZZ_INVOCATIONS = 8
+# Subprocess margin over the fuzzer's own time cap: it covers process
+# startup, corpus replay (which -max_total_time does not count) and the
+# shutdown stats dump.  A single invocation may therefore overshoot the
+# shared deadline by up to this margin plus its replay time; that tolerance
+# is absorbed by the slack between FUZZ_JOB_BUDGET and the release job's
+# 360-minute cap.
 INVOCATION_TIMEOUT_MARGIN = 900
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
@@ -440,6 +456,8 @@ def _classify_finding(finding: str) -> tuple[int, int]:
         "spawn failed:",
         "timed out:",
         "threshold not reached within",
+        "fuzz job budget exhausted",
+        "executions floor not reached within",
     )):
         return 0, 0
     if any(marker in finding for marker in (
@@ -488,8 +506,101 @@ def _startup_corpus_size(corpus_dir: Path) -> int:
     return sum(1 for entry in corpus_dir.iterdir() if entry.is_file())
 
 
+def _soak_invocation_schedule(
+    seed: int,
+    seconds_remaining: int,
+    runs_remaining: int,
+    startup_overhead: int,
+    continuation_spent: float,
+    deadline: float | None = None,
+) -> tuple[list[str], int, str | None]:
+    """Return (flags, time_cap, failure) for the next soak invocation.
+
+    The soak-time floor is chased first, WITHOUT a runs cap: when both caps
+    are present, libFuzzer stops at whichever trips first, and for fast
+    targets the runs cap ends the invocation in about a second.  Those short
+    bursts can then cancel out against the startup-corpus replay deduction,
+    leaving runs_remaining -- and therefore the command -- unchanged across
+    invocations: a fixed point that exhausts MAX_FUZZ_INVOCATIONS with
+    neither floor met (observed live: every blocking target failed this
+    way).
+
+    Once the time floor is met, the executions floor is chased with the runs
+    cap, bounded by the remaining continuation budget; the requested cap
+    carries the startup-replay overhead so the mutation budget actually
+    delivered still covers runs_remaining whichever executions the counter
+    includes.  Sub-second leftovers must not produce -max_total_time=0
+    (libFuzzer reads 0 as no time limit), so they fail instead.
+
+    The shared job deadline, when present, bounds the invocation cap; a
+    passed deadline fails the target immediately.
+    """
+    cap_limit = None
+    if deadline is not None:
+        cap_limit = int(deadline - time.monotonic())
+        if cap_limit < 1:
+            return [], 0, ("fuzz job budget exhausted before the floors "
+                           "were met")
+    if seconds_remaining > 0:
+        time_cap = seconds_remaining
+        if cap_limit is not None:
+            time_cap = min(time_cap, cap_limit)
+        flags = [f"-max_total_time={time_cap}", f"-seed={seed}",
+                 "-print_final_stats=1"]
+        return flags, time_cap, None
+    remaining_budget = TIME_CONTINUATION_BUDGET - continuation_spent
+    if remaining_budget < 1:
+        return [], 0, ("executions floor not reached within the "
+                       "continuation budget")
+    time_cap = min(TIME_CONTINUATION_CEILING, int(remaining_budget))
+    if cap_limit is not None:
+        time_cap = min(time_cap, cap_limit)
+    flags = [f"-runs={runs_remaining + startup_overhead}",
+             f"-max_total_time={time_cap}",
+             f"-seed={seed}", "-print_final_stats=1"]
+    return flags, time_cap, None
+
+
+def _soak_invocation_timeout(
+    time_cap: int, seconds_remaining: int, continuation_spent: float
+) -> int:
+    """The subprocess timeout for one soak invocation.
+
+    The fuzzer's own cap plus the shutdown/replay margin, and a chase
+    invocation is additionally bounded by its remaining continuation budget
+    so the margin cannot push the invocation's total wall-clock allowance
+    past that budget.
+    """
+    timeout = time_cap + INVOCATION_TIMEOUT_MARGIN
+    if seconds_remaining == 0:
+        timeout = min(timeout,
+                      max(1, int(TIME_CONTINUATION_BUDGET - continuation_spent)))
+    return timeout
+
+
+def _account_soak_invocation(
+    invocation: dict, startup_overhead: int, seconds_remaining: int
+) -> tuple[int, float, float, str | None]:
+    """Credit one invocation: (executions, elapsed, wall charge, failure).
+
+    The empty-input callback and the startup-corpus replay do not count
+    toward the mutation budget: they are launch overhead repeated on every
+    invocation, and startup_overhead is captured immediately before the
+    invocation so corpus growth is included in the deduction.  The
+    continuation budget is a strict wall-clock bound, so chase invocations
+    are charged their measured wall time, not the parsed fuzz time.
+    """
+    executions, elapsed, failure = _soak_outcome(invocation)
+    executions = max(0, executions - startup_overhead)
+    charge = 0.0
+    if seconds_remaining == 0:
+        charge = float(invocation.get("wall_elapsed") or elapsed)
+    return executions, elapsed, charge, failure
+
+
 def _run_target_soak(target: str, seed: int, required_executions: int,
-                     required_seconds: int, log_path: Path) -> dict:
+                     required_seconds: int, log_path: Path,
+                     deadline: float | None = None) -> dict:
     """Run libFuzzer until both floors are met or a finding terminates the run.
 
     libFuzzer stops at whichever of -runs / -max_total_time it hits first;
@@ -499,6 +610,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     total_executions = 0
     total_elapsed = 0.0
+    continuation_spent = 0.0
     log_parts = []
     failure = None
     target_corpus_dir = CORPUS_ROOT / validated_target
@@ -508,31 +620,30 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
             0, int(math.ceil(required_seconds - total_elapsed)))
         if runs_remaining == 0 and seconds_remaining == 0:
             break
-        time_cap = (seconds_remaining if seconds_remaining > 0
-                    else TIME_CONTINUATION_CEILING)
-        flags = [f"-max_total_time={time_cap}", f"-seed={seed}",
-                 "-print_final_stats=1"]
-        if runs_remaining > 0:
-            flags.insert(0, f"-runs={runs_remaining}")
         # Measure the startup corpus immediately before THIS invocation:
         # libFuzzer replays every seed present at launch, so an earlier
         # invocation that added corpus files increases THIS invocation's
         # startup-replay overhead.  Re-measuring here (instead of once
-        # before the loop) keeps the deduction accurate.
+        # before the loop) keeps both the deduction and the runs request
+        # accurate.
         startup_overhead = _startup_corpus_size(target_corpus_dir) + 1
+        flags, time_cap, schedule_failure = _soak_invocation_schedule(
+            seed, seconds_remaining, runs_remaining, startup_overhead,
+            continuation_spent, deadline,
+        )
+        if schedule_failure is not None:
+            failure = schedule_failure
+            break
         invocation = _invoke_fuzz(
-            validated_target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
+            validated_target, flags,
+            timeout=_soak_invocation_timeout(time_cap, seconds_remaining,
+                                             continuation_spent))
         log_parts.append(invocation["stdout"] + "\n" + invocation["stderr"])
-        executions, elapsed, failure = _soak_outcome(invocation)
-        # Exclude the empty-input callback and the startup-corpus replay
-        # from the mutation-budget accounting: they are launch overhead
-        # repeated on every invocation, not new executions.  startup_overhead
-        # is captured immediately before each invocation, so corpus growth
-        # from an earlier invocation is included in the next invocation's
-        # deduction.
-        executions = max(0, executions - startup_overhead)
+        executions, elapsed, charge, failure = _account_soak_invocation(
+            invocation, startup_overhead, seconds_remaining)
         total_executions += executions
         total_elapsed += elapsed
+        continuation_spent += charge
         if failure:
             break
         if (total_executions >= required_executions
@@ -581,13 +692,15 @@ def _skipped_record(entry: dict, reason: str) -> dict:
     }
 
 
-def _run_target_record(entry: dict, seed_path: str) -> dict:
+def _run_target_record(entry: dict, seed_path: str,
+                       deadline: float | None = None) -> dict:
     """Run one blocking target and build its qualification record entry."""
     required_seconds = int(entry["required_minutes"] * 60)
     required_executions = int(entry["required_executions"])
     log_path = REPO_ROOT / DEFAULT_LOG_DIR / f"{entry['name']}.log"
     record = _run_target_soak(entry["name"], int(entry["seed"]),
-                              required_executions, required_seconds, log_path)
+                              required_executions, required_seconds, log_path,
+                              deadline=deadline)
     record["seed_path"] = seed_path
     return record
 
@@ -710,10 +823,12 @@ def run_real_gate(args) -> int:
         return _handle_cargo_missing(args, manifest["candidate_sha"], targets)
 
     started_at = _utc_now()
+    fuzz_deadline = time.monotonic() + FUZZ_JOB_BUDGET
     per_target = []
     for entry in targets:
         if entry["name"] in blocking_names:
-            record = _run_target_record(entry, seeds[entry["name"]]["seed_path"])
+            record = _run_target_record(entry, seeds[entry["name"]]["seed_path"],
+                                        deadline=fuzz_deadline)
         else:
             record = _skipped_record(entry, "blocking=false (policy)")
         per_target.append(record)

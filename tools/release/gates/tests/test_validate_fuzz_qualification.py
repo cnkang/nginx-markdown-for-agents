@@ -289,6 +289,11 @@ def test_classify_finding_distinguishes_crashes_and_sanitizers() -> None:
         "SUMMARY: UndefinedBehaviorSanitizer: signed integer overflow") == (0, 1)
     assert validator._classify_finding(
         "runtime error: load of misaligned address") == (0, 1)
+    assert validator._classify_finding(
+        "fuzz job budget exhausted before the floors were met") == (0, 0)
+    assert validator._classify_finding(
+        "executions floor not reached within the continuation budget") == (0, 0)
+
 
 
 def test_soak_excludes_startup_overhead_from_executions(
@@ -381,3 +386,364 @@ def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
     assert result["returncode"] == 0
     assert seen["command"][0] == "/fake/cargo"
     assert seen["command"][1] == "+nightly"
+
+
+def test_soak_chases_time_before_runs_without_a_runs_cap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The soak-time floor must be chased without a runs cap.
+
+    With both caps present, libFuzzer stops at whichever trips first; on fast
+    targets the runs cap ends each invocation in about a second, and the
+    short bursts can cancel out against the startup-corpus replay deduction,
+    leaving runs_remaining unchanged: the fixed point that failed every
+    blocking target live.  The first invocation therefore must carry only
+    -max_total_time.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
+        if not any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 1000000\n",
+                "stderr": "",
+                "wall_elapsed": 900.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 100\n",
+            "stderr": "",
+            "wall_elapsed": 1.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "pass"
+    assert result["elapsed_seconds_total"] >= 900
+    assert not any(f.startswith("-runs=") for f in calls[0])
+    assert "-max_total_time=900" in calls[0]
+
+
+def test_soak_chases_runs_only_after_time_is_met(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 200000\n",
+                "stderr": "",
+                "wall_elapsed": 30.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "pass"
+    assert len(calls) == 2
+    assert "-max_total_time=900" in calls[0]
+    # runs_remaining (100000 minus 999 credited executions) plus the
+    # startup-replay overhead (empty corpus: one empty-input callback).
+    assert "-runs=99002" in calls[1]
+    # The chase cap is bounded by the continuation budget.
+    assert "-max_total_time=1800" in calls[1]
+
+
+def test_soak_fails_fast_when_the_continuation_budget_is_spent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A pathologically slow target must fail with a record instead of
+    consuming the release job budget until CI kills the job."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 1\n",
+                "stderr": "",
+                "wall_elapsed": 900.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "fail"
+    assert "continuation budget" in result["failure_reason"]
+    # one soak invocation plus the two budgeted chase invocations
+    assert len(calls) == 3
+
+
+def test_soak_rejects_sub_second_continuation_budgets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A fractional leftover budget must not become -max_total_time=0."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 1\n",
+                "stderr": "",
+                "wall_elapsed": 899.6,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "fail"
+    assert "continuation budget" in result["failure_reason"]
+    assert not any("-max_total_time=0" in flag for call in calls for flag in call)
+    assert len(calls) == 3
+
+
+def test_soak_schedule_applies_the_cap_limit(monkeypatch) -> None:
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator.time, "monotonic", lambda: 1000.0)
+
+    flags, time_cap, failure = validator._soak_invocation_schedule(
+        seed=1, seconds_remaining=900, runs_remaining=0,
+        startup_overhead=1, continuation_spent=0.0, deadline=1100.0)
+    assert failure is None
+    assert time_cap == 100
+    assert "-max_total_time=100" in flags
+
+    flags, time_cap, failure = validator._soak_invocation_schedule(
+        seed=1, seconds_remaining=0, runs_remaining=500,
+        startup_overhead=1, continuation_spent=0.0, deadline=1060.0)
+    assert failure is None
+    assert time_cap == 60
+    assert "-max_total_time=60" in flags
+
+    flags, time_cap, failure = validator._soak_invocation_schedule(
+        seed=1, seconds_remaining=900, runs_remaining=0,
+        startup_overhead=1, continuation_spent=0.0, deadline=999.0)
+    assert failure is not None
+    assert "job budget exhausted" in failure
+    assert flags == []
+
+
+def test_soak_stops_immediately_when_the_job_deadline_passed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import time
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(
+        validator, "_invoke_fuzz",
+        lambda target, flags, timeout: calls.append(list(flags)))
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000, required_seconds=900,
+        log_path=tmp_path / "soak.log", deadline=time.monotonic() - 5)
+
+    assert result["status"] == "fail"
+    assert "job budget exhausted" in result["failure_reason"]
+    assert calls == []
+
+
+def test_soak_continuation_budget_charges_wall_time(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Parsed fuzz time must not shrink the wall-clock continuation charge."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 1\n"
+                          "stat::elapsed_seconds: 0.1\n",
+                "stderr": "",
+                "wall_elapsed": 900.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "fail"
+    assert "continuation budget" in result["failure_reason"]
+    # one soak invocation plus two wall-charged (900s) chase invocations
+    assert len(calls) == 3
+
+
+def test_soak_bounds_the_invocation_timeout_under_a_deadline(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With a shared deadline, the subprocess margin shrinks to the tight
+    bound so a single overrun stays small; without one it stays generous."""
+    import time
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    seen_timeouts: list[int] = []
+
+    def fake_invoke(target, flags, timeout):
+        seen_timeouts.append(timeout)
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000000\n"
+                      "stat::elapsed_seconds: 900\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000, required_seconds=900,
+        log_path=tmp_path / "soak.log",
+        deadline=time.monotonic() + 100000)
+    assert result["status"] == "pass"
+    # Uniform margin: it must cover startup replay, which -max_total_time
+    # does not count, so it cannot be tightened near the deadline without
+    # risking a killed valid invocation.
+    assert seen_timeouts[0] == 900 + validator.INVOCATION_TIMEOUT_MARGIN
+
+
+def test_soak_caps_the_chase_timeout_to_the_remaining_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The margin must not push a chase invocation past its budget."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    seen_timeouts: list[int] = []
+
+    def fake_invoke(target, flags, timeout):
+        seen_timeouts.append(timeout)
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 1\n",
+                "stderr": "",
+                "wall_elapsed": 1858.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "fail"
+    assert "continuation budget" in result["failure_reason"]
+    # soak + one chase whose wall charge overshot the budget with floors unmet
+    assert len(seen_timeouts) == 2
+    # the chase timeout is capped at the remaining continuation budget, not
+    # time_cap + INVOCATION_TIMEOUT_MARGIN
+    assert seen_timeouts[1] == validator.TIME_CONTINUATION_BUDGET
+
+
+def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
+    """The soak-time floor must use libFuzzer's own loop time, not the
+    subprocess wall time: startup/corpus replay happens before the loop
+    ("Done ... in 7 second(s)" while wall was 8.46 in the traced run, so
+    replay time is not credited toward the floor)."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    invocation = {
+        "returncode": 0,
+        "stdout": "stat::number_of_executed_units: 100000\n"
+                  "Done 100000 runs in 7 second(s)\n",
+        "stderr": "",
+        "wall_elapsed": 8.46,
+    }
+    executions, elapsed, failure = validator._soak_outcome(invocation)
+    assert failure is None
+    assert executions == 100000
+    assert elapsed == 7.0
+
+    # The wall fallback only applies when the fuzzer reported no loop time.
+    invocation = {
+        "returncode": 0,
+        "stdout": "stat::number_of_executed_units: 3000\n",
+        "stderr": "",
+        "wall_elapsed": 5.0,
+    }
+    executions, elapsed, failure = validator._soak_outcome(invocation)
+    assert failure is None
+    assert elapsed == 5.0
