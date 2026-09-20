@@ -336,3 +336,48 @@ def test_startup_corpus_size_counts_seed_files(tmp_path: Path) -> None:
 
     assert validator._startup_corpus_size(corpus_dir) == 3
     assert validator._startup_corpus_size(tmp_path / "absent") == 0
+
+
+def test_cargo_fuzz_available_uses_the_rustup_shim(
+    tmp_path: Path, monkeypatch
+) -> None:
+    shim = tmp_path / "cargo"
+    shim.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    shim.chmod(0o755)
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: str(shim))
+    assert validator._cargo_fuzz_available() is True
+
+
+def test_cargo_fuzz_available_rejects_broken_cargo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    broken = tmp_path / "cargo"
+    broken.write_text("#!/bin/sh\nexit 101\n", encoding="utf-8")
+    broken.chmod(0o755)
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: str(broken))
+    assert validator._cargo_fuzz_available() is False
+
+
+def test_cargo_fuzz_unavailable_without_a_shim(monkeypatch) -> None:
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: None)
+    assert validator._cargo_fuzz_available() is False
+
+
+def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
+    seen: dict = {}
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        seen["command"] = list(command)
+        return _Result()
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+    result = validator._invoke_fuzz("corpus_population", [], 10)
+    assert result["returncode"] == 0
+    assert seen["command"][0] == "/fake/cargo"
+    assert seen["command"][1] == "+nightly"
