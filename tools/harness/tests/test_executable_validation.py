@@ -66,3 +66,42 @@ def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, na
     )
 
     assert module.resolve_approved_executable(name) == str(tool)
+
+
+def test_rustup_shim_resolver_returns_dispatcher(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path
+    cargo_bin = home / ".cargo" / "bin"
+    dispatcher = cargo_bin / "rustup"
+    shim = cargo_bin / "cargo"
+    cargo_bin.mkdir(parents=True)
+    dispatcher.write_text("dispatcher", encoding="utf-8")
+    dispatcher.chmod(0o755)
+    shim.symlink_to(dispatcher)
+
+    monkeypatch.setattr(module.Path, "home", lambda: home)
+
+    assert module.resolve_rustup_tool_shim("cargo") == str(shim)
+
+
+def test_rustup_shim_resolver_rejects_foreign_binary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    home = tmp_path
+    cargo_bin = home / ".cargo" / "bin"
+    cargo_bin.mkdir(parents=True)
+    dispatcher = cargo_bin / "rustup"
+    dispatcher.write_text("dispatcher", encoding="utf-8")
+    dispatcher.chmod(0o755)
+    foreign = cargo_bin / "cargo"
+    foreign.write_text("concrete", encoding="utf-8")
+    foreign.chmod(0o755)
+
+    monkeypatch.setattr(module.Path, "home", lambda: home)
+
+    assert module.resolve_rustup_tool_shim("cargo") is None
+
+
+def test_rustup_shim_resolver_rejects_non_shim_tool(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    with pytest.raises(ValueError):
+        module.resolve_rustup_tool_shim("git")

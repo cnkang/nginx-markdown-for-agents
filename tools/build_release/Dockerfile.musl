@@ -88,6 +88,12 @@ RUN set -eux; \
     retry 5 rustup toolchain install; \
     retry 5 cargo install cbindgen --version 0.29.4 --locked
 
+# Resolve the pinned toolchain from anywhere in the image: rustup reads
+# rust-toolchain.toml only from the current directory upward, and the
+# NGINX configure step runs outside /src, where the module config verifies
+# `rustc -Vv` against the release identity.
+ENV RUSTUP_TOOLCHAIN=${NGX_MARKDOWN_RUST_VERSION}
+
 WORKDIR /build
 RUN set -eux; \
     retry() { \
@@ -119,8 +125,13 @@ COPY Makefile /src/Makefile
 COPY components/rust-converter /src/components/rust-converter
 COPY components/nginx-module /src/components/nginx-module
 # make build's rust-lib step runs tools/harness/normalize_cbindgen_header.py
-# after cbindgen; the script must be present in the build image.
+# after cbindgen, and its capability-check step runs
+# tools/release/gates/verify_build_capabilities.py; both scripts and the
+# tools.lib helper the gate imports must be present in the build image.
 COPY tools/harness/normalize_cbindgen_header.py /src/tools/harness/normalize_cbindgen_header.py
+COPY tools/__init__.py /src/tools/__init__.py
+COPY tools/lib /src/tools/lib
+COPY tools/release/gates/verify_build_capabilities.py /src/tools/release/gates/verify_build_capabilities.py
 
 WORKDIR /src
 RUN rm -rf components/rust-converter/target \

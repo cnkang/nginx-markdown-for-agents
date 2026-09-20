@@ -46,12 +46,15 @@ jobs:
       - name: Install system dependencies
         run: |
           # Only the tools the job itself needs: the module is built inside a
-          # container so that it matches the musl images the checks load it into.
+          # container so that it matches the musl images the checks load it
+          # into.  Docker and its CLI come with the GitHub-hosted runner, and
+          # installing docker.io on top of them resolves against the runner's
+          # containerd packages and fails, so the runner's Docker is used
+          # as-is.
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ca-certificates \
-            curl \
-            docker.io
+            curl
 
       - name: Install cluster tooling
         run: |

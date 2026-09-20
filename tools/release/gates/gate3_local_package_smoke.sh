@@ -223,6 +223,15 @@ build_module() {
     local nginx_version="${NGINX_VERSION:-${DEFAULT_NGINX_VERSION}}"
     local pkg_version="${PKG_VERSION:-}"
 
+    # Exclusive upper bound of the exact upstream version (X.Y.Z -> X.Y.Z+1),
+    # mirroring the release workflow's DEB dependency interval so the local
+    # packages carry the same metadata as the release artifacts.
+    local nginx_version_ceil
+    nginx_version_ceil="$(printf '%s' "${nginx_version}" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')"
+    if [[ -z "${nginx_version_ceil}" ]]; then
+        die "Unable to derive the NGINX version ceiling from ${nginx_version}"
+    fi
+
     # Derive version from Cargo.toml if not set
     if [[ -z "$pkg_version" ]]; then
         pkg_version="$(grep '^version' "${PROJECT_ROOT}/components/rust-converter/Cargo.toml" \
@@ -309,18 +318,24 @@ WORKDIR /src
 
 ARG PKG_VERSION=${pkg_version}
 ARG NGINX_VERSION=${nginx_version}
+ARG NGINX_VERSION_CEIL=${nginx_version_ceil}
 ARG NFPM_ARCH=${ARCH}
 ARG RPM_ARCH=${RPM_ARCH}
 
 ENV PKG_VERSION=\${PKG_VERSION}
 ENV NGINX_VERSION=\${NGINX_VERSION}
+ENV NGINX_VERSION_CEIL=\${NGINX_VERSION_CEIL}
 ENV NFPM_ARCH=\${NFPM_ARCH}
 
 RUN packaging/nfpm/scripts/render-nfpm-config.sh \\
        packaging/nfpm/scripts/preinstall.sh /tmp/preinstall.sh "\${NGINX_VERSION}" \\
-    && sed 's|"\./packaging/nfpm/scripts/preinstall\.sh"|"/tmp/preinstall.sh"|' \\
+    && packaging/nfpm/scripts/render-nfpm-config.sh \\
+       packaging/nfpm/scripts/preremove.sh /tmp/preremove.sh "\${NGINX_VERSION}" \\
+    && sed -e 's|"\./packaging/nfpm/scripts/preinstall\.sh"|"/tmp/preinstall.sh"|' \\
+           -e 's|"\./packaging/nfpm/scripts/preremove\.sh"|"/tmp/preremove.sh"|' \\
        packaging/nfpm/nfpm.yaml > /tmp/nfpm.yaml \\
     && grep -Fq 'preinstall: "/tmp/preinstall.sh"' /tmp/nfpm.yaml \\
+    && grep -Fq 'preremove: "/tmp/preremove.sh"' /tmp/nfpm.yaml \\
     && mkdir -p /dist \\
     && nfpm package --config /tmp/nfpm.yaml --packager deb \\
        --target "/dist/nginx-module-markdown-for-agents_\${PKG_VERSION}_nginx-\${NGINX_VERSION}_\${NFPM_ARCH}.deb" \\

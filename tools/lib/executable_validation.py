@@ -26,6 +26,7 @@ _APPROVED_EXECUTABLE_DIRS = (
 # `rustc` belongs here too: the release gates resolve it the same way.
 _RUSTUP_SHIM_TOOLS = frozenset({"cargo", "rustc", "rustfmt"})
 _RUSTUP_DIR_NAME = ".rustup"
+_CARGO_DIR_NAME = ".cargo"
 
 
 def _trusted_roots() -> tuple[Path, ...]:
@@ -199,7 +200,7 @@ def _resolve_rustup_tool_shim(
         home = Path.home()
     except (RuntimeError, KeyError):
         return None
-    tool_shim = home / ".cargo" / "bin" / name
+    tool_shim = home / _CARGO_DIR_NAME / "bin" / name
     rustup_toolchains = home / _RUSTUP_DIR_NAME / "toolchains"
     if candidate != tool_shim:
         return None
@@ -210,7 +211,7 @@ def _resolve_rustup_tool_shim(
     # rather than a direct symlink into the selected toolchain.  Resolve the
     # active toolchain name and require the matching executable under that
     # specific toolchain root, not any installed toolchain.
-    rustup_dispatcher = home / ".cargo" / "bin" / "rustup"
+    rustup_dispatcher = home / _CARGO_DIR_NAME / "bin" / "rustup"
     try:
         dispatcher_resolved = rustup_dispatcher.resolve(strict=True)
         try:
@@ -241,6 +242,44 @@ def _resolve_rustup_tool_shim(
         return tool_resolved
     except (OSError, RuntimeError):
         return None
+
+
+def resolve_rustup_tool_shim(name: str) -> str | None:
+    """Return the validated Rustup shim path for a shim-managed tool.
+
+    ``resolve_approved_executable`` deliberately returns the concrete
+    active-toolchain binary for Rustup shim tools, which is the right target
+    for ordinary invocations.  Callers that use Rustup's ``+toolchain``
+    directive need the shim itself (the concrete binary rejects the
+    directive), so this resolves ``~/.cargo/bin/<name>`` only after checking
+    that it is the Rustup dispatcher (the same file as ``~/.cargo/bin/rustup``).
+
+    Returns None when the shim is absent or is not the dispatcher.
+    """
+    if name not in _RUSTUP_SHIM_TOOLS:
+        raise ValueError(f"executable is not a Rustup shim tool: {name!r}")
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError):
+        return None
+    shim = home / _CARGO_DIR_NAME / "bin" / name
+    dispatcher = home / _CARGO_DIR_NAME / "bin" / "rustup"
+    try:
+        dispatcher_resolved = dispatcher.resolve(strict=True)
+        shim_resolved = shim.resolve(strict=True)
+    except (OSError, RuntimeError):
+        # RuntimeError: cyclic symlinks on Python versions that report the
+        # loop there instead of as an OSError.
+        return None
+    try:
+        same_file = os.path.samefile(shim_resolved, dispatcher_resolved)
+    except OSError:
+        same_file = False
+    if shim_resolved != dispatcher_resolved and not same_file:
+        return None
+    if not (shim.is_file() and os.access(shim, os.X_OK)):
+        return None
+    return str(shim)
 
 
 def resolve_approved_executable(name: str) -> str | None:
