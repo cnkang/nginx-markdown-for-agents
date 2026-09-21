@@ -992,10 +992,9 @@ jobs:
     # This environment supplies the independent candidate promotion anchor and
     # requires the same human approval that protects release signing.
     environment: release-signing
-    # 14 blocking fuzz targets (15 min each) + short-soak + 091/092 perf
-    # gates + toolchain install ≈ 4.5-5.5 h.  GitHub-hosted ubuntu-24.04
-    # jobs are capped at 360 minutes, so set the maximum allowed value
-    # (tools fuzz-matrix); if the gate outgrows the cap, split the fuzz matrix.
+    # Host-side gates, the EL9 short-soak qualification and the module
+    # benchmark share this job; the 14-target fuzz soak runs in the separate
+    # fuzz-qualification job so each phase owns a full 360-minute budget.
     timeout-minutes: 360
     permissions:
       contents: read
@@ -1223,40 +1222,6 @@ jobs:
             --artifact-root dist
         shell: bash
 
-      - name: Install nightly Rust toolchain for fuzz qualification
-        run: |
-          set -euo pipefail
-          # Provision every toolchain serially, up front, with retries.  The
-          # gates below invoke cargo through rustup shims that auto-install
-          # missing toolchains and components; concurrent shims performing that
-          # auto-install race inside the shared rustup download directory and
-          # abort unrelated builds ("component download failed ... could not
-          # rename 'downloaded' file").
-          retry() {
-            attempts="$1"
-            shift
-            count=1
-            while :; do
-              "$@" && return 0
-              if [ "$count" -ge "$attempts" ]; then
-                echo "command failed after ${attempts} attempts: $*" >&2
-                return 1
-              fi
-              sleep "$((count * 5))"
-              count=$((count + 1))
-            done
-          }
-          rustup set auto-self-update disable
-          retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal \
-            --component rustfmt --component clippy --component rust-src \
-            --no-self-update
-          # cargo-fuzz builds against the nightly rust-src; install it up
-          # front so no component download happens mid-qualification.
-          retry 5 rustup toolchain install nightly --profile minimal \
-            --component rust-src --no-self-update
-          retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
-        shell: bash
-
       - name: Verify release tag protection
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1320,10 +1285,10 @@ jobs:
           # `release-gates-check-092` runs the same candidate-bound
           # qualification stages below. The tag release path MUST run the
           # same qualification the local gate enforces; publish hard-depends
-          # on this job's success.
+          # on this job's success and on the fuzz-qualification job, which
+          # runs the blocking fuzz soak under its own budget.
           python3 tools/release/gates/validate_release_candidate_evidence.py --mode real --git-head
           python3 tools/release/gates/validate_artifact_registry.py --mode real
-          python3 tools/release/gates/validate_fuzz_qualification.py --mode real --git-head
           make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
@@ -1420,6 +1385,91 @@ jobs:
           python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
         shell: bash
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Fuzz Qualification Job: the 14-target blocking fuzz soak (15 minutes of
+  # soak per target plus the slow decode target's executions chase) in its own
+  # job, so it gets a full 360-minute budget instead of sharing the Release
+  # Gate's.  It handles no secrets, so it runs without the protected
+  # environment, and it needs no upstream jobs: the validator is
+  # candidate-bound through the in-repo manifests.
+  # ─────────────────────────────────────────────────────────────────────────────
+  fuzz-qualification:
+    name: Fuzz Qualification
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for fuzz qualification
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.6'
+
+      # The fuzz manifests are candidate-bound and generated at run time
+      # (they are not tracked), so this job generates its own copies exactly
+      # as the Release Gate does.  The job handles no secrets and only
+      # reads; every publishing junction still requires the governance-gated
+      # release gate to succeed.
+      - name: Generate candidate-bound release gate inputs
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase inputs \
+            --candidate-sha "$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
+        shell: bash
+
+      - name: Install nightly Rust toolchain for fuzz qualification
+        run: |
+          set -euo pipefail
+          # Provision every toolchain serially, up front, with retries.  The
+          # qualification below invokes cargo through rustup shims that
+          # auto-install missing toolchains and components; concurrent shims
+          # performing that auto-install race inside the shared rustup
+          # download directory and abort unrelated builds ("component
+          # download failed ... could not rename 'downloaded' file").
+          retry() {
+            attempts="$1"
+            shift
+            count=1
+            while :; do
+              "$@" && return 0
+              if [ "$count" -ge "$attempts" ]; then
+                echo "command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+              sleep "$((count * 5))"
+              count=$((count + 1))
+            done
+          }
+          rustup set auto-self-update disable
+          # cargo-fuzz builds against the nightly rust-src; install it up
+          # front so no component download happens mid-qualification.
+          retry 5 rustup toolchain install nightly --profile minimal \
+            --component rust-src --no-self-update
+          retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
+        shell: bash
+
+      - name: Run fuzz qualification
+        env:
+          # Resolve every rustup shim to the pinned toolchain: without this,
+          # shims fall back to the channel-based default and concurrent shims
+          # can race to sync the channel.
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 tools/release/gates/validate_fuzz_qualification.py --mode real --git-head
+        shell: bash
+
       - name: Upload fuzz qualification record
         # Diagnostic evidence: when the fuzz qualification fails, the record
         # and per-target raw logs are exactly what a post-mortem needs; the
@@ -1439,7 +1489,7 @@ jobs:
   # stale, or merely related Docker validation run.
   official-docker-release-gate:
     name: Official NGINX Docker Release Gate
-    needs: [release-gate]
+    needs: [release-gate, fuzz-qualification]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     # The called workflow's jobs request contents: read, so this calling job
     # must grant it: a call cannot exceed the calling job's permissions.
@@ -1458,12 +1508,13 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: [smoke-test, musl-build, integrity-signing, official-docker-release-gate]
+    needs: [smoke-test, musl-build, integrity-signing, official-docker-release-gate, fuzz-qualification]
     if: >-
       always()
       && needs.musl-build.result == 'success'
       && needs.smoke-test.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
+      && needs.fuzz-qualification.result == 'success'
       && (needs.integrity-signing.result == 'success'
           || (needs.integrity-signing.result == 'skipped'
               && github.event_name == 'workflow_dispatch'))
@@ -1693,11 +1744,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate, rc-release-gates]
+    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate, rc-release-gates, fuzz-qualification]
     if: >-
       github.event_name == 'push'
       && github.ref_type == 'tag'
       && needs.rc-release-gates.result == 'success'
+      && needs.fuzz-qualification.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1808,7 +1860,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signature:
     name: Integrity - Sign SHA256SUMS
-    needs: [integrity-checksums, release-gate, official-docker-release-gate]
+    needs: [integrity-checksums, release-gate, official-docker-release-gate, fuzz-qualification]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1878,15 +1930,16 @@ jobs:
   rc-release-gates:
     name: Release candidate gates
     # The heavy real-environment qualification must not spend its runtime on
-    # a candidate that already failed the release or official-Docker gates.
-    needs: [release-gate, official-docker-release-gate]
+    # a candidate that already failed the release, fuzz or official-Docker
+    # gates.
+    needs: [release-gate, official-docker-release-gate, fuzz-qualification]
     uses: ./.github/workflows/rc-release-gates.yml
     permissions:
       contents: read
 
   publish:
     name: Publish
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate, rc-release-gates]
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate, rc-release-gates, fuzz-qualification]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
@@ -1894,6 +1947,7 @@ jobs:
       && needs.musl-build.result == 'success'
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
+      && needs.fuzz-qualification.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
       && needs.rc-release-gates.result == 'success'
       && (needs.integrity-signature.result == 'success'
