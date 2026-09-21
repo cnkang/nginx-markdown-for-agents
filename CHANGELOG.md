@@ -139,7 +139,7 @@ before/after examples.
   misclassified stream, fails with a decompression error that follows the
   configured `markdown_error_policy` (only the pass policy forwards the
   original response) — streaming cannot replay committed bytes. The
-  divergence is deliberate and pinned by tests on both paths.
+  divergence is deliberate, and tests pin it on both paths.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect

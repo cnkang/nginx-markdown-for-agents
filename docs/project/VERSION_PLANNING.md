@@ -72,8 +72,8 @@ than another baseline reset.
   and failure behavior.
 - Existing structures and exported functions at the bundled internal Rust/C
   boundary retain their documented layout and ownership rules. This is an
-  internal bundled boundary, not a public external ABI. Additions must be
-  append-only or versioned within that contract.
+  internal bundled boundary, not a public external ABI. Additions must stay
+  append-only or take a versioned form within that contract.
 - Diagnostics, metrics, and reason labels follow their declared stability
   level, stable names are not repurposed.
 - Supported NGINX/OS/libc/architecture targets do not shrink silently.
@@ -115,7 +115,7 @@ The comparison needs a frozen previous-release baseline, a reproducible way to
 produce it, and per-surface compatibility rules that distinguish an additive
 extension from a break.  Negative fixtures must show that editing source and the
 new inventory together cannot hide a breaking change.  The gate belongs behind a
-generic target, not one named after a specification number.
+generic target, not one whose name cites a specification number.
 
 This is deliberately not part of v0.9.2: the release keeps the detector and its
 current-release shape constants as they are, and a compatibility gate is a v1.0
