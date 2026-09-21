@@ -314,8 +314,171 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
     requirements = (REPO_ROOT / "requirements-release.txt").read_text(
         encoding="utf-8")
     # jsonschema backs the policy-matrix validation in the docs-check chain;
-    # PyYAML backs the matrix tooling that chain runs.
-    assert re.search(r"^jsonschema\[format\]==", requirements, re.M), (
-        "requirements-release.txt must pin jsonschema[format]")
-    assert re.search(r"^PyYAML==", requirements, re.M), (
-        "requirements-release.txt must pin PyYAML")
+    # PyYAML backs the matrix tooling that chain runs.  Each pin must carry
+    # an actual version token after ==, not just the separator.
+    assert re.search(r"^jsonschema\[format\]==[^#\s]", requirements, re.M), (
+        "requirements-release.txt must pin jsonschema[format] to a version")
+    assert re.search(r"^PyYAML==[^#\s]", requirements, re.M), (
+        "requirements-release.txt must pin PyYAML to a version")
+
+
+def test_toolchain_gate_rejects_runtime_expanded_heredoc_delimiters() -> None:
+    """A heredoc opened with ``<<$WORD`` cannot be delimited statically.
+
+    The shell expands a plain delimiter word at runtime, so the gate must
+    refuse to interpret the script instead of scanning fake commands inside
+    the body as executable content (or dropping a body it cannot find).
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    fake = "cat <<$EOF\n" + installer + component + drift + "EOF\n"
+    assert packaging_gate._release_gate_toolchain_issue(fake)
+    # The raw-install detector must reject the unverifiable script too: a raw
+    # install could hide behind the runtime-expanded delimiter.
+    workflow = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - name: b\n"
+        "        run: |\n"
+        "          cat <<$EOF\n"
+        "          rustup toolchain install nightly --profile minimal\n"
+        "          EOF\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(workflow)
+    # A quoted delimiter is static: the literal word is the terminator, the
+    # body is dropped, and real provisioning after it still satisfies.
+    quoted = (
+        "cat <<'$EOF'\nbody\n$EOF\n" + drift + installer + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(quoted) is None
+
+
+def test_toolchain_gate_sees_commands_after_a_multiline_quote_closes() -> None:
+    """Text after the closing quote on a continued line is executable again.
+
+    Quote state carries across lines, but the remainder of the line that
+    closes the quote is real shell code: a raw install chained there must
+    trip the detector.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    workflow = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - name: b\n"
+        "        run: |\n"
+        '          echo "x\n'
+        "          \"; rustup toolchain install nightly --profile minimal\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(workflow)
+
+
+def test_toolchain_gate_handles_escaped_quotes() -> None:
+    """Backslash-escaped quotes never toggle the quote state.
+
+    Outside quotes an escaped quote is a literal quote, so a following
+    separator is real and a chained raw install must be caught; inside double
+    quotes an escaped quote is data, so an install in that string must not be.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    def workflow(script_line: str) -> str:
+        return (
+            "jobs:\n"
+            "  fuzz-qualification:\n"
+            "    steps:\n"
+            "      - name: b\n"
+            "        run: |\n"
+            "          " + script_line + "\n"
+        )
+
+    # Escaped quote: the separator is real, the install is a command.
+    assert packaging_gate._raw_toolchain_install_issue(
+        workflow('echo \\"x; rustup toolchain install nightly\\"')
+    )
+    # Escaped quote inside a double-quoted string: all data, no install.
+    assert (
+        packaging_gate._raw_toolchain_install_issue(
+            workflow('echo "x\\"; rustup toolchain install nightly"')
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_requires_exact_heredoc_terminators() -> None:
+    """Only an exact delimiter line ends a heredoc body.
+
+    Shell semantics: ``<<`` requires the bare delimiter and ``<<-`` strips
+    leading tabs only, so a padded line keeps the body open.  A body the gate
+    cannot close must not let its content count as executable, and real
+    provisioning after a properly closed body still satisfies the gate.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    rest = drift + installer + component
+    # A space-padded or tab-padded line does not terminate <<EOF, so the
+    # body stays open and swallows the provisioning below it.
+    assert packaging_gate._release_gate_toolchain_issue(
+        "cat <<EOF\nbody\n  EOF\n" + rest
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        "cat <<EOF\nbody\n\tEOF\n" + rest
+    )
+    # <<- strips leading tabs, so a tab-padded terminator closes it and the
+    # provisioning after the body is real again.
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "cat <<-EOF\nbody\n\tEOF\n" + rest
+        )
+        is None
+    )
+    # A space-padded line does not close <<- either.
+    assert packaging_gate._release_gate_toolchain_issue(
+        "cat <<-EOF\nbody\n  EOF\n" + rest
+    )
+
+
+def test_toolchain_gate_splits_on_all_command_separators() -> None:
+    """Subshells, background separators and command substitution run code.
+
+    ``(``, ``)``, a single ``&`` and backticks each start a command position,
+    so a raw install inside them must trip the detector.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    def workflow(script_line: str) -> str:
+        return (
+            "jobs:\n"
+            "  fuzz-qualification:\n"
+            "    steps:\n"
+            "      - name: b\n"
+            "        run: |\n"
+            "          " + script_line + "\n"
+        )
+
+    for line in (
+        "echo ok & rustup toolchain install nightly --profile minimal",
+        "(rustup toolchain install nightly --profile minimal)",
+        "$(rustup toolchain install nightly --profile minimal)",
+        "echo `rustup toolchain install nightly --profile minimal`",
+        'echo "`rustup toolchain install nightly --profile minimal`"',
+    ):
+        assert packaging_gate._raw_toolchain_install_issue(workflow(line)), line

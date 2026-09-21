@@ -228,6 +228,29 @@ def check_release_workflow(result: ValidationResult) -> None:
         result.fail("pkg:smoke-test-job", "no smoke test job in workflow")
 
 
+def _scan_char(line: str, index: int, quote: str | None) -> tuple[str | None, int]:
+    """Advance one quote or escape unit; return (new quote, chars consumed).
+
+    Outside quotes a backslash escapes the next character, so an escaped
+    quote is a literal quote rather than a quote opener.  Inside double
+    quotes a backslash escapes only ``"`` and ``\\``; inside single quotes
+    backslashes are literal.  A quote that opens on one line stays open
+    across lines.
+    """
+    char = line[index]
+    if quote == "'":
+        return (None if char == "'" else "'"), 1
+    if quote == '"':
+        if char == "\\" and index + 1 < len(line) and line[index + 1] in '"\\':
+            return '"', 2
+        return (None if char == '"' else '"'), 1
+    if char == "\\" and index + 1 < len(line):
+        return None, 2
+    if char in ("'", '"'):
+        return char, 1
+    return None, 1
+
+
 def _strip_comment_from_line(
     line: str, quote: str | None = None
 ) -> tuple[str, str | None]:
@@ -235,44 +258,34 @@ def _strip_comment_from_line(
 
     ``quote`` carries the open-quote state from the previous line, so a
     quoted string that spans lines never lets an embedded ``#`` start a
-    comment.
+    comment.  Escape sequences are honored, so an escaped ``#`` stays data
+    and an escaped quote never toggles the quote state.
     """
     kept: list[str] = []
-    for index, char in enumerate(line):
-        if quote is not None:
-            kept.append(char)
-            if char == quote:
-                quote = None
-        elif char in ("'", '"'):
-            quote = char
-            kept.append(char)
-        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote is None and char == "#" and (index == 0 or line[index - 1] in " \t"):
             return "".join(kept), None
-        else:
-            kept.append(char)
+        new_quote, consumed = _scan_char(line, index, quote)
+        kept.append(line[index : index + consumed])
+        quote = new_quote
+        index += consumed
     return "".join(kept), quote
 
 
 def _strip_shell_comments(script: str) -> str:
-    """Remove shell comments from run scripts, respecting quotes.
+    """Remove shell comments from run scripts, respecting quotes and escapes.
 
     A leading or whitespace-preceded ``#`` starts a comment; ``#`` inside a
-    quoted string is literal.  Quote state carries across lines: a line that
-    begins inside an open quoted string is string data, not a command, so it
-    is blanked and can never satisfy a command-position check.  Escape
-    handling is intentionally simple: the run scripts in this repository do
-    not rely on escaped comment markers.
+    quoted string is literal.  Quote state carries across lines, so the
+    content of a string that spans lines stays string data for the command
+    checks; the text after the closing quote on that line is executable again
+    and stays in the output.
     """
     kept: list[str] = []
     quote: str | None = None
     for line in script.splitlines():
-        if quote is not None:
-            kept.append("")
-            for char in line:
-                if char == quote:
-                    quote = None
-                    break
-            continue
         stripped, quote = _strip_comment_from_line(line, quote)
         kept.append(stripped)
     return "\n".join(kept)
@@ -283,30 +296,101 @@ def _join_continuations(script: str) -> str:
     return re.sub(r"\\\n[ \t]*", " ", script)
 
 
-_HEREDOC_MARKER_RE = re.compile(r"<<-?\s*\\?['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+_HEREDOC_MARKER_RE = re.compile(
+    r"<<-?[ \t]*(?:\\?(['\"])([^'\"]*)\1|\\?([^ \t;|&()<>]+))"
+)
+
+
+def _heredoc_marker_at(
+    line: str, index: int
+) -> tuple[str, bool, bool, int] | None:
+    """Parse a heredoc marker at ``index``; return (word, tab, dynamic, end).
+
+    ``None`` when the position does not open a heredoc (including the
+    ``<<<`` herestring form).  A plain word containing expansion characters
+    (``$`` or backticks) is dynamic: the shell expands it at runtime, so the
+    terminator cannot be known statically.
+    """
+    if not line.startswith("<<", index) or line.startswith("<<<", index):
+        return None
+    match = _HEREDOC_MARKER_RE.match(line, index)
+    if match is None:
+        return None
+    quoted = match.group(2) is not None
+    word = match.group(2) if quoted else match.group(3)
+    dynamic = not quoted and ("$" in word or "`" in word)
+    return word, match.group(0).startswith("<<-"), dynamic, match.end()
+
+
+def _scan_line_for_heredocs(
+    line: str, quote: str | None
+) -> tuple[str | None, tuple[str, bool, bool] | None]:
+    """Scan one line for the first heredoc marker; return (quote, marker).
+
+    The marker is ``(delimiter, tab_stripped, dynamic)``.  Markers inside
+    quotes are data and do not open a heredoc.
+    """
+    found: tuple[str, bool, bool] | None = None
+    index = 0
+    while index < len(line):
+        marker = _heredoc_marker_at(line, index) if quote is None else None
+        if marker is not None:
+            word, tab_stripped, dynamic, end = marker
+            if found is None:
+                found = (word, tab_stripped, dynamic)
+            index = end
+            continue
+        new_quote, consumed = _scan_char(line, index, quote)
+        quote = new_quote
+        index += consumed
+    return quote, found
 
 
 def _strip_heredocs(script: str) -> str:
     """Drop heredoc bodies so their content never counts as a command.
 
     The marker line itself stays (it is executable); every line up to and
-    including the terminator is dropped.  The marker accepts the quoted and
-    backslash-escaped delimiter forms (``<<'WORD'``, ``<<"WORD"``,
-    ``<<\\WORD``); redirection forms beyond ``<<WORD`` / ``<<-WORD`` are
-    intentionally not interpreted.
+    including the terminator is dropped.  Delimiters may be quoted
+    (``<<'WORD'``, ``<<"WORD"``), backslash-escaped (``<<\\WORD``) or plain
+    (any word without expansion characters).  The terminator must match the
+    delimiter exactly -- ``<<-`` additionally strips leading tabs -- mirroring
+    shell semantics, so a padded line never ends the body early.  Bodies
+    opened with a dynamic delimiter (``<<$WORD``) cannot be delimited
+    statically and are left intact; ``_dynamic_heredoc_markers`` reports them
+    so the provisioning checks can reject the script.
     """
     kept: list[str] = []
     pending: str | None = None
+    tab_stripped = False
+    quote: str | None = None
     for line in script.splitlines():
         if pending is not None:
-            if line.strip() == pending:
+            candidate = line.lstrip("\t") if tab_stripped else line
+            if candidate == pending:
                 pending = None
             continue
         kept.append(line)
-        match = _HEREDOC_MARKER_RE.search(line)
-        if match:
-            pending = match.group(1)
+        quote, marker = _scan_line_for_heredocs(line, quote)
+        if marker is not None and not marker[2]:
+            pending = marker[0]
+            tab_stripped = marker[1]
     return "\n".join(kept)
+
+
+def _dynamic_heredoc_markers(script: str) -> list[str]:
+    """Return the delimiters of heredocs whose word expands at runtime.
+
+    The shell expands a plain delimiter word containing ``$`` or backticks,
+    so the terminator depends on the environment; the provisioning checks
+    treat such scripts as unverifiable instead of guessing.
+    """
+    markers: list[str] = []
+    quote: str | None = None
+    for line in script.splitlines():
+        quote, marker = _scan_line_for_heredocs(line, quote)
+        if marker is not None and marker[2]:
+            markers.append(marker[0])
+    return markers
 
 
 # Provisioning commands must sit in command position (optionally behind the
@@ -335,49 +419,56 @@ _DRIFT_CHECK_RE = re.compile(
 )
 
 
-def _unquoted_separator_at(
-    line: str, index: int, quote: str | None
-) -> tuple[int, str | None]:
-    """Return (separator length, new quote state) at ``index``.
+def _separator_at(line: str, index: int, quote: str | None) -> int:
+    """Return the command-separator length at ``index`` (0 = not one).
 
-    A separator only counts outside quotes; quoted separators are data.
+    ``;``, ``&&``, ``||``, ``|`` and a single ``&`` split only outside
+    quotes; ``(``, ``)`` and backticks also split inside double quotes
+    because subshells and command substitution run their content there.
     """
     char = line[index]
-    if quote is not None:
-        return 0, None if char == quote else quote
-    if char in ("'", '"'):
-        return 0, char
-    if char == ";":
-        return 1, None
-    if char == "|":
-        return 2 if line.startswith("||", index) else 1, None
-    if line.startswith("&&", index):
-        return 2, None
-    return 0, None
+    if quote == "'":
+        return 0
+    if quote is None:
+        if char == ";":
+            return 1
+        if char in "&|":
+            return 2 if line.startswith(char * 2, index) else 1
+    return 1 if char in "()`" else 0
 
 
 def _command_segments(script: str) -> list[str]:
-    """Split each line into command segments at unquoted shell separators.
+    """Split into command segments at unquoted shell separators.
 
-    ``;``, ``&&``, ``||`` and ``|`` each start a new command position, so a
-    command chained behind a separator is still a command; separators inside
+    Every separator from ``_separator_at`` starts a new command position, so
+    a command chained behind one is still a command.  Separators inside
     quotes stay data, so quoted fragments can neither satisfy a provisioning
-    requirement nor trip the rejection side.
+    requirement nor trip the rejection side.  A string that spans lines keeps
+    its content as data: its segment continues across the newline instead of
+    restarting inside the quote.
     """
     segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
     for line in script.splitlines():
-        current: list[str] = []
-        quote: str | None = None
         index = 0
         while index < len(line):
-            separator, quote = _unquoted_separator_at(line, index, quote)
-            if separator:
+            length = _separator_at(line, index, quote)
+            if length:
                 segments.append("".join(current))
                 current = []
-                index += separator
-            else:
-                current.append(line[index])
-                index += 1
+                index += length
+                continue
+            new_quote, consumed = _scan_char(line, index, quote)
+            current.append(line[index : index + consumed])
+            quote = new_quote
+            index += consumed
+        if quote is None:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(" ")
+    if current:
         segments.append("".join(current))
     return [segment.strip() for segment in segments if segment.strip()]
 
@@ -452,6 +543,13 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     all_scripts = _all_job_run_scripts(workflow_content)
     if all_scripts is None:
         return None
+    dynamic = _dynamic_heredoc_markers(all_scripts)
+    if dynamic:
+        return (
+            "release workflows must not open heredocs with runtime-expanded "
+            "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
+            "verified statically"
+        )
     executable = _join_continuations(
         _strip_heredocs(_strip_shell_comments(all_scripts))
     )
@@ -478,6 +576,13 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     rustfmt through Rustup shims, while the installer's minimal profile
     does not include it.
     """
+    dynamic = _dynamic_heredoc_markers(run_scripts)
+    if dynamic:
+        return (
+            "the release-gate job opens a heredoc with a runtime-expanded "
+            "delimiter, so its toolchain provisioning cannot be verified "
+            "statically; use a plain delimiter"
+        )
     executable = _join_continuations(
         _strip_heredocs(_strip_shell_comments(run_scripts))
     )
