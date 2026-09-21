@@ -75,27 +75,28 @@ TIME_CONTINUATION_BUDGET = 5400
 # reason and the record is still emitted instead of CI killing the job
 # before it exists.
 #
-# The envelope is one term of a job-limit equation asserted by unit test:
+# The fuzz soak runs in its own job (the release workflow's
+# fuzz-qualification job), so the whole 360-minute job budget belongs to
+# it.  The envelope is one term of a job-limit equation asserted by unit
+# test:
 #   SETUP_ALLOWANCE + FUZZ_JOB_BUDGET + INVOCATION_TIMEOUT_MARGIN
-#   + REPLAY_ALLOWANCE + POST_FUZZ_RESERVE <= RELEASE_JOB_LIMIT
-# The post-fuzz reserve covers what runs inside the same job after the
-# fuzz phase: the EL9 short-soak qualification (30 minutes per its
-# manifest), the module benchmark (eight scenarios, about twenty minutes),
-# the evidence validators, and the host-side gates.  Sized from the
-# real-mode arithmetic -- twelve targets need only their 900-second soak
-# (fast targets clear 100k executions inside it), the slow decode target
-# adds a chase that fits the envelope for any sustained rate at or above
-# twenty-five executions per second, and the last soak closes the phase.
-FUZZ_JOB_BUDGET = 15900
+#   + REPLAY_ALLOWANCE <= RELEASE_JOB_LIMIT
+# Sized from the real-mode arithmetic -- twelve targets need only their
+# 900-second soak (fast targets clear 100k executions inside it), the slow
+# decode target adds an executions chase, and the last soak closes the
+# phase.  The schedule fits the envelope for any sustained slow-target
+# rate at or above twenty executions per second (the measured CI band is
+# higher), which the dedicated job makes possible: the previous shared-job
+# layout could not fit that schedule inside the release gate's remaining
+# budget.
+FUZZ_JOB_BUDGET = 19800
 # Terms of the job-limit equation above.  The setup allowance covers the
-# gate dependencies and toolchain install steps before the first soak; the
-# replay allowance bounds the corpus replay plus shutdown of the single
-# invocation that may be running when the envelope expires; the post-fuzz
-# reserve leaves room for everything after the fuzz phase in the same job.
+# toolchain install steps before the first soak; the replay allowance
+# bounds the corpus replay plus shutdown of the single invocation that may
+# be running when the envelope expires.
 RELEASE_JOB_LIMIT_SECONDS = 21600
 SETUP_ALLOWANCE_SECONDS = 420
 REPLAY_ALLOWANCE_SECONDS = 120
-POST_FUZZ_RESERVE_SECONDS = 3900
 MAX_FUZZ_INVOCATIONS = 8
 # Subprocess margin over the fuzzer's own time cap: it covers process
 # startup, corpus replay (which -max_total_time does not count) and the

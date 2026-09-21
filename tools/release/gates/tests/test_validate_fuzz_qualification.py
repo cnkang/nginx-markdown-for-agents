@@ -853,10 +853,9 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
     assert elapsed == 5.0
 
 
-def test_fuzz_envelope_fits_the_release_job_limit() -> None:
-    """The fuzz envelope must leave room for setup, the single invocation
-    that may still be running at expiry, and everything the job runs after
-    the fuzz phase (soak qualification, benchmark, evidence gates)."""
+def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
+    """The fuzz envelope must leave room for setup and the single invocation
+    that may still be running at expiry inside the dedicated fuzz job."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
     total = (
@@ -864,13 +863,12 @@ def test_fuzz_envelope_fits_the_release_job_limit() -> None:
         + validator.FUZZ_JOB_BUDGET
         + validator.INVOCATION_TIMEOUT_MARGIN
         + validator.REPLAY_ALLOWANCE_SECONDS
-        + validator.POST_FUZZ_RESERVE_SECONDS
     )
     assert total <= validator.RELEASE_JOB_LIMIT_SECONDS
     # The normal-mode schedule (twelve soak-only targets, the slow target's
-    # soak plus a chase at 25 executions/second, one closing soak) must fit
+    # soak plus a chase at 20 executions/second, one closing soak) must fit
     # inside the envelope with the per-invocation overheads.
     twelve_soaks = 12 * (900 + 10)
-    slow_soak_chase = (900 + 10) + (100000 // 25 - 900 + 10)
+    slow_soak_chase = (900 + 10) + (100000 // 20 - 900 + 10)
     closing_soak = 900 + 10
     assert twelve_soaks + slow_soak_chase + closing_soak <= validator.FUZZ_JOB_BUDGET
