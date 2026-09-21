@@ -420,7 +420,11 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
             "tag package workflow gate",
             "release-gate:" in release_packages
             and "github.ref_type == 'tag'" in release_packages
-            and "needs: [prepare, smoke-test]" in release_packages,
+            and re.search(
+                r"needs:\s*\[[^\]]*\bprepare\b[^\]]*\bsmoke-test\b",
+                release_packages,
+            )
+            is not None,
         ),
         (
             "release gate package tools",
