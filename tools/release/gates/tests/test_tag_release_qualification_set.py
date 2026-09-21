@@ -26,23 +26,35 @@ QUALIFICATION_STAGES = {
 }
 
 STREAMING_EVIDENCE_VALIDATOR = "validate_streaming_evidence.py"
+FUZZ_QUALIFICATION_STAGE = "test-rust-fuzz-qualification"
 TAG_RULESET_VALIDATOR = "verify_tag_ref_protection.py"
 
 
-def _workflow_release_gate_body() -> str:
+def _job_body(job: str) -> str:
+    """Slice one top-level job's body, ending at the next job marker.
+
+    A fixed end marker (previously ''integrity-checksums:'') breaks as soon
+    as a job is inserted between the two names: the slice then swallows
+    later jobs and the assertions in this file can pass against text that
+    belongs to a different job.
+    """
     text = WORKFLOW.read_text(encoding="utf-8")
-    start = text.find("  release-gate:")
+    start = text.find(f"  {job}:")
     if start == -1:
-        raise AssertionError(
-            f"{WORKFLOW.name}: missing '  release-gate:' job marker"
-        )
-    end = text.find("  integrity-checksums:", start)
-    if end == -1:
-        raise AssertionError(
-            f"{WORKFLOW.name}: missing '  integrity-checksums:' job marker "
-            "after the release-gate job"
-        )
-    return text[start:end]
+        raise AssertionError(f"{WORKFLOW.name}: missing '  {job}:' job marker")
+    rest = text[start:]
+    next_job = re.search(r"\n  [A-Za-z0-9_-]+:$", rest, flags=re.MULTILINE)
+    if next_job is not None:
+        rest = rest[: next_job.start()]
+    return rest
+
+
+def _workflow_release_gate_body() -> str:
+    return _job_body("release-gate")
+
+
+def _workflow_fuzz_job_body() -> str:
+    return _job_body("fuzz-qualification")
 
 
 def _workflow_publish_body() -> str:
@@ -82,6 +94,18 @@ def _makefile_092_target() -> str:
 def test_release_gate_job_runs_all_qualification_validators() -> None:
     body = _workflow_release_gate_body()
     for stage, validator in QUALIFICATION_STAGES.items():
+        if stage == FUZZ_QUALIFICATION_STAGE:
+            # The fuzz soak owns a dedicated job; it must not leak back
+            # into the release gate, and it must run there.
+            assert validator not in body, (
+                f"release-gate job must not run {validator} (Makefile "
+                f"stage '{stage}'); it belongs to the fuzz job"
+            )
+            assert validator in _workflow_fuzz_job_body(), (
+                f"fuzz-qualification job must run {validator} (Makefile "
+                f"stage '{stage}')"
+            )
+            continue
         assert validator in body, (
             f"release-gate job must run {validator} (Makefile stage "
             f"'{stage}'); the tag release qualification set has drifted "
@@ -115,8 +139,10 @@ def test_makefile_092_runs_the_shared_contract_validators() -> None:
 def test_publish_hard_depends_on_release_gate() -> None:
     body = _workflow_publish_body()
     # The qualification validators run inside release-gate, so publish's
-    # success condition on release-gate carries the qualification.
+    # success condition on release-gate carries the qualification; the
+    # fuzz qualification runs in its own job and is gated separately.
     assert "needs.release-gate.result == 'success'" in body
+    assert "needs.fuzz-qualification.result == 'success'" in body
 
 
 RC_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "rc-release-gates.yml"
@@ -192,11 +218,17 @@ def test_any_non_success_candidate_result_blocks_publication() -> None:
         "integrity-checksums": "success",
         "release-gate": "success",
         "official-docker-release-gate": "success",
+        "fuzz-qualification": "success",
         "integrity-signature": "success",
     }
     assert _publish_allowed({**green, "rc-release-gates": "success"}) is True
     for outcome in ("failure", "cancelled", "skipped"):
         assert _publish_allowed({**green, "rc-release-gates": outcome}) is False
+    # The fuzz qualification is a candidate gate: no outcome but success
+    # may publish the tag.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _publish_allowed({**green, "fuzz-qualification": outcome,
+                                 "rc-release-gates": "success"}) is False
 
 
 def test_the_candidate_gates_run_the_called_commit() -> None:
@@ -249,10 +281,16 @@ def test_a_non_success_candidate_result_blocks_tag_signing() -> None:
         "release-gate": "success",
         "musl-build": "success",
         "official-docker-release-gate": "success",
+        "fuzz-qualification": "success",
     }
     assert _signing_allowed({**green, "rc-release-gates": "success"}) is True
     for outcome in ("failure", "cancelled", "skipped"):
         assert _signing_allowed({**green, "rc-release-gates": outcome}) is False
+    # A failed or missing fuzz qualification must not start protected
+    # signing either.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _signing_allowed({**green, "fuzz-qualification": outcome,
+                                 "rc-release-gates": "success"}) is False
 
 
 def test_manual_dispatch_does_not_sign() -> None:

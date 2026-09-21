@@ -234,7 +234,7 @@ STANDALONE_RPM_WORKFLOW_FORBIDDEN_SNIPPETS = [
 ]
 RELEASE_CHECKSUM_SIGNING_SECURITY_SNIPPETS = [
     "integrity-signature:",
-    "needs: [integrity-checksums, release-gate, official-docker-release-gate]",
+    "needs: [integrity-checksums, release-gate, official-docker-release-gate, fuzz-qualification]",
     "environment: release-signing",
     "name: Preflight - validate GPG secrets",
     "GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}",
@@ -399,7 +399,7 @@ PACKAGE_DOC_REQUIRED_SNIPPETS = {
     PACKAGE_DISTRIBUTION_DOC: [
         "GitHub Releases",
         "Active for published release artifacts",
-        "APT/YUM repository publishing is intentionally tracked as a future",
+        "The project intentionally tracks APT/YUM repository publishing as a future",
     ],
     GPG_KEY_MANAGEMENT_DOC: [
         "Public APT/YUM repositories are not available yet",
