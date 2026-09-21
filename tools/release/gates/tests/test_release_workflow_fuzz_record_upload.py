@@ -309,8 +309,18 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
         step.get("run", "") for step in jobs["release-gate"]["steps"]
         if isinstance(step, dict)
     )
-    assert "pip install --requirement requirements-release.txt" in gate_text, (
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    executable = packaging_gate._strip_shell_comments(gate_text)
+    assert "pip install --requirement requirements-release.txt" in executable, (
         "the release-gate job must install requirements-release.txt")
+    # A commented-out install line must not satisfy the guard.
+    commented = (
+        "# python3 -m pip install --requirement requirements-release.txt\n"
+    )
+    assert "pip install --requirement requirements-release.txt" not in (
+        packaging_gate._strip_shell_comments(commented)
+    )
     requirements = (REPO_ROOT / "requirements-release.txt").read_text(
         encoding="utf-8")
     # jsonschema backs the policy-matrix validation in the docs-check chain;
@@ -538,3 +548,86 @@ def test_toolchain_gate_ignores_dynamic_markers_in_comments_and_bodies() -> None
         )
         is None
     )
+
+
+def test_toolchain_gate_tracks_every_heredoc_body() -> None:
+    """A command line may open several heredocs; all bodies are data.
+
+    Bash reads the bodies in marker order, so tracking only the first
+    delimiter would expose the second body's text as executable commands.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    script = "cat <<A <<B\nA\n" + drift + installer + component + "B\n"
+    assert packaging_gate._release_gate_toolchain_issue(script)
+
+
+def test_toolchain_gate_handles_escaped_backticks_in_double_quotes() -> None:
+    """An escaped backtick inside double quotes is data, not a substitution.
+
+    Bash runs no command substitution for an escaped backtick, so text that
+    carries fake provisioning there must not satisfy the gate.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    script = (
+        'echo "x\\` python3 tools/reason-codegen/generate.py --check"\n'
+        'echo "y\\` bash ./packaging/scripts/install-verified-rustup.sh '
+        '--toolchain ${RUST_TOOLCHAIN}"\n'
+        'echo "z\\` rustup component add --toolchain ${RUST_TOOLCHAIN} '
+        'rustfmt"\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script)
+
+
+def test_toolchain_gate_ignores_function_definition_bodies() -> None:
+    """Defining a function runs nothing; provisioning must be top-level.
+
+    The gate does not track calls, so a body that no one invokes cannot
+    count as executed provisioning.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    body = drift + installer + component
+    assert packaging_gate._release_gate_toolchain_issue(
+        "provision() {\n" + body + "}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        "function provision {\n" + body + "}\n"
+    )
+
+
+def test_toolchain_gate_accepts_escaped_heredoc_delimiters() -> None:
+    """An escaped delimiter word is literal, so the body stays droppable.
+
+    The shell performs no expansion on ``<<\\$EOF``; the terminator is the
+    literal word and the body is data.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    script = "cat <<\\$EOF\nbody\n$EOF\n" + drift + installer + component
+    assert packaging_gate._release_gate_toolchain_issue(script) is None
