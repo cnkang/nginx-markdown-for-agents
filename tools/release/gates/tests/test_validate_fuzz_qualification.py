@@ -689,15 +689,18 @@ def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
     seen_timeouts: list[int] = []
     seen_flags: list[list[str]] = []
 
+    chase_results = iter([(5000, 3000.0), (200000, 60.0)])
+
     def fake_invoke(target, flags, timeout):
         seen_timeouts.append(timeout)
         seen_flags.append(list(flags))
         if any(f.startswith("-runs=") for f in flags):
+            executions, wall = next(chase_results)
             return {
                 "returncode": 0,
-                "stdout": "stat::number_of_executed_units: 200000\n",
+                "stdout": f"stat::number_of_executed_units: {executions}\n",
                 "stderr": "",
-                "wall_elapsed": 60.0,
+                "wall_elapsed": wall,
             }
         return {
             "returncode": 0,
@@ -715,13 +718,18 @@ def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
         required_seconds=900, log_path=tmp_path / "soak.log")
 
     assert result["status"] == "pass"
-    assert len(seen_timeouts) == 2
     margin = validator.INVOCATION_TIMEOUT_MARGIN
-    # The chase cap reserves the margin inside the continuation budget.
+    assert len(seen_timeouts) == 3
+    # The first chase runs with the full envelope: cap 3600, allowance 4500.
     assert "-max_total_time=3600" in seen_flags[1]
-    # The allowance exceeds the cap and fits the remaining budget exactly.
     assert seen_timeouts[1] == 3600 + margin
-    assert seen_timeouts[1] <= validator.TIME_CONTINUATION_BUDGET - 900
+    # The first chase charged 3000 wall seconds, so the second chase's cap
+    # drops to 2400 - 900 = 1500 -- the old clamping implementation would
+    # have issued 2400 here, so this assertion distinguishes the fix.
+    assert "-max_total_time=1500" in seen_flags[2]
+    assert seen_timeouts[2] == 1500 + margin
+    assert seen_timeouts[2] <= validator.TIME_CONTINUATION_BUDGET - 3000
+    assert seen_timeouts[2] > 1500
 
 
 def test_soak_chase_cap_shrinks_with_the_remaining_budget(
