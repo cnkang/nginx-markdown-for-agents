@@ -644,26 +644,60 @@ def _function_body_is_live(
 # stay inside the same command: an unbounded tail would cross command
 # separators, letting `rustup toolchain install "${RUST_TOOLCHAIN}"; echo
 # --component rustfmt` satisfy the check without installing rustfmt.
+_WRAPPER_COMMANDS = frozenset({"command", "exec", "builtin", "nohup", "sudo"})
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_BASH_C_RE = re.compile(r"-[A-Za-z]*c\Z")
+
+
+def _wrapper_prefix_length(words: list[str]) -> int:
+    """How many leading wrapper words to drop (a deterministic token scan).
+
+    Handles `retry N`, one of the command wrappers, `env VAR=VAL...`, and
+    `bash -c '...'` in the order the shell accepts them.
+    """
+    index = 0
+    if len(words) >= 2 and words[0] == "retry" and words[1].isdigit():
+        index = 2
+    if index < len(words) and words[index] in _WRAPPER_COMMANDS:
+        index += 1
+    if index < len(words) and words[index] == "env":
+        index += 1
+        while index < len(words) and _ENV_ASSIGN_RE.match(words[index]):
+            index += 1
+    if (
+        index + 1 < len(words)
+        and words[index] == "bash"
+        and _BASH_C_RE.match(words[index + 1])
+    ):
+        index += 2
+    return index
+
+
+def _strip_provision_wrappers(segment: str) -> str:
+    """Drop wrapper tokens a provision command may sit behind.
+
+    Shell wrappers (`retry N`, `command`, `exec`, `builtin`, `nohup`,
+    `sudo`, `env VAR=VAL...`, `bash -c '...'`) do not change which command
+    runs, so the gate unwraps them before matching.  This is a
+    deterministic scan instead of one composed pattern, which also keeps
+    the pattern scanner free of nested-quantifier complaints.
+    """
+    words = segment.split()
+    rest = " ".join(words[_wrapper_prefix_length(words) :])
+    if len(rest) >= 2 and rest[0] in "'\"" and rest[-1] == rest[0]:
+        rest = rest[1:-1]
+    return rest
+
+
 # Release workflows must provision toolchains through the verified installer
 # (with an explicit `bash` invocation) and add the rustfmt component
 # separately; raw `rustup toolchain install` commands are rejected.
-_PROVISION_PREFIX = (
-    r"^(?:retry\s+[0-9]+\s+)?"
-    r"(?:(?:command|exec|builtin|nohup|sudo)\s+)?"
-    r"(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)?"
-    r"(?:bash\s+-[A-Za-z]*c\s+['\"]?)?"
-)
 _VERIFIED_INSTALLER_RE = re.compile(
-    _PROVISION_PREFIX
-    + r"bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
+    r"^bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
     + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
 )
-_COMPONENT_ADD_RE = re.compile(
-    _PROVISION_PREFIX + r"rustup\s+component\s+add\b[^;|&]*"
-)
-_RAW_INSTALL_RE = re.compile(
-    _PROVISION_PREFIX + r"rustup\s+toolchain\s+install\b"
-)
+_COMPONENT_ADD_RE = re.compile(r"^rustup\s+component\s+add\b[^;|&]*")
+_RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
 )
@@ -873,7 +907,7 @@ def _rustfmt_component_index(segments: list[str]) -> int | None:
     from satisfying the requirement.
     """
     for position, segment in enumerate(segments):
-        if not _COMPONENT_ADD_RE.match(segment):
+        if not _COMPONENT_ADD_RE.match(_strip_provision_wrappers(segment)):
             continue
         if re.search(r"\brustfmt\b", segment) and re.search(
             r"--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?", segment
@@ -986,7 +1020,7 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "verified statically"
         )
     for segment in _live_command_segments(executable):
-        if _RAW_INSTALL_RE.match(segment):
+        if _RAW_INSTALL_RE.match(_strip_provision_wrappers(segment)):
             return (
                 "release workflows must provision Rust toolchains through "
                 "the verified installer; found a raw `rustup toolchain "
@@ -1033,7 +1067,7 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
         (
             position
             for position, segment in enumerate(segments)
-            if _VERIFIED_INSTALLER_RE.match(segment)
+            if _VERIFIED_INSTALLER_RE.match(_strip_provision_wrappers(segment))
         ),
         None,
     )
