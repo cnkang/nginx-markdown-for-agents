@@ -335,6 +335,53 @@ _DRIFT_CHECK_RE = re.compile(
 )
 
 
+def _unquoted_separator_at(
+    line: str, index: int, quote: str | None
+) -> tuple[int, str | None]:
+    """Return (separator length, new quote state) at ``index``.
+
+    A separator only counts outside quotes; quoted separators are data.
+    """
+    char = line[index]
+    if quote is not None:
+        return 0, None if char == quote else quote
+    if char in ("'", '"'):
+        return 0, char
+    if char == ";":
+        return 1, None
+    if char == "|":
+        return 2 if line.startswith("||", index) else 1, None
+    if line.startswith("&&", index):
+        return 2, None
+    return 0, None
+
+
+def _command_segments(script: str) -> list[str]:
+    """Split each line into command segments at unquoted shell separators.
+
+    ``;``, ``&&``, ``||`` and ``|`` each start a new command position, so a
+    command chained behind a separator is still a command; separators inside
+    quotes stay data, so quoted fragments can neither satisfy a provisioning
+    requirement nor trip the rejection side.
+    """
+    segments: list[str] = []
+    for line in script.splitlines():
+        current: list[str] = []
+        quote: str | None = None
+        index = 0
+        while index < len(line):
+            separator, quote = _unquoted_separator_at(line, index, quote)
+            if separator:
+                segments.append("".join(current))
+                current = []
+                index += separator
+            else:
+                current.append(line[index])
+                index += 1
+        segments.append("".join(current))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
 def _provides_rustfmt_component(run_scripts: str) -> bool:
     """Whether a command installs rustfmt for the pinned toolchain.
 
@@ -342,14 +389,13 @@ def _provides_rustfmt_component(run_scripts: str) -> bool:
     command segment; the segment boundary keeps a later command's arguments
     from satisfying the requirement.
     """
-    for line in run_scripts.splitlines():
-        for segment in re.split(r";|&&|\|\||\|", line):
-            if not _COMPONENT_ADD_RE.match(segment.strip()):
-                continue
-            if re.search(r"\brustfmt\b", segment) and re.search(
-                r"--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?", segment
-            ):
-                return True
+    for segment in _command_segments(run_scripts):
+        if not _COMPONENT_ADD_RE.match(segment):
+            continue
+        if re.search(r"\brustfmt\b", segment) and re.search(
+            r"--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?", segment
+        ):
+            return True
     return False
 
 
@@ -409,8 +455,8 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     executable = _join_continuations(
         _strip_heredocs(_strip_shell_comments(all_scripts))
     )
-    for line in executable.splitlines():
-        if _RAW_INSTALL_RE.match(line.strip()):
+    for segment in _command_segments(executable):
+        if _RAW_INSTALL_RE.match(segment):
             return (
                 "release workflows must provision Rust toolchains through "
                 "the verified installer; found a raw `rustup toolchain "
@@ -435,14 +481,14 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     executable = _join_continuations(
         _strip_heredocs(_strip_shell_comments(run_scripts))
     )
-    lines = [line.strip() for line in executable.splitlines() if line.strip()]
-    if not any(_DRIFT_CHECK_RE.match(line) for line in lines):
+    segments = _command_segments(executable)
+    if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
         return (
             "the release-gate job no longer runs "
             f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
             "expectation with the job split"
         )
-    if not any(_VERIFIED_INSTALLER_RE.match(line) for line in lines):
+    if not any(_VERIFIED_INSTALLER_RE.match(segment) for segment in segments):
         return (
             "the release-gate job must provision the pinned Rust toolchain "
             "through the verified installer (bash ./packaging/scripts/"
