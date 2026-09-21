@@ -976,6 +976,9 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
         }
 
     monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    # Pin the pool so the schedule is deterministic: with two workers the
+    # slow chase shares the pool with a fast soak.
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
     entries = [{"name": f"fast-{index}", "seed": 1} for index in range(3)]
     entries.append({"name": "slow", "seed": 1})
     seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
@@ -983,12 +986,14 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     records = validator._run_blocking_targets(
         entries, seeds, deadline=start + 60)
     assert set(records) == {entry["name"] for entry in entries}
-    # The pool overlaps: some pair of targets ran concurrently.  A serial
-    # schedule gives every span a disjoint interval regardless of machine
-    # speed, so the relative-time check is load-independent.
+    # The slow target must overlap a fast one: queueing the slow chase
+    # behind every fast soak (or the reverse) is exactly the regression.
+    # Relative-time overlap is load-independent: the spans come from the
+    # same clock, only their order matters.
+    slow_span = next(span for span in spans if span[0] == "slow")
+    fast_spans = [span for span in spans if span[0] != "slow"]
     overlapping = any(
-        first[1] < second[2] and second[1] < first[2]
-        for index, first in enumerate(spans)
-        for second in spans[index + 1:]
+        slow_span[1] < fast_span[2] and fast_span[1] < slow_span[2]
+        for fast_span in fast_spans
     )
     assert overlapping, spans
