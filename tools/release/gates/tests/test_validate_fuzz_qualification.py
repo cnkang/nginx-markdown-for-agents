@@ -471,8 +471,8 @@ def test_soak_chases_runs_only_after_time_is_met(
     # runs_remaining (100000 minus 999 credited executions) plus the
     # startup-replay overhead (empty corpus: one empty-input callback).
     assert "-runs=99002" in calls[1]
-    # The chase cap is bounded by the continuation budget.
-    assert "-max_total_time=1800" in calls[1]
+    # The chase cap fits the continuation budget with its margin reserved.
+    assert "-max_total_time=3600" in calls[1]
 
 
 def test_soak_fails_fast_when_the_continuation_budget_is_spent(
@@ -510,8 +510,8 @@ def test_soak_fails_fast_when_the_continuation_budget_is_spent(
 
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
-    # one soak invocation plus the two budgeted chase invocations
-    assert len(calls) == 3
+    # one soak invocation plus the five wall-charged chases the budget fits
+    assert len(calls) == 6
 
 
 def test_soak_rejects_sub_second_continuation_budgets(
@@ -529,7 +529,7 @@ def test_soak_rejects_sub_second_continuation_budgets(
                 "returncode": 0,
                 "stdout": "stat::number_of_executed_units: 1\n",
                 "stderr": "",
-                "wall_elapsed": 899.6,
+                "wall_elapsed": 5399.5,
             }
         return {
             "returncode": 0,
@@ -549,7 +549,8 @@ def test_soak_rejects_sub_second_continuation_budgets(
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
     assert not any("-max_total_time=0" in flag for call in calls for flag in call)
-    assert len(calls) == 3
+    # the sub-second leftover never schedules another invocation
+    assert len(calls) == 2
 
 
 def test_soak_schedule_applies_the_cap_limit(monkeypatch) -> None:
@@ -637,8 +638,8 @@ def test_soak_continuation_budget_charges_wall_time(
 
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
-    # one soak invocation plus two wall-charged (900s) chase invocations
-    assert len(calls) == 3
+    # one soak invocation plus five wall-charged (900s) chase invocations
+    assert len(calls) == 6
 
 
 def test_soak_bounds_the_invocation_timeout_under_a_deadline(
@@ -677,22 +678,119 @@ def test_soak_bounds_the_invocation_timeout_under_a_deadline(
     assert seen_timeouts[0] == 900 + validator.INVOCATION_TIMEOUT_MARGIN
 
 
-def test_soak_caps_the_chase_timeout_to_the_remaining_budget(
+def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The margin must not push a chase invocation past its budget."""
+    """A chase's subprocess allowance must both exceed its own cap (so a
+    healthy invocation is never killed at the cap) and fit the remaining
+    continuation budget (so the margin cannot push past it)."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
     seen_timeouts: list[int] = []
+    seen_flags: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
         seen_timeouts.append(timeout)
+        seen_flags.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            return {
+                "returncode": 0,
+                "stdout": "stat::number_of_executed_units: 200000\n",
+                "stderr": "",
+                "wall_elapsed": 60.0,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "pass"
+    assert len(seen_timeouts) == 2
+    margin = validator.INVOCATION_TIMEOUT_MARGIN
+    # The chase cap reserves the margin inside the continuation budget.
+    assert "-max_total_time=3600" in seen_flags[1]
+    # The allowance exceeds the cap and fits the remaining budget exactly.
+    assert seen_timeouts[1] == 3600 + margin
+    assert seen_timeouts[1] <= validator.TIME_CONTINUATION_BUDGET - 900
+
+
+def test_soak_chase_cap_shrinks_with_the_remaining_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When the remaining budget is small the cap shrinks so the allowance
+    still fits; a leftover too small for cap plus margin never schedules a
+    doomed invocation."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    seen_timeouts: list[int] = []
+    seen_flags: list[list[str]] = []
+
+    chase_results = iter([(5000, 4300.0), (200000, 50.0)])
+
+    def fake_invoke(target, flags, timeout):
+        seen_timeouts.append(timeout)
+        seen_flags.append(list(flags))
+        if any(f.startswith("-runs=") for f in flags):
+            executions, wall = next(chase_results)
+            return {
+                "returncode": 0,
+                "stdout": f"stat::number_of_executed_units: {executions}\n",
+                "stderr": "",
+                "wall_elapsed": wall,
+            }
+        return {
+            "returncode": 0,
+            "stdout": "stat::number_of_executed_units: 1000\n",
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        }
+
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(validator, "_invoke_fuzz", fake_invoke)
+
+    result = validator._run_target_soak(
+        "target", seed=1, required_executions=100000,
+        required_seconds=900, log_path=tmp_path / "soak.log")
+
+    assert result["status"] == "pass"
+    margin = validator.INVOCATION_TIMEOUT_MARGIN
+    assert len(seen_timeouts) == 3
+    # After the first chase charged 4300s, the budget fits only 1100 more:
+    # the cap shrinks to 200 and the allowance to cap + margin == 1100.
+    assert "-max_total_time=200" in seen_flags[2]
+    assert seen_timeouts[2] == 200 + margin
+    assert seen_timeouts[2] <= validator.TIME_CONTINUATION_BUDGET - 4300
+
+
+def test_soak_never_schedules_a_chase_without_room_for_its_margin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A remaining budget that only covers the margin must fail the target
+    instead of launching an invocation whose allowance would equal its cap
+    (killed at the cap before it can exit)."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    calls: list[list[str]] = []
+
+    def fake_invoke(target, flags, timeout):
+        calls.append(list(flags))
         if any(f.startswith("-runs=") for f in flags):
             return {
                 "returncode": 0,
                 "stdout": "stat::number_of_executed_units: 1\n",
                 "stderr": "",
-                "wall_elapsed": 1858.0,
+                "wall_elapsed": 4600.0,
             }
         return {
             "returncode": 0,
@@ -711,11 +809,9 @@ def test_soak_caps_the_chase_timeout_to_the_remaining_budget(
 
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
-    # soak + one chase whose wall charge overshot the budget with floors unmet
-    assert len(seen_timeouts) == 2
-    # the chase timeout is capped at the remaining continuation budget, not
-    # time_cap + INVOCATION_TIMEOUT_MARGIN
-    assert seen_timeouts[1] == validator.TIME_CONTINUATION_BUDGET
+    # The soak and the first chase ran; the leftover 800s cannot host
+    # another invocation with its margin, so none was ever launched.
+    assert len(calls) == 2
 
 
 def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:

@@ -1420,6 +1420,19 @@ jobs:
           python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
         shell: bash
 
+      - name: Upload fuzz qualification record
+        # Diagnostic evidence: when the fuzz qualification fails, the record
+        # and per-target raw logs are exactly what a post-mortem needs; the
+        # default upload steps below only run on success paths.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-qualification-record
+          path: |
+            artifacts/release/0.9.2/fuzz-qualification-record.json
+            artifacts/release/0.9.2/fuzz-logs/
+          if-no-files-found: warn
+
   # The official Docker matrix is release-blocking for Docker artifacts in
   # tools/release-matrix.json. Call the reusable workflow with this exact
   # candidate SHA so publish cannot proceed on an independently triggered,
