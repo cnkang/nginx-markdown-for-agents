@@ -482,6 +482,10 @@ def test_soak_fails_fast_when_the_continuation_budget_is_spent(
     consuming the release job budget until CI kills the job."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the invocation-count arithmetic
+    # below stays deterministic; the production tuning is asserted by the
+    # envelope arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -520,6 +524,10 @@ def test_soak_rejects_sub_second_continuation_budgets(
     """A fractional leftover budget must not become -max_total_time=0."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the leftover arithmetic below
+    # stays deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -609,6 +617,10 @@ def test_soak_continuation_budget_charges_wall_time(
     """Parsed fuzz time must not shrink the wall-clock continuation charge."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the invocation-count arithmetic
+    # below stays deterministic; the production tuning is asserted by the
+    # envelope arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -686,6 +698,10 @@ def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
     continuation budget (so the margin cannot push past it)."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the cap arithmetic below stays
+    # deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     seen_timeouts: list[int] = []
     seen_flags: list[list[str]] = []
 
@@ -740,6 +756,10 @@ def test_soak_chase_cap_shrinks_with_the_remaining_budget(
     doomed invocation."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the cap arithmetic below stays
+    # deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     seen_timeouts: list[int] = []
     seen_flags: list[list[str]] = []
 
@@ -789,6 +809,10 @@ def test_soak_never_schedules_a_chase_without_room_for_its_margin(
     (killed at the cap before it can exit)."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the leftover arithmetic below
+    # stays deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -870,10 +894,58 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     # post-envelope reserve; enforce the reserve floor as well.
     reserve = validator.RELEASE_JOB_LIMIT_SECONDS - total
     assert reserve >= validator.MIN_POST_ENVELOPE_RESERVE_SECONDS
-    # The normal-mode schedule (twelve soak-only targets, the slow target's
-    # soak plus a chase at 20 executions/second, one closing soak) must fit
-    # inside the envelope with the per-invocation overheads.
-    twelve_soaks = 12 * (900 + 10)
-    slow_soak_chase = (900 + 10) + (100000 // 20 - 900 + 10)
-    closing_soak = 900 + 10
-    assert twelve_soaks + slow_soak_chase + closing_soak <= validator.FUZZ_JOB_BUDGET
+    # The worker pool must fit the worst-case schedule inside the envelope:
+    # the slow decode target scheduled last on its worker (behind four fast
+    # soaks), chasing the executions floor at the slowest supported rate.
+    # The measured CI band is ten-plus executions per second; the floor
+    # asserted here leaves rate-variance headroom on top of that band.
+    per_invocation_overhead = 10
+    fast_soak = 900 + per_invocation_overhead
+    slow_start = 4 * fast_soak
+    supported_rate = 7  # executions per second
+    slow_chase = 100000 // supported_rate - 900 + per_invocation_overhead
+    slow_total = fast_soak + slow_chase
+    assert slow_start + slow_total <= validator.FUZZ_JOB_BUDGET
+    # The chase must also fit the per-target continuation budget together
+    # with its invocation margin.
+    assert (slow_chase + validator.INVOCATION_TIMEOUT_MARGIN
+            <= validator.TIME_CONTINUATION_BUDGET)
+    # Overlapping workers are what makes the schedule fit; a pool of one
+    # would serialize the chase behind every fast soak.
+    assert 2 <= validator.TARGET_WORKER_COUNT <= 4
+
+
+def test_blocking_targets_run_on_an_overlapping_worker_pool(
+    monkeypatch,
+) -> None:
+    """The slow target's chase must overlap the fast soaks instead of
+    queueing behind them."""
+    import time as time_module
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    durations = {"slow": 0.3, "fast": 0.15}
+
+    def fake_record(entry, seed_path, deadline=None):
+        time_module.sleep(
+            durations["slow"] if entry["name"] == "slow" else durations["fast"])
+        return {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+            "raw_log_ref": "", "status": "pass", "failure_reason": None,
+        }
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    entries = [{"name": f"fast-{index}", "seed": 1} for index in range(3)]
+    entries.append({"name": "slow", "seed": 1})
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    start = time_module.monotonic()
+    records = validator._run_blocking_targets(
+        entries, seeds, deadline=start + 60)
+    wall = time_module.monotonic() - start
+    assert set(records) == {entry["name"] for entry in entries}
+    # A serial schedule takes the sum of every duration; the pool overlaps
+    # the slow target's run with the fast targets' soaks.
+    serial_sum = 3 * durations["fast"] + durations["slow"]
+    assert wall < serial_sum
