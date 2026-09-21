@@ -480,5 +480,61 @@ def test_toolchain_gate_splits_on_all_command_separators() -> None:
         "$(rustup toolchain install nightly --profile minimal)",
         "echo `rustup toolchain install nightly --profile minimal`",
         'echo "`rustup toolchain install nightly --profile minimal`"',
+        'echo "$(rustup toolchain install nightly --profile minimal)"',
     ):
         assert packaging_gate._raw_toolchain_install_issue(workflow(line)), line
+
+
+def test_toolchain_gate_treats_quoted_parentheses_as_data() -> None:
+    """Bare parentheses inside double quotes are data, not separators.
+
+    Only a ``$``-preceded ``(`` opens a command substitution inside double
+    quotes; splitting on bare quoted parentheses would break a compliant
+    installer invocation that carries them in an argument.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--note "(amd64)" --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift + installer + component
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_ignores_dynamic_markers_in_comments_and_bodies() -> None:
+    """Dynamic-delimiter markers in comments or heredoc bodies are data.
+
+    The rejection scans the script after comment and static-heredoc
+    stripping, so an inert marker never fails a workflow that provisions
+    correctly.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    rest = drift + installer + component
+    assert (
+        packaging_gate._release_gate_toolchain_issue("# cat <<$EOF\n" + rest)
+        is None
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "cat <<'EOF'\ncat <<$EOF\nEOF\n" + rest
+        )
+        is None
+    )
