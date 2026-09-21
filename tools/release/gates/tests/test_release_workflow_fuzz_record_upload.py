@@ -56,12 +56,13 @@ def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
     junction requires it; the release gate no longer runs it."""
     jobs = _workflow()["jobs"]
     assert "fuzz-qualification" in jobs
-    run_text = packaging_gate_module()._strip_heredocs(
-        packaging_gate_module()._strip_shell_comments(
+    module = packaging_gate_module()
+    run_text = module._strip_heredocs(
+        module._strip_shell_comments(
             "\n".join(
                 step.get("run", "")
                 for step in jobs["fuzz-qualification"]["steps"]
-                if isinstance(step, dict)
+                if isinstance(step, dict) and module._step_runs_shell(step)
             )
         )
     )
@@ -322,12 +323,20 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
     step imports jsonschema, and a fresh runner only provides what
     requirements-release.txt installs; the install step and the pins must
     both stay in place (the first real run failed exactly here)."""
-    jobs = _workflow()["jobs"]
-    gate_text = "\n".join(
-        step.get("run", "") for step in jobs["release-gate"]["steps"]
-        if isinstance(step, dict)
+    packaging_gate = packaging_gate_module()
+    gate_text = packaging_gate._job_run_scripts(
+        WORKFLOW.read_text(encoding="utf-8"), "release-gate")
+    assert gate_text is not None
+    # A step the workflow disables is not part of the job's shell.
+    disabled = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - if: false\n"
+        "        run: python3 -m pip install --requirement "
+        "requirements-release.txt\n"
     )
-    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+    assert packaging_gate._job_run_scripts(disabled, "release-gate") == ""
 
     executable = packaging_gate._strip_heredocs(
         packaging_gate._strip_shell_comments(gate_text))
@@ -780,16 +789,29 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
         )
         is None
     )
-    # An `if false` branch is dead until its `fi`.
+    # Any `if` construct is conditional: the analyzer does not evaluate
+    # test expressions, so its body cannot count as provisioning.
     assert packaging_gate._release_gate_toolchain_issue(
         drift + "if false; then\n" + installer + component + "fi\n"
     )
-    # A branch that can run is live as before.
-    assert (
-        packaging_gate._release_gate_toolchain_issue(
-            drift + "if true; then\n" + installer + component + "fi\n"
-        )
-        is None
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + "if [ 1 -eq 0 ]; then\n" + installer + component + "fi\n"
+    )
+    # A quoted literal still reads as the command it names.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + 'false && ' + installer + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        'drift\n"false" && ' + installer + component
+    )
+    # `exit` ends that shell: nothing after it runs.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + "exit 0\n" + installer + component
+    )
+    # Nested conditionals stay dead for the whole construct.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + "if true; then\nif false; then\n" + installer + component
+        + "fi\nfi\n"
     )
 
 
@@ -867,6 +889,11 @@ def test_toolchain_gate_counts_called_function_bodies() -> None:
     )
     assert packaging_gate._release_gate_toolchain_issue(
         called_subshell + drift) is None
+    # Mentioning the name as an argument is not a call.
+    assert packaging_gate._release_gate_toolchain_issue(
+        "provision() {\n" + installer + component + "}\necho provision\n"
+        + drift
+    )
 
 
 def test_toolchain_gate_accepts_same_line_brace_groups() -> None:
@@ -880,3 +907,92 @@ def test_toolchain_gate_accepts_same_line_brace_groups() -> None:
         'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt; }\n'
     )
     assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_toolchain_gate_treats_steps_as_separate_shells() -> None:
+    """GitHub Actions starts each run step in a fresh shell, so a function
+    defined in one step is not callable in the next."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          provision() {\n"
+        "            bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '            rustup component add --toolchain "${RUST_TOOLCHAIN}" '
+        "rustfmt\n"
+        "          }\n"
+        "      - run: |\n"
+        "          provision\n"
+        "          python3 tools/reason-codegen/generate.py --check\n"
+    )
+    scripts = packaging_gate._job_run_scripts(workflow, "release-gate")
+    assert packaging_gate._release_gate_toolchain_issue(scripts) is not None
+
+
+def test_raw_install_detector_sees_command_wrappers() -> None:
+    """`command`/`env`/`bash -c` wrappers do not hide a raw install."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    for wrapped in (
+        "command rustup toolchain install nightly --profile minimal",
+        "env FOO=1 rustup toolchain install nightly --profile minimal",
+        "exec rustup toolchain install nightly --profile minimal",
+        "bash -c 'rustup toolchain install nightly --profile minimal'",
+    ):
+        workflow = (
+            "jobs:\n"
+            "  fuzz-qualification:\n"
+            "    steps:\n"
+            "      - name: b\n"
+            "        run: |\n"
+            "          " + wrapped + "\n"
+        )
+        assert packaging_gate._raw_toolchain_install_issue(workflow), wrapped
+    # A raw install in a conditional step still fails the gate.
+    conditional = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - if: true\n"
+        "        run: |\n"
+        "          rustup toolchain install nightly --profile minimal\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(conditional)
+
+
+def test_toolchain_gate_accepts_partially_quoted_delimiters() -> None:
+    """Quoting any part of a delimiter word disables expansion entirely."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    script = 'WORD=RUNTIME\ncat <<E"$WORD"\nbody\nE$WORD\n'
+    assert packaging_gate._release_gate_toolchain_issue(
+        script + drift + installer + component) is None
+
+
+def test_toolchain_gate_ignores_dynamic_markers_in_uncalled_functions() -> None:
+    """A dynamic delimiter in code that never runs cannot reject the script."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    dead = "unused() {\ncat <<$DELIM\nbody\nDELIM\n}\n"
+    assert packaging_gate._release_gate_toolchain_issue(
+        dead + drift + installer + component) is None
