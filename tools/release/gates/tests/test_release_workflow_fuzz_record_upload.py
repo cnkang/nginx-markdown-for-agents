@@ -195,6 +195,42 @@ def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
         )
         is None
     )
+    # A separator-prefixed compliant provisioning is still a command.
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift
+            + component
+            + "echo ok && bash ./packaging/scripts/install-verified-rustup.sh "
+            '--toolchain "${RUST_TOOLCHAIN}"\n'
+        )
+        is None
+    )
+    # A quoted separator stays data: it cannot satisfy the drift check.
+    assert packaging_gate._release_gate_toolchain_issue(
+        'echo "a; python3 tools/reason-codegen/generate.py --check"\n'
+        + installer
+        + component
+    )
+    # Normalization order is deliberate: comments and heredoc bodies are
+    # removed before continuation joining, so a comment line ending in a
+    # backslash never merges with (and strips) the command below it, and a
+    # heredoc body line ending in a backslash never merges with the
+    # terminator (which would swallow everything after it).
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "# setup note \\\n" + drift + installer + component
+        )
+        is None
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "cat <<'EOF'\nbody with backslash \\\nEOF\n"
+            + drift
+            + installer
+            + component
+        )
+        is None
+    )
 
 
 def test_workflow_rejects_raw_toolchain_installs() -> None:
@@ -219,6 +255,26 @@ def test_workflow_rejects_raw_toolchain_installs() -> None:
         "          retry 5 rustup toolchain install nightly --profile minimal\n"
     )
     assert packaging_gate._raw_toolchain_install_issue(workflow)
+    # A raw install chained behind a separator is still a command.
+    chained = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - name: b\n"
+        "        run: |\n"
+        "          echo ok && rustup toolchain install nightly --profile minimal\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(chained)
+    # A quoted fragment stays data and does not trip the detector.
+    quoted = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - name: b\n"
+        "        run: |\n"
+        '          echo "x; rustup toolchain install y"\n'
+    )
+    assert packaging_gate._raw_toolchain_install_issue(quoted) is None
     assert (
         packaging_gate._raw_toolchain_install_issue(
             WORKFLOW.read_text(encoding="utf-8")
