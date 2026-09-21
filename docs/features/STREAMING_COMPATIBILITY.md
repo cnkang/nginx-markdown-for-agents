@@ -90,7 +90,7 @@ receives a truncated response.
 ### Token estimation
 
 The `X-Markdown-Tokens` header requires knowing the full output length.
-Since streaming sends chunks incrementally, this header is not emitted.
+Streaming sends chunks incrementally, so the module does not emit this header.
 
 ## Deciding Which Mode to Use
 
@@ -110,7 +110,7 @@ Use **streaming** when:
 Use **auto** to prefer streaming for eligible responses. The module selects
 the processing path from the policy and hard compatibility constraints, not
 a response-size heuristic. The 0.9.2 default is `off` (bounded full-buffer).
-`auto` must be written explicitly to opt in.
+You must write `auto` explicitly to opt in.
 
 ### Frozen 0.9.2 selection contract
 
@@ -160,6 +160,7 @@ fallback.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-17 | Hermes | Scope the converted-response ETag/304 statement to `markdown_cache_validation = full`; `ims_only` never 304s a converted response through the transformed representation and `off` disables conditional handling for it |
 | 0.9.2 | 2026-09-07 | Kang | Split the post-commit fail-open outcome: later gzip-member failures finish the remaining Markdown safely; only impossible-safe-finish failures abort with truncated output |
 | 0.9.2 | 2026-08-24 | Kang | Corrected the parser_budget budget row: the bound covers both paths (full-buffer pre-parse estimate plus streaming enforcement), not streaming only |

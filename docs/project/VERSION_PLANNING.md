@@ -16,7 +16,7 @@ compatibility or release scope.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
-before v1.0. That freeze was deliberately extended through v0.9.1 because v1.0
+before v1.0. The project deliberately extended that freeze through v0.9.1 because v1.0
 had not shipped, adoption remained limited, and the final toolchain,
 dependency, configuration, and ABI audit found cleanup worth completing before
 the long-lived compatibility contract begins.
@@ -153,6 +153,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: current release state and release evidence updated for the published v0.9.2 |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |

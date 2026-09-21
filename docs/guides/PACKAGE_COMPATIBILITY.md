@@ -17,8 +17,8 @@ in the build matrix and is not a universal shared library.
 
 Key points:
 
-- Both nginx.org stable and selected mainline releases stay supported as shown
-  in the build matrix below.
+- The project supports both nginx.org stable and selected mainline releases,
+  as shown in the build matrix below.
 - Each prebuilt package targets a specific NGINX version and CPU architecture.
 - Users with unsupported NGINX versions must build from source (see below).
 
@@ -38,8 +38,8 @@ below X.Y.Z — the floor is not version-scoped across epochs. The `%pre`
 scriptlet performs the exact-version check at install time. RPM therefore rejects a
 same-version package that does not provide the expected NGINX package ABI
 capability before installation.
-**Runtime compatibility is only verified for the exact NGINX versions listed
-in the build matrix below**. Loading the module on any other NGINX version
+**The project verifies runtime compatibility only for the exact NGINX versions
+listed in the build matrix below**. Loading the module on any other NGINX version
 will fail with a version mismatch before signature checks. Install the
 package only on the NGINX version matching the artifact filename.
 
@@ -395,6 +395,7 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-17 | Hermes | Checksum-signature ownership clarified: release-packages.yml signs, release-binaries.yml never does |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that compatibility-matrix coverage does not imply a published package asset; made artifact names version-neutral templates. |
 | 0.9.1 | 2026-07-17 | Kang | Consolidated build matrix references to prevent version conflicts with dynamic support matrix for v0.9.1. |

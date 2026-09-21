@@ -155,7 +155,7 @@ repo/apt/
 
 - **Key ID**: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
 - **Key Type**: RSA 4096 (primary certification key, expires 2031-05-19)
-- **Key URL**: checked in at `packaging/nginx-markdown-for-agents-release.asc`
+- **Key URL**: the repository stores the key at `packaging/nginx-markdown-for-agents-release.asc`
 - **Fingerprints (complete allowed key set)**:
   - Primary key: `7A37 4368 7FEE E031 3128 3550 3872 4643 EA12 C02A`
   - Signing subkey: `15C7 9243 8EAA 762B 421E 60D2 1E8D 41E7 D19A 8A75`
@@ -357,7 +357,7 @@ The project documents key rotation in its
 
 ## NGINX ABI Compatibility
 
-The packages in this repository are built against specific NGINX versions.
+Each package in this repository targets a specific NGINX version.
 The package declares an ABI dependency (`nginx-abi-X.Y`) to prevent
 installation on incompatible NGINX builds.
 

@@ -98,8 +98,8 @@ before/after examples.
 
 ### Fixed
 
-- Upstream response trailers are now suppressed after an HTML-to-Markdown
-  representation change. `headers_out.trailers` is an independent list
+- The module now suppresses upstream response trailers after an
+  HTML-to-Markdown representation change. `headers_out.trailers` is an independent list
   that HTTP/2/3 and chunked encodings emit without an HTTP/1.1 `Trailer`
   declaration, so invalidating only the declaration left real trailers
   (Content-Digest, Repr-Digest, ...) propagating with the Markdown body.

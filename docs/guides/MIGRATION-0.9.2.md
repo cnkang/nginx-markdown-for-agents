@@ -328,7 +328,7 @@ markdown_stream_threshold 512k;
 
 ### `markdown_stream_precommit_buffer` → `markdown_limits streaming_buffer=`
 
-Precommit buffer size is now controlled through `markdown_limits`. The release
+The `markdown_limits` block now controls the precommit buffer size. The release
 drops the `markdown_stream_flush_min` directive separately and provides no
 replacement because flush coalescing uses an internal heuristic.
 
@@ -544,6 +544,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-17 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
 | 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
 | 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
