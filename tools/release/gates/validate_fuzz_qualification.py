@@ -88,8 +88,11 @@ TIME_CONTINUATION_BUDGET = 5400
 # rate at or above twenty executions per second (the measured CI band is
 # higher), which the dedicated job makes possible: the previous shared-job
 # layout could not fit that schedule inside the release gate's remaining
-# budget.
-FUZZ_JOB_BUDGET = 19800
+# budget.  The remainder of the job limit after the equation below covers
+# post-envelope work -- qualification-record writing, the diagnostic
+# artifact upload, and retry variance in the setup steps -- so the budget
+# leaves roughly a quarter hour of that slack.
+FUZZ_JOB_BUDGET = 19300
 # Terms of the job-limit equation above.  The setup allowance covers the
 # toolchain install steps before the first soak; the replay allowance
 # bounds the corpus replay plus shutdown of the single invocation that may
