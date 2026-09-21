@@ -897,19 +897,36 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     # The worker pool must fit the worst-case schedule inside the envelope:
     # the slow decode target scheduled last on its worker (behind four fast
     # soaks), chasing the executions floor at the slowest supported rate.
-    # The measured CI band is ten-plus executions per second; the floor
-    # asserted here leaves rate-variance headroom on top of that band.
-    per_invocation_overhead = 10
+    # The model charges each invocation its cap plus a generous startup,
+    # replay and shutdown overhead; the measured CI band is above the floor.
+    per_invocation_overhead = 60
+    supported_rate = 7  # executions per second
     fast_soak = 900 + per_invocation_overhead
     slow_start = 4 * fast_soak
-    supported_rate = 7  # executions per second
-    slow_chase = 100000 // supported_rate - 900 + per_invocation_overhead
+    chase_seconds = 100000 // supported_rate - 900
+    chase_invocations = -(-chase_seconds // validator.TIME_CONTINUATION_CEILING)
+    slow_chase = chase_seconds + chase_invocations * per_invocation_overhead
     slow_total = fast_soak + slow_chase
     assert slow_start + slow_total <= validator.FUZZ_JOB_BUDGET
     # The chase must also fit the per-target continuation budget together
     # with its invocation margin.
     assert (slow_chase + validator.INVOCATION_TIMEOUT_MARGIN
             <= validator.TIME_CONTINUATION_BUDGET)
+    # The margin is a budget bound, not spendable capacity: if every chase
+    # invocation ran to its subprocess timeout (a hung fuzzer), the budget
+    # could not host the floor at the supported rate -- and that case fails
+    # the target by design, because a hung invocation means a broken target.
+    worst_case_executions = 900 * supported_rate
+    spent = 0.0
+    for _ in range(validator.MAX_FUZZ_INVOCATIONS):
+        remaining = validator.TIME_CONTINUATION_BUDGET - spent
+        cap_max = int(remaining) - validator.INVOCATION_TIMEOUT_MARGIN
+        if remaining < 1 or cap_max < 1:
+            break
+        cap = min(validator.TIME_CONTINUATION_CEILING, cap_max)
+        spent += cap + validator.INVOCATION_TIMEOUT_MARGIN
+        worst_case_executions += cap * supported_rate
+    assert worst_case_executions < 100000
     # Overlapping workers are what makes the schedule fit; a pool of one
     # would serialize the chase behind every fast soak.
     assert 2 <= validator.TARGET_WORKER_COUNT <= 4

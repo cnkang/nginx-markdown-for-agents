@@ -233,15 +233,15 @@ def _scan_char(line: str, index: int, quote: str | None) -> tuple[str | None, in
 
     Outside quotes a backslash escapes the next character, so an escaped
     quote is a literal quote rather than a quote opener.  Inside double
-    quotes a backslash escapes only ``"`` and ``\\``; inside single quotes
-    backslashes are literal.  A quote that opens on one line stays open
-    across lines.
+    quotes a backslash escapes ``"``, ``\\``, ``$`` and backticks; inside
+    single quotes backslashes are literal.  A quote that opens on one line
+    stays open across lines.
     """
     char = line[index]
     if quote == "'":
         return (None if char == "'" else "'"), 1
     if quote == '"':
-        if char == "\\" and index + 1 < len(line) and line[index + 1] in '"\\':
+        if char == "\\" and index + 1 < len(line) and line[index + 1] in '"\\`$':
             return '"', 2
         return (None if char == '"' else '"'), 1
     if char == "\\" and index + 1 < len(line):
@@ -297,7 +297,7 @@ def _join_continuations(script: str) -> str:
 
 
 _HEREDOC_MARKER_RE = re.compile(
-    r"<<-?[ \t]*(?:\\?(['\"])([^'\"]*)\1|\\?([^ \t;|&()<>]+))"
+    r"<<-?[ \t]*(?:(\\?)(['\"])([^'\"]*)\2|(\\?)([^ \t;|&()<>]+))"
 )
 
 
@@ -308,42 +308,45 @@ def _heredoc_marker_at(
 
     ``None`` when the position does not open a heredoc (including the
     ``<<<`` herestring form).  A plain word containing expansion characters
-    (``$`` or backticks) is dynamic: the shell expands it at runtime, so the
-    terminator cannot be known statically.
+    (``$`` or backticks) is dynamic unless a backslash quotes it: the shell
+    expands an unquoted word at runtime, so the terminator cannot be known
+    statically, while ``<<\\$WORD`` keeps the literal delimiter.
     """
     if not line.startswith("<<", index) or line.startswith("<<<", index):
         return None
     match = _HEREDOC_MARKER_RE.match(line, index)
     if match is None:
         return None
-    quoted = match.group(2) is not None
-    word = match.group(2) if quoted else match.group(3)
-    dynamic = not quoted and ("$" in word or "`" in word)
+    if match.group(2) is not None:
+        word, dynamic = match.group(3), False
+    else:
+        word = match.group(5)
+        dynamic = match.group(4) != "\\" and ("$" in word or "`" in word)
     return word, match.group(0).startswith("<<-"), dynamic, match.end()
 
 
 def _scan_line_for_heredocs(
     line: str, quote: str | None
-) -> tuple[str | None, tuple[str, bool, bool] | None]:
-    """Scan one line for the first heredoc marker; return (quote, marker).
+) -> tuple[str | None, list[tuple[str, bool, bool]]]:
+    """Scan one line for heredoc markers; return (quote, markers).
 
-    The marker is ``(delimiter, tab_stripped, dynamic)``.  Markers inside
-    quotes are data and do not open a heredoc.
+    Each marker is ``(delimiter, tab_stripped, dynamic)``.  Markers inside
+    quotes are data and do not open a heredoc; a command line may open
+    several heredocs, whose bodies follow in marker order.
     """
-    found: tuple[str, bool, bool] | None = None
+    markers: list[tuple[str, bool, bool]] = []
     index = 0
     while index < len(line):
         marker = _heredoc_marker_at(line, index) if quote is None else None
         if marker is not None:
             word, tab_stripped, dynamic, end = marker
-            if found is None:
-                found = (word, tab_stripped, dynamic)
+            markers.append((word, tab_stripped, dynamic))
             index = end
             continue
         new_quote, consumed = _scan_char(line, index, quote)
         quote = new_quote
         index += consumed
-    return quote, found
+    return quote, markers
 
 
 def _strip_heredocs(script: str) -> str:
@@ -360,20 +363,19 @@ def _strip_heredocs(script: str) -> str:
     so the provisioning checks can reject the script.
     """
     kept: list[str] = []
-    pending: str | None = None
-    tab_stripped = False
+    pending: list[tuple[str, bool]] = []
     quote: str | None = None
     for line in script.splitlines():
-        if pending is not None:
+        if pending:
+            delimiter, tab_stripped = pending[0]
             candidate = line.lstrip("\t") if tab_stripped else line
-            if candidate == pending:
-                pending = None
+            if candidate == delimiter:
+                pending.pop(0)
             continue
         kept.append(line)
-        quote, marker = _scan_line_for_heredocs(line, quote)
-        if marker is not None and not marker[2]:
-            pending = marker[0]
-            tab_stripped = marker[1]
+        quote, markers = _scan_line_for_heredocs(line, quote)
+        pending.extend(
+            (marker[0], marker[1]) for marker in markers if not marker[2])
     return "\n".join(kept)
 
 
@@ -387,10 +389,77 @@ def _dynamic_heredoc_markers(script: str) -> list[str]:
     markers: list[str] = []
     quote: str | None = None
     for line in script.splitlines():
-        quote, marker = _scan_line_for_heredocs(line, quote)
-        if marker is not None and marker[2]:
-            markers.append(marker[0])
+        quote, line_markers = _scan_line_for_heredocs(line, quote)
+        markers.extend(
+            marker[0] for marker in line_markers if marker[2])
     return markers
+
+
+_FUNCTION_DEF_TAIL_RE = re.compile(
+    r"(?:^|[;&|()\n\s])(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*$"
+)
+_FUNCTION_KEYWORD_TAIL_RE = re.compile(
+    r"(?:^|[;&|()\n\s])function\s+[A-Za-z_][A-Za-z0-9_]*\s*$"
+)
+
+
+def _opens_function_body(script: str, index: int) -> bool:
+    """Whether the ``{`` at ``index`` opens a shell function definition."""
+    prefix = script[:index]
+    return bool(
+        _FUNCTION_DEF_TAIL_RE.search(prefix)
+        or _FUNCTION_KEYWORD_TAIL_RE.search(prefix)
+    )
+
+
+def _function_body_step(
+    script: str, index: int, depth: int, quote: str | None
+) -> tuple[int, int, str | None, str | None]:
+    """Advance one character inside a function body.
+
+    Returns (new index, new depth, new quote, brace to keep); only the
+    closing brace of the outermost body is kept, so the structure stays
+    visible while the body commands remain dropped.
+    """
+    char = script[index]
+    if quote is None and char == "{":
+        return index + 1, depth + 1, quote, None
+    if quote is None and char == "}":
+        depth -= 1
+        return index + 1, depth, quote, "}" if depth == 0 else None
+    new_quote, consumed = _scan_char(script, index, quote)
+    return index + consumed, depth, new_quote, None
+
+
+def _strip_function_bodies(script: str) -> str:
+    """Drop shell function bodies; defining a function runs nothing.
+
+    The release gate must provision in top-level commands: a body counts
+    only when someone calls the function, and the gate does not track calls.
+    Brace groups without a function name stay (they execute in place).
+    """
+    kept: list[str] = []
+    index = 0
+    depth = 0
+    quote: str | None = None
+    while index < len(script):
+        char = script[index]
+        if depth == 0 and char == "{" and _opens_function_body(script, index):
+            depth = 1
+            kept.append("{")
+            index += 1
+            continue
+        if depth > 0:
+            index, depth, quote, brace = _function_body_step(
+                script, index, depth, quote)
+            if brace:
+                kept.append(brace)
+            continue
+        kept.append(char)
+        new_quote, consumed = _scan_char(script, index, quote)
+        quote = new_quote
+        index += consumed
+    return "".join(kept)
 
 
 # Provisioning commands must sit in command position (optionally behind the
@@ -434,7 +503,12 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     if quote == '"':
         if char == "`":
             return 1
-        if char == "(" and index > 0 and line[index - 1] == "$":
+        if (
+            char == "("
+            and index > 0
+            and line[index - 1] == "$"
+            and (index < 2 or line[index - 2] != "\\")
+        ):
             return 1
         return 0
     if char == ";":
@@ -594,7 +668,7 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
             "delimiter, so its toolchain provisioning cannot be verified "
             "statically; use a plain delimiter"
         )
-    executable = _join_continuations(stripped)
+    executable = _join_continuations(_strip_function_bodies(stripped))
     segments = _command_segments(executable)
     if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
         return (
