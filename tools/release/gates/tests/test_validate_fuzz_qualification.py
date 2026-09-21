@@ -865,6 +865,11 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
         + validator.REPLAY_ALLOWANCE_SECONDS
     )
     assert total <= validator.RELEASE_JOB_LIMIT_SECONDS
+    # The upper-bound assertion alone would accept reverting FUZZ_JOB_BUDGET
+    # (the pre-fix value still fits the total), silently consuming the
+    # post-envelope reserve; enforce the reserve floor as well.
+    reserve = validator.RELEASE_JOB_LIMIT_SECONDS - total
+    assert reserve >= validator.MIN_POST_ENVELOPE_RESERVE_SECONDS
     # The normal-mode schedule (twelve soak-only targets, the slow target's
     # soak plus a chase at 20 executions/second, one closing soak) must fit
     # inside the envelope with the per-invocation overheads.
