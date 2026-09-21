@@ -45,8 +45,8 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 | glibc-based Linux (Ubuntu, Debian, RHEL, AlmaLinux, Amazon Linux) | DEB/RPM | `release-packages.yml` (GitHub Releases) |
 | musl-based Linux (Alpine, etc.) | Dynamic-module tarball | `release-packages.yml` `musl-build` job (GitHub Releases) — pair it with an ABI-compatible NGINX binary per the compatibility matrix; `release-binaries.yml` remains as the manual rebuild tool only |
 
-DEB and RPM packages are built on glibc-based build images and target
-glibc-based distributions only. For musl-based environments (Alpine Linux,
+The release pipeline builds DEB and RPM packages on glibc-based build images,
+and those packages target glibc-based distributions only. For musl-based environments (Alpine Linux,
 and so on), use the pre-built dynamic-module tarball from the musl-build job
 of the release-packages workflow (it is a loadable module artifact, not a
 static server binary — pair it with an ABI-compatible NGINX executable, see

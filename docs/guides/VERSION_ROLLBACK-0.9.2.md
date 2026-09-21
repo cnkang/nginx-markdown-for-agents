@@ -616,8 +616,8 @@ rollback API exists.
 
 ## Known Irreversible Changes
 
-There is no irreversible on-disk state change, but the public configuration
-and bundled ABI changes are not reversible by swapping only the binary:
+There is no irreversible on-disk state change, but swapping only the binary
+cannot revert the public configuration and bundled ABI changes:
 
 - Diagnostics mapping fix is backward-compatible
 - C reason code constants include the 0.9.2 registry additions
@@ -664,6 +664,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: overview wording updated for the released v0.9.2 |
 | 0.9.2 | 2026-09-17 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |
 | 0.9.2 | 2026-08-24 | Kang | Both shutdown blocks reuse the guarded systemd-detection logic with manual-master verification; MODULES_DIR fallback no longer guesses the first existing directory and requires explicit configuration |

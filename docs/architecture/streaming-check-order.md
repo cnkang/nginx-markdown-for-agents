@@ -120,9 +120,9 @@ the request passes through without ever reaching the streaming path selector.
   `ngx_http_markdown_is_streaming()` check (step 4) catches
   user-configured `markdown_stream_excluded_types`, and the streaming engine selector
   (step 9, Rule 6) provides a final defense layer.
-- **Verdict**: CONFIRMED -- implicitly excluded by content_type allowlist
-  before streaming, explicitly excluded by `stream_type_excluded()` for
-  defense-in-depth.
+- **Verdict**: CONFIRMED -- the content_type allowlist excludes them
+  implicitly before streaming, and `stream_type_excluded()` excludes them
+  explicitly for defense-in-depth.
 
 ### Resource limits -- size_limit (Requirement 1) -- PASS
 
@@ -146,7 +146,7 @@ the request passes through without ever reaching the streaming path selector.
   `ngx_http_markdown_parse_encoding_chain_ffi()` validates the complete chain.
   Malformed, unknown-token, and depth-exceeded results enter the configured
   error-policy handler without starting a decoder. Valid single-layer chains
-  can use controlled streaming decode; the module routes valid multi-layer
+  can use controlled streaming decode. The module routes valid multi-layer
   chains to bounded full-buffer decoding.
 - **Ordering**: Collection and chain parsing execute before
   `ngx_http_markdown_select_processing_path()`.

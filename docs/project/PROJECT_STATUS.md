@@ -59,13 +59,13 @@ with the tag, GitHub Release, package assets, and checksums.
 - **Reason-code registry normalization**: one declarative lowercase registry
   now drives Rust, C, logs, metrics, diagnostics, and generated projections.
   The project removed the former C-only uppercase mirror.
-- **README consistency verification**: English and Chinese READMEs verified
-  for version, directive, and default-value consistency.
+- **README consistency verification**: the release check confirmed that the
+  English and Chinese READMEs agree on version, directives, and default values.
 
 ### Historical release records
 
-Release-specific implementation recaps before the current 0.9.x line are
-kept in the [release notes](../releases/) and [CHANGELOG](../../CHANGELOG.md).
+The project keeps release-specific implementation recaps before the current
+0.9.x line in the [release notes](../releases/) and [CHANGELOG](../../CHANGELOG.md).
 This status document intentionally records the current release state and
 verification posture rather than duplicating the historical project ledger.
 
@@ -76,8 +76,8 @@ verification posture rather than duplicating the historical project ledger.
 - `tools/harness/check_harness_sync.py` and Make targets
   `make harness-check` / `make harness-check-full` provide executable
   validation instead of prose-only workflow rules.
-- Optional local adapter inputs remain supported, but public repository
-  validation no longer depends on private local assets being present.
+- The project still supports optional local adapter inputs, but public
+  repository validation no longer depends on private local assets being present.
 - The harness now records short-lived execution memory in a user-local state
   carrier instead of tracked repository docs.
 
@@ -447,6 +447,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: 0.9.2 marked as the stable release and published across the status page |
 | 0.9.2 | 2026-08-24 | Kang | Trimmed historical release recaps and kept the active status page linked to release notes and the changelog |
