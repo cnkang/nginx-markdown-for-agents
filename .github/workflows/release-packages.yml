@@ -1227,10 +1227,14 @@ jobs:
           set -euo pipefail
           # The gate scripts resolve cargo, rustc and rustfmt through Rustup
           # shims (streaming evidence generation, the reason-codegen drift
-          # check), so the pinned toolchain must be installed and PATH-visible
-          # inside this job.  Provision serially with retries up front so no
-          # shim auto-install races happen mid-gate.  The nightly toolchain
-          # and cargo-fuzz belong to the separate fuzz qualification job.
+          # check), so the pinned toolchain must be installed and
+          # PATH-visible inside this job.  Provision through the verified
+          # installer (checksum-validated rustup-init, explicit bash) and add
+          # the rustfmt component the drift check needs; the installer's
+          # minimal profile does not include it.  Provision serially with
+          # retries up front so no shim auto-install races happen mid-gate.
+          # The nightly toolchain and cargo-fuzz belong to the separate fuzz
+          # qualification job.
           retry() {
             attempts="$1"
             shift
@@ -1246,10 +1250,14 @@ jobs:
             done
           }
           rustup set auto-self-update disable
-          retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal \
-            --component rustfmt --component clippy --component rust-src \
-            --no-self-update
+          retry 5 bash ./packaging/scripts/install-verified-rustup.sh \
+            --arch amd64 \
+            --toolchain "${RUST_TOOLCHAIN}"
+          retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
+          "$HOME/.cargo/bin/rustc" --version
+          "$HOME/.cargo/bin/cargo" --version
+          "$HOME/.cargo/bin/rustfmt" --version
         shell: bash
 
       - name: Verify release tag protection
@@ -1480,8 +1488,10 @@ jobs:
           rustup set auto-self-update disable
           # cargo-fuzz builds against the nightly rust-src; install it up
           # front so no component download happens mid-qualification.
-          retry 5 rustup toolchain install nightly --profile minimal \
-            --component rust-src --no-self-update
+          retry 5 bash ./packaging/scripts/install-verified-rustup.sh \
+            --arch amd64 \
+            --toolchain nightly
+          retry 5 rustup component add --toolchain nightly rust-src
           retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
         shell: bash
 

@@ -61,8 +61,15 @@ def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
         if isinstance(step, dict)
     )
     assert "validate_fuzz_qualification.py --mode real" not in gate_text
-    # Publish and the integrity junctions must require the fuzz job.
-    for job in ("publish", "integrity-checksums", "official-docker-release-gate"):
+    # Publish and every integrity/release junction must require the fuzz job.
+    for job in (
+        "publish",
+        "integrity-checksums",
+        "integrity-signing",
+        "integrity-signature",
+        "official-docker-release-gate",
+        "rc-release-gates",
+    ):
         needs = jobs[job]["needs"]
         assert "fuzz-qualification" in needs, job
     publish_if = str(jobs["publish"]["if"])
@@ -90,81 +97,131 @@ def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
     """Only executable commands may satisfy the provisioning gate.
 
     This mirrors the incident class: the gate binds the provisioning to the
-    job that runs the drift check, and a commented-out install or drift
-    check, a missing rustfmt component, or an unpinned toolchain install
-    must each fail it.
+    job that runs the drift check; the pinned toolchain must come through
+    the verified installer with an explicit bash invocation and the rustfmt
+    component, while commented-out, echoed, heredoc-embedded, quoted-text or
+    separator-bypassed commands must each fail it.
     """
     from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
     drift = "python3 tools/reason-codegen/generate.py --check\n"
-    install = (
-        'retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" '
-        "--profile minimal \\\n"
-        "  --component rustfmt --no-self-update\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
     )
-
-    assert packaging_gate._release_gate_toolchain_issue(drift)  # no install
-    assert packaging_gate._release_gate_toolchain_issue(  # commented install
-        drift + "# " + install
-    )
-    assert packaging_gate._release_gate_toolchain_issue(  # no rustfmt
-        drift + install.replace("--component rustfmt ", "")
-    )
-    assert packaging_gate._release_gate_toolchain_issue(  # unpinned toolchain
-        drift + "rustup toolchain install nightly --component rustfmt\n"
-    )
-    assert packaging_gate._release_gate_toolchain_issue(  # commented drift check
-        "# " + drift + install
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
     )
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift
-            + "bash ./packaging/scripts/install-verified-rustup.sh "
-            '--arch x86_64 --toolchain "${RUST_TOOLCHAIN}"\n'
+            drift + installer + component
         )
         is None
     )
-    assert packaging_gate._release_gate_toolchain_issue(drift + install) is None
+
+    # Raw rustup installs are rejected: the verified installer is required.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + 'retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" --profile '
+        "minimal --component rustfmt\n"
+        + component
+    )
+    # The installer must be invoked with an explicit bash.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + installer.replace("bash ./", "./") + component
+    )
+    # rustfmt must be provisioned for the pinned toolchain.
+    assert packaging_gate._release_gate_toolchain_issue(drift + installer)
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + installer
+        + "retry 5 rustup component add --toolchain nightly rustfmt\n"
+    )
+    # No drift check means the provisioning expectation is stale.
+    assert packaging_gate._release_gate_toolchain_issue(installer + component)
+    # A commented-out installer or drift check never counts.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + "# " + installer + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        "# " + drift + installer + component
+    )
 
     # Command position matters: echoes and heredoc bodies must not count.
-    echo_install = 'echo \'rustup toolchain install "${RUST_TOOLCHAIN}" --component rustfmt\'\n'
-    assert packaging_gate._release_gate_toolchain_issue(drift + echo_install)
-    echo_drift = "echo 'python3 tools/reason-codegen/generate.py --check'\n"
-    assert packaging_gate._release_gate_toolchain_issue(echo_drift + install)
-    heredoc = (
-        "cat <<'EOF'\n"
-        + "rustup toolchain install " + '"${RUST_TOOLCHAIN}" --component rustfmt\n'
-        + "python3 tools/reason-codegen/generate.py --check\n"
-        + "EOF\n"
+    echo_install = "echo '" + installer.strip() + "'\n"
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + echo_install + component
     )
+    echo_drift = "echo 'python3 tools/reason-codegen/generate.py --check'\n"
+    assert packaging_gate._release_gate_toolchain_issue(
+        echo_drift + installer + component
+    )
+    heredoc = "cat <<'EOF'\n" + installer + component + drift + "EOF\n"
     assert packaging_gate._release_gate_toolchain_issue(heredoc)
+    # The backslash-escaped delimiter form is a heredoc too.
+    heredoc_escaped = "cat <<\\EOF\n" + installer + component + drift + "EOF\n"
+    assert packaging_gate._release_gate_toolchain_issue(heredoc_escaped)
 
     # A later command on the same line must not satisfy the requirement:
-    # the separator ends the install command, so an echoed component after
-    # `;`, `&&` or a pipe never counts.
+    # the separator ends the provisioning command.
     assert packaging_gate._release_gate_toolchain_issue(
         drift
-        + 'rustup toolchain install "${RUST_TOOLCHAIN}"; echo --component rustfmt\n'
-    )
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift
-        + 'rustup toolchain install "${RUST_TOOLCHAIN}" && echo --component rustfmt\n'
-    )
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift
-        + 'rustup toolchain install "${RUST_TOOLCHAIN}" | echo --component rustfmt\n'
-    )
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift
-        + './packaging/scripts/install-verified-rustup.sh; '
+        + "bash ./packaging/scripts/install-verified-rustup.sh; "
         'echo --toolchain "${RUST_TOOLCHAIN}"\n'
+        + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + installer
+        + 'rustup component add --toolchain "${RUST_TOOLCHAIN}"; echo rustfmt\n'
+    )
+    # Quoted text that spans lines is data, not a command.
+    multiline_quote = (
+        'echo "data\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "python3 tools/reason-codegen/generate.py --check\n"
+        '"\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift + installer + multiline_quote
     )
     # The component before a trailing separator is still the same command.
     assert (
         packaging_gate._release_gate_toolchain_issue(
             drift
-            + 'retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" '
-            "--profile minimal --component rustfmt; echo done\n"
+            + installer
+            + 'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" '
+            "rustfmt; echo done\n"
+        )
+        is None
+    )
+
+
+def test_workflow_rejects_raw_toolchain_installs() -> None:
+    """Every toolchain install in the workflow must use the verified installer.
+
+    The release workflows provision through
+    ``packaging/scripts/install-verified-rustup.sh`` (checksum-validated
+    rustup-init); a raw ``rustup toolchain install`` anywhere in the
+    workflow must fail the gate.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - {name: a, run: 'echo hi'}\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - name: b\n"
+        "        run: |\n"
+        "          retry 5 rustup toolchain install nightly --profile minimal\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(workflow)
+    assert (
+        packaging_gate._raw_toolchain_install_issue(
+            WORKFLOW.read_text(encoding="utf-8")
         )
         is None
     )

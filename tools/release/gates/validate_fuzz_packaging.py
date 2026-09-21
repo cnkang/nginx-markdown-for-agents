@@ -228,10 +228,16 @@ def check_release_workflow(result: ValidationResult) -> None:
         result.fail("pkg:smoke-test-job", "no smoke test job in workflow")
 
 
-def _strip_comment_from_line(line: str) -> str:
-    """Drop an unquoted trailing comment from a single line, respecting quotes."""
+def _strip_comment_from_line(
+    line: str, quote: str | None = None
+) -> tuple[str, str | None]:
+    """Drop an unquoted trailing comment; return the line and end quote state.
+
+    ``quote`` carries the open-quote state from the previous line, so a
+    quoted string that spans lines never lets an embedded ``#`` start a
+    comment.
+    """
     kept: list[str] = []
-    quote: str | None = None
     for index, char in enumerate(line):
         if quote is not None:
             kept.append(char)
@@ -241,20 +247,35 @@ def _strip_comment_from_line(line: str) -> str:
             quote = char
             kept.append(char)
         elif char == "#" and (index == 0 or line[index - 1] in " \t"):
-            break
+            return "".join(kept), None
         else:
             kept.append(char)
-    return "".join(kept)
+    return "".join(kept), quote
 
 
 def _strip_shell_comments(script: str) -> str:
     """Remove shell comments from run scripts, respecting quotes.
 
     A leading or whitespace-preceded ``#`` starts a comment; ``#`` inside a
-    quoted string is literal.  Escape handling is intentionally simple: the
-    run scripts in this repository do not rely on escaped comment markers.
+    quoted string is literal.  Quote state carries across lines: a line that
+    begins inside an open quoted string is string data, not a command, so it
+    is blanked and can never satisfy a command-position check.  Escape
+    handling is intentionally simple: the run scripts in this repository do
+    not rely on escaped comment markers.
     """
-    return "\n".join(_strip_comment_from_line(line) for line in script.splitlines())
+    kept: list[str] = []
+    quote: str | None = None
+    for line in script.splitlines():
+        if quote is not None:
+            kept.append("")
+            for char in line:
+                if char == quote:
+                    quote = None
+                    break
+            continue
+        stripped, quote = _strip_comment_from_line(line, quote)
+        kept.append(stripped)
+    return "\n".join(kept)
 
 
 def _join_continuations(script: str) -> str:
@@ -262,15 +283,17 @@ def _join_continuations(script: str) -> str:
     return re.sub(r"\\\n[ \t]*", " ", script)
 
 
-_HEREDOC_MARKER_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+_HEREDOC_MARKER_RE = re.compile(r"<<-?\s*\\?['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
 
 
 def _strip_heredocs(script: str) -> str:
     """Drop heredoc bodies so their content never counts as a command.
 
     The marker line itself stays (it is executable); every line up to and
-    including the terminator is dropped.  Redirection forms beyond the plain
-    ``<<WORD`` / ``<<-WORD`` shape are intentionally not interpreted.
+    including the terminator is dropped.  The marker accepts the quoted and
+    backslash-escaped delimiter forms (``<<'WORD'``, ``<<"WORD"``,
+    ``<<\\WORD``); redirection forms beyond ``<<WORD`` / ``<<-WORD`` are
+    intentionally not interpreted.
     """
     kept: list[str] = []
     pending: str | None = None
@@ -292,20 +315,42 @@ def _strip_heredocs(script: str) -> str:
 # stay inside the same command: an unbounded tail would cross command
 # separators, letting `rustup toolchain install "${RUST_TOOLCHAIN}"; echo
 # --component rustfmt` satisfy the check without installing rustfmt.
+# Release workflows must provision toolchains through the verified installer
+# (with an explicit `bash` invocation) and add the rustfmt component
+# separately; raw `rustup toolchain install` commands are rejected.
 _PROVISION_PREFIX = r"^(?:retry\s+[0-9]+\s+)?"
-_PINNED_INSTALL_RE = re.compile(
-    _PROVISION_PREFIX
-    + r"rustup\s+toolchain\s+install\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
-    + r"[^;|&]*--component\s+rustfmt"
-)
 _VERIFIED_INSTALLER_RE = re.compile(
     _PROVISION_PREFIX
-    + r"(?:bash\s+)?\./packaging/scripts/install-verified-rustup\.sh\b"
-    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}"
+    + r"bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
+    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
+)
+_COMPONENT_ADD_RE = re.compile(
+    _PROVISION_PREFIX + r"rustup\s+component\s+add\b[^;|&]*"
+)
+_RAW_INSTALL_RE = re.compile(
+    _PROVISION_PREFIX + r"rustup\s+toolchain\s+install\b"
 )
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
 )
+
+
+def _provides_rustfmt_component(run_scripts: str) -> bool:
+    """Whether a command installs rustfmt for the pinned toolchain.
+
+    Accepts either argument order inside a single ``rustup component add``
+    command segment; the segment boundary keeps a later command's arguments
+    from satisfying the requirement.
+    """
+    for line in run_scripts.splitlines():
+        for segment in re.split(r";|&&|\|\||\|", line):
+            if not _COMPONENT_ADD_RE.match(segment.strip()):
+                continue
+            if re.search(r"\brustfmt\b", segment) and re.search(
+                r"--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?", segment
+            ):
+                return True
+    return False
 
 
 def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
@@ -331,15 +376,61 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
     return "\n".join(scripts)
 
 
+def _all_job_run_scripts(workflow_content: str) -> str | None:
+    """Return the concatenated run scripts of every job, or None when the
+    workflow cannot be parsed."""
+    try:
+        workflow = yaml.safe_load(workflow_content)
+    except yaml.YAMLError:
+        return None
+    jobs = (workflow or {}).get("jobs") if isinstance(workflow, dict) else None
+    if not isinstance(jobs, dict):
+        return None
+    scripts: list[str] = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
+                scripts.append(step["run"])
+    return "\n".join(scripts)
+
+
+def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
+    """Reject raw ``rustup toolchain install`` anywhere in the workflow.
+
+    Release workflows must provision toolchains through the verified
+    installer, which validates the downloaded rustup-init checksum before
+    execution.
+    """
+    all_scripts = _all_job_run_scripts(workflow_content)
+    if all_scripts is None:
+        return None
+    executable = _join_continuations(
+        _strip_heredocs(_strip_shell_comments(all_scripts))
+    )
+    for line in executable.splitlines():
+        if _RAW_INSTALL_RE.match(line.strip()):
+            return (
+                "release workflows must provision Rust toolchains through "
+                "the verified installer; found a raw `rustup toolchain "
+                "install` command"
+            )
+    return None
+
+
 def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     """Return the toolchain provisioning issue, or None when satisfied.
 
     Only executable commands in command position count: shell comments are
-    stripped, heredoc bodies dropped, and backslash continuations joined, so
-    a commented-out, echoed, or heredoc-embedded install or drift check
-    cannot satisfy the gate.  The pinned ${RUST_TOOLCHAIN} provisioning must
-    install the rustfmt component in the same command, or come from the
-    verified installer, whose default profile provides rustfmt.
+    stripped (with quote state carried across lines), heredoc bodies are
+    dropped, and backslash continuations are joined, so a commented-out,
+    echoed, embedded or quoted-text install or drift check cannot satisfy
+    the gate.  The release gate must provision the pinned ${RUST_TOOLCHAIN}
+    through the verified installer with an explicit ``bash`` invocation and
+    add the rustfmt component for that toolchain: the gate scripts resolve
+    rustfmt through Rustup shims, while the installer's minimal profile
+    does not include it.
     """
     executable = _join_continuations(
         _strip_heredocs(_strip_shell_comments(run_scripts))
@@ -351,14 +442,18 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
             f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
             "expectation with the job split"
         )
-    if not any(
-        _PINNED_INSTALL_RE.match(line) or _VERIFIED_INSTALLER_RE.match(line)
-        for line in lines
-    ):
+    if not any(_VERIFIED_INSTALLER_RE.match(line) for line in lines):
         return (
-            "the release-gate job must install the pinned Rust toolchain "
-            '(rustup toolchain install "${RUST_TOOLCHAIN}") with the rustfmt '
-            "component so cargo, rustc and rustfmt resolve for the gate scripts"
+            "the release-gate job must provision the pinned Rust toolchain "
+            "through the verified installer (bash ./packaging/scripts/"
+            'install-verified-rustup.sh --toolchain "${RUST_TOOLCHAIN}")'
+        )
+    if not _provides_rustfmt_component(executable):
+        return (
+            "the release-gate job must add the rustfmt component for the "
+            "pinned toolchain (rustup component add --toolchain "
+            '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
+            "resolve for the gate scripts"
         )
     return None
 
@@ -381,12 +476,14 @@ def check_release_gate_toolchain(result: ValidationResult) -> None:
         )
         return
 
-    issue = _release_gate_toolchain_issue(run_scripts)
+    issue = _raw_toolchain_install_issue(content) or _release_gate_toolchain_issue(
+        run_scripts
+    )
     if issue is None:
         result.pass_(
             PKG_RELEASE_GATE_TOOLCHAIN_GATE,
-            "release gate installs the pinned Rust toolchain "
-            "(cargo/rustc/rustfmt)",
+            "release gate provisions the pinned Rust toolchain through the "
+            "verified installer (cargo/rustc/rustfmt)",
         )
     else:
         result.fail(PKG_RELEASE_GATE_TOOLCHAIN_GATE, issue)
