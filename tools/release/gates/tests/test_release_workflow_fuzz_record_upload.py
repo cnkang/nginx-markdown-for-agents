@@ -847,7 +847,14 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
         drift + 'false && ' + installer + component
     )
     assert packaging_gate._release_gate_toolchain_issue(
-        'drift\n"false" && ' + installer + component
+        drift + '"false" && ' + installer + component
+    )
+    # ...including the live side: a quoted `true` keeps the chain running.
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift + '"true" && ' + installer + component
+        )
+        is None
     )
     # `exit` ends that shell: nothing after it runs.
     assert packaging_gate._release_gate_toolchain_issue(
