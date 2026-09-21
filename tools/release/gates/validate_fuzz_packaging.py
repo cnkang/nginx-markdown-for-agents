@@ -720,19 +720,31 @@ def _trim_body_after_terminator(body: str) -> str:
     quoting survive for the checks that follow.  A standalone failure under
     ``set -e`` ends the shell and is handled by the live-segment scan.
     """
-    kept: list[str] = ["\n"]
+    segments = _command_segments_with_separators(body)
+    cut = len(body)
     depth = 0
-    for segment, separator in _command_segments_with_separators(body):
+    previous: bool | None = None
+    search_from = 0
+    for segment, separator in segments:
+        found = body.find(segment, search_from)
+        if found < 0:
+            break
         keyword = _segment_keyword(segment)
         if keyword in _CLOSE_KEYWORDS:
             depth = max(0, depth - 1)
-        kept.append(segment)
-        if depth == 0 and keyword == "return":
+        if (
+            depth == 0
+            and keyword == "return"
+            and not _chain_skips(separator, previous)
+        ):
+            cut = found
             break
         if keyword in ("if", "while", "until", "for", "case", "select"):
             depth += 1
-        kept.append(separator or "\n")
-    return "".join(kept)
+        previous = _segment_literal(segment)
+        search_from = found + len(segment)
+    # The leading newline keeps the body's first command off the brace.
+    return "\n" + body[:cut]
 
 
 def _strip_function_bodies(script: str) -> str:
@@ -862,7 +874,11 @@ def _retry_runs_its_target(script: str) -> bool:
     for name, lo, hi in effective:
         if name != "retry":
             continue
-        return re.search(r"\$@|\$\{@\}", script[lo:hi]) is not None
+        for segment, _separator in _command_segments_with_separators(script[lo:hi]):
+            words = segment.split()
+            if words and _resolve_heredoc_word(words[0])[0] in ("$@", "${@}"):
+                return True
+        return False
     return True
 
 
@@ -889,7 +905,8 @@ _TOOLCHAIN_VALUE_RE = (
     r"(?:\"\$\{RUST_TOOLCHAIN\}\"|(?<![\w'])\$\{RUST_TOOLCHAIN\}(?![\w']))"
 )
 _VERIFIED_INSTALLER_RE = re.compile(
-    r"^bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
+    r"^bash\s+[\"']?\./packaging/scripts/install-verified-rustup\.sh[\"']?"
+    r"(?=\s|$)"
     + r"[^;|&]*--toolchain\s+" + _TOOLCHAIN_VALUE_RE + r"(?=$|[\s;|&)])"
 )
 _COMPONENT_ADD_RE = re.compile(
@@ -1034,6 +1051,9 @@ def _segment_literal(segment: str) -> bool | None:
     if not words:
         return None
     first = _resolve_heredoc_word(words[0])[0]
+    while first in ("command", "builtin") and len(words) > 1:
+        words = words[1:]
+        first = _resolve_heredoc_word(words[0])[0]
     if first in (":", "true"):
         return True
     if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
@@ -1057,6 +1077,52 @@ def _segment_keyword(segment: str) -> str:
     """The segment's first word after quote removal (``""`` when empty)."""
     words = segment.split()
     return _resolve_heredoc_word(words[0])[0] if words else ""
+
+
+def _pair_condition(
+    pairs: list[tuple[str, str]], index: int, keyword: str
+) -> bool | None:
+    """The literal condition of an ``if``/``elif`` header (None otherwise)."""
+    if keyword not in ("if", "elif"):
+        return None
+    return _condition_tristate(pairs, index)
+
+
+def _combine_tristate(operator: str, left: bool | None, right: bool | None) -> bool | None:
+    """Fold two literal parts under ``&&``/``||`` (None = unevaluated)."""
+    if operator == "&&":
+        if left is False or right is False:
+            return False
+        if left is None or right is None:
+            return None
+        return True
+    if left is True or right is True:
+        return True
+    if left is None or right is None:
+        return None
+    return False
+
+
+def _condition_tristate(
+    pairs: list[tuple[str, str]], index: int
+) -> bool | None:
+    """The literal value of an ``if``/``elif`` condition across segments.
+
+    The segmentizer splits a condition at its ``&&``/``||`` operators, so
+    the parts fold back together; the condition ends at the ``then`` marker
+    or at a separator that is not a chain operator.
+    """
+    value = _condition_literal(pairs[index][0])
+    probe = index + 1
+    while probe < len(pairs) and probe <= index + 64:
+        segment, separator = pairs[probe]
+        if _segment_keyword(segment) in _BODY_MARKERS:
+            break
+        if separator not in ("&&", "||"):
+            break
+        value = _combine_tristate(separator, value, _segment_literal(segment))
+        probe += 1
+    return value
 
 
 def _condition_literal(segment: str) -> bool | None:
@@ -1098,17 +1164,21 @@ def _is_exec_replacement(segment: str) -> bool:
     return any(not _is_redirection_word(word) for word in words[1:])
 
 
-def _is_errexit_segment(segment: str) -> bool:
-    """Whether the segment enables ``set -e``-style error exit."""
+def _set_errexit_state(segment: str) -> bool | None:
+    """Whether the segment enables (True), disables (False) errexit or
+    leaves it alone (None)."""
     words = segment.split()
     if not words or words[0] != "set":
-        return False
+        return None
+    state: bool | None = None
     for word in words[1:]:
         if word == "errexit":
-            return True
-        if word.startswith("-") and "e" in word[1:]:
-            return True
-    return False
+            state = True
+        elif word.startswith("-") and "e" in word[1:]:
+            state = True
+        elif word.startswith("+") and "e" in word[1:]:
+            state = False
+    return state
 
 
 def _chain_skips(separator: str, previous: bool | None) -> bool:
@@ -1133,10 +1203,9 @@ def _branch_chain_state(condition: bool | None) -> int:
 
 
 def _branch_select(
-    branches: list[tuple[bool, int]], keyword: str, segment: str
+    branches: list[tuple[bool, int]], keyword: str, condition: bool | None
 ) -> None:
     """Open the branch chain for an ``if`` or advance it for an ``elif``."""
-    condition = _condition_literal(segment)
     if keyword == "elif" and branches:
         _runs, chain = branches[-1]
         runs = chain == _CLEAR_CHAIN and condition is True
@@ -1149,7 +1218,7 @@ def _branch_select(
 
 
 def _branch_keyword_step(
-    branches: list[tuple[bool, int]], segment: str
+    branches: list[tuple[bool, int]], segment: str, condition: bool | None
 ) -> bool:
     """Update the branch stack for a construct keyword; True when handled.
 
@@ -1167,7 +1236,7 @@ def _branch_keyword_step(
     if keyword in _BODY_MARKERS:
         return True
     if keyword in ("if", "elif"):
-        _branch_select(branches, keyword, segment)
+        _branch_select(branches, keyword, condition)
         return True
     if keyword == "else":
         if branches:
@@ -1180,23 +1249,65 @@ def _branch_keyword_step(
     return False
 
 
-def _segment_ends_shell(segment: str, following: str, errexit: bool) -> bool:
+def _always_failing_functions(script: str) -> set[str]:
+    """Functions whose last definition always returns a failure status."""
+    effective, _superseded = _effective_body_spans(script)
+    return {
+        name
+        for name, lo, hi in effective
+        if _body_fails_unconditionally(script[lo:hi])
+    }
+
+
+def _body_fails_unconditionally(body: str) -> bool:
+    """Whether a body's every path returns a failure status."""
+    depth = 0
+    failure_return = False
+    success_return = False
+    for segment, _separator in _command_segments_with_separators(body):
+        keyword = _segment_keyword(segment)
+        if keyword in _CLOSE_KEYWORDS:
+            depth = max(0, depth - 1)
+        elif keyword in ("if", "while", "until", "for", "case", "select"):
+            depth += 1
+        elif depth == 0 and keyword == "return":
+            words = segment.split()
+            arg = words[1].strip("'\"") if len(words) > 1 else ""
+            if arg and arg != "0":
+                failure_return = True
+            else:
+                success_return = True
+    return failure_return and not success_return
+
+
+def _segment_ends_shell(
+    segment: str,
+    following: str,
+    errexit: bool,
+    failing: frozenset[str] = frozenset(),
+) -> bool:
     """Whether the segment ends its shell.
 
     ``exit`` always ends it, ``exec cmd`` replaces the process, and a
     standalone failing command ends it under ``set -e`` (errexit ignores
-    failures inside an ``&&``/``||``/pipeline list).
+    failures inside an ``&&``/``||``/pipeline list).  A call to a local
+    function that always returns a failure status counts as failing too.
     """
     if _segment_keyword(segment) == "exit" or _is_exec_replacement(segment):
         return True
+    value = _segment_literal(segment)
+    if value is None and failing:
+        words = segment.split()
+        if words and _resolve_heredoc_word(words[0])[0] in failing:
+            value = False
     return (
-        errexit
-        and _segment_literal(segment) is False
-        and following not in ("&&", "||", "|")
+        errexit and value is False and following not in ("&&", "||", "|")
     )
 
 
-def _live_command_segments(script: str) -> list[str]:
+def _live_command_segments(
+    script: str, failing: frozenset[str] = frozenset()
+) -> list[str]:
     """Segments on the unconditional path of one shell's script.
 
     A command counts when the analyzer can prove it runs: an ``if`` with an
@@ -1217,7 +1328,10 @@ def _live_command_segments(script: str) -> list[str]:
         # Each tuple carries the separator BEFORE its segment, so the
         # separator after this segment comes from the next tuple.
         following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
-        if _branch_keyword_step(branches, segment):
+        condition = _pair_condition(
+            pairs, index, _segment_keyword(segment)
+        )
+        if _branch_keyword_step(branches, segment, condition):
             previous = None
             continue
         if exited or not _region_runs(branches):
@@ -1225,12 +1339,13 @@ def _live_command_segments(script: str) -> list[str]:
         if _chain_skips(separator, previous):
             continue
         live.append(segment)
-        if _segment_ends_shell(segment, following, errexit):
+        if _segment_ends_shell(segment, following, errexit, failing):
             exited = True
             previous = None
             continue
-        if _is_errexit_segment(segment):
-            errexit = True
+        state = _set_errexit_state(segment)
+        if state is not None:
+            errexit = state
         previous = _segment_literal(segment)
     return live
 
@@ -1337,14 +1452,27 @@ def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
     return scripts
 
 
+def _quote_cleaned_command(text: str) -> str:
+    """The command with its first word's quotes removed.
+
+    Bash resolves the unquoted name, so ``'rustup' toolchain install`` runs
+    the real ``rustup``.
+    """
+    first, _, rest = text.partition(" ")
+    cleaned = _resolve_heredoc_word(first)[0]
+    return cleaned + ((" " + rest) if rest else "")
+
+
 def _raw_install_in_segment(segment: str) -> bool:
     """Whether the segment runs a raw install, directly or via a shell -c."""
     stripped = _strip_provision_wrappers(segment)
-    if _RAW_INSTALL_RE.match(stripped):
+    if _RAW_INSTALL_RE.match(_quote_cleaned_command(stripped)):
         return True
     if stripped != segment:
         return any(
-            _RAW_INSTALL_RE.match(_strip_provision_wrappers(inner))
+            _RAW_INSTALL_RE.match(
+                _quote_cleaned_command(_strip_provision_wrappers(inner))
+            )
             for inner in _command_segments(stripped)
         )
     return False
@@ -1430,8 +1558,11 @@ def _release_gate_toolchain_issue(
                 "statically; use a plain delimiter"
             )
         retry_trusted = _retry_runs_its_target(stripped)
+        failing = frozenset(_always_failing_functions(stripped))
         segments.extend(
-            _provision_candidates(_live_command_segments(executable), retry_trusted)
+            _provision_candidates(
+                _live_command_segments(executable, failing), retry_trusted
+            )
         )
     if not any(
         _DRIFT_CHECK_RE.match(_strip_provision_wrappers(segment))
