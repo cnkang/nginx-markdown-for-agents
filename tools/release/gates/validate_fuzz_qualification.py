@@ -64,20 +64,31 @@ TIME_CONTINUATION_CEILING = 3600
 # Total time the executions-floor chase may spend per target.  Bounding the
 # chase keeps a pathologically slow target from consuming the release job's
 # budget until CI kills the job before the validator can emit its record.
-TIME_CONTINUATION_BUDGET = 1800
+# Sized from the slowest blocking target: the multilayer decode fuzzer runs
+# on the order of twenty executions per second on CI, so 100k executions
+# need roughly 4200 seconds of loop time beyond the 900-second soak; the
+# budget must cover that plus one full invocation margin.
+TIME_CONTINUATION_BUDGET = 5400
 # Shared fuzz envelope for the whole real-mode run.  The per-target budgets
 # multiply across the fourteen blocking targets, so a single monotonic
 # deadline bounds the whole fuzz phase; exhausted targets fail fast with a
 # reason and the record is still emitted instead of CI killing the job
-# before it exists (release-gate timeout: 360 minutes).
-FUZZ_JOB_BUDGET = 13800
+# before it exists (release-gate timeout: 360 minutes).  Sized from the
+# real-mode arithmetic: twelve targets need only their 900-second soak
+# (fast targets clear 100k executions inside it), one target adds a chase
+# of roughly 40 minutes, one adds its soak, and the benchmark and remaining
+# gates need about an hour: 260 minutes of envelope fits the 360-minute
+# job with margin.
+FUZZ_JOB_BUDGET = 15600
 MAX_FUZZ_INVOCATIONS = 8
 # Subprocess margin over the fuzzer's own time cap: it covers process
 # startup, corpus replay (which -max_total_time does not count) and the
-# shutdown stats dump.  A single invocation may therefore overshoot the
-# shared deadline by up to this margin plus its replay time; that tolerance
-# is absorbed by the slack between FUZZ_JOB_BUDGET and the release job's
-# 360-minute cap.
+# shutdown stats dump.  A chase invocation's cap is reduced by this margin
+# so its total wall-clock allowance never exceeds the remaining
+# continuation budget, while the allowance always exceeds the cap itself.
+# A single invocation may therefore overshoot the shared deadline by up to
+# this margin plus its replay time; that tolerance is absorbed by the
+# slack between FUZZ_JOB_BUDGET and the release job's 360-minute cap.
 INVOCATION_TIMEOUT_MARGIN = 900
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
@@ -549,10 +560,15 @@ def _soak_invocation_schedule(
                  "-print_final_stats=1"]
         return flags, time_cap, None
     remaining_budget = TIME_CONTINUATION_BUDGET - continuation_spent
-    if remaining_budget < 1:
+    # The invocation's subprocess allowance (cap plus margin) must fit the
+    # remaining continuation budget, so the cap reserves the margin.  A
+    # remainder too small to host another invocation with its margin fails
+    # the target instead of scheduling a doomed one.
+    cap_max = int(remaining_budget) - INVOCATION_TIMEOUT_MARGIN
+    if remaining_budget < 1 or cap_max < 1:
         return [], 0, ("executions floor not reached within the "
                        "continuation budget")
-    time_cap = min(TIME_CONTINUATION_CEILING, int(remaining_budget))
+    time_cap = min(TIME_CONTINUATION_CEILING, cap_max)
     if cap_limit is not None:
         time_cap = min(time_cap, cap_limit)
     flags = [f"-runs={runs_remaining + startup_overhead}",
@@ -561,23 +577,16 @@ def _soak_invocation_schedule(
     return flags, time_cap, None
 
 
-def _soak_invocation_timeout(
-    time_cap: int, seconds_remaining: int, continuation_spent: float
-) -> int:
+def _soak_invocation_timeout(time_cap: int) -> int:
     """The subprocess timeout for one soak invocation.
 
-    The fuzzer's own cap plus the shutdown/replay margin, and a chase
-    invocation is additionally bounded by its remaining continuation budget
-    so the margin cannot push the invocation's total wall-clock allowance
-    past that budget.
+    The fuzzer's own cap plus the startup/replay/shutdown margin.  The
+    chase scheduler already reserves this margin inside the continuation
+    budget when it sizes the cap, so the allowance always exceeds the cap
+    (a cap without room for the margin is never scheduled) and never
+    exceeds the remaining budget.
     """
-    timeout = time_cap + INVOCATION_TIMEOUT_MARGIN
-    if seconds_remaining == 0:
-        timeout = min(timeout,
-                      max(1, int(TIME_CONTINUATION_BUDGET - continuation_spent)))
-    return timeout
-
-
+    return time_cap + INVOCATION_TIMEOUT_MARGIN
 def _account_soak_invocation(
     invocation: dict, startup_overhead: int, seconds_remaining: int
 ) -> tuple[int, float, float, str | None]:
@@ -636,8 +645,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
             break
         invocation = _invoke_fuzz(
             validated_target, flags,
-            timeout=_soak_invocation_timeout(time_cap, seconds_remaining,
-                                             continuation_spent))
+            timeout=_soak_invocation_timeout(time_cap))
         log_parts.append(invocation["stdout"] + "\n" + invocation["stderr"])
         executions, elapsed, charge, failure = _account_soak_invocation(
             invocation, startup_overhead, seconds_remaining)
