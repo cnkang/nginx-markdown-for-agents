@@ -878,14 +878,19 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
 
 
 def _blocking_target_count() -> int:
-    """How many blocking fuzz targets the release manifest declares."""
-    import json
+    """How many fuzz targets the release declares (from tracked inputs).
+
+    The blocking manifest is generated at run time and ignored by git, so a
+    clean checkout cannot read it; the fuzz crate's binary list is the
+    tracked source the generator itself counts.
+    """
+    import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[4]
-    manifest = root / "artifacts" / "release" / "0.9.2" / (
-        "blocking-fuzz-target-manifest.json")
-    return len(json.loads(manifest.read_text(encoding="utf-8"))["targets"])
+    cargo = (root / "components" / "rust-converter" / "fuzz" / "Cargo.toml")
+    return len(re.findall(
+        r"^\[\[bin\]\]", cargo.read_text(encoding="utf-8"), re.MULTILINE))
 
 
 def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:

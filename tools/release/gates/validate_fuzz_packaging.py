@@ -309,7 +309,7 @@ def _walk_removal_char(
     Backslashes escape the shell's special characters (the escaped character
     stays literal, never expansion), quotes toggle string state, and
     everything else passes through as data.  ``live`` marks an unescaped
-    ``$`` or backtick: outside single quotes the shell expands it.
+    ``$`` or backtick that would expand when nothing in the word is quoted.
     """
     char = raw[index]
     if char == "\\" and index + 1 < len(raw) and (
@@ -327,24 +327,26 @@ def _walk_removal_char(
 def _resolve_heredoc_word(raw: str) -> tuple[str, bool]:
     """Resolve a heredoc delimiter word; return (delimiter, dynamic).
 
-    Quote removal models the shell: single quotes keep their content
-    literal, double quotes still expand ``$`` and backticks, and a
-    backslash escapes the next character everywhere outside single quotes.
-    A live expansion character makes the word dynamic, because the shell
-    then resolves the terminator at runtime.
+    Quote removal models the shell.  When any part of the word is quoted
+    (quotes or backslashes), the shell performs quote removal only and never
+    expands it, so the delimiter is static; a fully unquoted word with a
+    live ``$`` or backtick depends on the environment at runtime.
     """
     resolved: list[str] = []
     dynamic = False
+    quoted = False
     quote: str | None = None
     index = 0
     while index < len(raw):
+        if raw[index] in ("'", '"', "\\"):
+            quoted = True
         quote, consumed, keep, live = _walk_removal_char(raw, index, quote)
         if keep is not None:
             if live and quote != "'":
                 dynamic = True
             resolved.append(keep)
         index += consumed
-    return "".join(resolved), dynamic
+    return "".join(resolved), dynamic and not quoted
 
 
 def _heredoc_marker_at(
@@ -367,8 +369,7 @@ def _heredoc_marker_at(
     if match is None:
         return None
     if match.group(2) is not None:
-        word = match.group(2)
-        dynamic = match.group(1) == '"' and ("$" in word or "`" in word)
+        word, dynamic = match.group(2), False
     else:
         word, dynamic = _resolve_heredoc_word(match.group(3))
     return word, match.group(0).startswith("<<-"), dynamic, match.end()
@@ -543,13 +544,14 @@ def _defined_function_names(script: str) -> set[str]:
 def _called_function_names(script: str, defined: set[str]) -> set[str]:
     """Names the script calls: in command position, not the definition.
 
-    A definition writes the name before ``()`` (or after ``function``), so
-    those occurrences are skipped; every other command-position use runs the
-    body.
+    A definition writes the name before ``()`` (or after ``function``), and
+    an argument (``echo provision``) is not a call; only a name in command
+    position -- line start, after a separator, with indentation allowed --
+    runs the body.
     """
     called: set[str] = set()
     for match in re.finditer(
-        r"(?:^|[;&|()\n\s])([A-Za-z_][A-Za-z0-9_]*)", script
+        r"(?:^|[;&|()\n])[ \t]*([A-Za-z_][A-Za-z0-9_]*)", script
     ):
         name = match.group(1)
         if name not in defined:
@@ -562,14 +564,29 @@ def _called_function_names(script: str, defined: set[str]) -> set[str]:
     return called
 
 
+_STEP_BOUNDARY = "\n: __release_gate_step_boundary__\n"
+
+
 def _strip_function_bodies(script: str) -> str:
-    """Drop uncalled shell function bodies; calling one executes its body.
+    """Drop uncalled shell function bodies, per workflow step.
+
+    Each workflow step runs in a fresh shell, so the script is processed
+    per step boundary first: a definition cannot survive into the next
+    step, and neither can its call.
+    """
+    return _STEP_BOUNDARY.join(
+        _strip_function_body_block(part) for part in script.split(_STEP_BOUNDARY)
+    )
+
+
+def _strip_function_body_block(script: str) -> str:
+    """Drop uncalled shell function bodies from one shell's script.
 
     The release gate must provision in reachable commands: a definition body
-    counts when the script calls the function, because the call executes the
-    body.  Bodies of functions nobody calls never run, so they are dropped
-    (brace groups and subshells without a definition stay: they execute in
-    place).
+    counts when the same shell calls the function, because the call executes
+    the body.  Bodies of functions nobody calls never run, so they are
+    dropped (brace groups and subshells without a definition stay: they
+    execute in place).
     """
     defined = _defined_function_names(script)
     called = _called_function_names(script, defined)
@@ -630,7 +647,12 @@ def _function_body_is_live(
 # Release workflows must provision toolchains through the verified installer
 # (with an explicit `bash` invocation) and add the rustfmt component
 # separately; raw `rustup toolchain install` commands are rejected.
-_PROVISION_PREFIX = r"^(?:retry\s+[0-9]+\s+)?"
+_PROVISION_PREFIX = (
+    r"^(?:retry\s+[0-9]+\s+)?"
+    r"(?:(?:command|exec|builtin|nohup|sudo)\s+)?"
+    r"(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)?"
+    r"(?:bash\s+-[A-Za-z]*c\s+['\"]?)?"
+)
 _VERIFIED_INSTALLER_RE = re.compile(
     _PROVISION_PREFIX
     + r"bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
@@ -765,17 +787,24 @@ def _command_segments(script: str) -> list[str]:
 def _segment_literal(segment: str) -> bool | None:
     """The boolean a segment trivially evaluates to, or None when unknown.
 
-    A leading-and-sole ``false`` is False; a leading ``true`` or ``:`` is
-    True; everything else may depend on runtime state.
+    The first word resolves through quote removal, so ``"false"`` reads as
+    the ``false`` command; a leading-and-sole ``false`` is False, a leading
+    ``true`` or ``:`` is True, and everything else may depend on runtime
+    state.
     """
     words = segment.split()
     if not words:
         return None
-    if words[0] in (":", "true"):
+    first = _resolve_heredoc_word(words[0])[0]
+    if first in (":", "true"):
         return True
-    if words[0] == "false" and len(words) == 1:
+    if first == "false" and len(words) == 1:
         return False
     return None
+
+
+_OPEN_KEYWORDS = {"if", "while", "until", "for", "case", "select"}
+_CLOSE_KEYWORDS = {"fi", "done", "esac"}
 
 
 def _segment_unreachable(separator: str, previous: bool | None) -> bool:
@@ -786,32 +815,50 @@ def _segment_unreachable(separator: str, previous: bool | None) -> bool:
 
 
 def _live_command_segments(script: str) -> list[str]:
-    """Segments some execution path reaches; dead branches are dropped.
+    """Segments on the unconditional path across every shell in the script.
 
-    Literal short-circuits model the shell: behind ``false &&`` or
-    ``true ||`` nothing runs, and the chain stays dead for further
-    ``&&`` links while ``||`` revives it.  ``if false`` branches stay dead
-    until their ``fi``.  Commands that cannot run must not satisfy a
-    provisioning requirement.
+    Each workflow step runs in its own shell, so liveness resets per step:
+    an ``exit`` or an unbalanced conditional in one step must not swallow
+    the provisioning of another.
+    """
+    live: list[str] = []
+    for part in (
+        script.split(_STEP_BOUNDARY) if _STEP_BOUNDARY in script else [script]
+    ):
+        live.extend(_live_step_segments(part))
+    return live
+
+
+def _live_step_segments(script: str) -> list[str]:
+    """One step's segments on the unconditional path.
+
+    Literal short-circuits model the shell, and any conditional construct
+    (``if``/``while``/``until``/``for``/``case``) makes its body
+    conditional: the analyzer does not evaluate test expressions, so only
+    commands outside every conditional count as provisioning.  ``exit``
+    ends that shell, so segments after it cannot run either.  Commands that
+    cannot run must not satisfy a provisioning requirement.
     """
     live: list[str] = []
     previous: bool | None = None
-    dead_if = 0
+    conditional = 0
+    exited = False
     for segment, separator in _command_segments_with_separators(script):
         words = segment.split()
-        if dead_if:
-            if words[0] == "fi":
-                dead_if = 0
-                previous = None
-            continue
-        if words[0] == "fi":
+        keyword = _resolve_heredoc_word(words[0])[0] if words else ""
+        if keyword in _CLOSE_KEYWORDS:
+            conditional = max(0, conditional - 1)
             previous = None
             continue
-        if _segment_unreachable(separator, previous):
+        if exited or conditional or _segment_unreachable(separator, previous):
+            if keyword in _OPEN_KEYWORDS:
+                conditional += 1
             continue
         live.append(segment)
-        if words[0] == "if" and words[1:2] == ["false"]:
-            dead_if = 1
+        if keyword in _OPEN_KEYWORDS:
+            conditional += 1
+        elif keyword == "exit":
+            exited = True
             previous = None
             continue
         previous = _segment_literal(segment)
@@ -880,12 +927,17 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
             and _step_runs_shell(step)
         ):
             scripts.append(step["run"])
-    return "\n".join(scripts)
+    return _STEP_BOUNDARY.join(scripts)
 
 
 def _all_job_run_scripts(workflow_content: str) -> str | None:
     """Return the concatenated run scripts of every job, or None when the
-    workflow cannot be parsed."""
+    workflow cannot be parsed.
+
+    Every run step feeds this scan -- including conditional and non-shell
+    steps: a raw toolchain install must fail the gate wherever it could ever
+    appear.
+    """
     try:
         workflow = yaml.safe_load(workflow_content)
     except yaml.YAMLError:
@@ -898,13 +950,9 @@ def _all_job_run_scripts(workflow_content: str) -> str | None:
         if not isinstance(job, dict):
             continue
         for step in job.get("steps") or []:
-            if (
-                isinstance(step, dict)
-                and isinstance(step.get("run"), str)
-                and _step_runs_shell(step)
-            ):
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
                 scripts.append(step["run"])
-    return "\n".join(scripts)
+    return _STEP_BOUNDARY.join(scripts)
 
 
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
@@ -927,7 +975,16 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
             "verified statically"
         )
-    executable = _join_continuations(stripped)
+    executable = _join_continuations(_strip_function_bodies(stripped))
+    # Uncalled function bodies are gone, so only executable code can trip
+    # the dynamic-delimiter rejection.
+    dynamic = _dynamic_heredoc_markers(executable)
+    if dynamic:
+        return (
+            "release workflows must not open heredocs with runtime-expanded "
+            "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
+            "verified statically"
+        )
     for segment in _live_command_segments(executable):
         if _RAW_INSTALL_RE.match(segment):
             return (
@@ -954,7 +1011,10 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     # Strip comments and static heredoc bodies first: markers there are data,
     # so they must not trip the dynamic-delimiter rejection.
     stripped = _strip_heredocs(_strip_shell_comments(run_scripts))
-    dynamic = _dynamic_heredoc_markers(stripped)
+    executable = _join_continuations(_strip_function_bodies(stripped))
+    # Uncalled function bodies are already gone, so a dynamic delimiter in
+    # dead code cannot reject a script whose real provisioning is static.
+    dynamic = _dynamic_heredoc_markers(executable)
     if dynamic:
         return (
             "the release-gate job opens a heredoc with a runtime-expanded "
