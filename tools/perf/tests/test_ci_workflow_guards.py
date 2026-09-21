@@ -657,10 +657,13 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
     assert (
         "needs: [release-gate, musl-build, integrity-checksums, "
         "integrity-signature, official-docker-release-gate, "
-        "rc-release-gates]"
+        "rc-release-gates, fuzz-qualification]"
     ) in publish_block
     assert "github.event_name == 'workflow_dispatch'" in publish_block
     assert "needs.release-gate.result == 'success'" in publish_block
+    assert "needs.fuzz-qualification.result == 'success'" in publish_block, (
+        "a tag publish must require the fuzz qualification to succeed"
+    )
     assert "needs.rc-release-gates.result == 'success'" in publish_block, (
         "a tag publish must require the candidate gates to succeed"
     )
