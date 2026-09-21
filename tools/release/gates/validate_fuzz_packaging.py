@@ -288,17 +288,20 @@ def _strip_heredocs(script: str) -> str:
 
 # Provisioning commands must sit in command position (optionally behind the
 # repository's `retry N` wrapper); substring matches, echoes and heredoc
-# bodies must never satisfy the gate.
+# bodies must never satisfy the gate.  The component/toolchain argument must
+# stay inside the same command: an unbounded tail would cross command
+# separators, letting `rustup toolchain install "${RUST_TOOLCHAIN}"; echo
+# --component rustfmt` satisfy the check without installing rustfmt.
 _PROVISION_PREFIX = r"^(?:retry\s+[0-9]+\s+)?"
 _PINNED_INSTALL_RE = re.compile(
     _PROVISION_PREFIX
     + r"rustup\s+toolchain\s+install\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
-    + r".*--component\s+rustfmt"
+    + r"[^;|&]*--component\s+rustfmt"
 )
 _VERIFIED_INSTALLER_RE = re.compile(
     _PROVISION_PREFIX
     + r"(?:bash\s+)?\./packaging/scripts/install-verified-rustup\.sh\b"
-    + r".*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}"
+    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}"
 )
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
