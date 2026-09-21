@@ -546,25 +546,21 @@ def _defined_function_names(script: str) -> set[str]:
 
 
 def _called_function_names(script: str, defined: set[str]) -> set[str]:
-    """Names the script calls: in command position, not the definition.
+    """Names the script calls: the first word of command-position lines.
 
-    A definition writes the name before ``()`` (or after ``function``), and
-    an argument (``echo provision``) is not a call; only a name in command
-    position -- line start, after a separator, with indentation allowed --
-    runs the body.
+    The input is a joined list of command segments with definition heads
+    masked out, so a call is exactly a segment whose first word (after quote
+    removal) names a defined function; arguments, quoted text and escaped
+    text never sit in first-word position.
     """
     called: set[str] = set()
-    for match in re.finditer(
-        r"(?:^|[;&|()\n])[ \t]*([A-Za-z_][A-Za-z0-9_]*)", script
-    ):
-        name = match.group(1)
-        if name not in defined:
+    for line in script.splitlines():
+        words = line.split()
+        if not words:
             continue
-        if script[match.end() :].startswith("("):
-            continue
-        if re.search(r"function\s+$", script[: match.start(1)]):
-            continue
-        called.add(name)
+        name = _resolve_heredoc_word(words[0])[0]
+        if name in defined:
+            called.add(name)
     return called
 
 
@@ -614,24 +610,56 @@ def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
     return spans
 
 
+def _head_spans(
+    script: str, bodies: list[tuple[str, int, int]]
+) -> list[tuple[int, int]]:
+    """Spans of the definition heads (the ``name ()`` before each body)."""
+    heads: list[tuple[int, int]] = []
+    for _, lo, _hi in bodies:
+        prefix = script[: max(0, lo - 1)]
+        match = re.search(
+            r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
+        )
+        if match is None:
+            match = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
+        if match is not None:
+            heads.append((match.start(1), max(0, lo - 1)))
+    return heads
+
+
+def _masked_region(script: str, region: tuple[int, int] | None) -> str:
+    """Region text with nested bodies and definition heads replaced by spaces."""
+    if region is None:
+        text = script
+        bodies = _function_body_spans(script)
+    else:
+        text = script[region[0] : region[1]]
+        bodies = [
+            (name, lo - region[0], hi - region[0])
+            for name, lo, hi in _function_body_spans(script)
+            if lo > region[0] and hi < region[1]
+        ]
+    chars = list(text)
+    for lo, hi in [
+        (lo, hi) for _, lo, hi in bodies
+    ] + _head_spans(text, bodies):
+        for position in range(lo, min(hi, len(chars))):
+            chars[position] = " "
+    return "".join(chars)
+
+
 def _calls_in_region(
     script: str, defined: set[str], region: tuple[int, int] | None
 ) -> set[str]:
-    """Calls made by a region: nested function bodies are masked first.
+    """Calls made by the live code of a region.
 
-    With ``region`` None the whole script counts, so only top-level calls
-    remain after masking.
+    Nested function bodies and definition heads are masked, then the same
+    reachability rules drop dead branches, so a call behind ``if false``
+    or inside quoted text never activates its target.
     """
-    spans = [
-        (lo, hi)
-        for _, lo, hi in _function_body_spans(script)
-        if region is None or (lo > region[0] and hi < region[1])
-    ]
-    chars = list(script)
-    for lo, hi in spans:
-        for position in range(lo, min(hi, len(chars))):
-            chars[position] = " "
-    return _called_function_names("".join(chars), defined)
+    masked = _masked_region(script, region)
+    live = _live_command_segments(masked)
+    return _called_function_names("\n".join(live), defined)
 
 
 def _live_function_names(script: str, defined: set[str]) -> set[str]:
@@ -658,48 +686,52 @@ def _live_function_names(script: str, defined: set[str]) -> set[str]:
     return live
 
 
+def _trim_body_after_terminator(body: str) -> str:
+    """Drop a body's commands after a top-level ``return``: everything
+    after cannot run.
+
+    The kept text preserves the original separators, so line structure and
+    quoting survive for the checks that follow.  A standalone failure under
+    ``set -e`` ends the shell and is handled by the live-segment scan.
+    """
+    kept: list[str] = ["\n"]
+    depth = 0
+    for segment, separator in _command_segments_with_separators(body):
+        keyword = _segment_keyword(segment)
+        if keyword in _CLOSE_KEYWORDS:
+            depth = max(0, depth - 1)
+        kept.append(segment)
+        if depth == 0 and keyword == "return":
+            break
+        if keyword in ("if", "while", "until", "for", "case", "select"):
+            depth += 1
+        kept.append(separator or "\n")
+    return "".join(kept)
+
+
 def _strip_function_bodies(script: str) -> str:
-    """Drop the bodies of functions the script cannot reach.
+    """Drop the bodies of functions the script cannot reach, and a kept
+    body's commands after its own ``return`` or ``set -e`` failure.
 
     The release gate must provision in reachable commands: a body counts
     when its function is called from top-level code, transitively through
-    bodies that run.  Bodies nobody can reach never run, so they are
-    dropped (brace groups and subshells without a definition stay: they
+    bodies that run.  Bodies nobody can reach never run, so their text is
+    erased (brace groups and subshells without a definition stay: they
     execute in place).
     """
     defined = _defined_function_names(script)
+    if not defined:
+        return script
     live = _live_function_names(script, defined)
-    kept: list[str] = []
-    index = 0
-    depth = 0
-    quote: str | None = None
-    opener = ""
-    while index < len(script):
-        if depth == 0:
-            found = _opens_function_body(script, index)
-            if found is not None:
-                name = _definition_name(script, index) or ""
-                if name in live:
-                    new_quote, consumed = _scan_char(script, index, quote)
-                    kept.append(script[index : index + consumed])
-                    quote = new_quote
-                    index += consumed
-                    continue
-                depth = 1
-                opener = found
-                kept.append(found)
-                index += 1
-                continue
-            new_quote, consumed = _scan_char(script, index, quote)
-            kept.append(script[index : index + consumed])
-            quote = new_quote
-            index += consumed
-            continue
-        index, depth, quote, closer = _function_body_step(
-            script, index, depth, quote, opener)
-        if closer:
-            kept.append(closer)
-    return "".join(kept)
+    chars = list(script)
+    for name, lo, hi in _function_body_spans(script):
+        if name in live:
+            trimmed = _trim_body_after_terminator(script[lo:hi])
+            replacement = list(trimmed) + [" "] * (hi - lo - len(trimmed))
+        else:
+            replacement = [" "] * (hi - lo)
+        chars[lo:hi] = replacement
+    return "".join(chars)
 
 
 # Provisioning commands must sit in command position (optionally behind the
@@ -713,27 +745,77 @@ _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _BASH_C_RE = re.compile(r"-[A-Za-z]*c\Z")
 
 
+_SUDO_ARG_FLAGS = frozenset({"-u", "-g", "-p", "-C", "-T", "-r", "-t", "-h"})
+
+
+def _skip_option_words(
+    words: list[str], index: int, arg_flags: frozenset[str]
+) -> int:
+    """Skip a wrapper's own options (`sudo -n`, `sudo -u root`)."""
+    while (
+        index < len(words)
+        and words[index].startswith("-")
+        and words[index] != "--"
+    ):
+        if words[index] in arg_flags and index + 1 < len(words):
+            index += 1
+        index += 1
+    return index
+
+
+def _skip_env_assignments(words: list[str], index: int) -> int:
+    """Skip `env VAR=VAL...` assignments."""
+    while index < len(words) and _ENV_ASSIGN_RE.match(words[index]):
+        index += 1
+    return index
+
+
+def _skip_shell_c(words: list[str], index: int) -> int:
+    """Skip `<shell> [options] -c`, returning the payload word index."""
+    probe = index + 1
+    while (
+        probe < len(words)
+        and words[probe].startswith("-")
+        and not _BASH_C_RE.match(words[probe])
+    ):
+        if words[probe] == "-o" and probe + 1 < len(words):
+            probe += 1
+        probe += 1
+    if probe < len(words) and _BASH_C_RE.match(words[probe]):
+        return probe + 1
+    return index
+
+
+def _skip_bare_separators(words: list[str], index: int) -> int:
+    """Skip bare ``--`` separators left by a wrapper."""
+    while index < len(words) and words[index] == "--":
+        index += 1
+    return index
+
+
 def _wrapper_prefix_length(words: list[str]) -> int:
     """How many leading wrapper words to drop (a deterministic token scan).
 
-    Handles `retry N`, one of the command wrappers, `env VAR=VAL...`, and
-    `bash -c '...'` in the order the shell accepts them.
+    Handles `retry N`, command wrappers with their own options, `env
+    VAR=VAL...`, `<shell> -c '...'`, `eval` and bare `--` separators, in
+    the order the shell accepts them.
     """
     index = 0
     if len(words) >= 2 and words[0] == "retry" and words[1].isdigit():
         index = 2
+    index = _skip_bare_separators(words, index)
     if index < len(words) and words[index] in _WRAPPER_COMMANDS:
-        index += 1
+        index = _skip_bare_separators(
+            words, _skip_option_words(words, index + 1, _SUDO_ARG_FLAGS)
+        )
     if index < len(words) and words[index] == "env":
+        index = _skip_bare_separators(
+            words, _skip_env_assignments(words, index + 1)
+        )
+    if index < len(words) and words[index] in ("bash", "sh", "dash"):
+        index = _skip_shell_c(words, index)
+    if index < len(words) and words[index] == "eval":
         index += 1
-        while index < len(words) and _ENV_ASSIGN_RE.match(words[index]):
-            index += 1
-    if (
-        index + 1 < len(words)
-        and words[index] == "bash"
-        and _BASH_C_RE.match(words[index + 1])
-    ):
-        index += 2
     return index
 
 
@@ -909,8 +991,9 @@ def _segment_literal(segment: str) -> bool | None:
     return None
 
 
-_OPEN_KEYWORDS = {"if", "while", "until", "for", "case", "select"}
+_OPEN_KEYWORDS = {"while", "until", "for", "case", "select"}
 _CLOSE_KEYWORDS = {"fi", "done", "esac"}
+_BODY_MARKERS = {"then", "do"}
 
 
 def _segment_unreachable(separator: str, previous: bool | None) -> bool:
@@ -926,6 +1009,46 @@ def _segment_keyword(segment: str) -> str:
     return _resolve_heredoc_word(words[0])[0] if words else ""
 
 
+def _condition_literal(segment: str) -> bool | None:
+    """The literal truth of an ``if``/``elif`` condition, or None."""
+    words = segment.split()
+    if not words or words[0] not in ("if", "elif"):
+        return None
+    rest = [_resolve_heredoc_word(word)[0] for word in words[1:]]
+    rest = [word for word in rest if word and not _is_redirection_word(word)]
+    if rest in (["true"], [":"]):
+        return True
+    if rest == ["false"]:
+        return False
+    return None
+
+
+def _region_runs(branches: list[tuple[bool | None, bool]]) -> bool:
+    """Whether the branch regions so far all provably run.
+
+    ``branches`` holds ``(condition, in_else)`` per enclosing construct; a
+    condition the analyzer did not evaluate makes both branches
+    conditional.
+    """
+    for condition, in_else in branches:
+        if condition is None or in_else == condition:
+            return False
+    return True
+
+
+def _is_errexit_segment(segment: str) -> bool:
+    """Whether the segment enables ``set -e``-style error exit."""
+    words = segment.split()
+    if not words or words[0] != "set":
+        return False
+    for word in words[1:]:
+        if word == "errexit":
+            return True
+        if word.startswith("-") and "e" in word[1:]:
+            return True
+    return False
+
+
 def _chain_skips(separator: str, previous: bool | None) -> bool:
     """Whether an ``&&``/``||`` link makes the segment conditional.
 
@@ -938,40 +1061,75 @@ def _chain_skips(separator: str, previous: bool | None) -> bool:
     )
 
 
+def _branch_keyword_step(
+    branches: list[tuple[bool | None, bool]], segment: str
+) -> bool:
+    """Update the branch stack for a construct keyword; True when handled.
+
+    ``if``/``elif``/``else``/``fi`` track which branch region provably
+    runs; loops and ``case`` push an unevaluated condition, and their
+    bodies stay conditional.  ``then``/``do`` do not change the stack.
+    """
+    keyword = _segment_keyword(segment)
+    if keyword in _CLOSE_KEYWORDS:
+        if branches:
+            branches.pop()
+        return True
+    if keyword in _BODY_MARKERS:
+        return True
+    if keyword in ("if", "elif"):
+        entry = (_condition_literal(segment), False)
+        if keyword == "elif" and branches:
+            branches[-1] = entry
+        elif keyword == "if":
+            branches.append(entry)
+        return True
+    if keyword == "else":
+        if branches:
+            condition, _ = branches[-1]
+            branches[-1] = (condition, True)
+        return True
+    if keyword in _OPEN_KEYWORDS:
+        branches.append((None, False))
+        return True
+    return False
+
+
 def _live_command_segments(script: str) -> list[str]:
     """Segments on the unconditional path of one shell's script.
 
-    A command counts when the analyzer can prove it runs: every conditional
-    construct (``if``/``while``/``until``/``for``/``case``) hides its body,
-    an ``&&``/``||`` chain whose left side is not an evaluated literal is
-    conditional itself, and ``exit`` ends that shell.  Literal
-    short-circuits are modeled so a ``true &&`` chain still counts.
+    A command counts when the analyzer can prove it runs: an ``if`` with an
+    unevaluated condition hides both branches, loops and ``case`` hide
+    their bodies, an ``&&``/``||`` chain whose left side is not an
+    evaluated literal is conditional itself, and ``exit``/``return`` end
+    the run.  Literal conditions and short-circuits are modeled, so
+    ``if true`` bodies and ``true &&`` chains still count; a standalone
+    failing command under ``set -e`` ends the run too.
     """
     live: list[str] = []
     previous: bool | None = None
-    conditional = 0
+    branches: list[tuple[bool | None, bool]] = []
     exited = False
+    errexit = False
     for segment, separator in _command_segments_with_separators(script):
-        keyword = _segment_keyword(segment)
-        if keyword in _CLOSE_KEYWORDS:
-            conditional = max(0, conditional - 1)
+        if _branch_keyword_step(branches, segment):
             previous = None
             continue
-        if exited or conditional:
-            if keyword in _OPEN_KEYWORDS:
-                conditional += 1
+        if exited or not _region_runs(branches):
             continue
         if _chain_skips(separator, previous):
             continue
         live.append(segment)
-        if keyword in _OPEN_KEYWORDS:
-            conditional += 1
-            previous = None
-        elif keyword == "exit":
+        if _segment_keyword(segment) == "exit":
             exited = True
             previous = None
-        else:
-            previous = _segment_literal(segment)
+            continue
+        value = _segment_literal(segment)
+        if errexit and value is False:
+            exited = True
+        if _is_errexit_segment(segment):
+            errexit = True
+        previous = value
     return live
 
 
@@ -1137,7 +1295,10 @@ def _release_gate_toolchain_issue(
                 "statically; use a plain delimiter"
             )
         segments.extend(_live_command_segments(executable))
-    if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
+    if not any(
+        _DRIFT_CHECK_RE.match(_strip_provision_wrappers(segment))
+        for segment in segments
+    ):
         return (
             "the release-gate job no longer runs "
             f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
