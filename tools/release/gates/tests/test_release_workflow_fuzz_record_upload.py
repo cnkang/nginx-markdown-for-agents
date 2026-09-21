@@ -139,6 +139,36 @@ def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
     )
     assert packaging_gate._release_gate_toolchain_issue(heredoc)
 
+    # A later command on the same line must not satisfy the requirement:
+    # the separator ends the install command, so an echoed component after
+    # `;`, `&&` or a pipe never counts.
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + 'rustup toolchain install "${RUST_TOOLCHAIN}"; echo --component rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + 'rustup toolchain install "${RUST_TOOLCHAIN}" && echo --component rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + 'rustup toolchain install "${RUST_TOOLCHAIN}" | echo --component rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        drift
+        + './packaging/scripts/install-verified-rustup.sh; '
+        'echo --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    # The component before a trailing separator is still the same command.
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift
+            + 'retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" '
+            "--profile minimal --component rustfmt; echo done\n"
+        )
+        is None
+    )
+
 
 def test_job_run_scripts_requires_a_parseable_job() -> None:
     """Only executable run steps of an existing job feed the gate."""
