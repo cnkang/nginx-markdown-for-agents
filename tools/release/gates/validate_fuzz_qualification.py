@@ -100,6 +100,12 @@ FUZZ_JOB_BUDGET = 19300
 RELEASE_JOB_LIMIT_SECONDS = 21600
 SETUP_ALLOWANCE_SECONDS = 420
 REPLAY_ALLOWANCE_SECONDS = 120
+# Floor for the post-envelope reserve (record writing, the diagnostic
+# artifact upload, setup retry variance).  The budget equation above only
+# bounds the total from above; this floor is asserted separately by unit
+# test so a later increase of FUZZ_JOB_BUDGET cannot silently consume the
+# reserve that the previous shared-job layout lacked.
+MIN_POST_ENVELOPE_RESERVE_SECONDS = 800
 MAX_FUZZ_INVOCATIONS = 8
 # Subprocess margin over the fuzzer's own time cap: it covers process
 # startup, corpus replay (which -max_total_time does not count) and the
