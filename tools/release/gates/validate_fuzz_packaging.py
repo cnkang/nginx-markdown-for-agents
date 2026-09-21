@@ -297,31 +297,53 @@ def _join_continuations(script: str) -> str:
 
 
 _HEREDOC_MARKER_RE = re.compile(
-    r"<<-?[ \t]*(?:(['\"])([^'\"]*)\1|((?:\\[ \t]|[^ \t;|&()<>])+))"
+    r"<<-?[ \t]*(?:(['\"])([^'\"]*)\1|((?:\\.|[^ \t;|&()<>])+))"
 )
+
+
+def _walk_removal_char(
+    raw: str, index: int, quote: str | None
+) -> tuple[str | None, int, str | None, bool]:
+    """One quote-removal step; returns (quote, consumed, keep, live).
+
+    Backslashes escape the shell's special characters (the escaped character
+    stays literal, never expansion), quotes toggle string state, and
+    everything else passes through as data.  ``live`` marks an unescaped
+    ``$`` or backtick: outside single quotes the shell expands it.
+    """
+    char = raw[index]
+    if char == "\\" and index + 1 < len(raw) and (
+        quote is None or raw[index + 1] in "$`\"\\"
+    ):
+        return quote, 2, raw[index + 1], False
+    if char in ("'", '"'):
+        if quote is None:
+            return char, 1, None, False
+        if quote == char:
+            return None, 1, None, False
+    return quote, 1, char, char in ("$", "`")
 
 
 def _resolve_heredoc_word(raw: str) -> tuple[str, bool]:
     """Resolve a heredoc delimiter word; return (delimiter, dynamic).
 
-    Quote removal drops backslashes, so an escaped space stays inside the
-    word and an escaped ``$`` or backtick never expands; a live expansion
-    character makes the word dynamic, because the shell resolves the
-    terminator at runtime.
+    Quote removal models the shell: single quotes keep their content
+    literal, double quotes still expand ``$`` and backticks, and a
+    backslash escapes the next character everywhere outside single quotes.
+    A live expansion character makes the word dynamic, because the shell
+    then resolves the terminator at runtime.
     """
     resolved: list[str] = []
     dynamic = False
+    quote: str | None = None
     index = 0
     while index < len(raw):
-        char = raw[index]
-        if char == "\\" and index + 1 < len(raw):
-            resolved.append(raw[index + 1])
-            index += 2
-            continue
-        if char in ("$", "`"):
-            dynamic = True
-        resolved.append(char)
-        index += 1
+        quote, consumed, keep, live = _walk_removal_char(raw, index, quote)
+        if keep is not None:
+            if live and quote != "'":
+                dynamic = True
+            resolved.append(keep)
+        index += consumed
     return "".join(resolved), dynamic
 
 
@@ -335,13 +357,18 @@ def _heredoc_marker_at(
     resolves through quote removal, so escaped spaces stay part of it and
     escaped expansion characters do not make it dynamic.
     """
-    if not line.startswith("<<", index) or line.startswith("<<<", index):
+    if (
+        not line.startswith("<<", index)
+        or line.startswith("<<<", index)
+        or (index > 0 and line[index - 1] == "<")
+    ):
         return None
     match = _HEREDOC_MARKER_RE.match(line, index)
     if match is None:
         return None
     if match.group(2) is not None:
-        word, dynamic = match.group(2), False
+        word = match.group(2)
+        dynamic = match.group(1) == '"' and ("$" in word or "`" in word)
     else:
         word, dynamic = _resolve_heredoc_word(match.group(3))
     return word, match.group(0).startswith("<<-"), dynamic, match.end()
@@ -498,14 +525,54 @@ def _function_body_step(
     return index + consumed, depth, new_quote, None
 
 
-def _strip_function_bodies(script: str) -> str:
-    """Drop shell function bodies; defining a function runs nothing.
+_DEFINED_FUNCTION_RE = re.compile(
+    r"(?:^|[;&|()\n\s])(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*[{( \t\n]"
+)
+_FUNCTION_KEYWORD_DEF_RE = re.compile(
+    r"(?:^|[;&|()\n\s])function\s+([A-Za-z_][A-Za-z0-9_]*)\s*[{( \t\n]"
+)
 
-    The release gate must provision in top-level commands: a definition body
-    counts only when someone calls the function, and the gate does not track
-    calls.  Brace groups and subshells without a definition stay (they
-    execute in place).
+
+def _defined_function_names(script: str) -> set[str]:
+    """Names of functions the script defines (both definition forms)."""
+    names = set(_DEFINED_FUNCTION_RE.findall(script))
+    names.update(_FUNCTION_KEYWORD_DEF_RE.findall(script))
+    return names
+
+
+def _called_function_names(script: str, defined: set[str]) -> set[str]:
+    """Names the script calls: in command position, not the definition.
+
+    A definition writes the name before ``()`` (or after ``function``), so
+    those occurrences are skipped; every other command-position use runs the
+    body.
     """
+    called: set[str] = set()
+    for match in re.finditer(
+        r"(?:^|[;&|()\n\s])([A-Za-z_][A-Za-z0-9_]*)", script
+    ):
+        name = match.group(1)
+        if name not in defined:
+            continue
+        if script[match.end() :].startswith("("):
+            continue
+        if re.search(r"function\s+$", script[: match.start(1)]):
+            continue
+        called.add(name)
+    return called
+
+
+def _strip_function_bodies(script: str) -> str:
+    """Drop uncalled shell function bodies; calling one executes its body.
+
+    The release gate must provision in reachable commands: a definition body
+    counts when the script calls the function, because the call executes the
+    body.  Bodies of functions nobody calls never run, so they are dropped
+    (brace groups and subshells without a definition stay: they execute in
+    place).
+    """
+    defined = _defined_function_names(script)
+    called = _called_function_names(script, defined)
     kept: list[str] = []
     index = 0
     depth = 0
@@ -515,6 +582,12 @@ def _strip_function_bodies(script: str) -> str:
         if depth == 0:
             found = _opens_function_body(script, index)
             if found is not None:
+                if _function_body_is_live(script, index, called):
+                    new_quote, consumed = _scan_char(script, index, quote)
+                    kept.append(script[index : index + consumed])
+                    quote = new_quote
+                    index += consumed
+                    continue
                 depth = 1
                 opener = found
                 kept.append(found)
@@ -530,6 +603,22 @@ def _strip_function_bodies(script: str) -> str:
         if closer:
             kept.append(closer)
     return "".join(kept)
+
+
+def _function_body_is_live(
+    script: str, index: int, called: set[str]
+) -> bool:
+    """Whether the body opening at ``index`` belongs to a called function."""
+    if not called:
+        return False
+    prefix = script[:index]
+    match = re.search(
+        r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
+    )
+    if match is not None:
+        return match.group(1) in called
+    keyword = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
+    return keyword is not None and keyword.group(1) in called
 
 
 # Provisioning commands must sit in command position (optionally behind the
@@ -558,6 +647,32 @@ _DRIFT_CHECK_RE = re.compile(
 )
 
 
+def _quoted_separator_at(line: str, index: int, quote: str) -> int:
+    """Separator length inside a quoted string (0 = data)."""
+    char = line[index]
+    if quote == "'":
+        return 0
+    if char == "`":
+        return 1
+    if (
+        char == "("
+        and index > 0
+        and line[index - 1] == "$"
+        and (index < 2 or line[index - 2] != "\\")
+    ):
+        return 1
+    return 0
+
+
+def _brace_separator_at(line: str, index: int) -> int:
+    """Separator length for a brace-group token (0 = glued word data)."""
+    previous = line[index - 1] if index > 0 else ""
+    following = line[index + 1] if index + 1 < len(line) else ""
+    before_ok = previous in ("", " ", "\t", ";", "|", "&", "(", ")")
+    after_ok = following in ("", " ", "\t", ";", ")")
+    return 1 if before_ok and after_ok else 0
+
+
 def _separator_at(line: str, index: int, quote: str | None) -> int:
     """Return the command-separator length at ``index`` (0 = not one).
 
@@ -565,22 +680,15 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     quotes.  ``(`` and ``)`` split outside quotes (subshells) and backticks
     split everywhere except single quotes (command substitution); inside
     double quotes only a ``$``-preceded ``(`` opens a substitution, so bare
-    quoted parentheses stay data.
+    quoted parentheses stay data.  A whitespace-delimited ``{`` or ``}``
+    (a brace group) splits too, while expansion braces glued to their word
+    (``${VAR}``, ``{1..3}``) stay data.
     """
     char = line[index]
-    if quote == "'":
-        return 0
-    if quote == '"':
-        if char == "`":
-            return 1
-        if (
-            char == "("
-            and index > 0
-            and line[index - 1] == "$"
-            and (index < 2 or line[index - 2] != "\\")
-        ):
-            return 1
-        return 0
+    if quote is not None:
+        return _quoted_separator_at(line, index, quote)
+    if char in "{}":
+        return _brace_separator_at(line, index)
     if char == ";":
         return 1
     if char in "&|":
@@ -588,64 +696,171 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     return 1 if char in "()`" else 0
 
 
-def _command_segments(script: str) -> list[str]:
-    """Split into command segments at unquoted shell separators.
+def _flush_segment(
+    segments: list[tuple[str, str]], current: list[str], separator: str
+) -> None:
+    """Append the finished segment with its separator, when non-empty."""
+    segment = "".join(current).strip()
+    if segment:
+        segments.append((segment, separator))
+
+
+def _scan_segment_line(
+    line: str,
+    current: list[str],
+    quote: str | None,
+    segments: list[tuple[str, str]],
+    separator: str,
+) -> tuple[list[str], str | None, str]:
+    """Scan one line for separators; returns (current, quote, separator)."""
+    index = 0
+    while index < len(line):
+        length = _separator_at(line, index, quote)
+        if length:
+            _flush_segment(segments, current, separator)
+            separator = line[index : index + length]
+            current = []
+            index += length
+            continue
+        new_quote, consumed = _scan_char(line, index, quote)
+        current.append(line[index : index + consumed])
+        quote = new_quote
+        index += consumed
+    return current, quote, separator
+
+
+def _command_segments_with_separators(script: str) -> list[tuple[str, str]]:
+    """Split into (segment, separator-before) pairs at shell separators.
 
     Every separator from ``_separator_at`` starts a new command position, so
     a command chained behind one is still a command.  Separators inside
     quotes stay data, so quoted fragments can neither satisfy a provisioning
     requirement nor trip the rejection side.  A string that spans lines keeps
     its content as data: its segment continues across the newline instead of
-    restarting inside the quote.
+    restarting inside the quote.  A statement boundary reports ``\\n`` as its
+    separator, so callers can tell chains apart from fresh lines.
     """
-    segments: list[str] = []
+    segments: list[tuple[str, str]] = []
     current: list[str] = []
     quote: str | None = None
+    separator = "\n"
     for line in script.splitlines():
-        index = 0
-        while index < len(line):
-            length = _separator_at(line, index, quote)
-            if length:
-                segments.append("".join(current))
-                current = []
-                index += length
-                continue
-            new_quote, consumed = _scan_char(line, index, quote)
-            current.append(line[index : index + consumed])
-            quote = new_quote
-            index += consumed
+        current, quote, separator = _scan_segment_line(
+            line, current, quote, segments, separator)
         if quote is None:
-            segments.append("".join(current))
+            _flush_segment(segments, current, separator)
+            separator = "\n"
             current = []
         else:
             current.append(" ")
-    if current:
-        segments.append("".join(current))
-    return [segment.strip() for segment in segments if segment.strip()]
+    _flush_segment(segments, current, separator)
+    return segments
 
 
-def _provides_rustfmt_component(run_scripts: str) -> bool:
-    """Whether a command installs rustfmt for the pinned toolchain.
+def _command_segments(script: str) -> list[str]:
+    """Split into command segments at unquoted shell separators."""
+    return [segment for segment, _ in _command_segments_with_separators(script)]
+
+
+def _segment_literal(segment: str) -> bool | None:
+    """The boolean a segment trivially evaluates to, or None when unknown.
+
+    A leading-and-sole ``false`` is False; a leading ``true`` or ``:`` is
+    True; everything else may depend on runtime state.
+    """
+    words = segment.split()
+    if not words:
+        return None
+    if words[0] in (":", "true"):
+        return True
+    if words[0] == "false" and len(words) == 1:
+        return False
+    return None
+
+
+def _segment_unreachable(separator: str, previous: bool | None) -> bool:
+    """Whether a literal short-circuit on ``separator`` skips this segment."""
+    return (separator == "&&" and previous is False) or (
+        separator == "||" and previous is True
+    )
+
+
+def _live_command_segments(script: str) -> list[str]:
+    """Segments some execution path reaches; dead branches are dropped.
+
+    Literal short-circuits model the shell: behind ``false &&`` or
+    ``true ||`` nothing runs, and the chain stays dead for further
+    ``&&`` links while ``||`` revives it.  ``if false`` branches stay dead
+    until their ``fi``.  Commands that cannot run must not satisfy a
+    provisioning requirement.
+    """
+    live: list[str] = []
+    previous: bool | None = None
+    dead_if = 0
+    for segment, separator in _command_segments_with_separators(script):
+        words = segment.split()
+        if dead_if:
+            if words[0] == "fi":
+                dead_if = 0
+                previous = None
+            continue
+        if words[0] == "fi":
+            previous = None
+            continue
+        if _segment_unreachable(separator, previous):
+            continue
+        live.append(segment)
+        if words[0] == "if" and words[1:2] == ["false"]:
+            dead_if = 1
+            previous = None
+            continue
+        previous = _segment_literal(segment)
+    return live
+
+
+def _rustfmt_component_index(segments: list[str]) -> int | None:
+    """Position of the segment that installs rustfmt for the pinned toolchain.
 
     Accepts either argument order inside a single ``rustup component add``
     command segment; the segment boundary keeps a later command's arguments
     from satisfying the requirement.
     """
-    for segment in _command_segments(run_scripts):
+    for position, segment in enumerate(segments):
         if not _COMPONENT_ADD_RE.match(segment):
             continue
         if re.search(r"\brustfmt\b", segment) and re.search(
             r"--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?", segment
         ):
-            return True
-    return False
+            return position
+    return None
+
+
+def _provides_rustfmt_component(run_scripts: str) -> bool:
+    """Whether a command installs rustfmt for the pinned toolchain."""
+    return _rustfmt_component_index(_command_segments(run_scripts)) is not None
+
+
+def _step_runs_shell(step: dict) -> bool:
+    """Whether a workflow step's ``run`` executes in a shell on every path.
+
+    A step the workflow gates with ``if`` may never run, and a step whose
+    ``shell`` is not bash/sh feeds ``run`` to another interpreter, so neither
+    can satisfy a provisioning check.
+    """
+    if "if" in step:
+        return False
+    shell = step.get("shell")
+    if isinstance(shell, str) and shell.split():
+        return shell.split()[0] in ("bash", "sh")
+    return True
 
 
 def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
     """Return the concatenated run scripts of one job, or None when absent.
 
     The workflow is parsed as YAML so that only executable ``run`` steps feed
-    the checks: shell comments in the raw file never satisfy them.
+    the checks: shell comments in the raw file never satisfy them, and steps
+    that are conditional or run another interpreter are skipped.
     """
     try:
         workflow = yaml.safe_load(workflow_content)
@@ -659,7 +874,11 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
         return None
     scripts: list[str] = []
     for step in job.get("steps") or []:
-        if isinstance(step, dict) and isinstance(step.get("run"), str):
+        if (
+            isinstance(step, dict)
+            and isinstance(step.get("run"), str)
+            and _step_runs_shell(step)
+        ):
             scripts.append(step["run"])
     return "\n".join(scripts)
 
@@ -679,7 +898,11 @@ def _all_job_run_scripts(workflow_content: str) -> str | None:
         if not isinstance(job, dict):
             continue
         for step in job.get("steps") or []:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
+            if (
+                isinstance(step, dict)
+                and isinstance(step.get("run"), str)
+                and _step_runs_shell(step)
+            ):
                 scripts.append(step["run"])
     return "\n".join(scripts)
 
@@ -705,7 +928,7 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "verified statically"
         )
     executable = _join_continuations(stripped)
-    for segment in _command_segments(executable):
+    for segment in _live_command_segments(executable):
         if _RAW_INSTALL_RE.match(segment):
             return (
                 "release workflows must provision Rust toolchains through "
@@ -739,25 +962,40 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
             "statically; use a plain delimiter"
         )
     executable = _join_continuations(_strip_function_bodies(stripped))
-    segments = _command_segments(executable)
+    segments = _live_command_segments(executable)
     if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
         return (
             "the release-gate job no longer runs "
             f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
             "expectation with the job split"
         )
-    if not any(_VERIFIED_INSTALLER_RE.match(segment) for segment in segments):
+    installer_at = next(
+        (
+            position
+            for position, segment in enumerate(segments)
+            if _VERIFIED_INSTALLER_RE.match(segment)
+        ),
+        None,
+    )
+    if installer_at is None:
         return (
             "the release-gate job must provision the pinned Rust toolchain "
             "through the verified installer (bash ./packaging/scripts/"
             'install-verified-rustup.sh --toolchain "${RUST_TOOLCHAIN}")'
         )
-    if not _provides_rustfmt_component(executable):
+    component_at = _rustfmt_component_index(segments)
+    if component_at is None:
         return (
             "the release-gate job must add the rustfmt component for the "
             "pinned toolchain (rustup component add --toolchain "
             '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
             "resolve for the gate scripts"
+        )
+    if component_at < installer_at:
+        return (
+            "the release-gate job must install the toolchain through the "
+            "verified installer before adding the rustfmt component: rustup "
+            "cannot add a component to a toolchain that is not installed"
         )
     return None
 
