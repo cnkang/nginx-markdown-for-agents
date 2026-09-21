@@ -288,8 +288,8 @@ awk -v pkg="$PACKAGE" '
 sha256sum -c SHA256SUMS.select
 ```
 
-**Per-package signatures** (only for releases whose workflow produces them;
-not part of the canonical release verification path):
+**Per-package signatures** (only for releases whose workflow produces them,
+and not part of the canonical release verification path):
 
 ```bash
 dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
@@ -304,9 +304,9 @@ When you rotate the signing key:
 1. Publish the new key alongside the still-valid old key at the key URL.
 2. Announce the new fingerprint and have users install and independently
    verify it before repository metadata relies on it.
-3. Maintain an overlap period in which signatures made by both keys are
-   accepted. Existing clients must refresh their local keyring during this
-   overlap, before the old key is removed:
+3. Maintain an overlap period in which clients accept signatures made by
+   both keys. Existing clients must refresh their local keyring during this
+   overlap, before you remove the old key:
 
 ```bash
 # Refresh from the checked-in project public key, then verify the
