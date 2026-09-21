@@ -10,6 +10,7 @@ path without updating the workflow fails here.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -296,3 +297,25 @@ def test_job_run_scripts_requires_a_parseable_job() -> None:
     assert packaging_gate._job_run_scripts(text, "release-gate") == "echo hello"
     assert packaging_gate._job_run_scripts(text, "missing") is None
     assert packaging_gate._job_run_scripts("jobs: [", "release-gate") is None
+
+
+def test_release_gate_job_installs_the_release_python_dependencies() -> None:
+    """The release-gate job runs ``make docs-check``, whose contract-matrix
+    step imports jsonschema, and a fresh runner only provides what
+    requirements-release.txt installs; the install step and the pins must
+    both stay in place (the first real run failed exactly here)."""
+    jobs = _workflow()["jobs"]
+    gate_text = "\n".join(
+        step.get("run", "") for step in jobs["release-gate"]["steps"]
+        if isinstance(step, dict)
+    )
+    assert "pip install --requirement requirements-release.txt" in gate_text, (
+        "the release-gate job must install requirements-release.txt")
+    requirements = (REPO_ROOT / "requirements-release.txt").read_text(
+        encoding="utf-8")
+    # jsonschema backs the policy-matrix validation in the docs-check chain;
+    # PyYAML backs the matrix tooling that chain runs.
+    assert re.search(r"^jsonschema\[format\]==", requirements, re.M), (
+        "requirements-release.txt must pin jsonschema[format]")
+    assert re.search(r"^PyYAML==", requirements, re.M), (
+        "requirements-release.txt must pin PyYAML")

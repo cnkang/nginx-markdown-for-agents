@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,11 +65,14 @@ TIME_CONTINUATION_CEILING = 3600
 # Total time the executions-floor chase may spend per target.  Bounding the
 # chase keeps a pathologically slow target from consuming the release job's
 # budget until CI kills the job before the validator can emit its record.
-# Sized from the slowest blocking target: the multilayer decode fuzzer runs
-# on the order of twenty executions per second on CI, so 100k executions
-# need roughly 4200 seconds of loop time beyond the 900-second soak; the
-# budget must cover that plus one full invocation margin.
-TIME_CONTINUATION_BUDGET = 5400
+# Sized from the slowest blocking target: the multilayer decode fuzzer
+# measures on the order of ten executions per second on the CI runner
+# (observed: 9717 executions in its 900-second soak), so 100k executions
+# need roughly 9100 seconds of chase beyond the 900-second soak; the budget
+# must cover that plus one full invocation margin, with headroom for
+# runner-to-runner rate variance (the arithmetic test pins the supported
+# floor).
+TIME_CONTINUATION_BUDGET = 16000
 # Shared fuzz envelope for the whole real-mode run.  The per-target budgets
 # multiply across the fourteen blocking targets, so a single monotonic
 # deadline bounds the whole fuzz phase; exhausted targets fail fast with a
@@ -81,18 +85,24 @@ TIME_CONTINUATION_BUDGET = 5400
 # test:
 #   SETUP_ALLOWANCE + FUZZ_JOB_BUDGET + INVOCATION_TIMEOUT_MARGIN
 #   + REPLAY_ALLOWANCE <= RELEASE_JOB_LIMIT
-# Sized from the real-mode arithmetic -- twelve targets need only their
-# 900-second soak (fast targets clear 100k executions inside it), the slow
-# decode target adds an executions chase, and the last soak closes the
-# phase.  The schedule fits the envelope for any sustained slow-target
-# rate at or above twenty executions per second (the measured CI band is
-# higher), which the dedicated job makes possible: the previous shared-job
-# layout could not fit that schedule inside the release gate's remaining
-# budget.  The remainder of the job limit after the equation below covers
-# post-envelope work -- qualification-record writing, the diagnostic
-# artifact upload, and retry variance in the setup steps -- so the budget
-# leaves roughly a quarter hour of that slack.
+# The blocking targets run on a small worker pool: a strictly serial
+# schedule cannot fit the slow decode target's executions chase next to the
+# other targets' soaks at the measured CI execution rate (the first real
+# run failed exactly there).  With three workers the chase overlaps the
+# fast targets' soaks, and the worst case -- the slow target scheduled
+# behind four fast soaks on its worker -- stays inside the envelope for any
+# sustained slow-target rate at or above the floor pinned by the arithmetic
+# test, comfortably below the measured band.  The remainder of the job
+# limit after the equation below covers post-envelope work --
+# qualification-record writing, the diagnostic artifact upload, and retry
+# variance in the setup steps -- so the budget leaves roughly a quarter
+# hour of that slack.
 FUZZ_JOB_BUDGET = 19300
+# Blocking targets run on this many concurrent workers inside the fuzz job.
+# The runner has four cores: three fuzz processes leave headroom for the
+# replay and shutdown work of a finishing invocation, and the measured
+# single-process execution rate holds without CPU contention.
+TARGET_WORKER_COUNT = 3
 # Terms of the job-limit equation above.  The setup allowance covers the
 # toolchain install steps before the first soak; the replay allowance
 # bounds the corpus replay plus shutdown of the single invocation that may
@@ -835,6 +845,51 @@ def _handle_cargo_missing(args, candidate_sha: str,
     return 0
 
 
+def _run_blocking_targets(entries: list[dict], seeds: dict,
+                          deadline: float) -> dict[str, dict]:
+    """Run the blocking targets on a small worker pool.
+
+    Each worker owns a disjoint queue of targets (round-robin over the
+    manifest order) and runs its queue serially; the pool overlaps the slow
+    decode target's executions chase with the fast targets' soaks, which a
+    strictly serial schedule cannot fit into the shared job envelope at the
+    measured CI execution rate.  Every target still runs -- the shared
+    deadline, not a cross-target abort, bounds the phase -- and records are
+    returned keyed by target name.
+    """
+    queues: list[list[dict]] = [[] for _ in range(TARGET_WORKER_COUNT)]
+    for index, entry in enumerate(entries):
+        queues[index % TARGET_WORKER_COUNT].append(entry)
+    records: dict[str, dict] = {}
+    lock = threading.Lock()
+    errors: list[BaseException] = []
+
+    def run_queue(queue: list[dict]) -> None:
+        try:
+            for entry in queue:
+                record = _run_target_record(
+                    entry, seeds[entry["name"]]["seed_path"],
+                    deadline=deadline)
+                with lock:
+                    records[entry["name"]] = record
+        except BaseException as exc:  # pragma: no cover - defensive
+            with lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=run_queue, args=(queue,),
+                         name=f"fuzz-worker-{index}")
+        for index, queue in enumerate(queues)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    if errors:
+        raise errors[0]
+    return records
+
+
 def run_real_gate(args) -> int:
     """Run every blocking fuzz target and persist the qualification record."""
     manifest = load_json(args.manifest, BLOCKING_FUZZ_TARGET_MANIFEST_LABEL)
@@ -858,11 +913,14 @@ def run_real_gate(args) -> int:
 
     started_at = _utc_now()
     fuzz_deadline = time.monotonic() + FUZZ_JOB_BUDGET
+    blocking_entries = [entry for entry in targets
+                        if entry["name"] in blocking_names]
+    records_by_name = _run_blocking_targets(blocking_entries, seeds,
+                                            fuzz_deadline)
     per_target = []
     for entry in targets:
         if entry["name"] in blocking_names:
-            record = _run_target_record(entry, seeds[entry["name"]]["seed_path"],
-                                        deadline=fuzz_deadline)
+            record = records_by_name[entry["name"]]
         else:
             record = _skipped_record(entry, "blocking=false (policy)")
         per_target.append(record)
