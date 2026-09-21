@@ -67,3 +67,89 @@ def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
         assert "fuzz-qualification" in needs, job
     publish_if = str(jobs["publish"]["if"])
     assert "needs.fuzz-qualification.result == 'success'" in publish_if
+
+
+def test_release_gate_job_provisions_the_pinned_rust_toolchain() -> None:
+    """The split must keep the pinned toolchain inside the release gate.
+
+    Gate scripts resolve cargo, rustc and rustfmt through Rustup shims
+    (streaming evidence generation, the reason-codegen drift check), so the
+    gate job must install the pinned toolchain itself; the fuzz job installs
+    its own nightly toolchain separately.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    scripts = packaging_gate._job_run_scripts(
+        WORKFLOW.read_text(encoding="utf-8"), "release-gate"
+    )
+    assert scripts is not None, "the release-gate job must be parseable"
+    assert packaging_gate._release_gate_toolchain_issue(scripts) is None
+
+
+def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
+    """Only executable commands may satisfy the provisioning gate.
+
+    This mirrors the incident class: the gate binds the provisioning to the
+    job that runs the drift check, and a commented-out install or drift
+    check, a missing rustfmt component, or an unpinned toolchain install
+    must each fail it.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    install = (
+        'retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" '
+        "--profile minimal \\\n"
+        "  --component rustfmt --no-self-update\n"
+    )
+
+    assert packaging_gate._release_gate_toolchain_issue(drift)  # no install
+    assert packaging_gate._release_gate_toolchain_issue(  # commented install
+        drift + "# " + install
+    )
+    assert packaging_gate._release_gate_toolchain_issue(  # no rustfmt
+        drift + install.replace("--component rustfmt ", "")
+    )
+    assert packaging_gate._release_gate_toolchain_issue(  # unpinned toolchain
+        drift + "rustup toolchain install nightly --component rustfmt\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(  # commented drift check
+        "# " + drift + install
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift
+            + "bash ./packaging/scripts/install-verified-rustup.sh "
+            '--arch x86_64 --toolchain "${RUST_TOOLCHAIN}"\n'
+        )
+        is None
+    )
+    assert packaging_gate._release_gate_toolchain_issue(drift + install) is None
+
+    # Command position matters: echoes and heredoc bodies must not count.
+    echo_install = 'echo \'rustup toolchain install "${RUST_TOOLCHAIN}" --component rustfmt\'\n'
+    assert packaging_gate._release_gate_toolchain_issue(drift + echo_install)
+    echo_drift = "echo 'python3 tools/reason-codegen/generate.py --check'\n"
+    assert packaging_gate._release_gate_toolchain_issue(echo_drift + install)
+    heredoc = (
+        "cat <<'EOF'\n"
+        + "rustup toolchain install " + '"${RUST_TOOLCHAIN}" --component rustfmt\n'
+        + "python3 tools/reason-codegen/generate.py --check\n"
+        + "EOF\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(heredoc)
+
+
+def test_job_run_scripts_requires_a_parseable_job() -> None:
+    """Only executable run steps of an existing job feed the gate."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    text = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - {name: a, run: 'echo hello'}\n"
+    )
+    assert packaging_gate._job_run_scripts(text, "release-gate") == "echo hello"
+    assert packaging_gate._job_run_scripts(text, "missing") is None
+    assert packaging_gate._job_run_scripts("jobs: [", "release-gate") is None
