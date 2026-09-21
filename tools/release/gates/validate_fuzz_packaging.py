@@ -2,7 +2,7 @@
 """
 Fuzz and packaging infrastructure validator for the release gates.
 
-Validates the 11-item fuzz and packaging infrastructure requirements:
+Validates the 12-item fuzz and packaging infrastructure requirements:
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
 2. ClusterFuzzLite PR workflow exists
@@ -16,6 +16,8 @@ Validates the 11-item fuzz and packaging infrastructure requirements:
 9. Install/compatibility documentation exists
 10. Package smoke test job exists in release workflow
 11. Harness rules FUZZ-001 through FUZZ-007 defined in the fuzz guide
+12. Release-gate job provisions the pinned Rust toolchain (cargo, rustc,
+    rustfmt) that its gate scripts resolve through Rustup shims
 
 Exit codes:
   0 - All checks passed
@@ -31,6 +33,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 GITHUB_DIR = ".github"
 WORKFLOWS_DIR = "workflows"
@@ -41,7 +45,14 @@ FUZZ_TARGETS_GATE = "fuzz:targets-exist"
 FUZZ_CORPUS_PRUNING_GATE = "fuzz:corpus-pruning"
 PKG_NFPM_CONFIG_GATE = "pkg:nfpm-config"
 PKG_ARTIFACT_NAMING_WORKFLOW_GATE = "pkg:artifact-naming-workflow"
+PKG_RELEASE_GATE_TOOLCHAIN_GATE = "pkg:release-gate-toolchain"
 DOCS_COMPATIBILITY_GATE = "docs:compatibility"
+
+# The release-gate job runs this command; the gate scopes its toolchain
+# expectation to the job that actually carries the command so a future job
+# split must move the provisioning with it.
+RELEASE_GATE_JOB_NAME = "release-gate"
+RELEASE_GATE_RUSTFMT_CONSUMER = "tools/reason-codegen/generate.py --check"
 
 # Workflow paths
 CFLITE_PR_WORKFLOW = PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "cflite_pr.yml"
@@ -217,6 +228,167 @@ def check_release_workflow(result: ValidationResult) -> None:
         result.fail("pkg:smoke-test-job", "no smoke test job in workflow")
 
 
+def _strip_comment_from_line(line: str) -> str:
+    """Drop an unquoted trailing comment from a single line, respecting quotes."""
+    kept: list[str] = []
+    quote: str | None = None
+    for index, char in enumerate(line):
+        if quote is not None:
+            kept.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            kept.append(char)
+        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+            break
+        else:
+            kept.append(char)
+    return "".join(kept)
+
+
+def _strip_shell_comments(script: str) -> str:
+    """Remove shell comments from run scripts, respecting quotes.
+
+    A leading or whitespace-preceded ``#`` starts a comment; ``#`` inside a
+    quoted string is literal.  Escape handling is intentionally simple: the
+    run scripts in this repository do not rely on escaped comment markers.
+    """
+    return "\n".join(_strip_comment_from_line(line) for line in script.splitlines())
+
+
+def _join_continuations(script: str) -> str:
+    """Join backslash-continued lines so one command stays one logical line."""
+    return re.sub(r"\\\n[ \t]*", " ", script)
+
+
+_HEREDOC_MARKER_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
+def _strip_heredocs(script: str) -> str:
+    """Drop heredoc bodies so their content never counts as a command.
+
+    The marker line itself stays (it is executable); every line up to and
+    including the terminator is dropped.  Redirection forms beyond the plain
+    ``<<WORD`` / ``<<-WORD`` shape are intentionally not interpreted.
+    """
+    kept: list[str] = []
+    pending: str | None = None
+    for line in script.splitlines():
+        if pending is not None:
+            if line.strip() == pending:
+                pending = None
+            continue
+        kept.append(line)
+        match = _HEREDOC_MARKER_RE.search(line)
+        if match:
+            pending = match.group(1)
+    return "\n".join(kept)
+
+
+# Provisioning commands must sit in command position (optionally behind the
+# repository's `retry N` wrapper); substring matches, echoes and heredoc
+# bodies must never satisfy the gate.
+_PROVISION_PREFIX = r"^(?:retry\s+[0-9]+\s+)?"
+_PINNED_INSTALL_RE = re.compile(
+    _PROVISION_PREFIX
+    + r"rustup\s+toolchain\s+install\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
+    + r".*--component\s+rustfmt"
+)
+_VERIFIED_INSTALLER_RE = re.compile(
+    _PROVISION_PREFIX
+    + r"(?:bash\s+)?\./packaging/scripts/install-verified-rustup\.sh\b"
+    + r".*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}"
+)
+_DRIFT_CHECK_RE = re.compile(
+    r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
+)
+
+
+def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
+    """Return the concatenated run scripts of one job, or None when absent.
+
+    The workflow is parsed as YAML so that only executable ``run`` steps feed
+    the checks: shell comments in the raw file never satisfy them.
+    """
+    try:
+        workflow = yaml.safe_load(workflow_content)
+    except yaml.YAMLError:
+        return None
+    jobs = (workflow or {}).get("jobs") if isinstance(workflow, dict) else None
+    if not isinstance(jobs, dict) or job_name not in jobs:
+        return None
+    job = jobs[job_name]
+    if not isinstance(job, dict):
+        return None
+    scripts: list[str] = []
+    for step in job.get("steps") or []:
+        if isinstance(step, dict) and isinstance(step.get("run"), str):
+            scripts.append(step["run"])
+    return "\n".join(scripts)
+
+
+def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
+    """Return the toolchain provisioning issue, or None when satisfied.
+
+    Only executable commands in command position count: shell comments are
+    stripped, heredoc bodies dropped, and backslash continuations joined, so
+    a commented-out, echoed, or heredoc-embedded install or drift check
+    cannot satisfy the gate.  The pinned ${RUST_TOOLCHAIN} provisioning must
+    install the rustfmt component in the same command, or come from the
+    verified installer, whose default profile provides rustfmt.
+    """
+    executable = _join_continuations(
+        _strip_heredocs(_strip_shell_comments(run_scripts))
+    )
+    lines = [line.strip() for line in executable.splitlines() if line.strip()]
+    if not any(_DRIFT_CHECK_RE.match(line) for line in lines):
+        return (
+            "the release-gate job no longer runs "
+            f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
+            "expectation with the job split"
+        )
+    if not any(
+        _PINNED_INSTALL_RE.match(line) or _VERIFIED_INSTALLER_RE.match(line)
+        for line in lines
+    ):
+        return (
+            "the release-gate job must install the pinned Rust toolchain "
+            '(rustup toolchain install "${RUST_TOOLCHAIN}") with the rustfmt '
+            "component so cargo, rustc and rustfmt resolve for the gate scripts"
+        )
+    return None
+
+
+def check_release_gate_toolchain(result: ValidationResult) -> None:
+    """Validate pinned Rust toolchain provisioning in the release-gate job."""
+    content = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not content:
+        result.fail(
+            PKG_RELEASE_GATE_TOOLCHAIN_GATE,
+            "release-packages.yml not found",
+        )
+        return
+
+    run_scripts = _job_run_scripts(content, RELEASE_GATE_JOB_NAME)
+    if run_scripts is None:
+        result.fail(
+            PKG_RELEASE_GATE_TOOLCHAIN_GATE,
+            f"{RELEASE_GATE_JOB_NAME} job not found in release-packages.yml",
+        )
+        return
+
+    issue = _release_gate_toolchain_issue(run_scripts)
+    if issue is None:
+        result.pass_(
+            PKG_RELEASE_GATE_TOOLCHAIN_GATE,
+            "release gate installs the pinned Rust toolchain "
+            "(cargo/rustc/rustfmt)",
+        )
+    else:
+        result.fail(PKG_RELEASE_GATE_TOOLCHAIN_GATE, issue)
+
+
 def _workflow_naming_issue(wf_content: str) -> str | None:
     """Return a description of the naming gap, or None when both formats carry the version.
 
@@ -339,6 +511,7 @@ def main() -> int:
     check_cflite_workflows(result)
     check_fuzz_guide(result)
     check_release_workflow(result)
+    check_release_gate_toolchain(result)
     check_artifact_naming(result)
     check_install_docs(result)
 
