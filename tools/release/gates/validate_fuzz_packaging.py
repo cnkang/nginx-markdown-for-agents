@@ -720,29 +720,34 @@ def _trim_body_after_terminator(body: str) -> str:
     quoting survive for the checks that follow.  A standalone failure under
     ``set -e`` ends the shell and is handled by the live-segment scan.
     """
-    segments = _command_segments_with_separators(body)
+    pairs = _command_segments_with_separators(body)
     cut = len(body)
-    depth = 0
     previous: bool | None = None
+    branches: list[tuple[bool | None, bool]] = []
     search_from = 0
-    for segment, separator in segments:
+    for index, (segment, separator) in enumerate(pairs):
         found = body.find(segment, search_from)
         if found < 0:
             break
+        search_from = found + len(segment)
         keyword = _segment_keyword(segment)
-        if keyword in _CLOSE_KEYWORDS:
-            depth = max(0, depth - 1)
-        if (
-            depth == 0
-            and keyword == "return"
-            and not _chain_skips(separator, previous)
-        ):
+        condition = _pair_condition(pairs, index, keyword)
+        if _branch_keyword_step(branches, segment, condition):
+            if _marker_return_status(
+                segment, separator, previous, branches
+            ) is not None:
+                cut = found
+                break
+            previous = None
+            continue
+        if not _region_runs(branches):
+            continue
+        if _chain_skips(separator, previous):
+            continue
+        if keyword == "return":
             cut = found
             break
-        if keyword in ("if", "while", "until", "for", "case", "select"):
-            depth += 1
         previous = _segment_literal(segment)
-        search_from = found + len(segment)
     # The leading newline keeps the body's first command off the brace.
     return "\n" + body[:cut]
 
@@ -812,6 +817,21 @@ def _skip_env_assignments(words: list[str], index: int) -> int:
     return index
 
 
+def _skip_env_options(words: list[str], index: int) -> int:
+    """Skip `env` options (`-i`, `-u NAME`, `--unset=NAME`)."""
+    while (
+        index < len(words)
+        and words[index].startswith("-")
+        and words[index] != "--"
+    ):
+        if words[index] in ("-u", "--unset", "-C", "--chdir") and (
+            index + 1 < len(words)
+        ):
+            index += 1
+        index += 1
+    return index
+
+
 def _skip_shell_c(words: list[str], index: int) -> int:
     """Skip `<shell> [options] -c`, returning the payload word index."""
     probe = index + 1
@@ -844,7 +864,7 @@ def _wrapper_prefix_length(words: list[str]) -> int:
     VAR=VAL...`, `<shell> -c '...'`, `eval` and bare `--` separators, in
     the order the shell accepts them.
     """
-    index = 0
+    index = _skip_env_assignments(words, 0)
     if len(words) >= 2 and words[0] == "retry" and words[1].isdigit():
         index = 2
     index = _skip_bare_separators(words, index)
@@ -852,9 +872,13 @@ def _wrapper_prefix_length(words: list[str]) -> int:
         index = _skip_bare_separators(
             words, _skip_option_words(words, index + 1, _SUDO_ARG_FLAGS)
         )
+        index = _skip_env_assignments(words, index)
     if index < len(words) and words[index] == "env":
         index = _skip_bare_separators(
-            words, _skip_env_assignments(words, index + 1)
+            words,
+            _skip_env_assignments(
+                words, _skip_env_options(words, index + 1)
+            ),
         )
     if index < len(words) and words[index] in ("bash", "sh", "dash"):
         index = _skip_shell_c(words, index)
@@ -868,18 +892,68 @@ def _retry_runs_its_target(script: str) -> bool:
 
     ``retry N cmd`` only provisions when the retry implementation invokes
     the command it wraps; a no-op or partial implementation never reaches
-    the target, so wrapped provisioning must not count behind it.
+    the target, so wrapped provisioning must not count behind it.  The
+    invocation may sit inside a loop or an unevaluated branch: only a
+    provably dead position (a literal ``false`` branch or short-circuit)
+    does not count.
     """
     effective, _superseded = _effective_body_spans(script)
     for name, lo, hi in effective:
         if name != "retry":
             continue
-        for segment, _separator in _command_segments_with_separators(script[lo:hi]):
+        for segment in _possibly_reached_segments(script[lo:hi]):
             words = segment.split()
             if words and _resolve_heredoc_word(words[0])[0] in ("$@", "${@}"):
                 return True
         return False
     return True
+
+
+def _possible_marker_carry(
+    segment: str,
+    separator: str,
+    previous: bool | None,
+    branches: list[tuple[bool | None, bool]],
+) -> str | None:
+    """The command a marker carries when its region is not provably dead
+    and the marker itself is not short-circuited."""
+    if _segment_keyword(segment) not in _BODY_MARKERS:
+        return None
+    if _segment_unreachable(separator, previous) or not _region_runs(branches):
+        return None
+    return _body_marker_command(segment) or None
+
+
+def _possibly_reached_segments(script: str) -> list[str]:
+    """Segments that are not provably dead.
+
+    Literal-``false`` branches and short-circuits are dead; loops and
+    unevaluated conditions stay possible, so an invocation a retry
+    implementation wraps in a loop still counts.
+    """
+    live: list[str] = []
+    previous: bool | None = None
+    branches: list[tuple[bool | None, bool]] = []
+    pairs = _command_segments_with_separators(script)
+    for index, (segment, separator) in enumerate(pairs):
+        keyword = _segment_keyword(segment)
+        condition = _pair_condition(pairs, index, keyword)
+        if _branch_keyword_step(branches, segment, condition):
+            _possible_branch_state(branches, keyword, condition)
+            carried = _possible_marker_carry(
+                segment, separator, previous, branches
+            )
+            if carried:
+                live.append(carried)
+            previous = None
+            continue
+        if not _region_runs(branches):
+            continue
+        if _segment_unreachable(separator, previous):
+            continue
+        live.append(segment)
+        previous = _segment_literal(segment)
+    return live
 
 
 def _strip_provision_wrappers(segment: str) -> str:
@@ -891,7 +965,7 @@ def _strip_provision_wrappers(segment: str) -> str:
     deterministic scan instead of one composed pattern, which also keeps
     the pattern scanner free of nested-quantifier complaints.
     """
-    words = segment.split()
+    words = re.split(r"[ \t]+", segment.strip()) if segment.strip() else []
     rest = " ".join(words[_wrapper_prefix_length(words) :])
     if len(rest) >= 2 and rest[0] in "'\"" and rest[-1] == rest[0]:
         rest = rest[1:-1]
@@ -1024,7 +1098,9 @@ def _command_segments_with_separators(script: str) -> list[tuple[str, str]]:
             separator = "\n"
             current = []
         else:
-            current.append(" ")
+            # The newline stays data: a quoted payload with line-separated
+            # commands must keep them apart for the callers.
+            current.append("\n")
     _flush_segment(segments, current, separator)
     return segments
 
@@ -1170,14 +1246,28 @@ def _set_errexit_state(segment: str) -> bool | None:
     words = segment.split()
     if not words or words[0] != "set":
         return None
+    return _set_flags_state(words[1:])
+
+
+def _set_flags_state(flags: list[str]) -> bool | None:
+    """The errexit state a ``set`` argument list leaves behind."""
     state: bool | None = None
-    for word in words[1:]:
+    option_mode: bool | None = None
+    for word in flags:
+        if word in ("-o", "+o"):
+            option_mode = word == "-o"
+            continue
+        if option_mode is not None:
+            if word == "errexit":
+                state = option_mode
+            option_mode = None
+            continue
         if word == "errexit":
-            state = True
-        elif word.startswith("-") and "e" in word[1:]:
             state = True
         elif word.startswith("+") and "e" in word[1:]:
             state = False
+        elif word.startswith("-") and "e" in word[1:]:
+            state = True
     return state
 
 
@@ -1259,25 +1349,112 @@ def _always_failing_functions(script: str) -> set[str]:
     }
 
 
+def _marker_return_status(
+    segment: str,
+    separator: str,
+    previous: bool | None,
+    branches: list[tuple[bool | None, bool]],
+) -> bool | None:
+    """The failure status a marker's carried return provokes on the
+    provable path; None when the marker carries no taken return."""
+    if not _region_runs(branches) or _chain_skips(separator, previous):
+        return None
+    return _return_failure(_body_marker_command(segment))
+
+
+def _possible_branch_state(
+    branches: list[tuple[bool | None, bool]],
+    keyword: str,
+    condition: bool | None,
+) -> None:
+    """Relax the branch stack to "not provably dead" semantics: loops and
+    unevaluated conditions stay possible."""
+    if not branches:
+        return
+    _runs, chain = branches[-1]
+    if keyword in _OPEN_KEYWORDS:
+        branches[-1] = (True, chain)
+    elif keyword in ("if", "elif"):
+        branches[-1] = (condition is not False, chain)
+    elif keyword == "else":
+        branches[-1] = (chain != _OPEN_CHAIN, chain)
+
+
+def _body_marker_command(segment: str) -> str:
+    """The command a ``then``/``do``/``else`` marker carries on its own
+    segment (``then return 1``); ``""`` when the marker stands alone."""
+    words = segment.split()
+    if len(words) < 2:
+        return ""
+    return " ".join(words[1:])
+
+
+def _return_failure(segment: str) -> bool | None:
+    """Whether a ``return`` segment provokes a failure: True for a non-zero
+    argument, False for success, None when the segment is not a return."""
+    if _segment_keyword(segment) != "return":
+        return None
+    words = segment.split()
+    arg = words[1].strip("'\"") if len(words) > 1 else ""
+    return bool(arg and arg != "0")
+
+
+def _return_success_evidence(pairs: list[tuple[str, str]]) -> bool:
+    """Whether any segment or marker carries a success return.
+
+    Success evidence counts wherever it appears: a function that can
+    return success is never labelled as failing."""
+    if any(_return_failure(segment) is False for segment, _sep in pairs):
+        return True
+    return any(
+        _return_failure(_body_marker_command(segment)) is False
+        for segment, _sep in pairs
+        if _segment_keyword(segment) in ("then", "do", "else")
+    )
+
+
+def _marker_failure_evidence(
+    segment: str,
+    separator: str,
+    previous: bool | None,
+    branches: list[tuple[bool | None, bool]],
+) -> bool:
+    """Whether a marker's carried return provokes a failure on the
+    provable path."""
+    return (
+        _marker_return_status(segment, separator, previous, branches) is True
+    )
+
+
 def _body_fails_unconditionally(body: str) -> bool:
-    """Whether a body's every path returns a failure status."""
-    depth = 0
+    """Whether a body's provable path ends in a failure return.
+
+    Failure evidence must sit on the provable path; any success return
+    disqualifies the label, so a function that can succeed is never
+    treated as failing.
+    """
+    pairs = _command_segments_with_separators(body)
+    if _return_success_evidence(pairs):
+        return False
     failure_return = False
-    success_return = False
-    for segment, _separator in _command_segments_with_separators(body):
+    previous: bool | None = None
+    branches: list[tuple[bool | None, bool]] = []
+    for index, (segment, separator) in enumerate(pairs):
         keyword = _segment_keyword(segment)
-        if keyword in _CLOSE_KEYWORDS:
-            depth = max(0, depth - 1)
-        elif keyword in ("if", "while", "until", "for", "case", "select"):
-            depth += 1
-        elif depth == 0 and keyword == "return":
-            words = segment.split()
-            arg = words[1].strip("'\"") if len(words) > 1 else ""
-            if arg and arg != "0":
-                failure_return = True
-            else:
-                success_return = True
-    return failure_return and not success_return
+        condition = _pair_condition(pairs, index, keyword)
+        if _branch_keyword_step(branches, segment, condition):
+            if keyword in ("then", "do", "else"):
+                failure_return = failure_return or _marker_failure_evidence(
+                    segment, separator, previous, branches
+                )
+            previous = None
+            continue
+        if not _region_runs(branches) or _chain_skips(separator, previous):
+            continue
+        if _return_failure(segment) is True:
+            failure_return = True
+        previous = _segment_literal(segment)
+    return failure_return
 
 
 def _segment_ends_shell(
@@ -1518,7 +1695,7 @@ def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]
     for segment in segments:
         if not retry_trusted and _RETRY_CALL_RE.match(segment):
             continue
-        if re.search(r"[;&|]", _strip_provision_wrappers(segment)):
+        if re.search(r"[;&|\n]", _strip_provision_wrappers(segment)):
             continue
         candidates.append(segment)
     return candidates
