@@ -877,6 +877,17 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
     assert elapsed == 5.0
 
 
+def _blocking_target_count() -> int:
+    """How many blocking fuzz targets the release manifest declares."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[4]
+    manifest = root / "artifacts" / "release" / "0.9.2" / (
+        "blocking-fuzz-target-manifest.json")
+    return len(json.loads(manifest.read_text(encoding="utf-8"))["targets"])
+
+
 def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     """The fuzz envelope must leave room for setup and the single invocation
     that may still be running at expiry inside the dedicated fuzz job."""
@@ -895,14 +906,17 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     reserve = validator.RELEASE_JOB_LIMIT_SECONDS - total
     assert reserve >= validator.MIN_POST_ENVELOPE_RESERVE_SECONDS
     # The worker pool must fit the worst-case schedule inside the envelope:
-    # the slow decode target scheduled last on its worker (behind four fast
-    # soaks), chasing the executions floor at the slowest supported rate.
-    # The model charges each invocation its cap plus a generous startup,
-    # replay and shutdown overhead; the measured CI band is above the floor.
+    # the slow decode target is scheduled last, so it starts once a worker
+    # frees -- floor(fast targets / workers) fast soaks in -- and then chases
+    # the executions floor at the slowest supported rate.  The model charges
+    # each invocation its cap plus a generous startup, replay and shutdown
+    # overhead; the measured CI band is above the floor.
     per_invocation_overhead = 60
     supported_rate = 7  # executions per second
     fast_soak = 900 + per_invocation_overhead
-    slow_start = 4 * fast_soak
+    fast_targets = _blocking_target_count() - 1
+    workers = validator.TARGET_WORKER_COUNT
+    slow_start = (fast_targets // workers) * fast_soak
     chase_seconds = 100000 // supported_rate - 900
     chase_invocations = -(-chase_seconds // validator.TIME_CONTINUATION_CEILING)
     slow_chase = chase_seconds + chase_invocations * per_invocation_overhead
