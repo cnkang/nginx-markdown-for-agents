@@ -311,16 +311,23 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
     )
     from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
-    executable = packaging_gate._strip_shell_comments(gate_text)
-    assert "pip install --requirement requirements-release.txt" in executable, (
-        "the release-gate job must install requirements-release.txt")
-    # A commented-out install line must not satisfy the guard.
+    executable = packaging_gate._strip_heredocs(
+        packaging_gate._strip_shell_comments(gate_text))
+    install = "pip install --requirement requirements-release.txt"
+    # A commented-out install line inside a heredoc body must not satisfy
+    # the guard, and the install must run before the check that needs it.
     commented = (
         "# python3 -m pip install --requirement requirements-release.txt\n"
+        "cat <<'NOTE'\n" + install + "\nNOTE\n"
     )
-    assert "pip install --requirement requirements-release.txt" not in (
-        packaging_gate._strip_shell_comments(commented)
-    )
+    stopped = packaging_gate._strip_heredocs(
+        packaging_gate._strip_shell_comments(commented))
+    assert install not in stopped
+    install_at = executable.find(install)
+    assert install_at >= 0, "the release-gate job must install the pins"
+    check_at = executable.find("make docs-check")
+    assert install_at < check_at, (
+        "the install step must precede the docs-check that needs it")
     requirements = (REPO_ROOT / "requirements-release.txt").read_text(
         encoding="utf-8")
     # jsonschema backs the policy-matrix validation in the docs-check chain;
@@ -631,3 +638,88 @@ def test_toolchain_gate_accepts_escaped_heredoc_delimiters() -> None:
     )
     script = "cat <<\\$EOF\nbody\n$EOF\n" + drift + installer + component
     assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_toolchain_gate_keeps_escape_pairs_intact() -> None:
+    """Function-body stripping must not drop the second half of an escape.
+
+    A backslash-continued command relies on the newline surviving until the
+    continuation join; dropping it would hide a compliant drift check or
+    provisioning command.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py \\\n  --check\n"
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            drift + installer + component
+        )
+        is None
+    )
+    # The same holds when the script also defines a function.
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "unused() {\n  echo hi\n}\n" + drift + installer + component
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_treats_escaped_space_delimiter_as_one_word() -> None:
+    """A backslash-escaped space keeps the delimiter word intact.
+
+    ``<<EOF\ BAR`` declares the delimiter ``EOF BAR``; the provisioning
+    text before the closing line is body data and must not satisfy the
+    gate.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    body = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "python3 tools/reason-codegen/generate.py --check\n"
+    )
+    script = ": <<EOF\\ BAR\nEOF\\\n" + body + "EOF BAR\n"
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
+
+
+def test_toolchain_gate_joins_continued_marker_lines() -> None:
+    """A continued marker line reads its delimiter from the merged command.
+
+    ``: <<EOF \\`` followed by ``EOF`` puts the second ``EOF`` in command
+    position, so the body runs to the later terminator and the text in
+    between is body data.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    body = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "python3 tools/reason-codegen/generate.py --check\n"
+    )
+    script = ": <<EOF \\\nEOF\n:\n" + body + "EOF\n"
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
+
+
+def test_toolchain_gate_drops_subshell_function_bodies() -> None:
+    """A definition whose body is a subshell runs nothing until called."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    script = (
+        "provision() (\n"
+        "  bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '  rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        '  python3 tools/reason-codegen/generate.py --check\n'
+        ")\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
