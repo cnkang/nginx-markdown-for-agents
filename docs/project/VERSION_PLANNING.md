@@ -9,7 +9,7 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current released line (published 2026-09-19), building on
+- v0.9.2 is the current released line (published 2026-09-21), building on
   the v0.9.1 baseline-consolidation and compatibility-reset release.
 - Release version metadata is 0.9.2. The release shipped with the tag,
   assets, and checksums.
@@ -153,6 +153,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: current release state and release evidence updated for the published v0.9.2 |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
