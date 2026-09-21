@@ -1614,23 +1614,197 @@ def test_fuzz_job_runs_the_qualification_before_uploading() -> None:
     assert "fuzz-qualification-record.json" in upload.get("path", "")
 
 
+_SHADOW_RE = re.compile(
+    r"(?:^|[;\n]\s*)function\s+(bash|rustup|python3?)\b"
+    r"|(?:^|[;\n]\s*)(bash|rustup|python3?)\s*\(\s*\)"
+)
+
+
 def test_release_gate_scripts_do_not_shadow_matched_commands() -> None:
     """No gate script may define a shell function that shadows a command
     the provisioning checks match (bash, rustup, python3)."""
-    import re as _re
-
     workflow = _workflow()
-    shadow_re = _re.compile(
-        r"(?:^|[;\n]\s*)(?:function\s+)?(bash|rustup|python3?)\s*\(\s*\)"
-    )
     for job_name in ("release-gate", "fuzz-qualification"):
         for step in workflow["jobs"][job_name]["steps"]:
             run = step.get("run")
             if isinstance(run, str):
-                assert not shadow_re.search(run), (
+                assert not _SHADOW_RE.search(run), (
                     f"{job_name} step {step.get('name')!r} shadows a "
                     "matched command"
                 )
+
+
+def test_shadow_guard_recognizes_function_keyword_definitions() -> None:
+    """The guard must catch both definition spellings."""
+    assert _SHADOW_RE.search("function bash { :; }")
+    assert _SHADOW_RE.search("function rustup() { :; }")
+    assert _SHADOW_RE.search("bash() { :; }")
+    assert _SHADOW_RE.search("true; function python3 { :; }")
+    assert not _SHADOW_RE.search("bash --version")
+    assert not _SHADOW_RE.search("echo rustup python3")
+    assert not _SHADOW_RE.search("rustup component add --toolchain x rustfmt")
+
+
+def test_toolchain_gate_distrusts_provably_dead_retry_branches() -> None:
+    """A `$@` behind a literal `false` never runs: the wrapper cannot be
+    trusted to provision."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    wrapped = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    dead_branch = 'retry() { if false; then\n"$@"\nfi; }\n'
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            dead_branch + drift + wrapped
+        )
+        is not None
+    )
+    dead_marker = 'retry() { if false; then "$@"; fi; }\n'
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            dead_marker + drift + wrapped
+        )
+        is not None
+    )
+    short_circuit = 'retry() { false && "$@"; }\n'
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            short_circuit + drift + wrapped
+        )
+        is not None
+    )
+
+
+def test_toolchain_gate_keeps_loop_wrapped_retry_invocations() -> None:
+    """The real retry invokes `$@` inside a loop: that stays trusted."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    wrapped = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    looped = 'retry() { while :; do "$@" && return 0; done; }\n'
+    assert (
+        packaging_gate._release_gate_toolchain_issue(looped + drift + wrapped)
+        is None
+    )
+    guarded = 'retry() { if [ -n "$X" ]; then "$@"; fi; }\n'
+    assert (
+        packaging_gate._release_gate_toolchain_issue(guarded + drift + wrapped)
+        is None
+    )
+
+
+def test_toolchain_gate_trims_returns_in_taken_branches() -> None:
+    """`if true; then return` ends the body: later provisioning is dead."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    taken = "provision() { if true; then return 0; fi\n" + drift + provisioning + "}\nprovision\n"
+    assert packaging_gate._release_gate_toolchain_issue(taken) is not None
+    untaken = (
+        "provision() { if false; then return 0; fi\n"
+        + drift
+        + provisioning
+        + "}\nprovision\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(untaken) is None
+
+
+def test_toolchain_gate_ends_the_shell_at_a_certain_failing_return() -> None:
+    """A call to a function whose taken branch returns non-zero trips
+    errexit."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    fails = (
+        "set -e\nfail() { if true; then return 1; fi; }\nfail\n"
+        + drift
+        + provisioning
+    )
+    assert packaging_gate._release_gate_toolchain_issue(fails) is not None
+    ok = "set -e\nok() { if true; then return 0; fi; }\nok\n" + drift + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(ok) is None
+
+
+def test_raw_install_detector_reads_env_option_wrapped_commands() -> None:
+    """`env` options cannot smuggle a raw install past the detector."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    assert packaging_gate._raw_install_in_segment(
+        'env -i PATH="$PATH" rustup toolchain install nightly --profile minimal'
+    )
+    assert packaging_gate._raw_install_in_segment(
+        "env -u RUSTUP_HOME rustup toolchain install nightly"
+    )
+    assert packaging_gate._raw_install_in_segment(
+        "FOO=1 rustup toolchain install nightly"
+    )
+    assert packaging_gate._raw_install_in_segment(
+        "sudo FOO=1 rustup toolchain install nightly"
+    )
+    assert not packaging_gate._raw_install_in_segment(
+        'env -i PATH="$PATH" cargo --version'
+    )
+
+
+def test_toolchain_gate_rejects_line_separated_shell_payloads() -> None:
+    """A `bash -c` payload with line-separated commands cannot satisfy
+    the checks: its exit status is not predictable."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    multiline = (
+        "set -euo pipefail\n"
+        + drift
+        + "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain \"${RUST_TOOLCHAIN}\"\nfalse'\n"
+        + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(multiline) is not None
+    single = (
+        "set -euo pipefail\n"
+        + drift
+        + "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain \"${RUST_TOOLCHAIN}\" '\n"
+        + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(single) is None
+
+
+def test_toolchain_gate_models_set_plus_o_errexit() -> None:
+    """`set +o errexit` disables errexit: a later `false` is harmless."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    disabled = "set -e\nset +o errexit\nfalse\n" + drift + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(disabled) is None
+    enabled = "set +o errexit\nset -o errexit\nfalse\n" + drift + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(enabled) is not None
 
 
 def test_toolchain_gate_reads_command_wrapped_failures() -> None:
