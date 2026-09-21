@@ -297,8 +297,32 @@ def _join_continuations(script: str) -> str:
 
 
 _HEREDOC_MARKER_RE = re.compile(
-    r"<<-?[ \t]*(?:(\\?)(['\"])([^'\"]*)\2|(\\?)([^ \t;|&()<>]+))"
+    r"<<-?[ \t]*(?:(['\"])([^'\"]*)\1|((?:\\[ \t]|[^ \t;|&()<>])+))"
 )
+
+
+def _resolve_heredoc_word(raw: str) -> tuple[str, bool]:
+    """Resolve a heredoc delimiter word; return (delimiter, dynamic).
+
+    Quote removal drops backslashes, so an escaped space stays inside the
+    word and an escaped ``$`` or backtick never expands; a live expansion
+    character makes the word dynamic, because the shell resolves the
+    terminator at runtime.
+    """
+    resolved: list[str] = []
+    dynamic = False
+    index = 0
+    while index < len(raw):
+        char = raw[index]
+        if char == "\\" and index + 1 < len(raw):
+            resolved.append(raw[index + 1])
+            index += 2
+            continue
+        if char in ("$", "`"):
+            dynamic = True
+        resolved.append(char)
+        index += 1
+    return "".join(resolved), dynamic
 
 
 def _heredoc_marker_at(
@@ -307,10 +331,9 @@ def _heredoc_marker_at(
     """Parse a heredoc marker at ``index``; return (word, tab, dynamic, end).
 
     ``None`` when the position does not open a heredoc (including the
-    ``<<<`` herestring form).  A plain word containing expansion characters
-    (``$`` or backticks) is dynamic unless a backslash quotes it: the shell
-    expands an unquoted word at runtime, so the terminator cannot be known
-    statically, while ``<<\\$WORD`` keeps the literal delimiter.
+    ``<<<`` herestring form).  Quoted delimiters are literal; a plain word
+    resolves through quote removal, so escaped spaces stay part of it and
+    escaped expansion characters do not make it dynamic.
     """
     if not line.startswith("<<", index) or line.startswith("<<<", index):
         return None
@@ -318,10 +341,9 @@ def _heredoc_marker_at(
     if match is None:
         return None
     if match.group(2) is not None:
-        word, dynamic = match.group(3), False
+        word, dynamic = match.group(2), False
     else:
-        word = match.group(5)
-        dynamic = match.group(4) != "\\" and ("$" in word or "`" in word)
+        word, dynamic = _resolve_heredoc_word(match.group(3))
     return word, match.group(0).startswith("<<-"), dynamic, match.end()
 
 
@@ -353,30 +375,65 @@ def _strip_heredocs(script: str) -> str:
     """Drop heredoc bodies so their content never counts as a command.
 
     The marker line itself stays (it is executable); every line up to and
-    including the terminator is dropped.  Delimiters may be quoted
-    (``<<'WORD'``, ``<<"WORD"``), backslash-escaped (``<<\\WORD``) or plain
-    (any word without expansion characters).  The terminator must match the
-    delimiter exactly -- ``<<-`` additionally strips leading tabs -- mirroring
-    shell semantics, so a padded line never ends the body early.  Bodies
-    opened with a dynamic delimiter (``<<$WORD``) cannot be delimited
-    statically and are left intact; ``_dynamic_heredoc_markers`` reports them
-    so the provisioning checks can reject the script.
+    including the terminator is dropped.  Command lines join their backslash
+    continuations before marker detection, mirroring the shell: a continued
+    marker line reads its delimiter from the merged command, while heredoc
+    bodies stay literal and never join.  Delimiters may be quoted
+    (``<<'WORD'``, ``<<"WORD"``), escaped (``<<\\WORD``, ``<<EOF\\ BAR``) or
+    plain (any word without expansion characters).  The terminator must
+    match the delimiter exactly -- ``<<-`` additionally strips leading tabs
+    -- mirroring shell semantics, so a padded line never ends the body
+    early.  Bodies opened with a dynamic delimiter (``<<$WORD``) cannot be
+    delimited statically and are left intact; ``_dynamic_heredoc_markers``
+    reports them so the provisioning checks can reject the script.
     """
     kept: list[str] = []
     pending: list[tuple[str, bool]] = []
     quote: str | None = None
-    for line in script.splitlines():
+    lines = script.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if pending:
             delimiter, tab_stripped = pending[0]
             candidate = line.lstrip("\t") if tab_stripped else line
             if candidate == delimiter:
                 pending.pop(0)
             continue
+        line, quote, index = _join_command_line(lines, line, index, quote)
         kept.append(line)
         quote, markers = _scan_line_for_heredocs(line, quote)
         pending.extend(
             (marker[0], marker[1]) for marker in markers if not marker[2])
     return "\n".join(kept)
+
+
+def _line_continues(line: str, quote: str | None) -> bool:
+    """Whether a command line ends with an unescaped backslash.
+
+    Single-quoted strings keep backslashes literal, so a line inside one
+    never continues; elsewhere an odd run of trailing backslashes escapes
+    the newline.
+    """
+    if quote == "'":
+        return False
+    trailing = len(line) - len(line.rstrip("\\"))
+    return trailing % 2 == 1
+
+
+def _join_command_line(
+    lines: list[str], line: str, index: int, quote: str | None
+) -> tuple[str, str | None, int]:
+    """Join a command line's backslash continuations; return (line, quote, index).
+
+    The merged line is what the shell parses, so a heredoc marker split
+    across a continuation reads the same delimiter the shell would.
+    """
+    while _line_continues(line, quote) and index < len(lines):
+        line = line[:-1] + " " + lines[index].lstrip()
+        index += 1
+    return line, quote, index
 
 
 def _dynamic_heredoc_markers(script: str) -> list[str]:
@@ -401,32 +458,42 @@ _FUNCTION_DEF_TAIL_RE = re.compile(
 _FUNCTION_KEYWORD_TAIL_RE = re.compile(
     r"(?:^|[;&|()\n\s])function\s+[A-Za-z_][A-Za-z0-9_]*\s*$"
 )
+_BODY_CLOSERS = {"{": "}", "(": ")"}
 
 
-def _opens_function_body(script: str, index: int) -> bool:
-    """Whether the ``{`` at ``index`` opens a shell function definition."""
+def _opens_function_body(script: str, index: int) -> str | None:
+    """Return the opener when the char at ``index`` starts a function body.
+
+    A definition body may be a brace group or a subshell; both run only
+    when someone calls the function.
+    """
+    opener = script[index]
+    if opener not in _BODY_CLOSERS:
+        return None
     prefix = script[:index]
-    return bool(
-        _FUNCTION_DEF_TAIL_RE.search(prefix)
-        or _FUNCTION_KEYWORD_TAIL_RE.search(prefix)
-    )
+    if _FUNCTION_DEF_TAIL_RE.search(prefix) or _FUNCTION_KEYWORD_TAIL_RE.search(
+        prefix
+    ):
+        return opener
+    return None
 
 
 def _function_body_step(
-    script: str, index: int, depth: int, quote: str | None
+    script: str, index: int, depth: int, quote: str | None, opener: str
 ) -> tuple[int, int, str | None, str | None]:
     """Advance one character inside a function body.
 
-    Returns (new index, new depth, new quote, brace to keep); only the
-    closing brace of the outermost body is kept, so the structure stays
+    Returns (new index, new depth, new quote, closer to keep); only the
+    closing delimiter of the outermost body is kept, so the structure stays
     visible while the body commands remain dropped.
     """
+    closer = _BODY_CLOSERS[opener]
     char = script[index]
-    if quote is None and char == "{":
+    if quote is None and char == opener:
         return index + 1, depth + 1, quote, None
-    if quote is None and char == "}":
+    if quote is None and char == closer:
         depth -= 1
-        return index + 1, depth, quote, "}" if depth == 0 else None
+        return index + 1, depth, quote, closer if depth == 0 else None
     new_quote, consumed = _scan_char(script, index, quote)
     return index + consumed, depth, new_quote, None
 
@@ -434,31 +501,34 @@ def _function_body_step(
 def _strip_function_bodies(script: str) -> str:
     """Drop shell function bodies; defining a function runs nothing.
 
-    The release gate must provision in top-level commands: a body counts
-    only when someone calls the function, and the gate does not track calls.
-    Brace groups without a function name stay (they execute in place).
+    The release gate must provision in top-level commands: a definition body
+    counts only when someone calls the function, and the gate does not track
+    calls.  Brace groups and subshells without a definition stay (they
+    execute in place).
     """
     kept: list[str] = []
     index = 0
     depth = 0
     quote: str | None = None
+    opener = ""
     while index < len(script):
-        char = script[index]
-        if depth == 0 and char == "{" and _opens_function_body(script, index):
-            depth = 1
-            kept.append("{")
-            index += 1
+        if depth == 0:
+            found = _opens_function_body(script, index)
+            if found is not None:
+                depth = 1
+                opener = found
+                kept.append(found)
+                index += 1
+                continue
+            new_quote, consumed = _scan_char(script, index, quote)
+            kept.append(script[index : index + consumed])
+            quote = new_quote
+            index += consumed
             continue
-        if depth > 0:
-            index, depth, quote, brace = _function_body_step(
-                script, index, depth, quote)
-            if brace:
-                kept.append(brace)
-            continue
-        kept.append(char)
-        new_quote, consumed = _scan_char(script, index, quote)
-        quote = new_quote
-        index += consumed
+        index, depth, quote, closer = _function_body_step(
+            script, index, depth, quote, opener)
+        if closer:
+            kept.append(closer)
     return "".join(kept)
 
 
