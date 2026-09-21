@@ -1349,11 +1349,7 @@ def test_toolchain_gate_unwraps_drift_check() -> None:
 def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
     """The final evidence reads the fuzz record: the release-gate job must
     take the artifact handoff, and the producer must run first."""
-    import yaml
-
-    workflow = yaml.safe_load(
-        open(".github/workflows/release-packages.yml", encoding="utf-8")
-    )
+    workflow = _workflow()
     job = workflow["jobs"]["release-gate"]
     assert "fuzz-qualification" in job["needs"]
     names = [step.get("name", "") for step in job["steps"]]
@@ -1371,4 +1367,230 @@ def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
     ]
     assert uploads and (
         uploads[0].get("with", {}).get("name") == "fuzz-qualification-record"
+    )
+
+
+def test_toolchain_gate_strip_preserves_span_offsets() -> None:
+    """The stripper rewrites spans in place: a kept body's trimmed text is
+    clamped to the span width so later spans never shift."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"'
+    )
+    inline = "live(){" + installer + "}\nlive\n"
+    other = "unused(){" + installer + "}\n"
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    script = inline + other + drift
+    stripped = packaging_gate._strip_function_bodies(script)
+    assert len(stripped) == len(script)
+    # The unreachable body's text is fully erased despite the inline form,
+    # and the live body's text stays in place.
+    unused_at = stripped.index("unused(){")
+    assert "bash" not in stripped[unused_at + len("unused(){"):unused_at + len(other)]
+    assert installer in stripped[:unused_at]
+
+
+def test_toolchain_gate_reads_comments_after_separators() -> None:
+    """A `#` after a separator starts a comment to end of line."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    smuggled = (
+        "true;# inert; python3 tools/reason-codegen/generate.py --check; "
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"; rustup component add '
+        '--toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(smuggled) is not None
+    # A `#` inside a word is data, so the command still counts.
+    live = (
+        "echo a#b\n"
+        "python3 tools/reason-codegen/generate.py --check\n"
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(live) is None
+
+
+def test_toolchain_gate_requires_an_expandable_toolchain_argument() -> None:
+    """Single quotes suppress expansion: the installer would get a literal."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    quoted = (
+        drift
+        + "bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain '${RUST_TOOLCHAIN}'\n"
+        "rustup component add --toolchain '${RUST_TOOLCHAIN}' rustfmt\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(quoted) is not None
+    expandable = quoted.replace("'", '"')
+    assert packaging_gate._release_gate_toolchain_issue(expandable) is None
+
+
+def test_toolchain_gate_models_the_whole_if_chain() -> None:
+    """After a selected branch no elif or else part can run."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "  bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '  rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    elif_dead = (
+        "if true; then\n  echo selected\nelif true; then\n"
+        + provisioning
+        + "fi\n"
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(elif_dead) is not None
+    else_dead = (
+        "if true; then\n  echo selected\nelse\n"
+        + provisioning
+        + "fi\n"
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(else_dead) is not None
+    # A false first branch leaves the elif live.
+    elif_live = elif_dead.replace("if true;", "if false;", 1)
+    assert packaging_gate._release_gate_toolchain_issue(elif_live) is None
+
+
+def test_toolchain_gate_uses_the_last_definition() -> None:
+    """A redefined function runs its last body, not the earlier one."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    redefined = (
+        "provision() {\n"
+        "  bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '  rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "}\n"
+        "provision() { echo no; }\n"
+        "provision\n"
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(redefined) is not None
+    # The last definition with the real body satisfies the gate.
+    final = (
+        "provision() { echo no; }\n"
+        "provision() {\n"
+        "  bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '  rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "}\n"
+        "provision\n"
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(final) is None
+
+
+def test_toolchain_gate_verifies_the_retry_implementation() -> None:
+    """A local retry that never runs its target cannot provision."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    wrapped = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    noop = "set -euo pipefail\nretry() { :; }\n" + drift + wrapped
+    assert packaging_gate._release_gate_toolchain_issue(noop) is not None
+    honest = (
+        "set -euo pipefail\n"
+        'retry() { "$@" && return 0; return 1; }\n'
+        + drift
+        + wrapped
+    )
+    assert packaging_gate._release_gate_toolchain_issue(honest) is None
+
+
+def test_toolchain_gate_ends_the_shell_at_exec() -> None:
+    """`exec cmd` replaces the shell, so later commands never run."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    replaced = (
+        drift
+        + "exec bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(replaced) is not None
+    # Redirection-only exec keeps the shell running.
+    kept = (
+        drift
+        + "exec 3</dev/null\n"
+        + "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(kept) is None
+
+
+def test_toolchain_gate_rejects_dashed_c_payloads() -> None:
+    """`bash -- -c ...` makes `-c` a filename, not the option."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    dashed = (
+        drift
+        + "bash -- -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain \"${RUST_TOOLCHAIN}\"'\n"
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(dashed) is not None
+
+
+def test_toolchain_gate_rejects_compound_c_payloads() -> None:
+    """A multi-command payload's exit status cannot be trusted."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    compound = (
+        drift
+        + "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain \"${RUST_TOOLCHAIN}\"; false'\n"
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(compound) is not None
+    single = (
+        drift
+        + "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        "--toolchain \"${RUST_TOOLCHAIN}\"'\n"
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(single) is None
+
+
+def test_toolchain_gate_keeps_non_final_chain_failures_alive() -> None:
+    """errexit ignores a failing non-final && / || operand."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    chained = "set -e\nfalse && echo skipped\n" + drift + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(chained) is None
+    standalone = "set -e\nfalse\n" + drift + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(standalone) is not None
+
+
+def test_toolchain_gate_reads_literally_true_step_conditions() -> None:
+    """An `if: ${{ true }}` step still runs; anything else stays skipped."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    assert packaging_gate._step_runs_shell({"if": "${{ true }}", "run": "x"})
+    assert packaging_gate._step_runs_shell({"if": " true ", "run": "x"})
+    assert not packaging_gate._step_runs_shell({"if": "${{ false }}", "run": "x"})
+    assert not packaging_gate._step_runs_shell(
+        {"if": "${{ github.ref_type == 'tag' }}", "run": "x"}
     )

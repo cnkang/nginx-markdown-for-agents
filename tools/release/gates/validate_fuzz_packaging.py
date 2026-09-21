@@ -265,7 +265,11 @@ def _strip_comment_from_line(
     index = 0
     while index < len(line):
         char = line[index]
-        if quote is None and char == "#" and (index == 0 or line[index - 1] in " \t"):
+        if (
+            quote is None
+            and char == "#"
+            and (index == 0 or line[index - 1] in " \t;&|()")
+        ):
             return "".join(kept), None
         new_quote, consumed = _scan_char(line, index, quote)
         kept.append(line[index : index + consumed])
@@ -662,17 +666,39 @@ def _calls_in_region(
     return _called_function_names("\n".join(live), defined)
 
 
+def _effective_body_spans(
+    script: str,
+) -> tuple[list[tuple[str, int, int]], list[tuple[str, int, int]]]:
+    """Split body spans into the effective and the superseded ones.
+
+    A redefined function runs its last definition, so earlier bodies of the
+    same name can never execute on a later call: they are superseded.
+    """
+    spans = _function_body_spans(script)
+    last: dict[str, int] = {}
+    for position, (name, _lo, _hi) in enumerate(spans):
+        last[name] = position
+    effective: list[tuple[str, int, int]] = []
+    superseded: list[tuple[str, int, int]] = []
+    for position, span in enumerate(spans):
+        target = effective if last[span[0]] == position else superseded
+        target.append(span)
+    return effective, superseded
+
+
 def _live_function_names(script: str, defined: set[str]) -> set[str]:
     """Functions whose bodies actually run.
 
     Reachability is transitive: a call inside the body of a function nobody
-    calls never executes, so it cannot make its target live.  A fixpoint
-    over the call graph keeps both directions honest.
+    calls never executes, so it cannot make its target live, and only the
+    last definition of a name can be live at all.  A fixpoint over the call
+    graph keeps both directions honest.
     """
     if not defined:
         return set()
+    effective, _superseded = _effective_body_spans(script)
     spans_by_name: dict[str, list[tuple[int, int]]] = {}
-    for name, lo, hi in _function_body_spans(script):
+    for name, lo, hi in effective:
         spans_by_name.setdefault(name, []).append((lo, hi))
     live = _calls_in_region(script, defined, None)
     frontier = list(live)
@@ -724,13 +750,17 @@ def _strip_function_bodies(script: str) -> str:
         return script
     live = _live_function_names(script, defined)
     chars = list(script)
-    for name, lo, hi in _function_body_spans(script):
+    effective, superseded = _effective_body_spans(script)
+    for name, lo, hi in effective:
+        width = hi - lo
         if name in live:
-            trimmed = _trim_body_after_terminator(script[lo:hi])
-            replacement = list(trimmed) + [" "] * (hi - lo - len(trimmed))
+            trimmed = _trim_body_after_terminator(script[lo:hi])[:width]
+            replacement = list(trimmed) + [" "] * (width - len(trimmed))
         else:
-            replacement = [" "] * (hi - lo)
+            replacement = [" "] * width
         chars[lo:hi] = replacement
+    for _name, lo, hi in superseded:
+        chars[lo:hi] = [" "] * (hi - lo)
     return "".join(chars)
 
 
@@ -778,6 +808,8 @@ def _skip_shell_c(words: list[str], index: int) -> int:
         and words[probe].startswith("-")
         and not _BASH_C_RE.match(words[probe])
     ):
+        if words[probe] == "--":
+            return index
         if words[probe] == "-o" and probe + 1 < len(words):
             probe += 1
         probe += 1
@@ -819,6 +851,21 @@ def _wrapper_prefix_length(words: list[str]) -> int:
     return index
 
 
+def _retry_runs_its_target(script: str) -> bool:
+    """Whether a locally defined ``retry`` actually runs its arguments.
+
+    ``retry N cmd`` only provisions when the retry implementation invokes
+    the command it wraps; a no-op or partial implementation never reaches
+    the target, so wrapped provisioning must not count behind it.
+    """
+    effective, _superseded = _effective_body_spans(script)
+    for name, lo, hi in effective:
+        if name != "retry":
+            continue
+        return re.search(r"\$@|\$\{@\}", script[lo:hi]) is not None
+    return True
+
+
 def _strip_provision_wrappers(segment: str) -> str:
     """Drop wrapper tokens a provision command may sit behind.
 
@@ -838,13 +885,16 @@ def _strip_provision_wrappers(segment: str) -> str:
 # Release workflows must provision toolchains through the verified installer
 # (with an explicit `bash` invocation) and add the rustfmt component
 # separately; raw `rustup toolchain install` commands are rejected.
+_TOOLCHAIN_VALUE_RE = (
+    r"(?:\"\$\{RUST_TOOLCHAIN\}\"|(?<![\w'])\$\{RUST_TOOLCHAIN\}(?![\w']))"
+)
 _VERIFIED_INSTALLER_RE = re.compile(
     r"^bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
-    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?(?=$|[\s;|&)])"
+    + r"[^;|&]*--toolchain\s+" + _TOOLCHAIN_VALUE_RE + r"(?=$|[\s;|&)])"
 )
 _COMPONENT_ADD_RE = re.compile(
     r"^rustup\s+component\s+add\b[^;|&]*--toolchain\s+"
-    r"[\"']?\$\{RUST_TOOLCHAIN\}[\"']?(?=$|[\s;|&)])"
+    + _TOOLCHAIN_VALUE_RE + r"(?=$|[\s;|&)])"
 )
 _RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 _DRIFT_CHECK_RE = re.compile(
@@ -1023,17 +1073,29 @@ def _condition_literal(segment: str) -> bool | None:
     return None
 
 
-def _region_runs(branches: list[tuple[bool | None, bool]]) -> bool:
-    """Whether the branch regions so far all provably run.
+# Branch chain states, tracked per enclosing construct: an earlier branch
+# provably runs (OPEN_CHAIN: later parts are dead), an earlier branch might
+# run (UNKNOWN_CHAIN: fail closed, later parts stay conditional), or no
+# earlier branch ran (CLEAR_CHAIN: the current part decides).
+_OPEN_CHAIN = 0
+_UNKNOWN_CHAIN = 1
+_CLEAR_CHAIN = 2
 
-    ``branches`` holds ``(condition, in_else)`` per enclosing construct; a
-    condition the analyzer did not evaluate makes both branches
-    conditional.
+
+def _region_runs(branches: list[tuple[bool, int]]) -> bool:
+    """Whether the branch regions so far all provably run."""
+    return all(runs for runs, _chain in branches)
+
+
+def _is_exec_replacement(segment: str) -> bool:
+    """Whether ``exec cmd`` replaces the shell, ending it.
+
+    Redirection-only forms (``exec 3<file``) keep the shell running.
     """
-    for condition, in_else in branches:
-        if condition is None or in_else == condition:
-            return False
-    return True
+    words = segment.split()
+    if not words or _resolve_heredoc_word(words[0])[0] != "exec":
+        return False
+    return any(not _is_redirection_word(word) for word in words[1:])
 
 
 def _is_errexit_segment(segment: str) -> bool:
@@ -1061,14 +1123,41 @@ def _chain_skips(separator: str, previous: bool | None) -> bool:
     )
 
 
+def _branch_chain_state(condition: bool | None) -> int:
+    """The chain state after a branch whose condition evaluates so."""
+    if condition is True:
+        return _OPEN_CHAIN
+    if condition is None:
+        return _UNKNOWN_CHAIN
+    return _CLEAR_CHAIN
+
+
+def _branch_select(
+    branches: list[tuple[bool, int]], keyword: str, segment: str
+) -> None:
+    """Open the branch chain for an ``if`` or advance it for an ``elif``."""
+    condition = _condition_literal(segment)
+    if keyword == "elif" and branches:
+        _runs, chain = branches[-1]
+        runs = chain == _CLEAR_CHAIN and condition is True
+        branches[-1] = (
+            runs,
+            chain if chain != _CLEAR_CHAIN else _branch_chain_state(condition),
+        )
+    elif keyword == "if":
+        branches.append((condition is True, _branch_chain_state(condition)))
+
+
 def _branch_keyword_step(
-    branches: list[tuple[bool | None, bool]], segment: str
+    branches: list[tuple[bool, int]], segment: str
 ) -> bool:
     """Update the branch stack for a construct keyword; True when handled.
 
     ``if``/``elif``/``else``/``fi`` track which branch region provably
-    runs; loops and ``case`` push an unevaluated condition, and their
-    bodies stay conditional.  ``then``/``do`` do not change the stack.
+    runs: once a branch is selected, no later ``elif``/``else`` part can
+    run, and an unevaluated condition makes the rest conditional.  Loops
+    and ``case`` push an unevaluated condition, so their bodies stay
+    conditional; ``then``/``do`` do not change the stack.
     """
     keyword = _segment_keyword(segment)
     if keyword in _CLOSE_KEYWORDS:
@@ -1078,21 +1167,33 @@ def _branch_keyword_step(
     if keyword in _BODY_MARKERS:
         return True
     if keyword in ("if", "elif"):
-        entry = (_condition_literal(segment), False)
-        if keyword == "elif" and branches:
-            branches[-1] = entry
-        elif keyword == "if":
-            branches.append(entry)
+        _branch_select(branches, keyword, segment)
         return True
     if keyword == "else":
         if branches:
-            condition, _ = branches[-1]
-            branches[-1] = (condition, True)
+            _runs, chain = branches[-1]
+            branches[-1] = (chain == _CLEAR_CHAIN, _OPEN_CHAIN)
         return True
     if keyword in _OPEN_KEYWORDS:
-        branches.append((None, False))
+        branches.append((False, _UNKNOWN_CHAIN))
         return True
     return False
+
+
+def _segment_ends_shell(segment: str, following: str, errexit: bool) -> bool:
+    """Whether the segment ends its shell.
+
+    ``exit`` always ends it, ``exec cmd`` replaces the process, and a
+    standalone failing command ends it under ``set -e`` (errexit ignores
+    failures inside an ``&&``/``||``/pipeline list).
+    """
+    if _segment_keyword(segment) == "exit" or _is_exec_replacement(segment):
+        return True
+    return (
+        errexit
+        and _segment_literal(segment) is False
+        and following not in ("&&", "||", "|")
+    )
 
 
 def _live_command_segments(script: str) -> list[str]:
@@ -1111,7 +1212,11 @@ def _live_command_segments(script: str) -> list[str]:
     branches: list[tuple[bool | None, bool]] = []
     exited = False
     errexit = False
-    for segment, separator in _command_segments_with_separators(script):
+    pairs = _command_segments_with_separators(script)
+    for index, (segment, separator) in enumerate(pairs):
+        # Each tuple carries the separator BEFORE its segment, so the
+        # separator after this segment comes from the next tuple.
+        following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
         if _branch_keyword_step(branches, segment):
             previous = None
             continue
@@ -1120,16 +1225,13 @@ def _live_command_segments(script: str) -> list[str]:
         if _chain_skips(separator, previous):
             continue
         live.append(segment)
-        if _segment_keyword(segment) == "exit":
+        if _segment_ends_shell(segment, following, errexit):
             exited = True
             previous = None
             continue
-        value = _segment_literal(segment)
-        if errexit and value is False:
-            exited = True
         if _is_errexit_segment(segment):
             errexit = True
-        previous = value
+        previous = _segment_literal(segment)
     return live
 
 
@@ -1155,6 +1257,14 @@ def _provides_rustfmt_component(run_scripts: str) -> bool:
     return _rustfmt_component_index(_command_segments(run_scripts)) is not None
 
 
+def _literal_true_condition(value: str) -> bool:
+    """Whether an ``if:`` expression is literally, unconditionally true."""
+    text = value.strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text == "true"
+
+
 def _step_runs_shell(step: dict) -> bool:
     """Whether a workflow step's ``run`` executes in a shell on every path.
 
@@ -1163,7 +1273,11 @@ def _step_runs_shell(step: dict) -> bool:
     can satisfy a provisioning check.
     """
     if "if" in step:
-        return False
+        condition = step.get("if")
+        if not (
+            isinstance(condition, str) and _literal_true_condition(condition)
+        ):
+            return False
     shell = step.get("shell")
     if isinstance(shell, str) and shell.split():
         return shell.split()[0] in ("bash", "sh")
@@ -1261,6 +1375,27 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     return None
 
 
+_RETRY_CALL_RE = re.compile(r"^retry\s+\d+\s")
+
+
+def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]:
+    """Segments that can genuinely provision.
+
+    A command behind an untrusted ``retry`` never runs, and a wrapper whose
+    stripped payload still carries separators is several commands at once
+    (its exit status cannot be predicted), so neither can satisfy the
+    provisioning checks; the raw-install scan reads the plain segments.
+    """
+    candidates: list[str] = []
+    for segment in segments:
+        if not retry_trusted and _RETRY_CALL_RE.match(segment):
+            continue
+        if re.search(r"[;&|]", _strip_provision_wrappers(segment)):
+            continue
+        candidates.append(segment)
+    return candidates
+
+
 def _release_gate_toolchain_issue(
     run_scripts: "str | list[str]",
 ) -> str | None:
@@ -1294,7 +1429,10 @@ def _release_gate_toolchain_issue(
                 "delimiter, so its toolchain provisioning cannot be verified "
                 "statically; use a plain delimiter"
             )
-        segments.extend(_live_command_segments(executable))
+        retry_trusted = _retry_runs_its_target(stripped)
+        segments.extend(
+            _provision_candidates(_live_command_segments(executable), retry_trusted)
+        )
     if not any(
         _DRIFT_CHECK_RE.match(_strip_provision_wrappers(segment))
         for segment in segments
