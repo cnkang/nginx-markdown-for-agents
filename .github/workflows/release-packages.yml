@@ -1222,6 +1222,36 @@ jobs:
             --artifact-root dist
         shell: bash
 
+      - name: Install Rust toolchain for release gates
+        run: |
+          set -euo pipefail
+          # The gate scripts resolve cargo, rustc and rustfmt through Rustup
+          # shims (streaming evidence generation, the reason-codegen drift
+          # check), so the pinned toolchain must be installed and PATH-visible
+          # inside this job.  Provision serially with retries up front so no
+          # shim auto-install races happen mid-gate.  The nightly toolchain
+          # and cargo-fuzz belong to the separate fuzz qualification job.
+          retry() {
+            attempts="$1"
+            shift
+            count=1
+            while :; do
+              "$@" && return 0
+              if [ "$count" -ge "$attempts" ]; then
+                echo "command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+              sleep "$((count * 5))"
+              count=$((count + 1))
+            done
+          }
+          rustup set auto-self-update disable
+          retry 5 rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal \
+            --component rustfmt --component clippy --component rust-src \
+            --no-self-update
+          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
+        shell: bash
+
       - name: Verify release tag protection
         env:
           GH_TOKEN: ${{ github.token }}
