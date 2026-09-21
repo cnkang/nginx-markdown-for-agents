@@ -423,17 +423,24 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     """Return the command-separator length at ``index`` (0 = not one).
 
     ``;``, ``&&``, ``||``, ``|`` and a single ``&`` split only outside
-    quotes; ``(``, ``)`` and backticks also split inside double quotes
-    because subshells and command substitution run their content there.
+    quotes.  ``(`` and ``)`` split outside quotes (subshells) and backticks
+    split everywhere except single quotes (command substitution); inside
+    double quotes only a ``$``-preceded ``(`` opens a substitution, so bare
+    quoted parentheses stay data.
     """
     char = line[index]
     if quote == "'":
         return 0
-    if quote is None:
-        if char == ";":
+    if quote == '"':
+        if char == "`":
             return 1
-        if char in "&|":
-            return 2 if line.startswith(char * 2, index) else 1
+        if char == "(" and index > 0 and line[index - 1] == "$":
+            return 1
+        return 0
+    if char == ";":
+        return 1
+    if char in "&|":
+        return 2 if line.startswith(char * 2, index) else 1
     return 1 if char in "()`" else 0
 
 
@@ -543,16 +550,17 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     all_scripts = _all_job_run_scripts(workflow_content)
     if all_scripts is None:
         return None
-    dynamic = _dynamic_heredoc_markers(all_scripts)
+    # Strip comments and static heredoc bodies first: markers there are data,
+    # so they must not trip the dynamic-delimiter rejection.
+    stripped = _strip_heredocs(_strip_shell_comments(all_scripts))
+    dynamic = _dynamic_heredoc_markers(stripped)
     if dynamic:
         return (
             "release workflows must not open heredocs with runtime-expanded "
             "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
             "verified statically"
         )
-    executable = _join_continuations(
-        _strip_heredocs(_strip_shell_comments(all_scripts))
-    )
+    executable = _join_continuations(stripped)
     for segment in _command_segments(executable):
         if _RAW_INSTALL_RE.match(segment):
             return (
@@ -576,16 +584,17 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     rustfmt through Rustup shims, while the installer's minimal profile
     does not include it.
     """
-    dynamic = _dynamic_heredoc_markers(run_scripts)
+    # Strip comments and static heredoc bodies first: markers there are data,
+    # so they must not trip the dynamic-delimiter rejection.
+    stripped = _strip_heredocs(_strip_shell_comments(run_scripts))
+    dynamic = _dynamic_heredoc_markers(stripped)
     if dynamic:
         return (
             "the release-gate job opens a heredoc with a runtime-expanded "
             "delimiter, so its toolchain provisioning cannot be verified "
             "statically; use a plain delimiter"
         )
-    executable = _join_continuations(
-        _strip_heredocs(_strip_shell_comments(run_scripts))
-    )
+    executable = _join_continuations(stripped)
     segments = _command_segments(executable)
     if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
         return (

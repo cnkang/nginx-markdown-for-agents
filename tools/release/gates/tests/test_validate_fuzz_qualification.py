@@ -925,10 +925,13 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     import tools.release.gates.validate_fuzz_qualification as validator
 
     durations = {"slow": 0.3, "fast": 0.15}
+    spans: list[tuple[str, float, float]] = []
 
     def fake_record(entry, seed_path, deadline=None):
+        start = time_module.monotonic()
         time_module.sleep(
             durations["slow"] if entry["name"] == "slow" else durations["fast"])
+        spans.append((entry["name"], start, time_module.monotonic()))
         return {
             "target": entry["name"], "seed": entry["seed"],
             "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
@@ -943,9 +946,13 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     start = time_module.monotonic()
     records = validator._run_blocking_targets(
         entries, seeds, deadline=start + 60)
-    wall = time_module.monotonic() - start
     assert set(records) == {entry["name"] for entry in entries}
-    # A serial schedule takes the sum of every duration; the pool overlaps
-    # the slow target's run with the fast targets' soaks.
-    serial_sum = 3 * durations["fast"] + durations["slow"]
-    assert wall < serial_sum
+    # The pool overlaps: some pair of targets ran concurrently.  A serial
+    # schedule gives every span a disjoint interval regardless of machine
+    # speed, so the relative-time check is load-independent.
+    overlapping = any(
+        first[1] < second[2] and second[1] < first[2]
+        for index, first in enumerate(spans)
+        for second in spans[index + 1:]
+    )
+    assert overlapping, spans
