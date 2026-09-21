@@ -73,13 +73,29 @@ TIME_CONTINUATION_BUDGET = 5400
 # multiply across the fourteen blocking targets, so a single monotonic
 # deadline bounds the whole fuzz phase; exhausted targets fail fast with a
 # reason and the record is still emitted instead of CI killing the job
-# before it exists (release-gate timeout: 360 minutes).  Sized from the
-# real-mode arithmetic: twelve targets need only their 900-second soak
-# (fast targets clear 100k executions inside it), one target adds a chase
-# of roughly 40 minutes, one adds its soak, and the benchmark and remaining
-# gates need about an hour: 260 minutes of envelope fits the 360-minute
-# job with margin.
-FUZZ_JOB_BUDGET = 15600
+# before it exists.
+#
+# The envelope is one term of a job-limit equation asserted by unit test:
+#   SETUP_ALLOWANCE + FUZZ_JOB_BUDGET + INVOCATION_TIMEOUT_MARGIN
+#   + REPLAY_ALLOWANCE + POST_FUZZ_RESERVE <= RELEASE_JOB_LIMIT
+# The post-fuzz reserve covers what runs inside the same job after the
+# fuzz phase: the EL9 short-soak qualification (30 minutes per its
+# manifest), the module benchmark (eight scenarios, about twenty minutes),
+# the evidence validators, and the host-side gates.  Sized from the
+# real-mode arithmetic -- twelve targets need only their 900-second soak
+# (fast targets clear 100k executions inside it), the slow decode target
+# adds a chase that fits the envelope for any sustained rate at or above
+# twenty-five executions per second, and the last soak closes the phase.
+FUZZ_JOB_BUDGET = 15900
+# Terms of the job-limit equation above.  The setup allowance covers the
+# gate dependencies and toolchain install steps before the first soak; the
+# replay allowance bounds the corpus replay plus shutdown of the single
+# invocation that may be running when the envelope expires; the post-fuzz
+# reserve leaves room for everything after the fuzz phase in the same job.
+RELEASE_JOB_LIMIT_SECONDS = 21600
+SETUP_ALLOWANCE_SECONDS = 420
+REPLAY_ALLOWANCE_SECONDS = 120
+POST_FUZZ_RESERVE_SECONDS = 3900
 MAX_FUZZ_INVOCATIONS = 8
 # Subprocess margin over the fuzzer's own time cap: it covers process
 # startup, corpus replay (which -max_total_time does not count) and the
