@@ -102,7 +102,7 @@ Each installation method falls into a tier that sets expectations for friction a
 | **Secondary** | Supported, more steps required | Yes | Linux package artifacts, Docker source build, manual source build |
 | **Convenience** | Available, not officially recommended | Partial | Homebrew tap (macOS) |
 
-- **Primary** — Recommended for most users. Pre-built binary, automated configuration, CI-verified across the full platform matrix.
+- **Primary** — Recommended for most users. Pre-built binary, automated configuration, and CI verification across the full platform matrix.
 - **Secondary** — Fully supported but requires more manual steps. Use when the primary path does not cover your platform or you need a custom NGINX build.
 - **Convenience** — Community-contributed methods that are not part of the project's CI pipeline. Use at your own discretion.
   - Homebrew tap publication and post-release verification are available through repository workflows, but this path remains convenience-tier.
@@ -1675,6 +1675,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: publication note and RELEASE_TAG guidance updated for the published v0.9.2 |
 | 0.9.2 | 2026-09-17 | Hermes | Reinstall example blocks define RELEASE_TAG and INSTALLER inline so each block runs on its own |
 | 0.9.2 | 2026-08-24 | Kang | DEB/RPM download commands now save responses to their intended artifact file names with curl -o options; AUTO_DISABLE_STALE_MODULE is passed through sudo env alongside VERSION |

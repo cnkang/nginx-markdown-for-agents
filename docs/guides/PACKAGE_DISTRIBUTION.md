@@ -18,8 +18,8 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 | Self-hosted APT | .deb | Planned; no public repository URL yet | GPG |
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
-APT/YUM repository publishing is intentionally tracked as a future distribution
-step. Until the project publishes a real repository and signing key, installation docs
+The project intentionally tracks APT/YUM repository publishing as a future
+distribution step. Until the project publishes a real repository and signing key, installation docs
 must point users to GitHub Release package artifacts rather than bare
 `apt-get install` or `yum install` commands.
 
