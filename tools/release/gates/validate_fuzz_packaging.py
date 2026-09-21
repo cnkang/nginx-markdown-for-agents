@@ -312,6 +312,10 @@ def _walk_removal_char(
     ``$`` or backtick that would expand when nothing in the word is quoted.
     """
     char = raw[index]
+    if char == "$" and index + 1 < len(raw) and raw[index + 1] in "'\"":
+        # The $ of $'..' / $".." quoting is not an expansion character; the
+        # quote that follows performs the quoting.
+        return quote, 1, None, False
     if char == "\\" and index + 1 < len(raw) and (
         quote is None or raw[index + 1] in "$`\"\\"
     ):
@@ -564,32 +568,107 @@ def _called_function_names(script: str, defined: set[str]) -> set[str]:
     return called
 
 
-_STEP_BOUNDARY = "\n: __release_gate_step_boundary__\n"
+def _definition_name(script: str, index: int) -> str | None:
+    """The function whose body opens at ``index`` (both definition forms)."""
+    prefix = script[:index]
+    match = re.search(
+        r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
+    )
+    if match is not None:
+        return match.group(1)
+    keyword = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
+    return keyword.group(1) if keyword is not None else None
+
+
+def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
+    """Spans ``(name, start, end)`` of every function body in the script.
+
+    The walk matches the bodies-stripper so reachability and stripping agree
+    on the structure.
+    """
+    spans: list[tuple[str, int, int]] = []
+    index = 0
+    depth = 0
+    quote: str | None = None
+    opener = ""
+    name = ""
+    body_start = 0
+    while index < len(script):
+        if depth == 0:
+            found = _opens_function_body(script, index)
+            if found is not None:
+                name = _definition_name(script, index) or ""
+                body_start = index + 1
+                opener = found
+                depth = 1
+                quote = None
+                index += 1
+                continue
+            quote, consumed = _scan_char(script, index, quote)
+            index += consumed
+            continue
+        index, depth, quote, closer = _function_body_step(
+            script, index, depth, quote, opener)
+        if closer and depth == 0:
+            spans.append((name, body_start, index))
+    return spans
+
+
+def _calls_in_region(
+    script: str, defined: set[str], region: tuple[int, int] | None
+) -> set[str]:
+    """Calls made by a region: nested function bodies are masked first.
+
+    With ``region`` None the whole script counts, so only top-level calls
+    remain after masking.
+    """
+    spans = [
+        (lo, hi)
+        for _, lo, hi in _function_body_spans(script)
+        if region is None or (lo > region[0] and hi < region[1])
+    ]
+    chars = list(script)
+    for lo, hi in spans:
+        for position in range(lo, min(hi, len(chars))):
+            chars[position] = " "
+    return _called_function_names("".join(chars), defined)
+
+
+def _live_function_names(script: str, defined: set[str]) -> set[str]:
+    """Functions whose bodies actually run.
+
+    Reachability is transitive: a call inside the body of a function nobody
+    calls never executes, so it cannot make its target live.  A fixpoint
+    over the call graph keeps both directions honest.
+    """
+    if not defined:
+        return set()
+    spans_by_name: dict[str, list[tuple[int, int]]] = {}
+    for name, lo, hi in _function_body_spans(script):
+        spans_by_name.setdefault(name, []).append((lo, hi))
+    live = _calls_in_region(script, defined, None)
+    frontier = list(live)
+    while frontier:
+        name = frontier.pop()
+        for region in spans_by_name.get(name, []):
+            for found in _calls_in_region(script, defined, region):
+                if found not in live:
+                    live.add(found)
+                    frontier.append(found)
+    return live
 
 
 def _strip_function_bodies(script: str) -> str:
-    """Drop uncalled shell function bodies, per workflow step.
+    """Drop the bodies of functions the script cannot reach.
 
-    Each workflow step runs in a fresh shell, so the script is processed
-    per step boundary first: a definition cannot survive into the next
-    step, and neither can its call.
-    """
-    return _STEP_BOUNDARY.join(
-        _strip_function_body_block(part) for part in script.split(_STEP_BOUNDARY)
-    )
-
-
-def _strip_function_body_block(script: str) -> str:
-    """Drop uncalled shell function bodies from one shell's script.
-
-    The release gate must provision in reachable commands: a definition body
-    counts when the same shell calls the function, because the call executes
-    the body.  Bodies of functions nobody calls never run, so they are
+    The release gate must provision in reachable commands: a body counts
+    when its function is called from top-level code, transitively through
+    bodies that run.  Bodies nobody can reach never run, so they are
     dropped (brace groups and subshells without a definition stay: they
     execute in place).
     """
     defined = _defined_function_names(script)
-    called = _called_function_names(script, defined)
+    live = _live_function_names(script, defined)
     kept: list[str] = []
     index = 0
     depth = 0
@@ -599,7 +678,8 @@ def _strip_function_body_block(script: str) -> str:
         if depth == 0:
             found = _opens_function_body(script, index)
             if found is not None:
-                if _function_body_is_live(script, index, called):
+                name = _definition_name(script, index) or ""
+                if name in live:
                     new_quote, consumed = _scan_char(script, index, quote)
                     kept.append(script[index : index + consumed])
                     quote = new_quote
@@ -620,22 +700,6 @@ def _strip_function_body_block(script: str) -> str:
         if closer:
             kept.append(closer)
     return "".join(kept)
-
-
-def _function_body_is_live(
-    script: str, index: int, called: set[str]
-) -> bool:
-    """Whether the body opening at ``index`` belongs to a called function."""
-    if not called:
-        return False
-    prefix = script[:index]
-    match = re.search(
-        r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
-    )
-    if match is not None:
-        return match.group(1) in called
-    keyword = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
-    return keyword is not None and keyword.group(1) in called
 
 
 # Provisioning commands must sit in command position (optionally behind the
@@ -694,9 +758,12 @@ def _strip_provision_wrappers(segment: str) -> str:
 # separately; raw `rustup toolchain install` commands are rejected.
 _VERIFIED_INSTALLER_RE = re.compile(
     r"^bash\s+\./packaging/scripts/install-verified-rustup\.sh\b"
-    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?"
+    + r"[^;|&]*--toolchain\s+[\"']?\$\{RUST_TOOLCHAIN\}[\"']?(?=$|[\s;|&)])"
 )
-_COMPONENT_ADD_RE = re.compile(r"^rustup\s+component\s+add\b[^;|&]*")
+_COMPONENT_ADD_RE = re.compile(
+    r"^rustup\s+component\s+add\b[^;|&]*--toolchain\s+"
+    r"[\"']?\$\{RUST_TOOLCHAIN\}[\"']?(?=$|[\s;|&)])"
+)
 _RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
@@ -818,13 +885,18 @@ def _command_segments(script: str) -> list[str]:
     return [segment for segment, _ in _command_segments_with_separators(script)]
 
 
+def _is_redirection_word(word: str) -> bool:
+    """Whether the word is a bare redirection like ``>/dev/null``/``2>&1``."""
+    return re.match(r"\d*[<>]", word) is not None
+
+
 def _segment_literal(segment: str) -> bool | None:
     """The boolean a segment trivially evaluates to, or None when unknown.
 
     The first word resolves through quote removal, so ``"false"`` reads as
-    the ``false`` command; a leading-and-sole ``false`` is False, a leading
-    ``true`` or ``:`` is True, and everything else may depend on runtime
-    state.
+    the ``false`` command; a leading ``false`` followed only by redirections
+    is False, a leading ``true`` or ``:`` is True, and everything else may
+    depend on runtime state.
     """
     words = segment.split()
     if not words:
@@ -832,7 +904,7 @@ def _segment_literal(segment: str) -> bool | None:
     first = _resolve_heredoc_word(words[0])[0]
     if first in (":", "true"):
         return True
-    if first == "false" and len(words) == 1:
+    if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
         return False
     return None
 
@@ -848,54 +920,58 @@ def _segment_unreachable(separator: str, previous: bool | None) -> bool:
     )
 
 
-def _live_command_segments(script: str) -> list[str]:
-    """Segments on the unconditional path across every shell in the script.
+def _segment_keyword(segment: str) -> str:
+    """The segment's first word after quote removal (``""`` when empty)."""
+    words = segment.split()
+    return _resolve_heredoc_word(words[0])[0] if words else ""
 
-    Each workflow step runs in its own shell, so liveness resets per step:
-    an ``exit`` or an unbalanced conditional in one step must not swallow
-    the provisioning of another.
+
+def _chain_skips(separator: str, previous: bool | None) -> bool:
+    """Whether an ``&&``/``||`` link makes the segment conditional.
+
+    A left side the analyzer did not evaluate may or may not have
+    succeeded, so the chained command cannot count as unconditional
+    provisioning.
     """
-    live: list[str] = []
-    for part in (
-        script.split(_STEP_BOUNDARY) if _STEP_BOUNDARY in script else [script]
-    ):
-        live.extend(_live_step_segments(part))
-    return live
+    return separator in ("&&", "||") and (
+        previous is None or _segment_unreachable(separator, previous)
+    )
 
 
-def _live_step_segments(script: str) -> list[str]:
-    """One step's segments on the unconditional path.
+def _live_command_segments(script: str) -> list[str]:
+    """Segments on the unconditional path of one shell's script.
 
-    Literal short-circuits model the shell, and any conditional construct
-    (``if``/``while``/``until``/``for``/``case``) makes its body
-    conditional: the analyzer does not evaluate test expressions, so only
-    commands outside every conditional count as provisioning.  ``exit``
-    ends that shell, so segments after it cannot run either.  Commands that
-    cannot run must not satisfy a provisioning requirement.
+    A command counts when the analyzer can prove it runs: every conditional
+    construct (``if``/``while``/``until``/``for``/``case``) hides its body,
+    an ``&&``/``||`` chain whose left side is not an evaluated literal is
+    conditional itself, and ``exit`` ends that shell.  Literal
+    short-circuits are modeled so a ``true &&`` chain still counts.
     """
     live: list[str] = []
     previous: bool | None = None
     conditional = 0
     exited = False
     for segment, separator in _command_segments_with_separators(script):
-        words = segment.split()
-        keyword = _resolve_heredoc_word(words[0])[0] if words else ""
+        keyword = _segment_keyword(segment)
         if keyword in _CLOSE_KEYWORDS:
             conditional = max(0, conditional - 1)
             previous = None
             continue
-        if exited or conditional or _segment_unreachable(separator, previous):
+        if exited or conditional:
             if keyword in _OPEN_KEYWORDS:
                 conditional += 1
+            continue
+        if _chain_skips(separator, previous):
             continue
         live.append(segment)
         if keyword in _OPEN_KEYWORDS:
             conditional += 1
+            previous = None
         elif keyword == "exit":
             exited = True
             previous = None
-            continue
-        previous = _segment_literal(segment)
+        else:
+            previous = _segment_literal(segment)
     return live
 
 
@@ -936,7 +1012,7 @@ def _step_runs_shell(step: dict) -> bool:
     return True
 
 
-def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
+def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
     """Return the concatenated run scripts of one job, or None when absent.
 
     The workflow is parsed as YAML so that only executable ``run`` steps feed
@@ -961,10 +1037,10 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> str | None:
             and _step_runs_shell(step)
         ):
             scripts.append(step["run"])
-    return _STEP_BOUNDARY.join(scripts)
+    return scripts
 
 
-def _all_job_run_scripts(workflow_content: str) -> str | None:
+def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
     """Return the concatenated run scripts of every job, or None when the
     workflow cannot be parsed.
 
@@ -986,7 +1062,20 @@ def _all_job_run_scripts(workflow_content: str) -> str | None:
         for step in job.get("steps") or []:
             if isinstance(step, dict) and isinstance(step.get("run"), str):
                 scripts.append(step["run"])
-    return _STEP_BOUNDARY.join(scripts)
+    return scripts
+
+
+def _raw_install_in_segment(segment: str) -> bool:
+    """Whether the segment runs a raw install, directly or via a shell -c."""
+    stripped = _strip_provision_wrappers(segment)
+    if _RAW_INSTALL_RE.match(stripped):
+        return True
+    if stripped != segment:
+        return any(
+            _RAW_INSTALL_RE.match(_strip_provision_wrappers(inner))
+            for inner in _command_segments(stripped)
+        )
+    return False
 
 
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
@@ -994,42 +1083,29 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
 
     Release workflows must provision toolchains through the verified
     installer, which validates the downloaded rustup-init checksum before
-    execution.
+    execution.  Every run line is scanned -- including conditional steps
+    and function bodies -- because a raw install must fail the gate
+    wherever it could ever appear.
     """
-    all_scripts = _all_job_run_scripts(workflow_content)
-    if all_scripts is None:
+    runs = _all_job_run_scripts(workflow_content)
+    if runs is None:
         return None
-    # Strip comments and static heredoc bodies first: markers there are data,
-    # so they must not trip the dynamic-delimiter rejection.
-    stripped = _strip_heredocs(_strip_shell_comments(all_scripts))
-    dynamic = _dynamic_heredoc_markers(stripped)
-    if dynamic:
-        return (
-            "release workflows must not open heredocs with runtime-expanded "
-            "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
-            "verified statically"
-        )
-    executable = _join_continuations(_strip_function_bodies(stripped))
-    # Uncalled function bodies are gone, so only executable code can trip
-    # the dynamic-delimiter rejection.
-    dynamic = _dynamic_heredoc_markers(executable)
-    if dynamic:
-        return (
-            "release workflows must not open heredocs with runtime-expanded "
-            "delimiters (`<<$VAR`): the toolchain provisioning cannot be "
-            "verified statically"
-        )
-    for segment in _live_command_segments(executable):
-        if _RAW_INSTALL_RE.match(_strip_provision_wrappers(segment)):
-            return (
-                "release workflows must provision Rust toolchains through "
-                "the verified installer; found a raw `rustup toolchain "
-                "install` command"
-            )
+    for run in runs:
+        stripped = _join_continuations(
+            _strip_heredocs(_strip_shell_comments(run)))
+        for segment in _command_segments(stripped):
+            if _raw_install_in_segment(segment):
+                return (
+                    "release workflows must provision Rust toolchains "
+                    "through the verified installer; found a raw `rustup "
+                    "toolchain install` command"
+                )
     return None
 
 
-def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
+def _release_gate_toolchain_issue(
+    run_scripts: "str | list[str]",
+) -> str | None:
     """Return the toolchain provisioning issue, or None when satisfied.
 
     Only executable commands in command position count: shell comments are
@@ -1042,21 +1118,25 @@ def _release_gate_toolchain_issue(run_scripts: str) -> str | None:
     rustfmt through Rustup shims, while the installer's minimal profile
     does not include it.
     """
-    # Strip comments and static heredoc bodies first: markers there are data,
-    # so they must not trip the dynamic-delimiter rejection.
-    stripped = _strip_heredocs(_strip_shell_comments(run_scripts))
-    executable = _join_continuations(_strip_function_bodies(stripped))
-    # Uncalled function bodies are already gone, so a dynamic delimiter in
-    # dead code cannot reject a script whose real provisioning is static.
-    dynamic = _dynamic_heredoc_markers(executable)
-    if dynamic:
-        return (
-            "the release-gate job opens a heredoc with a runtime-expanded "
-            "delimiter, so its toolchain provisioning cannot be verified "
-            "statically; use a plain delimiter"
-        )
-    executable = _join_continuations(_strip_function_bodies(stripped))
-    segments = _live_command_segments(executable)
+    steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
+    segments: list[str] = []
+    for step in steps:
+        # Strip comments and static heredoc bodies first: markers there are
+        # data, so they must not trip the dynamic-delimiter rejection.  A
+        # step runs in its own shell, so function reachability resets per
+        # step: a definition cannot cross into the next step's shell.
+        stripped = _strip_heredocs(_strip_shell_comments(step))
+        executable = _join_continuations(_strip_function_bodies(stripped))
+        # Unreachable function bodies are already gone, so a dynamic
+        # delimiter in dead code cannot reject a script whose real
+        # provisioning is static.
+        if _dynamic_heredoc_markers(executable):
+            return (
+                "the release-gate job opens a heredoc with a runtime-expanded "
+                "delimiter, so its toolchain provisioning cannot be verified "
+                "statically; use a plain delimiter"
+            )
+        segments.extend(_live_command_segments(executable))
     if not any(_DRIFT_CHECK_RE.match(segment) for segment in segments):
         return (
             "the release-gate job no longer runs "
