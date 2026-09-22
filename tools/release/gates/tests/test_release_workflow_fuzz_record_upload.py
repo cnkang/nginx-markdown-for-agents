@@ -1945,3 +1945,130 @@ def test_toolchain_gate_reads_a_quoted_installer_path() -> None:
         'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
     )
     assert packaging_gate._release_gate_toolchain_issue(quoted) is None
+
+
+def test_toolchain_gate_takes_single_word_c_payloads() -> None:
+    """`bash -c cmd arg...` runs only `cmd`; later words are positional."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    joined = (
+        "bash -c bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n' + component + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(joined) is not None
+    combined = (
+        "bash -ce 'bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\'\n' + component + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(combined) is None
+    quoted = (
+        "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\'\n' + component + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(quoted) is None
+
+
+def test_toolchain_gate_reads_wrapped_failure_literals() -> None:
+    """`env false`, `FOO=bar false` and `command exit 0` end the shell."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    for opener in ("env false", "FOO=bar false", "command exit 0"):
+        assert (
+            packaging_gate._release_gate_toolchain_issue(
+                "set -e\n" + opener + "\n" + provisioning + drift
+            )
+            is not None
+        ), opener
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "set -e\nenv true\n" + provisioning + drift
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_distrusts_retry_after_return() -> None:
+    """A retry that returns before `$@` never invokes its target."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    wrapped = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    early = 'retry() { return 1; "$@"; }\n' + drift + wrapped
+    assert packaging_gate._release_gate_toolchain_issue(early) is not None
+    looped = 'retry() { while :; do "$@" && return 0; done; }\n' + drift + wrapped
+    assert packaging_gate._release_gate_toolchain_issue(looped) is None
+
+
+def test_toolchain_gate_rejects_shadowing_definitions() -> None:
+    """Functions that shadow the commands the checks read are rejected."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    shadow_true = (
+        "true() { return 1; }\nif true; then\n" + provisioning + "fi\n" + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(shadow_true) is not None
+    for definition in (
+        "true && bash() { :; }\n",
+        "function rustup { :; }\n",
+        "env() { :; }\n",
+    ):
+        assert (
+            packaging_gate._release_gate_toolchain_issue(
+                definition + provisioning + drift
+            )
+            is not None
+        ), definition
+    named_retry = (
+        'retry() { "$@" && return 0; return 1; }\n'
+        + drift
+        + "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(named_retry) is None
+
+
+def test_literally_true_bool_conditions_keep_steps() -> None:
+    """`if: true` (a YAML boolean) still runs its shell step."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    runs = (
+        "python3 tools/reason-codegen/generate.py --check\n"
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - name: a\n"
+        "        if: true\n"
+        "        run: |\n"
+        + "".join("          " + line + "\n" for line in runs.splitlines())
+    )
+    scripts = packaging_gate._job_run_scripts(workflow, "release-gate")
+    assert packaging_gate._release_gate_toolchain_issue(scripts) is None
+    disabled = workflow.replace("        if: true\n", "        if: false\n")
+    scripts = packaging_gate._job_run_scripts(disabled, "release-gate")
+    assert packaging_gate._release_gate_toolchain_issue(scripts) is not None

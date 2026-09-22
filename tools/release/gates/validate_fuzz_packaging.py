@@ -789,7 +789,7 @@ def _strip_function_bodies(script: str) -> str:
 # --component rustfmt` satisfy the check without installing rustfmt.
 _WRAPPER_COMMANDS = frozenset({"command", "exec", "builtin", "nohup", "sudo"})
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_BASH_C_RE = re.compile(r"-[A-Za-z]*c\Z")
+_BASH_C_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
 
 
 _SUDO_ARG_FLAGS = frozenset({"-u", "-g", "-p", "-C", "-T", "-r", "-t", "-h"})
@@ -857,8 +857,9 @@ def _skip_bare_separators(words: list[str], index: int) -> int:
     return index
 
 
-def _wrapper_prefix_length(words: list[str]) -> int:
-    """How many leading wrapper words to drop (a deterministic token scan).
+def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
+    """How many leading wrapper words to drop (a deterministic token scan),
+    plus whether the rest starts at a shell ``-c`` payload.
 
     Handles `retry N`, command wrappers with their own options, `env
     VAR=VAL...`, `<shell> -c '...'`, `eval` and bare `--` separators, in
@@ -881,10 +882,12 @@ def _wrapper_prefix_length(words: list[str]) -> int:
             ),
         )
     if index < len(words) and words[index] in ("bash", "sh", "dash"):
-        index = _skip_shell_c(words, index)
+        payload = _skip_shell_c(words, index)
+        if payload != index:
+            return payload, True
     if index < len(words) and words[index] == "eval":
         index += 1
-    return index
+    return index, False
 
 
 def _retry_runs_its_target(script: str) -> bool:
@@ -951,6 +954,11 @@ def _possibly_reached_segments(script: str) -> list[str]:
             continue
         if _segment_unreachable(separator, previous):
             continue
+        if (
+            _segment_keyword(segment) == "return"
+            and not _chain_skips(separator, previous)
+        ):
+            break
         live.append(segment)
         previous = _segment_literal(segment)
     return live
@@ -966,7 +974,15 @@ def _strip_provision_wrappers(segment: str) -> str:
     the pattern scanner free of nested-quantifier complaints.
     """
     words = re.split(r"[ \t]+", segment.strip()) if segment.strip() else []
-    rest = " ".join(words[_wrapper_prefix_length(words) :])
+    index, payload_at = _wrapper_prefix_length(words)
+    if payload_at and index < len(words) and words[index][:1] in ("'", '"'):
+        # A quoted payload keeps its text; an unquoted -c payload is one
+        # word (later words are positional parameters, not commands).
+        rest = " ".join(words[index:])
+    elif payload_at and index < len(words):
+        rest = words[index]
+    else:
+        rest = " ".join(words[index:])
     if len(rest) >= 2 and rest[0] in "'\"" and rest[-1] == rest[0]:
         rest = rest[1:-1]
     return rest
@@ -1115,21 +1131,44 @@ def _is_redirection_word(word: str) -> bool:
     return re.match(r"\d*[<>]", word) is not None
 
 
+def _peel_execution_wrappers(words: list[str]) -> list[str]:
+    """Drop leading wrappers that do not change which command runs:
+    ``command``/``builtin``, ``env`` with its options and ``VAR=VAL``
+    assignments, and bare assignments."""
+    while words:
+        first = _resolve_heredoc_word(words[0])[0]
+        if first in ("command", "builtin") and len(words) > 1:
+            words = words[1:]
+            continue
+        if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
+            words = words[1:]
+            continue
+        if first == "env" and len(words) > 1:
+            probe = _skip_bare_separators(
+                words,
+                _skip_env_assignments(words, _skip_env_options(words, 1)),
+            )
+            if probe >= len(words):
+                return []
+            words = words[probe:]
+            continue
+        break
+    return words
+
+
 def _segment_literal(segment: str) -> bool | None:
     """The boolean a segment trivially evaluates to, or None when unknown.
 
-    The first word resolves through quote removal, so ``"false"`` reads as
-    the ``false`` command; a leading ``false`` followed only by redirections
-    is False, a leading ``true`` or ``:`` is True, and everything else may
-    depend on runtime state.
+    The first word resolves through quote removal and execution wrappers,
+    so ``"false"``, ``command false``, ``env false`` and ``FOO=1 false``
+    all read as the ``false`` command; a leading ``false`` followed only
+    by redirections is False, a leading ``true`` or ``:`` is True, and
+    everything else may depend on runtime state.
     """
-    words = segment.split()
+    words = _peel_execution_wrappers(segment.split())
     if not words:
         return None
     first = _resolve_heredoc_word(words[0])[0]
-    while first in ("command", "builtin") and len(words) > 1:
-        words = words[1:]
-        first = _resolve_heredoc_word(words[0])[0]
     if first in (":", "true"):
         return True
     if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
@@ -1229,12 +1268,12 @@ def _region_runs(branches: list[tuple[bool, int]]) -> bool:
     return all(runs for runs, _chain in branches)
 
 
-def _is_exec_replacement(segment: str) -> bool:
-    """Whether ``exec cmd`` replaces the shell, ending it.
+def _is_exec_replacement(words: list[str]) -> bool:
+    """Whether ``exec cmd`` replaces the shell, ending it (the words are
+    already peeled of non-replacing wrappers).
 
     Redirection-only forms (``exec 3<file``) keep the shell running.
     """
-    words = segment.split()
     if not words or _resolve_heredoc_word(words[0])[0] != "exec":
         return False
     return any(not _is_redirection_word(word) for word in words[1:])
@@ -1470,12 +1509,13 @@ def _segment_ends_shell(
     failures inside an ``&&``/``||``/pipeline list).  A call to a local
     function that always returns a failure status counts as failing too.
     """
-    if _segment_keyword(segment) == "exit" or _is_exec_replacement(segment):
+    words = _peel_execution_wrappers(segment.split())
+    keyword = _resolve_heredoc_word(words[0])[0] if words else ""
+    if keyword == "exit" or _is_exec_replacement(words):
         return True
     value = _segment_literal(segment)
-    if value is None and failing:
-        words = segment.split()
-        if words and _resolve_heredoc_word(words[0])[0] in failing:
+    if value is None and failing and words:
+        if _resolve_heredoc_word(words[0])[0] in failing:
             value = False
     return (
         errexit and value is False and following not in ("&&", "||", "|")
@@ -1566,7 +1606,10 @@ def _step_runs_shell(step: dict) -> bool:
     """
     if "if" in step:
         condition = step.get("if")
-        if not (
+        if isinstance(condition, bool):
+            if not condition:
+                return False
+        elif not (
             isinstance(condition, str) and _literal_true_condition(condition)
         ):
             return False
@@ -1701,6 +1744,43 @@ def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]
     return candidates
 
 
+_SHADOWED_NAMES = frozenset({
+    ":",
+    "bash",
+    "builtin",
+    "command",
+    "dash",
+    "env",
+    "exec",
+    "exit",
+    "false",
+    "python",
+    "python3",
+    "return",
+    "rustup",
+    "sh",
+    "true",
+})
+
+
+def _shadowing_issue(script: str) -> str | None:
+    """Reject functions that shadow commands the provisioning checks read.
+
+    A function named like a shell builtin or like one of the commands the
+    checks match changes what those words do, so provisioning text can no
+    longer be trusted to mean what it says.
+    """
+    shadowed = _defined_function_names(script) & _SHADOWED_NAMES
+    if not shadowed:
+        return None
+    return (
+        "the release-gate job defines shell functions that shadow commands "
+        "used by the provisioning checks ("
+        + ", ".join(sorted(shadowed))
+        + "); rename them so the checks trust the commands they read"
+    )
+
+
 def _release_gate_toolchain_issue(
     run_scripts: "str | list[str]",
 ) -> str | None:
@@ -1724,6 +1804,9 @@ def _release_gate_toolchain_issue(
         # step runs in its own shell, so function reachability resets per
         # step: a definition cannot cross into the next step's shell.
         stripped = _strip_heredocs(_strip_shell_comments(step))
+        shadow_issue = _shadowing_issue(stripped)
+        if shadow_issue:
+            return shadow_issue
         executable = _join_continuations(_strip_function_bodies(stripped))
         # Unreachable function bodies are already gone, so a dynamic
         # delimiter in dead code cannot reject a script whose real
