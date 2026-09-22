@@ -2069,15 +2069,51 @@ def test_shadow_guard_covers_every_stripped_wrapper() -> None:
 
     Stripping a wrapper to reach the real command is only trustworthy when
     that wrapper cannot be redefined out from under the check; the two sets
-    have to stay in step as wrappers are added.
+    have to stay in step as wrappers are added.  The inventory spans names
+    stripped outside `_WRAPPER_COMMANDS` too (`eval`), which the earlier
+    `_WRAPPER_COMMANDS`-only difference silently missed.
     """
     from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
-    missing = packaging_gate._WRAPPER_COMMANDS - packaging_gate._SHADOWED_NAMES
+    # The inventory itself must span names stripped outside
+    # _WRAPPER_COMMANDS: collapsing it back to the wrapper subset is what
+    # made the original `eval` hole invisible to this very test.
+    assert "eval" in packaging_gate._PREFIX_STRIPPED_NAMES, (
+        "`eval` is stripped outside _WRAPPER_COMMANDS; the inventory must "
+        "stay wide enough to cover it"
+    )
+    missing = (
+        packaging_gate._PREFIX_STRIPPED_NAMES - packaging_gate._SHADOWED_NAMES
+    )
     assert not missing, (
         "stripped wrappers missing from the shadow guard: "
         + ", ".join(sorted(missing))
     )
+
+
+def test_shadow_guard_rejects_noop_eval_wrapper() -> None:
+    """A no-op `eval()` cannot hide skipped provisioning from the gate.
+
+    `eval` is stripped before the installer regex is matched, so a
+    function that overrides the builtin makes the literal text match
+    while bash runs nothing; the shadow guard has to reject it, exactly
+    as it rejects any other stripped name redefined to a no-op.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    provisioning = (
+        'eval bash ./packaging/scripts/install-verified-rustup.sh '
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'eval rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "python3 tools/reason-codegen/generate.py --check\n"
+    )
+    shadowed = "set -euo pipefail\neval() { :; }\n" + provisioning
+    issue = packaging_gate._release_gate_toolchain_issue([shadowed])
+    assert issue is not None and "eval" in issue
+    # Same text without the redefinition still provisions: no false
+    # rejection for the unshadowed spelling.
+    clean = "set -euo pipefail\n" + provisioning
+    assert packaging_gate._release_gate_toolchain_issue([clean]) is None
 
 
 def test_literally_true_bool_conditions_keep_steps() -> None:
