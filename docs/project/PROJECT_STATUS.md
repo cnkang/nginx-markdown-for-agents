@@ -29,7 +29,7 @@ operations, architecture, and contributor-facing harness maintenance.
 ### Current Release Line 0.9.2
 
 **Status:** Stable release. 0.9.2 is the latest released version, published
-2026-09-21. 0.9.2 is the final pre-1.0 breaking release: the public
+2026-09-22. 0.9.2 is the final pre-1.0 breaking release: the public
 configuration surface shrank to 20 active directives with the seven
 highlighted retired names (a subset of the removal inventory) dropped from
 the command table, the retired profile/conflict FFI snapshots are gone, and
@@ -217,7 +217,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current
-released version is 0.9.2 (published 2026-09-21). It is a
+released version is 0.9.2 (published 2026-09-22). It is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
@@ -413,7 +413,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
-released line (published 2026-09-21). The project provides
+released line (published 2026-09-22). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 bounded full-buffer default, explicit streaming opt-in, bounded-memory
 processing, and a repo-owned validation harness. Release readiness remains tied
@@ -430,7 +430,7 @@ the active release documentation.
 
 ### Current State
 The team has implemented and tested the core feature set. 0.9.2 shipped on
-2026-09-21 after the release assets and the required verification evidence
+2026-09-22 after the release assets and the required verification evidence
 (performance baselines, SonarCloud scan on the final SHA, and the full
 release-gate suite) passed. The focus is on operational validation,
 performance optimization, and community feedback integration.
@@ -447,6 +447,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-22 | Hermes | Release date adjusted to the official publication day |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: 0.9.2 marked as the stable release and published across the status page |
