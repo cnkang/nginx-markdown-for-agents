@@ -832,6 +832,25 @@ def _skip_env_options(words: list[str], index: int) -> int:
     return index
 
 
+def _skip_env_prefix(words: list[str], index: int) -> int:
+    """Consume an ``env`` command's options, ``--`` separators and
+    ``VAR=VAL`` assignments in any accepted order, returning the index of
+    the command word that follows."""
+    probe = index
+    options_open = True
+    while True:
+        moved = probe
+        if options_open:
+            moved = _skip_env_options(words, moved)
+        if moved < len(words) and words[moved] == "--":
+            options_open = False
+            moved += 1
+        moved = _skip_env_assignments(words, moved)
+        if moved == probe:
+            return probe
+        probe = moved
+
+
 def _skip_shell_c(words: list[str], index: int) -> int:
     """Skip `<shell> [options] -c`, returning the payload word index."""
     probe = index + 1
@@ -842,7 +861,7 @@ def _skip_shell_c(words: list[str], index: int) -> int:
     ):
         if words[probe] == "--":
             return index
-        if words[probe] == "-o" and probe + 1 < len(words):
+        if words[probe] in ("-o", "-O") and probe + 1 < len(words):
             probe += 1
         probe += 1
     if probe < len(words) and _BASH_C_RE.match(words[probe]):
@@ -879,12 +898,7 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
         )
         index = _skip_env_assignments(words, index)
     if index < len(words) and words[index] == "env":
-        index = _skip_bare_separators(
-            words,
-            _skip_env_assignments(
-                words, _skip_env_options(words, index + 1)
-            ),
-        )
+        index = _skip_env_prefix(words, index + 1)
     if index < len(words) and words[index] in ("bash", "sh", "dash"):
         payload = _skip_shell_c(words, index)
         if payload != index:
@@ -909,7 +923,7 @@ def _retry_runs_its_target(script: str) -> bool:
         if name != "retry":
             continue
         for segment in _possibly_reached_segments(script[lo:hi]):
-            words = segment.split()
+            words = _peel_execution_wrappers(segment.split())
             if words and _resolve_heredoc_word(words[0])[0] in ("$@", "${@}"):
                 return True
         return False
@@ -968,6 +982,21 @@ def _possibly_reached_segments(script: str) -> list[str]:
     return live
 
 
+def _payload_end_index(text: str) -> int:
+    """The index of a quoted payload's closing quote, escape aware inside
+    double quotes; -1 when the payload never closes."""
+    quote = text[0]
+    index = 1
+    while index < len(text):
+        if quote == '"' and text[index] == "\\":
+            index += 2
+            continue
+        if text[index] == quote:
+            return index
+        index += 1
+    return -1
+
+
 def _strip_provision_wrappers(segment: str) -> str:
     """Drop wrapper tokens a provision command may sit behind.
 
@@ -980,18 +1009,23 @@ def _strip_provision_wrappers(segment: str) -> str:
     words = re.split(r"[ \t]+", segment.strip()) if segment.strip() else []
     index, payload_at = _wrapper_prefix_length(words)
     if payload_at and index < len(words) and words[index][:1] in ("'", '"'):
-        # A quoted payload keeps its text up to its closing quote; the
-        # words after it are positional parameters ($0 and later), and an
-        # unquoted -c payload is one word (the same rule).
+        # A quoted payload keeps its text up to its closing quote (escape
+        # aware inside double quotes); the words after it are positional
+        # parameters ($0 and later), and an unquoted -c payload is one
+        # word (the same rule).
         joined = " ".join(words[index:])
-        close = joined.find(joined[0], 1)
+        close = _payload_end_index(joined)
         rest = joined[: close + 1] if close > 0 else joined
     elif payload_at and index < len(words):
         rest = words[index]
     else:
         rest = " ".join(words[index:])
     if len(rest) >= 2 and rest[0] in "'\"" and rest[-1] == rest[0]:
+        quote_char = rest[0]
         rest = rest[1:-1]
+        if quote_char == '"':
+            # Inside double quotes bash turns \" into a literal ".
+            rest = rest.replace('\\"', '"')
     return rest
 
 
@@ -1138,28 +1172,33 @@ def _is_redirection_word(word: str) -> bool:
     return re.match(r"\d*[<>]", word) is not None
 
 
+def _peel_one_wrapper(words: list[str]) -> list[str] | None:
+    """Drop one leading execution wrapper (``command``/``builtin`` with an
+    optional ``--``, ``env`` with its whole prefix, or a ``VAR=VAL``
+    assignment); None when the leading word is not a wrapper."""
+    first = _resolve_heredoc_word(words[0])[0]
+    if first in ("command", "builtin") and len(words) > 1:
+        rest = words[1:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        return rest
+    if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
+        return words[1:]
+    if first == "env" and len(words) > 1:
+        probe = _skip_env_prefix(words, 1)
+        return words[probe:] if probe < len(words) else []
+    return None
+
+
 def _peel_execution_wrappers(words: list[str]) -> list[str]:
     """Drop leading wrappers that do not change which command runs:
     ``command``/``builtin``, ``env`` with its options and ``VAR=VAL``
     assignments, and bare assignments."""
     while words:
-        first = _resolve_heredoc_word(words[0])[0]
-        if first in ("command", "builtin") and len(words) > 1:
-            words = words[_skip_bare_separators(words, 1):]
-            continue
-        if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
-            words = words[1:]
-            continue
-        if first == "env" and len(words) > 1:
-            probe = _skip_bare_separators(
-                words,
-                _skip_env_assignments(words, _skip_env_options(words, 1)),
-            )
-            if probe >= len(words):
-                return []
-            words = words[probe:]
-            continue
-        break
+        peeled = _peel_one_wrapper(words)
+        if peeled is None:
+            break
+        words = peeled
     return words
 
 
@@ -1176,6 +1215,8 @@ def _segment_literal(segment: str) -> bool | None:
     if not words:
         return None
     first = _resolve_heredoc_word(words[0])[0]
+    if first == "--":
+        return False
     if first in (":", "true"):
         return True
     if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
