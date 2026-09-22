@@ -1873,11 +1873,13 @@ _SHADOWED_NAMES = frozenset({
     "exec",
     "exit",
     "false",
+    "nohup",
     "python",
     "python3",
     "return",
     "rustup",
     "sh",
+    "sudo",
     "true",
 })
 
