@@ -345,6 +345,38 @@ def test_job_run_scripts_requires_a_parseable_job() -> None:
     assert packaging_gate._job_run_scripts("jobs: [", "release-gate") is None
 
 
+_PIP_REQUIREMENT_COMMAND = re.compile(
+    r"(?:sudo\s+)?(?:python3?\s+-m\s+pip|pip3?)\s+install\s+"
+    r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?\b"
+)
+
+
+def _live_segments(script: str) -> list[str]:
+    """Live command segments of a workflow run script."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    stripped = packaging_gate._strip_heredocs(
+        packaging_gate._strip_shell_comments(script))
+    executable = packaging_gate._join_continuations(
+        packaging_gate._strip_function_bodies(stripped))
+    return packaging_gate._live_command_segments(executable)
+
+
+def _pip_install_steps(steps: list[str]) -> list[int]:
+    """Steps whose live segments install the pinned release requirements
+    through pip, in any shell-equivalent spelling."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    found: list[int] = []
+    for index, step in enumerate(steps):
+        for segment in _live_segments(step):
+            if _PIP_REQUIREMENT_COMMAND.match(
+                packaging_gate._strip_provision_wrappers(segment)
+            ):
+                found.append(index)
+    return found
+
+
 def test_release_gate_job_installs_the_release_python_dependencies() -> None:
     """The release-gate job runs ``make docs-check``, whose contract-matrix
     step imports jsonschema, and a fresh runner only provides what
@@ -365,26 +397,11 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
     )
     assert packaging_gate._job_run_scripts(disabled, "release-gate") == []
 
-    install_command = re.compile(
-        r"(?:sudo\s+)?(?:python3?\s+-m\s+pip|pip3?)\s+install\s+"
-        r"--requirement\s+requirements-release\.txt\b"
-    )
-
-    def live_segments(script: str) -> list[str]:
-        stripped = packaging_gate._strip_heredocs(
-            packaging_gate._strip_shell_comments(script))
-        executable = packaging_gate._join_continuations(
-            packaging_gate._strip_function_bodies(stripped))
-        return packaging_gate._live_command_segments(executable)
-
-    install_steps: list[int] = []
+    install_steps = _pip_install_steps(steps)
     check_steps: list[int] = []
     for index, step in enumerate(steps):
-        for segment in live_segments(step):
-            if install_command.match(segment):
-                install_steps.append(index)
-            if "make docs-check" in segment:
-                check_steps.append(index)
+        if any("make docs-check" in segment for segment in _live_segments(step)):
+            check_steps.append(index)
     assert install_steps, "the release-gate job must install the pins"
     assert check_steps, "the release-gate job must run the docs-check"
     assert install_steps[0] < check_steps[0], (
@@ -401,13 +418,7 @@ def test_release_gate_job_installs_the_release_python_dependencies() -> None:
         "          make docs-check\n"
     )
     dead_steps = packaging_gate._job_run_scripts(dead, "release-gate")
-    dead_installs = [
-        segment
-        for step in dead_steps
-        for segment in live_segments(step)
-        if install_command.match(segment)
-    ]
-    assert dead_installs == [], (
+    assert _pip_install_steps(dead_steps) == [], (
         "a dead install branch must not satisfy the guard")
     requirements = (REPO_ROOT / "requirements-release.txt").read_text(
         encoding="utf-8")
@@ -2259,3 +2270,135 @@ def test_toolchain_gate_treats_separator_commands_as_failures() -> None:
     assert packaging_gate._release_gate_toolchain_issue(failing2) is not None
     control = "set -e\ncommand -- true\n" + installer + component + drift
     assert packaging_gate._release_gate_toolchain_issue(control) is None
+
+
+def test_release_gate_dependency_guard_takes_valid_pip_spellings() -> None:
+    """Shell-equivalent spellings of the pinned pip install all count."""
+    steps = [
+        "retry 5 python3 -m pip install -r requirements-release.txt",
+        "python3 -m pip install --requirement "
+        "\"requirements-release.txt\"",
+        "bash -c 'python3 -m pip install --requirement "
+        "requirements-release.txt'",
+        "env FOO=bar python3 -m pip install --requirement "
+        "requirements-release.txt",
+        "sudo python3 -m pip install -r \"requirements-release.txt\"",
+        "pip3 install --requirement=requirements-release.txt",
+    ]
+    assert _pip_install_steps(steps) == [0, 1, 2, 3, 4, 5]
+    # A masked or dead spelling still does not count.
+    assert _pip_install_steps(
+        ["set -e\nfalse && python3 -m pip install -r "
+         "requirements-release.txt"]
+    ) == []
+
+
+def test_toolchain_gate_rejects_command_lookup_spellings() -> None:
+    """`command -v` only looks names up; it never runs them."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt'
+    )
+    looked_up = (
+        "set -euo pipefail\n"
+        f"command -v {installer} || true\n"
+        f"command -v {component} || true\n"
+        f"command -v {drift} || true\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(looked_up) is not None
+    control = (
+        "set -e\n"
+        f"command {installer}\n"
+        f"command {component}\n"
+        f"{drift}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(control) is None
+
+
+def test_toolchain_gate_takes_command_default_path_spelling() -> None:
+    """`command -p` runs the command through the default PATH."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt'
+    )
+    script = (
+        "set -e\n"
+        f"command -p {installer}\n"
+        f"command -p {component}\n"
+        f"{drift}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_toolchain_gate_rejects_builtin_wrapped_externals() -> None:
+    """`builtin` never runs external commands, so it provisions nothing."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt'
+    )
+    masked = (
+        f"builtin -- {installer} || true\n"
+        f"builtin -- {component} || true\n"
+        f"builtin -- {drift} || true\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(masked) is not None
+    chained = (
+        "set -e\n"
+        f"builtin -- true && {installer}\n"
+        f"builtin -- true && {component}\n"
+        f"{drift}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(chained) is None
+    failing = (
+        "set -e\n"
+        "builtin -- false\n"
+        f"{installer}\n"
+        f"{component}\n"
+        f"{drift}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(failing) is not None
+
+
+def test_toolchain_gate_rejects_separator_argument_commands() -> None:
+    """`command -- -- bash ...` runs a utility named `--` (127)."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt'
+    )
+    doubled = (
+        f"command -- -- {installer} || true\n"
+        f"command -- -- {component} || true\n"
+        f"command -- -- {drift} || true\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(doubled) is not None
+    single = (
+        "set -e\n"
+        f"command -- {installer}\n"
+        f"command -- {component}\n"
+        f"{drift}\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(single) is None

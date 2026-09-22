@@ -788,6 +788,13 @@ def _strip_function_bodies(script: str) -> str:
 # separators, letting `rustup toolchain install "${RUST_TOOLCHAIN}"; echo
 # --component rustfmt` satisfy the check without installing rustfmt.
 _WRAPPER_COMMANDS = frozenset({"command", "exec", "builtin", "nohup", "sudo"})
+# `builtin` only runs shell builtins: a known literal builtin keeps its
+# literal, and a command that is surely not a builtin makes it fail.
+_BUILTIN_LITERAL_WORDS = {":": True, "true": True, "false": False}
+_NON_BUILTIN_COMMANDS = frozenset({
+    "bash", "sh", "dash", "python", "python3", "rustup",
+    "env", "command", "exec", "nohup", "sudo",
+})
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _BASH_C_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
 
@@ -876,6 +883,25 @@ def _skip_bare_separators(words: list[str], index: int) -> int:
     return index
 
 
+def _wrapper_command_step(words: list[str], index: int) -> tuple[int, bool] | None:
+    """Advance past a leading command wrapper's own words; None when the
+    wrapper must not be unwrapped (a `builtin`, or a `command` lookup)."""
+    wrapper = words[index]
+    if wrapper == "builtin":
+        # `builtin` can only run shell builtins, never the external
+        # commands the provisioning checks match.
+        return None
+    if wrapper == "command":
+        rest, lookup = _command_operand(words[index + 1:])
+        if lookup:
+            return None
+        return len(words) - len(rest), False
+    probe = _skip_option_words(words, index + 1, _SUDO_ARG_FLAGS)
+    if probe < len(words) and words[probe] == "--":
+        probe += 1
+    return probe, False
+
+
 def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
     """How many leading wrapper words to drop (a deterministic token scan),
     plus whether the rest starts at a shell ``-c`` payload.
@@ -893,10 +919,10 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
         index += 2
     index = _skip_bare_separators(words, index)
     if index < len(words) and words[index] in _WRAPPER_COMMANDS:
-        index = _skip_bare_separators(
-            words, _skip_option_words(words, index + 1, _SUDO_ARG_FLAGS)
-        )
-        index = _skip_env_assignments(words, index)
+        step = _wrapper_command_step(words, index)
+        if step is None:
+            return index, False
+        index = _skip_env_assignments(words, step[0])
     if index < len(words) and words[index] == "env":
         index = _skip_env_prefix(words, index + 1)
     if index < len(words) and words[index] in ("bash", "sh", "dash"):
@@ -1172,15 +1198,34 @@ def _is_redirection_word(word: str) -> bool:
     return re.match(r"\d*[<>]", word) is not None
 
 
+def _command_operand(rest: list[str]) -> tuple[list[str], bool]:
+    """``command``'s operand after its own options, plus whether the
+    options ask for a lookup (``-v``/``-V``), which never runs it."""
+    probe = 0
+    lookup = False
+    while (
+        probe < len(rest)
+        and rest[probe].startswith("-")
+        and rest[probe] != "--"
+    ):
+        if "v" in rest[probe][1:] or "V" in rest[probe][1:]:
+            lookup = True
+        probe += 1
+    if probe < len(rest) and rest[probe] == "--":
+        probe += 1
+    return rest[probe:], lookup
+
+
 def _peel_one_wrapper(words: list[str]) -> list[str] | None:
-    """Drop one leading execution wrapper (``command``/``builtin`` with an
-    optional ``--``, ``env`` with its whole prefix, or a ``VAR=VAL``
-    assignment); None when the leading word is not a wrapper."""
+    """Drop one leading execution wrapper (``command`` with its options
+    and an optional ``--``, ``env`` with its whole prefix, or a
+    ``VAR=VAL`` assignment); None when the leading word is not a wrapper
+    (``builtin`` is not one: it only runs shell builtins)."""
     first = _resolve_heredoc_word(words[0])[0]
-    if first in ("command", "builtin") and len(words) > 1:
-        rest = words[1:]
-        if rest and rest[0] == "--":
-            rest = rest[1:]
+    if first == "command" and len(words) > 1:
+        rest, lookup = _command_operand(words[1:])
+        if lookup:
+            return None
         return rest
     if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
         return words[1:]
@@ -1217,6 +1262,18 @@ def _segment_literal(segment: str) -> bool | None:
     first = _resolve_heredoc_word(words[0])[0]
     if first == "--":
         return False
+    if first == "builtin":
+        rest = words[1:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        if not rest:
+            return None
+        name = _resolve_heredoc_word(rest[0])[0]
+        if name in _BUILTIN_LITERAL_WORDS:
+            return _BUILTIN_LITERAL_WORDS[name]
+        if name in _NON_BUILTIN_COMMANDS:
+            return False
+        return None
     if first in (":", "true"):
         return True
     if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
