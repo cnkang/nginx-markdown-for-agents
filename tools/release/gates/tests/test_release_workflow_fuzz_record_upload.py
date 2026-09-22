@@ -2072,3 +2072,67 @@ def test_literally_true_bool_conditions_keep_steps() -> None:
     disabled = workflow.replace("        if: true\n", "        if: false\n")
     scripts = packaging_gate._job_run_scripts(disabled, "release-gate")
     assert packaging_gate._release_gate_toolchain_issue(scripts) is not None
+
+
+def test_toolchain_gate_skips_command_separator_failures() -> None:
+    """`command -- false` fails a shell under errexit."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "set -e\ncommand -- false\n" + provisioning + drift
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            "set -e\ncommand -- true\n" + provisioning + drift
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_takes_c_payload_labels() -> None:
+    """A word after a quoted `-c` payload is $0, not more payload."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    labelled = (
+        "bash -c 'bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\' release-label\n' + component + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(labelled) is None
+    joined = (
+        "bash -c bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n' + component + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(joined) is not None
+
+
+def test_toolchain_gate_handles_assigned_retry_calls() -> None:
+    """Leading assignments do not hide retry calls in either direction."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    wrapped = (
+        "FOO=bar retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        "FOO=bar retry 5 rustup component add "
+        '--toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    honest = (
+        'retry() { attempts="$1"; shift; while :; do "$@" && return 0;'
+        " return 1; done; }\n" + drift + wrapped
+    )
+    assert packaging_gate._release_gate_toolchain_issue(honest) is None
+    early = 'retry() { return 1; "$@"; }\n' + drift + wrapped
+    assert packaging_gate._release_gate_toolchain_issue(early) is not None
