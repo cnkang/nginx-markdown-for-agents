@@ -788,6 +788,14 @@ def _strip_function_bodies(script: str) -> str:
 # separators, letting `rustup toolchain install "${RUST_TOOLCHAIN}"; echo
 # --component rustfmt` satisfy the check without installing rustfmt.
 _WRAPPER_COMMANDS = frozenset({"command", "exec", "builtin", "nohup", "sudo"})
+# Every command name `_wrapper_prefix_length` drops before it can match the
+# real command (`retry` excluded: shadowing it is the modeled case, covered
+# by `_retry_runs_its_target`).  The shadow guard must span this whole set —
+# including names stripped outside `_WRAPPER_COMMANDS`, like `eval` — or a
+# redefined no-op defeats the gate while the literal text still matches.
+_PREFIX_STRIPPED_NAMES = _WRAPPER_COMMANDS | frozenset({
+    "bash", "dash", "env", "eval", "sh",
+})
 # `builtin` only runs shell builtins: a known literal builtin keeps its
 # literal, and a command that is surely not a builtin makes it fail.
 _BUILTIN_LITERAL_WORDS = {":": True, "true": True, "false": False}
@@ -1870,6 +1878,7 @@ _SHADOWED_NAMES = frozenset({
     "command",
     "dash",
     "env",
+    "eval",
     "exec",
     "exit",
     "false",
