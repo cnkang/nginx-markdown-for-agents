@@ -2136,3 +2136,126 @@ def test_toolchain_gate_handles_assigned_retry_calls() -> None:
     assert packaging_gate._release_gate_toolchain_issue(honest) is None
     early = 'retry() { return 1; "$@"; }\n' + drift + wrapped
     assert packaging_gate._release_gate_toolchain_issue(early) is not None
+
+
+def test_toolchain_gate_rejects_double_separator_commands() -> None:
+    """`command -- -- true` cannot be found (127): its chain never runs."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    doubled = (
+        "set -e\n"
+        "command -- -- true && " + installer
+        + "command -- -- true && " + component
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(doubled) is not None
+    single = (
+        "set -e\n"
+        "command -- true && " + installer
+        + "command -- true && " + component
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(single) is None
+
+
+def test_toolchain_gate_takes_escaped_payload_quotes() -> None:
+    """A double-quoted `-c` payload may escape its inner quotes."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    escaped = (
+        'bash -c "bash ./packaging/scripts/install-verified-rustup.sh '
+        '--toolchain \\"${RUST_TOOLCHAIN}\\""\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        + drift
+    )
+    assert packaging_gate._release_gate_toolchain_issue(escaped) is None
+    hidden_raw = 'bash -c "echo \\"x\\"; rustup toolchain install nightly"'
+    assert packaging_gate._raw_install_in_segment(hidden_raw) is True
+
+
+def test_toolchain_gate_takes_env_separator_and_assignments() -> None:
+    """`env -- FOO=bar cmd` keeps the command reachable."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    script = (
+        drift
+        + "env -- FOO=bar " + installer
+        + "env -- FOO=bar " + component
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_toolchain_gate_takes_shell_option_arguments() -> None:
+    """`bash -O extglob -c '...'` carries its option argument."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    script = (
+        drift
+        + "bash -O extglob -c 'bash ./packaging/scripts/"
+        "install-verified-rustup.sh --toolchain \"${RUST_TOOLCHAIN}\"'\n"
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_toolchain_gate_trusts_command_forwarding_retry() -> None:
+    """A retry that forwards through `command \"$@\"` runs its target."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    retry = (
+        'retry() {\n  attempts="$1"\n  shift\n'
+        '  command "$@" && return 0\n  return 1\n}\n'
+    )
+    installer = (
+        "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        "retry 5 rustup component add "
+        '--toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    assert (
+        packaging_gate._release_gate_toolchain_issue(
+            retry + drift + installer + component
+        )
+        is None
+    )
+
+
+def test_toolchain_gate_treats_separator_commands_as_failures() -> None:
+    """A bare `--` command cannot be found: under errexit the shell ends."""
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    drift = "python3 tools/reason-codegen/generate.py --check\n"
+    installer = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    component = (
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+    )
+    failing = "set -e\n-- true\n" + installer + component + drift
+    assert packaging_gate._release_gate_toolchain_issue(failing) is not None
+    failing2 = "set -e\ncommand -- -- true\n" + installer + component + drift
+    assert packaging_gate._release_gate_toolchain_issue(failing2) is not None
+    control = "set -e\ncommand -- true\n" + installer + component + drift
+    assert packaging_gate._release_gate_toolchain_issue(control) is None
