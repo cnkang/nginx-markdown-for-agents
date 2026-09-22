@@ -2042,6 +2042,11 @@ def test_toolchain_gate_rejects_shadowing_definitions() -> None:
         "true && bash() { :; }\n",
         "function rustup { :; }\n",
         "env() { :; }\n",
+        # Stripped wrappers must be guarded too: a no-op `sudo()` or
+        # `nohup()` makes the gate read through a shell function that
+        # never runs the provisioning behind it.
+        "sudo() { :; }\n",
+        "nohup() { :; }\n",
     ):
         assert (
             packaging_gate._release_gate_toolchain_issue(
@@ -2057,6 +2062,22 @@ def test_toolchain_gate_rejects_shadowing_definitions() -> None:
         'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
     )
     assert packaging_gate._release_gate_toolchain_issue(named_retry) is None
+
+
+def test_shadow_guard_covers_every_stripped_wrapper() -> None:
+    """Every wrapper the gate strips must also be shadow-guarded.
+
+    Stripping a wrapper to reach the real command is only trustworthy when
+    that wrapper cannot be redefined out from under the check; the two sets
+    have to stay in step as wrappers are added.
+    """
+    from tools.release.gates import validate_fuzz_packaging as packaging_gate
+
+    missing = packaging_gate._WRAPPER_COMMANDS - packaging_gate._SHADOWED_NAMES
+    assert not missing, (
+        "stripped wrappers missing from the shadow guard: "
+        + ", ".join(sorted(missing))
+    )
 
 
 def test_literally_true_bool_conditions_keep_steps() -> None:
