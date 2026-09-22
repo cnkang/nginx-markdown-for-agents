@@ -866,8 +866,12 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
     the order the shell accepts them.
     """
     index = _skip_env_assignments(words, 0)
-    if len(words) >= 2 and words[0] == "retry" and words[1].isdigit():
-        index = 2
+    if (
+        index + 1 < len(words)
+        and words[index] == "retry"
+        and words[index + 1].isdigit()
+    ):
+        index += 2
     index = _skip_bare_separators(words, index)
     if index < len(words) and words[index] in _WRAPPER_COMMANDS:
         index = _skip_bare_separators(
@@ -976,9 +980,12 @@ def _strip_provision_wrappers(segment: str) -> str:
     words = re.split(r"[ \t]+", segment.strip()) if segment.strip() else []
     index, payload_at = _wrapper_prefix_length(words)
     if payload_at and index < len(words) and words[index][:1] in ("'", '"'):
-        # A quoted payload keeps its text; an unquoted -c payload is one
-        # word (later words are positional parameters, not commands).
-        rest = " ".join(words[index:])
+        # A quoted payload keeps its text up to its closing quote; the
+        # words after it are positional parameters ($0 and later), and an
+        # unquoted -c payload is one word (the same rule).
+        joined = " ".join(words[index:])
+        close = joined.find(joined[0], 1)
+        rest = joined[: close + 1] if close > 0 else joined
     elif payload_at and index < len(words):
         rest = words[index]
     else:
@@ -1138,7 +1145,7 @@ def _peel_execution_wrappers(words: list[str]) -> list[str]:
     while words:
         first = _resolve_heredoc_word(words[0])[0]
         if first in ("command", "builtin") and len(words) > 1:
-            words = words[1:]
+            words = words[_skip_bare_separators(words, 1):]
             continue
         if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
             words = words[1:]
@@ -1723,7 +1730,21 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     return None
 
 
-_RETRY_CALL_RE = re.compile(r"^retry\s+\d+\s")
+
+
+def _is_retry_call(segment: str) -> bool:
+    """Whether the segment invokes the local ``retry N`` wrapper.
+
+    Leading ``VAR=VAL`` assignments do not change which command runs, so
+    they are stepped over before the retry token is read.
+    """
+    words = segment.split()
+    index = _skip_env_assignments(words, 0)
+    return (
+        index + 1 < len(words)
+        and words[index] == "retry"
+        and words[index + 1].isdigit()
+    )
 
 
 def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]:
@@ -1736,7 +1757,7 @@ def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]
     """
     candidates: list[str] = []
     for segment in segments:
-        if not retry_trusted and _RETRY_CALL_RE.match(segment):
+        if not retry_trusted and _is_retry_call(segment):
             continue
         if re.search(r"[;&|\n]", _strip_provision_wrappers(segment)):
             continue
