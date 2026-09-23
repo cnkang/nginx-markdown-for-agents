@@ -9,7 +9,7 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current released line (published 2026-09-22), building on
+- v0.9.2 is the current released line (published 2026-09-23), building on
   the v0.9.1 baseline-consolidation and compatibility-reset release.
 - Release version metadata is 0.9.2. The release shipped with the tag,
   assets, and checksums.
@@ -153,6 +153,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-23 | Hermes | Release date moved to the current publication day |
 | 0.9.2 | 2026-09-22 | Hermes | Release date adjusted to the official publication day |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |

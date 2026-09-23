@@ -7,7 +7,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current line: v0.9.2 shipped on 2026-09-22 as the final breaking release
+> Current line: v0.9.2 shipped on 2026-09-23 as the final breaking release
 > before v1.0. Use the `v0.9.2` tag for installation.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
