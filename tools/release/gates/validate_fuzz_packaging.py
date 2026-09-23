@@ -256,27 +256,51 @@ def check_release_workflow(result: ValidationResult) -> None:
         result.fail("pkg:smoke-test-job", "no smoke test job in workflow")
 
 
+def _scan_ansi_c_quote(line: str, index: int) -> tuple[str | None, int]:
+    """Advance one character inside an ANSI-C-quoted string."""
+    char = line[index]
+    if char == chr(92) and index + 1 < len(line):
+        return "ansi-c", 2
+    return (None if char == "'" else "ansi-c"), 1
+
+
+def _scan_single_quote(line: str, index: int) -> tuple[str | None, int]:
+    """Advance one character inside a single-quoted string."""
+    return (None if line[index] == "'" else "'"), 1
+
+
+def _scan_double_quote(line: str, index: int) -> tuple[str | None, int]:
+    """Advance one character inside a double-quoted string."""
+    char = line[index]
+    escaped = char == chr(92) and index + 1 < len(line)
+    if escaped and line[index + 1] in ('"', chr(92), '`', '$'):
+        return '"', 2
+    return (None if char == '"' else '"'), 1
+
+
+def _scan_unquoted_char(line: str, index: int) -> tuple[str | None, int]:
+    """Advance one shell character when no quote is open."""
+    char = line[index]
+    if char == chr(92) and index + 1 < len(line):
+        return None, 2
+    if line.startswith("$'", index):
+        return "ansi-c", 2
+    return (char, 1) if char in ("'", '"') else (None, 1)
+
+
 def _scan_char(line: str, index: int, quote: str | None) -> tuple[str | None, int]:
     """Advance one quote or escape unit; return (new quote, chars consumed).
 
-    Outside quotes a backslash escapes the next character, so an escaped
-    quote is a literal quote rather than a quote opener.  Inside double
-    quotes a backslash escapes ``"``, ``\\``, ``$`` and backticks; inside
-    single quotes backslashes are literal.  A quote that opens on one line
-    stays open across lines.
+    Quote state is shared by comments, heredocs, function spans and command
+    segmentation so ANSI-C escaped apostrophes cannot desynchronize readers.
     """
-    char = line[index]
+    if quote == "ansi-c":
+        return _scan_ansi_c_quote(line, index)
     if quote == "'":
-        return (None if char == "'" else "'"), 1
+        return _scan_single_quote(line, index)
     if quote == '"':
-        if char == "\\" and index + 1 < len(line) and line[index + 1] in '"\\`$':
-            return '"', 2
-        return (None if char == '"' else '"'), 1
-    if char == "\\" and index + 1 < len(line):
-        return None, 2
-    if char in ("'", '"'):
-        return char, 1
-    return None, 1
+        return _scan_double_quote(line, index)
+    return _scan_unquoted_char(line, index)
 
 
 def _strip_comment_from_line(
@@ -336,30 +360,59 @@ _HEREDOC_MARKER_RE = re.compile(
 )
 
 
+def _walk_ansi_c_removal(
+    raw: str, index: int
+) -> tuple[str | None, int, str | None, bool]:
+    """One quote-removal step inside an ANSI-C string."""
+    char = raw[index]
+    if char == chr(92) and index + 1 < len(raw):
+        return "ansi-c", 2, raw[index + 1], False
+    if char == "'":
+        return None, 1, None, False
+    return "ansi-c", 1, char, False
+
+
+def _walk_removal_escape(
+    raw: str, index: int, quote: str | None
+) -> tuple[str | None, int, str | None, bool]:
+    """Remove a backslash when it quotes a shell-special character."""
+    char = raw[index]
+    if index + 1 < len(raw) and (
+        quote is None or raw[index + 1] in ("$", "`", '"', chr(92))
+    ):
+        return quote, 2, raw[index + 1], False
+    return quote, 1, char, False
+
+
+def _walk_removal_quote(
+    raw: str, index: int, quote: str | None
+) -> tuple[str | None, int, str | None, bool]:
+    """Open or close a regular single- or double-quoted fragment."""
+    char = raw[index]
+    if quote is None:
+        return char, 1, None, False
+    if quote == char:
+        return None, 1, None, False
+    return quote, 1, char, char in ("$", "`")
+
+
 def _walk_removal_char(
     raw: str, index: int, quote: str | None
 ) -> tuple[str | None, int, str | None, bool]:
-    """One quote-removal step; returns (quote, consumed, keep, live).
-
-    Backslashes escape the shell's special characters (the escaped character
-    stays literal, never expansion), quotes toggle string state, and
-    everything else passes through as data.  ``live`` marks an unescaped
-    ``$`` or backtick that would expand when nothing in the word is quoted.
-    """
+    """One quote-removal step; return (quote, consumed, keep, live)."""
     char = raw[index]
-    if char == "$" and index + 1 < len(raw) and raw[index + 1] in "'\"":
-        # The $ of $'..' / $".." quoting is not an expansion character; the
-        # quote that follows performs the quoting.
+    if quote == "ansi-c":
+        return _walk_ansi_c_removal(raw, index)
+    if raw.startswith("$'", index):
+        return "ansi-c", 2, None, False
+    if char == "$" and index + 1 < len(raw) and raw[index + 1] == '"':
+        # The dollar in $".." is not an expansion character; the quote
+        # that follows performs the quoting.
         return quote, 1, None, False
-    if char == "\\" and index + 1 < len(raw) and (
-        quote is None or raw[index + 1] in "$`\"\\"
-    ):
-        return quote, 2, raw[index + 1], False
+    if char == chr(92):
+        return _walk_removal_escape(raw, index, quote)
     if char in ("'", '"'):
-        if quote is None:
-            return char, 1, None, False
-        if quote == char:
-            return None, 1, None, False
+        return _walk_removal_quote(raw, index, quote)
     return quote, 1, char, char in ("$", "`")
 
 
@@ -371,6 +424,11 @@ def _resolve_heredoc_word(raw: str) -> tuple[str, bool]:
     expands it, so the delimiter is static; a fully unquoted word with a
     live ``$`` or backtick depends on the environment at runtime.
     """
+    # ANSI-C escapes have more spellings than this quote-removal model
+    # resolves.  Treat an escaped delimiter as dynamic/unverifiable instead
+    # of guessing a terminator and exposing heredoc body text as commands.
+    if raw.startswith("$'") and "\\" in raw:
+        return raw[2:-1] if raw.endswith("'") else raw[2:], True
     resolved: list[str] = []
     dynamic = False
     quoted = False
@@ -559,8 +617,51 @@ def _opens_function_body(script: str, index: int) -> str | None:
     return None
 
 
+def _function_brace_step(
+    script: str, index: int, depth: int, quote: str | None, body_start: int
+) -> tuple[int, int, str | None, str | None] | None:
+    """Track a brace-group delimiter when it is a shell command token."""
+    char = script[index]
+    if quote is not None:
+        return None
+    if char == "{" and _body_brace_is_command_position(
+        script, body_start, index, "{"
+    ):
+        return index + 1, depth + 1, quote, None
+    if char == "}" and _body_brace_is_command_position(
+        script, body_start, index, "}"
+    ):
+        depth -= 1
+        return index + 1, depth, quote, "}" if depth == 0 else None
+    return None
+
+
+def _function_paren_step(
+    script: str,
+    index: int,
+    depth: int,
+    quote: str | None,
+    closer: str,
+) -> tuple[int, int, str | None, str | None] | None:
+    """Track nested subshell delimiters inside a function body."""
+    if quote is not None:
+        return None
+    char = script[index]
+    if char == "(":
+        return index + 1, depth + 1, quote, None
+    if char == closer:
+        depth -= 1
+        return index + 1, depth, quote, closer if depth == 0 else None
+    return None
+
+
 def _function_body_step(
-    script: str, index: int, depth: int, quote: str | None, opener: str
+    script: str,
+    index: int,
+    depth: int,
+    quote: str | None,
+    opener: str,
+    body_start: int,
 ) -> tuple[int, int, str | None, str | None]:
     """Advance one character inside a function body.
 
@@ -569,12 +670,13 @@ def _function_body_step(
     visible while the body commands remain dropped.
     """
     closer = _BODY_CLOSERS[opener]
-    char = script[index]
-    if quote is None and char == opener:
-        return index + 1, depth + 1, quote, None
-    if quote is None and char == closer:
-        depth -= 1
-        return index + 1, depth, quote, closer if depth == 0 else None
+    delimiter_step = (
+        _function_brace_step(script, index, depth, quote, body_start)
+        if opener == "{"
+        else _function_paren_step(script, index, depth, quote, closer)
+    )
+    if delimiter_step is not None:
+        return delimiter_step
     new_quote, consumed = _scan_char(script, index, quote)
     return index + consumed, depth, new_quote, None
 
@@ -593,24 +695,6 @@ def _blank_span(chars: list[str], start: int, end: int) -> None:
         chars[position] = " "
 
 
-def _ansi_c_span_end(script: str, index: int) -> int:
-    """End offset of the ANSI-C string (``$'...'``) opened at ``index``.
-
-    The string honors backslash escapes, so an escaped quote does not
-    close it; an unterminated span runs to the script end.
-    """
-    end = index + 2
-    while end < len(script):
-        if script[end] == "\\":
-            end += 2
-            continue
-        if script[end] == "'":
-            end += 1
-            break
-        end += 1
-    return end
-
-
 def _masked_quotes(script: str) -> str:
     """Script text with quoted spans blanked to spaces.
 
@@ -625,11 +709,6 @@ def _masked_quotes(script: str) -> str:
     quote: str | None = None
     index = 0
     while index < len(script):
-        if quote is None and script.startswith("$'", index):
-            end = _ansi_c_span_end(script, index)
-            _blank_span(chars, index, end)
-            index = end
-            continue
         new_quote, consumed = _scan_char(script, index, quote)
         if quote is not None or new_quote is not None:
             _blank_span(chars, index, index + consumed)
@@ -742,7 +821,7 @@ def _function_body_walk_uncached(
             index += consumed
             continue
         index, depth, quote, closer = _function_body_step(
-            script, index, depth, quote, opener)
+            script, index, depth, quote, opener, body_start)
         if closer and depth == 0:
             spans.append((name, body_start, index))
     if depth != 0:
@@ -764,6 +843,13 @@ def _unclosed_structure_issue(script: str) -> str | None:
     hiding the spans of the real ones, and the shell cannot even parse the
     script, so an unclosed body or quoted string is rejected outright.
     """
+    code = _masked_quotes(_strip_shell_comments(script))
+    if re.search(r"(?<![A-Za-z0-9_])(?:@|\?|\+|\*|!)\(", code):
+        return (
+            "the release-gate job's run script uses extglob syntax that the "
+            "static shell model cannot delimit safely; rewrite it without "
+            "extglob so its toolchain provisioning can be verified"
+        )
     unclosed = _function_body_walk(script)[1]
     if unclosed == "body":
         return (
@@ -1009,6 +1095,24 @@ _SUDO_FLAG_FLAGS = frozenset({
     "--preserve-env", "--stdin", "--set-home", "--background", "--login",
     "--shell", "--non-interactive",
 })
+_MAX_COMMAND_WRAPPER_DEPTH = 4
+
+
+def _skip_one_option_word(
+    words: list[str], index: int, value_flags: frozenset[str],
+    flag_flags: frozenset[str],
+) -> int | None:
+    """Return the next index for one modeled wrapper option."""
+    word = words[index]
+    if word in value_flags:
+        return index + 2 if index + 1 < len(words) else None
+    if word in flag_flags:
+        return index + 1
+    if word.startswith("--") and "=" in word:
+        option, value = word.split("=", 1)
+        if option in value_flags and value:
+            return index + 1
+    return None
 
 
 def _skip_option_words(
@@ -1022,13 +1126,12 @@ def _skip_option_words(
         and words[index].startswith("-")
         and words[index] != "--"
     ):
-        word = words[index]
-        if word in value_flags:
-            if index + 1 < len(words):
-                index += 1
-        elif word not in flag_flags:
+        next_index = _skip_one_option_word(
+            words, index, value_flags, flag_flags
+        )
+        if next_index is None:
             return None
-        index += 1
+        index = next_index
     return index
 
 
@@ -1039,18 +1142,39 @@ def _skip_env_assignments(words: list[str], index: int) -> int:
     return index
 
 
+_ENV_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir"})
+_ENV_FLAG_OPTIONS = frozenset({"-i", "--ignore-environment", "-0", "--null"})
+_ENV_LONG_VALUE_OPTIONS = frozenset({"--unset", "--chdir"})
+
+
+def _env_option_step(words: list[str], index: int) -> int | None:
+    """Return the next index for one modeled ``env`` option."""
+    word = words[index]
+    if word in _ENV_VALUE_OPTIONS:
+        return index + 2 if index + 1 < len(words) else None
+    if word.startswith("--") and "=" in word:
+        option, value = word.split("=", 1)
+        if option in _ENV_LONG_VALUE_OPTIONS and value:
+            return index + 1
+        return None
+    return index + 1 if word in _ENV_FLAG_OPTIONS else None
+
+
 def _skip_env_options(words: list[str], index: int) -> int:
-    """Skip `env` options (`-i`, `-u NAME`, `--unset=NAME`)."""
+    """Skip only modeled ``env`` options; leave unknown options unpeeled.
+
+    The command after an unknown option may not be the next word, so its
+    apparent payload cannot count as a verified command.
+    """
     while (
         index < len(words)
         and words[index].startswith("-")
         and words[index] != "--"
     ):
-        if words[index] in ("-u", "--unset", "-C", "--chdir") and (
-            index + 1 < len(words)
-        ):
-            index += 1
-        index += 1
+        next_index = _env_option_step(words, index)
+        if next_index is None:
+            return index
+        index = next_index
     return index
 
 
@@ -1228,7 +1352,7 @@ def _unwrap_stacked_wrappers(
     lookup, an unmodeled sudo option) stops the scan with the wrapper still
     in front, so its text never counts.
     """
-    for _ in range(4):
+    for _ in range(_MAX_COMMAND_WRAPPER_DEPTH):
         if (
             index < len(words)
             and _resolve_heredoc_word(words[index])[0] in _WRAPPER_COMMANDS
@@ -1239,6 +1363,11 @@ def _unwrap_stacked_wrappers(
             index = _skip_env_assignments(words, step)
         if index < len(words) and _resolve_heredoc_word(words[index])[0] == "env":
             index = _skip_env_prefix(words, index + 1)
+    if index < len(words) and (
+        _resolve_heredoc_word(words[index])[0] in _WRAPPER_COMMANDS
+        or _resolve_heredoc_word(words[index])[0] == "env"
+    ):
+        return index, True
     return index, False
 
 
@@ -1323,7 +1452,7 @@ def _possible_marker_carry(
 ) -> str | None:
     """The command a marker carries when its region is not provably dead
     and the marker itself is not short-circuited."""
-    if _segment_keyword(segment) not in _BODY_MARKERS:
+    if _segment_keyword(segment) not in _CARRIED_BODY_MARKERS:
         return None
     if _segment_unreachable(separator, previous) or not _region_runs(branches):
         return None
@@ -1344,8 +1473,11 @@ def _possibly_reached_segments(script: str) -> list[str]:
     for index, (segment, separator) in enumerate(pairs):
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
+        prior_chain = branches[-1][1] if branches else None
         if _branch_keyword_step(branches, segment, condition):
-            _possible_branch_state(branches, keyword, condition)
+            _possible_branch_state(
+                branches, keyword, condition, prior_chain
+            )
             carried = _possible_marker_carry(
                 segment, separator, previous, branches
             )
@@ -1445,10 +1577,16 @@ _DRIFT_CHECK_RE = re.compile(
 )
 
 
+def _quote_removed_command(text: str) -> str:
+    """Remove static shell word quotes before matching a command spelling."""
+    words = text.split()
+    return " ".join(_resolve_heredoc_word(word)[0] for word in words)
+
+
 def _quoted_separator_at(line: str, index: int, quote: str) -> int:
     """Separator length inside a quoted string (0 = data)."""
     char = line[index]
-    if quote == "'":
+    if quote in ("'", "ansi-c"):
         return 0
     if char == "`":
         return 1
@@ -1466,9 +1604,35 @@ def _brace_separator_at(line: str, index: int) -> int:
     """Separator length for a brace-group token (0 = glued word data)."""
     previous = line[index - 1] if index > 0 else ""
     following = line[index + 1] if index + 1 < len(line) else ""
-    before_ok = previous in ("", " ", "\t", ";", "|", "&", "(", ")")
-    after_ok = following in ("", " ", "\t", ";", ")")
+    before_ok = previous in ("", " ", "\t", "\n", ";", "|", "&", "(", ")")
+    after_ok = following in ("", " ", "\t", "\n", ";", ")")
     return 1 if before_ok and after_ok else 0
+
+
+def _body_brace_is_command_position(
+    script: str, body_start: int, index: int, brace: str
+) -> bool:
+    """Whether a brace in a function body is a shell group token.
+
+    A right brace is a closer only as a command in its own right; treating a
+    ``}`` argument or parameter expansion as a body closer exposes the rest
+    of an uncalled function as top-level code.  Open brace groups likewise
+    count only at command position, not as brace expansion or an argument.
+    The release workflow's supported group boundaries are separated by a
+    shell operator/newline, a compound-command keyword, or a subshell end.
+    """
+    if not _brace_separator_at(script, index):
+        return False
+    code = _masked_quotes(script[body_start:index])
+    current = re.split(r"[;&|\n]", code)[-1].strip()
+    if not current:
+        return True
+    last_word = current.split()[-1]
+    if brace == "{":
+        return last_word in {"then", "do", "else", "!"}
+    return last_word in {"fi", "done", "esac"} or (
+        current.startswith("(") and current.endswith(")")
+    )
 
 
 def _separator_at(line: str, index: int, quote: str | None) -> int:
@@ -1527,17 +1691,11 @@ def _scan_segment_line(
     return current, quote, separator
 
 
-def _command_segments_with_separators(script: str) -> list[tuple[str, str]]:
-    """Split into (segment, separator-before) pairs at shell separators.
-
-    Every separator from ``_separator_at`` starts a new command position, so
-    a command chained behind one is still a command.  Separators inside
-    quotes stay data, so quoted fragments can neither satisfy a provisioning
-    requirement nor trip the rejection side.  A string that spans lines keeps
-    its content as data: its segment continues across the newline instead of
-    restarting inside the quote.  A statement boundary reports ``\\n`` as its
-    separator, so callers can tell chains apart from fresh lines.
-    """
+@functools.lru_cache(maxsize=64)
+def _command_segments_with_separators_cached(
+    script: str,
+) -> tuple[tuple[str, str], ...]:
+    """Immutable cached result for repeated scans of the same shell text."""
     segments: list[tuple[str, str]] = []
     current: list[str] = []
     quote: str | None = None
@@ -1554,7 +1712,12 @@ def _command_segments_with_separators(script: str) -> list[tuple[str, str]]:
             # commands must keep them apart for the callers.
             current.append("\n")
     _flush_segment(segments, current, separator)
-    return segments
+    return tuple(segments)
+
+
+def _command_segments_with_separators(script: str) -> list[tuple[str, str]]:
+    """Return a fresh list of segments from the immutable cached scan."""
+    return list(_command_segments_with_separators_cached(script))
 
 
 def _command_segments(script: str) -> list[str]:
@@ -1666,6 +1829,7 @@ def _segment_literal(segment: str) -> bool | None:
 _OPEN_KEYWORDS = {"while", "until", "for", "case", "select"}
 _CLOSE_KEYWORDS = {"fi", "done", "esac"}
 _BODY_MARKERS = {"then", "do"}
+_CARRIED_BODY_MARKERS = _BODY_MARKERS | {"else"}
 
 
 def _segment_unreachable(separator: str, previous: bool | None) -> bool:
@@ -1884,8 +2048,27 @@ def _branch_keyword_step(
     return False
 
 
+def _grown_function_kill_sets(
+    bodies: list[tuple[str, str]],
+    failing: frozenset[str],
+    exiting: frozenset[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """One monotone expansion of the function failure/exit fixpoints."""
+    walked = [
+        (name, *_body_verdict(body, failing, exiting))
+        for name, body in bodies
+    ]
+    grown_failing = frozenset(
+        name for name, fails, exits in walked if fails or exits
+    )
+    grown_exiting = frozenset(
+        name for name, _fails, exits in walked if exits
+    )
+    return grown_failing, grown_exiting
+
+
 def _function_kill_sets(script: str) -> tuple[frozenset[str], frozenset[str]]:
-    """Functions whose invocation provably ends in a failure or in a exit.
+    """Functions whose invocation provably ends in failure or exit.
 
     ``failing``: invoking the function unprotected provably dies under
     errexit (a provable failure with no success return before it), so a
@@ -1895,6 +2078,7 @@ def _function_kill_sets(script: str) -> tuple[frozenset[str], frozenset[str]]:
     protection list exempts.  Both sets are fixpoints over the call graph:
     a body that ends by calling another such function counts too.
     """
+    script = _join_continuations(script)
     effective, _superseded = _effective_body_spans(script)
     bodies = [
         (name, script[lo:hi]) for name, lo, hi in effective if name
@@ -1902,15 +2086,8 @@ def _function_kill_sets(script: str) -> tuple[frozenset[str], frozenset[str]]:
     failing: frozenset[str] = frozenset()
     exiting: frozenset[str] = frozenset()
     for _pass in range(len(bodies) + 1):
-        walked = [
-            (name, *_body_verdict(body, failing, exiting))
-            for name, body in bodies
-        ]
-        grown_failing = frozenset(
-            name for name, fails, exits in walked if fails or exits
-        )
-        grown_exiting = frozenset(
-            name for name, _fails, exits in walked if exits
+        grown_failing, grown_exiting = _grown_function_kill_sets(
+            bodies, failing, exiting
         )
         if grown_failing == failing and grown_exiting == exiting:
             break
@@ -1935,6 +2112,7 @@ def _possible_branch_state(
     branches: list[tuple[bool, int]],
     keyword: str,
     condition: bool | None,
+    prior_chain: int | None = None,
 ) -> None:
     """Relax the branch stack to "not provably dead" semantics: loops and
     unevaluated conditions stay possible."""
@@ -1946,7 +2124,8 @@ def _possible_branch_state(
     elif keyword in ("if", "elif"):
         branches[-1] = (condition is not False, chain)
     elif keyword == "else":
-        branches[-1] = (chain != _OPEN_CHAIN, chain)
+        previous_chain = chain if prior_chain is None else prior_chain
+        branches[-1] = (previous_chain != _OPEN_CHAIN, _OPEN_CHAIN)
 
 
 def _body_marker_command(segment: str) -> str:
@@ -1959,20 +2138,18 @@ def _body_marker_command(segment: str) -> str:
 
 
 def _return_failure(segment: str) -> bool | None:
-    """Whether a ``return`` segment provokes a failure: True for a non-zero
-    argument, False for success, None when the segment is not a return."""
+    """Whether a return is provably non-zero; unknown status is not failure."""
     if _segment_keyword(segment) != "return":
         return None
-    words = segment.split()
-    arg = words[1].strip("'\"") if len(words) > 1 else ""
-    return bool(arg and arg != "0")
+    return _return_kind(segment) == "nonzero"
 
 
 def _return_kind(segment: str) -> str | None:
     """The kind of ``return`` a segment performs: a non-zero argument
     (``"nonzero"``), an explicit zero (``"zero"``), no argument
-    (``"bare"``: the shell propagates the previous status), or None when
-    the segment is not a return."""
+    (``"bare"``: the shell propagates the previous status), ``"unknown"``
+    when its status depends on a non-literal argument, or None when the
+    segment is not a return."""
     if _segment_keyword(segment) != "return":
         return None
     words = segment.split()
@@ -1981,7 +2158,15 @@ def _return_kind(segment: str) -> str | None:
     arg = words[1].strip("'\"")
     if arg == "0":
         return "zero"
-    return "nonzero" if arg else "bare"
+    if not arg:
+        return "bare"
+    if re.fullmatch(r"[0-9]+", arg):
+        value = int(arg)
+        if value == 0:
+            return "zero"
+        if value < 256:
+            return "nonzero"
+    return "unknown"
 
 
 def _chain_prefix_words(segment: str) -> tuple[list[str], bool]:
@@ -2192,7 +2377,7 @@ def _body_can_succeed(body: str) -> bool:
     unevaluated branches alive for exactly this check.
     """
     for segment in _possibly_reached_segments(body):
-        if _return_kind(segment) in ("zero", "bare"):
+        if _return_kind(segment) in ("zero", "bare", "unknown"):
             return True
     return False
 
@@ -2280,29 +2465,6 @@ def _body_verdict(
     return False, False
 
 
-def _segment_ends_shell(
-    segment: str,
-    separator: str,
-    following: str,
-    errexit: bool,
-    previous: bool | None,
-    failing: frozenset[str] = frozenset(),
-    exiting: frozenset[str] = frozenset(),
-) -> bool:
-    """Whether the segment ends its shell.
-
-    ``exit`` always ends it (outside pipelines, background lists, subshells
-    and substitutions), ``exec cmd`` replaces the process, and a failing
-    command ends it under ``set -e`` when it is not exempt as a chain
-    operand or contained region.  A call to a local function that provably
-    ends the same way counts too.
-    """
-    verdict, _status = _live_segment_state(
-        segment, separator, following, previous, failing, exiting
-    )
-    return _verdict_ends(verdict, errexit)
-
-
 def _live_scan_step(
     pairs: list[tuple[str, str]],
     index: int,
@@ -2325,6 +2487,14 @@ def _live_scan_step(
     following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
     condition = _pair_condition(pairs, index, _segment_keyword(segment))
     if _branch_keyword_step(branches, segment, condition):
+        carried = (
+            _body_marker_command(segment)
+            if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
+            else ""
+        )
+        marker_is_live = bool(carried) and _region_runs(branches) and not (
+            _segment_unreachable(separator, previous)
+        )
         verdict, status = _branch_step_state(
             segment,
             _segment_keyword(segment),
@@ -2337,7 +2507,7 @@ def _live_scan_step(
         )
         if not exited and _verdict_ends(verdict, errexit):
             exited = True
-        return False, exited, status, errexit, True
+        return marker_is_live, exited, status, errexit, True
     if exited or not _region_runs(branches) or _chain_skips(separator, previous):
         return False, exited, previous, errexit, False
     verdict, status = _live_segment_state(
@@ -2371,7 +2541,9 @@ def _live_command_segments(
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     exited = False
-    errexit = False
+    # GitHub's default bash invocation adds ``-e -o pipefail`` unless a
+    # workflow explicitly selects a different shell command.
+    errexit = True
     pairs = _command_segments_with_separators(script)
     for index in range(len(pairs)):
         # Each tuple carries the separator BEFORE its segment, so the
@@ -2380,7 +2552,13 @@ def _live_command_segments(
             pairs, index, previous, branches, exited, errexit, failing, exiting
         )
         if is_live:
-            live.append(pairs[index][0])
+            segment = pairs[index][0]
+            carried = (
+                _body_marker_command(segment)
+                if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
+                else ""
+            )
+            live.append(carried if carried else segment)
         if carry:
             exited = exited_out
             previous = previous_out
@@ -2428,8 +2606,12 @@ def _step_runs_shell(step: dict) -> bool:
 
     A step the workflow gates with ``if`` may never run, and a step whose
     ``shell`` is not bash/sh feeds ``run`` to another interpreter, so neither
-    can satisfy a provisioning check.
+    can satisfy a provisioning check.  GitHub's default is
+    ``continue-on-error: false``; an explicit true or unparseable value means
+    the step cannot prove successful provisioning.
     """
+    if "continue-on-error" in step and step["continue-on-error"] is not False:
+        return False
     if "if" in step:
         condition = step.get("if")
         if isinstance(condition, bool):
@@ -2449,19 +2631,25 @@ def _step_runs_shell(step: dict) -> bool:
     return name in ("bash", "sh")
 
 
+def _workflow_jobs(workflow_content: str) -> dict | None:
+    """Parse a workflow and return its job mapping; None means unverifiable."""
+    try:
+        workflow = yaml.safe_load(workflow_content)
+    except yaml.YAMLError:
+        return None
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    return jobs if isinstance(jobs, dict) else None
+
+
 def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
-    """Return the concatenated run scripts of one job, or None when absent.
+    """Return one executable run script per step, or None when absent.
 
     The workflow is parsed as YAML so that only executable ``run`` steps feed
     the checks: shell comments in the raw file never satisfy them, and steps
     that are conditional or run another interpreter are skipped.
     """
-    try:
-        workflow = yaml.safe_load(workflow_content)
-    except yaml.YAMLError:
-        return None
-    jobs = (workflow or {}).get("jobs") if isinstance(workflow, dict) else None
-    if not isinstance(jobs, dict) or job_name not in jobs:
+    jobs = _workflow_jobs(workflow_content)
+    if jobs is None or job_name not in jobs:
         return None
     job = jobs[job_name]
     if not isinstance(job, dict):
@@ -2478,19 +2666,15 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
 
 
 def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
-    """Return the concatenated run scripts of every job, or None when the
+    """Return one run script per workflow step, or None when the
     workflow cannot be parsed.
 
     Every run step feeds this scan -- including conditional and non-shell
     steps: a raw toolchain install must fail the gate wherever it could ever
     appear.
     """
-    try:
-        workflow = yaml.safe_load(workflow_content)
-    except yaml.YAMLError:
-        return None
-    jobs = (workflow or {}).get("jobs") if isinstance(workflow, dict) else None
-    if not isinstance(jobs, dict):
+    jobs = _workflow_jobs(workflow_content)
+    if jobs is None:
         return None
     scripts: list[str] = []
     for job in jobs.values():
@@ -2542,7 +2726,10 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     """
     runs = _all_job_run_scripts(workflow_content)
     if runs is None:
-        return None
+        return (
+            "release workflow YAML or its jobs mapping cannot be parsed, "
+            "so raw Rust toolchain installs cannot be ruled out"
+        )
     for run in runs:
         stripped = _join_continuations(
             _strip_heredocs(_strip_shell_comments(run)))
@@ -2646,57 +2833,38 @@ def _provisioning_shadow_issue(workflow_content: str) -> str | None:
     return None
 
 
-def _release_gate_toolchain_issue(
-    run_scripts: str | list[str],
-) -> str | None:
-    """Return the toolchain provisioning issue, or None when satisfied.
-
-    Only executable commands in command position count: shell comments are
-    stripped (with quote state carried across lines), heredoc bodies are
-    dropped, and backslash continuations are joined, so a commented-out,
-    echoed, embedded or quoted-text install or drift check cannot satisfy
-    the gate.  The release gate must provision the pinned ${RUST_TOOLCHAIN}
-    through the verified installer with an explicit ``bash`` invocation and
-    add the rustfmt component for that toolchain: the gate scripts resolve
-    rustfmt through Rustup shims, while the installer's minimal profile
-    does not include it.
-    """
-    steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
-    segments: list[str] = []
-    for step in steps:
-        # Strip comments and static heredoc bodies first: markers there are
-        # data, so they must not trip the dynamic-delimiter rejection.  A
-        # step runs in its own shell, so function reachability resets per
-        # step: a definition cannot cross into the next step's shell.
-        stripped = _strip_heredocs(_strip_shell_comments(step))
-        structure_issue = _unclosed_structure_issue(stripped)
-        if structure_issue:
-            return structure_issue
-        shadow_issue = _shadowing_issue(stripped)
-        if shadow_issue:
-            return shadow_issue
-        executable = _join_continuations(_strip_function_bodies(stripped))
-        # Unreachable function bodies are already gone, so a dynamic
-        # delimiter in dead code cannot reject a script whose real
-        # provisioning is static.
-        if _dynamic_heredoc_markers(executable):
-            return (
-                "the release-gate job opens a heredoc with a runtime-expanded "
-                "delimiter, so its toolchain provisioning cannot be verified "
-                "statically; use a plain delimiter"
-            )
-        retry_trusted = _retry_runs_its_target(stripped)
-        failing, exiting = _function_kill_sets(stripped)
-        segments.extend(
-            _provision_candidates(
-                _live_command_segments(executable, failing, exiting),
-                retry_trusted,
-            )
+def _release_gate_step_candidates(step: str) -> tuple[list[str], str | None]:
+    """Analyze one independent workflow shell step for provisioning commands."""
+    stripped = _strip_heredocs(_strip_shell_comments(step))
+    executable_source = _join_continuations(stripped)
+    structure_issue = _unclosed_structure_issue(executable_source)
+    if structure_issue:
+        return [], structure_issue
+    shadow_issue = _shadowing_issue(executable_source)
+    if shadow_issue:
+        return [], shadow_issue
+    executable = _strip_function_bodies(executable_source)
+    if _dynamic_heredoc_markers(executable):
+        return [], (
+            "the release-gate job opens a heredoc with a runtime-expanded "
+            "delimiter, so its toolchain provisioning cannot be verified "
+            "statically; use a plain delimiter"
         )
-    if not any(
-        _DRIFT_CHECK_RE.match(_strip_provision_wrappers(segment))
+    retry_trusted = _retry_runs_its_target(executable_source)
+    failing, exiting = _function_kill_sets(executable_source)
+    candidates = _live_command_segments(executable, failing, exiting)
+    return _provision_candidates(candidates, retry_trusted), None
+
+
+def _release_gate_provisioning_issue(segments: list[str]) -> str | None:
+    """Check drift, installer and rustfmt ordering across analyzed steps."""
+    drift_found = any(
+        _DRIFT_CHECK_RE.match(
+            _quote_removed_command(_strip_provision_wrappers(segment))
+        )
         for segment in segments
-    ):
+    )
+    if not drift_found:
         return (
             "the release-gate job no longer runs "
             f"{RELEASE_GATE_RUSTFMT_CONSUMER}; update this provisioning "
@@ -2717,20 +2885,39 @@ def _release_gate_toolchain_issue(
             'install-verified-rustup.sh --toolchain "${RUST_TOOLCHAIN}")'
         )
     component_at = _rustfmt_component_index(segments, after=installer_at)
-    if component_at is None:
-        if _rustfmt_component_index(segments) is None:
-            return (
-                "the release-gate job must add the rustfmt component for the "
-                "pinned toolchain (rustup component add --toolchain "
-                '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
-                "resolve for the gate scripts"
-            )
+    if component_at is not None:
+        return None
+    if _rustfmt_component_index(segments) is None:
         return (
-            "the release-gate job must install the toolchain through the "
-            "verified installer before adding the rustfmt component: rustup "
-            "cannot add a component to a toolchain that is not installed"
+            "the release-gate job must add the rustfmt component for the "
+            "pinned toolchain (rustup component add --toolchain "
+            '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
+            "resolve for the gate scripts"
         )
-    return None
+    return (
+        "the release-gate job must install the toolchain through the "
+        "verified installer before adding the rustfmt component: rustup "
+        "cannot add a component to a toolchain that is not installed"
+    )
+
+
+def _release_gate_toolchain_issue(
+    run_scripts: str | list[str],
+) -> str | None:
+    """Return the toolchain provisioning issue, or None when satisfied.
+
+    Only executable commands in command position count: comments, heredoc
+    bodies, function bodies and quoted text cannot satisfy the gate. The
+    pinned toolchain must use the verified installer and include rustfmt.
+    """
+    steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
+    segments: list[str] = []
+    for step in steps:
+        candidates, issue = _release_gate_step_candidates(step)
+        if issue:
+            return issue
+        segments.extend(candidates)
+    return _release_gate_provisioning_issue(segments)
 
 
 def check_release_gate_toolchain(result: ValidationResult) -> None:
@@ -2811,24 +2998,33 @@ def _requirements_pin_issue(requirements: str) -> str | None:
     return None
 
 
-def _pip_first_steps(steps: list[str]) -> tuple[int | None, int | None]:
+def _pip_first_steps(
+    steps: list[str],
+) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
     """Positions of the first pip install and the first docs-check.
 
     Both are read from the live command segments of each step, so a
     disabled or dead branch never satisfies the guard.
     """
-    install_at: int | None = None
-    docs_check_at: int | None = None
-    for index, step in enumerate(steps):
+    install_at: tuple[int, int] | None = None
+    docs_check_at: tuple[int, int] | None = None
+    for step_index, step in enumerate(steps):
         stripped = _strip_heredocs(_strip_shell_comments(step))
-        executable = _join_continuations(_strip_function_bodies(stripped))
-        failing, exiting = _function_kill_sets(stripped)
-        for segment in _live_command_segments(executable, failing, exiting):
+        executable_source = _join_continuations(stripped)
+        executable = _strip_function_bodies(executable_source)
+        failing, exiting = _function_kill_sets(executable_source)
+        for command_index, segment in enumerate(
+            _live_command_segments(executable, failing, exiting)
+        ):
             text = _strip_provision_wrappers(segment)
-            if _PIP_REQUIREMENT_RE.search(text) and install_at is None:
-                install_at = index
+            position = (step_index, command_index)
+            if (
+                _PIP_REQUIREMENT_RE.search(_quote_removed_command(text))
+                and install_at is None
+            ):
+                install_at = position
             if "make docs-check" in text and docs_check_at is None:
-                docs_check_at = index
+                docs_check_at = position
     return install_at, docs_check_at
 
 

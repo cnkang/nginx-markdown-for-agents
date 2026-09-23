@@ -10,7 +10,7 @@ with paired acceptance/rejection shapes wherever both directions matter.
 
 from __future__ import annotations
 
-from tools.release.gates import validate_fuzz_packaging as packaging_gate  # noqa: E402
+from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
 # Shell fragments shared by the scenarios.  Single-sourced so one literal
 # serves every test that builds a script around it.
@@ -322,6 +322,15 @@ def test_toolchain_gate_splits_on_all_command_separators() -> None:
         assert packaging_gate._raw_toolchain_install_issue(workflow(line)), line
 
 
+def test_cached_command_segments_return_fresh_mutable_lists() -> None:
+    """Callers cannot corrupt later reads of the immutable cached parse."""
+    script = "echo first; echo second\n"
+    expected = packaging_gate._command_segments_with_separators(script)
+    mutated = packaging_gate._command_segments_with_separators(script)
+    mutated.clear()
+    assert packaging_gate._command_segments_with_separators(script) == expected
+
+
 def test_toolchain_gate_treats_quoted_parentheses_as_data() -> None:
     """Bare parentheses inside double quotes are data, not separators.
 
@@ -439,6 +448,43 @@ def test_toolchain_gate_ignores_function_definition_bodies() -> None:
     assert packaging_gate._release_gate_toolchain_issue(
         "function provision {\n" + body + "}\n"
     )
+
+
+def test_function_body_scan_only_closes_on_a_command_position_brace() -> None:
+    """A brace passed to a command or glued into a word is not a closer."""
+    suffix = INSTALLER + COMPONENT + "}\n" + DRIFT
+    separated_argument = "unused() { echo before } ; " + suffix
+    glued_argument = "unused() { echo a}b; " + suffix
+    assert packaging_gate._release_gate_toolchain_issue(separated_argument)
+    assert packaging_gate._release_gate_toolchain_issue(glued_argument)
+
+
+def test_function_body_scan_fails_closed_on_extglob_boundaries() -> None:
+    """Extglob's pattern braces are not modeled as function delimiters."""
+    body = "unused() { case x in @(x|})) : ;; esac; "
+    issue = packaging_gate._release_gate_toolchain_issue(
+        body + INSTALLER + COMPONENT + "}\n" + DRIFT
+    )
+    assert issue is not None
+    assert "extglob" in issue
+    assert packaging_gate._release_gate_toolchain_issue(
+        "# extglob decoy @(x|})\n" + DRIFT + INSTALLER + COMPONENT
+    ) is None
+    assert packaging_gate._release_gate_toolchain_issue(
+        'echo "@(x|})"\n' + DRIFT + INSTALLER + COMPONENT
+    ) is None
+
+
+def test_ansi_c_escaped_quote_stays_quoted_across_all_scanners() -> None:
+    """An escaped apostrophe inside $'...' cannot expose command-looking text."""
+    decoy = r"echo $'quoted \' rustup toolchain install nightly; dead() { '" + "\n"
+    assert packaging_gate._defined_function_names(decoy) == set()
+    assert packaging_gate._raw_install_in_segment(
+        packaging_gate._command_segments(decoy)[0]
+    ) is False
+    assert packaging_gate._release_gate_toolchain_issue(
+        decoy + DRIFT + INSTALLER + COMPONENT
+    ) is None
 
 
 def test_toolchain_gate_accepts_escaped_heredoc_delimiters() -> None:
@@ -967,7 +1013,9 @@ def test_toolchain_gate_drops_body_commands_after_errexit_failure() -> None:
     )
     assert packaging_gate._release_gate_toolchain_issue(script) is not None
     # Without errexit the failing command does not abort the body.
-    without_errexit = script.replace("set -euo pipefail\n", "", 1)
+    without_errexit = script.replace(
+        "set -euo pipefail\n", "set +e\n", 1
+    )
     assert packaging_gate._release_gate_toolchain_issue(without_errexit) is None
 
 
@@ -978,6 +1026,7 @@ def test_toolchain_gate_unwraps_wrapper_options() -> None:
     for wrapper in (
         "sudo -n",
         "sudo -u root",
+        "sudo --user=runner",
         "env --",
         "command --",
         "eval",
@@ -1006,14 +1055,18 @@ def test_toolchain_gate_unwraps_drift_check() -> None:
     wrapped = "command python3 tools/reason-codegen/generate.py --check\n"
     assert packaging_gate._release_gate_toolchain_issue(
         installer + wrapped) is None
+    quoted_path = 'python3 "tools/reason-codegen/generate.py" --check\n'
+    assert packaging_gate._release_gate_toolchain_issue(
+        quoted_path + installer + COMPONENT
+    ) is None
 
 
 def test_toolchain_gate_strip_preserves_span_offsets() -> None:
     """The stripper rewrites spans in place: a kept body's trimmed text is
     clamped to the span width so later spans never shift."""
     installer = INSTALLER_NO_NL
-    inline = "live(){" + installer + "}\nlive\n"
-    other = "unused(){" + installer + "}\n"
+    inline = "live(){" + installer + ";}\nlive\n"
+    other = "unused(){" + installer + ";}\n"
     drift = DRIFT
     script = inline + other + drift
     stripped = packaging_gate._strip_function_bodies(script)
@@ -1209,6 +1262,35 @@ def test_toolchain_gate_reads_literally_true_step_conditions() -> None:
     )
 
 
+def test_continue_on_error_steps_never_prove_successful_provisioning() -> None:
+    """Only steps with successful completion semantics count as evidence."""
+    assert packaging_gate._step_runs_shell(
+        {"continue-on-error": False, "run": "x"}
+    )
+    assert not packaging_gate._step_runs_shell(
+        {"continue-on-error": True, "run": "x"}
+    )
+    assert not packaging_gate._step_runs_shell(
+        {"continue-on-error": "${{ inputs.ignore }}", "run": "x"}
+    )
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - continue-on-error: true\n"
+        "        run: |\n"
+        "          python3 tools/reason-codegen/generate.py --check\n"
+        "          bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '          rustup component add --toolchain "${RUST_TOOLCHAIN}" '
+        "rustfmt\n"
+        "      - continue-on-error: false\n"
+        "        run: echo eligible\n"
+    )
+    scripts = packaging_gate._job_run_scripts(workflow, "release-gate")
+    assert scripts == ["echo eligible"]
+
+
 def test_step_shell_model_reads_success_always_and_shell_paths() -> None:
     """`success()`/`always()` run on the happy path; shells match by basename.
 
@@ -1340,6 +1422,41 @@ def test_toolchain_gate_ends_the_shell_at_a_certain_failing_return() -> None:
     assert packaging_gate._release_gate_toolchain_issue(ok) is None
 
 
+def test_dynamic_return_status_is_not_proven_nonzero() -> None:
+    """A variable return may be zero, so it cannot prove errexit termination."""
+    assert packaging_gate._return_kind('return "$CODE"') == "unknown"
+    assert packaging_gate._return_failure('return "$CODE"') is False
+    script = (
+        'set -e\nfinish() { return "$CODE"; }\nfinish\n'
+        + DRIFT + INSTALLER + COMPONENT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+
+def test_same_line_branch_markers_carry_live_commands() -> None:
+    """Commands on then/else marker segments count only on live branches."""
+    true_branch = (
+        "if true; then " + INSTALLER.rstrip() + "; fi\n"
+        + COMPONENT + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(true_branch) is None
+    false_branch = (
+        "if false; then " + INSTALLER.rstrip() + "; fi\n"
+        + COMPONENT + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(false_branch) is not None
+    else_live = (
+        "if false; then echo skip; else " + INSTALLER.rstrip() + "; fi\n"
+        + COMPONENT + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(else_live) is None
+    else_dead = (
+        "if true; then echo run; else " + INSTALLER.rstrip() + "; fi\n"
+        + COMPONENT + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(else_dead) is not None
+
+
 def test_raw_install_detector_reads_env_option_wrapped_commands() -> None:
     """`env` options cannot smuggle a raw install past the detector."""
     assert packaging_gate._raw_install_in_segment(
@@ -1357,6 +1474,18 @@ def test_raw_install_detector_reads_env_option_wrapped_commands() -> None:
     assert not packaging_gate._raw_install_in_segment(
         'env -i PATH="$PATH" cargo --version'
     )
+    assert packaging_gate._skip_env_options(["-Z", "rustup"], 0) == 0
+    assert packaging_gate._skip_env_options(["-u", "NAME", "rustup"], 0) == 2
+
+
+def test_unmodeled_env_options_cannot_count_as_provisioning() -> None:
+    """An unknown env option remains in command position and fails closed."""
+    script = (
+        DRIFT
+        + "env -Z " + INSTALLER
+        + "env -Z " + COMPONENT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
 
 
 def test_toolchain_gate_rejects_line_separated_shell_payloads() -> None:
@@ -1913,6 +2042,12 @@ def test_release_gate_dependency_guard_takes_valid_pip_spellings() -> None:
         ["make docs-check",
          "python3 -m pip install -r requirements-release.txt"]
     ) is not None
+    assert packaging_gate._python_deps_issue(
+        ["make docs-check; python3 -m pip install -r requirements-release.txt"]
+    ) is not None
+    assert packaging_gate._python_deps_issue(
+        ["python3 -m pip install -r requirements-release.txt; make docs-check"]
+    ) is None
     # A missing install or a missing consumer fails closed.
     assert packaging_gate._python_deps_issue(["make docs-check"]) is not None
     assert packaging_gate._python_deps_issue(
