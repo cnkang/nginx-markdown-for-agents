@@ -366,6 +366,26 @@ def test_record_output_path_cannot_change_artifact_name() -> None:
         validator._write_record({}, args)
 
 
+def test_record_write_target_tracks_default_record_version_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The actual record write follows the version in DEFAULT_RECORD."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    record_path = "artifacts/release/7.8.9/fuzz-qualification-record.json"
+    monkeypatch.setattr(validator, "DEFAULT_RECORD", record_path)
+    args = type("Args", (), {"output": None, "record": record_path})()
+    record = {"candidate_sha": "a" * 40, "blocking_pass": True}
+
+    written = validator._write_record(record, args)
+
+    expected = tmp_path / record_path
+    assert written == expected
+    assert json.loads(written.read_text(encoding="utf-8")) == record
+    assert not (
+        tmp_path / "artifacts/release/0.9.2/fuzz-qualification-record.json"
+    ).exists()
+
+
 def test_seed_digest_rejects_escape_when_called_directly(
         tmp_path: Path, monkeypatch) -> None:
     """Digest verification must repeat the corpus-root boundary check."""
@@ -1688,6 +1708,56 @@ def test_run_blocking_targets_skips_queued_entries_after_an_external_stop(
         validator._INTERRUPT_JOIN_GRACE_SECONDS]
 
 
+def test_start_worker_interrupt_cleans_attempted_threads(monkeypatch) -> None:
+    """An interrupt during startup stops, cancels, and bounded-joins attempts."""
+    stop = threading.Event()
+    cancel_requested = threading.Event()
+    cancellations: list[str] = []
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", cancel_requested)
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancellations.append("cancelled"),
+    )
+
+    class _StartedThread(threading.Thread):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = False
+            self.join_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            self.started = True
+
+        def join(self, timeout=None) -> None:
+            assert stop.is_set()
+            assert cancel_requested.is_set()
+            self.join_timeouts.append(timeout)
+
+    class _InterruptedStart(threading.Thread):
+        def __init__(self) -> None:
+            super().__init__()
+            self.join_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            raise KeyboardInterrupt("interrupt during startup")
+
+        def join(self, timeout=None) -> None:
+            self.join_timeouts.append(timeout)
+            raise RuntimeError("cannot join before thread start")
+
+    started = _StartedThread()
+    interrupted = _InterruptedStart()
+    with pytest.raises(KeyboardInterrupt, match="interrupt during startup"):
+        validator._start_and_join_workers([started, interrupted], stop)
+
+    assert started.started
+    assert stop.is_set()
+    assert cancel_requested.is_set()
+    assert cancellations == ["cancelled"]
+    assert started.join_timeouts == [validator._INTERRUPT_JOIN_GRACE_SECONDS]
+    assert interrupted.join_timeouts == [validator._INTERRUPT_JOIN_GRACE_SECONDS]
+
+
 def test_join_workers_interrupt_stops_siblings_and_waits_for_cleanup() -> None:
     """An interrupt during the join must stop siblings, then re-raise.
 
@@ -1802,28 +1872,99 @@ def _wait_for_file(path: Path, timeout: float = 5.0) -> None:
     assert path.exists(), f"timed out waiting for {path}"
 
 
-def _kill_test_process_group(pid_path: Path) -> None:
-    """Remove any process descendants left by a deliberately mutated probe."""
+def _read_test_child_pid(pid_path: Path) -> int | None:
+    """Read a test-owned child PID without trusting malformed fixture text."""
     if not pid_path.is_file():
-        return
-    child_pid = int(pid_path.read_text(encoding="utf-8"))
+        return None
     try:
-        process_group = os.getpgid(child_pid)
-    except ProcessLookupError:
+        child_pid = int(pid_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+    return child_pid if child_pid > 1 else None
+
+
+def _kill_test_child_pid(child_pid: int) -> None:
+    """Signal only the test's recorded child, never an ambient process group."""
+    if child_pid in {os.getpid(), os.getppid()}:
         return
     try:
-        os.killpg(process_group, signal.SIGKILL)
-    except ProcessLookupError:
+        os.kill(child_pid, signal.SIGKILL)
+    except OSError:
         pass
 
 
-def _install_real_script_popen(monkeypatch, script: str) -> None:
-    """Run the supplied Python script while preserving Popen process options."""
+def _kill_and_reap_process(process) -> None:
+    """Stop one subprocess handle and reap it within a bounded interval."""
+    try:
+        if process.poll() is None:
+            process.kill()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _kill_test_processes(pid_path: Path, processes) -> None:
+    """Clean up only PIDs owned by the test, never an ambient process group."""
+    child_pid = _read_test_child_pid(pid_path)
+    if child_pid is not None:
+        _kill_test_child_pid(child_pid)
+    for process in processes:
+        _kill_and_reap_process(process)
+
+
+def _install_real_script_popen(monkeypatch, script: str):
+    """Run the script and return owned process handles for safe cleanup."""
+    processes = []
+
     def fake_popen(command, **kwargs):
-        return _real_popen([sys.executable, "-c", script], **kwargs)
+        process = _real_popen([sys.executable, "-c", script], **kwargs)
+        processes.append(process)
+        return process
 
     monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
     monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
+    return processes
+
+
+def test_test_process_cleanup_signals_owned_pids_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test cleanup must never signal a process group that includes pytest."""
+    child_pid_path = tmp_path / "child.pid"
+    child_pid_path.write_text("424242", encoding="utf-8")
+    calls: list[tuple] = []
+
+    class _OwnedProcess:
+        pid = 424241
+
+        def poll(self):
+            return None
+
+        def kill(self) -> None:
+            calls.append(("process-kill", self.pid))
+
+        def wait(self, timeout=None) -> None:
+            calls.append(("wait", self.pid, timeout))
+
+    fake_os = types.SimpleNamespace(
+        getpid=lambda: 101,
+        getppid=lambda: 100,
+        getpgid=lambda _pid: 88,
+        kill=lambda pid, sig: calls.append(("pid-kill", pid, sig)),
+        killpg=lambda *_args: pytest.fail("cleanup must not signal a process group"),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "os", fake_os)
+
+    _kill_test_processes(child_pid_path, [_OwnedProcess()])
+
+    assert calls == [
+        ("pid-kill", 424242, signal.SIGKILL),
+        ("process-kill", 424241),
+        ("wait", 424241, 1.0),
+    ]
 
 
 def test_invoke_fuzz_timeout_terminates_descendant_processes(
@@ -1831,7 +1972,7 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
 ) -> None:
     """A timeout kills the whole invocation group and releases inherited pipes."""
     script, child_pid_path, child_marker = _process_tree_script(tmp_path)
-    _install_real_script_popen(monkeypatch, script)
+    processes = _install_real_script_popen(monkeypatch, script)
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
 
     try:
@@ -1844,7 +1985,7 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
         assert not child_marker.exists(), "a descendant survived the timeout"
         assert not validator._ACTIVE_FUZZ_PROCESSES
     finally:
-        _kill_test_process_group(child_pid_path)
+        _kill_test_processes(child_pid_path, processes)
 
 
 def test_parent_interrupt_cancels_active_process_groups(
@@ -1852,7 +1993,7 @@ def test_parent_interrupt_cancels_active_process_groups(
 ) -> None:
     """Interrupt cleanup stops live fuzz workers and their descendants."""
     script, child_pid_path, child_marker = _process_tree_script(tmp_path)
-    _install_real_script_popen(monkeypatch, script)
+    processes = _install_real_script_popen(monkeypatch, script)
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
     monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
     results: list[dict] = []
@@ -1892,7 +2033,7 @@ def test_parent_interrupt_cancels_active_process_groups(
         time.sleep(1.0)
         assert not child_marker.exists(), "a descendant survived parent cancellation"
     finally:
-        _kill_test_process_group(child_pid_path)
+        _kill_test_processes(child_pid_path, processes)
         worker.join(5)
 
 

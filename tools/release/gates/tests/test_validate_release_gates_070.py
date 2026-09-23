@@ -38,6 +38,11 @@ def _release_gate_job(needs_block: str) -> str:
     )
 
 
+def _publish_gate_item(release_packages: str) -> bool:
+    checks = gates._gate_3_items(release_packages)
+    return dict(checks)["publish waits for release gate"]
+
+
 def _reason_code_check(contract: str) -> bool:
     checks = _gate_2_items("", contract, "", "", "", "", "", "")
     return dict(checks)["reason code source"]
@@ -209,7 +214,8 @@ def test_gate_three_items_accepts_the_release_packages_workflow() -> None:
     assert gates.RELEASE_GATE_REQUIRED_NEEDS <= parsed
     condition = gates._release_gate_if_condition(release_packages)
     assert condition is not None
-    assert gates.RELEASE_GATE_TAG_PREDICATE_RE.search(condition)
+    assert gates._release_gate_tag_condition_gate(release_packages)
+    assert gates._publish_waits_for_release_gate(release_packages)
 
 
 def test_gate_three_items_reads_the_job_if_structurally() -> None:
@@ -244,6 +250,23 @@ def test_gate_three_items_reads_the_job_if_structurally() -> None:
                 "    needs: [prepare, smoke-test, fuzz-qualification]\n"
             ).replace("    if: " + TAG_CONDITION, f"    if: {spelling}\n")
         )
+
+
+def test_gate_three_items_rejects_false_or_negated_tag_conditions() -> None:
+    """A tag token cannot satisfy a condition that blocks tag-push execution."""
+    invalid_conditions = (
+        "false && github.ref_type == 'tag'",
+        "github.ref_type != 'tag'",
+        "github.ref_type == 'tag' || true",
+        "github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'",
+        "!github.ref_type == 'tag'",
+    )
+    needs = "    needs: [prepare, smoke-test, fuzz-qualification]" + chr(10)
+    for condition in invalid_conditions:
+        workflow = _release_gate_job(needs).replace(
+            "if: " + TAG_CONDITION, "if: " + condition
+        )
+        assert not _gate_3_item(workflow), condition
 
 
 def test_gate_three_items_rejects_condition_comment_decoy() -> None:
@@ -286,9 +309,46 @@ def test_gate_three_items_rejects_commented_out_predicate_in_block_scalar() -> N
     assert not _gate_3_item(workflow)
     # The predicate itself survives inside a block scalar once it is real.
     live_block = workflow.replace(
-        "# github.ref_type == 'tag'", "github.ref_type == 'tag'"
+        "# github.ref_type == 'tag'",
+        "github.event_name == 'push' && github.ref_type == 'tag' ||",
     )
     assert _gate_3_item(live_block)
+
+
+def test_publish_gate_reads_the_publish_job_dependency_and_condition() -> None:
+    """A real YAML dependency plus a positive success conjunct passes."""
+    workflow = """
+jobs:
+  publish:
+    needs:
+      - release-gate
+      - prepare
+    if: >-
+      always() &&
+      needs.release-gate.result == 'success'
+"""
+    assert _publish_gate_item(workflow)
+
+
+def test_publish_gate_rejects_comment_decoys_and_nested_or_success() -> None:
+    """Comments and a success test nested in OR cannot establish the gate."""
+    comment_decoy = """
+# needs: [release-gate]
+# if: always() && needs.release-gate.result == 'success'
+jobs:
+  publish:
+    needs: [other-job]
+    if: always()
+"""
+    assert not _publish_gate_item(comment_decoy)
+
+    nested_or = """
+jobs:
+  publish:
+    needs: [release-gate]
+    if: always() && (needs.release-gate.result == 'success' || true)
+"""
+    assert not _publish_gate_item(nested_or)
 
 
 def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(
