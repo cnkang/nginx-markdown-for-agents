@@ -10,6 +10,8 @@ with paired acceptance/rejection shapes wherever both directions matter.
 
 from __future__ import annotations
 
+import subprocess
+
 from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
 # Shell fragments shared by the scenarios.  Single-sourced so one literal
@@ -615,10 +617,16 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     drift = DRIFT
     installer = INSTALLER
     component = COMPONENT
-    # `false &&` skips the installer; the gate must not count it.
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift + "false && " + installer + component
+    # `false &&` skips the installer; quoted command names remain executable.
+    false_cases = (
+        ("bare false", drift + "false && " + installer + component),
+        ("quoted false", drift + '"false" && ' + installer + component),
     )
+    scripts = [script for _label, script in false_cases]
+    assert len(set(scripts)) == len(scripts)
+    for _label, script in false_cases:
+        assert packaging_gate._release_gate_toolchain_issue(script)
+
     # The chain stays dead through further `&&` links...
     assert packaging_gate._release_gate_toolchain_issue(
         drift + "false && " + installer.strip() + " && " + component.strip()
@@ -638,13 +646,6 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     )
     assert packaging_gate._release_gate_toolchain_issue(
         drift + "if [ 1 -eq 0 ]; then\n" + installer + component + "fi\n"
-    )
-    # A quoted literal still reads as the command it names.
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift + 'false && ' + installer + component
-    )
-    assert packaging_gate._release_gate_toolchain_issue(
-        drift + '"false" && ' + installer + component
     )
     # ...including the live side: a quoted `true` keeps the chain running.
     assert (
@@ -2278,3 +2279,168 @@ def test_toolchain_gate_requires_unquoted_or_resolvable_wrapper_names() -> None:
         drift + quoted_shell + "\n" + component) is None
     smuggled = "'bash' -c 'rustup toolchain install stable'\n"
     assert packaging_gate._raw_install_in_segment(smuggled)
+
+
+def _raw_install_workflow(script: str) -> str:
+    """Put one literal script in a parseable workflow run step."""
+    body = "".join("          " + line + "\n" for line in script.splitlines())
+    return "jobs:\n  probe:\n    steps:\n      - run: |\n" + body
+
+
+def test_raw_install_detector_follows_indirect_command_positions() -> None:
+    """Raw Rust installs remain forbidden through common shell dispatchers."""
+    commands = (
+        "printf stable | xargs -n 1 rustup toolchain install stable",
+        "timeout --signal=TERM 5s rustup toolchain install stable",
+        r"find /tmp -maxdepth 1 -exec rustup toolchain install stable \;",
+        "if rustup toolchain install stable; then echo done; fi",
+    )
+    for command in commands:
+        issue = packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(command)
+        )
+        assert issue is not None, command
+
+    controls = (
+        "printf stable | xargs -n 1 printf safe",
+        "timeout 5s printf safe",
+        r"find /tmp -maxdepth 1 -exec echo rustup toolchain install stable \;",
+        "if true; then echo rustup toolchain install stable; fi",
+    )
+    for command in controls:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(command)
+        ) is None, command
+
+
+def test_toolchain_liveness_respects_explicit_shell_errexit() -> None:
+    """A custom ``bash {0}`` shell does not inherit GitHub's implicit ``-e``."""
+    script = "false\n" + DRIFT + INSTALLER + COMPONENT
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
+    assert packaging_gate._release_gate_toolchain_issue(
+        [{"run": script, "shell": "bash"}]
+    ) is not None
+    assert packaging_gate._release_gate_toolchain_issue(
+        [{"run": script, "shell": "bash -e {0}"}]
+    ) is not None
+    assert packaging_gate._release_gate_toolchain_issue(
+        [{"run": script, "shell": "bash {0}"}]
+    ) is None
+
+    actual = subprocess.run(
+        ["bash", "-c", "false; printf reached"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert actual.returncode == 0
+    assert actual.stdout == "reached"
+    assert packaging_gate._live_command_segments(
+        "false; printf reached", errexit=False
+    ) == ["false", "printf reached"]
+
+
+def test_verified_installer_must_finish_before_component_add() -> None:
+    """A backgrounded installer cannot satisfy a later foreground add."""
+    background = DRIFT + INSTALLER.rstrip("\n") + " &\n" + COMPONENT
+    assert packaging_gate._release_gate_toolchain_issue(background) is not None
+    cross_step = [
+        {"run": DRIFT + INSTALLER.rstrip("\n") + " &\n"},
+        {"run": COMPONENT},
+    ]
+    assert packaging_gate._release_gate_toolchain_issue(cross_step) is not None
+    assert packaging_gate._release_gate_toolchain_issue(
+        DRIFT + INSTALLER + COMPONENT
+    ) is None
+
+
+def test_python_dependency_gate_requires_a_real_docs_check_command() -> None:
+    """Text emitted or quoted by another command is not a docs-check run."""
+    install = "python3 -m pip install -r requirements-release.txt"
+    decoys = (
+        "echo make docs-check",
+        "printf '%s' 'make docs-check'",
+        "'make docs-check'",
+        "# make docs-check",
+    )
+    for decoy in decoys:
+        assert packaging_gate._python_deps_issue([install, decoy]) is not None, decoy
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+
+
+def test_python_dependency_gate_accepts_only_supported_pip_command_forms() -> None:
+    """The requirement install must invoke Python's pip module or pip itself."""
+    valid = (
+        "python -m pip install -r requirements-release.txt",
+        "python3 -m pip install -r requirements-release.txt",
+        "pip install -r requirements-release.txt",
+        "pip3 install -r requirements-release.txt",
+    )
+    for command in valid:
+        assert packaging_gate._python_deps_issue(
+            [command, "make docs-check"]
+        ) is None, command
+
+    invalid = (
+        "python install -r requirements-release.txt",
+        "python3 install -r requirements-release.txt",
+        "pip -m pip install -r requirements-release.txt",
+        "pip3 -m pip install -r requirements-release.txt",
+    )
+    for command in invalid:
+        assert packaging_gate._python_deps_issue(
+            [command, "make docs-check"]
+        ) is not None, command
+
+
+def test_virtualenv_install_in_one_step_does_not_feed_a_later_shell() -> None:
+    """A per-step activation cannot provision dependencies for another step."""
+    scoped_install = (
+        "python3 -m venv .venv; source .venv/bin/activate; "
+        "python3 -m pip install -r requirements-release.txt"
+    )
+    assert packaging_gate._python_deps_issue(
+        [scoped_install, "make docs-check"]
+    ) is not None
+    # A global install persists across run steps; same-step venv use also does.
+    assert packaging_gate._python_deps_issue(
+        ["python3 -m pip install -r requirements-release.txt", "make docs-check"]
+    ) is None
+    assert packaging_gate._python_deps_issue(
+        [scoped_install + "; make docs-check"]
+    ) is None
+
+
+def test_release_gate_step_env_does_not_carry_to_later_docs_check() -> None:
+    """A step-local VIRTUAL_ENV must not count as the next step's runtime."""
+    workflow = (
+        "jobs:\n"
+        f"  {packaging_gate.RELEASE_GATE_JOB_NAME}:\n"
+        "    steps:\n"
+        "      - run: pip install -r requirements-release.txt\n"
+        "        env:\n"
+        "          VIRTUAL_ENV: .venv\n"
+        '          PATH: ".venv/bin:$PATH"\n'
+        "      - run: make docs-check\n"
+    )
+    steps = packaging_gate._job_run_step_records(
+        workflow, packaging_gate.RELEASE_GATE_JOB_NAME
+    )
+    assert steps is not None
+    assert packaging_gate._python_deps_issue(steps) is not None
+
+    shared_workflow = (
+        "jobs:\n"
+        f"  {packaging_gate.RELEASE_GATE_JOB_NAME}:\n"
+        "    env:\n"
+        "      VIRTUAL_ENV: .venv\n"
+        '      PATH: ".venv/bin:$PATH"\n'
+        "    steps:\n"
+        "      - run: pip install -r requirements-release.txt\n"
+        "      - run: make docs-check\n"
+    )
+    shared_steps = packaging_gate._job_run_step_records(
+        shared_workflow, packaging_gate.RELEASE_GATE_JOB_NAME
+    )
+    assert shared_steps is not None
+    assert packaging_gate._python_deps_issue(shared_steps) is None

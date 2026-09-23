@@ -31,8 +31,10 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import functools
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -1567,8 +1569,7 @@ _RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 # --requirement=requirements-release.txt`, quoted paths, and a leading
 # `sudo`/`retry N` wrapper (already peeled by the caller).
 _PIP_REQUIREMENT_RE = re.compile(
-    r"^(?:python3?|pip3?)"
-    r"(?:\s+-m\s+pip)?"
+    r"^(?:python3?\s+-m\s+pip|pip3?)"
     r"\s+install\s+"
     r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?\b"
 )
@@ -1704,8 +1705,10 @@ def _command_segments_with_separators_cached(
         current, quote, separator = _scan_segment_line(
             line, current, quote, segments, separator)
         if quote is None:
+            had_segment = bool("".join(current).strip())
             _flush_segment(segments, current, separator)
-            separator = "\n"
+            if had_segment:
+                separator = "\n"
             current = []
         else:
             # The newline stays data: a quoted payload with line-separated
@@ -2525,6 +2528,8 @@ def _live_command_segments(
     script: str,
     failing: frozenset[str] = frozenset(),
     exiting: frozenset[str] = frozenset(),
+    *,
+    errexit: bool = True,
 ) -> list[str]:
     """Segments on the unconditional path of one shell's script.
 
@@ -2541,9 +2546,8 @@ def _live_command_segments(
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     exited = False
-    # GitHub's default bash invocation adds ``-e -o pipefail`` unless a
-    # workflow explicitly selects a different shell command.
-    errexit = True
+    # GitHub's default bash invocation adds ``-e -o pipefail``.  A custom
+    # shell such as ``bash {0}`` receives no such implicit options.
     pairs = _command_segments_with_separators(script)
     for index in range(len(pairs)):
         # Each tuple carries the separator BEFORE its segment, so the
@@ -2641,28 +2645,81 @@ def _workflow_jobs(workflow_content: str) -> dict | None:
     return jobs if isinstance(jobs, dict) else None
 
 
-def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
-    """Return one executable run script per step, or None when absent.
+def _env_mapping(value: object) -> dict[str, object]:
+    """Keep named environment values without dropping dynamic overrides."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
-    The workflow is parsed as YAML so that only executable ``run`` steps feed
-    the checks: shell comments in the raw file never satisfy them, and steps
-    that are conditional or run another interpreter are skipped.
-    """
+
+def _step_environment_scopes(
+    workflow_env: object, job_env: object, step_env: object
+) -> dict[str, dict[str, object]]:
+    """Return the three GitHub Actions env scopes in precedence order."""
+    return {
+        "workflow": _env_mapping(workflow_env),
+        "job": _env_mapping(job_env),
+        "step": _env_mapping(step_env),
+    }
+
+
+def _merge_environment_scopes(
+    scopes: dict[str, dict[str, object]]
+) -> dict[str, object]:
+    """Apply workflow → job → step precedence to a run step."""
+    effective: dict[str, object] = {}
+    for scope in scopes.values():
+        effective.update(scope)
+    return effective
+
+
+def _is_shell_run_step(step: object) -> bool:
+    """Whether a workflow step has a parseable run script and shell."""
+    return (
+        isinstance(step, dict)
+        and isinstance(step.get("run"), str)
+        and _step_runs_shell(step)
+    )
+
+
+def _job_run_step_records(
+    workflow_content: str, job_name: str
+) -> list[dict] | None:
+    """Return executable run steps with shell and scoped environment metadata."""
     jobs = _workflow_jobs(workflow_content)
     if jobs is None or job_name not in jobs:
         return None
+    workflow = yaml.safe_load(workflow_content)
+    workflow_env = workflow.get("env") if isinstance(workflow, dict) else None
     job = jobs[job_name]
     if not isinstance(job, dict):
         return None
-    scripts: list[str] = []
-    for step in job.get("steps") or []:
-        if (
-            isinstance(step, dict)
-            and isinstance(step.get("run"), str)
-            and _step_runs_shell(step)
-        ):
-            scripts.append(step["run"])
-    return scripts
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return []
+    records: list[dict] = []
+    for step in steps:
+        if not _is_shell_run_step(step):
+            continue
+        scopes = _step_environment_scopes(
+            workflow_env, job.get("env"), step.get("env")
+        )
+        records.append({
+            "run": step["run"],
+            "shell": step.get("shell"),
+            "env": _merge_environment_scopes(scopes),
+            "env_scopes": scopes,
+        })
+    return records
+
+
+
+def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
+    """Return one executable run script per step, or None when absent."""
+    records = _job_run_step_records(workflow_content, job_name)
+    if records is None:
+        return None
+    return [record["run"] for record in records]
 
 
 def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
@@ -2697,19 +2754,172 @@ def _quote_cleaned_command(text: str) -> str:
     return cleaned + ((" " + rest) if rest else "")
 
 
-def _raw_install_in_segment(segment: str) -> bool:
-    """Whether the segment runs a raw install, directly or via a shell -c."""
-    stripped = _strip_provision_wrappers(segment)
-    if _RAW_INSTALL_RE.match(_quote_cleaned_command(stripped)):
-        return True
-    if stripped != segment:
-        return any(
-            _RAW_INSTALL_RE.match(
-                _quote_cleaned_command(_strip_provision_wrappers(inner))
-            )
-            for inner in _command_segments(stripped)
-        )
+def _mentions_raw_install(text: str) -> bool:
+    """Whether an unparsed payload names the forbidden install sequence."""
+    return bool(re.search(r"(?:^|\s)rustup\s+toolchain\s+install(?:\s|$)", text))
+
+
+def _xargs_command_index(words: list[str]) -> int | None:
+    """Return xargs' command operand after its supported static options."""
+    flags = {
+        "-0", "--null", "-p", "--interactive", "-r", "--no-run-if-empty",
+        "-t", "--verbose", "-x", "--exit",
+    }
+    valued = {
+        "-d", "--delimiter", "-E", "--eof", "-I", "--replace",
+        "-i", "-L", "--max-lines", "-n", "--max-args", "-P",
+        "--max-procs", "-s", "--max-chars", "-a", "--arg-file",
+    }
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            return index + 1
+        if not word.startswith("-") or word == "-":
+            return index
+        if word in valued:
+            index += 2
+        elif word.startswith("--") and "=" in word:
+            index += 1
+        elif len(word) > 2 and word[:2] in {
+            "-d", "-E", "-I", "-i", "-L", "-n", "-P", "-s", "-a",
+        }:
+            index += 1
+        elif word in flags:
+            index += 1
+        else:
+            return None
+    return None
+
+
+def _timeout_command_index(words: list[str]) -> int | None:
+    """Return timeout's command operand after its duration and options."""
+    value_options = {"-k", "--kill-after", "-s", "--signal"}
+    flag_options = {"--foreground", "--preserve-status", "-v", "--verbose"}
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            index += 1
+            break
+        if word in flag_options:
+            index += 1
+            continue
+        if word in value_options:
+            index += 2
+            continue
+        if word.startswith("--") and "=" in word:
+            index += 1
+            continue
+        if word.startswith("-") and word != "-":
+            return None
+        # timeout requires one duration before its command.
+        return index + 1
+    return index
+
+
+def _find_exec_argv(words: list[str]) -> list[list[str]] | None:
+    """Extract find's static -exec/-execdir commands, if well formed."""
+    commands: list[list[str]] = []
+    index = 0
+    while index < len(words):
+        if words[index] not in ("-exec", "-execdir"):
+            index += 1
+            continue
+        start = index + 1
+        end = start
+        while end < len(words) and words[end] not in (";", "+"):
+            end += 1
+        if end == len(words) or end == start:
+            return None
+        commands.append(words[start:end])
+        index = end + 1
+    return commands
+
+
+def _raw_install_from_dispatcher(words: list[str], depth: int) -> bool:
+    """Follow indirect command launchers with statically locatable operands."""
+    if words[0] == "xargs":
+        command_index = _xargs_command_index(words)
+        if command_index is None:
+            return _mentions_raw_install(" ".join(words))
+        return _raw_install_from_words(words[command_index:], depth + 1)
+    if words[0] == "timeout":
+        command_index = _timeout_command_index(words)
+        if command_index is None or command_index >= len(words):
+            return _mentions_raw_install(" ".join(words))
+        return _raw_install_from_words(words[command_index:], depth + 1)
+    if words[0] == "find":
+        commands = _find_exec_argv(words)
+        if commands is None:
+            return _mentions_raw_install(" ".join(words))
+        return any(_raw_install_from_words(command, depth + 1)
+                   for command in commands)
     return False
+
+
+def _raw_install_from_wrapper(words: list[str], depth: int) -> bool:
+    """Follow shell and command wrappers while preserving quoted word boundaries."""
+    if words[0] == "exec":
+        return _raw_install_from_words(words[1:], depth + 1)
+    if words[0] == "eval":
+        return _raw_install_in_segment(shlex.join(words[1:]), depth + 1)
+    if words[0] == "env":
+        command_index = _skip_env_prefix(words, 1)
+        return _raw_install_from_words(words[command_index:], depth + 1)
+    if words[0] == "command":
+        operands, lookup = _command_operand(words[1:])
+        return False if lookup else _raw_install_from_words(operands, depth + 1)
+    wrappers = {"bash", "sh", "dash", "zsh", "sudo", "retry"}
+    if words[0] in wrappers:
+        serialized = shlex.join(words)
+        stripped = _strip_provision_wrappers(serialized)
+        if stripped != serialized:
+            return any(
+                _raw_install_in_segment(inner, depth + 1)
+                for inner in _command_segments(stripped)
+            )
+    return False
+
+
+def _raw_install_from_words(words: list[str], depth: int = 0) -> bool:
+    """Follow a bounded set of command-position dispatchers to their target."""
+    if not words:
+        return False
+    if depth > 12:
+        return _mentions_raw_install(" ".join(words))
+    if words[0] in ("if", "then", "elif", "else", "!"):
+        return _raw_install_from_words(words[1:], depth + 1)
+    command_index = _skip_env_assignments(words, 0)
+    if command_index:
+        return _raw_install_from_words(words[command_index:], depth + 1)
+    if words[0] in {"echo", "printf", "test", "[", "true", "false", ":"}:
+        return False
+    if words[0] == "rustup":
+        return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
+    return _raw_install_from_dispatcher(words, depth) or _raw_install_from_wrapper(
+        words, depth
+    )
+
+
+def _raw_install_in_segment(segment: str, depth: int = 0) -> bool:
+    """Whether the segment runs a raw install, directly or through dispatchers."""
+    if depth > 12:
+        return _mentions_raw_install(segment)
+    commands = _command_segments(segment)
+    if len(commands) > 1:
+        return any(
+            _raw_install_in_segment(command, depth + 1) for command in commands
+        )
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        first = _resolve_heredoc_word(segment.split(maxsplit=1)[0])[0] \
+            if segment.split() else ""
+        if first in {"echo", "printf", "test", "[", "true", "false", ":"}:
+            return False
+        return _mentions_raw_install(segment)
+    return _raw_install_from_words(words, depth)
 
 
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
@@ -2833,7 +3043,50 @@ def _provisioning_shadow_issue(workflow_content: str) -> str | None:
     return None
 
 
-def _release_gate_step_candidates(step: str) -> tuple[list[str], str | None]:
+def _shell_option_enables_errexit(words: list[str], index: int) -> bool:
+    """Whether one explicit custom-shell option turns on errexit."""
+    word = words[index]
+    if word in ("-e", "--errexit"):
+        return True
+    if word.startswith("-") and not word.startswith("--") and "e" in word[1:]:
+        return True
+    return (
+        word == "-o"
+        and index + 1 < len(words)
+        and words[index + 1] == "errexit"
+    )
+
+
+def _shell_initial_errexit(shell: object) -> bool:
+    """Model whether a workflow shell starts with errexit enabled."""
+    if shell is None or not isinstance(shell, str):
+        return True
+    words = shell.split()
+    if not words or "{0}" not in words:
+        # GitHub's built-in `bash`/`sh` forms add errexit by default.
+        return True
+    return any(
+        _shell_option_enables_errexit(words, index)
+        for index in range(1, len(words))
+    )
+
+
+def _ends_with_background_operator(script: str) -> bool:
+    """Whether the last non-space token is a bare shell ``&`` operator."""
+    text = script.rstrip()
+    if not text.endswith("&") or text.endswith("&&"):
+        return False
+    backslashes = 0
+    for char in reversed(text[:-1]):
+        if char != "\\":
+            break
+        backslashes += 1
+    return backslashes % 2 == 0
+
+
+def _release_gate_step_candidates(
+    step: str, shell: object = None
+) -> tuple[list[str], str | None]:
     """Analyze one independent workflow shell step for provisioning commands."""
     stripped = _strip_heredocs(_strip_shell_comments(step))
     executable_source = _join_continuations(stripped)
@@ -2852,7 +3105,28 @@ def _release_gate_step_candidates(step: str) -> tuple[list[str], str | None]:
         )
     retry_trusted = _retry_runs_its_target(executable_source)
     failing, exiting = _function_kill_sets(executable_source)
-    candidates = _live_command_segments(executable, failing, exiting)
+    pairs = _command_segments_with_separators(executable)
+    for index, (segment, _) in enumerate(pairs):
+        following_separator = pairs[index + 1][1] if index + 1 < len(pairs) else ""
+        if (
+            following_separator == "&"
+            and _VERIFIED_INSTALLER_RE.match(_strip_provision_wrappers(segment))
+        ):
+            return [], (
+                "the verified Rust installer must finish in the foreground "
+                "before rustup adds a component"
+            )
+    if pairs and _ends_with_background_operator(executable):
+        last_segment = _strip_provision_wrappers(pairs[-1][0])
+        if _VERIFIED_INSTALLER_RE.match(last_segment):
+            return [], (
+                "the verified Rust installer must finish in the foreground "
+                "before a later workflow step"
+            )
+    candidates = _live_command_segments(
+        executable, failing, exiting,
+        errexit=_shell_initial_errexit(shell),
+    )
     return _provision_candidates(candidates, retry_trusted), None
 
 
@@ -2902,7 +3176,7 @@ def _release_gate_provisioning_issue(segments: list[str]) -> str | None:
 
 
 def _release_gate_toolchain_issue(
-    run_scripts: str | list[str],
+    run_scripts: str | Sequence[str | dict],
 ) -> str | None:
     """Return the toolchain provisioning issue, or None when satisfied.
 
@@ -2912,8 +3186,14 @@ def _release_gate_toolchain_issue(
     """
     steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
     segments: list[str] = []
-    for step in steps:
-        candidates, issue = _release_gate_step_candidates(step)
+    for record in steps:
+        if isinstance(record, str):
+            step, shell = record, None
+        elif isinstance(record, dict) and isinstance(record.get("run"), str):
+            step, shell = record["run"], record.get("shell")
+        else:
+            return "release-gate run step cannot be verified as a shell script"
+        candidates, issue = _release_gate_step_candidates(step, shell)
         if issue:
             return issue
         segments.extend(candidates)
@@ -2930,8 +3210,8 @@ def check_release_gate_toolchain(result: ValidationResult) -> None:
         )
         return
 
-    run_scripts = _job_run_scripts(content, RELEASE_GATE_JOB_NAME)
-    if run_scripts is None:
+    run_steps = _job_run_step_records(content, RELEASE_GATE_JOB_NAME)
+    if run_steps is None:
         result.fail(
             PKG_RELEASE_GATE_TOOLCHAIN_GATE,
             f"{RELEASE_GATE_JOB_NAME} job not found in release-packages.yml",
@@ -2941,7 +3221,7 @@ def check_release_gate_toolchain(result: ValidationResult) -> None:
     issue = (
         _raw_toolchain_install_issue(content)
         or _provisioning_shadow_issue(content)
-        or _release_gate_toolchain_issue(run_scripts)
+        or _release_gate_toolchain_issue(run_steps)
     )
     if issue is None:
         result.pass_(
@@ -2998,45 +3278,175 @@ def _requirements_pin_issue(requirements: str) -> str | None:
     return None
 
 
-def _pip_first_steps(
-    steps: list[str],
-) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-    """Positions of the first pip install and the first docs-check.
+def _step_script(step: str | dict) -> str | None:
+    """Get a script from a plain string or parsed run-step record."""
+    if isinstance(step, str):
+        return step
+    if isinstance(step, dict) and isinstance(step.get("run"), str):
+        return step["run"]
+    return None
 
-    Both are read from the live command segments of each step, so a
-    disabled or dead branch never satisfies the guard.
-    """
+
+def _step_live_commands(step: str | dict) -> list[str]:
+    """Executable command segments in one run step with its shell semantics."""
+    script = _step_script(step)
+    if script is None:
+        return []
+    stripped = _strip_heredocs(_strip_shell_comments(script))
+    executable_source = _join_continuations(stripped)
+    executable = _strip_function_bodies(executable_source)
+    failing, exiting = _function_kill_sets(executable_source)
+    shell = step.get("shell") if isinstance(step, dict) else None
+    return _live_command_segments(
+        executable, failing, exiting,
+        errexit=_shell_initial_errexit(shell),
+    )
+
+
+def _shell_words(segment: str) -> list[str]:
+    """Tokenize a parsed command and peel only real execution wrappers."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return []
+    wrappers = {"bash", "sh", "dash", "zsh", "sudo", "env", "command", "retry"}
+    if words and words[0] in wrappers:
+        text = _strip_provision_wrappers(segment)
+        if text != segment:
+            try:
+                return shlex.split(text, posix=True)
+            except ValueError:
+                return []
+    return words
+
+
+def _runs_make_docs_check(words: list[str]) -> bool:
+    """Whether make's command and target positions invoke docs-check."""
+    command_index = _skip_env_assignments(words, 0)
+    if command_index >= len(words) or words[command_index] != "make":
+        return False
+    value_options = {
+        "-C", "--directory", "-f", "--file", "--makefile", "-I",
+        "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
+        "--old-file", "-W", "--what-if", "--assume-new", "--eval",
+    }
+    targets: list[str] = []
+    index = command_index + 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            targets.extend(words[index + 1:])
+            break
+        if word in value_options:
+            index += 2
+        elif word.startswith("--") and "=" in word:
+            index += 1
+        elif word.startswith("-"):
+            index += 1
+        else:
+            targets.append(word)
+            index += 1
+    return "docs-check" in targets
+
+
+def _virtualenv_root(path: str) -> str | None:
+    """Recognize common activated-venv paths without treating system bin as one."""
+    normalized = path.replace("\\", "/").rstrip("/")
+    suffix = "/bin/activate"
+    if normalized.endswith(suffix):
+        return normalized[:-len(suffix)]
+    parts = normalized.split("/")
+    for index, part in enumerate(parts):
+        if re.fullmatch(r"\.?venv\d*|virtualenvs?", part, re.IGNORECASE):
+            return "/".join(parts[:index + 1])
+    return None
+
+
+def _virtualenv_markers_from_path(value: str) -> set[str]:
+    """Marker set for PATH entries that name a virtual environment."""
+    markers = set()
+    for entry in value.split(":"):
+        root = _virtualenv_root(entry + "/activate")
+        if root is not None:
+            markers.add("venv:" + root)
+    return markers
+
+
+def _virtualenv_markers_from_word(word: str) -> set[str]:
+    """Marker set for an inline VIRTUAL_ENV or PATH assignment."""
+    key, separator, value = word.partition("=")
+    if not separator:
+        return set()
+    if key == "VIRTUAL_ENV" and value:
+        return {"venv:" + value.rstrip("/")}
+    if key == "PATH":
+        return _virtualenv_markers_from_path(value)
+    return set()
+
+
+def _virtualenv_command_markers(segment: str) -> set[str]:
+    """Virtualenv state established by one live shell command."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return set()
+    markers = set()
+    if len(words) > 1 and words[0] in (".", "source"):
+        root = _virtualenv_root(words[1])
+        if root is not None:
+            markers.add("venv:" + root)
+    for word in words:
+        markers.update(_virtualenv_markers_from_word(word))
+    return markers
+
+
+def _virtualenv_environment_markers(environment: object) -> set[str]:
+    """Virtualenv state inherited from a workflow/job/step env mapping."""
+    if not isinstance(environment, dict):
+        return set()
+    markers = set()
+    virtual_env = environment.get("VIRTUAL_ENV")
+    if isinstance(virtual_env, str) and virtual_env:
+        markers.add("venv:" + virtual_env.rstrip("/"))
+    path_value = environment.get("PATH")
+    if isinstance(path_value, str):
+        markers.update(_virtualenv_markers_from_path(path_value))
+    return markers
+
+
+def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
+    """Python-environment state established by a run-step prefix and its env."""
+    commands = _step_live_commands(step)
+    visible = commands if through is None else commands[:through + 1]
+    markers = set()
+    for segment in visible:
+        markers.update(_virtualenv_command_markers(segment))
+    if isinstance(step, dict):
+        markers.update(_virtualenv_environment_markers(step.get("env")))
+    return markers
+
+
+def _pip_first_steps(
+    steps: Sequence[str | dict],
+) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+    """Positions of the first live requirements install and docs-check command."""
     install_at: tuple[int, int] | None = None
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
-        stripped = _strip_heredocs(_strip_shell_comments(step))
-        executable_source = _join_continuations(stripped)
-        executable = _strip_function_bodies(executable_source)
-        failing, exiting = _function_kill_sets(executable_source)
-        for command_index, segment in enumerate(
-            _live_command_segments(executable, failing, exiting)
-        ):
-            text = _strip_provision_wrappers(segment)
+        for command_index, segment in enumerate(_step_live_commands(step)):
+            words = _shell_words(segment)
             position = (step_index, command_index)
-            if (
-                _PIP_REQUIREMENT_RE.search(_quote_removed_command(text))
-                and install_at is None
-            ):
+            command_index_after_env = _skip_env_assignments(words, 0)
+            command = " ".join(words[command_index_after_env:])
+            if _PIP_REQUIREMENT_RE.search(command) and install_at is None:
                 install_at = position
-            if "make docs-check" in text and docs_check_at is None:
+            if _runs_make_docs_check(words) and docs_check_at is None:
                 docs_check_at = position
     return install_at, docs_check_at
 
 
-def _python_deps_issue(run_scripts: str | list[str]) -> str | None:
-    """Check the release-gate job installs its pinned Python dependencies.
-
-    The docs-check chain imports jsonschema and PyYAML, which a fresh
-    runner only provides when ``requirements-release.txt`` is installed
-    first; the install must sit in executable command position before the
-    docs-check runs, in any shell-equivalent spelling of the pip
-    invocation, and both pins must carry an actual version token.
-    """
+def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
+    """Check pinned dependencies are installed in the environment docs-check uses."""
     pin_issue = _requirements_pin_issue(read_safe(RELEASE_REQUIREMENTS))
     if pin_issue is not None:
         return pin_issue
@@ -3058,6 +3468,19 @@ def _python_deps_issue(run_scripts: str | list[str]) -> str | None:
             "the release-gate job must install requirements-release.txt "
             "before the docs-check step that imports it"
         )
+    if install_at[0] != docs_check_at[0]:
+        install_environment = _virtualenv_markers(
+            steps[install_at[0]], install_at[1]
+        )
+        docs_environment = _virtualenv_markers(
+            steps[docs_check_at[0]], None
+        )
+        if install_environment != docs_environment:
+            return (
+                "the release-gate job must install requirements into the "
+                "Python environment used by docs-check; run-step shells do "
+                "not share virtualenv activation"
+            )
     return None
 
 
@@ -3150,14 +3573,14 @@ def check_release_gate_python_deps(result: ValidationResult) -> None:
             "release-packages.yml not found",
         )
         return
-    run_scripts = _job_run_scripts(content, RELEASE_GATE_JOB_NAME)
-    if run_scripts is None:
+    run_steps = _job_run_step_records(content, RELEASE_GATE_JOB_NAME)
+    if run_steps is None:
         result.fail(
             PKG_RELEASE_GATE_PYTHON_DEPS_GATE,
             f"{RELEASE_GATE_JOB_NAME} job not found in release-packages.yml",
         )
         return
-    issue = _python_deps_issue(run_scripts)
+    issue = _python_deps_issue(run_steps)
     if issue is None:
         result.pass_(
             PKG_RELEASE_GATE_PYTHON_DEPS_GATE,

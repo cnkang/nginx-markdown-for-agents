@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -33,6 +35,16 @@ class _PopenAdapter:
         self.stdout = process.stdout
         self.stderr = process.stderr
         self.returncode = None
+
+    @property
+    def pid(self) -> int:
+        """Return the real child's process id for process-group signaling."""
+        return self._process.pid
+
+    def poll(self):
+        """Poll the process, mirroring ``Popen.poll``."""
+        self.returncode = self._process.poll()
+        return self.returncode
 
     def wait(self, timeout=None):
         """Wait for the process, mirroring ``Popen.wait``."""
@@ -104,7 +116,8 @@ def _install_streaming_popen(monkeypatch, script: str) -> None:
     def fake_popen(command, **kwargs):
         real = _real_popen(
             [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
-            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"))
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"),
+            start_new_session=kwargs.get("start_new_session", False))
         return _PopenAdapter(real)
 
     monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
@@ -547,7 +560,8 @@ def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
         seen["command"] = list(command)
         real = _real_popen(
             [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
-            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"))
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"),
+            start_new_session=kwargs.get("start_new_session", False))
         return _PopenAdapter(real)
 
     monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
@@ -1757,3 +1771,148 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     # in-flight workers both failed before the stop could skip them), and
     # the aggregation printed it rather than swallowing it.
     assert err.count("additional worker error") == 1, err
+
+
+def _process_tree_script(tmp_path: Path, marker_delay: float = 0.8) -> tuple[str, Path, Path]:
+    """Create parent/child scripts whose child survives TERM unless group-killed."""
+    child_pid_path = tmp_path / "child.pid"
+    child_marker = tmp_path / "child-survived"
+    child_code = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"time.sleep({marker_delay})\n"
+        f"open({str(child_marker)!r}, 'w').write('survived')\n"
+        "time.sleep(30)\n"
+    )
+    parent_code = (
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    return parent_code, child_pid_path, child_marker
+
+
+def _wait_for_file(path: Path, timeout: float = 5.0) -> None:
+    """Wait boundedly for a subprocess marker file."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not path.exists():
+        time.sleep(0.01)
+    assert path.exists(), f"timed out waiting for {path}"
+
+
+def _kill_test_process_group(pid_path: Path) -> None:
+    """Remove any process descendants left by a deliberately mutated probe."""
+    if not pid_path.is_file():
+        return
+    child_pid = int(pid_path.read_text(encoding="utf-8"))
+    try:
+        process_group = os.getpgid(child_pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _install_real_script_popen(monkeypatch, script: str) -> None:
+    """Run the supplied Python script while preserving Popen process options."""
+    def fake_popen(command, **kwargs):
+        return _real_popen([sys.executable, "-c", script], **kwargs)
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
+
+
+def test_invoke_fuzz_timeout_terminates_descendant_processes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A timeout kills the whole invocation group and releases inherited pipes."""
+    script, child_pid_path, child_marker = _process_tree_script(tmp_path)
+    _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
+
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 0.25)
+
+        assert result["returncode"] == -1
+        assert result["stderr"].startswith("timed out: ")
+        _wait_for_file(child_pid_path)
+        time.sleep(1.0)
+        assert not child_marker.exists(), "a descendant survived the timeout"
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_process_group(child_pid_path)
+
+
+def test_parent_interrupt_cancels_active_process_groups(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Interrupt cleanup stops live fuzz workers and their descendants."""
+    script, child_pid_path, child_marker = _process_tree_script(tmp_path)
+    _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    results: list[dict] = []
+    worker = threading.Thread(
+        target=lambda: results.append(
+            validator._invoke_fuzz("corpus_population", [], 30)
+        ),
+        name="fuzz-process-worker",
+    )
+    worker.start()
+    try:
+        _wait_for_file(child_pid_path)
+
+        class _InterruptingJoin(threading.Thread):
+            """Raise once for the initial join, then tolerate cleanup joining."""
+
+            def __init__(self) -> None:
+                super().__init__(name="interrupt-trigger")
+
+            def join(self, timeout=None):
+                if timeout is None:
+                    raise KeyboardInterrupt("simulated parent interrupt")
+
+        stop = threading.Event()
+        try:
+            validator._join_workers([_InterruptingJoin(), worker], stop)
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("the parent interrupt must be re-raised")
+
+        worker.join(5)
+        assert stop.is_set()
+        assert not worker.is_alive()
+        assert len(results) == 1
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+        time.sleep(1.0)
+        assert not child_marker.exists(), "a descendant survived parent cancellation"
+    finally:
+        _kill_test_process_group(child_pid_path)
+        worker.join(5)
+
+
+def test_default_artifact_paths_follow_the_cargo_package_version() -> None:
+    """Artifact defaults are derived from Cargo and work for another version."""
+    current_version = validator._cargo_package_version()
+    current = validator._release_artifact_paths(current_version)
+    assert validator.DEFAULT_MANIFEST == current["manifest"]
+    assert validator.DEFAULT_CORPUS_MANIFEST == current["corpus_manifest"]
+    assert validator.DEFAULT_RECORD == current["record"]
+    assert validator.DEFAULT_LOG_DIR == current["log_dir"]
+
+    alternate = validator._release_artifact_paths("7.8.9")
+    assert alternate["manifest"] == (
+        "artifacts/release/7.8.9/blocking-fuzz-target-manifest.json"
+    )
+    assert alternate["corpus_manifest"] == (
+        "artifacts/release/7.8.9/corpus-seed-manifest.json"
+    )
+    assert alternate["record"] == (
+        "artifacts/release/7.8.9/fuzz-qualification-record.json"
+    )
+    assert alternate["log_dir"] == "artifacts/release/7.8.9/fuzz-logs"

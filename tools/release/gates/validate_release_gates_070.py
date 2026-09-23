@@ -60,12 +60,26 @@ GATE_LOCAL_SCRIPTS = {
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
 # The release-gate job waits for the three upstream jobs whose artifacts it
-# consumes.  The dependency edge is read structurally from the workflow's own
-# job entry (see _release_gate_needs), so this job name must stay in step with
-# the workflow's job key.
+# consumes.  The dependency edge and the job's own tag condition are read
+# structurally from the workflow's own job entry (see _release_gate_needs), so
+# this job name must stay in step with the workflow's job key.
 RELEASE_GATE_JOB = "release-gate"
 RELEASE_GATE_REQUIRED_NEEDS = frozenset(
     {"prepare", "smoke-test", "fuzz-qualification"}
+)
+# The tag predicate is matched inside the parsed job-level ``if`` value only.
+# A quoted or unquoted YAML scalar is resolved by the parser, so neither a
+# comment nor another job's condition can answer for the release-gate job.
+RELEASE_GATE_TAG_PREDICATE_RE = re.compile(
+    r"github\.ref_type\s*==\s*['\"]tag['\"]"
+)
+# Named failure row reported when the workflow cannot be parsed at all because
+# PyYAML is not importable.
+RELEASE_GATE_PYYAML_GATE = "release-gate:pyyaml-dependency"
+RELEASE_GATE_PYYAML_MESSAGE = (
+    "PyYAML is not importable, so the release-gate job's condition and "
+    "dependencies cannot be read structurally; install the pinned release "
+    "dependencies with `python3 -m pip install -r requirements-release.txt`"
 )
 BlockingItems = list[tuple[str, bool]]
 
@@ -422,18 +436,19 @@ def _gate_2_items(
     ]
 
 
-def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
-    """Return the release-gate job's ``needs`` entries, or None when unreadable.
+def _release_gate_job(release_packages: str) -> dict[str, object] | None:
+    """Return the release-gate job mapping, or None when unreadable.
 
     The workflow text is parsed as YAML and only the ``release-gate`` job entry
-    is inspected, so a dependency list belonging to another job -- or text
-    sitting in a comment -- can never satisfy the check.  Block sequences,
-    quoted scalars and flow sequences are all resolved by the parser.
+    is inspected, so a condition or dependency list belonging to another job --
+    or text sitting in a comment -- can never satisfy a check.  Block
+    sequences, quoted scalars and flow sequences are all resolved by the
+    parser.
 
-    ``None`` means the document did not parse into the expected shape (bad
-    YAML, missing job, or a ``needs`` value that is not a string or a list of
-    strings); callers treat that as a failure so a malformed or restructured
-    workflow fails closed instead of passing by accident.
+    ``None`` means PyYAML is unavailable or the document did not parse into the
+    expected shape (bad YAML, missing jobs map, or missing job entry); callers
+    treat that as a failure so a malformed or restructured workflow fails
+    closed instead of passing by accident.
     """
     try:
         import yaml
@@ -447,7 +462,35 @@ def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
     if not isinstance(jobs, dict):
         return None
     job = jobs.get(RELEASE_GATE_JOB)
-    if not isinstance(job, dict):
+    return job if isinstance(job, dict) else None
+
+
+def check_release_workflow_dependencies(result: ValidationResult) -> None:
+    """Record an explicit failed gate row when PyYAML is not importable.
+
+    Without the parser the release-gate job's condition and dependency edges
+    cannot be read at all, so the run must fail with an actionable dependency
+    diagnostic instead of a generic unreadable-workflow failure.
+    """
+    try:
+        import yaml  # noqa: F401  (import probe only)
+    except ImportError:
+        result.fail(RELEASE_GATE_PYYAML_GATE, RELEASE_GATE_PYYAML_MESSAGE)
+
+
+def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
+    """Return the release-gate job's ``needs`` entries, or None when unreadable.
+
+    Only the ``release-gate`` job entry is inspected, so a dependency list
+    belonging to another job -- or text sitting in a comment -- can never
+    satisfy the check.  ``None`` means the document did not parse into the
+    expected shape (bad YAML, missing job, or a ``needs`` value that is not a
+    string or a list of strings); callers treat that as a failure so a
+    malformed or restructured workflow fails closed instead of passing by
+    accident.
+    """
+    job = _release_gate_job(release_packages)
+    if job is None:
         return None
     needs = job.get("needs")
     if isinstance(needs, str):
@@ -457,6 +500,79 @@ def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
     ):
         return frozenset(needs)
     return None
+
+
+def _release_gate_if_condition(release_packages: str) -> str | None:
+    """Return the release-gate job's own ``if`` expression, or None.
+
+    Only a non-empty string scalar on the ``release-gate`` job entry counts;
+    an unrelated scalar elsewhere in the document, or the decoy text sitting
+    in a comment, is invisible to this lookup.
+    """
+    job = _release_gate_job(release_packages)
+    if job is None:
+        return None
+    condition = job.get("if")
+    if isinstance(condition, str) and condition.strip():
+        return condition
+    return None
+
+
+def _strip_yaml_line_comment(line: str, *, in_sq: bool, in_dq: bool) -> str:
+    """Drop an unquoted ``#`` comment from one line of a scalar.
+
+    ``if`` values are normally plain scalars, where YAML itself removes the
+    comment; inside a block scalar the text survives parsing, so a
+    commented-out predicate must be removed here before it is matched.  A
+    ``#`` inside a quoted segment is not a comment.
+    """
+    for index, char in enumerate(line):
+        if in_sq:
+            in_sq = char != "'"
+        elif in_dq:
+            in_dq = char != '"'
+        elif char == "'":
+            in_sq = True
+        elif char == '"':
+            in_dq = True
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            return line[:index]
+    return line
+
+
+def _strip_yaml_comments(text: str) -> str:
+    """Remove YAML comments from a scalar, honoring quoted segments."""
+    lines: list[str] = []
+    in_sq = False
+    in_dq = False
+    for line in text.splitlines():
+        stripped = _strip_yaml_line_comment(line, in_sq=in_sq, in_dq=in_dq)
+        for char in stripped:
+            if in_sq:
+                in_sq = char != "'"
+            elif in_dq:
+                in_dq = char != '"'
+            elif char == "'":
+                in_sq = True
+            elif char == '"':
+                in_dq = True
+        lines.append(stripped)
+    return "\n".join(lines)
+
+
+def _release_gate_tag_condition_gate(release_packages: str) -> bool:
+    """True when the release-gate job's own ``if`` carries the tag predicate.
+
+    The predicate is matched inside the parsed condition scalar, with comments
+    inside that scalar removed first, so a commented-out predicate cannot
+    satisfy it.
+    """
+    condition = _release_gate_if_condition(release_packages)
+    if condition is None:
+        return False
+    return RELEASE_GATE_TAG_PREDICATE_RE.search(
+        _strip_yaml_comments(condition)
+    ) is not None
 
 
 def _release_gate_needs_gate(release_packages: str) -> bool:
@@ -469,8 +585,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
     return [
         (
             "tag package workflow gate",
-            "release-gate:" in release_packages
-            and "github.ref_type == 'tag'" in release_packages
+            _release_gate_tag_condition_gate(release_packages)
             and _release_gate_needs_gate(release_packages),
         ),
         (
@@ -642,6 +757,7 @@ def main() -> int:
     result = ValidationResult()
     check_structure(result)
     if args.mode in {"strict", "evidence"}:
+        check_release_workflow_dependencies(result)
         check_blocking_items(result, args.mode)
 
     print_report(result)

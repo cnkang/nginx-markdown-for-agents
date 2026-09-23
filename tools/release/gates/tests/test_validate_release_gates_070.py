@@ -207,3 +207,138 @@ def test_gate_three_items_accepts_the_release_packages_workflow() -> None:
     parsed = gates._release_gate_needs(release_packages)
     assert parsed is not None
     assert gates.RELEASE_GATE_REQUIRED_NEEDS <= parsed
+    condition = gates._release_gate_if_condition(release_packages)
+    assert condition is not None
+    assert gates.RELEASE_GATE_TAG_PREDICATE_RE.search(condition)
+
+
+def test_gate_three_items_reads_the_job_if_structurally() -> None:
+    """Only the release-gate job's own `if` may carry the tag predicate."""
+    # The job condition is a quoted scalar: the parser resolves it, so the
+    # predicate is matched even though the source text differs from the
+    # unquoted spelling.
+    quoted_condition = (
+        _release_gate_job(
+            "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+        ).replace(
+            "    if: " + TAG_CONDITION,
+            '    if: "github.event_name == \'push\' && ' + TAG_CONDITION + '"\n',
+        )
+    )
+    assert _gate_3_item(quoted_condition)
+    # Another job's condition cannot answer for release-gate.
+    other_job = (
+        "jobs:\n"
+        "  prepare:\n    runs-on: ubuntu-24.04\n"
+        "  smoke-test:\n    runs-on: ubuntu-24.04\n"
+        "  fuzz-qualification:\n    runs-on: ubuntu-24.04\n"
+        "  other-job:\n    if: " + TAG_CONDITION + "\n"
+        "  release-gate:\n"
+        "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+    )
+    assert not _gate_3_item(other_job)
+    # A scalar `if` that is not a condition (list, number) stays unreadable.
+    for spelling in ("[a, b]", "42", "null", "~"):
+        assert not _gate_3_item(
+            _release_gate_job(
+                "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+            ).replace("    if: " + TAG_CONDITION, f"    if: {spelling}\n")
+        )
+
+
+def test_gate_three_items_rejects_condition_comment_decoy() -> None:
+    """Comment text carrying both gate strings must not satisfy the gate.
+
+    The fixture holds a correct `needs` list and mentions ``release-gate:``
+    and ``github.ref_type == 'tag'`` only inside YAML comments, so the raw
+    substring form of this check (the pre-fix behaviour) would accept it.
+    """
+    workflow = (
+        "# release-gate: github.ref_type == 'tag'\n"
+        "jobs:\n"
+        "  prepare:\n    runs-on: ubuntu-24.04\n"
+        "  smoke-test:\n    runs-on: ubuntu-24.04\n"
+        "  fuzz-qualification:\n    runs-on: ubuntu-24.04\n"
+        "  release-gate:\n"
+        "    # github.ref_type == 'tag'\n"
+        "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+    )
+    # Mutation sensitivity: the retired substring check is satisfied here.
+    assert "release-gate:" in workflow
+    assert TAG_CONDITION in workflow
+    assert not _gate_3_item(workflow)
+    assert gates._release_gate_if_condition(workflow) is None
+
+
+def test_gate_three_items_rejects_commented_out_predicate_in_block_scalar() -> None:
+    """A commented-out predicate inside the job `if` is still not a condition."""
+    workflow = (
+        "jobs:\n"
+        "  prepare:\n    runs-on: ubuntu-24.04\n"
+        "  smoke-test:\n    runs-on: ubuntu-24.04\n"
+        "  fuzz-qualification:\n    runs-on: ubuntu-24.04\n"
+        "  release-gate:\n"
+        "    if: |\n"
+        "      # github.ref_type == 'tag'\n"
+        "      github.event_name == 'workflow_dispatch'\n"
+        "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+    )
+    assert not _gate_3_item(workflow)
+    # The predicate itself survives inside a block scalar once it is real.
+    live_block = workflow.replace(
+        "# github.ref_type == 'tag'", "github.ref_type == 'tag'"
+    )
+    assert _gate_3_item(live_block)
+
+
+def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(
+    monkeypatch, capsys
+) -> None:
+    """A blocked PyYAML import must surface one named, actionable FAIL row."""
+    result = gates.ValidationResult()
+    gates.check_release_workflow_dependencies(result)
+    assert result.results == []
+
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    result = gates.ValidationResult()
+    gates.check_release_workflow_dependencies(result)
+
+    assert result.results == [
+        ("FAIL", gates.RELEASE_GATE_PYYAML_GATE, gates.RELEASE_GATE_PYYAML_MESSAGE)
+    ]
+    assert result.has_failures
+    assert "PyYAML" in gates.RELEASE_GATE_PYYAML_MESSAGE
+    assert "requirements-release.txt" in gates.RELEASE_GATE_PYYAML_MESSAGE
+
+
+def test_strict_run_fails_with_the_pyyaml_diagnostic(monkeypatch, capsys) -> None:
+    """The strict CLI run reports the dependency row and exits nonzero."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    monkeypatch.setattr(
+        sys, "argv", ["validate_release_gates_070.py", "--mode", "strict"]
+    )
+    monkeypatch.setenv("RELEASE_GATE_EXPECTED_CARGO_VERSION", "0.9.2")
+
+    rc = gates.main()
+
+    assert rc == 1
+    report = capsys.readouterr().out
+    assert f"FAIL  {gates.RELEASE_GATE_PYYAML_GATE}" in report
+    assert "requirements-release.txt" in report
+    # The dependency row is the actionable cause; the structural checks that
+    # need the parser fail closed alongside it rather than passing silently.
+    assert "FAIL  Gate 3:tag package workflow gate" in report
+
+
+def test_strict_run_parses_the_real_workflow_with_pyyaml() -> None:
+    """Installed-PyYAML positive control: the real workflow passes strictly."""
+    import yaml  # noqa: F401  (the control requires the parser)
+
+    result = gates.ValidationResult()
+    gates.check_release_workflow_dependencies(result)
+    assert result.results == []
+
+    release_packages = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    checks = dict(gates._gate_3_items(release_packages))
+    assert checks["tag package workflow gate"]
+    assert checks["publish waits for release gate"]

@@ -33,6 +33,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -55,12 +56,48 @@ from lib.executable_validation import (  # noqa: E402
 )
 
 SCHEMA_VERSION = "release.fuzz-qualification.v1"
-DEFAULT_MANIFEST = "artifacts/release/0.9.2/blocking-fuzz-target-manifest.json"
-DEFAULT_CORPUS_MANIFEST = "artifacts/release/0.9.2/corpus-seed-manifest.json"
-DEFAULT_RECORD = "artifacts/release/0.9.2/fuzz-qualification-record.json"
-DEFAULT_LOG_DIR = "artifacts/release/0.9.2/fuzz-logs"
 CORPUS_ROOT = REPO_ROOT / "components" / "rust-converter" / "fuzz" / "corpus"
 FUZZ_CRATE_DIR = REPO_ROOT / "components" / "rust-converter"
+
+
+def _cargo_package_version() -> str:
+    """Read the active converter crate version from its package table."""
+    cargo_toml = FUZZ_CRATE_DIR / "Cargo.toml"
+    section = None
+    for line in cargo_toml.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped
+            continue
+        if section == "[package]":
+            match = re.fullmatch(
+                r'version\s*=\s*"([^\"]+)"\s*(?:#.*)?', stripped
+            )
+            if match:
+                return match.group(1)
+    raise ValueError(f"package version not found in {cargo_toml}")
+
+
+def _release_artifact_paths(version: str) -> dict[str, str]:
+    """Build release artifact defaults for any valid Cargo package version."""
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+        raise ValueError(f"invalid Cargo package version: {version!r}")
+    root = Path("artifacts") / "release" / version
+    return {
+        "manifest": (root / "blocking-fuzz-target-manifest.json").as_posix(),
+        "corpus_manifest": (root / "corpus-seed-manifest.json").as_posix(),
+        "record": (root / "fuzz-qualification-record.json").as_posix(),
+        "log_dir": (root / "fuzz-logs").as_posix(),
+        "record_root": root.as_posix(),
+    }
+
+
+_DEFAULT_ARTIFACT_PATHS = _release_artifact_paths(_cargo_package_version())
+DEFAULT_MANIFEST = _DEFAULT_ARTIFACT_PATHS["manifest"]
+DEFAULT_CORPUS_MANIFEST = _DEFAULT_ARTIFACT_PATHS["corpus_manifest"]
+DEFAULT_RECORD = _DEFAULT_ARTIFACT_PATHS["record"]
+DEFAULT_LOG_DIR = _DEFAULT_ARTIFACT_PATHS["log_dir"]
+RECORD_OUTPUT_ROOT = Path(_DEFAULT_ARTIFACT_PATHS["record_root"])
 
 SKIP_ENV = "RELEASE_GATE_ALLOW_SKIP_FUZZ"
 TIME_CONTINUATION_CEILING = 3600
@@ -465,6 +502,10 @@ _MAX_MARKER_EVIDENCE_CHARS = 400
 _STREAM_READ_BYTES = 1 << 16
 _MAX_PENDING_LINE_CHARS = 1 << 20
 _STREAM_JOIN_GRACE_SECONDS = 30
+_PROCESS_TERMINATION_GRACE_SECONDS = 1.0
+_ACTIVE_FUZZ_PROCESSES: set[subprocess.Popen] = set()
+_ACTIVE_FUZZ_PROCESSES_LOCK = threading.Lock()
+_FUZZ_CANCEL_REQUESTED = threading.Event()
 # Grace for the interrupt cleanup join: long enough for workers to reach
 # their next queue boundary and for the in-flight invocation's readers to
 # drain, short enough that an interrupt is not held up indefinitely.
@@ -623,23 +664,75 @@ def _join_readers(readers: list[threading.Thread]) -> None:
         reader.join(_STREAM_JOIN_GRACE_SECONDS)
 
 
-def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
-    """Run one cargo fuzz invocation, returning status and captured output.
+def _signal_fuzz_process_group(
+    process: subprocess.Popen, signal_number: int
+) -> None:
+    """Signal the isolated fuzz invocation and any descendants it spawned."""
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal_number)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    if process.poll() is None:
+        if signal_number == getattr(signal, "SIGTERM", None):
+            process.terminate()
+        else:
+            process.kill()
 
-    Both streams are drained by reader threads into bounded buffers while
-    the process runs, so the retained text never holds the full stream
-    and a failure marker anywhere in it (including inside the elided
-    middle of a many-megabyte stream) still surfaces via
-    ``marker_finding``.  The readers are joined once the process is
-    reaped; a timeout kills the process and returns the partial streams
-    behind the "timed out: " prefix the soak consumer recognizes.  Every
-    return path carries ``wall_elapsed``.
-    """
+
+def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
+    """Bound TERM grace, then KILL every remaining process in the group."""
+    _signal_fuzz_process_group(process, signal.SIGTERM)
+    time.sleep(_PROCESS_TERMINATION_GRACE_SECONDS)
+    _signal_fuzz_process_group(
+        process, getattr(signal, "SIGKILL", signal.SIGTERM)
+    )
+    process.wait()
+
+
+def _register_fuzz_process(process: subprocess.Popen) -> None:
+    """Track a new process and close the interrupt-registration race."""
+    with _ACTIVE_FUZZ_PROCESSES_LOCK:
+        _ACTIVE_FUZZ_PROCESSES.add(process)
+        cancel_requested = _FUZZ_CANCEL_REQUESTED.is_set()
+    if cancel_requested:
+        _terminate_fuzz_process_group(process)
+
+
+def _unregister_fuzz_process(process: subprocess.Popen) -> None:
+    """Remove a completed invocation from the cancellation registry."""
+    with _ACTIVE_FUZZ_PROCESSES_LOCK:
+        _ACTIVE_FUZZ_PROCESSES.discard(process)
+
+
+def _cancel_active_fuzz_processes() -> None:
+    """Terminate all active fuzz process groups together on parent interrupt."""
+    with _ACTIVE_FUZZ_PROCESSES_LOCK:
+        processes = list(_ACTIVE_FUZZ_PROCESSES)
+    for process in processes:
+        _signal_fuzz_process_group(process, signal.SIGTERM)
+    if processes:
+        time.sleep(_PROCESS_TERMINATION_GRACE_SECONDS)
+    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+    for process in processes:
+        _signal_fuzz_process_group(process, kill_signal)
+
+
+def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
+    """Run one isolated cargo fuzz process group and capture its output."""
     cargo = _resolve_fuzz_cargo()
     started = time.monotonic()
     if cargo is None:
         return {"returncode": -1, "stdout": "",
                 "stderr": "spawn failed: Rustup cargo shim not found",
+                "wall_elapsed": time.monotonic() - started,
+                "marker_finding": None}
+    if _FUZZ_CANCEL_REQUESTED.is_set():
+        return {"returncode": -1, "stdout": "",
+                "stderr": "cancelled: parent interrupted",
                 "wall_elapsed": time.monotonic() - started,
                 "marker_finding": None}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
@@ -649,11 +742,12 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     try:
         process = subprocess.Popen(
             command, cwd=FUZZ_CRATE_DIR, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
+            stderr=subprocess.PIPE, start_new_session=True)
     except OSError as exc:
         return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}",
                 "wall_elapsed": time.monotonic() - started,
                 "marker_finding": None}
+    _register_fuzz_process(process)
     stdout_stream, stderr_stream = _BoundedStream(), _BoundedStream()
     readers = [
         threading.Thread(target=_drain_stream, args=(pipe, stream), daemon=True)
@@ -664,12 +758,22 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
         reader.start()
     timed_out = False
     try:
-        returncode = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        process.kill()
-        process.wait()
-    _join_readers(readers)
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_fuzz_process_group(process)
+            returncode = process.returncode
+        _join_readers(readers)
+    except KeyboardInterrupt:
+        _FUZZ_CANCEL_REQUESTED.set()
+        _terminate_fuzz_process_group(process)
+        raise
+    except BaseException:
+        _terminate_fuzz_process_group(process)
+        raise
+    finally:
+        _unregister_fuzz_process(process)
     result = {
         "stdout": stdout_stream.text(),
         "wall_elapsed": time.monotonic() - started,
@@ -677,9 +781,6 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
             stdout_stream.marker_finding() or stderr_stream.marker_finding()),
     }
     if timed_out:
-        # Same shape as the previous TimeoutExpired-driven path: the
-        # partial stderr behind the "timed out: " prefix the soak outcome
-        # keys on.
         exc = subprocess.TimeoutExpired(command, timeout)
         result["returncode"] = -1
         result["stderr"] = _bounded_capture(
@@ -1163,6 +1264,8 @@ def _join_workers(threads: list[threading.Thread],
             thread.join()
     except KeyboardInterrupt:
         stop.set()
+        _FUZZ_CANCEL_REQUESTED.set()
+        _cancel_active_fuzz_processes()
         for thread in threads:
             thread.join(_INTERRUPT_JOIN_GRACE_SECONDS)
         raise
@@ -1185,6 +1288,10 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
     records are returned keyed by target name, and any error re-raises the
     first exception after the join.
     """
+    with _ACTIVE_FUZZ_PROCESSES_LOCK:
+        if _ACTIVE_FUZZ_PROCESSES:
+            raise RuntimeError("cannot start fuzz workers while a process group is active")
+        _FUZZ_CANCEL_REQUESTED.clear()
     queues = _worker_queue(entries, TARGET_WORKER_COUNT)
     records: dict[str, dict] = {}
     lock = threading.Lock()
