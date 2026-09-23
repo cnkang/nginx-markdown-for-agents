@@ -10,7 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.2)**, the project includes a
+As of the **current development line (0.9.2)**, the project includes a
 bounded full-buffer conversion by default (`markdown_streaming off`),
 with explicit streaming opt-in,
 Rust-first
@@ -28,16 +28,17 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.2
 
-**Status:** Stable release. 0.9.2 is the latest released version, published
-2026-09-23. 0.9.2 is the final pre-1.0 breaking release: the public
+**Status:** Release candidate. 0.9.1 is the latest released version
+(2026-07-29). 0.9.2 is the final pre-1.0 breaking release: the public
 configuration surface shrank to 20 active directives with the seven
 highlighted retired names (a subset of the removal inventory) dropped from
 the command table, the retired profile/conflict FFI snapshots are gone, and
 the bundled FFI ABI sits at version 3. See the removal inventory in the
-[0.9.2 release notes](../releases/0.9.2-release-notes.md). The release ships
-with the tag, GitHub Release, package assets, and checksums.
+[0.9.2 release notes](../releases/0.9.2-release-notes.md). The project
+publishes the tag, GitHub Release, package assets, and checksums after the
+merge and the candidate-bound release gates pass.
 
-#### 0.9.2 (current release)
+#### 0.9.2 (current development)
 
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
@@ -217,7 +218,8 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current
-released version is 0.9.2 (published 2026-09-23). It is a
+development version is 0.9.2. 0.9.1 remains the latest released version
+until the 0.9.2 release tag and its release gates complete. It is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
@@ -413,7 +415,8 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
-released line (published 2026-09-23). The project provides
+development line and 0.9.1 is the latest released version. The project
+provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 bounded full-buffer default, explicit streaming opt-in, bounded-memory
 processing, and a repo-owned validation harness. Release readiness remains tied
@@ -429,10 +432,11 @@ the active release documentation.
 - Multi-platform support (macOS, Linux, Docker)
 
 ### Current State
-The team has implemented and tested the core feature set. 0.9.2 shipped on
-2026-09-23 after the release assets and the required verification evidence
-(performance baselines, SonarCloud scan on the final SHA, and the full
-release-gate suite) passed. The focus is on operational validation,
+The team has implemented and tested the core feature set. Production and
+release readiness stay pending publication: the release assets and the
+required verification evidence (performance baselines, SonarCloud scan on
+the final SHA, and the full release-gate suite) pass after the merge. The
+focus is on operational validation,
 performance optimization, and community feedback integration.
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
@@ -447,11 +451,11 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-23 | Hermes | Release date moved to the current publication day |
-| 0.9.2 | 2026-09-22 | Hermes | Release date adjusted to the official publication day |
+| 0.9.2 | 2026-09-23 | Hermes | Planned publication date recorded in the release metadata, pending publication |
+| 0.9.2 | 2026-09-22 | Hermes | Planned publication date adjusted in the release metadata, pending publication |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
-| 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
-| 0.9.2 | 2026-09-19 | Kang | Release finalization: 0.9.2 marked as the stable release and published across the status page |
+| 0.9.2 | 2026-09-21 | Hermes | Planned publication date corrected in the release metadata, pending publication |
+| 0.9.2 | 2026-09-19 | Kang | Release-state wording prepared across the status page for the v0.9.2 candidate |
 | 0.9.2 | 2026-08-24 | Kang | Trimmed historical release recaps and kept the active status page linked to release notes and the changelog |
 | 0.9.2 | 2026-08-15 | Kang | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
 | 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |
