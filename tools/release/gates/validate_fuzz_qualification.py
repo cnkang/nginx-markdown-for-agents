@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import codecs
 import hashlib
 import json
 import math
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,8 +106,9 @@ FUZZ_JOB_BUDGET = 19300
 # single-process execution rate holds without CPU contention.  Memory is
 # the other half of the budget: three concurrent ASan fuzzers times their
 # per-process footprint stay inside the runner's 16 GB (each invocation's
-# captured output is additionally head/tail-capped by `_bounded_capture`,
-# so a chatty run cannot grow the captured buffers without bound).
+# streams are drained into the head/tail-bounded captures of
+# `_BoundedStream`, so a chatty run cannot grow the captured output
+# without bound).
 TARGET_WORKER_COUNT = 3
 # Terms of the job-limit equation above.  The setup allowance covers the
 # toolchain install steps before the first soak; the replay allowance
@@ -444,8 +447,28 @@ def _cargo_fuzz_available() -> bool:
 # chatty progress stream must not grow the captured output without bound
 # inside the 16 GB runner budget.  Head and tail stay (the startup banner
 # is head, the stats dump and crash reports are tail), and the elision is
-# marked so post-mortem readers know bytes were dropped.
+# marked so post-mortem readers know bytes were dropped.  The retained
+# text is also what the statistics parse consumes, while the failure
+# marker is matched on every line as it streams in (`_BoundedStream`
+# keeps bounded marker evidence), so a crash past the cap still fails the
+# target instead of classifying as a pass.
 _MAX_CAPTURE_CHARS = 4_000_000
+_ELISION_TEMPLATE = "\n[... {dropped} chars elided by the capture cap ...]\n"
+# Upper bound on the retained marker evidence; a bounded slice keeps a
+# pathological marker line from growing the evidence buffer.
+_MAX_MARKER_EVIDENCE_CHARS = 400
+# Pipe read size, the cap on a line still awaiting its newline, and the
+# post-exit reader join grace (see _join_readers).  A writer that never
+# emits a newline must not grow the carry-over buffer without bound, so a
+# longer partial line is flushed through the same bounded retention as a
+# complete line (real fuzzer lines are orders of magnitude shorter).
+_STREAM_READ_BYTES = 1 << 16
+_MAX_PENDING_LINE_CHARS = 1 << 20
+_STREAM_JOIN_GRACE_SECONDS = 30
+# Grace for the interrupt cleanup join: long enough for workers to reach
+# their next queue boundary and for the in-flight invocation's readers to
+# drain, short enough that an interrupt is not held up indefinitely.
+_INTERRUPT_JOIN_GRACE_SECONDS = 30
 
 
 def _bounded_capture(text: str) -> str:
@@ -454,56 +477,233 @@ def _bounded_capture(text: str) -> str:
         return text
     keep = _MAX_CAPTURE_CHARS // 2
     dropped = len(text) - 2 * keep
-    return (
-        text[:keep]
-        + f"\n[... {dropped} chars elided by the capture cap ...]\n"
-        + text[-keep:]
-    )
+    return text[:keep] + _ELISION_TEMPLATE.format(dropped=dropped) + text[-keep:]
+
+
+def _split_lines(chunk: str) -> tuple[list[str], str]:
+    """Split a chunk into complete lines plus a trailing partial line."""
+    segments = chunk.split("\n")
+    partial = segments.pop()
+    return [segment + "\n" for segment in segments], partial
+
+
+class _BoundedStream:
+    """Drain one subprocess stream, retaining head, tail and failure markers.
+
+    ``subprocess.run(capture_output=True)`` buffers the whole stream in
+    memory before any cap can be applied, so a runaway fuzzer could grow
+    the gate's RSS without bound.  Instead a reader thread consumes the
+    pipe while the process runs and retains at most ``_MAX_CAPTURE_CHARS``
+    characters: the first half is the head, the last half is a rolling
+    tail (crash reports and the stats dump land there), and the middle is
+    dropped and counted -- the same head/elision/tail shape
+    ``_bounded_capture`` gives the full text, so the stored output is
+    unchanged.  Every line is matched against the failure marker pattern
+    on the way through, because a marker inside the dropped middle must
+    still fail the target instead of classifying as a pass; the bounded
+    marker evidence (``marker_finding``) is the marker text plus the line
+    that carries it.  One reader thread feeds one instance; the small lock
+    only covers the case where a reader outlives the post-exit join grace
+    (a killed process's child still holding the pipe) and the caller reads
+    the retained result while that reader is still appending to it.
+    """
+
+    def __init__(self) -> None:
+        self._head_limit = _MAX_CAPTURE_CHARS // 2
+        self._tail_limit = _MAX_CAPTURE_CHARS - self._head_limit
+        self._head: list[str] = []
+        self._tail: deque[str] = deque()
+        self._head_size = 0
+        self._tail_size = 0
+        self._total = 0
+        self._pending = ""
+        self._marker_evidence: str | None = None
+        self._lock = threading.Lock()
+
+    def feed(self, chunk: str) -> None:
+        """Consume one decoded chunk, retaining head, tail and markers."""
+        with self._lock:
+            lines, partial = _split_lines(self._pending + chunk)
+            if len(partial) > _MAX_PENDING_LINE_CHARS:
+                # A line that never ends must not grow the carry-over
+                # buffer without bound; flush it through the retention
+                # instead and restart the carry-over.
+                lines.append(partial)
+                partial = ""
+            self._pending = partial
+            for line in lines:
+                self._feed_segment(line)
+
+    def finish(self) -> None:
+        """Flush the trailing partial line once the writer closed the pipe."""
+        with self._lock:
+            if self._pending:
+                segment, self._pending = self._pending, ""
+                self._feed_segment(segment)
+
+    def _feed_segment(self, segment: str) -> None:
+        self._total += len(segment)
+        if self._marker_evidence is None:
+            marker = FAILURE_MARKER_PATTERN.search(segment)
+            if marker:
+                self._marker_evidence = (
+                    f"{marker.group(0)}: {segment.strip()}"
+                )[:_MAX_MARKER_EVIDENCE_CHARS]
+        self._retain(segment)
+
+    def _retain(self, segment: str) -> None:
+        """Keep the segment's head prefix, then roll it through the tail.
+
+        Head and tail together retain exactly the first and last
+        ``_MAX_CAPTURE_CHARS / 2`` characters of the stream, so
+        ``text()`` reproduces ``_bounded_capture`` over the full text.
+        Whole tail segments are evicted first; a partial front segment is
+        trimmed only when it holds the excess, which keeps the retained
+        size exact without re-scanning the deque.
+        """
+        if self._head_size < self._head_limit:
+            room = self._head_limit - self._head_size
+            self._head.append(segment[:room])
+            self._head_size += min(len(segment), room)
+            segment = segment[room:]
+            if not segment:
+                return
+        self._tail.append(segment)
+        self._tail_size += len(segment)
+        while self._tail and self._tail_size - len(self._tail[0]) >= self._tail_limit:
+            self._tail_size -= len(self._tail.popleft())
+        if self._tail_size > self._tail_limit:
+            excess = self._tail_size - self._tail_limit
+            front = self._tail.popleft()
+            self._tail.appendleft(front[excess:])
+            self._tail_size -= excess
+
+    def text(self) -> str:
+        """Return the capped stream, eliding and counting the dropped middle."""
+        with self._lock:
+            dropped = self._total - self._head_size - self._tail_size
+            if dropped <= 0:
+                return "".join(self._head) + "".join(self._tail)
+            return "".join(self._head) + _ELISION_TEMPLATE.format(
+                dropped=dropped) + "".join(self._tail)
+
+    def marker_finding(self) -> str | None:
+        """Return the failure marker seen anywhere in the stream, if any."""
+        with self._lock:
+            return self._marker_evidence
+
+
+def _drain_stream(pipe, stream: _BoundedStream) -> None:
+    """Read one pipe to EOF into the bounded stream (reader-thread body).
+
+    Chunks are decoded incrementally: a multi-byte character split across a
+    read boundary must not become replacement characters, which is what
+    ``subprocess``'s own text mode does for a buffered read.
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    try:
+        for chunk in iter(lambda: pipe.read(_STREAM_READ_BYTES), b""):
+            stream.feed(decoder.decode(chunk))
+        stream.feed(decoder.decode(b"", final=True))
+    finally:
+        stream.finish()
+        pipe.close()
+
+
+def _join_readers(readers: list[threading.Thread]) -> None:
+    """Join the stream readers, bounded by the post-exit flush grace.
+
+    The process has already been reaped when this runs, so the readers
+    only drain what the pipe still holds; the bound keeps a process that
+    inherited the pipe (a fuzzer child outliving a killed cargo) from
+    holding the gate open.  The readers are daemon threads, so one still
+    draining after the grace cannot block interpreter exit either.
+    """
+    for reader in readers:
+        reader.join(_STREAM_JOIN_GRACE_SECONDS)
 
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
-    """Run one cargo fuzz invocation, returning status and captured output."""
+    """Run one cargo fuzz invocation, returning status and captured output.
+
+    Both streams are drained by reader threads into bounded buffers while
+    the process runs, so the retained text never holds the full stream
+    and a failure marker anywhere in it (including inside the elided
+    middle of a many-megabyte stream) still surfaces via
+    ``marker_finding``.  The readers are joined once the process is
+    reaped; a timeout kills the process and returns the partial streams
+    behind the "timed out: " prefix the soak consumer recognizes.  Every
+    return path carries ``wall_elapsed``.
+    """
     cargo = _resolve_fuzz_cargo()
+    started = time.monotonic()
     if cargo is None:
         return {"returncode": -1, "stdout": "",
-                "stderr": "spawn failed: Rustup cargo shim not found"}
+                "stderr": "spawn failed: Rustup cargo shim not found",
+                "wall_elapsed": time.monotonic() - started,
+                "marker_finding": None}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
         cargo, "+nightly", "fuzz", "run", validated_target, "--", *flags
     ]
-    started = time.monotonic()
     try:
-        result = subprocess.run(
-            command, cwd=FUZZ_CRATE_DIR, capture_output=True, text=True,
-            timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
-        return {"returncode": -1, "stdout": _bounded_capture(stdout),
-                "stderr": _bounded_capture(f"timed out: {exc}\n{stderr}")}
+        process = subprocess.Popen(
+            command, cwd=FUZZ_CRATE_DIR, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
     except OSError as exc:
-        return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}"}
-    return {"returncode": result.returncode,
-            "stdout": _bounded_capture(result.stdout),
-            "stderr": _bounded_capture(result.stderr),
-            "wall_elapsed": time.monotonic() - started}
+        return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}",
+                "wall_elapsed": time.monotonic() - started,
+                "marker_finding": None}
+    stdout_stream, stderr_stream = _BoundedStream(), _BoundedStream()
+    readers = [
+        threading.Thread(target=_drain_stream, args=(pipe, stream), daemon=True)
+        for pipe, stream in ((process.stdout, stdout_stream),
+                             (process.stderr, stderr_stream))
+    ]
+    for reader in readers:
+        reader.start()
+    timed_out = False
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+    _join_readers(readers)
+    result = {
+        "stdout": stdout_stream.text(),
+        "wall_elapsed": time.monotonic() - started,
+        "marker_finding": (
+            stdout_stream.marker_finding() or stderr_stream.marker_finding()),
+    }
+    if timed_out:
+        # Same shape as the previous TimeoutExpired-driven path: the
+        # partial stderr behind the "timed out: " prefix the soak outcome
+        # keys on.
+        exc = subprocess.TimeoutExpired(command, timeout)
+        result["returncode"] = -1
+        result["stderr"] = _bounded_capture(
+            f"timed out: {exc}\n{stderr_stream.text()}")
+        return result
+    result["returncode"] = returncode
+    result["stderr"] = stderr_stream.text()
+    return result
 
 
-def _marker_line(combined: str, start: int) -> str:
-    """Return the full line containing a failure marker."""
-    line_start = combined.rfind("\n", 0, start) + 1
-    line_end = combined.find("\n", start)
-    if line_end < 0:
-        line_end = len(combined)
-    return combined[line_start:line_end].strip()
+def _parse_fuzz_output(stdout: str, stderr: str,
+                       marker_finding: str | None = None
+                       ) -> tuple[int, float, str | None]:
+    """Extract executed units, elapsed seconds, and the first failure marker.
 
-
-def _parse_fuzz_output(stdout: str, stderr: str) -> tuple[int, float, str | None]:
-    """Extract executed units, elapsed seconds, and the first failure marker."""
+    Statistics come from the retained (capped) output; ``marker_finding``
+    makes the marker check stream-aware.  A streamed failure marker must
+    win even when its line was dropped into the elided middle of the
+    capped text, because the crash that produced it is exactly what the
+    target's status must report: a marker past the cap is otherwise
+    invisible and the run classifies as a pass.  A call without
+    ``marker_finding`` still parses the marker from the capped text, so
+    direct callers keep working.
+    """
     combined = stdout + "\n" + stderr
     match = STAT_EXECS_PATTERN.search(combined)
     executions = int(match.group(1)) if match else 0
@@ -513,11 +713,21 @@ def _parse_fuzz_output(stdout: str, stderr: str) -> tuple[int, float, str | None
         match = DONE_RUNS_PATTERN.search(combined)
         if match:
             elapsed = float(match.group(2))
-    marker = FAILURE_MARKER_PATTERN.search(combined)
-    finding = None
-    if marker:
-        finding = f"{marker.group(0)}: {_marker_line(combined, marker.start())}"
+    finding = marker_finding
+    if finding is None:
+        marker = FAILURE_MARKER_PATTERN.search(combined)
+        if marker:
+            finding = f"{marker.group(0)}: {_marker_line(combined, marker.start())}"
     return executions, elapsed, finding
+
+
+def _marker_line(combined: str, start: int) -> str:
+    """Return the full line containing a failure marker."""
+    line_start = combined.rfind("\n", 0, start) + 1
+    line_end = combined.find("\n", start)
+    if line_end < 0:
+        line_end = len(combined)
+    return combined[line_start:line_end].strip()
 
 
 def _classify_finding(finding: str) -> tuple[int, int]:
@@ -541,9 +751,16 @@ def _classify_finding(finding: str) -> tuple[int, int]:
 
 
 def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
-    """Return (executions, elapsed, failure) for one fuzz invocation."""
+    """Return (executions, elapsed, failure) for one fuzz invocation.
+
+    Statistics come from the retained stream text; the failure marker
+    comes from the streaming scan (``marker_finding``) when present, so a
+    marker anywhere in the invocation's output is seen even when its line
+    lies in the elided middle of the capped text.
+    """
     executions, elapsed, finding = _parse_fuzz_output(
-        invocation["stdout"], invocation["stderr"])
+        invocation["stdout"], invocation.get("stderr", ""),
+        invocation.get("marker_finding"))
     if elapsed <= 0.0:
         elapsed = float(invocation.get("wall_elapsed", 0.0))
     # Infrastructure failures (timeout, spawn failure) take precedence
@@ -904,7 +1121,7 @@ def _run_queue(
                 entry, seeds[entry["name"]]["seed_path"], deadline=deadline)
             with lock:
                 records[entry["name"]] = record
-    except (KeyboardInterrupt, SystemExit) as exc:  # pragma: no cover
+    except (KeyboardInterrupt, SystemExit) as exc:
         # Interpreter-level exits are recorded for the parent's join-time
         # re-raise and signal the siblings to stop; the re-raise here
         # keeps the exit visible to the runtime instead of swallowing it
@@ -929,6 +1146,28 @@ def _raise_worker_errors(errors: list[BaseException]) -> None:
     raise errors[0]
 
 
+def _join_workers(threads: list[threading.Thread],
+                  stop: threading.Event) -> None:
+    """Join the worker threads, stopping siblings on an interrupt.
+
+    A KeyboardInterrupt raised while the main thread waits here would
+    otherwise propagate with the siblings still running: they would keep
+    draining the fuzz envelope (and their in-flight invocations) after
+    the gate has effectively been abandoned.  The interrupt is turned
+    into the same cooperative stop the workers honor at their queue
+    boundaries, the workers are given a bounded grace to unwind, and the
+    interrupt is re-raised so the process still exits as interrupted.
+    """
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        stop.set()
+        for thread in threads:
+            thread.join(_INTERRUPT_JOIN_GRACE_SECONDS)
+        raise
+
+
 def _run_blocking_targets(entries: list[dict], seeds: dict,
                           deadline: float) -> dict[str, dict]:
     """Run the blocking targets on a small worker pool.
@@ -939,10 +1178,12 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
     strictly serial schedule cannot fit into the shared job envelope at the
     measured CI execution rate.  The shared deadline bounds the phase, and
     an interrupted or failing worker stops its siblings at the next queue
-    boundary instead of letting them drain the whole envelope; every target
-    still runs unless a worker failed.  All worker errors are reported,
-    not just the first: records are returned keyed by target name, and any
-    error re-raises the first exception after the join.
+    boundary instead of letting them drain the whole envelope; a
+    KeyboardInterrupt raised while this function joins the workers sets the
+    same stop event before re-raising, so an external stop also ends the
+    queued entries.  All worker errors are reported, not just the first:
+    records are returned keyed by target name, and any error re-raises the
+    first exception after the join.
     """
     queues = _worker_queue(entries, TARGET_WORKER_COUNT)
     records: dict[str, dict] = {}
@@ -960,8 +1201,7 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
     ]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join()
+    _join_workers(threads, stop)
     _raise_worker_errors(errors)
     return records
 
