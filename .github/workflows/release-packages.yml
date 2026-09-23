@@ -1127,9 +1127,14 @@ jobs:
       - name: Verify Python Brotli dependency
         run: |
           set -euo pipefail
-          dependency_versions="$(python3 -c 'import brotli, yaml; print(brotli.__version__, yaml.__version__)')"
-          [[ "${dependency_versions}" == "1.2.0 6.0.2" ]] || {
+          dependency_versions="$(python3 -c 'import brotli, yaml, jsonschema; print(brotli.__version__, yaml.__version__, jsonschema.__version__)')"
+          [[ "${dependency_versions}" == "1.2.0 6.0.2 "* ]] || {
             echo "ERROR: release gate requires Brotli==1.2.0 and PyYAML==6.0.2, found ${dependency_versions}" >&2
+            exit 1
+          }
+          jsonschema_version="${dependency_versions##* }"
+          [[ "${jsonschema_version}" == "4.23.0" ]] || {
+            echo "ERROR: release gate requires jsonschema==4.23.0, found ${jsonschema_version}" >&2
             exit 1
           }
           echo "Python release dependencies ${dependency_versions} are available."
@@ -1288,7 +1293,12 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: fuzz-qualification-record
-          path: artifacts/release/0.9.2/
+          # env.RELEASE_VERSION is this workflow's own static env value
+          # (defined in the top-level env: block), not untrusted input, and
+          # `with.path` is consumed by the action, never evaluated by a
+          # shell; deriving the path from the shared variable keeps the
+          # upload and download ends in sync across version bumps.
+          path: artifacts/release/${{ env.RELEASE_VERSION }}/
 
       - name: Run release gates
         env:
@@ -1534,9 +1544,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-qualification-record
+          # The version comes from this workflow's own static env block,
+          # not untrusted input; `with.path` is an action input (never
+          # shell-evaluated), and one variable keeps both ends in sync.
           path: |
-            artifacts/release/0.9.2/fuzz-qualification-record.json
-            artifacts/release/0.9.2/fuzz-logs/
+            artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-qualification-record.json
+            artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-logs/
           if-no-files-found: warn
 
   # The official Docker matrix is release-blocking for Docker artifacts in
