@@ -8,6 +8,7 @@ carries it, and which near-miss names must not satisfy it.
 
 from __future__ import annotations
 
+import ast
 import sys
 
 from tools.release.gates import validate_release_gates_070 as gates
@@ -389,6 +390,25 @@ jobs:
     if: {condition}
 """
         assert not _publish_gate_item(workflow), condition
+
+
+def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
+    """The bounded evaluator covers calls, comparisons, and Boolean ops."""
+    context = {"needs.release_gate.result": "success"}
+    expression = gates._github_condition_ast(
+        "needs.release-gate.result == 'success' && false"
+    )
+    assert isinstance(expression, ast.BoolOp)
+    assert gates._evaluate_publish_boolean_operator(expression, context) is False
+    assert isinstance(expression.values[0], ast.Compare)
+    assert gates._evaluate_publish_comparison(expression.values[0], context) is True
+
+    always_call = gates._github_condition_ast("always()")
+    other_call = gates._github_condition_ast("success()")
+    assert isinstance(always_call, ast.Call)
+    assert isinstance(other_call, ast.Call)
+    assert gates._is_always_condition_call(always_call)
+    assert not gates._is_always_condition_call(other_call)
 
 
 def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(
