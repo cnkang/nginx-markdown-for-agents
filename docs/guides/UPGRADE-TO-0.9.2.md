@@ -22,7 +22,7 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: 0.9.2 shipped (2026-09-22). The release carries the
+> Publication status: 0.9.2 shipped (2026-09-23). The release carries the
 > `v0.9.2` tag, GitHub Release, package checksums, and signed artifacts.
 > Verify checksums and signatures as described below before you install
 > prebuilt packages. Helm repository publication, where offered, stays
@@ -2173,6 +2173,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-23 | Hermes | Release date moved to the current publication day |
 | 0.9.2 | 2026-09-22 | Hermes | Release date adjusted to the official publication day |
 | 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status updated for the published v0.9.2 |
