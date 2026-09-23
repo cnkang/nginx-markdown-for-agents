@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -11,6 +15,33 @@ import pytest
 from tools.release.gates import validate_fuzz_qualification as validator
 
 MANIFEST_FIXTURE = "fuzz-qualification-manifest.json"
+
+_real_popen = subprocess.Popen
+
+
+class _PopenAdapter:
+    """Expose a real ``Popen`` behind the surface ``_invoke_fuzz`` uses.
+
+    ``_invoke_fuzz`` drives ``subprocess.Popen`` through the module's
+    ``subprocess`` reference, so the tests substitute a spawner that runs
+    a scripted stream producer instead of the fuzzer; the adapter keeps
+    the pipe, ``wait``/``kill`` and ``returncode`` contract identical.
+    """
+
+    def __init__(self, process) -> None:
+        self._process = process
+        self.stdout = process.stdout
+        self.stderr = process.stderr
+        self.returncode = None
+
+    def wait(self, timeout=None):
+        """Wait for the process, mirroring ``Popen.wait``."""
+        self.returncode = self._process.wait(timeout=timeout)
+        return self.returncode
+
+    def kill(self) -> None:
+        """Kill the process, mirroring ``Popen.kill``."""
+        self._process.kill()
 
 
 def _fixture_path(name: str) -> Path:
@@ -42,6 +73,42 @@ def _run(monkeypatch, capsys, *flags: str) -> int:
     """Run the validator CLI with staged argv."""
     monkeypatch.setattr(sys, "argv", list(flags))
     return validator.main()
+
+
+def _marker_stream_script(padding_chars_per_side: int, marker: str | None) -> str:
+    """Return a subprocess script emitting a large stream with a marker.
+
+    The stream is deliberately much larger than the validator's capture
+    cap so the marker line (when requested) lands in the elided middle
+    region of the retained text, while the script remains a single
+    short-lived Python process so the test stays bounded.
+    """
+    lines = ["import sys", "w = sys.stdout.buffer.write",
+             f"for _ in range({padding_chars_per_side} // 100):"
+             " w(b'P' * 99 + b'\\n')"]
+    if marker is not None:
+        lines.append(f"w({marker.encode()!r})")
+    lines.append(f"for _ in range({padding_chars_per_side} // 100):"
+                 " w(b'Q' * 99 + b'\\n')")
+    lines.append("w(b'stat::number_of_executed_units: 7\\n')")
+    return "\n".join(lines)
+
+
+def _install_streaming_popen(monkeypatch, script: str) -> None:
+    """Route _invoke_fuzz's Popen to a real subprocess running ``script``.
+
+    The pipe wiring, the reader threads and the timeout path stay
+    production code under test; only the fuzzer command itself is
+    replaced by the scripted stream producer.
+    """
+    def fake_popen(command, **kwargs):
+        real = _real_popen(
+            [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"))
+        return _PopenAdapter(real)
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
 
 
 def test_valid_fixture_passes(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -164,6 +231,109 @@ def test_target_manifest_rejects_path_like_target_name() -> None:
 
     with pytest.raises(ValueError, match="invalid"):
         validator.validate_target_manifest(manifest)
+
+
+def test_run_real_gate_writes_the_qualification_record(
+    tmp_path: Path, monkeypatch, capsys) -> None:
+    """The real gate must persist the composed record after the pool ran.
+
+    Everything heavy is mocked (cargo availability, the worker pool, the
+    corpus-seed validation); the recorded wiring under test is the record
+    composition and its single canonical write path, including the
+    non-blocking target's skipped entry and the printed PASS lines.
+    """
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8"))
+    manifest["targets"][1]["blocking"] = False  # convert_html skips
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {"parser_html": {"seed_path": "seed"}})
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": [
+        {"target": "parser_html", "seed_path": "seed",
+         "digest": "sha256:" + "0" * 64}]}), encoding="utf-8")
+
+    def fake_run_blocking(entries, seeds, deadline):
+        assert [entry["name"] for entry in entries] == ["parser_html"]
+        return {"parser_html": {
+            "target": "parser_html", "seed": 12345,
+            "elapsed_seconds_total": 900, "executions_total": 100000,
+            "crashes": 0, "sanitizer_findings": 0, "corpus_dir": "",
+            "seed_path": "seed", "raw_log_ref": "", "status": "pass",
+            "failure_reason": None,
+        }}
+
+    monkeypatch.setattr(validator, "_run_blocking_targets", fake_run_blocking)
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(tmp_path / "corpus.json"),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[PASS] parser_html" in captured.out
+    assert "[SKIPPED] convert_html" in captured.out
+    record_path = (tmp_path / validator.DEFAULT_RECORD)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["schema_version"] == validator.SCHEMA_VERSION
+    assert record["candidate_sha"] == manifest["candidate_sha"]
+    assert record["blocking_pass"] is True
+    assert record["blocking_failures"] == []
+    statuses = {entry["target"]: entry["status"]
+                for entry in record["per_target"]}
+    assert statuses == {"parser_html": "pass", "convert_html": "skipped"}
+
+
+def test_run_real_gate_reports_blocking_failures(
+    tmp_path: Path, monkeypatch, capsys) -> None:
+    """A failing blocking target must produce rc 1 and a FAIL record.
+
+    The record is still written (it is the diagnostic evidence for the
+    failed job), with the target named in ``blocking_failures``.
+    """
+    manifest_path = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {name: {"seed_path": "seed"}
+                                  for name in names})
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
+
+    def fake_run_blocking(entries, seeds, deadline):
+        return {entry["name"]: {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 900, "executions_total": 100000,
+            "crashes": 1, "sanitizer_findings": 0, "corpus_dir": "",
+            "seed_path": "seed", "raw_log_ref": "", "status": "fail",
+            "failure_reason": "ERROR: libFuzzer: deadly signal",
+        } for entry in entries}
+
+    monkeypatch.setattr(validator, "_run_blocking_targets", fake_run_blocking)
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(tmp_path / "corpus.json"),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "FAIL: blocking fuzz targets not qualified" in captured.out
+    record = json.loads(
+        (tmp_path / validator.DEFAULT_RECORD).read_text(encoding="utf-8"))
+    assert record["blocking_pass"] is False
+    assert sorted(record["blocking_failures"]) == ["convert_html",
+                                                   "parser_html"]
 
 
 def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
@@ -370,22 +540,229 @@ def test_cargo_fuzz_unavailable_without_a_shim(monkeypatch) -> None:
 
 def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
     seen: dict = {}
+    script = ("import sys\n"
+              "sys.stdout.write('stat::number_of_executed_units: 3\\n')\n")
 
-    class _Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         seen["command"] = list(command)
-        return _Result()
+        real = _real_popen(
+            [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"))
+        return _PopenAdapter(real)
 
     monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
-    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
     result = validator._invoke_fuzz("corpus_population", [], 10)
     assert result["returncode"] == 0
     assert seen["command"][0] == "/fake/cargo"
     assert seen["command"][1] == "+nightly"
+    assert "stat::number_of_executed_units: 3" in result["stdout"]
+
+
+def test_streaming_capture_detects_a_marker_past_the_capture_cap(
+    monkeypatch,
+) -> None:
+    """A failure marker past the capture cap must still fail the target.
+
+    The retained text keeps only a head and a rolling tail, so a marker
+    line in the elided middle is invisible to a post-hoc parse of the
+    capped text; the streaming scan must surface it, with the marker text
+    in the finding, and the invocation must not classify as a pass.
+    """
+    cap = validator._MAX_CAPTURE_CHARS
+    marker = "==ERROR: AddressSanitizer: heap-buffer-overflow on address\n"
+    script = _marker_stream_script(cap, marker)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    assert result["returncode"] == 0
+    # The mid-stream marker line is not in the retained text at all; only
+    # the streaming scan can see it, which is exactly the regression.
+    assert marker.strip() not in result["stdout"]
+    assert "elided by the capture cap" in result["stdout"]
+    assert result["marker_finding"] is not None
+    assert "AddressSanitizer" in result["marker_finding"]
+    _, _, failure = validator._soak_outcome(dict(result))
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+    assert validator._classify_finding(failure) == (0, 1)
+
+
+def test_streaming_capture_keeps_a_clean_large_stream_passing(
+    monkeypatch,
+) -> None:
+    """A clean stream larger than the cap must still pass and stay capped."""
+    script = _marker_stream_script(validator._MAX_CAPTURE_CHARS, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    assert result["returncode"] == 0
+    assert result["marker_finding"] is None
+    assert len(result["stdout"]) <= validator._MAX_CAPTURE_CHARS + 100
+    assert "elided by the capture cap" in result["stdout"]
+    executions, _, failure = validator._soak_outcome(dict(result))
+    assert failure is None
+    assert executions == 7
+
+
+def test_streaming_capture_retains_the_same_head_and_tail_as_the_cap(
+    monkeypatch,
+) -> None:
+    """The streamed retention must equal ``_bounded_capture`` of the full text."""
+    cap = validator._MAX_CAPTURE_CHARS
+    script = _marker_stream_script(cap, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    lines_per_side = cap // 100
+    full = (("P" * 99 + "\n") * lines_per_side
+            + ("Q" * 99 + "\n") * lines_per_side
+            + "stat::number_of_executed_units: 7\n")
+    assert result["stdout"] == validator._bounded_capture(full)
+
+
+def test_streaming_capture_bounds_memory_below_the_full_stream(
+    monkeypatch,
+) -> None:
+    """The drained buffers must not hold the full stream in memory.
+
+    Measured with ``tracemalloc``: the traced peak stays bounded by the
+    capture cap no matter how many times the cap the stream produces,
+    which is the difference between draining a pipe and buffering it
+    whole (the latter peaks at or above the produced size).
+    """
+    import tracemalloc
+
+    cap = validator._MAX_CAPTURE_CHARS
+    script = _marker_stream_script(cap * 8, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    tracemalloc.start()
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 600)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    produced = (cap * 8 // 100) * 100 * 2  # two padded halves
+    assert produced > cap * 4, "the stream must dwarf the cap for this test"
+    assert len(result["stdout"]) <= cap + 100
+    # A buffering capture would peak at (at least) the produced size; the
+    # streaming drain peaks at the retained buffers plus the joined text.
+    assert peak < produced // 2, (peak, produced)
+
+
+def test_streaming_capture_decodes_split_multibyte_characters(
+    monkeypatch,
+) -> None:
+    """A multi-byte character split across reads must survive the drain.
+
+    Decoding each raw read independently would turn a character straddling
+    a read boundary into replacement characters; the incremental decoder
+    must keep the text intact.
+    """
+    script = ("import sys\n"
+              "sys.stdout.buffer.write('crash near \\u00e9\\u00e8\\u20ac ok\\n'"
+              ".encode('utf-8'))\n")
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 30)
+
+    assert result["returncode"] == 0
+    assert "crash near \u00e9\u00e8\u20ac ok" in result["stdout"]
+    assert "\ufffd" not in result["stdout"]
+
+
+def test_streaming_capture_timeout_kills_and_keeps_partial_output(
+    monkeypatch,
+) -> None:
+    """A timed-out invocation keeps the partial streams and its wall time."""
+    script = ("import sys, time\n"
+              "w = sys.stdout.buffer.write\n"
+              "w(b'INFO: starting up\\n')\n"
+              "w(b'stat::number_of_executed_units: 11\\n')\n"
+              "sys.stdout.flush()\n"
+              "time.sleep(60)\n")
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 1)
+
+    assert result["returncode"] == -1
+    assert result["stderr"].startswith("timed out: ")
+    assert "wall_elapsed" in result
+    assert result["wall_elapsed"] >= 0
+    assert "stat::number_of_executed_units: 11" in result["stdout"]
+    executions, _, failure = validator._soak_outcome(dict(result))
+    assert executions == 11
+    assert failure == "timed out: fuzz invocation exceeded its time cap"
+
+
+def test_invoke_fuzz_returns_wall_elapsed_on_every_return_path(
+    monkeypatch,
+) -> None:
+    """Timeout, spawn failure and success must all carry ``wall_elapsed``.
+
+    The soak's continuation budget charges chase invocations their wall
+    time, so a return path without the field silently mis-charges them.
+    """
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: None)
+    missing_cargo = validator._invoke_fuzz("corpus_population", [], 10)
+    assert missing_cargo["returncode"] == -1
+    assert "wall_elapsed" in missing_cargo
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+
+    def failing_popen(command, **kwargs):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(validator.subprocess, "Popen", failing_popen)
+    spawn_failed = validator._invoke_fuzz("corpus_population", [], 10)
+    assert spawn_failed["returncode"] == -1
+    assert spawn_failed["stderr"].startswith("spawn failed:")
+    assert "wall_elapsed" in spawn_failed
+
+
+def test_soak_uses_the_streamed_marker_when_the_capped_text_hides_it() -> None:
+    """``_soak_outcome`` must prefer the streamed marker evidence.
+
+    The invocation shape here mirrors a real one: capped text whose only
+    marker line is gone, plus the marker the streaming scan retained.
+    """
+    invocation = {
+        "returncode": 0,
+        "stdout": ("INFO: running\n[... 9000000 chars elided ...]\n"
+                   "stat::number_of_executed_units: 900000\n"),
+        "stderr": "",
+        "wall_elapsed": 901.0,
+        "marker_finding": "==ERROR: AddressSanitizer: heap-buffer-overflow on address",
+    }
+
+    executions, _, failure = validator._soak_outcome(invocation)
+
+    assert executions == 900000
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+    assert validator._classify_finding(failure) == (0, 1)
+
+
+def test_soak_ignores_marker_evidence_when_there_is_none() -> None:
+    """A clean invocation keeps passing with the streaming field present."""
+    invocation = {
+        "returncode": 0,
+        "stdout": "stat::number_of_executed_units: 900000\n",
+        "stderr": "",
+        "wall_elapsed": 901.0,
+        "marker_finding": None,
+    }
+
+    executions, elapsed, failure = validator._soak_outcome(invocation)
+
+    assert executions == 900000
+    assert elapsed == 901.0
+    assert failure is None
 
 
 def test_soak_chases_time_before_runs_without_a_runs_cap(
@@ -877,15 +1254,31 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
     assert elapsed == 5.0
 
 
+def _scope_fuzz_targets() -> list[str]:
+    """Return the fuzz target names in the tracked scope file, in order.
+
+    The scope file is the tracked source the manifest generator counts and
+    orders the blocking targets by, so a clean checkout (the generated
+    blocking manifest is ignored by git) can still model the schedule
+    exactly: the round-robin queue layout follows this order.
+    """
+    scope = json.loads(
+        (Path(__file__).resolve().parents[4] / "release" / "scope"
+         / "fuzz-scope.json").read_text(encoding="utf-8"))
+    targets = scope["targets"]
+    assert isinstance(targets, list) and targets
+    return targets
+
+
 def _blocking_target_count() -> int:
-    """How many fuzz targets the release declares (from tracked inputs).
+    """How many fuzz binaries the crate declares (from tracked inputs).
 
     The blocking manifest is generated at run time and ignored by git, so a
     clean checkout cannot read it; the fuzz crate's binary list is the
-    tracked source the generator itself counts.
+    tracked source of truth for the target set, and the envelope model
+    cross-checks it against the scope file's target list.
     """
     import re
-    from pathlib import Path
 
     root = Path(__file__).resolve().parents[4]
     cargo = (root / "components" / "rust-converter" / "fuzz" / "Cargo.toml")
@@ -919,9 +1312,28 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     per_invocation_overhead = 60
     supported_rate = 7  # executions per second
     fast_soak = 900 + per_invocation_overhead
-    fast_targets = _blocking_target_count() - 1
+    scope_targets = _scope_fuzz_targets()
+    fast_targets = len(scope_targets) - 1
+    # The crate's binary list and the scope file must describe the same
+    # target set, or the schedule model below is built on the wrong count.
+    assert _blocking_target_count() == len(scope_targets)
     workers = validator.TARGET_WORKER_COUNT
-    slow_start = (fast_targets // workers) * fast_soak
+    # Pin the slow target's queue position the model above relies on: the
+    # slow decode target must be the last entry of its worker's queue (so
+    # no further work follows it), and the number of fast soaks ahead of it
+    # in the actual round-robin layout must equal the model's start term.
+    # A scope reorder that changes its position (or puts work after it)
+    # fails here instead of silently invalidating the envelope arithmetic.
+    slow_target = "fuzz_multilayer_decode"
+    slow_index = scope_targets.index(slow_target)
+    queues = validator._worker_queue(
+        [{"name": name} for name in scope_targets], workers)
+    slow_queue_names = [entry["name"]
+                        for entry in queues[slow_index % workers]]
+    assert slow_queue_names[-1] == slow_target, slow_queue_names
+    fast_ahead_of_slow = len(slow_queue_names) - 1
+    assert fast_ahead_of_slow == fast_targets // workers, slow_queue_names
+    slow_start = fast_ahead_of_slow * fast_soak
     chase_seconds = 100000 // supported_rate - 900
     chase_invocations = -(-chase_seconds // validator.TIME_CONTINUATION_CEILING)
     slow_chase = chase_seconds + chase_invocations * per_invocation_overhead
@@ -968,9 +1380,12 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
 
     import tools.release.gates.validate_fuzz_qualification as validator
 
-    # Two workers: fast-0 starts with slow (worker 0) and fast-1/2 share
-    # worker 1.  The handshake pairs fast-0 with slow: they must be
-    # running at the same time for the barrier to release.
+    # Two workers, round-robin over [fast-0, fast-1, fast-2, slow]: worker 0
+    # gets fast-0 and fast-2, worker 1 gets fast-1 and the slow target.  The
+    # handshake pairs fast-0 with slow: the barrier releases only when both
+    # are inside the faked record call at the same time, so overlap is
+    # proven by the handshake itself (a queueing schedule would deadlock the
+    # barrier and fail via its timeout) instead of a timing margin.
     barrier = threading.Barrier(2, timeout=10)
     spans: list[tuple[str, float, float]] = []
     spans_lock = threading.Lock()
@@ -996,6 +1411,11 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     entries = [{"name": f"fast-{index}", "seed": 1} for index in range(3)]
     entries.append({"name": "slow", "seed": 1})
     seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    # Pin the queue layout the handshake relies on instead of trusting the
+    # round-robin order implicitly.
+    queues = validator._worker_queue(entries, 2)
+    assert [entry["name"] for entry in queues[0]] == ["fast-0", "fast-2"]
+    assert [entry["name"] for entry in queues[1]] == ["fast-1", "slow"]
     start = time_module.monotonic()
     records = validator._run_blocking_targets(
         entries, seeds, deadline=start + 60)
@@ -1004,6 +1424,109 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     # barrier (both were running together, or the wait timed out).
     names = {span[0] for span in spans}
     assert {"fast-0", "slow"} <= names, spans
+
+
+def _patch_threading(monkeypatch, *, event_class=None, thread_factory=None):
+    """Swap the validator's ``threading`` for a shim with test seams.
+
+    ``validator.threading`` is the real module, so mutating its attributes
+    would change ``threading`` process-wide (including the test's own
+    events).  The shim is a namespace exposing the three names the pool
+    uses -- ``Thread``, ``Lock`` and ``Event`` -- with the real objects by
+    default; only the production lookups are redirected.
+    """
+    shim = types.SimpleNamespace(
+        Thread=thread_factory or threading.Thread,
+        Lock=threading.Lock,
+        Event=event_class or threading.Event,
+    )
+    monkeypatch.setattr(validator, "threading", shim)
+
+
+def _signaling_event(monkeypatch, *, thread_factory=None) -> threading.Event:
+    """Return an Event that fires whenever the pool's stop event is set.
+
+    The pool creates its stop event internally, so a test that needs to
+    order sibling work against the stop cannot poll it.  The validator's
+    ``threading`` is shimmed with a delegating Event subclass (identical
+    behaviour) whose ``set()`` also signals the returned event; the
+    handshake then triggers on the production call itself instead of
+    racing it with a sleep.  The stop event is the only Event the pool
+    creates, so what the test observes is exactly the sibling-stop signal.
+    ``thread_factory``, when given, shims the worker-thread factory in the
+    same pass.
+    """
+    observed = threading.Event()
+
+    class _SignalingEvent(threading.Event):
+        """A real Event whose set() also signals the test's observer."""
+
+        def set(self) -> None:
+            super().set()
+            observed.set()
+
+    _patch_threading(
+        monkeypatch, event_class=_SignalingEvent, thread_factory=thread_factory)
+    return observed
+
+
+def _record_stub(entry: dict, seed_path: str) -> dict:
+    """Return a passing per-target record for a faked target run."""
+    return {
+        "target": entry["name"], "seed": entry["seed"],
+        "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+        "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+        "raw_log_ref": "", "status": "pass", "failure_reason": None,
+    }
+
+
+def _run_pool_with_stop_gate(monkeypatch, failing_name, failure) -> dict:
+    """Run the production pool behind a deterministic stop-gate handshake.
+
+    Two workers, round-robin over ``[failing, gate, pad, queued]``: worker
+    0 owns ``failing`` and ``pad``, worker 1 owns ``gate`` and ``queued``.
+    ``gate`` runs only while ``failing`` has not yet raised, and it returns
+    only once the pool's stop event is set; the queued entry behind it must
+    then be skipped at the boundary.  Every step is ordered by events (the
+    failing entry raises after the gate is in flight; the gate resumes only
+    after the stop), so "exactly the in-flight sibling entry ran" is a
+    deterministic fact rather than a timing race.
+
+    Returns ``ran`` (sibling entries that completed), the observed stop
+    event and whether the gate ever timed out.
+    """
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    stop_observed = _signaling_event(monkeypatch)
+    gate_in_flight = threading.Event()
+    ran: list[str] = []
+    state = {"gate_timeout": False}
+
+    def fake_record(entry, seed_path, deadline=None):
+        if entry["name"] == "gate":
+            gate_in_flight.set()
+            if not stop_observed.wait(10):
+                state["gate_timeout"] = True
+            ran.append(entry["name"])
+            return _record_stub(entry, seed_path)
+        if entry["name"] == failing_name:
+            # Raise only once the gate (the sibling's in-flight entry) is
+            # provably running, so it is the entry the stop interrupts.
+            assert gate_in_flight.wait(10), "the gate never started"
+            raise failure
+        ran.append(entry["name"])
+        return _record_stub(entry, seed_path)
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    entries = [{"name": failing_name, "seed": 1},
+               {"name": "gate", "seed": 1},
+               {"name": "pad", "seed": 1},
+               {"name": "queued", "seed": 1}]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    state["ran"] = ran
+    state["stop_observed"] = stop_observed
+    state["entries"] = entries
+    state["seeds"] = seeds
+    return state
 
 
 def test_worker_interrupt_stops_siblings_and_is_recorded_for_join(
@@ -1015,110 +1538,205 @@ def test_worker_interrupt_stops_siblings_and_is_recorded_for_join(
     re-raised at join time (``errors[0]``), while the in-thread re-raise
     keeps the exit visible to the interpreter's thread-exception hook
     instead of silently swallowing it.  The hook is captured here so the
-    assertion covers the re-raise itself, not a pytest warning.
+    assertion covers the re-raise itself, not a pytest warning.  The
+    sibling handshake is deterministic (see ``_run_pool_with_stop_gate``).
     """
-    import threading
-    import time as time_module
-
-    import tools.release.gates.validate_fuzz_qualification as validator
-
-    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
-    ran = []
-    seen = []
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "exit", SystemExit("interrupted"))
+    seen: list[str] = []
     monkeypatch.setattr(
         threading, "excepthook",
         lambda args: seen.append(type(args.exc_value).__name__))
 
-    def interrupt(entry, seed_path, deadline=None):
-        if entry["name"] == "exit":
-            raise SystemExit("interrupted")
-        time_module.sleep(0.05)
-        ran.append(entry["name"])
-        return {
-            "target": entry["name"], "seed": entry["seed"],
-            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
-            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
-            "raw_log_ref": "", "status": "pass", "failure_reason": None,
-        }
-
-    monkeypatch.setattr(validator, "_run_target_record", interrupt)
-    entries = [{"name": "exit", "seed": 1}]
-    entries += [{"name": f"tail-{index}", "seed": 1} for index in range(4)]
-    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
     try:
-        validator._run_blocking_targets(entries, seeds, deadline=0)
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
     except SystemExit:
         pass
     else:
         raise AssertionError("the worker exit must re-raise at join")
+
+    assert not state["gate_timeout"], "the gate never saw the stop event"
+    assert state["stop_observed"].is_set()
     # The in-thread re-raise reached the interpreter's thread-exception
     # hook: the exit stays visible instead of being swallowed.
     assert "SystemExit" in seen, seen
-    # The exit stopped the sibling queue: at most the in-flight entry ran.
-    assert len(ran) <= 1, ran
+    # Only the sibling entry already in flight completed; the queued entry
+    # behind it was skipped at its boundary.
+    assert state["ran"] == ["gate"], state["ran"]
 
 
-def test_worker_failure_stops_siblings_and_reports_every_error(
+def test_worker_failure_stops_siblings_and_leaves_in_flight_work_only(
     monkeypatch,
-    capsys,
 ) -> None:
-    """A failing worker stops its siblings and every error is reported.
+    """A failing worker stops its siblings at their next queue boundary.
 
     The early-stop event must prevent sibling queues from draining the
     whole envelope after one worker fails (their records would be wasted
-    runs), and the aggregation must print every error beyond the first,
-    not just swallow them, while the first error still re-raises.
+    runs), and the first error must still re-raise at join.  The handshake
+    makes both facts deterministic: the failure fires only once the gate
+    entry is in flight, and the gate returns only once the stop event is
+    set, so the queued entry behind it can never start.
     """
-    import time as time_module
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "boom", RuntimeError("worker exploded"))
 
-    import tools.release.gates.validate_fuzz_qualification as validator
-
-    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
-    ran = []
-
-    def fail_first(entry, seed_path, deadline=None):
-        # boom fails at once; siblings' entries sleep, so only an entry
-        # already in flight can complete after the stop event fires.
-        if entry["name"] == "boom":
-            raise RuntimeError("worker exploded")
-        time_module.sleep(0.05)
-        ran.append(entry["name"])
-        return {
-            "target": entry["name"], "seed": entry["seed"],
-            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
-            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
-            "raw_log_ref": "", "status": "pass", "failure_reason": None,
-        }
-
-    monkeypatch.setattr(validator, "_run_target_record", fail_first)
-    # boom lands on worker 0; worker 1 gets the tail entries.
-    entries = [{"name": "boom", "seed": 1}]
-    entries += [{"name": f"tail-{index}", "seed": 1} for index in range(4)]
-    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
     try:
-        validator._run_blocking_targets(entries, seeds, deadline=0)
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
     except RuntimeError as exc:
         assert "worker exploded" in str(exc)
     else:
         raise AssertionError("the first worker error must re-raise")
-    # The early-stop event kept worker 1 from draining its whole queue:
-    # only the entry already in flight when the failure fired completed.
-    assert len(ran) <= 1, ran
+
+    assert not state["gate_timeout"], "the gate never saw the stop event"
+    assert state["stop_observed"].is_set()
+    assert state["ran"] == ["gate"], state["ran"]
+
+
+def test_run_blocking_targets_skips_queued_entries_after_an_external_stop(
+    monkeypatch,
+) -> None:
+    """A stop set at interrupt time must keep queued entries from running.
+
+    The interrupt-at-join path sets the pool's stop event before it joins
+    the workers; a worker that is mid-entry when the interrupt fires must
+    finish that entry and leave the rest of its queue untouched.  The
+    interrupt stands in for an external stop (ctrl-c in the fuzz job's
+    terminal) and fires only once a real sibling worker is provably in
+    flight, so ordering is deterministic; that sibling runs the production
+    worker loop, so the boundary check under test is the real one.
+    """
+    real_thread = threading.Thread
+    in_flight = threading.Event()
+    calls: list[str] = []
+
+    class _InterruptingJoin:
+        """Thread stand-in whose unbounded join raises KeyboardInterrupt.
+
+        It takes the first worker slot (whose queue never runs), so the
+        interrupt fires exactly in the join loop the fix guards; its
+        cleanup join records the bounded grace it was given.
+        """
+
+        def __init__(self) -> None:
+            self.cleanup_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None):
+            if timeout is None:
+                assert in_flight.wait(10), "the sibling never started"
+                raise KeyboardInterrupt("external interrupt at join")
+            self.cleanup_timeouts.append(timeout)
+            return None
+
+    stand_in = _InterruptingJoin()
+    handed_out: list = []
+
+    def fake_thread(target=None, args=(), name=None):
+        if not handed_out:
+            handed_out.append(True)
+            return stand_in
+        return real_thread(target=target, args=args, name=name)
+
+    stop_observed = _signaling_event(monkeypatch, thread_factory=fake_thread)
+
+    def fake_record(entry, seed_path, deadline=None):
+        calls.append(entry["name"])
+        in_flight.set()
+        # Only the interrupt handler's stop can release this entry, so the
+        # queued entry behind it is skipped deterministically.
+        assert stop_observed.wait(10), "the interrupt never set the stop"
+        return _record_stub(entry, seed_path)
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    # Round-robin over [pad, first, pad-2, queued] with two workers: worker
+    # 0 (the interrupting stand-in, whose queue never runs) owns the pads,
+    # worker 1 (a real thread running the production worker loop) owns
+    # [first, queued].  first is in flight when the interrupt fires and
+    # releases only after the handler's stop; the queued entry behind it on
+    # the same real queue is then the boundary check under test.
+    entries = [{"name": "pad", "seed": 1}, {"name": "first", "seed": 1},
+               {"name": "pad-2", "seed": 1}, {"name": "queued", "seed": 1}]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+
+    with pytest.raises(KeyboardInterrupt, match="external interrupt"):
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+
+    # The in-flight entry completed, and the stop the interrupt handler
+    # set stopped the queued entry behind it from ever starting.
+    assert calls == ["first"], calls
+    assert stop_observed.is_set()
+    assert stand_in.cleanup_timeouts == [
+        validator._INTERRUPT_JOIN_GRACE_SECONDS]
+
+
+def test_join_workers_interrupt_stops_siblings_and_waits_for_cleanup() -> None:
+    """An interrupt during the join must stop siblings, then re-raise.
+
+    The first join raises KeyboardInterrupt; the handler must set the
+    shared stop event (so the still-running worker returns at its next
+    boundary), join within the bounded cleanup grace, and re-raise so the
+    process still exits as interrupted.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    stop = threading.Event()
+    sibling_finished = threading.Event()
+
+    def sibling() -> None:
+        # Only the interrupt handler's stop can release this worker, so a
+        # successful cleanup join is proof the event was set.
+        assert stop.wait(10), "the interrupt never set the stop event"
+        sibling_finished.set()
+
+    worker = threading.Thread(target=sibling, name="fuzz-worker-sibling")
+    worker.start()
+    interrupt_raised = False
+
+    class _InterruptingJoin:
+        """Thread stand-in whose unbounded join raises once."""
+
+        def __init__(self) -> None:
+            self.cleanup_timeouts: list[float | None] = []
+
+        def join(self, timeout=None):
+            if timeout is None:
+                raise KeyboardInterrupt("ctrl-c at join")
+            self.cleanup_timeouts.append(timeout)
+
+    stand_in = _InterruptingJoin()
+    try:
+        validator._join_workers([stand_in, worker], stop)
+    except KeyboardInterrupt:
+        interrupt_raised = True
+
+    assert interrupt_raised, "the interrupt must re-raise after cleanup"
+    assert stop.is_set()
+    assert stand_in.cleanup_timeouts == [
+        validator._INTERRUPT_JOIN_GRACE_SECONDS]
+    assert sibling_finished.wait(10), "the cleanup join did not wait"
+    worker.join(10)
+    assert not worker.is_alive()
 
 
 def test_worker_failure_aggregates_errors_beyond_the_first(
     monkeypatch,
     capsys,
 ) -> None:
-    """Every worker error is reported; the first one still raises."""
-    import threading
+    """Both workers' errors are seen and the sibling one is printed.
 
+    The barrier puts both workers inside the failure path before either
+    raises, so the pool deterministically records exactly two errors: the
+    first re-raises and the aggregation must print every error beyond it
+    (one line here) instead of swallowing them.
+    """
     import tools.release.gates.validate_fuzz_qualification as validator
 
     monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
-    # Both workers must be inside the failure path before either raises,
-    # so the aggregation deterministically sees two errors instead of one
-    # racing the early-stop check.
     barrier = threading.Barrier(2, timeout=10)
 
     def fail_all(entry, seed_path, deadline=None):
@@ -1135,6 +1753,7 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     else:
         raise AssertionError("the first worker error must re-raise")
     err = capsys.readouterr().err
-    # At least one sibling error was printed beyond the raised first one
-    # (two workers, both fail; aggregation must not swallow the second).
-    assert "additional worker error" in err
+    # Exactly one sibling error exists beyond the raised first one (the two
+    # in-flight workers both failed before the stop could skip them), and
+    # the aggregation printed it rather than swallowing it.
+    assert err.count("additional worker error") == 1, err
