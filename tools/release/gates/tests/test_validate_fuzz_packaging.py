@@ -29,6 +29,34 @@ INSTALLER_NO_NL = INSTALLER.rstrip("\n")
 COMPONENT_NO_NL = COMPONENT.rstrip("\n")
 
 
+def test_toolchain_gate_keeps_heredoc_body_quotes_out_of_later_comments() -> None:
+    """A heredoc apostrophe cannot make a later shell comment executable."""
+    for body in ("ordinary heredoc text", "it's ordinary heredoc text"):
+        script = (
+            "cat <<'EOF' >/dev/null\n"
+            + body
+            + "\nEOF\n"
+            + "echo inert; # function fake() {\n"
+            + DRIFT
+            + INSTALLER
+            + COMPONENT
+        )
+        assert packaging_gate._release_gate_toolchain_issue(script) is None
+
+    # A commented-out installer still cannot satisfy the required provisioning.
+    commented_installer = (
+        "cat <<'EOF' >/dev/null\n"
+        "it's ordinary heredoc text\n"
+        "EOF\n"
+        + "echo inert; # "
+        + INSTALLER_NO_NL
+        + "\n"
+        + DRIFT
+        + COMPONENT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(commented_installer) is not None
+
+
 def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
     """Only executable commands may satisfy the provisioning gate.
 
@@ -1315,6 +1343,37 @@ def test_continue_on_error_steps_never_prove_successful_provisioning() -> None:
     )
     scripts = packaging_gate._job_run_scripts(workflow, "release-gate")
     assert scripts == ["echo eligible"]
+
+
+def test_step_shell_model_rejects_nonexecuting_bash_templates() -> None:
+    """A shell template must feed the generated script to an interpreter."""
+    script = DRIFT + INSTALLER + COMPONENT
+    invalid_shells = (
+        "bash --version {0}",
+        "bash -c ':' {0}",
+        "bash -c : {0}",
+        "bash -n {0}",
+    )
+    for shell in invalid_shells:
+        step = {"shell": shell, "run": script}
+        assert not packaging_gate._step_runs_shell(step), shell
+        workflow = packaging_gate.yaml.safe_dump(
+            {"jobs": {"release-gate": {"steps": [step]}}},
+            sort_keys=False,
+        )
+        records = packaging_gate._job_run_step_records(workflow, "release-gate")
+        assert records is not None
+        assert records == [], shell
+        assert packaging_gate._release_gate_toolchain_issue(records) is not None
+
+    for shell in (
+        "bash",
+        "/bin/bash",
+        "bash {0}",
+        "bash -e {0}",
+        "bash --noprofile --norc -e -o pipefail {0}",
+    ):
+        assert packaging_gate._step_runs_shell({"shell": shell, "run": script})
 
 
 def test_step_shell_model_reads_success_always_and_shell_paths() -> None:

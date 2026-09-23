@@ -13,7 +13,10 @@ import sys
 from tools.release.gates import validate_release_gates_070 as gates
 from tools.release.gates.validate_release_gates_070 import _gate_2_items
 
-TAG_CONDITION = "github.ref_type == 'tag'"
+TAG_CONDITION = (
+    "(github.event_name == 'push' && github.ref_type == 'tag') "
+    "|| github.event_name == 'workflow_dispatch'"
+)
 
 
 def _gate_3_item(release_packages: str) -> bool:
@@ -269,6 +272,27 @@ def test_gate_three_items_rejects_false_or_negated_tag_conditions() -> None:
         assert not _gate_3_item(workflow), condition
 
 
+def test_gate_three_items_requires_the_manual_dispatch_path() -> None:
+    """A tag-only condition must not silently drop workflow_dispatch runs."""
+    needs = "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+    valid = _release_gate_job(needs)
+    assert _gate_3_item(valid)
+    condition_text = gates._release_gate_if_condition(valid)
+    assert condition_text is not None
+    condition = gates._github_condition_ast(condition_text)
+    assert condition is not None
+    assert gates._evaluate_tag_condition(
+        condition,
+        {"github.event_name": "workflow_dispatch", "github.ref_type": "branch"},
+    ) is True
+
+    tag_only = valid.replace(
+        TAG_CONDITION,
+        "github.event_name == 'push' && github.ref_type == 'tag'",
+    )
+    assert not _gate_3_item(tag_only)
+
+
 def test_gate_three_items_rejects_condition_comment_decoy() -> None:
     """Comment text carrying both gate strings must not satisfy the gate.
 
@@ -288,7 +312,7 @@ def test_gate_three_items_rejects_condition_comment_decoy() -> None:
     )
     # Mutation sensitivity: the retired substring check is satisfied here.
     assert "release-gate:" in workflow
-    assert TAG_CONDITION in workflow
+    assert "github.ref_type == 'tag'" in workflow
     assert not _gate_3_item(workflow)
     assert gates._release_gate_if_condition(workflow) is None
 
@@ -349,6 +373,22 @@ jobs:
     if: always() && (needs.release-gate.result == 'success' || true)
 """
     assert not _publish_gate_item(nested_or)
+
+
+def test_publish_gate_rejects_a_false_conjunct_after_gate_success() -> None:
+    """A positive gate-success comparison cannot outweigh a false term."""
+    conditions = (
+        "always() && needs.release-gate.result == 'success' && false",
+        "always() && (needs.release-gate.result == 'success' && false)",
+    )
+    for condition in conditions:
+        workflow = f"""
+jobs:
+  publish:
+    needs: [release-gate]
+    if: {condition}
+"""
+        assert not _publish_gate_item(workflow), condition
 
 
 def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(

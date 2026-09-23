@@ -333,20 +333,59 @@ def _strip_comment_from_line(
 
 
 def _strip_shell_comments(script: str) -> str:
-    """Remove shell comments from run scripts, respecting quotes and escapes.
-
-    A leading or whitespace-preceded ``#`` starts a comment; ``#`` inside a
-    quoted string is literal.  Quote state carries across lines, so the
-    content of a string that spans lines stays string data for the command
-    checks; the text after the closing quote on that line is executable again
-    and stays in the output.
-    """
+    """Remove shell comments without letting heredoc data change quote state."""
     kept: list[str] = []
+    lines = script.splitlines()
+    pending: list[tuple[str, bool]] = []
     quote: str | None = None
-    for line in script.splitlines():
-        stripped, quote = _strip_comment_from_line(line, quote)
-        kept.append(stripped)
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if pending:
+            kept.append(line)
+            delimiter, tab_stripped = pending[0]
+            candidate = line.lstrip("\t") if tab_stripped else line
+            if candidate == delimiter:
+                pending.pop(0)
+            index += 1
+            continue
+        command_lines, next_index, quote, markers = _strip_shell_comment_command(
+            lines, index, quote
+        )
+        kept.extend(command_lines)
+        index = next_index
+        if any(dynamic for _, _, dynamic in markers):
+            # The terminator is unknowable; leave the remainder opaque. The
+            # separate dynamic-heredoc gate rejects this script fail-closed.
+            kept.extend(lines[index:])
+            break
+        pending.extend((delimiter, tab_stripped)
+                       for delimiter, tab_stripped, _ in markers)
     return "\n".join(kept)
+
+
+def _strip_shell_comment_command(
+    lines: list[str], start: int, quote: str | None
+) -> tuple[list[str], int, str | None, list[tuple[str, bool, bool]]]:
+    """Strip comments in one logical command and discover its heredocs."""
+    initial_quote = quote
+    command_lines: list[str] = []
+    merged = ""
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        line_quote = quote
+        stripped, quote = _strip_comment_from_line(line, quote)
+        command_lines.append(stripped)
+        if len(command_lines) == 1:
+            merged = stripped
+        else:
+            merged = merged[:-1] + " " + stripped.lstrip()
+        index += 1
+        if not _line_continues(stripped, line_quote):
+            break
+    quote, markers = _scan_line_for_heredocs(merged, initial_quote)
+    return command_lines, index, quote, markers
 
 
 def _join_continuations(script: str) -> str:
@@ -2628,6 +2667,31 @@ def _syntax_only_shell_mode(words: list[str]) -> bool:
     return False
 
 
+_EXECUTING_SHELL_TEMPLATE_PREFIXES = {
+    "bash": frozenset({
+        (),
+        ("--noprofile", "--norc"),
+        ("-e",),
+        ("-u",),
+        ("-x",),
+        ("-eu",),
+        ("-eux",),
+        ("-e", "-o", "pipefail"),
+        ("-eo", "pipefail"),
+        ("--noprofile", "--norc", "-e", "-o", "pipefail"),
+        ("--noprofile", "--norc", "-eo", "pipefail"),
+    }),
+    "sh": frozenset({
+        (),
+        ("-e",),
+        ("-u",),
+        ("-x",),
+        ("-eu",),
+        ("-eux",),
+    }),
+}
+
+
 def _step_runs_shell(step: dict) -> bool:
     """Whether a workflow step's ``run`` executes in a shell on every path.
 
@@ -2658,10 +2722,28 @@ def _step_runs_shell(step: dict) -> bool:
         words = shlex.split(shell, posix=True)
     except ValueError:
         return False
+    return _shell_template_executes_script(words)
+
+
+def _shell_template_executes_script(words: list[str]) -> bool:
+    """Accept only known bash/sh templates that execute GitHub's script file."""
     if not words:
         return False
     name = words[0].rsplit("/", 1)[-1]
-    return name in ("bash", "sh") and not _syntax_only_shell_mode(words)
+    allowed_prefixes = _EXECUTING_SHELL_TEMPLATE_PREFIXES.get(name)
+    if allowed_prefixes is None:
+        return False
+    if len(words) == 1:
+        return True
+    script_indexes = [index for index, word in enumerate(words[1:], start=1)
+                      if word == "{0}"]
+    if len(script_indexes) != 1:
+        return False
+    script_index = script_indexes[0]
+    prefix = tuple(words[1:script_index])
+    return prefix in allowed_prefixes and not _syntax_only_shell_mode(
+        words[:script_index + 1]
+    )
 
 
 def _workflow_jobs(workflow_content: str) -> dict | None:
