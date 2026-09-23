@@ -2,7 +2,7 @@
 """
 Fuzz and packaging infrastructure validator for the release gates.
 
-Validates the 12-item fuzz and packaging infrastructure requirements:
+Validates the fuzz and packaging infrastructure requirements:
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
 2. ClusterFuzzLite PR workflow exists
@@ -18,6 +18,8 @@ Validates the 12-item fuzz and packaging infrastructure requirements:
 11. Harness rules FUZZ-001 through FUZZ-007 defined in the fuzz guide
 12. Release-gate job provisions the pinned Rust toolchain (cargo, rustc,
     rustfmt) that its gate scripts resolve through Rustup shims
+13. Release-gate job installs the pinned Python release dependencies
+    (requirements-release.txt) before the docs-check chain imports them
 
 Exit codes:
   0 - All checks passed
@@ -29,11 +31,18 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+import functools
 import re
 import sys
 from pathlib import Path
 
 import yaml
+
+try:
+    from tools.lib.path_validation import validate_read_path
+except ModuleNotFoundError:  # executed as a script from another directory
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from tools.lib.path_validation import validate_read_path  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 GITHUB_DIR = ".github"
@@ -46,6 +55,7 @@ FUZZ_CORPUS_PRUNING_GATE = "fuzz:corpus-pruning"
 PKG_NFPM_CONFIG_GATE = "pkg:nfpm-config"
 PKG_ARTIFACT_NAMING_WORKFLOW_GATE = "pkg:artifact-naming-workflow"
 PKG_RELEASE_GATE_TOOLCHAIN_GATE = "pkg:release-gate-toolchain"
+PKG_RELEASE_GATE_PYTHON_DEPS_GATE = "pkg:release-gate-python-deps"
 DOCS_COMPATIBILITY_GATE = "docs:compatibility"
 
 # The release-gate job runs this command; the gate scopes its toolchain
@@ -53,6 +63,12 @@ DOCS_COMPATIBILITY_GATE = "docs:compatibility"
 # split must move the provisioning with it.
 RELEASE_GATE_JOB_NAME = "release-gate"
 RELEASE_GATE_RUSTFMT_CONSUMER = "tools/reason-codegen/generate.py --check"
+
+# Both provisioning jobs read the same commands (bash, rustup, python3,
+# retry), so the shadow guard spans both; a no-op `rustup()` in either job
+# defeats its checks the same way.
+FUZZ_QUALIFICATION_JOB_NAME = "fuzz-qualification"
+PROVISIONING_JOB_NAMES = (RELEASE_GATE_JOB_NAME, FUZZ_QUALIFICATION_JOB_NAME)
 
 # Workflow paths
 CFLITE_PR_WORKFLOW = PROJECT_ROOT / GITHUB_DIR / WORKFLOWS_DIR / "cflite_pr.yml"
@@ -68,6 +84,7 @@ FUZZ_CARGO_TOML = PROJECT_ROOT / "components" / "rust-converter" / "fuzz" / "Car
 
 # Packaging paths
 NFPM_CONFIG = PROJECT_ROOT / "packaging" / "nfpm" / "nfpm.yaml"
+RELEASE_REQUIREMENTS = PROJECT_ROOT / "requirements-release.txt"
 
 # Documentation paths
 INSTALL_DOCS = [
@@ -113,13 +130,24 @@ class ValidationResult:
 
 
 def read_safe(path: Path) -> str:
-    """Read file content safely, returning empty string if missing."""
-    resolved = path.resolve()
+    """Read a project-contained file, returning empty string when unreadable.
+
+    The path resolves through the shared `path_validation` helper (Rule
+    33/54: canonicalize before containment), so a `..` traversal or a
+    symlink that leaves the project root reads as empty exactly like a
+    missing file: every check treats either as its FAIL path.
+    """
     try:
+        resolved = validate_read_path(
+            path, must_exist=False, purpose="fuzz packaging gate"
+        )
         resolved.relative_to(PROJECT_ROOT.resolve())
-    except ValueError:
+    except (ValueError, OSError):
         return ""
-    return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
+    try:
+        return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
+    except OSError:
+        return ""
 
 
 def check_fuzz_targets(result: ValidationResult) -> None:
@@ -301,6 +329,9 @@ def _join_continuations(script: str) -> str:
 
 
 _HEREDOC_MARKER_RE = re.compile(
+    # The escaped alternative `\\.` matches any escaped character including
+    # a backslash, so the two alternation branches overlap on `\\`; that is
+    # harmless (the escaped branch wins) and kept for clarity.
     r"<<-?[ \t]*(?:(['\"])([^'\"]*)\1|((?:\\.|[^ \t;|&()<>])+))"
 )
 
@@ -437,7 +468,7 @@ def _strip_heredocs(script: str) -> str:
             if candidate == delimiter:
                 pending.pop(0)
             continue
-        line, quote, index = _join_command_line(lines, line, index, quote)
+        line, index = _join_command_line(lines, line, index, quote)
         kept.append(line)
         quote, markers = _scan_line_for_heredocs(line, quote)
         pending.extend(
@@ -445,14 +476,26 @@ def _strip_heredocs(script: str) -> str:
     return "\n".join(kept)
 
 
+def _line_end_quote(line: str, quote: str | None) -> str | None:
+    """The quote state at the end of one line, from the state it starts in."""
+    index = 0
+    while index < len(line):
+        quote, consumed = _scan_char(line, index, quote)
+        index += consumed
+    return quote
+
+
 def _line_continues(line: str, quote: str | None) -> bool:
     """Whether a command line ends with an unescaped backslash.
 
-    Single-quoted strings keep backslashes literal, so a line inside one
-    never continues; elsewhere an odd run of trailing backslashes escapes
-    the newline.
+    The decision follows the quote state at the END of the line, not the
+    state it starts in: a single-quoted string that closes mid-line puts
+    the trailing backslash outside quotes (so it escapes the newline),
+    while a string that stays open keeps a trailing backslash literal.
+    Outside single quotes an odd run of trailing backslashes escapes the
+    newline.
     """
-    if quote == "'":
+    if _line_end_quote(line, quote) == "'":
         return False
     trailing = len(line) - len(line.rstrip("\\"))
     return trailing % 2 == 1
@@ -460,16 +503,18 @@ def _line_continues(line: str, quote: str | None) -> bool:
 
 def _join_command_line(
     lines: list[str], line: str, index: int, quote: str | None
-) -> tuple[str, str | None, int]:
-    """Join a command line's backslash continuations; return (line, quote, index).
+) -> tuple[str, int]:
+    """Join a command line's backslash continuations; return (line, index).
 
     The merged line is what the shell parses, so a heredoc marker split
-    across a continuation reads the same delimiter the shell would.
+    across a continuation reads the same delimiter the shell would.  The
+    line's carried quote state decides each join, and the same state is
+    returned to the caller for the next line's scan.
     """
     while _line_continues(line, quote) and index < len(lines):
         line = line[:-1] + " " + lines[index].lstrip()
         index += 1
-    return line, quote, index
+    return line, index
 
 
 def _dynamic_heredoc_markers(script: str) -> list[str]:
@@ -489,10 +534,10 @@ def _dynamic_heredoc_markers(script: str) -> list[str]:
 
 
 _FUNCTION_DEF_TAIL_RE = re.compile(
-    r"(?:^|[;&|()\n\s])(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*$"
+    r"(?:^|[;&|()\s])(?:function\s+)?[A-Za-z_](?a:\w)*\s*\(\s*\)\s*$"
 )
 _FUNCTION_KEYWORD_TAIL_RE = re.compile(
-    r"(?:^|[;&|()\n\s])function\s+[A-Za-z_][A-Za-z0-9_]*\s*$"
+    r"(?:^|[;&|()\s])function\s+[A-Za-z_](?a:\w)*\s*$"
 )
 _BODY_CLOSERS = {"{": "}", "(": ")"}
 
@@ -535,17 +580,74 @@ def _function_body_step(
 
 
 _DEFINED_FUNCTION_RE = re.compile(
-    r"(?:^|[;&|()\n\s])(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*[{( \t\n]"
+    r"(?:^|[;&|()\s])(?:function\s+)?([A-Za-z_](?a:\w)*)\s*\(\s*\)\s*[{( \t\n]"
 )
 _FUNCTION_KEYWORD_DEF_RE = re.compile(
-    r"(?:^|[;&|()\n\s])function\s+([A-Za-z_][A-Za-z0-9_]*)\s*[{( \t\n]"
+    r"(?:^|[;&|()\s])function\s+([A-Za-z_](?a:\w)*)\s*[{( \t\n]"
 )
+
+
+def _blank_span(chars: list[str], start: int, end: int) -> None:
+    """Blank the characters in ``[start, end)`` in place."""
+    for position in range(max(0, start), min(end, len(chars))):
+        chars[position] = " "
+
+
+def _ansi_c_span_end(script: str, index: int) -> int:
+    """End offset of the ANSI-C string (``$'...'``) opened at ``index``.
+
+    The string honors backslash escapes, so an escaped quote does not
+    close it; an unterminated span runs to the script end.
+    """
+    end = index + 2
+    while end < len(script):
+        if script[end] == "\\":
+            end += 2
+            continue
+        if script[end] == "'":
+            end += 1
+            break
+        end += 1
+    return end
+
+
+def _masked_quotes(script: str) -> str:
+    """Script text with quoted spans blanked to spaces.
+
+    A ``name() {`` shape inside a string is data the shell never defines:
+    ``echo "define rustup() { like this"`` documents syntax, it does not
+    shadow anything.  The scan is stateful like the rest of the analyzer,
+    so escaped quotes and multi-line strings mean what they mean
+    everywhere else; an ANSI-C string (``$'...'``) honors its own quote
+    escape so the spans after it stay code.
+    """
+    chars = list(script)
+    quote: str | None = None
+    index = 0
+    while index < len(script):
+        if quote is None and script.startswith("$'", index):
+            end = _ansi_c_span_end(script, index)
+            _blank_span(chars, index, end)
+            index = end
+            continue
+        new_quote, consumed = _scan_char(script, index, quote)
+        if quote is not None or new_quote is not None:
+            _blank_span(chars, index, index + consumed)
+        quote = new_quote
+        index += consumed
+    return "".join(chars)
 
 
 def _defined_function_names(script: str) -> set[str]:
-    """Names of functions the script defines (both definition forms)."""
-    names = set(_DEFINED_FUNCTION_RE.findall(script))
-    names.update(_FUNCTION_KEYWORD_DEF_RE.findall(script))
+    """Names of functions the script defines (both definition forms).
+
+    Definitions are read from real code only: quoted spans are blanked
+    first, so a definition shape inside a string can neither shadow a
+    command nor hide a body from the checks.
+    """
+    code = _masked_quotes(script)
+    names = set(_DEFINED_FUNCTION_RE.findall(code))
+    names.update(_FUNCTION_KEYWORD_DEF_RE.findall(code))
     return names
 
 
@@ -572,20 +674,51 @@ def _definition_name(script: str, index: int) -> str | None:
     """The function whose body opens at ``index`` (both definition forms)."""
     prefix = script[:index]
     match = re.search(
-        r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
+        r"(?:function\s+)?([A-Za-z_](?a:\w)*)\s*\(\s*\)\s*$", prefix
     )
     if match is not None:
         return match.group(1)
-    keyword = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
+    keyword = re.search(r"function\s+([A-Za-z_](?a:\w)*)\s*$", prefix)
     return keyword.group(1) if keyword is not None else None
 
 
-def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
-    """Spans ``(name, start, end)`` of every function body in the script.
+@functools.lru_cache(maxsize=64)
+def _function_body_walk_cached(
+    script: str,
+) -> tuple[tuple[tuple[str, int, int], ...], str]:
+    """Memoized core of ``_function_body_walk``: spans as an immutable tuple.
+
+    The checks rescan the same script through several helpers (masking,
+    reachability, truncation); caching the walk keeps those rescans from
+    re-parsing the whole text each time.  ``lru_cache`` keys on the script
+    text, so each distinct script parses once per process run.
+    """
+    spans, state = _function_body_walk_uncached(script)
+    return tuple(spans), state
+
+
+def _function_body_walk(
+    script: str,
+) -> tuple[list[tuple[str, int, int]], str]:
+    """Spans ``(name, start, end)`` of every body, plus the open structure.
 
     The walk matches the bodies-stripper so reachability and stripping agree
-    on the structure.
+    on the structure.  A definition only opens outside quoted text: a
+    ``name() {`` shape inside a string is data, so the quote state the walk
+    carries is checked before a body can open and is never reset, and a
+    quoted decoy can no longer swallow the spans of the real definitions
+    after it.  The second element is ``""`` when every body and quoted
+    string closes; otherwise it names what stays open at the end
+    (``"body"`` or ``"quote"``).  An unclosed script cannot be parsed by
+    the shell, so callers fail closed instead of trusting its spans.
     """
+    spans, state = _function_body_walk_cached(script)
+    return list(spans), state
+
+
+def _function_body_walk_uncached(
+    script: str,
+) -> tuple[list[tuple[str, int, int]], str]:
     spans: list[tuple[str, int, int]] = []
     index = 0
     depth = 0
@@ -595,13 +728,14 @@ def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
     body_start = 0
     while index < len(script):
         if depth == 0:
-            found = _opens_function_body(script, index)
+            found = (
+                _opens_function_body(script, index) if quote is None else None
+            )
             if found is not None:
                 name = _definition_name(script, index) or ""
                 body_start = index + 1
                 opener = found
                 depth = 1
-                quote = None
                 index += 1
                 continue
             quote, consumed = _scan_char(script, index, quote)
@@ -611,7 +745,39 @@ def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
             script, index, depth, quote, opener)
         if closer and depth == 0:
             spans.append((name, body_start, index))
-    return spans
+    if depth != 0:
+        return spans, "body"
+    if quote is not None:
+        return spans, "quote"
+    return spans, ""
+
+
+def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
+    """Spans ``(name, start, end)`` of every function body in the script."""
+    return _function_body_walk(script)[0]
+
+
+def _unclosed_structure_issue(script: str) -> str | None:
+    """The fail-closed issue for a script whose structure never closes.
+
+    A phantom definition can only satisfy the provisioning checks by
+    hiding the spans of the real ones, and the shell cannot even parse the
+    script, so an unclosed body or quoted string is rejected outright.
+    """
+    unclosed = _function_body_walk(script)[1]
+    if unclosed == "body":
+        return (
+            "the release-gate job's run script ends inside an open function "
+            "body, so its toolchain provisioning cannot be verified "
+            "statically; close every function body"
+        )
+    if unclosed == "quote":
+        return (
+            "the release-gate job's run script ends with an unterminated "
+            "quoted string, so its toolchain provisioning cannot be "
+            "verified statically; close every quoted string"
+        )
+    return None
 
 
 def _head_spans(
@@ -622,10 +788,10 @@ def _head_spans(
     for _, lo, _hi in bodies:
         prefix = script[: max(0, lo - 1)]
         match = re.search(
-            r"(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*$", prefix
+            r"(?:function\s+)?([A-Za-z_](?a:\w)*)\s*\(\s*\)\s*$", prefix
         )
         if match is None:
-            match = re.search(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", prefix)
+            match = re.search(r"function\s+([A-Za-z_](?a:\w)*)\s*$", prefix)
         if match is not None:
             heads.append((match.start(1), max(0, lo - 1)))
     return heads
@@ -723,7 +889,7 @@ def _trim_body_after_terminator(body: str) -> str:
     pairs = _command_segments_with_separators(body)
     cut = len(body)
     previous: bool | None = None
-    branches: list[tuple[bool | None, bool]] = []
+    branches: list[tuple[bool, int]] = []
     search_from = 0
     for index, (segment, separator) in enumerate(pairs):
         found = body.find(segment, search_from)
@@ -803,24 +969,65 @@ _NON_BUILTIN_COMMANDS = frozenset({
     "bash", "sh", "dash", "python", "python3", "rustup",
     "env", "command", "exec", "nohup", "sudo",
 })
-_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_BASH_C_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_](?a:\w)*=")
+
+# Bash invocation options.  Value-taking options consume a file word;
+# flag-only options the option parser steps over keep parsing.  Anything
+# else -- an unrecognized option, a word whose spelling the parser cannot
+# model -- stops the ``-c`` unwrap, because whether a payload behind it
+# runs is unknowable and unverifiable text must never count as verified.
+_SHELL_VALUE_OPTIONS = frozenset({"--rcfile", "--init-file"})
+_SHELL_FLAG_OPTIONS = frozenset({
+    "--debug", "--debugger", "--login", "--noediting", "--noprofile",
+    "--norc", "--posix", "--pretty-print", "--restricted", "--verbose",
+})
+# Single letters a bash invocation accepts.  `c` (either sign, as the
+# invocation parser reads it) takes the payload word; `-n`/`-D`/`+D`
+# suppress execution (noexec / dump-strings) while `+n` does not; `o`/`O`
+# consume the following shell-option name word; an unlisted letter makes
+# bash reject the invocation outright (nothing runs).
+_SHELL_OPTION_LETTERS = frozenset("abcefhiklmprstuvxBCEHPTnDoO")
+_SHELL_SUPPRESS_LETTERS = frozenset({"n", "D"})
 
 
-_SUDO_ARG_FLAGS = frozenset({"-u", "-g", "-p", "-C", "-T", "-r", "-t", "-h"})
+# sudo's options, split by arity.  Value-taking options consume their
+# argument (`sudo -u root`, `sudo --user root`); the flags are stepped
+# over.  `-h`/`--help` print help (a bare `-h` prints help, and `-h host`
+# binds the host but refuses to run anything outside listing mode), and
+# `-V`/`-v`/`-l`/`-e`/`-U` and `--version`/`--validate`/`--list`/`--edit`
+# never reach a command either, so they all make the invocation un-runnable
+# instead of transparently skippable.  Anything outside this model is
+# treated the same way: without a trustworthy option model the wrapper
+# must not be unwrapped, because the text behind it may never run.
+_SUDO_VALUE_FLAGS = frozenset({
+    "-u", "-g", "-p", "-C", "-T", "-r", "-t",
+    "--user", "--group", "--prompt", "--close-from", "--chdir",
+    "--role", "--type", "--command-timeout", "--other-user",
+})
+_SUDO_FLAG_FLAGS = frozenset({
+    "-A", "-B", "-E", "-H", "-N", "-P", "-S", "-b", "-i", "-k", "-n", "-s",
+    "--preserve-env", "--stdin", "--set-home", "--background", "--login",
+    "--shell", "--non-interactive",
+})
 
 
 def _skip_option_words(
-    words: list[str], index: int, arg_flags: frozenset[str]
-) -> int:
-    """Skip a wrapper's own options (`sudo -n`, `sudo -u root`)."""
+    words: list[str], index: int, value_flags: frozenset[str],
+    flag_flags: frozenset[str],
+) -> int | None:
+    """Skip a wrapper's own options (`sudo -n`, `sudo -u root`); None when
+    an option is outside the arity model (the caller must not unwrap)."""
     while (
         index < len(words)
         and words[index].startswith("-")
         and words[index] != "--"
     ):
-        if words[index] in arg_flags and index + 1 < len(words):
-            index += 1
+        word = words[index]
+        if word in value_flags:
+            if index + 1 < len(words):
+                index += 1
+        elif word not in flag_flags:
+            return None
         index += 1
     return index
 
@@ -866,21 +1073,112 @@ def _skip_env_prefix(words: list[str], index: int) -> int:
         probe = moved
 
 
-def _skip_shell_c(words: list[str], index: int) -> int:
-    """Skip `<shell> [options] -c`, returning the payload word index."""
-    probe = index + 1
-    while (
-        probe < len(words)
-        and words[probe].startswith("-")
-        and not _BASH_C_RE.match(words[probe])
+def _long_shell_option_step(word: str) -> tuple[int, bool] | None:
+    """Classify a long (``--``) bash option; None when it cannot run text.
+
+    ``--rcfile``/``--init-file`` consume the following file word; the
+    modeled flag-only options consume none; ``--opt=value`` forms and
+    unknown long options make bash reject the invocation outright, so
+    nothing behind them could ever run either.
+    """
+    if "=" in word or word not in _SHELL_VALUE_OPTIONS | _SHELL_FLAG_OPTIONS:
+        return None
+    return (2 if word in _SHELL_VALUE_OPTIONS else 1), False
+
+
+def _short_shell_option_span(letters: str, sign: str) -> int | None:
+    """Consumed words for one short-option cluster; None = unverifiable.
+
+    ``o``/``O`` take the following shell-option-name word and must be the
+    cluster's last letter; ``-n``/``-D``/``+D`` suppress execution; any
+    unlisted letter makes bash reject the invocation outright.
+    """
+    if not letters or any(
+        letter not in _SHELL_OPTION_LETTERS for letter in letters
     ):
-        if words[probe] == "--":
+        return None
+    if sign == "-" and _SHELL_SUPPRESS_LETTERS.intersection(letters):
+        return None
+    if sign == "+" and "D" in letters:
+        return None
+    value_tail = letters[-1] in "oO" and (
+        letters.count("o") + letters.count("O") == 1
+    )
+    if ("o" in letters or "O" in letters) and not value_tail:
+        return None
+    return 2 if value_tail else 1
+
+
+def _shell_option_step(words: list[str], probe: int) -> tuple[int, bool] | None:
+    """Classify one bash invocation option word at ``probe``.
+
+    Returns ``(next_probe, command_mode)``: where option scanning
+    continues, and whether this word turned on the ``-c`` command mode.
+    ``None`` means the line is unverifiable from this word on -- an
+    unknown spelling, a suppressed invocation, or an argument the model
+    cannot place -- and nothing behind it may count as a verified
+    command.  The model follows the bash option parser (the release
+    runners invoke bash): quote removal happens before a word is read as
+    an option, a value-taking option consumes the following word, an
+    unlisted letter makes bash reject the whole invocation, and ``-n``
+    /``-D``/``+D`` suppress execution.
+    """
+    word = _resolve_heredoc_word(words[probe])[0]
+    if word.startswith("--"):
+        stepped = _long_shell_option_step(word)
+    elif re.fullmatch(r"[+-][A-Za-z]*", word):
+        span = _short_shell_option_span(word[1:], word[0])
+        stepped = (span, "c" in word[1:]) if span is not None else None
+    else:
+        stepped = None
+    if stepped is None:
+        return None
+    span, command_mode = stepped
+    if probe + span > len(words):
+        return None
+    return probe + span, command_mode
+
+
+def _shell_scan_outcome(
+    words: list[str], probe: int, command_mode: bool
+) -> int | None:
+    """How the word at ``probe`` ends option scanning (None = keep going).
+
+    A non-option word is the command string in command mode and otherwise
+    names a script file; ``--`` switches to positional words, so its
+    successor is the command string when command mode is already on.  A
+    decided outcome is the payload index, or ``-1`` when nothing can be
+    unwrapped from here.
+    """
+    cleaned = _resolve_heredoc_word(words[probe])[0]
+    if cleaned == "--":
+        if command_mode and probe + 1 < len(words):
+            return probe + 1
+        return -1
+    if cleaned.startswith(("-", "+")) and cleaned not in ("-", "+"):
+        return None
+    return probe if command_mode else -1
+
+
+def _skip_shell_c(words: list[str], index: int) -> int:
+    """Skip `<shell> [options] -c`, returning the payload word index.
+
+    The payload is the first positional word after the options, exactly
+    as bash resolves its command string.  A word the option model cannot
+    classify stops the unwrap: text behind it is unverifiable and must
+    never count as a verified command (fail closed).
+    """
+    probe = index + 1
+    command_mode = False
+    while probe < len(words):
+        outcome = _shell_scan_outcome(words, probe, command_mode)
+        if outcome is not None:
+            return outcome if outcome >= 0 else index
+        stepped = _shell_option_step(words, probe)
+        if stepped is None:
             return index
-        if words[probe] in ("-o", "-O") and probe + 1 < len(words):
-            probe += 1
-        probe += 1
-    if probe < len(words) and _BASH_C_RE.match(words[probe]):
-        return probe + 1
+        probe, activated = stepped
+        command_mode = command_mode or activated
     return index
 
 
@@ -891,10 +1189,15 @@ def _skip_bare_separators(words: list[str], index: int) -> int:
     return index
 
 
-def _wrapper_command_step(words: list[str], index: int) -> tuple[int, bool] | None:
+def _wrapper_command_step(words: list[str], index: int) -> int | None:
     """Advance past a leading command wrapper's own words; None when the
-    wrapper must not be unwrapped (a `builtin`, or a `command` lookup)."""
-    wrapper = words[index]
+    wrapper must not be unwrapped (a `builtin`, a `command` lookup or
+    invalid option spelling, or a sudo option outside the arity model).
+
+    The wrapper's name is read after quote removal, as bash resolves it:
+    a quoted ``'command'``/``"sudo"`` still runs that wrapper.
+    """
+    wrapper = _resolve_heredoc_word(words[index])[0]
     if wrapper == "builtin":
         # `builtin` can only run shell builtins, never the external
         # commands the provisioning checks match.
@@ -903,11 +1206,40 @@ def _wrapper_command_step(words: list[str], index: int) -> tuple[int, bool] | No
         rest, lookup = _command_operand(words[index + 1:])
         if lookup:
             return None
-        return len(words) - len(rest), False
-    probe = _skip_option_words(words, index + 1, _SUDO_ARG_FLAGS)
+        return len(words) - len(rest)
+    probe = _skip_option_words(
+        words, index + 1, _SUDO_VALUE_FLAGS, _SUDO_FLAG_FLAGS
+    )
+    if probe is None:
+        return None
     if probe < len(words) and words[probe] == "--":
         probe += 1
-    return probe, False
+    return probe
+
+
+def _unwrap_stacked_wrappers(
+    words: list[str], index: int
+) -> tuple[int, bool]:
+    """Unwrap stacked command wrappers; flag a refused step.
+
+    One wrapper's own words can expose another wrapper in command position
+    (``command sudo rustup ...``, ``nohup env FOO=1 cmd``); the loop is
+    bounded, and a step that refuses to unwrap (``builtin``, a ``command``
+    lookup, an unmodeled sudo option) stops the scan with the wrapper still
+    in front, so its text never counts.
+    """
+    for _ in range(4):
+        if (
+            index < len(words)
+            and _resolve_heredoc_word(words[index])[0] in _WRAPPER_COMMANDS
+        ):
+            step = _wrapper_command_step(words, index)
+            if step is None:
+                return index, True
+            index = _skip_env_assignments(words, step)
+        if index < len(words) and _resolve_heredoc_word(words[index])[0] == "env":
+            index = _skip_env_prefix(words, index + 1)
+    return index, False
 
 
 def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
@@ -916,30 +1248,48 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
 
     Handles `retry N`, command wrappers with their own options, `env
     VAR=VAL...`, `<shell> -c '...'`, `eval` and bare `--` separators, in
-    the order the shell accepts them.
+    the order the shell accepts them.  Names are read after quote removal:
+    the shell resolves ``'bash'``/``"retry"`` to the same commands, so a
+    quoted spelling must unwrap exactly like the plain one.
     """
     index = _skip_env_assignments(words, 0)
     if (
         index + 1 < len(words)
-        and words[index] == "retry"
+        and _resolve_heredoc_word(words[index])[0] == "retry"
         and words[index + 1].isdigit()
     ):
         index += 2
     index = _skip_bare_separators(words, index)
-    if index < len(words) and words[index] in _WRAPPER_COMMANDS:
-        step = _wrapper_command_step(words, index)
-        if step is None:
-            return index, False
-        index = _skip_env_assignments(words, step[0])
-    if index < len(words) and words[index] == "env":
-        index = _skip_env_prefix(words, index + 1)
-    if index < len(words) and words[index] in ("bash", "sh", "dash"):
+    index, refused = _unwrap_stacked_wrappers(words, index)
+    if refused:
+        return index, False
+    if (
+        index < len(words)
+        and _resolve_heredoc_word(words[index])[0] in ("bash", "sh", "dash")
+    ):
         payload = _skip_shell_c(words, index)
         if payload != index:
             return payload, True
-    if index < len(words) and words[index] == "eval":
+    if index < len(words) and _resolve_heredoc_word(words[index])[0] == "eval":
         index += 1
     return index, False
+
+
+def _forwards_all_arguments(words: list[str]) -> bool:
+    """Whether the words invoke their whole argument list (``"$@"`` forms).
+
+    ``eval "$@"`` runs its arguments exactly like a plain ``"$@"`` does,
+    so both count as a full forward; anything else does not.
+    """
+    if not words:
+        return False
+    first = _resolve_heredoc_word(words[0])[0]
+    if first in ("$@", "${@}"):
+        return True
+    if first != "eval" or len(words) < 2:
+        return False
+    argument = _resolve_heredoc_word(words[1])[0]
+    return argument.strip("'\"") in ("$@", "${@}", "$*", "${*}")
 
 
 def _retry_runs_its_target(script: str) -> bool:
@@ -950,7 +1300,8 @@ def _retry_runs_its_target(script: str) -> bool:
     the target, so wrapped provisioning must not count behind it.  The
     invocation may sit inside a loop or an unevaluated branch: only a
     provably dead position (a literal ``false`` branch or short-circuit)
-    does not count.
+    does not count.  An honest implementation may forward through
+    ``eval "$@"``, which runs its arguments like a plain ``"$@"`` does.
     """
     effective, _superseded = _effective_body_spans(script)
     for name, lo, hi in effective:
@@ -958,7 +1309,7 @@ def _retry_runs_its_target(script: str) -> bool:
             continue
         for segment in _possibly_reached_segments(script[lo:hi]):
             words = _peel_execution_wrappers(segment.split())
-            if words and _resolve_heredoc_word(words[0])[0] in ("$@", "${@}"):
+            if _forwards_all_arguments(words):
                 return True
         return False
     return True
@@ -968,7 +1319,7 @@ def _possible_marker_carry(
     segment: str,
     separator: str,
     previous: bool | None,
-    branches: list[tuple[bool | None, bool]],
+    branches: list[tuple[bool, int]],
 ) -> str | None:
     """The command a marker carries when its region is not provably dead
     and the marker itself is not short-circuited."""
@@ -988,7 +1339,7 @@ def _possibly_reached_segments(script: str) -> list[str]:
     """
     live: list[str] = []
     previous: bool | None = None
-    branches: list[tuple[bool | None, bool]] = []
+    branches: list[tuple[bool, int]] = []
     pairs = _command_segments_with_separators(script)
     for index, (segment, separator) in enumerate(pairs):
         keyword = _segment_keyword(segment)
@@ -1079,6 +1430,16 @@ _COMPONENT_ADD_RE = re.compile(
     + _TOOLCHAIN_VALUE_RE + r"(?=$|[\s;|&)])"
 )
 _RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
+# Shell-equivalent spellings of installing the pinned release requirements:
+# `python3 -m pip install -r requirements-release.txt`, `pip3 install
+# --requirement=requirements-release.txt`, quoted paths, and a leading
+# `sudo`/`retry N` wrapper (already peeled by the caller).
+_PIP_REQUIREMENT_RE = re.compile(
+    r"^(?:python3?|pip3?)"
+    r"(?:\s+-m\s+pip)?"
+    r"\s+install\s+"
+    r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?\b"
+)
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
 )
@@ -1208,7 +1569,14 @@ def _is_redirection_word(word: str) -> bool:
 
 def _command_operand(rest: list[str]) -> tuple[list[str], bool]:
     """``command``'s operand after its own options, plus whether the
-    options ask for a lookup (``-v``/``-V``), which never runs it."""
+    invocation never runs it (a lookup or an invalid option spelling).
+
+    Bash's ``command`` builtin accepts only clusters of ``p``/``v``/``V``:
+    a cluster carrying ``v``/``V`` asks for a lookup instead of running the
+    operand, an all-``p`` cluster keeps it runnable, and every other
+    spelling (``-x``, ``--version``, a bare ``-``) makes bash reject or
+    miss the invocation, so the operand must not count as executed.
+    """
     probe = 0
     lookup = False
     while (
@@ -1216,7 +1584,12 @@ def _command_operand(rest: list[str]) -> tuple[list[str], bool]:
         and rest[probe].startswith("-")
         and rest[probe] != "--"
     ):
-        if "v" in rest[probe][1:] or "V" in rest[probe][1:]:
+        body = rest[probe][1:]
+        if not body or any(letter not in "pvV" for letter in body):
+            # An invalid option spelling: bash refuses the invocation (or
+            # treats the word as the name), so nothing behind it runs.
+            return rest[probe:], True
+        if "v" in body or "V" in body:
             lookup = True
         probe += 1
     if probe < len(rest) and rest[probe] == "--":
@@ -1245,8 +1618,9 @@ def _peel_one_wrapper(words: list[str]) -> list[str] | None:
 
 def _peel_execution_wrappers(words: list[str]) -> list[str]:
     """Drop leading wrappers that do not change which command runs:
-    ``command``/``builtin``, ``env`` with its options and ``VAR=VAL``
-    assignments, and bare assignments."""
+    ``command``, ``env`` with its options and ``VAR=VAL`` assignments, and
+    bare assignments.  ``builtin`` is deliberately not peeled: it can only
+    run shell builtins, never the external commands the checks match."""
     while words:
         peeled = _peel_one_wrapper(words)
         if peeled is None:
@@ -1338,12 +1712,19 @@ def _condition_tristate(
 
     The segmentizer splits a condition at its ``&&``/``||`` operators, so
     the parts fold back together; the condition ends at the ``then`` marker
-    or at a separator that is not a chain operator.
+    or at a separator that is not a chain operator.  A ``|``/``|&``
+    pipeline inside the condition evaluates its last command, not its left
+    literal, so the value is unknown (None) rather than the left operand's;
+    a condition longer than the fold cap is None too, never a stale value.
     """
     value = _condition_literal(pairs[index][0])
     probe = index + 1
-    while probe < len(pairs) and probe <= index + 64:
+    while probe < len(pairs):
+        if probe > index + 64:
+            return None
         segment, separator = pairs[probe]
+        if separator in ("|", "|&"):
+            return None
         if _segment_keyword(segment) in _BODY_MARKERS:
             break
         if separator not in ("&&", "||"):
@@ -1401,6 +1782,21 @@ def _set_errexit_state(segment: str) -> bool | None:
     return _set_flags_state(words[1:])
 
 
+def _flags_word_state(word: str) -> bool | None:
+    """The errexit state one plain ``set`` word carries (None = no signal).
+
+    A bare ``errexit`` enables it, an ``e`` in a ``+…`` cluster disables,
+    an ``e`` in a ``-…`` cluster enables.
+    """
+    if word == "errexit":
+        return True
+    if word.startswith("+") and "e" in word[1:]:
+        return False
+    if word.startswith("-") and "e" in word[1:]:
+        return True
+    return None
+
+
 def _set_flags_state(flags: list[str]) -> bool | None:
     """The errexit state a ``set`` argument list leaves behind."""
     state: bool | None = None
@@ -1414,12 +1810,9 @@ def _set_flags_state(flags: list[str]) -> bool | None:
                 state = option_mode
             option_mode = None
             continue
-        if word == "errexit":
-            state = True
-        elif word.startswith("+") and "e" in word[1:]:
-            state = False
-        elif word.startswith("-") and "e" in word[1:]:
-            state = True
+        found = _flags_word_state(word)
+        if found is not None:
+            state = found
     return state
 
 
@@ -1491,21 +1884,45 @@ def _branch_keyword_step(
     return False
 
 
-def _always_failing_functions(script: str) -> set[str]:
-    """Functions whose last definition always returns a failure status."""
+def _function_kill_sets(script: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Functions whose invocation provably ends in a failure or in a exit.
+
+    ``failing``: invoking the function unprotected provably dies under
+    errexit (a provable failure with no success return before it), so a
+    standalone call under ``set -e`` ends the shell.  ``exiting``: invoking
+    the function provably ends the shell wherever it runs (an
+    ``exit``/``exec`` replacement on the provable path), which no
+    protection list exempts.  Both sets are fixpoints over the call graph:
+    a body that ends by calling another such function counts too.
+    """
     effective, _superseded = _effective_body_spans(script)
-    return {
-        name
-        for name, lo, hi in effective
-        if _body_fails_unconditionally(script[lo:hi])
-    }
+    bodies = [
+        (name, script[lo:hi]) for name, lo, hi in effective if name
+    ]
+    failing: frozenset[str] = frozenset()
+    exiting: frozenset[str] = frozenset()
+    for _pass in range(len(bodies) + 1):
+        walked = [
+            (name, *_body_verdict(body, failing, exiting))
+            for name, body in bodies
+        ]
+        grown_failing = frozenset(
+            name for name, fails, exits in walked if fails or exits
+        )
+        grown_exiting = frozenset(
+            name for name, _fails, exits in walked if exits
+        )
+        if grown_failing == failing and grown_exiting == exiting:
+            break
+        failing, exiting = grown_failing, grown_exiting
+    return failing, exiting
 
 
 def _marker_return_status(
     segment: str,
     separator: str,
     previous: bool | None,
-    branches: list[tuple[bool | None, bool]],
+    branches: list[tuple[bool, int]],
 ) -> bool | None:
     """The failure status a marker's carried return provokes on the
     provable path; None when the marker carries no taken return."""
@@ -1515,7 +1932,7 @@ def _marker_return_status(
 
 
 def _possible_branch_state(
-    branches: list[tuple[bool | None, bool]],
+    branches: list[tuple[bool, int]],
     keyword: str,
     condition: bool | None,
 ) -> None:
@@ -1551,92 +1968,393 @@ def _return_failure(segment: str) -> bool | None:
     return bool(arg and arg != "0")
 
 
-def _return_success_evidence(pairs: list[tuple[str, str]]) -> bool:
-    """Whether any segment or marker carries a success return.
+def _return_kind(segment: str) -> str | None:
+    """The kind of ``return`` a segment performs: a non-zero argument
+    (``"nonzero"``), an explicit zero (``"zero"``), no argument
+    (``"bare"``: the shell propagates the previous status), or None when
+    the segment is not a return."""
+    if _segment_keyword(segment) != "return":
+        return None
+    words = segment.split()
+    if len(words) < 2:
+        return "bare"
+    arg = words[1].strip("'\"")
+    if arg == "0":
+        return "zero"
+    return "nonzero" if arg else "bare"
 
-    Success evidence counts wherever it appears: a function that can
-    return success is never labelled as failing."""
-    if any(_return_failure(segment) is False for segment, _sep in pairs):
-        return True
-    return any(
-        _return_failure(_body_marker_command(segment)) is False
-        for segment, _sep in pairs
-        if _segment_keyword(segment) in ("then", "do", "else")
+
+def _chain_prefix_words(segment: str) -> tuple[list[str], bool]:
+    """Segment words with a leading ``!`` and ``time`` prefix removed.
+
+    Returns the remaining words and whether a ``!`` negation came off: the
+    negation inverts a failure the way a chain operand does, while ``time``
+    is transparent (``time f`` runs ``f`` like a plain call).
+    """
+    words = segment.split()
+    bang = False
+    while words and words[0] == "!":
+        bang = True
+        words = words[1:]
+    while words and _resolve_heredoc_word(words[0])[0] == "time":
+        words = words[1:]
+        if words and words[0].startswith("-") and words[0] != "--":
+            words = words[1:]
+    return words, bang
+
+
+def _literal_zero_exit(words: list[str]) -> bool:
+    """Whether the words are the verb ``exit 0`` specifically."""
+    return (
+        bool(words)
+        and _resolve_heredoc_word(words[0])[0] == "exit"
+        and len(words) > 1
+        and words[1].strip("'\"") == "0"
     )
 
 
-def _marker_failure_evidence(
+def _contained_list(separator: str, following: str) -> bool:
+    """Whether the segment runs inside a pipeline, background list,
+    subshell or command substitution.
+
+    A ``(``/backtick before the segment, or a ``|``/``&`` on either side,
+    puts the end in a child: an ``exit`` is contained there, and only the
+    status the container reports reaches the enclosing shell.
+    """
+    return separator in ("(", "`", "|", "&") or following in ("|", "&")
+
+
+def _contained_failure(
+    following: str,
+) -> tuple[str | None, bool | None]:
+    """How a contained failure (or non-zero exit) reaches the parent.
+
+    A pipeline or background container swallows the status, an embedded
+    argument substitution (``)`` right after, more command to come) is
+    swallowed too (the outer command's own status decides), a chain
+    operator makes the failure conditional, and a standalone container
+    (``x=$(...)``, ``(...)``) dies under errexit through its own status.
+    """
+    if following in ("|", "&", ")"):
+        return None, None
+    if following in ("&&", "||"):
+        return None, False
+    return "fail", None
+
+
+def _exit_segment_state(
+    words: list[str],
+    separator: str,
+    following: str,
+    exiting: frozenset[str],
+) -> tuple[str | None, bool | None] | None:
+    """Verdict/status for a segment that names an exit-class command.
+
+    ``exit``, an ``exec`` replacement and a call to a function in ``exiting``
+    end the shell wherever they run; a contained list (pipeline, background,
+    subshell, substitution) holds the end.  Returns None when the segment is
+    not exit-class at all, so the caller keeps classifying.
+    """
+    first = _resolve_heredoc_word(words[0])[0] if words else ""
+    if first == "exit" or _is_exec_replacement(words) or first in exiting:
+        if _contained_list(separator, following):
+            if _literal_zero_exit(words):
+                return None, None
+            return _contained_failure(following)
+        return "exit", None
+    return None
+
+
+def _return_segment_state(
+    segment: str, first: str, previous: bool | None
+) -> tuple[str | None, bool | None] | None:
+    """Verdict/status for a ``return`` segment, or None when not one.
+
+    ``first`` is the segment's command word after the same chain-prefix
+    and wrapper peeling the caller applied, so a wrapped or ``!``-prefixed
+    ``return`` is classified exactly like a bare one.
+    """
+    if first != "return":
+        return None
+    kind = _return_kind(segment)
+    if kind == "nonzero":
+        return "fail", None
+    if kind == "bare" and previous is False:
+        return "fail", None
+    return "ok", None
+
+
+def _failing_segment_state(
+    separator: str,
+    following: str,
+) -> tuple[str | None, bool | None]:
+    """Verdict/status for a segment whose literal value is False."""
+    if following in ("&&", "||"):
+        return None, False
+    if _contained_list(separator, following):
+        return _contained_failure(following)
+    return "fail", None
+
+
+def _live_segment_state(
     segment: str,
     separator: str,
+    following: str,
     previous: bool | None,
-    branches: list[tuple[bool | None, bool]],
-) -> bool:
-    """Whether a marker's carried return provokes a failure on the
-    provable path."""
-    return (
-        _marker_return_status(segment, separator, previous, branches) is True
-    )
+    failing: frozenset[str],
+    exiting: frozenset[str],
+) -> tuple[str | None, bool | None]:
+    """The shell-end verdict and chain status of one live segment.
 
-
-def _body_fails_unconditionally(body: str) -> bool:
-    """Whether a body's provable path ends in a failure return.
-
-    Failure evidence must sit on the provable path; any success return
-    disqualifies the label, so a function that can succeed is never
-    treated as failing.
+    Verdicts: ``"exit"`` ends the shell unconditionally wherever it runs,
+    ``"fail"`` dies under errexit when unprotected, ``"ok"`` terminates a
+    body normally, and None keeps running.  ``exit`` is only contained by
+    pipelines, background lists, subshells and substitutions; a failure is
+    also exempted as a non-final ``&&``/``||`` operand (including the whole
+    run of a function called there).  The status feeds the chain tracker
+    (None = unknown).
     """
-    pairs = _command_segments_with_separators(body)
-    if _return_success_evidence(pairs):
+    words, bang = _chain_prefix_words(segment)
+    words = _peel_execution_wrappers(words)
+    first = _resolve_heredoc_word(words[0])[0] if words else ""
+    exit_state = _exit_segment_state(words, separator, following, exiting)
+    if exit_state is not None:
+        return exit_state
+    return_state = _return_segment_state(segment, first, previous)
+    if return_state is not None:
+        return return_state
+    value = _segment_literal(segment)
+    if value is None and first in failing:
+        value = False
+    if bang and value is not None:
+        value = not value
+    if value is False:
+        return _failing_segment_state(separator, following)
+    return None, value
+
+
+def _verdict_ends(verdict: str | None, errexit: bool) -> bool:
+    """Whether a segment verdict ends the shell under the errexit state."""
+    if verdict == "exit":
+        return True
+    return verdict == "fail" and errexit
+
+
+def _condition_exit(segment: str, exiting: frozenset[str]) -> bool:
+    """Whether an ``if``/``elif``/``while`` condition itself provably exits."""
+    words, _bang = _chain_prefix_words(" ".join(segment.split()[1:]))
+    words = _peel_execution_wrappers(words)
+    if not words:
         return False
-    failure_return = False
-    previous: bool | None = None
-    branches: list[tuple[bool | None, bool]] = []
-    for index, (segment, separator) in enumerate(pairs):
-        keyword = _segment_keyword(segment)
-        condition = _pair_condition(pairs, index, keyword)
-        if _branch_keyword_step(branches, segment, condition):
-            if keyword in ("then", "do", "else"):
-                failure_return = failure_return or _marker_failure_evidence(
-                    segment, separator, previous, branches
-                )
-            previous = None
-            continue
+    first = _resolve_heredoc_word(words[0])[0]
+    return first == "exit" or _is_exec_replacement(words) or first in exiting
+
+
+def _branch_step_state(
+    segment: str,
+    keyword: str,
+    separator: str,
+    following: str,
+    previous: bool | None,
+    branches: list[tuple[bool, int]],
+    failing: frozenset[str],
+    exiting: frozenset[str],
+) -> tuple[str | None, bool | None]:
+    """The carried-command verdict and status of a construct keyword step.
+
+    ``if true; then exit 1`` and ``then bail`` carry a command that ends
+    the shell when the branch provably runs; an exiting condition
+    (``if bail; then``) provokes the end wherever it is evaluated.  The
+    status feeds the chain tracker exactly like a plain segment's does, so
+    a carried ``then false`` still short-circuits the ``||`` after it.
+    """
+    if keyword in ("then", "do", "else"):
         if not _region_runs(branches) or _chain_skips(separator, previous):
-            continue
-        if _return_failure(segment) is True:
-            failure_return = True
-        previous = _segment_literal(segment)
-    return failure_return
+            return None, None
+        carried = _body_marker_command(segment)
+        if not carried:
+            return None, None
+        return _live_segment_state(
+            carried, ";", following, previous, failing, exiting
+        )
+    if keyword in ("if", "elif", "while", "until"):
+        if _condition_exit(segment, exiting):
+            return "exit", None
+    return None, None
+
+
+def _body_can_succeed(body: str) -> bool:
+    """Whether a body can possibly return success.
+
+    A reachable ``return 0`` or bare ``return`` (which propagates a status
+    that can be zero) means the function can succeed, so it must never
+    carry the always-failing label; the possible-path walk keeps loops and
+    unevaluated branches alive for exactly this check.
+    """
+    for segment in _possibly_reached_segments(body):
+        if _return_kind(segment) in ("zero", "bare"):
+            return True
+    return False
+
+
+def _verdict_disposition(
+    verdict: str | None, can_succeed: bool
+) -> tuple[bool, bool] | None:
+    """Map a segment verdict to the (fails, exits) answer, or None.
+
+    ``exit`` ends the shell from any position; ``fail`` ends it under
+    errexit unless the body can possibly succeed.  None means the verdict
+    carries no terminal disposition and the walk continues.
+    """
+    if verdict == "exit":
+        return False, True
+    if verdict == "fail":
+        return (not can_succeed), False
+    return None
+
+
+def _body_step_verdict(
+    pairs: list[tuple[str, str]],
+    index: int,
+    previous: bool | None,
+    branches: list[tuple[bool, int]],
+    can_succeed: bool,
+    failing: frozenset[str],
+    exiting: frozenset[str],
+) -> tuple[tuple[bool, bool] | None, bool | None, bool]:
+    """One step of the body walk.
+
+    Returns ``(disposition, previous, dead)``: a non-None disposition is
+    the final ``(fails, exits)`` answer; otherwise ``dead`` tells the
+    caller the step was skipped (dead region or short-circuit) and
+    ``previous`` carries the state for the next step.
+    """
+    segment, separator = pairs[index]
+    following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
+    keyword = _segment_keyword(segment)
+    condition = _pair_condition(pairs, index, keyword)
+    if _branch_keyword_step(branches, segment, condition):
+        verdict, status = _branch_step_state(
+            segment, keyword, separator, following, previous, branches,
+            failing, exiting,
+        )
+        return _verdict_disposition(verdict, can_succeed), status, False
+    if not _region_runs(branches) or _chain_skips(separator, previous):
+        return None, previous, True
+    verdict, status = _live_segment_state(
+        segment, separator, following, previous, failing, exiting
+    )
+    disposition = _verdict_disposition(verdict, can_succeed)
+    if disposition is None and verdict == "ok":
+        disposition = (False, False)
+    return disposition, status, False
+
+
+def _body_verdict(
+    body: str, failing: frozenset[str], exiting: frozenset[str]
+) -> tuple[bool, bool]:
+    """Whether invoking this body provably ends the shell, and how.
+
+    ``fails``: an errexit-fatal event occurs on the provable path before
+    the body returns, so a non-exempt call under ``set -e`` ends the
+    shell; a possibly-reached success return disqualifies the label,
+    because such a function can succeed.  ``exits``: the body provably
+    reaches ``exit``/``exec`` on the provable path, which ends the shell
+    from any non-contained position regardless of errexit.  Both sets feed
+    the call-graph fixpoint in ``_function_kill_sets``.
+    """
+    can_succeed = _body_can_succeed(body)
+    pairs = _command_segments_with_separators(body)
+    previous: bool | None = None
+    branches: list[tuple[bool, int]] = []
+    for index in range(len(pairs)):
+        disposition, previous_out, dead = _body_step_verdict(
+            pairs, index, previous, branches, can_succeed, failing, exiting
+        )
+        if disposition is not None:
+            return disposition
+        if not dead:
+            previous = previous_out
+    if previous is False:
+        return (not can_succeed), False
+    return False, False
 
 
 def _segment_ends_shell(
     segment: str,
+    separator: str,
     following: str,
     errexit: bool,
+    previous: bool | None,
     failing: frozenset[str] = frozenset(),
+    exiting: frozenset[str] = frozenset(),
 ) -> bool:
     """Whether the segment ends its shell.
 
-    ``exit`` always ends it, ``exec cmd`` replaces the process, and a
-    standalone failing command ends it under ``set -e`` (errexit ignores
-    failures inside an ``&&``/``||``/pipeline list).  A call to a local
-    function that always returns a failure status counts as failing too.
+    ``exit`` always ends it (outside pipelines, background lists, subshells
+    and substitutions), ``exec cmd`` replaces the process, and a failing
+    command ends it under ``set -e`` when it is not exempt as a chain
+    operand or contained region.  A call to a local function that provably
+    ends the same way counts too.
     """
-    words = _peel_execution_wrappers(segment.split())
-    keyword = _resolve_heredoc_word(words[0])[0] if words else ""
-    if keyword == "exit" or _is_exec_replacement(words):
-        return True
-    value = _segment_literal(segment)
-    if value is None and failing and words:
-        if _resolve_heredoc_word(words[0])[0] in failing:
-            value = False
-    return (
-        errexit and value is False and following not in ("&&", "||", "|")
+    verdict, _status = _live_segment_state(
+        segment, separator, following, previous, failing, exiting
     )
+    return _verdict_ends(verdict, errexit)
+
+
+def _live_scan_step(
+    pairs: list[tuple[str, str]],
+    index: int,
+    previous: bool | None,
+    branches: list[tuple[bool, int]],
+    exited: bool,
+    errexit: bool,
+    failing: frozenset[str],
+    exiting: frozenset[str],
+) -> tuple[bool, bool, bool | None, bool, bool]:
+    """One step of the live-command scan.
+
+    Returns ``(is_live, exited, previous, errexit, carry)``: ``is_live``
+    marks a segment on the unconditional path (the caller appends it);
+    ``carry`` is False when the step is provably dead or short-circuited,
+    so the caller keeps its current chain state instead of the returned
+    one.  ``exited`` and ``errexit`` are the updated shell-end state.
+    """
+    segment, separator = pairs[index]
+    following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
+    condition = _pair_condition(pairs, index, _segment_keyword(segment))
+    if _branch_keyword_step(branches, segment, condition):
+        verdict, status = _branch_step_state(
+            segment,
+            _segment_keyword(segment),
+            separator,
+            following,
+            previous,
+            branches,
+            failing,
+            exiting,
+        )
+        if not exited and _verdict_ends(verdict, errexit):
+            exited = True
+        return False, exited, status, errexit, True
+    if exited or not _region_runs(branches) or _chain_skips(separator, previous):
+        return False, exited, previous, errexit, False
+    verdict, status = _live_segment_state(
+        segment, separator, following, previous, failing, exiting
+    )
+    if _verdict_ends(verdict, errexit):
+        return True, True, None, errexit, True
+    state = _set_errexit_state(segment)
+    if state is not None:
+        errexit = state
+    return True, exited, status, errexit, True
 
 
 def _live_command_segments(
-    script: str, failing: frozenset[str] = frozenset()
+    script: str,
+    failing: frozenset[str] = frozenset(),
+    exiting: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Segments on the unconditional path of one shell's script.
 
@@ -1646,48 +2364,44 @@ def _live_command_segments(
     evaluated literal is conditional itself, and ``exit``/``return`` end
     the run.  Literal conditions and short-circuits are modeled, so
     ``if true`` bodies and ``true &&`` chains still count; a standalone
-    failing command under ``set -e`` ends the run too.
+    failing command under ``set -e`` ends the run too, including through
+    calls to local functions that provably end in a failure or an exit.
     """
     live: list[str] = []
     previous: bool | None = None
-    branches: list[tuple[bool | None, bool]] = []
+    branches: list[tuple[bool, int]] = []
     exited = False
     errexit = False
     pairs = _command_segments_with_separators(script)
-    for index, (segment, separator) in enumerate(pairs):
+    for index in range(len(pairs)):
         # Each tuple carries the separator BEFORE its segment, so the
         # separator after this segment comes from the next tuple.
-        following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
-        condition = _pair_condition(
-            pairs, index, _segment_keyword(segment)
+        is_live, exited_out, previous_out, errexit_out, carry = _live_scan_step(
+            pairs, index, previous, branches, exited, errexit, failing, exiting
         )
-        if _branch_keyword_step(branches, segment, condition):
-            previous = None
-            continue
-        if exited or not _region_runs(branches):
-            continue
-        if _chain_skips(separator, previous):
-            continue
-        live.append(segment)
-        if _segment_ends_shell(segment, following, errexit, failing):
-            exited = True
-            previous = None
-            continue
-        state = _set_errexit_state(segment)
-        if state is not None:
-            errexit = state
-        previous = _segment_literal(segment)
+        if is_live:
+            live.append(pairs[index][0])
+        if carry:
+            exited = exited_out
+            previous = previous_out
+            errexit = errexit_out
     return live
 
 
-def _rustfmt_component_index(segments: list[str]) -> int | None:
+def _rustfmt_component_index(
+    segments: list[str], after: int | None = None
+) -> int | None:
     """Position of the segment that installs rustfmt for the pinned toolchain.
 
     Accepts either argument order inside a single ``rustup component add``
     command segment; the segment boundary keeps a later command's arguments
-    from satisfying the requirement.
+    from satisfying the requirement.  With ``after``, only the segments
+    after that position qualify, so a reordered list that still contains a
+    valid installer→component pair passes.
     """
     for position, segment in enumerate(segments):
+        if after is not None and position <= after:
+            continue
         if not _COMPONENT_ADD_RE.match(_strip_provision_wrappers(segment)):
             continue
         if re.search(r"\brustfmt\b", segment) and re.search(
@@ -1697,17 +2411,16 @@ def _rustfmt_component_index(segments: list[str]) -> int | None:
     return None
 
 
-def _provides_rustfmt_component(run_scripts: str) -> bool:
-    """Whether a command installs rustfmt for the pinned toolchain."""
-    return _rustfmt_component_index(_command_segments(run_scripts)) is not None
-
-
 def _literal_true_condition(value: str) -> bool:
-    """Whether an ``if:`` expression is literally, unconditionally true."""
+    """Whether an ``if:`` expression runs on the normal path.
+
+    GitHub expressions ``true``, ``success()`` and ``always()`` all leave
+    the step running on the happy path (``success()`` is the default
+    gate); every other expression may skip it."""
     text = value.strip()
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2].strip()
-    return text == "true"
+    return text in ("true", "success()", "always()")
 
 
 def _step_runs_shell(step: dict) -> bool:
@@ -1727,9 +2440,13 @@ def _step_runs_shell(step: dict) -> bool:
         ):
             return False
     shell = step.get("shell")
-    if isinstance(shell, str) and shell.split():
-        return shell.split()[0] in ("bash", "sh")
-    return True
+    if shell is None:
+        return True
+    if not isinstance(shell, str) or not shell.split():
+        # An unexpected shape cannot be known to feed bash; fail closed.
+        return False
+    name = shell.split()[0].rsplit("/", 1)[-1]
+    return name in ("bash", "sh")
 
 
 def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
@@ -1818,7 +2535,10 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     installer, which validates the downloaded rustup-init checksum before
     execution.  Every run line is scanned -- including conditional steps
     and function bodies -- because a raw install must fail the gate
-    wherever it could ever appear.
+    wherever it could ever appear.  The scan models static shell command
+    lines; a payload assembled at runtime (a ``python3 -c`` program, an
+    expanded variable) is outside its scope and such a form never counts
+    as provisioning either.
     """
     runs = _all_job_run_scripts(workflow_content)
     if runs is None:
@@ -1836,19 +2556,18 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     return None
 
 
-
-
 def _is_retry_call(segment: str) -> bool:
     """Whether the segment invokes the local ``retry N`` wrapper.
 
     Leading ``VAR=VAL`` assignments do not change which command runs, so
-    they are stepped over before the retry token is read.
+    they are stepped over before the retry token is read; the token is
+    resolved through quote removal, as the shell resolves it.
     """
     words = segment.split()
     index = _skip_env_assignments(words, 0)
     return (
         index + 1 < len(words)
-        and words[index] == "retry"
+        and _resolve_heredoc_word(words[index])[0] == "retry"
         and words[index + 1].isdigit()
     )
 
@@ -1871,48 +2590,64 @@ def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]
     return candidates
 
 
-_SHADOWED_NAMES = frozenset({
+_SHADOWED_NAMES = _PREFIX_STRIPPED_NAMES | frozenset({
     ":",
-    "bash",
-    "builtin",
-    "command",
-    "dash",
-    "env",
-    "eval",
-    "exec",
     "exit",
     "false",
-    "nohup",
     "python",
     "python3",
     "return",
     "rustup",
-    "sh",
-    "sudo",
     "true",
 })
 
 
-def _shadowing_issue(script: str) -> str | None:
+def _shadowing_issue(
+    script: str, job_name: str = RELEASE_GATE_JOB_NAME
+) -> str | None:
     """Reject functions that shadow commands the provisioning checks read.
 
     A function named like a shell builtin or like one of the commands the
     checks match changes what those words do, so provisioning text can no
-    longer be trusted to mean what it says.
+    longer be trusted to mean what it says.  The guard spans every
+    provisioning job: a no-op wrapper in either job defeats its own checks
+    the same way.
     """
     shadowed = _defined_function_names(script) & _SHADOWED_NAMES
     if not shadowed:
         return None
     return (
-        "the release-gate job defines shell functions that shadow commands "
+        f"the {job_name} job defines shell functions that shadow commands "
         "used by the provisioning checks ("
         + ", ".join(sorted(shadowed))
         + "); rename them so the checks trust the commands they read"
     )
 
 
+def _provisioning_shadow_issue(workflow_content: str) -> str | None:
+    """Reject shadowing definitions anywhere in a provisioning job.
+
+    Both release-gate and fuzz-qualification resolve the pinned toolchain
+    through the same commands, so both jobs' run steps are scanned; a
+    function defined in one job cannot be trusted to mean the builtin it
+    shadows.  Steps that do not run a shell on every path are skipped,
+    exactly as the provisioning checks skip them.
+    """
+    for job_name in PROVISIONING_JOB_NAMES:
+        run_scripts = _job_run_scripts(workflow_content, job_name)
+        if run_scripts is None:
+            continue
+        for step in run_scripts:
+            issue = _shadowing_issue(
+                _strip_heredocs(_strip_shell_comments(step)), job_name
+            )
+            if issue:
+                return issue
+    return None
+
+
 def _release_gate_toolchain_issue(
-    run_scripts: "str | list[str]",
+    run_scripts: str | list[str],
 ) -> str | None:
     """Return the toolchain provisioning issue, or None when satisfied.
 
@@ -1934,6 +2669,9 @@ def _release_gate_toolchain_issue(
         # step runs in its own shell, so function reachability resets per
         # step: a definition cannot cross into the next step's shell.
         stripped = _strip_heredocs(_strip_shell_comments(step))
+        structure_issue = _unclosed_structure_issue(stripped)
+        if structure_issue:
+            return structure_issue
         shadow_issue = _shadowing_issue(stripped)
         if shadow_issue:
             return shadow_issue
@@ -1948,10 +2686,11 @@ def _release_gate_toolchain_issue(
                 "statically; use a plain delimiter"
             )
         retry_trusted = _retry_runs_its_target(stripped)
-        failing = frozenset(_always_failing_functions(stripped))
+        failing, exiting = _function_kill_sets(stripped)
         segments.extend(
             _provision_candidates(
-                _live_command_segments(executable, failing), retry_trusted
+                _live_command_segments(executable, failing, exiting),
+                retry_trusted,
             )
         )
     if not any(
@@ -1977,15 +2716,15 @@ def _release_gate_toolchain_issue(
             "through the verified installer (bash ./packaging/scripts/"
             'install-verified-rustup.sh --toolchain "${RUST_TOOLCHAIN}")'
         )
-    component_at = _rustfmt_component_index(segments)
+    component_at = _rustfmt_component_index(segments, after=installer_at)
     if component_at is None:
-        return (
-            "the release-gate job must add the rustfmt component for the "
-            "pinned toolchain (rustup component add --toolchain "
-            '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
-            "resolve for the gate scripts"
-        )
-    if component_at < installer_at:
+        if _rustfmt_component_index(segments) is None:
+            return (
+                "the release-gate job must add the rustfmt component for the "
+                "pinned toolchain (rustup component add --toolchain "
+                '"${RUST_TOOLCHAIN}" rustfmt) so cargo, rustc and rustfmt '
+                "resolve for the gate scripts"
+            )
         return (
             "the release-gate job must install the toolchain through the "
             "verified installer before adding the rustfmt component: rustup "
@@ -2012,8 +2751,10 @@ def check_release_gate_toolchain(result: ValidationResult) -> None:
         )
         return
 
-    issue = _raw_toolchain_install_issue(content) or _release_gate_toolchain_issue(
-        run_scripts
+    issue = (
+        _raw_toolchain_install_issue(content)
+        or _provisioning_shadow_issue(content)
+        or _release_gate_toolchain_issue(run_scripts)
     )
     if issue is None:
         result.pass_(
@@ -2035,11 +2776,11 @@ def _workflow_naming_issue(wf_content: str) -> str | None:
     """
     has_deb_naming = bool(
         re.search(r"nginx-\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx-\$\{\{.*nginx_version", wf_content)
+        or re.search(r"nginx-\$\{\{[^}]*nginx_version", wf_content)
     )
     has_rpm_naming = bool(
         re.search(r"nginx\$\{?NGINX_VERSION", wf_content)
-        or re.search(r"nginx\$\{\{.*nginx_version", wf_content)
+        or re.search(r"nginx\$\{\{[^}]*nginx_version", wf_content)
     )
     if has_deb_naming and has_rpm_naming:
         return None
@@ -2049,6 +2790,79 @@ def _workflow_naming_issue(wf_content: str) -> str | None:
     if not has_rpm_naming:
         missing.append(".rpm naming without NGINX version")
     return "; ".join(missing)
+
+
+def _requirements_pin_issue(requirements: str) -> str | None:
+    """Reject a missing requirements file or an unpinned dependency."""
+    if not requirements:
+        return (
+            "requirements-release.txt not found; the release-gate job "
+            "cannot be verified to install its pinned Python dependencies"
+        )
+    for name, pattern in (
+        ("jsonschema[format]", r"^jsonschema\[format\]=="),
+        ("PyYAML", r"^PyYAML=="),
+    ):
+        if not re.search(pattern + r"[^#\s]", requirements, re.M):
+            return (
+                f"requirements-release.txt must pin {name} to a version "
+                "(a bare name or a lone separator is not a pin)"
+            )
+    return None
+
+
+def _pip_first_steps(steps: list[str]) -> tuple[int | None, int | None]:
+    """Positions of the first pip install and the first docs-check.
+
+    Both are read from the live command segments of each step, so a
+    disabled or dead branch never satisfies the guard.
+    """
+    install_at: int | None = None
+    docs_check_at: int | None = None
+    for index, step in enumerate(steps):
+        stripped = _strip_heredocs(_strip_shell_comments(step))
+        executable = _join_continuations(_strip_function_bodies(stripped))
+        failing, exiting = _function_kill_sets(stripped)
+        for segment in _live_command_segments(executable, failing, exiting):
+            text = _strip_provision_wrappers(segment)
+            if _PIP_REQUIREMENT_RE.search(text) and install_at is None:
+                install_at = index
+            if "make docs-check" in text and docs_check_at is None:
+                docs_check_at = index
+    return install_at, docs_check_at
+
+
+def _python_deps_issue(run_scripts: str | list[str]) -> str | None:
+    """Check the release-gate job installs its pinned Python dependencies.
+
+    The docs-check chain imports jsonschema and PyYAML, which a fresh
+    runner only provides when ``requirements-release.txt`` is installed
+    first; the install must sit in executable command position before the
+    docs-check runs, in any shell-equivalent spelling of the pip
+    invocation, and both pins must carry an actual version token.
+    """
+    pin_issue = _requirements_pin_issue(read_safe(RELEASE_REQUIREMENTS))
+    if pin_issue is not None:
+        return pin_issue
+    steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
+    install_at, docs_check_at = _pip_first_steps(steps)
+    if install_at is None:
+        return (
+            "the release-gate job must install the pinned Python release "
+            "dependencies (from requirements-release.txt) so the docs-check "
+            "chain can import jsonschema and PyYAML"
+        )
+    if docs_check_at is None:
+        return (
+            "the release-gate job must run its docs-check chain once the "
+            "pinned Python dependencies are installed"
+        )
+    if install_at > docs_check_at:
+        return (
+            "the release-gate job must install requirements-release.txt "
+            "before the docs-check step that imports it"
+        )
+    return None
 
 
 def check_artifact_naming(result: ValidationResult) -> None:
@@ -2126,6 +2940,38 @@ def check_install_docs(result: ValidationResult) -> None:
         )
 
 
+def check_release_gate_python_deps(result: ValidationResult) -> None:
+    """Validate the release-gate job installs its pinned Python deps.
+
+    The docs-check chain imports jsonschema and PyYAML; a fresh runner
+    only has what requirements-release.txt installs, so the install step
+    must stay in the job and precede the check that needs it.
+    """
+    content = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not content:
+        result.fail(
+            PKG_RELEASE_GATE_PYTHON_DEPS_GATE,
+            "release-packages.yml not found",
+        )
+        return
+    run_scripts = _job_run_scripts(content, RELEASE_GATE_JOB_NAME)
+    if run_scripts is None:
+        result.fail(
+            PKG_RELEASE_GATE_PYTHON_DEPS_GATE,
+            f"{RELEASE_GATE_JOB_NAME} job not found in release-packages.yml",
+        )
+        return
+    issue = _python_deps_issue(run_scripts)
+    if issue is None:
+        result.pass_(
+            PKG_RELEASE_GATE_PYTHON_DEPS_GATE,
+            "release gate installs the pinned Python release dependencies "
+            "before the docs-check chain",
+        )
+    else:
+        result.fail(PKG_RELEASE_GATE_PYTHON_DEPS_GATE, issue)
+
+
 def print_report(result: ValidationResult) -> None:
     """Print a formatted validation report."""
     print("Fuzz & Packaging Infrastructure Validation Report")
@@ -2148,6 +2994,7 @@ def main() -> int:
     check_fuzz_guide(result)
     check_release_workflow(result)
     check_release_gate_toolchain(result)
+    check_release_gate_python_deps(result)
     check_artifact_naming(result)
     check_install_docs(result)
 

@@ -10,6 +10,7 @@ addresses the repository is asserted to be git-ignored here.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,41 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
+
+
+ENV_REFERENCE = re.compile(r"\$\{\{\s*env\.([A-Za-z_](?a:\w)*)\s*\}\}")
+
+
+def _workflow_env() -> dict[str, str]:
+    """Static top-level env values of the workflow."""
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    env = document.get("env") if isinstance(document, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    return {
+        name: value for name, value in env.items() if isinstance(value, str)
+    }
+
+
+def _resolve_static_env(text: str) -> str | None:
+    """Substitute the workflow's own ``${{ env.NAME }}`` references.
+
+    Only names defined as static string values in the workflow's top-level
+    env block are resolved; any other reference (a missing name, a
+    non-string value, a value that is itself an expression) returns None
+    so the caller fails closed instead of trusting an unverifiable path.
+    """
+    env = _workflow_env()
+    resolved = text
+    for _ in range(8):
+        match = ENV_REFERENCE.search(resolved)
+        if match is None:
+            return resolved
+        value = env.get(match.group(1))
+        if not isinstance(value, str) or "${" + "{" in value:
+            return None
+        resolved = resolved[: match.start()] + value + resolved[match.end():]
+    return None
 
 
 def _is_download_artifact(step: object) -> bool:
@@ -34,16 +70,21 @@ EXTERNAL_EXPRESSION_ROOTS = ("${{ runner.temp }}",)
 def _repository_path(step: dict) -> str | None:
     """The static repository-relative download path of the step, if any.
 
-    Only paths that are fully static after stripping an optional
-    ``${{ github.workspace }}`` prefix can be checked against git's ignore
-    rules; anything unresolved is left to the fail-closed predicate below.
+    Only paths that are fully static after resolving the workflow's own
+    env references and stripping an optional ``${{ github.workspace }}``
+    prefix can be checked against git's ignore rules; anything unresolved
+    is left to the fail-closed predicate below.
     """
     path = step.get("with", {}).get("path")
     if not isinstance(path, str):
         return None
+    resolved = _resolve_static_env(path)
+    if resolved is None:
+        return None
+    path = resolved
     if path.startswith(WORKSPACE_EXPRESSION):
         path = path[len(WORKSPACE_EXPRESSION):].lstrip("/")
-    if path.startswith("/") or "${{" in path or ".." in path.split("/"):
+    if path.startswith("/") or "${" + "{" in path or ".." in path.split("/"):
         return None
     return path.rstrip("/") or None
 
@@ -74,6 +115,9 @@ def _stages_into_repository_root(step: dict) -> bool:
 def _unresolvable_repository_path(step: dict) -> str | None:
     """A download path that cannot be proven safe, so the guard fails closed.
 
+    - The workflow's own static env references are resolved first; an env
+      reference that cannot be resolved (unknown name, non-string value,
+      value containing another expression) fails closed.
     - A path rooted in ``${{ github.workspace }}`` resolves inside the
       checkout; if its remainder still contains expressions it cannot be
       proven git-ignored.
@@ -88,16 +132,20 @@ def _unresolvable_repository_path(step: dict) -> str | None:
     path = step.get("with", {}).get("path")
     if not isinstance(path, str):
         return None
+    resolved = _resolve_static_env(path)
+    if resolved is None:
+        return path
+    path = resolved
     if _has_parent_segment(path):
         # A parent segment can walk back from an external root (for example
         # ${{ runner.temp }}/../<repo>/<repo>/...) into the checkout.
         return path
     if path.startswith(WORKSPACE_EXPRESSION):
         remainder = path[len(WORKSPACE_EXPRESSION):].lstrip("/")
-        return path if "${{" in remainder else None
+        return path if "$" + "{{" in remainder else None
     if path.startswith("/"):
         return path
-    if path.startswith("${{"):
+    if path.startswith("$" + "{{"):
         # Only roots with documented external semantics are provably outside
         # the checkout; any other expression (matrix, env, inputs, ...) can
         # resolve to a workspace-relative path.  The remainder of an external
@@ -106,8 +154,8 @@ def _unresolvable_repository_path(step: dict) -> str | None:
         if root is None:
             return path
         remainder = path[len(root):].lstrip("/")
-        return path if "${{" in remainder else None
-    if "${{" in path:
+        return path if "$" + "{{" in remainder else None
+    if "$" + "{{" in path:
         return path
     return None
 

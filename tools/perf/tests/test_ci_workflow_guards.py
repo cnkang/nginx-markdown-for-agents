@@ -155,13 +155,23 @@ def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
 
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
     assert "python3 -m pip install --requirement requirements-release.txt" in workflow
-    assert "import brotli, yaml; print(brotli.__version__, yaml.__version__)" in workflow
+    # The preflight must assert every pinned version the gate relies on:
+    # brotli and PyYAML from the start, plus jsonschema, whose transitive
+    # closure is the newest entry in requirements-release.txt.
+    assert (
+        "import brotli, yaml, jsonschema; "
+        "print(brotli.__version__, yaml.__version__, jsonschema.__version__)"
+    ) in workflow
+    assert "requires jsonschema==4.23.0" in workflow
     assert "Brotli==1.2.0" in (repo_root / "requirements-perf.txt").read_text(
         encoding="utf-8"
     )
     assert "PyYAML==6.0.2" in (repo_root / "requirements-release.txt").read_text(
         encoding="utf-8"
     )
+    assert "jsonschema[format]==4.23.0" in (
+        repo_root / "requirements-release.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_release_gate_requires_exact_tag_sha_checks() -> None:
