@@ -278,6 +278,11 @@ def test_declared_rust_exports_ignore_comments_and_string_literals(
         lambda path: path.read_text(encoding="utf-8"),
     )
 
+    nested_comment = "/* outer /* inner */ tail */"
+    assert (
+        detector._rust_block_comment_end(nested_comment, 0) == len(nested_comment)
+    )
+
     rust_exports = detector.declared_rust_exports()
     assert rust_exports == ["markdown_converter_new"]
     stale_header = frozenset(
