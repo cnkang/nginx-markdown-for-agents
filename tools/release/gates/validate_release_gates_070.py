@@ -595,6 +595,11 @@ def _github_boolean_operator(text: str, index: int) -> tuple[str, int] | None:
     return None
 
 
+_NEEDS_RESULT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])needs\.([A-Za-z0-9_-]+)\.result\b"
+)
+
+
 def _translate_github_expression(text: str) -> str:
     """Translate boolean punctuation while preserving quoted string content."""
     translated: list[str] = []
@@ -613,6 +618,12 @@ def _translate_github_expression(text: str) -> str:
             translated.append(char)
             index += 1
             continue
+        needs_result = _NEEDS_RESULT_RE.match(text, index)
+        if needs_result is not None:
+            job_name = needs_result.group(1).replace("-", "_")
+            translated.append(f"needs.{job_name}.result")
+            index = needs_result.end()
+            continue
         operator = _github_boolean_operator(text, index)
         if operator is not None:
             replacement, width = operator
@@ -621,9 +632,7 @@ def _translate_github_expression(text: str) -> str:
             continue
         translated.append(char)
         index += 1
-    return "".join(translated).replace(
-        "needs.release-gate.result", "needs.release_gate.result"
-    )
+    return "".join(translated)
 
 
 def _github_condition_ast(condition: str) -> ast.expr | None:
@@ -657,7 +666,7 @@ def _expression_attribute_name(node: ast.AST) -> str | None:
 def _condition_value(
     node: ast.AST, context: dict[str, str]
 ) -> bool | str | None:
-    """Resolve only boolean literals and the two release-tag context values."""
+    """Resolve literals and explicitly modeled GitHub context attributes."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (bool, str)):
         return node.value
     if isinstance(node, ast.Name):
@@ -666,7 +675,10 @@ def _condition_value(
         if node.id.lower() == "false":
             return False
     name = _expression_attribute_name(node)
-    if name in {"github.event_name", "github.ref_type"}:
+    if name is not None and (
+        name in {"github.event_name", "github.ref_type"}
+        or (name.startswith("needs.") and name.endswith(".result"))
+    ):
         return context.get(name)
     return None
 
@@ -751,23 +763,111 @@ def _evaluate_tag_condition(
     return None
 
 
+def _condition_needs_result_attributes(node: ast.AST) -> set[str]:
+    """Collect job-result contexts referenced by a parsed condition."""
+    attributes = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Attribute):
+            continue
+        name = _expression_attribute_name(child)
+        if (
+            name is not None
+            and name.startswith("needs.")
+            and name.endswith(".result")
+        ):
+            attributes.add(name)
+    return attributes
+
+
+def _is_always_condition_call(node: ast.Call) -> bool:
+    """Whether a GitHub status-function call is the supported ``always()``."""
+    return (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "always"
+        and not node.args
+        and not node.keywords
+    )
+
+
+def _evaluate_publish_boolean_operator(
+    node: ast.BoolOp, context: dict[str, str]
+) -> bool | None:
+    """Evaluate a publish AND/OR after every child is proven boolean."""
+    values = [
+        _evaluate_publish_condition(value, context) for value in node.values
+    ]
+    if any(not isinstance(value, bool) for value in values):
+        return None
+    return all(values) if isinstance(node.op, ast.And) else any(values)
+
+
+def _evaluate_publish_comparison(
+    node: ast.Compare, context: dict[str, str]
+) -> bool | None:
+    """Evaluate one equality comparison over a modeled workflow context."""
+    if len(node.ops) != 1:
+        return None
+    actual = _condition_value(node.left, context)
+    expected = _condition_value(node.comparators[0], context)
+    if actual is None or expected is None:
+        return None
+    if isinstance(node.ops[0], ast.Eq):
+        return actual == expected
+    if isinstance(node.ops[0], ast.NotEq):
+        return actual != expected
+    return None
+
+
+def _evaluate_publish_condition(
+    node: ast.AST, context: dict[str, str]
+) -> bool | None:
+    """Evaluate the publish condition's bounded boolean subset."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.Name) and node.id.lower() in {"true", "false"}:
+        return node.id.lower() == "true"
+    if isinstance(node, ast.Call):
+        return True if _is_always_condition_call(node) else None
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+        return _evaluate_publish_boolean_operator(node, context)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _evaluate_publish_condition(node.operand, context)
+        return not value if isinstance(value, bool) else None
+    if isinstance(node, ast.Compare):
+        return _evaluate_publish_comparison(node, context)
+    return None
+
+
 def _condition_contains_release_gate_success(condition: str) -> bool:
-    """Whether publish's own condition has a positive top-level success test."""
+    """Whether the full publish condition requires a successful release gate."""
     node = _github_condition_ast(condition)
     if node is None:
         return False
-    terms = node.values if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And) else [node]
-    for term in terms:
-        if (
-            isinstance(term, ast.Compare)
-            and len(term.ops) == 1
-            and isinstance(term.ops[0], ast.Eq)
-            and _expression_attribute_name(term.left) == "needs.release_gate.result"
-            and isinstance(term.comparators[0], ast.Constant)
-            and term.comparators[0].value == "success"
-        ):
-            return True
-    return False
+    gate_result = "needs.release_gate.result"
+    attributes = _condition_needs_result_attributes(node)
+    if gate_result not in attributes:
+        return False
+    success_context = {attribute: "success" for attribute in attributes}
+    success_context.update({"github.event_name": "push", "github.ref_type": "tag"})
+    if _evaluate_publish_condition(node, success_context) is not True:
+        return False
+    for result in ("failure", "cancelled", "skipped"):
+        failed_context = dict(success_context)
+        failed_context[gate_result] = result
+        if _evaluate_publish_condition(node, failed_context) is not False:
+            return False
+    signature_result = "needs.integrity_signature.result"
+    if signature_result in attributes:
+        dispatch_context = dict(success_context)
+        dispatch_context["github.event_name"] = "workflow_dispatch"
+        dispatch_context[signature_result] = "skipped"
+        if _evaluate_publish_condition(node, dispatch_context) is not True:
+            return False
+        tag_context = dict(dispatch_context)
+        tag_context["github.event_name"] = "push"
+        if _evaluate_publish_condition(node, tag_context) is not False:
+            return False
+    return True
 
 
 def _publish_waits_for_release_gate(release_packages: str) -> bool:
@@ -811,7 +911,11 @@ def _release_gate_tag_condition_gate(release_packages: str) -> bool:
         expression,
         {"github.event_name": "push", "github.ref_type": "branch"},
     )
-    return tag_push is True and branch_push is False
+    manual_dispatch = _evaluate_tag_condition(
+        expression,
+        {"github.event_name": "workflow_dispatch", "github.ref_type": "branch"},
+    )
+    return tag_push is True and branch_push is False and manual_dispatch is True
 
 
 def _release_gate_needs_gate(release_packages: str) -> bool:
