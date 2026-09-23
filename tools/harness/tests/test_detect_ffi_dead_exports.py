@@ -256,6 +256,37 @@ def test_lifecycle_pairs_reject_a_rust_removed_export_even_if_header_is_stale(
         detector.run_audit()
 
 
+def test_declared_rust_exports_ignore_comments_and_string_literals(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Only live Rust declarations belong to the FFI export set."""
+    module = tmp_path / "commented_exports.rs"
+    module.write_text(
+        'const DOC: &str = r###"#[unsafe(no_mangle)] pub extern "C" '
+        'fn markdown_converter_free() {}"###;\n'
+        'const COOKED: &str = "literal // and /* markers";\n'
+        '// #[unsafe(no_mangle)] pub extern "C" fn markdown_converter_free() {}\n'
+        '/* outer /* nested */ #[unsafe(no_mangle)] pub extern "C" '
+        'fn markdown_result_init() {} */\n'
+        '#[unsafe(no_mangle)]\npub extern "C" fn markdown_converter_new() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    rust_exports = detector.declared_rust_exports()
+    assert rust_exports == ["markdown_converter_new"]
+    stale_header = frozenset(
+        {"markdown_converter_new", "markdown_converter_free"}
+    )
+    dangling = detector.dangling_lifecycle_pairs(stale_header, rust_exports)
+    assert ("markdown_converter_new", "markdown_converter_free") in dangling
+
+
 def test_mask_keeps_string_literal_callsites() -> None:
     """URLs and strings containing // or /* must not hide real callsites."""
     code, state, _, _ = detector._mask_inline_comments(
