@@ -23,6 +23,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,12 @@ from lib.path_validation import validate_read_path, validate_write_path_within_r
 MODULE_SRC = ROOT / "components" / "nginx-module" / "src"
 MODULE_TESTS = ROOT / "components" / "nginx-module" / "tests"
 FFI_HEADER = MODULE_SRC / "markdown_converter.h"
+RUST_FFI_DIR = ROOT / "components" / "rust-converter" / "src" / "ffi"
+# Rust-owned FFI exports are discovered under this source directory, while the
+# generated header also includes reason-code generator declarations.
+RUST_FFI_EXPORT_RE = re.compile(
+    r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
+)
 
 # Loader/ABI functions that are part of the module handshake lifecycle.
 # These are never dead even if they only appear in the lifecycle init path.
@@ -65,8 +72,6 @@ LIFECYCLE_PAIRS = {
     "markdown_header_plan_free": "markdown_header_plan_init",
     "markdown_decomp_result_init": "markdown_decompress_bounded",
     "markdown_decompress_free": "markdown_decompress_bounded",
-    "markdown_dynconf_result_init": "markdown_dynconf_parse",
-    "markdown_dynconf_result_free": "markdown_dynconf_parse",
     "markdown_trusted_proxies_new": "markdown_trusted_proxies_push",
     "markdown_trusted_proxies_free": "markdown_trusted_proxies_push",
     "markdown_streaming_output_free": "markdown_streaming_feed",
@@ -173,6 +178,86 @@ def _line_export_name(line: str) -> str | None:
         match = CALLSITE_RE.search(line)
         return match.group(1) if match else None
     return _header_declaration_name(line)
+
+
+def declared_rust_exports() -> list[str]:
+    """Extract declared C export names from the Rust FFI export modules."""
+    names: set[str] = set()
+    for path in sorted(RUST_FFI_DIR.rglob("*.rs")):
+        text = _read_text(path)
+        if text is None:
+            raise ValueError(f"cannot read declared Rust FFI exports from {path}")
+        names.update(RUST_FFI_EXPORT_RE.findall(text))
+    if not names:
+        raise ValueError("no declared Rust FFI exports were found")
+    return sorted(names)
+
+
+def declared_ffi_export_universe(
+    header_exports: Iterable[str] | None = None,
+    rust_exports: Iterable[str] | None = None,
+) -> frozenset[str]:
+    """Return every C export name the current tree declares or generates.
+
+    The generated header is derived from the Rust FFI export modules plus the
+    reason-code generator, so the union of both sides is the export universe a
+    lifecycle pair must name.  Pass ``header_exports`` or ``rust_exports`` to
+    reuse existing parses instead of reading those sources again.
+    """
+    header_names = (
+        set(parse_header_exports(FFI_HEADER))
+        if header_exports is None
+        else set(header_exports)
+    )
+    rust_names = (
+        set(declared_rust_exports())
+        if rust_exports is None
+        else set(rust_exports)
+    )
+    if not header_names:
+        raise ValueError("no generated C header exports were found")
+    if not rust_names:
+        raise ValueError("no declared Rust FFI exports were found")
+    return frozenset(header_names | rust_names)
+
+
+def dangling_lifecycle_pairs(
+    universe: frozenset[str],
+    rust_exports: Iterable[str] | None = None,
+) -> list[tuple[str, str]]:
+    """Return lifecycle pairs naming a symbol outside the export universe.
+
+    ``LIFECYCLE_PAIRS`` exists to infer production calls for the CURRENT
+    Rust-owned lifecycle surface, so a pair left behind by a removed export is
+    stale detector data: it can silently credit a symbol that no longer exists.
+    Each key and value must therefore appear in both the declared Rust modules
+    and the generated/header export universe. Returns an empty list when sound.
+    """
+    rust_names = set(
+        declared_rust_exports() if rust_exports is None else rust_exports
+    )
+    return sorted(
+        (key, value)
+        for key, value in LIFECYCLE_PAIRS.items()
+        if key not in universe
+        or value not in universe
+        or key not in rust_names
+        or value not in rust_names
+    )
+
+
+def _reject_dangling_lifecycle_pairs(
+    universe: frozenset[str],
+    rust_exports: Iterable[str] | None = None,
+) -> None:
+    """Fail closed when a lifecycle pair names a removed export."""
+    dangling = dangling_lifecycle_pairs(universe, rust_exports)
+    if dangling:
+        joined = ", ".join(f"{key} -> {value}" for key, value in dangling)
+        raise ValueError(
+            "LIFECYCLE_PAIRS names symbols outside the declared FFI export "
+            f"universe: {joined}"
+        )
 
 
 def scan_c_callsites(
@@ -656,6 +741,11 @@ def run_audit() -> dict[str, Any]:
         )
 
     exports = parse_header_exports(FFI_HEADER)
+    rust_exports = declared_rust_exports()
+    # Stale detector data fails closed: an inference pair naming an export the
+    # current Rust declarations no longer expose cannot rely on a stale header.
+    universe = declared_ffi_export_universe(exports, rust_exports)
+    _reject_dangling_lifecycle_pairs(universe, rust_exports)
     production_callsites = scan_c_callsites(MODULE_SRC)
     test_references = scan_test_references(MODULE_TESTS)
     classifications = classify_exports(exports, production_callsites, test_references)

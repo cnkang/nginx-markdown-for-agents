@@ -128,6 +128,134 @@ def test_callsite_names_ignores_multiline_comment_body() -> None:
     assert "markdown_decompress" not in names
 
 
+def test_declared_export_universe_covers_header_and_rust_modules() -> None:
+    """The universe is the declared Rust exports plus the generated header."""
+    universe = detector.declared_ffi_export_universe()
+
+    rust_exports = detector.declared_rust_exports()
+    assert rust_exports
+    assert {"markdown_convert", "markdown_abi_version"} <= set(rust_exports)
+    # The removed dynconf surface must not be part of the current universe.
+    assert {
+        "markdown_dynconf_parse",
+        "markdown_dynconf_result_init",
+        "markdown_dynconf_result_free",
+    }.isdisjoint(universe)
+    # Reason-code helpers are generated into the header only, so the universe
+    # is the union of both sides rather than the Rust modules alone.
+    header_exports = detector.parse_header_exports(detector.FFI_HEADER)
+    assert universe == set(header_exports) | set(rust_exports)
+    assert set(header_exports) <= universe
+    assert set(rust_exports) <= universe
+
+
+def test_declared_rust_exports_discover_added_ffi_modules(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A new Rust module is included without updating a fixed module list."""
+    (tmp_path / "exports.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn base_export() {}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "future.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn future_export() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == ["base_export", "future_export"]
+
+
+def test_current_lifecycle_pairs_all_belong_to_the_export_universe() -> None:
+    """Every current pair names live exports, so the invariant passes."""
+    universe = detector.declared_ffi_export_universe()
+
+    assert detector.dangling_lifecycle_pairs(universe) == []
+    assert set(detector.LIFECYCLE_PAIRS) <= universe
+    assert set(detector.LIFECYCLE_PAIRS.values()) <= universe
+    # The removed dynconf pairs are the stale entries this invariant exists
+    # to catch; they must be gone from the table itself.
+    assert {
+        "markdown_dynconf_result_init",
+        "markdown_dynconf_result_free",
+    }.isdisjoint(detector.LIFECYCLE_PAIRS)
+
+
+def test_reintroduced_dynconf_lifecycle_pair_is_rejected() -> None:
+    """A pair naming a removed export must fail the universe invariant.
+
+    This is the mutation the fix guards against: restoring an obsolete pair
+    the current tree no longer declares.
+    """
+    universe = detector.declared_ffi_export_universe()
+    obsolete_pair = {
+        "markdown_dynconf_result_init": "markdown_dynconf_parse",
+        "markdown_dynconf_result_free": "markdown_dynconf_parse",
+    }
+
+    mutated = dict(detector.LIFECYCLE_PAIRS)
+    mutated.update(obsolete_pair)
+    restored = detector.LIFECYCLE_PAIRS
+    detector.LIFECYCLE_PAIRS = mutated
+    try:
+        dangling = detector.dangling_lifecycle_pairs(universe)
+        assert dangling == [
+            ("markdown_dynconf_result_free", "markdown_dynconf_parse"),
+            ("markdown_dynconf_result_init", "markdown_dynconf_parse"),
+        ]
+        with pytest.raises(ValueError, match="declared FFI export universe"):
+            detector._reject_dangling_lifecycle_pairs(universe)
+        with pytest.raises(ValueError, match="markdown_dynconf_parse"):
+            detector.run_audit()
+    finally:
+        detector.LIFECYCLE_PAIRS = restored
+
+    assert detector.LIFECYCLE_PAIRS is restored
+    assert detector.dangling_lifecycle_pairs(universe) == []
+
+
+def test_run_audit_wires_the_universe_invariant() -> None:
+    """The production audit path enforces the invariant on this tree."""
+    inventory = detector.run_audit()
+
+    assert inventory["summary"]["dead"] == 0
+    assert inventory["total_exports"] == len(
+        detector.parse_header_exports(detector.FFI_HEADER)
+    )
+
+
+def test_lifecycle_pairs_reject_a_rust_removed_export_even_if_header_is_stale(
+    monkeypatch,
+) -> None:
+    """A stale generated header cannot hide a removed Rust lifecycle symbol."""
+    export_name = sorted(detector.LIFECYCLE_PAIRS)[0]
+    header_exports = detector.parse_header_exports(detector.FFI_HEADER)
+    rust_exports = detector.declared_rust_exports()
+    assert export_name in header_exports
+    assert export_name in rust_exports
+
+    stale_rust_exports = [name for name in rust_exports if name != export_name]
+    universe = detector.declared_ffi_export_universe(
+        header_exports, stale_rust_exports
+    )
+    assert export_name in universe  # the stale generated header still says it exists
+    dangling = detector.dangling_lifecycle_pairs(universe, stale_rust_exports)
+    assert any(key == export_name or value == export_name for key, value in dangling)
+    with pytest.raises(ValueError, match=export_name):
+        detector._reject_dangling_lifecycle_pairs(universe, stale_rust_exports)
+
+    monkeypatch.setattr(
+        detector, "declared_rust_exports", lambda: stale_rust_exports
+    )
+    with pytest.raises(ValueError, match=export_name):
+        detector.run_audit()
+
+
 def test_mask_keeps_string_literal_callsites() -> None:
     """URLs and strings containing // or /* must not hide real callsites."""
     code, state, _, _ = detector._mask_inline_comments(
