@@ -1074,6 +1074,76 @@ def test_release_state_contract_accepts_canonical_pre_publication_state(tmp_path
     assert docs_checker.check_release_state_contract(tmp_path) == []
 
 
+def test_implementation_plan_distinguishes_prepared_notes_from_publication():
+    """WI-11 must separate prepared notes from unpublished release assets."""
+    plan_text = (
+        docs_checker.ROOT / "docs/development/0.9.2-implementation-plan.md"
+    ).read_text(encoding="utf-8")
+    wi11 = plan_text.partition("### WI-11:")[2].partition("### WI-12:")[0]
+    assert "The project prepared the v0.9.2 release notes" in wi11
+    assert "Publication of the tag and assets remains pending." in wi11
+
+    status_table = plan_text.partition("## 5. Task Status Tracking")[2]
+    wi11_row = next(
+        (line for line in status_table.splitlines() if line.startswith("| 11 |")),
+        "",
+    )
+    assert "The project prepared the v0.9.2 release notes" in wi11_row
+    assert "Publication of the tag and assets remains pending." in wi11_row
+
+
+def test_implementation_plan_scopes_historical_pending_labels():
+    """Historical work-item notes must not imply publication is historical."""
+    plan_text = (
+        docs_checker.ROOT / "docs/development/0.9.2-implementation-plan.md"
+    ).read_text(encoding="utf-8")
+    intro = " ".join(
+        plan_text.partition("## 1. Baseline Information")[2]
+        .partition("### Historical 0.9.1 Baseline")[0]
+        .split()
+    )
+    assert (
+        "Completed work-item statuses and dated `Document Updates` entries are "
+        "historical snapshots."
+    ) in intro
+    assert "WI-8 publication section below show the current state" in intro
+    assert (
+        "v0.9.2 remains pending publication, including its tag, assets, and "
+        "checksums."
+    ) in intro
+    assert "plan-era `pending` wording below is historical" not in intro
+
+
+def test_rollback_guide_history_does_not_claim_v092_was_released():
+    """The revision log must reflect the unpublished release candidate."""
+    rollback = (
+        docs_checker.ROOT / "docs/guides/VERSION_ROLLBACK-0.9.2.md"
+    ).read_text(encoding="utf-8")
+    history_row = next(
+        (
+            line
+            for line in rollback.splitlines()
+            if "| 0.9.2 | 2026-09-19 | Kang |" in line
+        ),
+        "",
+    )
+    assert "v0.9.2 release candidate" in history_row
+    assert "released v0.9.2" not in history_row.lower()
+
+
+def test_release_state_contract_accepts_future_publication_clause(tmp_path):
+    """Availability after the named version is published remains conditional."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "packaging/repo/apt/README.md":
+            "The v9.9.9 assets will be available after v9.9.9 is published.\n",
+        },
+    )
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
 def test_release_state_contract_rejects_pending_version_as_latest_tag(tmp_path):
     _write_pending_state(
         tmp_path,
