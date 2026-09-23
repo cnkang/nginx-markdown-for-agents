@@ -20,7 +20,7 @@ import re
 import subprocess
 from collections.abc import Mapping
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -67,6 +67,24 @@ def _workflow_env() -> dict[str, str]:
     return {
         name: value for name, value in env.items() if isinstance(value, str)
     }
+
+
+def _step_effective_env(step: object) -> dict[str, object]:
+    """Merge workflow, job, and step env values in GitHub precedence order."""
+    if not isinstance(step, dict):
+        return {name: value for name, value in _workflow_env().items()}
+    effective: dict[str, object] = {
+        name: value for name, value in _workflow_env().items()
+    }
+    scoped = step.get("_effective_env")
+    if isinstance(scoped, dict):
+        return {key: value for key, value in scoped.items()
+                if isinstance(key, str)}
+    step_env = step.get("env")
+    if isinstance(step_env, dict):
+        effective.update({key: value for key, value in step_env.items()
+                          if isinstance(key, str)})
+    return effective
 
 
 def _resolve_static_env(
@@ -137,7 +155,7 @@ def _repository_path(step: object) -> str | None:
     path = _step_path(step)
     if not isinstance(path, str):
         return None
-    resolved = _resolve_static_env(path)
+    resolved = _resolve_static_env(path, _step_effective_env(step))
     if resolved is None:
         return None
     path = resolved
@@ -145,7 +163,8 @@ def _repository_path(step: object) -> str | None:
         path = path[len(WORKSPACE_EXPRESSION):].lstrip("/")
     if path.startswith("/") or _GH_EXPR_OPEN in path or _has_parent_segment(path):
         return None
-    return path.rstrip("/") or None
+    normalized = PurePosixPath(path).as_posix()
+    return None if normalized == "." else normalized
 
 
 def _stages_into_repository_root(step: object) -> bool:
@@ -163,14 +182,17 @@ def _stages_into_repository_root(step: object) -> bool:
         # No path key (root staging) or an unreadable with: block: either way
         # the step cannot be attributed to a git-ignored staging directory.
         return True
-    if not isinstance(path, str) or path.startswith("/"):
+    if not isinstance(path, str):
+        return False
+    path = _resolve_static_env(path, _step_effective_env(step))
+    if path is None or path.startswith("/"):
         return False
     remainder = path
     if remainder.startswith(WORKSPACE_EXPRESSION):
         remainder = remainder[len(WORKSPACE_EXPRESSION):].lstrip("/")
-    if _GH_EXPR_OPEN in remainder:
+    if _GH_EXPR_OPEN in remainder or _has_parent_segment(remainder):
         return False
-    return remainder.rstrip("/") == ""
+    return PurePosixPath(remainder).as_posix() == "."
 
 
 def _unresolvable_repository_path(step: object) -> str | None:
@@ -193,7 +215,7 @@ def _unresolvable_repository_path(step: object) -> str | None:
     path = _step_path(step)
     if not isinstance(path, str):
         return None
-    resolved = _resolve_static_env(path)
+    resolved = _resolve_static_env(path, _step_effective_env(step))
     if resolved is None:
         return path
     path = resolved
@@ -234,15 +256,15 @@ def _external_expression_root(path: str) -> str | None:
     return None
 
 
-def _download_steps(document: object | None = None) -> list[dict]:
-    """Every ``actions/download-artifact`` step in the workflow.
+def _env_scope(value: object) -> dict[str, object]:
+    """Keep every named env override, including non-static values to fail closed."""
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
-    Malformed shapes never crash the guard: a document that is not a mapping,
-    a job that is not a mapping, a ``steps`` value that is not a list, and a
-    step that is not a mapping are each skipped (the predicates themselves
-    also reject non-mappings).  ``document`` defaults to the parsed workflow;
-    a caller may inject a synthetic one to drive the malformed branches.
-    """
+
+def _download_steps(document: object | None = None) -> list[dict]:
+    """Every artifact download step with its effective scoped environment."""
     if document is None:
         document = _workflow_document()
     if not isinstance(document, dict):
@@ -250,6 +272,7 @@ def _download_steps(document: object | None = None) -> list[dict]:
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         return []
+    workflow_env = _env_scope(document.get("env"))
     steps: list[dict] = []
     for job in jobs.values():
         if not isinstance(job, dict):
@@ -257,9 +280,16 @@ def _download_steps(document: object | None = None) -> list[dict]:
         job_steps = job.get("steps")
         if not isinstance(job_steps, list):
             continue
+        job_env = _env_scope(job.get("env"))
         for step in job_steps:
-            if isinstance(step, dict) and _is_download_artifact(step):
-                steps.append(step)
+            if not isinstance(step, dict) or not _is_download_artifact(step):
+                continue
+            effective_env = dict(workflow_env)
+            effective_env.update(job_env)
+            effective_env.update(_env_scope(step.get("env")))
+            scoped_step = dict(step)
+            scoped_step["_effective_env"] = effective_env
+            steps.append(scoped_step)
     return steps
 
 
@@ -492,3 +522,60 @@ def test_workflow_env_is_cached_and_static() -> None:
             f"workflow env {name!r} is itself an expression; the resolver "
             "fails closed on it"
         )
+
+
+def test_download_path_uses_workflow_job_then_step_environment() -> None:
+    """Narrower GitHub Actions env scopes shadow wider path variables."""
+    document = {
+        "env": {"STAGE": "release-assets"},
+        "jobs": {
+            "release": {
+                "env": {"STAGE": "job-staging"},
+                "steps": [
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "with": {"path": "${{ env.STAGE }}"},
+                    },
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "env": {"STAGE": "."},
+                        "with": {"path": "${{ env.STAGE }}"},
+                    },
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "env": {"STAGE": "step-staging"},
+                        "with": {"path": "${{ env.STAGE }}/downloaded/"},
+                    },
+                ],
+            }
+        },
+    }
+    steps = _download_steps(document)
+    assert len(steps) == 3
+    assert _repository_path(steps[0]) == "job-staging"
+    assert _stages_into_repository_root(steps[1])
+    assert _repository_path(steps[1]) is None
+    assert _repository_path(steps[2]) == "step-staging/downloaded"
+    for step in steps:
+        assert _unresolvable_repository_path(step) is None
+
+
+def test_shadowed_unresolvable_step_environment_fails_closed() -> None:
+    """A dynamic step override cannot fall back to a safe workflow value."""
+    document = {
+        "env": {"STAGE": "release-assets"},
+        "jobs": {
+            "release": {
+                "steps": [
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "env": {"STAGE": "${{ matrix.stage }}"},
+                        "with": {"path": "${{ env.STAGE }}/downloaded"},
+                    }
+                ]
+            }
+        },
+    }
+    (step,) = _download_steps(document)
+    assert _unresolvable_repository_path(step) == "${{ env.STAGE }}/downloaded"
+    assert _repository_path(step) is None
