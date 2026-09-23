@@ -1131,6 +1131,15 @@ def test_rollback_guide_history_does_not_claim_v092_was_released():
     assert "released v0.9.2" not in history_row.lower()
 
 
+def test_upgrade_guide_does_not_substitute_an_older_release_tag():
+    """A pending target release must not silently downgrade the download."""
+    guide = (
+        docs_checker.ROOT / "docs/guides/UPGRADE-TO-0.9.2.md"
+    ).read_text(encoding="utf-8")
+    assert "wait for its assets; do not substitute v0.9.1" in guide.lower()
+    assert "replace v0.9.2 with the latest published tag" not in guide.lower()
+
+
 def test_release_state_contract_accepts_future_publication_clause(tmp_path):
     """Availability after the named version is published remains conditional."""
     _write_pending_state(
