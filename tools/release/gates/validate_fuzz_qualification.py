@@ -101,7 +101,11 @@ FUZZ_JOB_BUDGET = 19300
 # Blocking targets run on this many concurrent workers inside the fuzz job.
 # The runner has four cores: three fuzz processes leave headroom for the
 # replay and shutdown work of a finishing invocation, and the measured
-# single-process execution rate holds without CPU contention.
+# single-process execution rate holds without CPU contention.  Memory is
+# the other half of the budget: three concurrent ASan fuzzers times their
+# per-process footprint stay inside the runner's 16 GB (each invocation's
+# captured output is additionally head/tail-capped by `_bounded_capture`,
+# so a chatty run cannot grow the captured buffers without bound).
 TARGET_WORKER_COUNT = 3
 # Terms of the job-limit equation above.  The setup allowance covers the
 # toolchain install steps before the first soak; the replay allowance
@@ -435,6 +439,28 @@ def _cargo_fuzz_available() -> bool:
     return result.returncode == 0
 
 
+# Cap on the captured output a single fuzz invocation may retain.  The
+# runner holds three concurrent workers; a crash-heavy invocation or a
+# chatty progress stream must not grow the captured output without bound
+# inside the 16 GB runner budget.  Head and tail stay (the startup banner
+# is head, the stats dump and crash reports are tail), and the elision is
+# marked so post-mortem readers know bytes were dropped.
+_MAX_CAPTURE_CHARS = 4_000_000
+
+
+def _bounded_capture(text: str) -> str:
+    """Keep the head and tail of a captured stream within the cap."""
+    if len(text) <= _MAX_CAPTURE_CHARS:
+        return text
+    keep = _MAX_CAPTURE_CHARS // 2
+    dropped = len(text) - 2 * keep
+    return (
+        text[:keep]
+        + f"\n[... {dropped} chars elided by the capture cap ...]\n"
+        + text[-keep:]
+    )
+
+
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
     cargo = _resolve_fuzz_cargo()
@@ -457,12 +483,13 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
             stdout = stdout.decode("utf-8", errors="replace")
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
-        return {"returncode": -1, "stdout": stdout,
-                "stderr": f"timed out: {exc}\n{stderr}"}
+        return {"returncode": -1, "stdout": _bounded_capture(stdout),
+                "stderr": _bounded_capture(f"timed out: {exc}\n{stderr}")}
     except OSError as exc:
         return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}"}
     return {"returncode": result.returncode,
-            "stdout": result.stdout, "stderr": result.stderr,
+            "stdout": _bounded_capture(result.stdout),
+            "stderr": _bounded_capture(result.stderr),
             "wall_elapsed": time.monotonic() - started}
 
 
@@ -845,6 +872,63 @@ def _handle_cargo_missing(args, candidate_sha: str,
     return 0
 
 
+def _worker_queue(entries: list[dict], worker_count: int) -> list[list[dict]]:
+    """Round-robin the entries into per-worker queues."""
+    queues: list[list[dict]] = [[] for _ in range(worker_count)]
+    for index, entry in enumerate(entries):
+        queues[index % worker_count].append(entry)
+    return queues
+
+
+def _run_queue(
+    queue: list[dict],
+    seeds: dict,
+    deadline: float,
+    records: dict[str, dict],
+    lock: threading.Lock,
+    errors: list[BaseException],
+    stop: threading.Event,
+) -> None:
+    """Run one worker's queue serially, recording errors and stopping peers.
+
+    An interpreter-level exit (KeyboardInterrupt/SystemExit) is recorded
+    for the parent's join-time re-raise and re-raised in-thread so the
+    runtime keeps seeing it; any other exception is recorded and stops the
+    sibling queues at their next boundary.
+    """
+    try:
+        for entry in queue:
+            if stop.is_set():
+                return
+            record = _run_target_record(
+                entry, seeds[entry["name"]]["seed_path"], deadline=deadline)
+            with lock:
+                records[entry["name"]] = record
+    except (KeyboardInterrupt, SystemExit) as exc:  # pragma: no cover
+        # Interpreter-level exits are recorded for the parent's join-time
+        # re-raise and signal the siblings to stop; the re-raise here
+        # keeps the exit visible to the runtime instead of swallowing it
+        # inside the worker thread.
+        with lock:
+            errors.append(exc)
+        stop.set()
+        raise
+    except Exception as exc:
+        with lock:
+            errors.append(exc)
+        stop.set()
+
+
+def _raise_worker_errors(errors: list[BaseException]) -> None:
+    """Re-raise the first worker error after reporting every later one."""
+    if not errors:
+        return
+    for extra in errors[1:]:
+        print(f"WARNING: additional worker error: {extra!r}",
+              file=sys.stderr)
+    raise errors[0]
+
+
 def _run_blocking_targets(entries: list[dict], seeds: dict,
                           deadline: float) -> dict[str, dict]:
     """Run the blocking targets on a small worker pool.
@@ -853,40 +937,32 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
     manifest order) and runs its queue serially; the pool overlaps the slow
     decode target's executions chase with the fast targets' soaks, which a
     strictly serial schedule cannot fit into the shared job envelope at the
-    measured CI execution rate.  Every target still runs -- the shared
-    deadline, not a cross-target abort, bounds the phase -- and records are
-    returned keyed by target name.
+    measured CI execution rate.  The shared deadline bounds the phase, and
+    an interrupted or failing worker stops its siblings at the next queue
+    boundary instead of letting them drain the whole envelope; every target
+    still runs unless a worker failed.  All worker errors are reported,
+    not just the first: records are returned keyed by target name, and any
+    error re-raises the first exception after the join.
     """
-    queues: list[list[dict]] = [[] for _ in range(TARGET_WORKER_COUNT)]
-    for index, entry in enumerate(entries):
-        queues[index % TARGET_WORKER_COUNT].append(entry)
+    queues = _worker_queue(entries, TARGET_WORKER_COUNT)
     records: dict[str, dict] = {}
     lock = threading.Lock()
     errors: list[BaseException] = []
-
-    def run_queue(queue: list[dict]) -> None:
-        try:
-            for entry in queue:
-                record = _run_target_record(
-                    entry, seeds[entry["name"]]["seed_path"],
-                    deadline=deadline)
-                with lock:
-                    records[entry["name"]] = record
-        except BaseException as exc:  # pragma: no cover - defensive
-            with lock:
-                errors.append(exc)
+    stop = threading.Event()
 
     threads = [
-        threading.Thread(target=run_queue, args=(queue,),
-                         name=f"fuzz-worker-{index}")
+        threading.Thread(
+            target=_run_queue,
+            args=(queue, seeds, deadline, records, lock, errors, stop),
+            name=f"fuzz-worker-{index}",
+        )
         for index, queue in enumerate(queues)
     ]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    if errors:
-        raise errors[0]
+    _raise_worker_errors(errors)
     return records
 
 

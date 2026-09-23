@@ -421,8 +421,10 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
             "release-gate:" in release_packages
             and "github.ref_type == 'tag'" in release_packages
             and re.search(
-                r"needs:\s*\[(?=[^\]]*\bprepare\b)"
-                r"(?=[^\]]*\bsmoke-test\b)[^\]]*\]",
+                r"needs:\s*\[(?=[^\]]*(?<![\w-])prepare(?![\w-]))"
+                r"(?=[^\]]*(?<![\w-])smoke-test(?![\w-]))"
+                r"(?=[^\]]*(?<![\w-])fuzz-qualification(?![\w-]))"
+                r"[^\]]*\]",
                 release_packages,
             )
             is not None,

@@ -955,19 +955,33 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     monkeypatch,
 ) -> None:
     """The slow target's chase must overlap the fast soaks instead of
-    queueing behind them."""
+    queueing behind them.
+
+    The schedule is made deterministic with a barrier handshake: each
+    target blocks until its partner is running, so overlap is proven by
+    the handshake itself instead of a timing margin.  A queueing schedule
+    would deadlock the barrier (and fail via the timeout), while an
+    overlapping one passes regardless of machine load.
+    """
+    import threading
     import time as time_module
 
     import tools.release.gates.validate_fuzz_qualification as validator
 
-    durations = {"slow": 0.3, "fast": 0.15}
+    # Two workers: fast-0 starts with slow (worker 0) and fast-1/2 share
+    # worker 1.  The handshake pairs fast-0 with slow: they must be
+    # running at the same time for the barrier to release.
+    barrier = threading.Barrier(2, timeout=10)
     spans: list[tuple[str, float, float]] = []
+    spans_lock = threading.Lock()
 
     def fake_record(entry, seed_path, deadline=None):
         start = time_module.monotonic()
-        time_module.sleep(
-            durations["slow"] if entry["name"] == "slow" else durations["fast"])
-        spans.append((entry["name"], start, time_module.monotonic()))
+        if entry["name"] in ("fast-0", "slow"):
+            barrier.wait()
+        time_module.sleep(0.05)
+        with spans_lock:
+            spans.append((entry["name"], start, time_module.monotonic()))
         return {
             "target": entry["name"], "seed": entry["seed"],
             "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
@@ -986,14 +1000,141 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     records = validator._run_blocking_targets(
         entries, seeds, deadline=start + 60)
     assert set(records) == {entry["name"] for entry in entries}
-    # The slow target must overlap a fast one: queueing the slow chase
-    # behind every fast soak (or the reverse) is exactly the regression.
-    # Relative-time overlap is load-independent: the spans come from the
-    # same clock, only their order matters.
-    slow_span = next(span for span in spans if span[0] == "slow")
-    fast_spans = [span for span in spans if span[0] != "slow"]
-    overlapping = any(
-        slow_span[1] < fast_span[2] and fast_span[1] < slow_span[2]
-        for fast_span in fast_spans
-    )
-    assert overlapping, spans
+    # Both handshake participants recorded; overlap was proven by the
+    # barrier (both were running together, or the wait timed out).
+    names = {span[0] for span in spans}
+    assert {"fast-0", "slow"} <= names, spans
+
+
+def test_worker_interrupt_stops_siblings_and_is_recorded_for_join(
+    monkeypatch,
+) -> None:
+    """An interpreter-level exit in a worker stops siblings and re-raises.
+
+    KeyboardInterrupt/SystemExit are recorded like any other worker error and
+    re-raised at join time (``errors[0]``), while the in-thread re-raise
+    keeps the exit visible to the interpreter's thread-exception hook
+    instead of silently swallowing it.  The hook is captured here so the
+    assertion covers the re-raise itself, not a pytest warning.
+    """
+    import threading
+    import time as time_module
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    ran = []
+    seen = []
+    monkeypatch.setattr(
+        threading, "excepthook",
+        lambda args: seen.append(type(args.exc_value).__name__))
+
+    def interrupt(entry, seed_path, deadline=None):
+        if entry["name"] == "exit":
+            raise SystemExit("interrupted")
+        time_module.sleep(0.05)
+        ran.append(entry["name"])
+        return {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+            "raw_log_ref": "", "status": "pass", "failure_reason": None,
+        }
+
+    monkeypatch.setattr(validator, "_run_target_record", interrupt)
+    entries = [{"name": "exit", "seed": 1}]
+    entries += [{"name": f"tail-{index}", "seed": 1} for index in range(4)]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    try:
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the worker exit must re-raise at join")
+    # The in-thread re-raise reached the interpreter's thread-exception
+    # hook: the exit stays visible instead of being swallowed.
+    assert "SystemExit" in seen, seen
+    # The exit stopped the sibling queue: at most the in-flight entry ran.
+    assert len(ran) <= 1, ran
+
+
+def test_worker_failure_stops_siblings_and_reports_every_error(
+    monkeypatch,
+    capsys,
+) -> None:
+    """A failing worker stops its siblings and every error is reported.
+
+    The early-stop event must prevent sibling queues from draining the
+    whole envelope after one worker fails (their records would be wasted
+    runs), and the aggregation must print every error beyond the first,
+    not just swallow them, while the first error still re-raises.
+    """
+    import time as time_module
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    ran = []
+
+    def fail_first(entry, seed_path, deadline=None):
+        # boom fails at once; siblings' entries sleep, so only an entry
+        # already in flight can complete after the stop event fires.
+        if entry["name"] == "boom":
+            raise RuntimeError("worker exploded")
+        time_module.sleep(0.05)
+        ran.append(entry["name"])
+        return {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+            "raw_log_ref": "", "status": "pass", "failure_reason": None,
+        }
+
+    monkeypatch.setattr(validator, "_run_target_record", fail_first)
+    # boom lands on worker 0; worker 1 gets the tail entries.
+    entries = [{"name": "boom", "seed": 1}]
+    entries += [{"name": f"tail-{index}", "seed": 1} for index in range(4)]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    try:
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+    except RuntimeError as exc:
+        assert "worker exploded" in str(exc)
+    else:
+        raise AssertionError("the first worker error must re-raise")
+    # The early-stop event kept worker 1 from draining its whole queue:
+    # only the entry already in flight when the failure fired completed.
+    assert len(ran) <= 1, ran
+
+
+def test_worker_failure_aggregates_errors_beyond_the_first(
+    monkeypatch,
+    capsys,
+) -> None:
+    """Every worker error is reported; the first one still raises."""
+    import threading
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    # Both workers must be inside the failure path before either raises,
+    # so the aggregation deterministically sees two errors instead of one
+    # racing the early-stop check.
+    barrier = threading.Barrier(2, timeout=10)
+
+    def fail_all(entry, seed_path, deadline=None):
+        barrier.wait()
+        raise ValueError(f"failure for {entry['name']}")
+
+    monkeypatch.setattr(validator, "_run_target_record", fail_all)
+    entries = [{"name": f"t{index}", "seed": 1} for index in range(4)]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    try:
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+    except ValueError as exc:
+        assert "failure for" in str(exc)
+    else:
+        raise AssertionError("the first worker error must re-raise")
+    err = capsys.readouterr().err
+    # At least one sibling error was printed beyond the raised first one
+    # (two workers, both fail; aggregation must not swallow the second).
+    assert "additional worker error" in err

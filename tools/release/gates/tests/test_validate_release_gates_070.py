@@ -28,7 +28,12 @@ def test_reason_code_gate_rejects_unrelated_reason_text():
 
 
 def test_gate_three_items_accepts_needs_in_any_order() -> None:
-    """`needs` order carries no meaning: both jobs may be listed any way."""
+    """`needs` order carries no meaning: every job may be listed any way.
+
+    The boundary is exact: a prefixed name (`prepare-x`) or a longer
+    sibling (`fuzz-qualification-record`) must not satisfy the list, and
+    every required job must actually be present.
+    """
     from tools.release.gates import validate_release_gates_070 as gates
 
     def item(text: str) -> bool:
@@ -39,7 +44,21 @@ def test_gate_three_items_accepts_needs_in_any_order() -> None:
         ][0]
 
     header = "release-gate:\n  job:\n    if: github.ref_type == 'tag'\n"
-    assert item(header + "    needs: [prepare, smoke-test]\n") is True
-    assert item(header + "    needs: [smoke-test, prepare]\n") is True
+    assert item(
+        header + "    needs: [prepare, smoke-test, fuzz-qualification]\n"
+    ) is True
+    assert item(
+        header + "    needs: [fuzz-qualification, smoke-test, prepare]\n"
+    ) is True
+    # A prefixed name must not stand in for the real job.
+    assert item(
+        header + "    needs: [prepare-x, smoke-test, fuzz-qualification]\n"
+    ) is False
+    # A longer sibling name must not stand in either.
+    assert item(
+        header + "    needs: [prepare, smoke-test, fuzz-qualification-record]\n"
+    ) is False
+    # Dropping the fuzz job from the list must fail the gate.
+    assert item(header + "    needs: [prepare, smoke-test]\n") is False
     crossed = header + "    needs: [prepare]\nother:\n  needs: [smoke-test]\n"
     assert item(crossed) is False
