@@ -7,6 +7,7 @@ documentation gates required for the 0.7.0 release milestone.
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import shutil
@@ -67,12 +68,7 @@ RELEASE_GATE_JOB = "release-gate"
 RELEASE_GATE_REQUIRED_NEEDS = frozenset(
     {"prepare", "smoke-test", "fuzz-qualification"}
 )
-# The tag predicate is matched inside the parsed job-level ``if`` value only.
-# A quoted or unquoted YAML scalar is resolved by the parser, so neither a
-# comment nor another job's condition can answer for the release-gate job.
-RELEASE_GATE_TAG_PREDICATE_RE = re.compile(
-    r"github\.ref_type\s*==\s*['\"]tag['\"]"
-)
+RELEASE_PUBLISH_JOB = "publish"
 # Named failure row reported when the workflow cannot be parsed at all because
 # PyYAML is not importable.
 RELEASE_GATE_PYYAML_GATE = "release-gate:pyyaml-dependency"
@@ -436,14 +432,13 @@ def _gate_2_items(
     ]
 
 
-def _release_gate_job(release_packages: str) -> dict[str, object] | None:
-    """Return the release-gate job mapping, or None when unreadable.
+def _workflow_job(
+    workflow_content: str, job_name: str
+) -> dict[str, object] | None:
+    """Return one parsed workflow job mapping, or None when unreadable.
 
-    The workflow text is parsed as YAML and only the ``release-gate`` job entry
-    is inspected, so a condition or dependency list belonging to another job --
-    or text sitting in a comment -- can never satisfy a check.  Block
-    sequences, quoted scalars and flow sequences are all resolved by the
-    parser.
+    Block sequences, quoted scalars, and flow sequences are resolved by the
+    YAML parser; comments and unrelated jobs are not part of this mapping.
 
     ``None`` means PyYAML is unavailable or the document did not parse into the
     expected shape (bad YAML, missing jobs map, or missing job entry); callers
@@ -455,14 +450,19 @@ def _release_gate_job(release_packages: str) -> dict[str, object] | None:
     except ImportError:  # PyYAML is a release requirement; fail closed here
         return None
     try:
-        document = yaml.safe_load(release_packages)
+        document = yaml.safe_load(workflow_content)
     except yaml.YAMLError:
         return None
     jobs = document.get("jobs") if isinstance(document, dict) else None
     if not isinstance(jobs, dict):
         return None
-    job = jobs.get(RELEASE_GATE_JOB)
+    job = jobs.get(job_name)
     return job if isinstance(job, dict) else None
+
+
+def _release_gate_job(release_packages: str) -> dict[str, object] | None:
+    """Return the release-gate job mapping, or None when unreadable."""
+    return _workflow_job(release_packages, RELEASE_GATE_JOB)
 
 
 def check_release_workflow_dependencies(result: ValidationResult) -> None:
@@ -557,22 +557,261 @@ def _strip_yaml_comments(text: str) -> str:
             elif char == '"':
                 in_dq = True
         lines.append(stripped)
-    return "\n".join(lines)
+    return chr(10).join(lines)
+
+
+def _github_expression_text(condition: str) -> str | None:
+    """Strip YAML comments and the optional GitHub expression wrapper."""
+    text = _strip_yaml_comments(condition).strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text or None
+
+
+def _advance_github_quote(
+    char: str, quote: str, escaped: bool
+) -> tuple[str | None, bool]:
+    """Advance quote/escape state for one character inside a string literal."""
+    if escaped:
+        return quote, False
+    if char == chr(92):
+        return quote, True
+    if char == quote:
+        return None, False
+    return quote, False
+
+
+def _github_boolean_operator(text: str, index: int) -> tuple[str, int] | None:
+    """Translate one unquoted GitHub boolean operator, if present."""
+    replacements = (("&&", " and "), ("||", " or "))
+    for operator, replacement in replacements:
+        if text.startswith(operator, index):
+            return replacement, len(operator)
+    char = text[index]
+    if ord(char) in (10, 13):
+        return " ", 1
+    if char == "!" and not text.startswith("!=", index):
+        return " not ", 1
+    return None
+
+
+def _translate_github_expression(text: str) -> str:
+    """Translate boolean punctuation while preserving quoted string content."""
+    translated: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            translated.append(char)
+            quote, escaped = _advance_github_quote(char, quote, escaped)
+            index += 1
+            continue
+        if char in ("'", '\"'):
+            quote = char
+            translated.append(char)
+            index += 1
+            continue
+        operator = _github_boolean_operator(text, index)
+        if operator is not None:
+            replacement, width = operator
+            translated.append(replacement)
+            index += width
+            continue
+        translated.append(char)
+        index += 1
+    return "".join(translated).replace(
+        "needs.release-gate.result", "needs.release_gate.result"
+    )
+
+
+def _github_condition_ast(condition: str) -> ast.expr | None:
+    """Parse a bounded GitHub boolean expression into a Python AST.
+
+    Only boolean operators and comparisons are evaluated by the gate. Calls,
+    unknown contexts, and unsupported operators remain unverifiable and fail
+    closed. The hyphenated release-gate name is normalized only for parsing.
+    """
+    text = _github_expression_text(condition)
+    if text is None:
+        return None
+    python_expression = _translate_github_expression(text)
+    try:
+        parsed = ast.parse(python_expression, mode="eval")
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    return parsed.body
+
+
+def _expression_attribute_name(node: ast.AST) -> str | None:
+    """Return a dotted attribute path without evaluating arbitrary syntax."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _expression_attribute_name(node.value)
+        return f"{parent}.{node.attr}" if parent is not None else None
+    return None
+
+
+def _condition_value(
+    node: ast.AST, context: dict[str, str]
+) -> bool | str | None:
+    """Resolve only boolean literals and the two release-tag context values."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (bool, str)):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id.lower() == "true":
+            return True
+        if node.id.lower() == "false":
+            return False
+    name = _expression_attribute_name(node)
+    if name in {"github.event_name", "github.ref_type"}:
+        return context.get(name)
+    return None
+
+
+_TAG_CONDITION_VALUES = {
+    "github.event_name": frozenset({"push", "workflow_dispatch"}),
+    "github.ref_type": frozenset({"tag"}),
+}
+
+
+def _condition_attribute_operand(node: ast.Compare) -> tuple[str, ast.AST] | None:
+    """Pair one modeled context attribute with its comparison literal."""
+    if len(node.ops) != 1:
+        return None
+    left_name = _expression_attribute_name(node.left)
+    right_name = _expression_attribute_name(node.comparators[0])
+    if left_name is not None and right_name is None:
+        return left_name, node.comparators[0]
+    if right_name is not None and left_name is None:
+        return right_name, node.left
+    return None
+
+
+def _supported_tag_predicate(attribute: str, literal_node: ast.AST) -> bool:
+    """Accept only tag/event literals whose context the gate models."""
+    values = _TAG_CONDITION_VALUES.get(attribute)
+    return (
+        values is not None
+        and _condition_value(literal_node, {}) in values
+    )
+
+
+def _evaluate_tag_comparison(
+    node: ast.Compare, context: dict[str, str]
+) -> bool | None:
+    """Evaluate one supported equality/inequality against tag context."""
+    operands = _condition_attribute_operand(node)
+    if operands is None:
+        return None
+    attribute, literal_node = operands
+    if not _supported_tag_predicate(attribute, literal_node):
+        return None
+    actual = _condition_value(node.left, context)
+    expected = _condition_value(node.comparators[0], context)
+    if actual is None or expected is None:
+        return None
+    operation = node.ops[0]
+    if isinstance(operation, ast.Eq):
+        return actual == expected
+    if isinstance(operation, ast.NotEq):
+        return actual != expected
+    return None
+
+
+def _evaluate_boolean_condition(
+    node: ast.BoolOp, context: dict[str, str]
+) -> bool | None:
+    """Evaluate an AND/OR only when every child is modeled."""
+    if not isinstance(node.op, (ast.And, ast.Or)):
+        return None
+    values = [_evaluate_tag_condition(value, context) for value in node.values]
+    if any(value is None for value in values):
+        return None
+    return all(values) if isinstance(node.op, ast.And) else any(values)
+
+
+def _evaluate_tag_condition(
+    node: ast.AST, context: dict[str, str]
+) -> bool | None:
+    """Evaluate a small boolean/comparison subset; unknown syntax is rejected."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.Name) and node.id.lower() in {"true", "false"}:
+        return node.id.lower() == "true"
+    if isinstance(node, ast.BoolOp):
+        return _evaluate_boolean_condition(node, context)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _evaluate_tag_condition(node.operand, context)
+        return None if value is None else not value
+    if isinstance(node, ast.Compare):
+        return _evaluate_tag_comparison(node, context)
+    return None
+
+
+def _condition_contains_release_gate_success(condition: str) -> bool:
+    """Whether publish's own condition has a positive top-level success test."""
+    node = _github_condition_ast(condition)
+    if node is None:
+        return False
+    terms = node.values if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And) else [node]
+    for term in terms:
+        if (
+            isinstance(term, ast.Compare)
+            and len(term.ops) == 1
+            and isinstance(term.ops[0], ast.Eq)
+            and _expression_attribute_name(term.left) == "needs.release_gate.result"
+            and isinstance(term.comparators[0], ast.Constant)
+            and term.comparators[0].value == "success"
+        ):
+            return True
+    return False
+
+
+def _publish_waits_for_release_gate(release_packages: str) -> bool:
+    """Check the parsed publish job's actual dependency and success condition."""
+    job = _workflow_job(release_packages, RELEASE_PUBLISH_JOB)
+    if job is None:
+        return False
+    needs = job.get("needs")
+    if isinstance(needs, str):
+        need_names = {needs}
+    elif isinstance(needs, list) and all(isinstance(item, str) for item in needs):
+        need_names = set(needs)
+    else:
+        return False
+    condition = job.get("if")
+    return (
+        RELEASE_GATE_JOB in need_names
+        and isinstance(condition, str)
+        and _condition_contains_release_gate_success(condition)
+    )
 
 
 def _release_gate_tag_condition_gate(release_packages: str) -> bool:
-    """True when the release-gate job's own ``if`` carries the tag predicate.
+    """True when the actual job condition runs on tags and rejects branch pushes.
 
-    The predicate is matched inside the parsed condition scalar, with comments
-    inside that scalar removed first, so a commented-out predicate cannot
-    satisfy it.
+    The bounded evaluator accepts only known boolean operators and GitHub
+    context comparisons; unknown forms fail closed. Manual dispatch remains a
+    supported alternate path.
     """
     condition = _release_gate_if_condition(release_packages)
     if condition is None:
         return False
-    return RELEASE_GATE_TAG_PREDICATE_RE.search(
-        _strip_yaml_comments(condition)
-    ) is not None
+    expression = _github_condition_ast(condition)
+    if expression is None:
+        return False
+    tag_push = _evaluate_tag_condition(
+        expression,
+        {"github.event_name": "push", "github.ref_type": "tag"},
+    )
+    branch_push = _evaluate_tag_condition(
+        expression,
+        {"github.event_name": "push", "github.ref_type": "branch"},
+    )
+    return tag_push is True and branch_push is False
 
 
 def _release_gate_needs_gate(release_packages: str) -> bool:
@@ -606,8 +845,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         ),
         (
             "publish waits for release gate",
-            "needs: [release-gate" in release_packages
-            and "needs.release-gate.result == 'success'" in release_packages,
+            _publish_waits_for_release_gate(release_packages),
         ),
     ]
 

@@ -1655,6 +1655,14 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     if char == ";":
         return 1
     if char in "&|":
+        if char == "&":
+            if (index > 0 and line[index - 1] in "<>") or line.startswith(
+                "&>", index
+            ):
+                # In a redirection such as ``2>&1`` or ``&>file``, the
+                # ampersand is part of the redirection token, not a command
+                # separator.
+                return 0
         return 2 if line.startswith(char * 2, index) else 1
     return 1 if char in "()`" else 0
 
@@ -2605,6 +2613,21 @@ def _literal_true_condition(value: str) -> bool:
     return text in ("true", "success()", "always()")
 
 
+def _syntax_only_shell_mode(words: list[str]) -> bool:
+    """Whether a shell command requests syntax checking instead of execution."""
+    for index, word in enumerate(words[1:], start=1):
+        if word == "{0}":
+            break
+        if word in {"-n", "--noexec"}:
+            return True
+        if word.startswith("-") and not word.startswith("--") and "n" in word[1:]:
+            return True
+        if word in {"-o", "-O"} and index + 1 < len(words):
+            if words[index + 1] == "noexec":
+                return True
+    return False
+
+
 def _step_runs_shell(step: dict) -> bool:
     """Whether a workflow step's ``run`` executes in a shell on every path.
 
@@ -2628,11 +2651,17 @@ def _step_runs_shell(step: dict) -> bool:
     shell = step.get("shell")
     if shell is None:
         return True
-    if not isinstance(shell, str) or not shell.split():
+    if not isinstance(shell, str):
         # An unexpected shape cannot be known to feed bash; fail closed.
         return False
-    name = shell.split()[0].rsplit("/", 1)[-1]
-    return name in ("bash", "sh")
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    name = words[0].rsplit("/", 1)[-1]
+    return name in ("bash", "sh") and not _syntax_only_shell_mode(words)
 
 
 def _workflow_jobs(workflow_content: str) -> dict | None:
@@ -2863,7 +2892,9 @@ def _raw_install_from_wrapper(words: list[str], depth: int) -> bool:
     if words[0] == "exec":
         return _raw_install_from_words(words[1:], depth + 1)
     if words[0] == "eval":
-        return _raw_install_in_segment(shlex.join(words[1:]), depth + 1)
+        # Bash eval joins its expanded arguments with spaces before parsing
+        # them; shlex.join would preserve argv boundaries Bash discards.
+        return _raw_install_in_segment(" ".join(words[1:]), depth + 1)
     if words[0] == "env":
         command_index = _skip_env_prefix(words, 1)
         return _raw_install_from_words(words[command_index:], depth + 1)
@@ -2981,7 +3012,10 @@ def _provision_candidates(segments: list[str], retry_trusted: bool) -> list[str]
     for segment in segments:
         if not retry_trusted and _is_retry_call(segment):
             continue
-        if re.search(r"[;&|\n]", _strip_provision_wrappers(segment)):
+        payload = _strip_provision_wrappers(segment)
+        if "\n" in payload or re.search(
+            r"[;|]|(?<![<>])&(?!>)", payload
+        ):
             continue
         candidates.append(segment)
     return candidates
@@ -3320,24 +3354,43 @@ def _shell_words(segment: str) -> list[str]:
     return words
 
 
-def _runs_make_docs_check(words: list[str]) -> bool:
-    """Whether make's command and target positions invoke docs-check."""
-    command_index = _skip_env_assignments(words, 0)
-    if command_index >= len(words) or words[command_index] != "make":
-        return False
-    value_options = {
-        "-C", "--directory", "-f", "--file", "--makefile", "-I",
-        "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
-        "--old-file", "-W", "--what-if", "--assume-new", "--eval",
-    }
+_MAKE_VALUE_OPTIONS = frozenset({
+    "-C", "--directory", "-f", "--file", "--makefile", "-I",
+    "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
+    "--old-file", "-W", "--what-if", "--assume-new", "--eval",
+})
+_MAKE_NONEXECUTING_OPTIONS = frozenset({
+    "-n", "--dry-run", "--just-print", "--recon",
+    "-q", "--question", "-t", "--touch",
+})
+_MAKE_NONEXECUTING_LONG_OPTIONS = frozenset(
+    option for option in _MAKE_NONEXECUTING_OPTIONS if option.startswith("--")
+)
+_MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqt")
+
+
+def _make_option_prevents_execution(word: str) -> bool:
+    """Recognize dry-run/question/touch options, including short clusters."""
+    option = word.split("=", 1)[0]
+    if word in _MAKE_NONEXECUTING_OPTIONS or option in _MAKE_NONEXECUTING_LONG_OPTIONS:
+        return True
+    return (
+        word.startswith("-")
+        and not word.startswith("--")
+        and any(flag in word[1:] for flag in _MAKE_NONEXECUTING_SHORT_FLAGS)
+    )
+
+
+def _make_targets_after_options(words: list[str], index: int) -> list[str] | None:
+    """Collect make target words, or reject a command that cannot execute them."""
     targets: list[str] = []
-    index = command_index + 1
     while index < len(words):
         word = words[index]
         if word == "--":
-            targets.extend(words[index + 1:])
-            break
-        if word in value_options:
+            return targets + words[index + 1:]
+        if _make_option_prevents_execution(word):
+            return None
+        if word in _MAKE_VALUE_OPTIONS:
             index += 2
         elif word.startswith("--") and "=" in word:
             index += 1
@@ -3346,7 +3399,16 @@ def _runs_make_docs_check(words: list[str]) -> bool:
         else:
             targets.append(word)
             index += 1
-    return "docs-check" in targets
+    return targets
+
+
+def _runs_make_docs_check(words: list[str]) -> bool:
+    """Whether make's command and target positions invoke docs-check."""
+    command_index = _skip_env_assignments(words, 0)
+    if command_index >= len(words) or words[command_index] != "make":
+        return False
+    targets = _make_targets_after_options(words, command_index + 1)
+    return targets is not None and "docs-check" in targets
 
 
 def _virtualenv_root(path: str) -> str | None:
@@ -3414,15 +3476,27 @@ def _virtualenv_environment_markers(environment: object) -> set[str]:
     return markers
 
 
+def _is_virtualenv_deactivation(segment: str) -> bool:
+    """Whether a live command deactivates the current shell's virtualenv."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return False
+    command_index = _skip_env_assignments(words, 0)
+    return command_index < len(words) and words[command_index] == "deactivate"
+
+
 def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
     """Python-environment state established by a run-step prefix and its env."""
     commands = _step_live_commands(step)
     visible = commands if through is None else commands[:through + 1]
-    markers = set()
+    environment = step.get("env") if isinstance(step, dict) else None
+    markers = _virtualenv_environment_markers(environment)
     for segment in visible:
-        markers.update(_virtualenv_command_markers(segment))
-    if isinstance(step, dict):
-        markers.update(_virtualenv_environment_markers(step.get("env")))
+        if _is_virtualenv_deactivation(segment):
+            markers = {marker for marker in markers if not marker.startswith("venv:")}
+        else:
+            markers.update(_virtualenv_command_markers(segment))
     return markers
 
 
@@ -3468,19 +3542,18 @@ def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
             "the release-gate job must install requirements-release.txt "
             "before the docs-check step that imports it"
         )
-    if install_at[0] != docs_check_at[0]:
-        install_environment = _virtualenv_markers(
-            steps[install_at[0]], install_at[1]
+    install_environment = _virtualenv_markers(
+        steps[install_at[0]], install_at[1]
+    )
+    docs_environment = _virtualenv_markers(
+        steps[docs_check_at[0]], docs_check_at[1]
+    )
+    if install_environment != docs_environment:
+        return (
+            "the release-gate job must install requirements into the "
+            "Python environment used by docs-check; run-step shells do "
+            "not share virtualenv activation"
         )
-        docs_environment = _virtualenv_markers(
-            steps[docs_check_at[0]], None
-        )
-        if install_environment != docs_environment:
-            return (
-                "the release-gate job must install requirements into the "
-                "Python environment used by docs-check; run-step shells do "
-                "not share virtualenv activation"
-            )
     return None
 
 

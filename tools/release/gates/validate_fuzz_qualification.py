@@ -97,7 +97,6 @@ DEFAULT_MANIFEST = _DEFAULT_ARTIFACT_PATHS["manifest"]
 DEFAULT_CORPUS_MANIFEST = _DEFAULT_ARTIFACT_PATHS["corpus_manifest"]
 DEFAULT_RECORD = _DEFAULT_ARTIFACT_PATHS["record"]
 DEFAULT_LOG_DIR = _DEFAULT_ARTIFACT_PATHS["log_dir"]
-RECORD_OUTPUT_ROOT = Path(_DEFAULT_ARTIFACT_PATHS["record_root"])
 
 SKIP_ENV = "RELEASE_GATE_ALLOW_SKIP_FUZZ"
 TIME_CONTINUATION_CEILING = 3600
@@ -173,7 +172,6 @@ INVOCATION_TIMEOUT_MARGIN = 900
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
 RECORD_OUTPUT_LABEL = "fuzz qualification record"
-RECORD_OUTPUT_ROOT = Path("artifacts/release/0.9.2")
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
@@ -1131,7 +1129,7 @@ def _write_record(record: dict, args) -> Path:
     safe_name = validate_filename_strict(
         expected_output.name, purpose=RECORD_OUTPUT_LABEL
     )
-    candidate_output = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
+    candidate_output = REPO_ROOT / Path(DEFAULT_RECORD).parent / safe_name
     resolved_candidate = candidate_output.resolve(strict=False)
     resolved_root = REPO_ROOT.resolve(strict=False)
     if not resolved_candidate.is_relative_to(resolved_root):
@@ -1247,6 +1245,22 @@ def _raise_worker_errors(errors: list[BaseException]) -> None:
     raise errors[0]
 
 
+def _stop_and_join_workers(
+    threads: list[threading.Thread], stop: threading.Event
+) -> None:
+    """Cancel active work and give attempted workers a bounded cleanup join."""
+    stop.set()
+    _FUZZ_CANCEL_REQUESTED.set()
+    _cancel_active_fuzz_processes()
+    for thread in threads:
+        try:
+            thread.join(_INTERRUPT_JOIN_GRACE_SECONDS)
+        except RuntimeError:
+            # A thread whose start itself was interrupted may never have
+            # reached the started state, in which case join is invalid.
+            continue
+
+
 def _join_workers(threads: list[threading.Thread],
                   stop: threading.Event) -> None:
     """Join the worker threads, stopping siblings on an interrupt.
@@ -1263,12 +1277,23 @@ def _join_workers(threads: list[threading.Thread],
         for thread in threads:
             thread.join()
     except KeyboardInterrupt:
-        stop.set()
-        _FUZZ_CANCEL_REQUESTED.set()
-        _cancel_active_fuzz_processes()
-        for thread in threads:
-            thread.join(_INTERRUPT_JOIN_GRACE_SECONDS)
+        _stop_and_join_workers(threads, stop)
         raise
+
+
+def _start_and_join_workers(
+    threads: list[threading.Thread], stop: threading.Event
+) -> None:
+    """Start the pool, cleaning every attempted thread if startup aborts."""
+    attempted: list[threading.Thread] = []
+    try:
+        for thread in threads:
+            attempted.append(thread)
+            thread.start()
+    except BaseException:
+        _stop_and_join_workers(attempted, stop)
+        raise
+    _join_workers(threads, stop)
 
 
 def _run_blocking_targets(entries: list[dict], seeds: dict,
@@ -1306,9 +1331,7 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
         )
         for index, queue in enumerate(queues)
     ]
-    for thread in threads:
-        thread.start()
-    _join_workers(threads, stop)
+    _start_and_join_workers(threads, stop)
     _raise_worker_errors(errors)
     return records
 

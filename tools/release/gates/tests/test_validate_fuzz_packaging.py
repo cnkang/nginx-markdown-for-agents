@@ -1046,6 +1046,31 @@ def test_toolchain_gate_unwraps_wrapper_options() -> None:
     assert packaging_gate._raw_install_in_segment(prefixed)
 
 
+def test_eval_reparses_bash_joined_arguments_and_keeps_echo_control() -> None:
+    """Quoted eval payloads execute as shell text, while echo remains inert."""
+    for raw in (
+        "eval 'rustup toolchain install stable'",
+        'eval "rustup toolchain install stable"',
+        "eval rustup toolchain install stable",
+    ):
+        assert packaging_gate._raw_install_in_segment(raw), raw
+
+    for control in (
+        "eval 'echo rustup toolchain install stable'",
+        'eval "echo rustup toolchain install stable"',
+    ):
+        assert not packaging_gate._raw_install_in_segment(control), control
+
+    raw_workflow = _raw_install_workflow(
+        "eval 'rustup toolchain install stable'"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(raw_workflow) is not None
+    echo_control = _raw_install_workflow(
+        "eval 'echo rustup toolchain install stable'"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(echo_control) is None
+
+
 def test_toolchain_gate_unwraps_drift_check() -> None:
     """The drift check counts behind a command wrapper too."""
     installer = (
@@ -1311,6 +1336,41 @@ def test_step_shell_model_reads_success_always_and_shell_paths() -> None:
         {"shell": "python3", "run": "x"})
     assert not packaging_gate._step_runs_shell({"shell": 123, "run": "x"})
     assert not packaging_gate._step_runs_shell({"shell": [], "run": "x"})
+
+
+def test_syntax_only_shell_modes_do_not_prove_execution() -> None:
+    """Syntax-only shell flags cannot count as executed provisioning evidence."""
+    for shell in (
+        "bash -n {0}",
+        "/bin/bash --noexec {0}",
+        "sh -n {0}",
+        "bash -en {0}",
+        "bash -o noexec {0}",
+        "bash -O noexec {0}",
+    ):
+        assert not packaging_gate._step_runs_shell({"shell": shell, "run": "x"})
+
+    assert packaging_gate._step_runs_shell(
+        {"shell": "bash --noprofile --norc {0}", "run": "x"}
+    )
+    assert packaging_gate._step_runs_shell(
+        {"shell": "bash {0} -n", "run": "x"}
+    )
+
+    workflow = chr(10).join(
+        (
+            "jobs:",
+            "  release-gate:",
+            "    steps:",
+            "      - shell: bash -n {0}",
+            "        run: echo not-executed",
+            "      - shell: bash {0}",
+            "        run: echo eligible",
+        )
+    )
+    assert packaging_gate._job_run_scripts(workflow, "release-gate") == [
+        "echo eligible"
+    ]
 
 
 def test_shadow_guard_reads_real_definitions_only() -> None:
@@ -2340,6 +2400,21 @@ def test_toolchain_liveness_respects_explicit_shell_errexit() -> None:
     ) == ["false", "printf reached"]
 
 
+def test_verified_installer_accepts_file_descriptor_redirections() -> None:
+    """Redirection ampersands do not background or hide the installer."""
+    for redirection in ("2>&1", "&>rustup.log", "&>>rustup.log"):
+        installer = INSTALLER.rstrip("\n") + f" {redirection}\n"
+        segments = packaging_gate._command_segments_with_separators(installer)
+        assert len(segments) == 1, (redirection, segments)
+        assert segments[0][0].endswith(redirection), segments
+        assert packaging_gate._release_gate_toolchain_issue(
+            DRIFT + installer + COMPONENT
+        ) is None, redirection
+
+    background = INSTALLER.rstrip("\n") + " &\n"
+    assert packaging_gate._ends_with_background_operator(background)
+
+
 def test_verified_installer_must_finish_before_component_add() -> None:
     """A backgrounded installer cannot satisfy a later foreground add."""
     background = DRIFT + INSTALLER.rstrip("\n") + " &\n" + COMPONENT
@@ -2362,10 +2437,21 @@ def test_python_dependency_gate_requires_a_real_docs_check_command() -> None:
         "printf '%s' 'make docs-check'",
         "'make docs-check'",
         "# make docs-check",
+        "make -n docs-check",
+        "make --dry-run docs-check",
+        "make --dry-run=ignored docs-check",
+        "make --just-print docs-check",
+        "make --recon docs-check",
+        "make -q docs-check",
+        "make --question docs-check",
+        "make -t docs-check",
+        "make --touch docs-check",
+        "make -kn docs-check",
     )
     for decoy in decoys:
         assert packaging_gate._python_deps_issue([install, decoy]) is not None, decoy
     assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+    assert packaging_gate._python_deps_issue([install, "make -- docs-check"]) is None
 
 
 def test_python_dependency_gate_accepts_only_supported_pip_command_forms() -> None:
@@ -2409,6 +2495,30 @@ def test_virtualenv_install_in_one_step_does_not_feed_a_later_shell() -> None:
     assert packaging_gate._python_deps_issue(
         [scoped_install + "; make docs-check"]
     ) is None
+
+
+def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:
+    """A same-step deactivate returns docs-check to the system environment."""
+    installed = (
+        "python3 -m venv .venv; source .venv/bin/activate; "
+        "python3 -m pip install -r requirements-release.txt; "
+        "deactivate; make docs-check"
+    )
+    assert packaging_gate._python_deps_issue([installed]) is not None
+
+    reactivated = (
+        "source .venv/bin/activate; "
+        "python3 -m pip install -r requirements-release.txt; "
+        "deactivate; source .venv/bin/activate; make docs-check"
+    )
+    assert packaging_gate._python_deps_issue([reactivated]) is None
+
+    echoed = (
+        "source .venv/bin/activate; "
+        "python3 -m pip install -r requirements-release.txt; "
+        "echo deactivate; make docs-check"
+    )
+    assert packaging_gate._python_deps_issue([echoed]) is None
 
 
 def test_release_gate_step_env_does_not_carry_to_later_docs_check() -> None:
