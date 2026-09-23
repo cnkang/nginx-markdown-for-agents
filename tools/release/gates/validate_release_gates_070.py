@@ -59,6 +59,14 @@ GATE_LOCAL_SCRIPTS = {
 }
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
+# The release-gate job waits for the three upstream jobs whose artifacts it
+# consumes.  The dependency edge is read structurally from the workflow's own
+# job entry (see _release_gate_needs), so this job name must stay in step with
+# the workflow's job key.
+RELEASE_GATE_JOB = "release-gate"
+RELEASE_GATE_REQUIRED_NEEDS = frozenset(
+    {"prepare", "smoke-test", "fuzz-qualification"}
+)
 BlockingItems = list[tuple[str, bool]]
 
 
@@ -414,20 +422,56 @@ def _gate_2_items(
     ]
 
 
+def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
+    """Return the release-gate job's ``needs`` entries, or None when unreadable.
+
+    The workflow text is parsed as YAML and only the ``release-gate`` job entry
+    is inspected, so a dependency list belonging to another job -- or text
+    sitting in a comment -- can never satisfy the check.  Block sequences,
+    quoted scalars and flow sequences are all resolved by the parser.
+
+    ``None`` means the document did not parse into the expected shape (bad
+    YAML, missing job, or a ``needs`` value that is not a string or a list of
+    strings); callers treat that as a failure so a malformed or restructured
+    workflow fails closed instead of passing by accident.
+    """
+    try:
+        import yaml
+    except ImportError:  # PyYAML is a release requirement; fail closed here
+        return None
+    try:
+        document = yaml.safe_load(release_packages)
+    except yaml.YAMLError:
+        return None
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    if not isinstance(jobs, dict):
+        return None
+    job = jobs.get(RELEASE_GATE_JOB)
+    if not isinstance(job, dict):
+        return None
+    needs = job.get("needs")
+    if isinstance(needs, str):
+        return frozenset({needs})
+    if isinstance(needs, list) and all(
+        isinstance(item, str) for item in needs
+    ):
+        return frozenset(needs)
+    return None
+
+
+def _release_gate_needs_gate(release_packages: str) -> bool:
+    """True when the release-gate job depends on every required upstream job."""
+    needs = _release_gate_needs(release_packages)
+    return needs is not None and RELEASE_GATE_REQUIRED_NEEDS <= needs
+
+
 def _gate_3_items(release_packages: str) -> BlockingItems:
     return [
         (
             "tag package workflow gate",
             "release-gate:" in release_packages
             and "github.ref_type == 'tag'" in release_packages
-            and re.search(
-                r"needs:\s*\[(?=[^\]]*(?<![\w-])prepare(?![\w-]))"
-                r"(?=[^\]]*(?<![\w-])smoke-test(?![\w-]))"
-                r"(?=[^\]]*(?<![\w-])fuzz-qualification(?![\w-]))"
-                r"[^\]]*\]",
-                release_packages,
-            )
-            is not None,
+            and _release_gate_needs_gate(release_packages),
         ),
         (
             "release gate package tools",

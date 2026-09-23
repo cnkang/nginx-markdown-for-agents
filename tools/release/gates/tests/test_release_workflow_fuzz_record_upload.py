@@ -1,18 +1,25 @@
-"""Workflow-wiring tests for the fuzz qualification record handoff.
+"""Wiring tests for the release workflow's fuzz qualification handoff.
 
 The record and the per-target raw logs are the only post-mortem evidence
-when the fuzz qualification fails; the workflow's other upload steps sit on
-success paths, so the record upload step is asserted to be unconditional
-(``if: always()``) and to point at the paths the validator actually writes.
-The paths are resolved from the workflow's own RELEASE_VERSION variable and
-checked against the validator's constants, so a version bump cannot desync
-the two ends.  The sibling suite
-(``test_validate_fuzz_packaging.py``) attacks the shell-semantics model of
-the packaging gate itself; this module keeps the wiring contracts.
+when the fuzz qualification fails, and the record is the input the final
+evidence generator reads to decide the blocking fuzz verdict; the
+workflow's other upload steps sit on success paths, so the record upload
+step is asserted to be unconditional (``if: always()``), fail-closed
+(``if-no-files-found: error``) and to point at the paths the validator
+actually writes.  The paths are resolved from the workflow's own
+RELEASE_VERSION variable and checked against the validator's constants,
+so a version bump cannot desync the two ends.  This module also covers
+the job-level pipeline structure (the fuzz job owning a full budget, the
+publish junctions requiring it, the release gate no longer running it)
+and the packaging gate's own wiring into the workflow.  The
+shell-semantics suite for that gate lives in
+``test_validate_fuzz_packaging.py``.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 from pathlib import Path
 
@@ -24,34 +31,69 @@ from tools.release.gates import validate_fuzz_packaging as packaging_gate
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 
+RECORD_ARTIFACT_NAME = "fuzz-qualification-record"
+
 
 def _workflow() -> dict:
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
-def packaging_gate_module():
-    return packaging_gate
+def _live_segments(script: str) -> list[str]:
+    """Executable command segments of one workflow run script.
+
+    Mirrors the production composition exactly, including the
+    ``_function_kill_sets`` arguments: a copy that calls
+    ``_live_command_segments(executable)`` without them would credit
+    commands inside functions whose invocation provably fails or exits,
+    so the pipeline assertions could pass on a script whose commands
+    never run.
+    """
+    stripped = packaging_gate._strip_heredocs(
+        packaging_gate._strip_shell_comments(script))
+    executable = packaging_gate._join_continuations(
+        packaging_gate._strip_function_bodies(stripped))
+    failing, exiting = packaging_gate._function_kill_sets(stripped)
+    return packaging_gate._live_command_segments(executable, failing, exiting)
+
+
+def _job_live_text(workflow_text: str, job_name: str) -> str:
+    """Live command text of every executable step of one job."""
+    scripts = packaging_gate._job_run_scripts(workflow_text, job_name)
+    assert scripts is not None, f"the {job_name} job must be parseable"
+    return "\n".join(
+        segment for script in scripts for segment in _live_segments(script)
+    )
+
+
+def _named_step(job: dict, name: str) -> dict:
+    """The single step with this name, failing loudly when it is absent."""
+    matches = [
+        step for step in job["steps"]
+        if isinstance(step, dict) and step.get("name") == name
+    ]
+    assert len(matches) == 1, (
+        f"expected exactly one step named {name!r}, found {len(matches)}")
+    return matches[0]
 
 
 def test_fuzz_record_upload_is_unconditional_and_matches_the_validator() -> None:
-    steps = _workflow()["jobs"]["fuzz-qualification"]["steps"]
-    uploads = [
-        step for step in steps
-        if isinstance(step, dict)
-        and step.get("name") == "Upload fuzz qualification record"
-    ]
-    assert len(uploads) == 1, "the record upload step is missing"
-    step = uploads[0]
+    workflow_doc = _workflow()
+    job = workflow_doc["jobs"]["fuzz-qualification"]
+    step = _named_step(job, "Upload fuzz qualification record")
     uses = step.get("uses", "")
     assert uses.startswith("actions/upload-artifact"), (
-        "the record upload step must actually upload an artifact")
+        "the record upload step must actually upload an artifact, "
+        f"found uses={uses!r}")
     assert step.get("if") == "always()", (
         "the record upload must survive a failing fuzz qualification")
+    assert step.get("with", {}).get("if-no-files-found") == "error", (
+        "a missing record must fail the producer job instead of uploading "
+        "nothing silently")
     path_text = step.get("with", {}).get("path", "")
     # The path derives from the workflow's own RELEASE_VERSION variable;
     # resolving it must reproduce the validator's real write paths for
     # record and logs, so a version bump cannot desync the two ends.
-    release_version = _workflow().get("env", {}).get("RELEASE_VERSION")
+    release_version = workflow_doc.get("env", {}).get("RELEASE_VERSION")
     assert isinstance(release_version, str)
     assert release_version
     resolved = path_text.replace(
@@ -64,23 +106,28 @@ def test_fuzz_record_upload_is_unconditional_and_matches_the_validator() -> None
     assert log_dir == f"artifacts/release/{release_version}/" + log_dir.rsplit("/", 1)[-1]
 
 
-def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
-    """The fuzz soak owns a dedicated job (full budget) and every publish
-    junction requires it; the release gate no longer runs it."""
-    jobs = _workflow()["jobs"]
-    assert "fuzz-qualification" in jobs
-    module = packaging_gate_module()
-    live_fuzz: list[str] = []
-    for step in jobs["fuzz-qualification"]["steps"]:
-        if not isinstance(step, dict) or not module._step_runs_shell(step):
-            continue
-        stripped = module._strip_heredocs(
-            module._strip_shell_comments(step.get("run", "")))
-        executable = module._join_continuations(
-            module._strip_function_bodies(stripped))
-        live_fuzz.extend(module._live_command_segments(executable))
-    run_text = "\n".join(live_fuzz)
-    # Commands behind `if false` cannot satisfy the structure contract.
+def test_fuzz_job_generates_its_manifests_and_runs_the_qualification() -> None:
+    """The fuzz job owns the qualification and its runtime-generated inputs.
+
+    The fuzz manifests are candidate-bound and generated at run time (not
+    tracked), so the job must generate its own candidate-bound copies
+    before the validator runs, and the validator must sit on the job's
+    provably executed path -- a commented-out, quoted or dead-branch copy
+    must not satisfy it.
+    """
+    run_text = _job_live_text(
+        WORKFLOW.read_text(encoding="utf-8"), "fuzz-qualification")
+    assert "generate_release_gate_manifests.py" in run_text
+    assert "validate_fuzz_qualification.py --mode real --git-head" in run_text
+
+
+def test_fuzz_job_structure_contract_rejects_dead_and_commented_commands() -> None:
+    """The pipeline scan must read executed commands, not raw text.
+
+    The same assertions that pass on the workflow must fail on a job whose
+    only copies of those commands sit behind `if false`, so a pipeline
+    that stopped running the qualification cannot pass on text alone.
+    """
     dead = (
         "jobs:\n"
         "  fuzz-qualification:\n"
@@ -93,27 +140,38 @@ def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
         "validate_fuzz_qualification.py --mode real --git-head\n"
         "          fi\n"
     )
-    dead_job = yaml.safe_load(dead)["jobs"]["fuzz-qualification"]
-    dead_live: list[str] = []
-    for step in dead_job["steps"]:
-        stripped = module._strip_heredocs(
-            module._strip_shell_comments(step.get("run", "")))
-        executable = module._join_continuations(
-            module._strip_function_bodies(stripped))
-        dead_live.extend(module._live_command_segments(executable))
-    dead_text = "\n".join(dead_live)
+    dead_text = _job_live_text(dead, "fuzz-qualification")
     assert "validate_fuzz_qualification.py --mode real --git-head" not in (
         dead_text)
     assert "generate_release_gate_manifests.py" not in dead_text
-    assert "validate_fuzz_qualification.py --mode real --git-head" in run_text
-    # The fuzz manifests are generated at run time (not tracked), so the job
-    # must generate its own candidate-bound copies before the validator runs.
-    assert "generate_release_gate_manifests.py" in run_text
-    # The release gate must not run the fuzz qualification any more.
-    gate_text = "\n".join(
-        step.get("run", "") for step in jobs["release-gate"]["steps"]
-        if isinstance(step, dict)
+    commented = (
+        "jobs:\n"
+        "  fuzz-qualification:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          # python3 tools/release/gates/"
+        "validate_fuzz_qualification.py --mode real --git-head\n"
+        "          # python3 tools/release/gates/"
+        "generate_release_gate_manifests.py --phase inputs\n"
+        "          echo ok\n"
     )
+    commented_text = _job_live_text(commented, "fuzz-qualification")
+    assert "validate_fuzz_qualification.py --mode real --git-head" not in (
+        commented_text)
+    assert "generate_release_gate_manifests.py" not in commented_text
+    assert "echo ok" in commented_text
+
+
+def test_fuzz_qualification_runs_in_its_own_job_and_gates_publish() -> None:
+    """The fuzz soak owns a dedicated job (full budget) and every publish
+    junction requires it; the release gate no longer runs it."""
+    jobs = _workflow()["jobs"]
+    assert "fuzz-qualification" in jobs
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    # The release gate must not run the fuzz qualification any more: the
+    # check reads live segments, so a commented-out or quoted copy of the
+    # command cannot masquerade as an executed one.
+    gate_text = _job_live_text(workflow_text, "release-gate")
     assert "validate_fuzz_qualification.py --mode real" not in gate_text
     # Publish and every integrity/release junction must require the fuzz job.
     for job in (
@@ -208,37 +266,22 @@ def test_job_run_scripts_requires_a_parseable_job() -> None:
     assert packaging_gate._job_run_scripts("jobs: [", "release-gate") is None
 
 
-_PIP_REQUIREMENT_COMMAND = re.compile(
-    r"(?:sudo\s+)?(?:python3?\s+-m\s+pip|pip3?)\s+install\s+"
-    r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?\b"
+# Version-token patterns for the two pins the release gate relies on:
+# jsonschema backs the policy-matrix validation in the docs-check chain,
+# PyYAML backs the matrix tooling that chain runs.  Each pattern is the
+# strongest form of the production check: the line must be exactly the
+# pin, `==`, and a version token (never a comment or a bare separator).
+_PIN_LINES = (
+    (
+        "jsonschema[format]",
+        re.compile(r"^jsonschema\[format\]==[^#\s]\S*$", re.M),
+    ),
+    ("PyYAML", re.compile(r"^PyYAML==[^#\s]\S*$", re.M)),
 )
-
-
-def _live_segments(script: str) -> list[str]:
-    """Live command segments of a workflow run script."""
-    stripped = packaging_gate._strip_heredocs(
-        packaging_gate._strip_shell_comments(script))
-    executable = packaging_gate._join_continuations(
-        packaging_gate._strip_function_bodies(stripped))
-    return packaging_gate._live_command_segments(executable)
-
-
-def _pip_install_steps(steps: list[str]) -> list[int]:
-    """Steps whose live segments install the pinned release requirements
-    through pip, in any shell-equivalent spelling."""
-    found: list[int] = []
-    for index, step in enumerate(steps):
-        for segment in _live_segments(step):
-            if _PIP_REQUIREMENT_COMMAND.match(
-                packaging_gate._strip_provision_wrappers(segment)
-            ):
-                found.append(index)
-    return found
 
 
 def test_release_gate_job_installs_the_release_python_dependencies(
     monkeypatch,
-    tmp_path,
 ) -> None:
     """The release-gate job runs ``make docs-check``, whose contract-matrix
     step imports jsonschema, and a fresh runner only provides what
@@ -252,7 +295,7 @@ def test_release_gate_job_installs_the_release_python_dependencies(
     """
     steps = packaging_gate._job_run_scripts(
         WORKFLOW.read_text(encoding="utf-8"), "release-gate")
-    assert steps is not None
+    assert steps is not None, "the release-gate job must be parseable"
     # A step the workflow disables is not part of the job's shell.
     disabled = (
         "jobs:\n"
@@ -262,8 +305,10 @@ def test_release_gate_job_installs_the_release_python_dependencies(
         "        run: python3 -m pip install --requirement "
         "requirements-release.txt\n"
     )
-    assert packaging_gate._job_run_scripts(disabled, "release-gate") == []
-    assert packaging_gate._python_deps_issue(steps) is None
+    assert packaging_gate._job_run_scripts(disabled, "release-gate") == [], (
+        "a step the workflow disables must not feed the job's shell")
+    assert packaging_gate._python_deps_issue(steps) is None, (
+        "the checked-in release-gate job must satisfy the python-deps guard")
     # A dead branch cannot satisfy the guard: liveness drops `false && ...`.
     dead = (
         "jobs:\n"
@@ -280,18 +325,61 @@ def test_release_gate_job_installs_the_release_python_dependencies(
         "a dead install branch must not satisfy the guard")
     requirements = (REPO_ROOT / "requirements-release.txt").read_text(
         encoding="utf-8")
-    # jsonschema backs the policy-matrix validation in the docs-check chain;
-    # PyYAML backs the matrix tooling that chain runs.  Each pin must carry
-    # an actual version token after ==, not just the separator; a pin
-    # stripped to its bare name must fail the gate.
-    assert re.search(r"^jsonschema\[format\]==[^#\s]", requirements, re.M)
-    assert re.search(r"^PyYAML==[^#\s]", requirements, re.M)
-    unpinned = tmp_path / "requirements-release.txt"
-    unpinned.write_text(
-        requirements.replace("jsonschema[format]==4.23.0", "jsonschema[format]=="),
-        encoding="utf-8")
-    monkeypatch.setattr(packaging_gate, "RELEASE_REQUIREMENTS", unpinned)
-    assert packaging_gate._python_deps_issue(steps) is not None
+    # Each pin must carry an actual version token after ==, not just the
+    # separator; a pin stripped to its bare name must fail the gate.
+    for name, pattern in _PIN_LINES:
+        assert pattern.search(requirements), (
+            f"the checked-in requirements-release.txt must pin {name} to a "
+            "version token")
+    # Serve each unpinned variant through read_safe itself: a file written
+    # under tmp_path would sit outside PROJECT_ROOT and read as empty, so
+    # the assertion would pass on the not-found branch without ever
+    # exercising the pin check.  The message assertion pins the exact
+    # branch production takes.
+    original_read = packaging_gate.read_safe
+    for name, pattern in _PIN_LINES:
+        unpinned_text, substitutions = pattern.subn(
+            name + "==", requirements)
+        assert substitutions >= 1, (
+            f"the {name} pin must be substitutable in requirements-release.txt")
+        assert unpinned_text != requirements
+        monkeypatch.setattr(
+            packaging_gate,
+            "read_safe",
+            lambda path, _text=unpinned_text: (
+                _text
+                if path == packaging_gate.RELEASE_REQUIREMENTS
+                else original_read(path)
+            ),
+        )
+        try:
+            pin_issue = packaging_gate._python_deps_issue(steps)
+        finally:
+            monkeypatch.setattr(packaging_gate, "read_safe", original_read)
+        assert pin_issue is not None, (
+            f"an unpinned {name} must fail the python-deps guard")
+        assert f"must pin {name} to a version" in pin_issue, pin_issue
+
+
+def test_release_gate_preflight_proves_the_jsonschema_format_extras() -> None:
+    """The release preflight must prove the jsonschema [format] extras.
+
+    The release gate validates schemas that declare ``format: date-time``
+    and passes a ``FormatChecker``; a jsonschema install without its
+    ``[format]`` extras imports and reports its version normally but
+    registers no checkers, so those formats would be skipped silently.
+    The preflight must therefore read the checker registry on its
+    executable path, not merely the version string.
+    """
+    run_text = _job_live_text(
+        WORKFLOW.read_text(encoding="utf-8"), "release-gate")
+    assert "jsonschema[format]" in (
+        REPO_ROOT / "requirements-release.txt").read_text(encoding="utf-8")
+    assert "from jsonschema import FormatChecker" in run_text, (
+        "the release preflight must import the format checker")
+    assert "FormatChecker().checkers" in run_text, (
+        "the preflight must read the checker registry, since the version "
+        "string alone cannot prove the extras are installed")
 
 
 def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
@@ -306,7 +394,10 @@ def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
     gate_at = names.index("Run release gates")
     assert download_at < gate_at
     download = job["steps"][download_at]
-    assert download.get("with", {}).get("name") == "fuzz-qualification-record"
+    assert download.get("uses", "").startswith("actions/download-artifact"), (
+        "the handoff step must actually download the artifact, found "
+        f"uses={download.get('uses')!r}")
+    assert download.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
     # The download path derives from the workflow's own RELEASE_VERSION
     # variable, and that variable must match the version directory the
     # validator actually writes into -- otherwise the handoff silently
@@ -315,21 +406,25 @@ def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
     assert isinstance(download_path, str)
     assert "${{ env.RELEASE_VERSION }}" in download_path
     record_dir = validator.DEFAULT_RECORD.rsplit("/", 1)[0]
-    workflow_doc = _workflow()
-    release_version = workflow_doc.get("env", {}).get("RELEASE_VERSION")
+    release_version = workflow.get("env", {}).get("RELEASE_VERSION")
     assert isinstance(release_version, str)
     assert release_version
     assert record_dir == f"artifacts/release/{release_version}"
     resolved_path = download_path.replace(
         "${{ env.RELEASE_VERSION }}", release_version)
     assert resolved_path.rstrip("/") == record_dir
-    uploads = [
-        step
-        for step in workflow["jobs"]["fuzz-qualification"]["steps"]
-        if step.get("name", "") == "Upload fuzz qualification record"
-    ]
-    assert uploads
-    assert uploads[0].get("with", {}).get("name") == "fuzz-qualification-record"
+    # The handoff is followed by an explicit existence assertion on the
+    # record itself: the download action only proves the artifact arrived,
+    # not that the record file is in it.
+    verify_at = names.index("Verify fuzz qualification record was downloaded")
+    assert download_at < verify_at < gate_at
+    verify_run = job["steps"][verify_at].get("run", "")
+    assert "fuzz-qualification-record.json" in verify_run
+    assert "-f " in verify_run or "test -f" in verify_run
+    upload = _named_step(
+        workflow["jobs"]["fuzz-qualification"],
+        "Upload fuzz qualification record")
+    assert upload.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
 
 
 def test_fuzz_job_runs_the_qualification_before_uploading() -> None:
@@ -346,7 +441,7 @@ def test_fuzz_job_runs_the_qualification_before_uploading() -> None:
     assert "--mode real" in run
     # The upload publishes the record the release gate reads.
     upload = steps[upload_at].get("with", {})
-    assert upload.get("name") == "fuzz-qualification-record"
+    assert upload.get("name") == RECORD_ARTIFACT_NAME
     assert "fuzz-qualification-record.json" in upload.get("path", "")
 
 
@@ -391,8 +486,6 @@ def test_packaging_gate_main_runs_every_check_against_the_repo() -> None:
     this drives the production entry point itself: exit 0 with no FAIL
     rows and the toolchain gate among the reported checks.
     """
-    import io
-    import contextlib
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         rc = packaging_gate.main()
@@ -406,22 +499,59 @@ def test_packaging_gate_main_runs_every_check_against_the_repo() -> None:
 def test_packaging_gate_main_fails_when_the_workflow_is_unreadable(
     monkeypatch,
 ) -> None:
-    """A missing workflow must surface as the toolchain gate's FAIL path.
+    """An unreadable workflow must surface as the toolchain gate's FAIL path.
 
     Stubbing the file read (not the check) keeps the wiring honest: the
     unreadable workflow flows through `main()` into the gate's own
-    failure branch even while the file exists on disk.
+    failure branch even while the file exists on disk.  The specific
+    FAIL row is asserted, so a check that stopped being wired into
+    `main()` cannot pass this test on some other check's failure.
     """
-    import io
-    import contextlib
     monkeypatch.setattr(packaging_gate, "read_safe", lambda path: "")
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         rc = packaging_gate.main()
     report = buffer.getvalue()
     assert rc == 1, report
-    assert "FAIL" in report, report
+    fail_rows = [
+        line for line in report.splitlines() if line.startswith("  FAIL")
+    ]
+    assert any(
+        "pkg:release-gate-toolchain" in line and "not found" in line
+        for line in fail_rows
+    ), report
+
+
+def test_packaging_gate_main_fails_closed_on_malformed_workflow_yaml(
+    monkeypatch,
+) -> None:
+    """Unparseable workflow YAML must fail the gate, not skip its checks.
+
+    The toolchain and python-deps checks both parse the workflow through
+    `_job_run_scripts`; a malformed document must reach their FAIL branch
+    with the release-gate job reported as unfindable rather than
+    short-circuiting the entry point.
+    """
+    original_read = packaging_gate.read_safe
+    monkeypatch.setattr(
+        packaging_gate,
+        "read_safe",
+        lambda path: (
+            "jobs: [" if path == packaging_gate.RELEASE_PACKAGES_WORKFLOW
+            else original_read(path)
+        ),
+    )
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = packaging_gate.main()
+    report = buffer.getvalue()
+    assert rc == 1, report
     assert "pkg:release-gate-toolchain" in report, report
+    assert any(
+        line.startswith("  FAIL") and "pkg:release-gate-toolchain" in line
+        and "release-gate job not found" in line
+        for line in report.splitlines()
+    ), report
 
 
 def test_read_safe_rejects_paths_outside_the_project_root(
@@ -431,13 +561,27 @@ def test_read_safe_rejects_paths_outside_the_project_root(
 
     `read_safe` must not leak content from outside the project root, and
     the same empty signal is what the checks already turn into a FAIL.
+    A `..` component and a symlink that resolves outside the root are the
+    two ways a path reaches past containment; both must read as empty.
     """
     outside = tmp_path / "outside.txt"
     outside.write_text("secret", encoding="utf-8")
-    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path / "root")
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", root)
     assert packaging_gate.read_safe(outside) == ""
-    inside = tmp_path / "root" / "inside.txt"
-    inside.parent.mkdir()
+    assert packaging_gate.read_safe(root / ".." / "outside.txt") == ""
+    link = root / "link.txt"
+    try:
+        link.symlink_to(outside)
+        symlinked = True
+    except (OSError, NotImplementedError):
+        # Platforms or filesystems without symlink support: the traversal
+        # fixture above still covers containment.
+        symlinked = False
+    if symlinked:
+        assert packaging_gate.read_safe(link) == ""
+    inside = root / "inside.txt"
     inside.write_text("visible", encoding="utf-8")
     assert packaging_gate.read_safe(inside) == "visible"
-    assert packaging_gate.read_safe(tmp_path / "root" / "missing.txt") == ""
+    assert packaging_gate.read_safe(root / "missing.txt") == ""

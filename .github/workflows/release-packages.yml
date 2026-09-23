@@ -1128,6 +1128,17 @@ jobs:
         run: |
           set -euo pipefail
           dependency_versions="$(python3 -c 'import brotli, yaml, jsonschema; print(brotli.__version__, yaml.__version__, jsonschema.__version__)')"
+          # jsonschema imports and reports its version without its [format]
+          # extras, but registers none of the format checkers the release
+          # schemas rely on (date-time), and validation silently skips an
+          # unregistered format.  Read the checker registry here so a pin
+          # stripped to a bare `jsonschema` fails this preflight instead of
+          # quietly dropping those checks.
+          format_checkers="$(python3 -c 'from jsonschema import FormatChecker; print("date-time" in FormatChecker().checkers)')"
+          [[ "${format_checkers}" == "True" ]] || {
+            echo "ERROR: jsonschema [format] extras are not installed; the date-time format checker is missing" >&2
+            exit 1
+          }
           [[ "${dependency_versions}" == "1.2.0 6.0.2 "* ]] || {
             echo "ERROR: release gate requires Brotli==1.2.0 and PyYAML==6.0.2, found ${dependency_versions}" >&2
             exit 1
@@ -1299,6 +1310,22 @@ jobs:
           # shell; deriving the path from the shared variable keeps the
           # upload and download ends in sync across version bumps.
           path: artifacts/release/${{ env.RELEASE_VERSION }}/
+
+      - name: Verify fuzz qualification record was downloaded
+        # The handoff above is the only path the record reaches this job by,
+        # and the final evidence generator reads that record to decide the
+        # blocking fuzz verdict.  The download action fails for a missing
+        # artifact, but an artifact that arrived without the record file
+        # (an upload whose paths matched only the logs) would otherwise
+        # surface much later, as a fuzz failure in the evidence manifest.
+        # Assert the exact file here so the handoff failure names itself.
+        run: |
+          record="artifacts/release/${RELEASE_VERSION}/fuzz-qualification-record.json"
+          [[ -f "${record}" ]] || {
+            echo "ERROR: ${record} is missing; the fuzz-qualification record did not arrive through the artifact handoff" >&2
+            exit 1
+          }
+        shell: bash
 
       - name: Run release gates
         env:
@@ -1550,7 +1577,10 @@ jobs:
           path: |
             artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-qualification-record.json
             artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-logs/
-          if-no-files-found: warn
+          # `warn` would let the producer job pass while uploading nothing,
+          # leaving the release-gate download to fail far from the cause;
+          # `error` fails this job instead, next to the missing evidence.
+          if-no-files-found: error
 
   # The official Docker matrix is release-blocking for Docker artifacts in
   # tools/release-matrix.json. Call the reusable workflow with this exact
