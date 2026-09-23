@@ -1182,6 +1182,335 @@ def check_stable_release_surfaces(
     return failures
 
 
+# Surfaces that carry the current release state a reader acts on.  A pending
+# release is judged on these documents, so one document cannot declare a
+# publication the others do not support.
+PENDING_STATE_SURFACES = (
+    "README.md",
+    CHINESE_README,
+    "docs/project/PROJECT_STATUS.md",
+    "docs/project/README.md",
+    "docs/project/VERSION_PLANNING.md",
+    "docs/development/{version}-implementation-plan.md",
+    "docs/guides/INSTALLATION.md",
+    "docs/guides/UPGRADE-TO-{version}.md",
+    "docs/guides/VERSION_ROLLBACK-{version}.md",
+    "docs/releases/{version}-release-notes.md",
+    "docs/releases/{version}-deployment-recommendation.md",
+    "packaging/repo/apt/README.md",
+)
+
+# Wording that ties a mention of the pending version to a later publication.
+# A conditional instruction is honest; an unconditional one reads as a
+# download that works today.
+_PREPUBLICATION_BOUNDARY_RE = re.compile(
+    r"after (?:the )?(?:publication|release)"
+    r"|after (?:the )?merge\b"
+    r"|following (?:the )?publication"
+    r"|once (?:the project )?(?:publishes|has published)"
+    r"|once published"
+    r"|post-publication"
+    r"|will become available"
+    r"|release[- ]time template"
+    r"|(?:release|development)[- ]candidate"
+    r"|only after"
+    r"|before (?:the )?(?:publication|release)"
+    r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
+    r"|not (?:yet )?(?:published|released)"
+    r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
+    re.IGNORECASE,
+)
+
+# Completion verbs.  A sentence that names the pending version with one of these
+# and no local negation or future-publication qualifier states a completed release.
+_PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
+    r"\b(?:shipped|published|released|available)\b|已发布|已正式发布",
+    re.IGNORECASE,
+)
+_NEGATED_COMPLETION_CLAIM_RE = re.compile(
+    r"\b(?:not|never|no)\s+(?:(?:yet|still|longer|been|be|become|officially|formally)\s+)*$"
+    r"|\b(?:isn't|aren't|wasn't|weren't|hasn't|haven't)\s+"
+    r"(?:(?:yet|still|been)\s+)*$",
+    re.IGNORECASE,
+)
+# How far a completion verb may sit from the pending version and still read as
+# a claim about it.  A verb that belongs to another release sits further away
+# or carries a sentence break between the two.
+_ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+\b")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _first_dated_changelog_version(changelog: str) -> str | None:
+    """Return the newest released version, or None while none is dated.
+
+    The first dated heading is the released one: an unreleased entry above it
+    belongs to the pending line, and that line has no publication date yet.
+    """
+    text = _without_fenced_blocks(changelog)
+    for match in re.finditer(r"^ {0,3}##(?!#)[^\n]*$", text, re.MULTILINE):
+        dated = DATED_CHANGELOG_RE.match(match.group(0))
+        if dated is not None:
+            return dated.group("version")
+    return None
+
+
+def _is_conditional_publication_block(block: str) -> bool:
+    """Return whether a block marks the pending version as not yet published."""
+    if _STALE_RELEASE_CLAIM_RE.search(block) is not None:
+        return True
+    return _PREPUBLICATION_BOUNDARY_RE.search(block) is not None
+
+
+def _publication_claim_window(block: str, version_pattern: "re.Pattern[str]") -> str:
+    """Return sentence text about the pending version, including its context.
+
+    Sentence boundaries keep claims about another release out of scope while
+    preserving nearby negation or publication timing that qualifies a verb.
+    """
+    return " ".join(
+        sentence
+        for sentence in _SENTENCE_SPLIT_RE.split(block)
+        if version_pattern.search(sentence) is not None
+    )
+
+
+def _completion_claim_is_nonaffirmative(
+    sentence: str, claim: re.Match[str]
+) -> bool:
+    """Ignore a negated claim or future availability tied to publication."""
+    prefix = re.sub(r"\s+", " ", sentence[:claim.start()].replace(">", " "))
+    context = re.sub(r"\s+", " ", sentence.replace(">", " ").replace("`", ""))
+    if _NEGATED_COMPLETION_CLAIM_RE.search(prefix) is not None:
+        return True
+    claim_word = claim.group(0).lower()
+    if claim_word in {"published", "released", "shipped"}:
+        future_publication = re.search(
+            r"\b(?:once|will\s+be)\s*$", prefix, re.IGNORECASE
+        )
+        if (
+            future_publication is not None
+            and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None
+        ):
+            return True
+    if claim_word != "available":
+        return False
+    future = re.search(
+        r"\b(?:will\s+)?become(?:s)?\s*$|\bwill\s+be\s*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    return future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None
+
+
+def _nearest_version_to_claim(
+    window: str, claim: re.Match[str]
+) -> re.Match[str] | None:
+    """Return the version token closest to a completion verb."""
+    versions = list(_ANY_VERSION_RE.finditer(window))
+    if not versions:
+        return None
+    return min(versions, key=lambda span: abs(span.start() - claim.start()))
+
+
+def _claim_belongs_to_pending_version(window: str, pending_version: str) -> bool:
+    """Return whether an affirmative completion verb names the pending version.
+
+    The nearest version token decides, so a published baseline is not mistaken
+    for a claim about the pending line in a sentence that names both.
+    """
+    pending = re.compile(rf"\bv?{re.escape(pending_version)}\b")
+    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
+        nearest = _nearest_version_to_claim(window, claim)
+        if nearest is None or pending.fullmatch(nearest.group(0)) is None:
+            continue
+        pending_span = nearest
+        if claim.start() < pending_span.start() and claim.group(0).lower() == "published":
+            between = window[claim.end():pending_span.start()]
+            if re.search(r"\buntil\b", between, re.IGNORECASE) and re.search(
+                r"\btag\b", between, re.IGNORECASE
+            ):
+                continue
+        if not _completion_claim_is_nonaffirmative(window, claim):
+            return True
+    return False
+
+
+def _claims_pending_latest_tag(block: str, pending_version: str) -> bool:
+    """Return whether the pending version is called the current latest tag."""
+    version = rf"\bv?{re.escape(pending_version)}\b"
+    latest_tag = (
+        r"\b(?:latest|most recent)\s+"
+        r"(?:(?:public|published|stable)\s+)*tag\b"
+    )
+    forward = re.compile(latest_tag + rf"\s*(?:is\s+)?[:=]?\s*{version}",
+                         re.IGNORECASE)
+    reverse = re.compile(version + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
+                         re.IGNORECASE)
+    for sentence in _SENTENCE_SPLIT_RE.split(block):
+        plain = sentence.replace("**", "").replace("`", "")
+        if forward.search(plain) or reverse.search(plain):
+            return True
+    return False
+
+
+def _pending_sentence_failures(
+    rel: str, sentence: str, pending_version: str,
+    version_pattern: "re.Pattern[str]",
+) -> tuple[list[str], bool]:
+    """Validate one current-state sentence about the pending release."""
+    if version_pattern.search(sentence) is None:
+        return [], False
+    boundary = _is_conditional_publication_block(sentence)
+    window = _publication_claim_window(sentence, version_pattern)
+    claim = _PREPUBLICATION_COMPLETION_CLAIM_RE.search(window)
+    if claim is not None and _claim_belongs_to_pending_version(
+        window, pending_version
+    ):
+        return [
+            f"{rel}: pending {pending_version} is described as "
+            f"{claim.group(0)!r} without a publication boundary in: "
+            f"{sentence[:80]!r}"
+        ], boundary
+    return [], boundary
+
+
+def _pending_document_failures(
+    root: Path, rel: str, pending_version: str
+) -> list[str]:
+    """Validate all current-state blocks for one pending-release surface."""
+    path = root / rel
+    if not path.is_file():
+        return []
+    version_pattern = re.compile(rf"\bv?{re.escape(pending_version)}\b")
+    text = _without_fenced_blocks(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    history = set(_document_update_table_lines(text))
+    failures: list[str] = []
+    boundary_seen = False
+    for block in _logical_blocks(text, history):
+        if version_pattern.search(block) is None:
+            continue
+        if _claims_pending_latest_tag(block, pending_version):
+            failures.append(
+                f"{rel}: pending {pending_version} is identified as the latest tag"
+            )
+        for sentence in _SENTENCE_SPLIT_RE.split(block):
+            sentence_failures, boundary = _pending_sentence_failures(
+                rel, sentence, pending_version, version_pattern
+            )
+            failures.extend(sentence_failures)
+            boundary_seen = boundary_seen or boundary
+    if not boundary_seen:
+        failures.append(
+            f"{rel}: pending {pending_version} needs one explicit "
+            "publication boundary in current-state prose"
+        )
+    return failures
+
+
+def check_pending_release_state(
+    root: Path,
+    pending_version: str,
+    surface_rel_paths: tuple[str, ...] = PENDING_STATE_SURFACES,
+) -> list[str]:
+    """Reject current-state claims that a pending release is published."""
+    failures: list[str] = []
+    for template in surface_rel_paths:
+        rel = template.format(version=pending_version)
+        failures.extend(_pending_document_failures(root, rel, pending_version))
+    return failures
+
+
+def _published_baseline_failures(root: Path, published_version: str) -> list[str]:
+    """Require the published baseline release to stay canonical.
+
+    A pending line sits on top of a real publication, so the checks confirm
+    that the published release notes still carry the stable status and the
+    changelog date that the release declared.
+    """
+    failures = _release_notes_status_failures(
+        root / "docs" / "releases" / f"{published_version}-release-notes.md",
+        published_version,
+    )
+    changelog_path = root / "CHANGELOG.md"
+    if not changelog_path.is_file():
+        return failures
+    changelog = _without_fenced_blocks(
+        changelog_path.read_text(encoding="utf-8", errors="ignore")
+    )
+    heading = re.search(
+        rf"^ {{0,3}}##[ \t]+\[{re.escape(published_version)}\][ \t]*-[ \t]*"
+        rf"(?P<date>\d{{4}}-\d{{2}}-\d{{2}})[ \t]*$",
+        changelog,
+        re.MULTILINE,
+    )
+    if heading is None:
+        failures.append(
+            f"CHANGELOG.md: published {published_version} has no dated heading"
+        )
+        return failures
+    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
+    if notes.is_file():
+        declared = re.search(
+            r"^\*\*Date\*\*:(?P<value>.*)$",
+            _without_fenced_blocks(notes.read_text(encoding="utf-8", errors="ignore")),
+            re.MULTILINE,
+        )
+        if declared is not None and declared.group("value").strip() != heading.group(
+            "date"
+        ):
+            failures.append(
+                f"docs/releases/{published_version}-release-notes.md: date "
+                f"{declared.group('value').strip()!r} does not match CHANGELOG "
+                f"date {heading.group('date')!r}"
+            )
+    return failures
+
+
+def check_release_state_contract(
+    root: Path,
+    surface_rel_paths: tuple[str, ...] = PENDING_STATE_SURFACES,
+) -> list[str]:
+    """Run the release-state contract in the direction the changelog declares.
+
+    An unreleased top entry means the pending version must not read as
+    published while the latest dated release stays canonical.  A dated top
+    entry means the released version must not read as pending, so the same
+    contract accepts the post-publication state.
+    """
+    changelog_path = root / "CHANGELOG.md"
+    if not changelog_path.is_file():
+        return []
+    changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
+    pending_version, errors = _find_unreleased_changelog_line(changelog)
+    if errors:
+        return errors
+    if pending_version is not None:
+        failures = check_pending_release_state(root, pending_version, surface_rel_paths)
+        published_version = _first_dated_changelog_version(changelog)
+        if published_version is not None:
+            failures.extend(_published_baseline_failures(root, published_version))
+        return failures
+    published_version = _first_dated_changelog_version(changelog)
+    if published_version is None:
+        return []
+    failures: list[str] = []
+    for template in surface_rel_paths:
+        rel = template.format(version=published_version)
+        path = root / rel
+        if not path.is_file():
+            continue
+        failures.extend(
+            _stable_claim_failures(
+                rel,
+                published_version,
+                path.read_text(encoding="utf-8", errors="ignore"),
+            )
+        )
+    return failures
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -1217,6 +1546,7 @@ def main() -> int:
     )
     stable_ran, stable_failures = _stable_surface_check(changelog, ROOT)
     failures.extend(stable_failures)
+    failures.extend(check_release_state_contract(ROOT))
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
@@ -1240,6 +1570,7 @@ def main() -> int:
         "- Stable release surface consistency: "
         + ("OK" if stable_ran else "SKIPPED (no dated release in CHANGELOG)")
     )
+    print("- Pending/released release-state contract: OK")
     print("- Duplicate canonical/mirror sync: OK")
     print("- Document Updates chronological order (descending): OK")
     print("- Release checklist states requirements only: OK")

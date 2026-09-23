@@ -977,3 +977,231 @@ def test_stable_claim_failures_flag_candidate_headings(tmp_path):
             tmp_path, "9.9.9", ("README.md",)
         )
         assert any("pre-release wording" in error for error in errors), heading
+
+
+# --------------------------------------------------------------------------
+# Release-state contract: pre-publication and post-publication surfaces.
+# --------------------------------------------------------------------------
+
+_PENDING_SURFACES = {
+    "README.md": "> Current line: v9.9.9 is a release candidate and the project has\n"
+    "> not published it yet. The latest public stable release is v9.8.8.\n",
+    "README_zh-CN.md": "> 当前版本线：v9.9.9 是发布候选版本，尚未发布。\n",
+    "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+    "**Status:** Release candidate. 9.8.8 is the latest released version\n"
+    "(2026-01-01). 9.9.9 is the final pre-1.0 breaking release and the project\n"
+    "publishes it after the merge.\n",
+    "docs/project/README.md": "The v9.9.9 release is pending publication; v9.8.8\n"
+    "remains the latest published stable release.\n",
+    "docs/project/VERSION_PLANNING.md": "v9.9.9 is the current development line\n"
+    "and is a release candidate. The project publishes it after the merge.\n",
+    "docs/development/9.9.9-implementation-plan.md": "## Release Status\n\n"
+    "9.9.9 is a release candidate pending publication.\n"
+    "The latest published stable tag is v9.8.8. The planned tag is v9.9.9.\n",
+    "docs/guides/INSTALLATION.md": "The project has not published 9.9.9 yet.\n"
+    "Set RELEASE_TAG to the latest published tag until the v9.9.9 assets\n"
+    "become available.\n",
+    "docs/guides/UPGRADE-TO-9.9.9.md": "> Publication status: 9.9.9 is a release\n"
+    "> candidate and the project has not published it yet.\n",
+    "docs/guides/VERSION_ROLLBACK-9.9.9.md": "This guide covers rolling back\n"
+    "the 9.9.9 release candidate, which is not yet published.\n",
+    "docs/releases/9.9.9-release-notes.md": "# Release Notes: 9.9.9\n\n"
+    "**Date**: Pending publication\n\n"
+    "**Status**: Pending release. This document describes the release candidate\n"
+    "for the v9.9.9 line and does not assert that a tag or checksum exists.\n",
+    "docs/releases/9.9.9-deployment-recommendation.md":
+    "Record the v9.9.9 tag and commit SHA as the release identity once published.\n",
+    "packaging/repo/apt/README.md": "The example below uses the v9.8.8 release\n"
+    "assets, the latest published release. The v9.9.9 assets become available\n"
+    "after publication.\n",
+}
+
+# The same surfaces once the release is real: no pending wording survives.
+_PUBLISHED_SURFACES = {
+    "README.md": "> Current line: v9.9.9 shipped on 2026-02-02 as the final\n"
+    "> breaking release before v1.0.\n",
+    "README_zh-CN.md": "> 当前版本线：v9.9.9 已正式发布（2026-02-02）。\n",
+    "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+    "**Status:** Stable release. 9.9.9 is the latest released version,\n"
+    "published 2026-02-02.\n",
+    "docs/project/VERSION_PLANNING.md": "v9.9.9 is the current released line\n"
+    "(published 2026-02-02).\n",
+    "docs/project/README.md": "The v9.9.9 line is the latest published stable\n"
+    "release.\n",
+    "docs/development/9.9.9-implementation-plan.md": "## Release Status\n\n"
+    "The latest published stable tag is v9.9.9 (2026-02-02).\n",
+    "docs/guides/INSTALLATION.md": "Set RELEASE_TAG to the published v9.9.9 tag\n"
+    "and run the authenticated sequence.\n",
+    "docs/guides/UPGRADE-TO-9.9.9.md": "> Publication status: 9.9.9 shipped\n"
+    "> (2026-02-02). The release carries the tag and signed artifacts.\n",
+    "docs/guides/VERSION_ROLLBACK-9.9.9.md":
+    "This guide covers rolling back the released 9.9.9 version.\n",
+    "docs/releases/9.9.9-release-notes.md": "# Release Notes: 9.9.9\n\n"
+    "**Date**: 2026-02-02\n\n**Status**: Stable release\n",
+    "docs/releases/9.9.9-deployment-recommendation.md":
+    "Record the published v9.9.9 tag and commit SHA as the release identity.\n",
+    "packaging/repo/apt/README.md": "The example below uses the v9.9.9 release\n"
+    "assets and the published checksum manifest.\n",
+}
+
+_CHANGELOG_PENDING = (
+    "## [9.9.9] - Unreleased\n\nPending work.\n\n"
+    "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+)
+
+
+def _write_pending_state(root, *, changelog=_CHANGELOG_PENDING, **overrides):
+    """Write the canonical pre-publication surface set plus the changelog."""
+    (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    notes = root / "docs" / "releases"
+    notes.mkdir(parents=True, exist_ok=True)
+    (notes / "9.8.8-release-notes.md").write_text(
+        "# Release Notes: 9.8.8\n\n**Date**: 2026-01-01\n**Status**: Stable release\n",
+        encoding="utf-8",
+    )
+    bodies = dict(_PENDING_SURFACES)
+    bodies.update(overrides)
+    for rel, body in bodies.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def test_release_state_contract_accepts_canonical_pre_publication_state(tmp_path):
+    """The real pre-publication shape passes: v9.8.8 stable, v9.9.9 pending."""
+    _write_pending_state(tmp_path)
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_rejects_pending_version_as_latest_tag(tmp_path):
+    _write_pending_state(
+        tmp_path,
+        **{
+            "docs/development/9.9.9-implementation-plan.md":
+            "## Release Status\n\n"
+            "9.9.9 is a release candidate pending publication.\n\n"
+            "- Latest tag: v9.9.9\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("latest tag" in failure for failure in failures), failures
+
+
+def test_release_state_contract_rejects_a_published_claim_while_pending(tmp_path):
+    """A current-state surface cannot call the pending version published."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "> Current line: v9.9.9 is a release candidate but shipped on\n"
+            "> 2026-01-01 despite publication being pending. Use the `v9.9.9` tag\n"
+            "> for installation.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("pending 9.9.9" in failure for failure in failures), failures
+
+
+def test_release_state_contract_rejects_a_stable_status_while_pending(tmp_path):
+    """The project status section cannot declare the pending line stable."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+            "**Status:** Stable release. 9.9.9 is the latest released version, "
+            "published 2026-01-01.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("stable release" in failure or "pending 9.9.9" in failure
+               for failure in failures), failures
+
+
+def test_release_state_contract_requires_a_publication_boundary(tmp_path):
+    """Prose that names the pending version must state the publication gate."""
+    _write_pending_state(
+        tmp_path,
+        **{"docs/guides/INSTALLATION.md": "Install guide for 9.9.9 operators.\n"},
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("publication boundary" in failure for failure in failures), failures
+
+
+def test_release_state_contract_ignores_history_and_fenced_examples(tmp_path):
+    """Ledger rows and fenced commands may name the pending version freely."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "> Current line: v9.9.9 is a release candidate and the\n"
+            "> project has not published it yet.\n"
+            "\n## Document Updates\n\n"
+            "| Version | Date | Change |\n"
+            "|---------|------|--------|\n"
+            "| 9.9.9 | 2026-01-01 | Release finalization prepared for the published 9.9.9 |\n"
+            "\n```bash\n"
+            "VERSION=v9.9.9  # 9.9.9 shipped on 2026-01-01\n"
+            "```\n",
+        },
+    )
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_accepts_post_publication_state(tmp_path):
+    """A dated top changelog entry flips the same contract to the released side."""
+    _write_pending_state(
+        tmp_path,
+        changelog="## [9.9.9] - 2026-02-02\n\nReleased work.\n",
+    )
+    for rel, body in _PUBLISHED_SURFACES.items():
+        (tmp_path / rel).write_text(body, encoding="utf-8")
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_requires_the_published_baseline_to_stay_canonical(
+    tmp_path,
+):
+    """The released baseline keeps its stable notes and changelog date."""
+    _write_pending_state(tmp_path)
+    (tmp_path / "docs" / "releases" / "9.8.8-release-notes.md").write_text(
+        "# Release Notes: 9.8.8\n\n**Date**: 2026-01-01\n**Status**: Pending release\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("9.8.8" in failure for failure in failures), failures
+
+
+def test_release_state_contract_surfaces_the_malformed_unreleased_heading(tmp_path):
+    """A malformed unreleased heading fails the contract instead of hiding."""
+    _write_pending_state(
+        tmp_path,
+        changelog="## [9.9.9] - Unreleased candidate (rc3)\n",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("malformed unreleased heading" in failure for failure in failures)
+
+
+def test_release_state_contract_has_no_failures_without_a_changelog(tmp_path):
+    """A missing changelog leaves the decision to the checks that own it."""
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_pending_claim_window_scopes_a_verb_to_its_own_version():
+    """A completion verb credits the version nearest to it in the sentence."""
+    window = "9.9.9 is the current development line and 9.8.8 was published."
+    assert not docs_checker._claim_belongs_to_pending_version(window, "9.9.9")
+    window = "9.9.9 was published as the final breaking release."
+    assert docs_checker._claim_belongs_to_pending_version(window, "9.9.9")

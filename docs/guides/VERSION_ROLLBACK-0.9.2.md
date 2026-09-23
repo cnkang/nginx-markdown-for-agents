@@ -7,7 +7,7 @@ or narrowly scopes conversion **without replacing the binary**, see
 
 ## Overview
 
-This guide covers rolling back the released 0.9.2 to a prior
+This guide covers rolling back the 0.9.2 release candidate to a prior
 release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
 on-disk data migration. Rolling back the module binary restores the 0.9.1

@@ -22,11 +22,12 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: 0.9.2 shipped (2026-09-23). The release carries the
-> `v0.9.2` tag, GitHub Release, package checksums, and signed artifacts.
-> Verify checksums and signatures as described below before you install
-> prebuilt packages. Helm repository publication, where offered, stays
-> separate from this release.
+> Publication status: 0.9.2 is a release candidate and the project has not
+> published it yet. The `v0.9.2` tag, GitHub Release, package checksums,
+> and signed artifacts become available after the merge and the
+> candidate-bound release gates pass. Verify checksums and signatures as
+> described below before you install prebuilt packages. Helm repository
+> publication, where offered, stays separate from this release.
 
 Choose the upgrade method matching your deployment:
 
@@ -47,6 +48,8 @@ set -euo pipefail
 # Replace <nginx-version>, <os>, and <arch> with your target (for example,
 # 1.26.3, glibc, and x86_64). The archive contains the module .so.
 MODULE_ARCHIVE="ngx_http_markdown_filter_module-<nginx-version>-<os>-<arch>.tar.gz"
+# Publication-dependent: the v0.9.2 tag becomes available after publication.
+# Until then, replace v0.9.2 with the latest published tag (v0.9.1).
 RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2"
 curl --fail --location --remote-name "${RELEASE_BASE}/${MODULE_ARCHIVE}"
 curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS"
@@ -1111,6 +1114,7 @@ commit. External FFI consumers must regenerate bindings from
 
 ```bash
 cd nginx-markdown-for-agents
+# Publication-dependent: the v0.9.2 tag becomes available after publication.
 RELEASE_TAG=v0.9.2
 git fetch --tags origin "${RELEASE_TAG}"
 # Copy EXPECTED_COMMIT from the independently authenticated release evidence.
@@ -2173,10 +2177,10 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-23 | Hermes | Release date moved to the current publication day |
-| 0.9.2 | 2026-09-22 | Hermes | Release date adjusted to the official publication day |
-| 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
-| 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status updated for the published v0.9.2 |
+| 0.9.2 | 2026-09-23 | Hermes | Planned publication date recorded in the release metadata, pending publication |
+| 0.9.2 | 2026-09-22 | Hermes | Planned publication date adjusted in the release metadata, pending publication |
+| 0.9.2 | 2026-09-21 | Hermes | Planned publication date corrected in the release metadata, pending publication |
+| 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status wording prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-17 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
 | 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
 | 0.9.2 | 2026-09-07 | Kang | Source-build restore copies the backup (never consumes it), the post-start check prefers systemctl is-active on systemd hosts, and backup removal waits for a known-convertible fixture to return Markdown |
