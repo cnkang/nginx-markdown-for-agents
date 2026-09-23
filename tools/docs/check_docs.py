@@ -1205,6 +1205,9 @@ PENDING_STATE_SURFACES = (
 # download that works today.
 _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"after (?:the )?(?:publication|release)"
+    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+|version|tag)|it|"
+    r"this (?:version|release)|that (?:version|release))"
+    r"\s+(?:is|has been|will be|gets)\s+(?:published|released)"
     r"|after (?:the )?merge\b"
     r"|following (?:the )?publication"
     r"|once (?:the project )?(?:publishes|has published)"
@@ -1285,7 +1288,10 @@ def _completion_claim_is_nonaffirmative(
     claim_word = claim.group(0).lower()
     if claim_word in {"published", "released", "shipped"}:
         future_publication = re.search(
-            r"\b(?:once|will\s+be)\s*$", prefix, re.IGNORECASE
+            r"\b(?:once|will\s+be|after\b[^!?]*\b"
+            r"(?:is|has been|will be|gets))\s*$",
+            prefix,
+            re.IGNORECASE,
         )
         if (
             future_publication is not None
