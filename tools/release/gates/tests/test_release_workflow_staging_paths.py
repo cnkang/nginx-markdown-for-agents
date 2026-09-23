@@ -6,12 +6,20 @@ requires a clean checkout before it records candidate-bound evidence, so a
 staging directory that git does not ignore makes the gate fail after the
 downloads have happened.  Every ``actions/download-artifact`` step path that
 addresses the repository is asserted to be git-ignored here.
+
+The guard reads the workflow document once per session (the parsed document
+and its top-level env block are cached), resolves the workflow's own static
+``env.`` references, and fails closed on every path it cannot prove: an
+unresolvable reference, a literal segment mixed with expressions, a parent
+segment walking back into the checkout, or a repository-root target.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Mapping
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -22,11 +30,38 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 
 ENV_REFERENCE = re.compile(r"\$\{\{\s*env\.([A-Za-z_](?a:\w)*)\s*\}\}")
 
+# The GitHub Actions expression opener: ``$`` immediately followed by ``{{``.
+# It is assembled from its two characters rather than written as one literal
+# so this module never carries that sequence as a standalone token -- only
+# full expressions (fixtures and the documented roots below) contain it
+# verbatim -- and every opener comparison reads it through this constant.
+_GH_EXPR_OPEN = "$" + "{{"
 
-def _workflow_env() -> dict[str, str]:
-    """Static top-level env values of the workflow."""
+# Each iteration of the resolution loop below substitutes one ``env.NAME``
+# reference; a path whose reference chain outlasts this bound fails closed
+# instead of being trusted.  The workflow's own paths substitute a single
+# static value, so only a crafted chain can reach the bound.
+_MAX_ENV_SUBSTITUTIONS = 8
+
+
+@lru_cache(maxsize=1)
+def _workflow_document() -> dict:
+    """The parsed workflow, cached: the document is fixed while the suite runs.
+
+    Callers must not mutate the returned mapping.
+    """
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    env = document.get("env") if isinstance(document, dict) else None
+    return document if isinstance(document, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _workflow_env() -> dict[str, str]:
+    """Static top-level env values of the workflow.
+
+    Parsed once per session: every download path is resolved against the
+    document.  Callers must not mutate the returned mapping.
+    """
+    env = _workflow_document().get("env")
     if not isinstance(env, dict):
         return {}
     return {
@@ -34,22 +69,31 @@ def _workflow_env() -> dict[str, str]:
     }
 
 
-def _resolve_static_env(text: str) -> str | None:
+def _resolve_static_env(
+    text: str, env: Mapping[str, object] | None = None
+) -> str | None:
     """Substitute the workflow's own ``${{ env.NAME }}`` references.
 
     Only names defined as static string values in the workflow's top-level
     env block are resolved; any other reference (a missing name, a
     non-string value, a value that is itself an expression) returns None
     so the caller fails closed instead of trusting an unverifiable path.
+    ``env`` defaults to the workflow's own block; a caller may inject a
+    synthetic mapping to drive the fail-closed branches.
     """
-    env = _workflow_env()
+    if _GH_EXPR_OPEN not in text:
+        # Nothing to substitute and no document to read: the scan loop only
+        # replaces ``env.`` references, which need the opener.
+        return text
+    if env is None:
+        env = _workflow_env()
     resolved = text
-    for _ in range(8):
+    for _ in range(_MAX_ENV_SUBSTITUTIONS):
         match = ENV_REFERENCE.search(resolved)
         if match is None:
             return resolved
         value = env.get(match.group(1))
-        if not isinstance(value, str) or "${" + "{" in value:
+        if not isinstance(value, str) or _GH_EXPR_OPEN in value:
             return None
         resolved = resolved[: match.start()] + value + resolved[match.end():]
     return None
@@ -67,7 +111,22 @@ WORKSPACE_EXPRESSION = "${{ github.workspace }}"
 EXTERNAL_EXPRESSION_ROOTS = ("${{ runner.temp }}",)
 
 
-def _repository_path(step: dict) -> str | None:
+def _step_path(step: object) -> object:
+    """The step's ``with.path`` value; None when the shape is unreadable.
+
+    A step whose ``with`` value is not a mapping names no path the guard can
+    read.  The predicates treat that like a missing path -- root staging --
+    so a malformed step fails closed instead of raising ``AttributeError``.
+    """
+    if not isinstance(step, dict):
+        return None
+    with_values = step.get("with")
+    if not isinstance(with_values, dict):
+        return None
+    return with_values.get("path")
+
+
+def _repository_path(step: object) -> str | None:
     """The static repository-relative download path of the step, if any.
 
     Only paths that are fully static after resolving the workflow's own
@@ -75,7 +134,7 @@ def _repository_path(step: dict) -> str | None:
     prefix can be checked against git's ignore rules; anything unresolved
     is left to the fail-closed predicate below.
     """
-    path = step.get("with", {}).get("path")
+    path = _step_path(step)
     if not isinstance(path, str):
         return None
     resolved = _resolve_static_env(path)
@@ -84,12 +143,12 @@ def _repository_path(step: dict) -> str | None:
     path = resolved
     if path.startswith(WORKSPACE_EXPRESSION):
         path = path[len(WORKSPACE_EXPRESSION):].lstrip("/")
-    if path.startswith("/") or "${" + "{" in path or ".." in path.split("/"):
+    if path.startswith("/") or _GH_EXPR_OPEN in path or _has_parent_segment(path):
         return None
     return path.rstrip("/") or None
 
 
-def _stages_into_repository_root(step: dict) -> bool:
+def _stages_into_repository_root(step: object) -> bool:
     """True when a download step targets the checkout root itself.
 
     ``actions/download-artifact`` without ``path`` drops files into the
@@ -99,20 +158,22 @@ def _stages_into_repository_root(step: dict) -> bool:
     """
     if not isinstance(step, dict):
         return False
-    path = step.get("with", {}).get("path")
+    path = _step_path(step)
     if path is None:
+        # No path key (root staging) or an unreadable with: block: either way
+        # the step cannot be attributed to a git-ignored staging directory.
         return True
     if not isinstance(path, str) or path.startswith("/"):
         return False
     remainder = path
     if remainder.startswith(WORKSPACE_EXPRESSION):
         remainder = remainder[len(WORKSPACE_EXPRESSION):].lstrip("/")
-    if "${{" in remainder:
+    if _GH_EXPR_OPEN in remainder:
         return False
     return remainder.rstrip("/") == ""
 
 
-def _unresolvable_repository_path(step: dict) -> str | None:
+def _unresolvable_repository_path(step: object) -> str | None:
     """A download path that cannot be proven safe, so the guard fails closed.
 
     - The workflow's own static env references are resolved first; an env
@@ -129,7 +190,7 @@ def _unresolvable_repository_path(step: dict) -> str | None:
     """
     if not isinstance(step, dict):
         return None
-    path = step.get("with", {}).get("path")
+    path = _step_path(step)
     if not isinstance(path, str):
         return None
     resolved = _resolve_static_env(path)
@@ -142,10 +203,10 @@ def _unresolvable_repository_path(step: dict) -> str | None:
         return path
     if path.startswith(WORKSPACE_EXPRESSION):
         remainder = path[len(WORKSPACE_EXPRESSION):].lstrip("/")
-        return path if "$" + "{{" in remainder else None
+        return path if _GH_EXPR_OPEN in remainder else None
     if path.startswith("/"):
         return path
-    if path.startswith("$" + "{{"):
+    if path.startswith(_GH_EXPR_OPEN):
         # Only roots with documented external semantics are provably outside
         # the checkout; any other expression (matrix, env, inputs, ...) can
         # resolve to a workspace-relative path.  The remainder of an external
@@ -154,8 +215,8 @@ def _unresolvable_repository_path(step: dict) -> str | None:
         if root is None:
             return path
         remainder = path[len(root):].lstrip("/")
-        return path if "$" + "{{" in remainder else None
-    if "$" + "{{" in path:
+        return path if _GH_EXPR_OPEN in remainder else None
+    if _GH_EXPR_OPEN in path:
         return path
     return None
 
@@ -173,15 +234,33 @@ def _external_expression_root(path: str) -> str | None:
     return None
 
 
-def _download_steps() -> list[dict]:
-    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return [
-        step
-        for job in document.get("jobs", {}).values()
-        if isinstance(job, dict)
-        for step in job.get("steps", [])
-        if _is_download_artifact(step)
-    ]
+def _download_steps(document: object | None = None) -> list[dict]:
+    """Every ``actions/download-artifact`` step in the workflow.
+
+    Malformed shapes never crash the guard: a document that is not a mapping,
+    a job that is not a mapping, a ``steps`` value that is not a list, and a
+    step that is not a mapping are each skipped (the predicates themselves
+    also reject non-mappings).  ``document`` defaults to the parsed workflow;
+    a caller may inject a synthetic one to drive the malformed branches.
+    """
+    if document is None:
+        document = _workflow_document()
+    if not isinstance(document, dict):
+        return []
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return []
+    steps: list[dict] = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        job_steps = job.get("steps")
+        if not isinstance(job_steps, list):
+            continue
+        for step in job_steps:
+            if isinstance(step, dict) and _is_download_artifact(step):
+                steps.append(step)
+    return steps
 
 
 def test_download_artifact_paths_are_git_ignored() -> None:
@@ -262,3 +341,154 @@ def test_unresolvable_repository_path_detection() -> None:
     assert not flagged("${{ github.workspace }}/staged/")
     assert not flagged("dist/")
     assert not flagged("")
+
+
+def test_parent_segment_walks_back_into_the_checkout() -> None:
+    """A ``..`` segment is unresolvable even behind an external expression root.
+
+    ``${{ runner.temp }}/../<repo>`` starts at a documented-external root but
+    walks back up into the checkout, so it must fail closed rather than be
+    skipped as an outside-the-checkout path.
+    """
+    parent_walk = "${{ runner.temp }}/../" + "nginx-markdown-for-agents"
+    assert _has_parent_segment(parent_walk)
+    assert _unresolvable_repository_path({"with": {"path": parent_walk}}) == parent_walk
+    assert _repository_path({"with": {"path": parent_walk}}) is None
+    # Positive controls: the identical shape without the parent segment, and
+    # a plain workspace-relative directory, both stay accepted.
+    assert not _has_parent_segment("${{ runner.temp }}/staging")
+    assert _unresolvable_repository_path(
+        {"with": {"path": "${{ runner.temp }}/staging"}}
+    ) is None
+    assert _repository_path({"with": {"path": "runtime/staged"}}) == "runtime/staged"
+
+
+def test_resolve_static_env_fails_closed_on_unprovable_values() -> None:
+    """Every unresolvable ``env.`` reference returns None, never a guess.
+
+    The synthetic mappings cover the branches the workflow's own env block
+    cannot exercise: an unknown name, a non-string value, and a value that is
+    itself an expression.
+    """
+    def resolve(text: str, env: Mapping[str, object]) -> str | None:
+        return _resolve_static_env(text, env)
+
+    assert resolve("${{ env.KNOWN }}/x", {"KNOWN": "value"}) == "value/x"
+    assert resolve("${{ env.MISSING }}/x", {"KNOWN": "value"}) is None
+    for non_string in (None, 7, ["value"], {"nested": "value"}, True):
+        assert resolve("${{ env.NAME }}", {"NAME": non_string}) is None, (
+            f"non-string env value {non_string!r} must fail closed"
+        )
+    assert resolve("${{ env.NAME }}", {"NAME": "${{ secrets.TOKEN }}"}) is None
+    assert resolve("${{ env.NAME }}", {"NAME": "$" + "{{ matrix.name }}"}) is None
+    # Positive controls: a value that merely contains a non-expression dollar
+    # sign, and a reference-free path, still resolve.
+    assert resolve("${{ env.NAME }}", {"NAME": "$5/staged"}) == "$5/staged"
+    assert resolve("staged/", {"NAME": "unused"}) == "staged/"
+
+
+def test_resolve_static_env_bounds_the_reference_chain() -> None:
+    """A reference chain at or past the bound is unresolvable.
+
+    Each loop iteration substitutes one reference, so a chain resolves only
+    while its length is strictly below ``_MAX_ENV_SUBSTITUTIONS``: the loop
+    that substitutes the last reference has no iteration left to observe the
+    reference-free result.
+    """
+    def chain(count: int) -> str:
+        return "".join("${{ env.A }}" for _ in range(count))
+
+    env = {"A": "value"}
+    bound = _MAX_ENV_SUBSTITUTIONS
+    assert bound >= 2, "the bound must leave room for a resolving chain"
+    assert _resolve_static_env(chain(bound - 1), env) == "value" * (bound - 1)
+    assert _resolve_static_env(chain(bound), env) is None
+    assert _resolve_static_env(chain(bound + 1), env) is None
+
+
+def test_malformed_step_shapes_never_crash_the_guard() -> None:
+    """A malformed workflow cannot crash the guard with AttributeError.
+
+    Unreadable step and ``with`` shapes fail closed (root staging), while a
+    well-formed step with a staging path stays accepted.
+    """
+    malformed = (
+        {"with": None},
+        {"with": "dist/"},
+        {"with": ["dist/"]},
+        {"with": 7},
+    )
+    for step in malformed:
+        assert _stages_into_repository_root(step), (
+            f"unreadable with: block {step!r} must fail closed"
+        )
+        assert _repository_path(step) is None
+        assert _unresolvable_repository_path(step) is None
+    # Positive controls: non-mapping steps are skipped rather than rejected,
+    # and the documented staging directories still resolve.
+    assert not _stages_into_repository_root(None)
+    assert _stages_into_repository_root({"uses": "actions/download-artifact@v8"})
+    assert _repository_path({"with": {"path": "release-assets/"}}) == "release-assets"
+
+
+def test_download_steps_skips_malformed_containers() -> None:
+    """A job that is not a mapping, a non-list ``steps``, and a non-mapping
+    step are each skipped instead of raising from the scan.
+
+    The synthetic documents go through the production scan, so the guard's
+    iteration itself is what is exercised -- not a copy of its logic.
+    """
+    document = {
+        "jobs": {
+            "scalar-job": "not-a-mapping",
+            "steps-not-a-list": {"steps": "run: echo hi"},
+            "steps-not-iterable": {"steps": 7},
+            "steps-null": {"steps": None},
+            "steps-are-scalars": {"steps": ["echo hi", 7, None]},
+            "mixed": {
+                "steps": [
+                    "echo hi",
+                    {
+                        "uses": "actions/download-artifact@v8",
+                        "with": {"path": "staged/"},
+                    },
+                ]
+            },
+        }
+    }
+    steps = _download_steps(document)
+    assert [step.get("with", {}).get("path") for step in steps] == ["staged/"]
+    for malformed in (
+        {"jobs": None},
+        {"jobs": ["not-a-mapping"]},
+        {},
+        "not-a-document",
+        {"jobs": {"ok": {"steps": []}}},
+    ):
+        assert _download_steps(malformed) == [], (
+            f"malformed document {malformed!r} must yield no steps"
+        )
+    # Positive control: the real workflow still yields its own steps.
+    assert _download_steps()
+
+
+def test_workflow_env_is_cached_and_static() -> None:
+    """The env mapping is the cached document's static string entries.
+
+    Repeated calls must not re-read the workflow, and every kept value must be
+    a plain string: a value that is itself an expression is exactly what the
+    resolver fails closed on.
+    """
+    _workflow_env.cache_clear()
+    _workflow_document.cache_clear()
+    first = _workflow_env()
+    assert first == _workflow_env(), "repeated calls must return the same mapping"
+    assert _workflow_env.cache_info().hits >= 1
+    assert first
+    for name, value in first.items():
+        assert isinstance(name, str)
+        assert isinstance(value, str)
+        assert _GH_EXPR_OPEN not in value, (
+            f"workflow env {name!r} is itself an expression; the resolver "
+            "fails closed on it"
+        )
