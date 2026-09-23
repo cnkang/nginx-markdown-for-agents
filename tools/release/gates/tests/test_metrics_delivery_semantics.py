@@ -391,7 +391,7 @@ def test_non_delivery_outcomes_no_double_count(requests):
         if req.outcome in NON_DELIVERY_OUTCOMES
     )
     assert non_delivery_count == (len(requests) - success_count), (
-        f"Non-delivery count mismatch"
+        "Non-delivery count mismatch"
     )
 
 
@@ -614,7 +614,7 @@ def test_delivery_counter_semantics_combined(requests):
 
     # 2. Non-delivery outcomes never leaked into delivery counter
     assert snapshot.conversion_deliveries_total <= len(requests), (
-        f"Deliveries exceed total requests"
+        "Deliveries exceed total requests"
     )
     assert (
         snapshot.conversion_deliveries_total
