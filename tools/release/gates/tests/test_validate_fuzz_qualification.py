@@ -1843,7 +1843,11 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     assert err.count("additional worker error") == 1, err
 
 
-def _process_tree_script(tmp_path: Path, marker_delay: float = 0.8) -> tuple[str, Path, Path]:
+def _process_tree_script(
+    tmp_path: Path,
+    marker_delay: float = 4.0,
+    parent_startup_delay: float = 0.0,
+) -> tuple[str, Path, Path]:
     """Create parent/child scripts whose child survives TERM unless group-killed."""
     child_pid_path = tmp_path / "child.pid"
     child_marker = tmp_path / "child-survived"
@@ -1854,9 +1858,13 @@ def _process_tree_script(tmp_path: Path, marker_delay: float = 0.8) -> tuple[str
         f"open({str(child_marker)!r}, 'w').write('survived')\n"
         "time.sleep(30)\n"
     )
+    startup_delay = (
+        f"time.sleep({parent_startup_delay})\n" if parent_startup_delay else ""
+    )
     parent_code = (
         "import subprocess, sys, time\n"
-        "child = subprocess.Popen([sys.executable, '-c', "
+        + startup_delay
+        + "child = subprocess.Popen([sys.executable, '-c', "
         f"{child_code!r}])\n"
         f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
         "time.sleep(30)\n"
@@ -1971,17 +1979,20 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
     tmp_path: Path, monkeypatch
 ) -> None:
     """A timeout kills the whole invocation group and releases inherited pipes."""
-    script, child_pid_path, child_marker = _process_tree_script(tmp_path)
+    marker_delay = 4.0
+    script, child_pid_path, child_marker = _process_tree_script(
+        tmp_path, marker_delay=marker_delay, parent_startup_delay=0.4
+    )
     processes = _install_real_script_popen(monkeypatch, script)
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
 
     try:
-        result = validator._invoke_fuzz("corpus_population", [], 0.25)
+        result = validator._invoke_fuzz("corpus_population", [], 2.0)
 
         assert result["returncode"] == -1
         assert result["stderr"].startswith("timed out: ")
         _wait_for_file(child_pid_path)
-        time.sleep(1.0)
+        time.sleep(marker_delay + 0.1)
         assert not child_marker.exists(), "a descendant survived the timeout"
         assert not validator._ACTIVE_FUZZ_PROCESSES
     finally:
@@ -1992,7 +2003,10 @@ def test_parent_interrupt_cancels_active_process_groups(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Interrupt cleanup stops live fuzz workers and their descendants."""
-    script, child_pid_path, child_marker = _process_tree_script(tmp_path)
+    marker_delay = 4.0
+    script, child_pid_path, child_marker = _process_tree_script(
+        tmp_path, marker_delay=marker_delay
+    )
     processes = _install_real_script_popen(monkeypatch, script)
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
     monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
@@ -2030,7 +2044,7 @@ def test_parent_interrupt_cancels_active_process_groups(
         assert not worker.is_alive()
         assert len(results) == 1
         assert not validator._ACTIVE_FUZZ_PROCESSES
-        time.sleep(1.0)
+        time.sleep(marker_delay + 0.1)
         assert not child_marker.exists(), "a descendant survived parent cancellation"
     finally:
         _kill_test_processes(child_pid_path, processes)
