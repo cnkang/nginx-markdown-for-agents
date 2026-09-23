@@ -180,6 +180,112 @@ def _line_export_name(line: str) -> str | None:
     return _header_declaration_name(line)
 
 
+def _rust_raw_string_end(source: str, index: int) -> int | None:
+    """Return the end of one Rust raw string, when one starts at ``index``."""
+    if source.startswith("br", index):
+        quote_index = index + 2
+    elif source[index] == "r":
+        quote_index = index + 1
+    else:
+        return None
+    hash_start = quote_index
+    while quote_index < len(source) and source[quote_index] == "#":
+        quote_index += 1
+    if quote_index >= len(source) or source[quote_index] != '"':
+        return None
+    terminator = '"' + ("#" * (quote_index - hash_start))
+    closing_quote = source.find(terminator, quote_index + 1)
+    return len(source) if closing_quote < 0 else closing_quote + len(terminator)
+
+
+def _rust_quoted_string_end(source: str, index: int) -> int:
+    """Return the end of a cooked Rust string beginning at a quote."""
+    escaped = False
+    cursor = index + 1
+    while cursor < len(source):
+        char = source[cursor]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            return cursor + 1
+        cursor += 1
+    return len(source)
+
+
+def _rust_block_comment_end(source: str, index: int) -> int:
+    """Return the end of a nested Rust block comment."""
+    depth = 1
+    cursor = index + 2
+    while cursor < len(source) and depth:
+        if source.startswith("/*", cursor):
+            depth += 1
+            cursor += 2
+        elif source.startswith("*/", cursor):
+            depth -= 1
+            cursor += 2
+        else:
+            cursor += 1
+    return cursor
+
+
+def _rust_comment_end(source: str, index: int) -> int | None:
+    """Return the end of a line or block comment at ``index``."""
+    if source.startswith("//", index):
+        newline = source.find("\n", index)
+        return len(source) if newline < 0 else newline
+    if source.startswith("/*", index):
+        return _rust_block_comment_end(source, index)
+    return None
+
+
+def _mask_rust_span(masked: list[str], start: int, end: int) -> None:
+    """Replace non-newline characters in a Rust non-code span with spaces."""
+    for position in range(start, end):
+        if masked[position] not in "\r\n":
+            masked[position] = " "
+
+
+def _is_rust_abi_string(
+    source: str, masked: list[str], start: int, end: int
+) -> bool:
+    """Keep only the ``\"C\"`` literal that follows a Rust ``extern`` token."""
+    return (
+        source[start:end] == '"C"'
+        and re.search(r"\bextern\s*$", "".join(masked[:start])) is not None
+    )
+
+
+def _mask_rust_non_code(source: str) -> str:
+    """Mask comments and non-ABI string literals before matching exports."""
+    masked = list(source)
+    index = 0
+    while index < len(source):
+        raw_end = (
+            _rust_raw_string_end(source, index)
+            if source[index] in {"b", "r"}
+            else None
+        )
+        if raw_end is not None:
+            _mask_rust_span(masked, index, raw_end)
+            index = raw_end
+            continue
+        if source[index] == '"':
+            string_end = _rust_quoted_string_end(source, index)
+            if not _is_rust_abi_string(source, masked, index, string_end):
+                _mask_rust_span(masked, index, string_end)
+            index = string_end
+            continue
+        comment_end = _rust_comment_end(source, index)
+        if comment_end is not None:
+            _mask_rust_span(masked, index, comment_end)
+            index = comment_end
+            continue
+        index += 1
+    return "".join(masked)
+
+
 def declared_rust_exports() -> list[str]:
     """Extract declared C export names from the Rust FFI export modules."""
     names: set[str] = set()
@@ -187,7 +293,7 @@ def declared_rust_exports() -> list[str]:
         text = _read_text(path)
         if text is None:
             raise ValueError(f"cannot read declared Rust FFI exports from {path}")
-        names.update(RUST_FFI_EXPORT_RE.findall(text))
+        names.update(RUST_FFI_EXPORT_RE.findall(_mask_rust_non_code(text)))
     if not names:
         raise ValueError("no declared Rust FFI exports were found")
     return sorted(names)
