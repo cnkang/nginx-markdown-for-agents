@@ -1108,6 +1108,20 @@ def test_release_state_contract_checks_current_unreleased_changelog_prose(
     assert any("CHANGELOG.md" in failure and "published" in failure for failure in failures)
 
 
+def test_release_state_contract_uses_unreleased_heading_context(tmp_path):
+    """Claims under the pending heading apply to that release version."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The release has been published.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("CHANGELOG.md" in failure and "published" in failure for failure in failures)
+
+
 def test_release_state_contract_ignores_published_claims_in_changelog_history(
     tmp_path,
 ):
@@ -1239,6 +1253,36 @@ def test_release_state_contract_rejects_pending_version_as_latest_tag(tmp_path):
     failures = docs_checker.check_release_state_contract(tmp_path)
 
     assert any("latest tag" in failure for failure in failures), failures
+
+
+def test_release_state_contract_rejects_pending_version_as_latest_stable_release(
+    tmp_path,
+):
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "v9.9.9 is pending publication. "
+            "The v9.9.9 is the latest stable release.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("latest tag" in failure for failure in failures), failures
+
+
+def test_release_state_contract_scans_versioned_breaking_changes_guide(tmp_path):
+    _write_pending_state(tmp_path)
+    guide = tmp_path / "docs/guides/9.9.9-breaking-changes.md"
+    guide.parent.mkdir(parents=True, exist_ok=True)
+    guide.write_text(
+        "The v9.9.9 release has been published.\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("9.9.9-breaking-changes.md" in failure for failure in failures)
 
 
 def test_release_state_contract_rejects_a_published_claim_while_pending(tmp_path):
