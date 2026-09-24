@@ -591,13 +591,15 @@ def _github_boolean_operator(text: str, index: int) -> tuple[str, int] | None:
     if ord(char) in (10, 13):
         return " ", 1
     if char == "!" and not text.startswith("!=", index):
-        return " not ", 1
+        return ("~ " if index == 0 else " ~ "), 1
     return None
 
 
 _NEEDS_RESULT_RE = re.compile(
     r"(?<![A-Za-z0-9_.])needs\.([A-Za-z0-9_-]+)\.result\b"
 )
+_GITHUB_EVENT_NAME = "github.event_name"
+_GITHUB_REF_TYPE = "github.ref_type"
 
 
 def _translate_github_expression(text: str) -> str:
@@ -676,7 +678,7 @@ def _condition_value(
             return False
     name = _expression_attribute_name(node)
     if name is not None and (
-        name in {"github.event_name", "github.ref_type"}
+        name in {_GITHUB_EVENT_NAME, _GITHUB_REF_TYPE}
         or (name.startswith("needs.") and name.endswith(".result"))
     ):
         return context.get(name)
@@ -684,8 +686,8 @@ def _condition_value(
 
 
 _TAG_CONDITION_VALUES = {
-    "github.event_name": frozenset({"push", "workflow_dispatch"}),
-    "github.ref_type": frozenset({"tag"}),
+    _GITHUB_EVENT_NAME: frozenset({"push", "workflow_dispatch"}),
+    _GITHUB_REF_TYPE: frozenset({"tag"}),
 }
 
 
@@ -755,7 +757,9 @@ def _evaluate_tag_condition(
         return node.id.lower() == "true"
     if isinstance(node, ast.BoolOp):
         return _evaluate_boolean_condition(node, context)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+    if isinstance(node, ast.UnaryOp) and isinstance(
+        node.op, (ast.Not, ast.Invert)
+    ):
         value = _evaluate_tag_condition(node.operand, context)
         return None if value is None else not value
     if isinstance(node, ast.Compare):
@@ -830,7 +834,9 @@ def _evaluate_publish_condition(
         return True if _is_always_condition_call(node) else None
     if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
         return _evaluate_publish_boolean_operator(node, context)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+    if isinstance(node, ast.UnaryOp) and isinstance(
+        node.op, (ast.Not, ast.Invert)
+    ):
         value = _evaluate_publish_condition(node.operand, context)
         return not value if isinstance(value, bool) else None
     if isinstance(node, ast.Compare):
@@ -847,8 +853,8 @@ def _condition_contains_release_gate_success(condition: str) -> bool:
     attributes = _condition_needs_result_attributes(node)
     if gate_result not in attributes:
         return False
-    success_context = {attribute: "success" for attribute in attributes}
-    success_context.update({"github.event_name": "push", "github.ref_type": "tag"})
+    success_context = dict.fromkeys(attributes, "success")
+    success_context.update({_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "tag"})
     if _evaluate_publish_condition(node, success_context) is not True:
         return False
     for result in ("failure", "cancelled", "skipped"):
@@ -859,12 +865,12 @@ def _condition_contains_release_gate_success(condition: str) -> bool:
     signature_result = "needs.integrity_signature.result"
     if signature_result in attributes:
         dispatch_context = dict(success_context)
-        dispatch_context["github.event_name"] = "workflow_dispatch"
+        dispatch_context[_GITHUB_EVENT_NAME] = "workflow_dispatch"
         dispatch_context[signature_result] = "skipped"
         if _evaluate_publish_condition(node, dispatch_context) is not True:
             return False
         tag_context = dict(dispatch_context)
-        tag_context["github.event_name"] = "push"
+        tag_context[_GITHUB_EVENT_NAME] = "push"
         if _evaluate_publish_condition(node, tag_context) is not False:
             return False
     return True
@@ -905,15 +911,15 @@ def _release_gate_tag_condition_gate(release_packages: str) -> bool:
         return False
     tag_push = _evaluate_tag_condition(
         expression,
-        {"github.event_name": "push", "github.ref_type": "tag"},
+        {_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "tag"},
     )
     branch_push = _evaluate_tag_condition(
         expression,
-        {"github.event_name": "push", "github.ref_type": "branch"},
+        {_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "branch"},
     )
     manual_dispatch = _evaluate_tag_condition(
         expression,
-        {"github.event_name": "workflow_dispatch", "github.ref_type": "branch"},
+        {_GITHUB_EVENT_NAME: "workflow_dispatch", _GITHUB_REF_TYPE: "branch"},
     )
     return tag_push is True and branch_push is False and manual_dispatch is True
 
