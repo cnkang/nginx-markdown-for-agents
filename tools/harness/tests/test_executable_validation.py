@@ -129,10 +129,10 @@ def test_rustup_shim_resolver_rejects_foreign_binary(
     home = tmp_path
     cargo_bin = home / ".cargo" / "bin"
     cargo_bin.mkdir(parents=True)
-    _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(
+    _write_executable_tool_fixture(
         cargo_bin, "rustup", "dispatcher"
     )
-    _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(
+    _write_executable_tool_fixture(
         cargo_bin, "cargo", "concrete"
     )
     monkeypatch.setattr(module.Path, "home", lambda: home)
@@ -140,11 +140,19 @@ def test_rustup_shim_resolver_rejects_foreign_binary(
     assert module.resolve_rustup_tool_shim("cargo") is None
 
 
-# TODO Rename this here and in `test_rustup_shim_resolver_rejects_foreign_binary`
-def _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(cargo_bin, arg1, arg2):
-    dispatcher = cargo_bin / arg1
-    dispatcher.write_text(arg2, encoding="utf-8")
-    dispatcher.chmod(0o755)
+def _write_executable_tool_fixture(
+    cargo_bin: Path, tool_name: str, contents: str
+) -> None:
+    """Write and mark a tool fixture executable.
+
+    Args:
+        cargo_bin: Temporary Cargo bin directory.
+        tool_name: Filename for the executable fixture.
+        contents: Text written to the executable fixture.
+    """
+    executable_path = cargo_bin / tool_name
+    executable_path.write_text(contents, encoding="utf-8")
+    executable_path.chmod(0o755)
 
 
 def test_rustup_shim_resolver_rejects_non_shim_tool(tmp_path: Path, monkeypatch) -> None:

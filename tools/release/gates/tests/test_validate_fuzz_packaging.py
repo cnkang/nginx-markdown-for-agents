@@ -762,7 +762,7 @@ def test_toolchain_gate_counts_called_function_bodies() -> None:
 
 def test_toolchain_gate_uses_definition_active_at_each_call() -> None:
     """A later uncalled redefinition cannot satisfy an earlier function call."""
-    called_after_redefinition = _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(
+    called_after_redefinition = _assert_call_order_issue_and_build_followup(
         "provision() { echo safe; }\n" "provision\n" "provision() {\n",
         "}\n",
         "provision() { echo safe; }\n" "provision() {\n",
@@ -772,7 +772,7 @@ def test_toolchain_gate_uses_definition_active_at_each_call() -> None:
         called_after_redefinition
     ) is None
 
-    call_in_false_branch_after_definition = _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(
+    call_in_false_branch_after_definition = _assert_call_order_issue_and_build_followup(
         "provision() { echo safe; }\n"
         "if false; then\n"
         "  echo __release_gate_definition_1\n"
@@ -790,14 +790,37 @@ def test_toolchain_gate_uses_definition_active_at_each_call() -> None:
     ) is not None
 
 
-# TODO Rename this here and in `test_toolchain_gate_uses_definition_active_at_each_call`
-def _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(arg0, arg1, arg2, arg3):
-    called_before_redefinition = arg0 + INSTALLER + COMPONENT + arg1 + DRIFT
+def _assert_call_order_issue_and_build_followup(
+    issue_script_prefix: str,
+    issue_script_suffix: str,
+    followup_script_prefix: str,
+    followup_script_suffix: str,
+) -> str:
+    """Assert a call-order issue and build a follow-up script.
+
+    Args:
+        issue_script_prefix: Rejected script content before the install sequence.
+        issue_script_suffix: Rejected script content after the install sequence.
+        followup_script_prefix: Follow-up content before the install sequence.
+        followup_script_suffix: Follow-up content after the install sequence.
+
+    Returns:
+        The follow-up script with the toolchain drift check.
+    """
+    issue_script = (
+        issue_script_prefix + INSTALLER + COMPONENT + issue_script_suffix + DRIFT
+    )
     assert packaging_gate._release_gate_toolchain_issue(
-        called_before_redefinition
+        issue_script
     ) is not None
 
-    return arg2 + INSTALLER + COMPONENT + arg3 + DRIFT
+    return (
+        followup_script_prefix
+        + INSTALLER
+        + COMPONENT
+        + followup_script_suffix
+        + DRIFT
+    )
 
 
 def test_toolchain_gate_accepts_same_line_brace_groups() -> None:
