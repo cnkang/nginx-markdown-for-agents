@@ -24,10 +24,12 @@ Exit codes:
   1 = qualification failed or could not be established
 """
 
+
 from __future__ import annotations
 
 import argparse
 import codecs
+import contextlib
 import hashlib
 import json
 import math
@@ -70,11 +72,10 @@ def _cargo_package_version() -> str:
             section = stripped
             continue
         if section == "[package]":
-            match = re.fullmatch(
+            if match := re.fullmatch(
                 r'version\s*=\s*"([^\"]+)"\s*(?:#.*)?', stripped
-            )
-            if match:
-                return match.group(1)
+            ):
+                return match[1]
     raise ValueError(f"package version not found in {cargo_toml}")
 
 
@@ -177,9 +178,15 @@ CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
 STAT_ELAPSED_PATTERN = re.compile(r"stat::elapsed_seconds:\s*([\d.]+)")
 DONE_RUNS_PATTERN = re.compile(r"Done\s+(\d+)\s+runs?\s+in\s+([\d.]+)\s+second")
-FAILURE_MARKER_PATTERN = re.compile(
-    r"ERROR: libFuzzer|==ERROR: AddressSanitizer|SUMMARY: AddressSanitizer"
-    r"|SUMMARY: UndefinedBehaviorSanitizer|runtime error:")
+_FAILURE_MARKER_TEXTS = (
+    "ERROR: libFuzzer",
+    "==ERROR: AddressSanitizer",
+    "SUMMARY: AddressSanitizer",
+    "SUMMARY: UndefinedBehaviorSanitizer",
+    "runtime error:",
+)
+FAILURE_MARKER_PATTERN = re.compile("|".join(_FAILURE_MARKER_TEXTS))
+_MARKER_SCAN_OVERLAP_CHARS = max(map(len, _FAILURE_MARKER_TEXTS)) - 1
 
 REQUIRED_TARGET_FIELDS = ("name", "seed", "required_minutes",
                           "required_executions", "blocking")
@@ -290,19 +297,16 @@ def _validate_scalar(value, kind, positive: bool, non_empty: bool) -> bool:
         return False
     if isinstance(value, bool) and kind is not bool:
         return False
-    if non_empty and not value:
-        return False
-    if positive and value <= 0:
-        return False
-    return True
+    return False if non_empty and not value else not positive or value > 0
 
 
 def _validate_target_entry(entry, index: int) -> str | None:
     """Return an error string when a manifest target entry is malformed."""
     if not isinstance(entry, dict):
         return f"malformed: targets[{index}] must be an object"
-    missing = [field for field in REQUIRED_TARGET_FIELDS if field not in entry]
-    if missing:
+    if missing := [
+        field for field in REQUIRED_TARGET_FIELDS if field not in entry
+    ]:
         return (f"malformed: targets[{index}] missing fields: "
                 + ", ".join(missing))
     for field, kind, positive, non_empty, description in TARGET_FIELD_SPECS:
@@ -321,18 +325,16 @@ def validate_target_manifest(data: dict) -> list[dict]:
     """Validate the blocking-fuzz-target manifest, returning target entries."""
     if not isinstance(data.get("schema_version"), str):
         raise ValueError("malformed: manifest schema_version must be a string")
-    error = _check_candidate_sha(
+    if error := _check_candidate_sha(
         data.get("candidate_sha"), BLOCKING_FUZZ_TARGET_MANIFEST_LABEL
-    )
-    if error:
+    ):
         raise ValueError(error)
     targets = data.get("targets")
     if not isinstance(targets, list) or not targets:
         raise ValueError("malformed: manifest targets must be a non-empty array")
     errors = []
     for index, entry in enumerate(targets):
-        error = _validate_target_entry(entry, index)
-        if error:
+        if error := _validate_target_entry(entry, index):
             errors.append(error)
     if errors:
         raise ValueError("; ".join(errors))
@@ -392,7 +394,7 @@ def _validate_seed_digest(entry: dict, target: str) -> str | None:
         raw = validated_seed_path.read_bytes()
     except (OSError, ValueError) as exc:
         return f"seed corpus for {target} is unreadable: {exc}"
-    actual = "sha256:" + hashlib.sha256(raw).hexdigest()
+    actual = f"sha256:{hashlib.sha256(raw).hexdigest()}"
     if actual != manifest_digest:
         return (f"stale-digest: seed corpus for {target} content does not "
                 f"match the manifest digest ({manifest_digest[:16]}... != "
@@ -404,16 +406,19 @@ def _validate_seed_entry(entry, index: int) -> str | None:
     """Return an error string when a seed manifest entry is malformed."""
     if not isinstance(entry, dict):
         return f"malformed: seeds[{index}] must be an object"
-    missing = [field for field in REQUIRED_SEED_FIELDS if field not in entry]
-    if missing:
+    if missing := [
+        field for field in REQUIRED_SEED_FIELDS if field not in entry
+    ]:
         return (f"malformed: seeds[{index}] missing fields: "
                 + ", ".join(missing))
-    for field in REQUIRED_SEED_FIELDS:
-        if _validate_scalar(entry[field], str, False, True):
-            continue
-        return (f"malformed: seeds[{index}].{field} must be "
-                f"a non-empty string")
-    return None
+    return next(
+        (
+            f"malformed: seeds[{index}].{field} must be a non-empty string"
+            for field in REQUIRED_SEED_FIELDS
+            if not _validate_scalar(entry[field], str, False, True)
+        ),
+        None,
+    )
 
 
 def validate_corpus_seeds(data: dict, expected_sha: str,
@@ -431,23 +436,19 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
                          "a non-empty array")
     by_target = {}
     for index, entry in enumerate(seeds):
-        error = _validate_seed_entry(entry, index)
-        if error:
+        if error := _validate_seed_entry(entry, index):
             raise ValueError(error)
         target = entry["target"]
         if target in by_target:
             raise ValueError(f"duplicate corpus seed target: {target!r}")
         by_target[target] = entry
-    missing_seeds = sorted(blocking_names - set(by_target))
-    if missing_seeds:
+    if missing_seeds := sorted(blocking_names - set(by_target)):
         raise ValueError("blocking targets missing corpus seed entries: "
                          + ", ".join(missing_seeds))
     for name in blocking_names:
-        error = _validate_seed_path(by_target[name]["seed_path"], name)
-        if error:
+        if error := _validate_seed_path(by_target[name]["seed_path"], name):
             raise ValueError(error)
-        error = _validate_seed_digest(by_target[name], name)
-        if error:
+        if error := _validate_seed_digest(by_target[name], name):
             raise ValueError(error)
     return by_target
 
@@ -526,6 +527,18 @@ def _split_lines(chunk: str) -> tuple[list[str], str]:
     return [segment + "\n" for segment in segments], partial
 
 
+def _marker_evidence_text(text: str, marker: re.Match[str]) -> str:
+    """Keep bounded context around a matched marker, including its signature."""
+    line_start = text.rfind("\n", 0, marker.start()) + 1
+    line_end = text.find("\n", marker.end())
+    if line_end < 0:
+        line_end = len(text)
+    prefix = f"{marker.group(0)}: "
+    context_limit = max(0, _MAX_MARKER_EVIDENCE_CHARS - len(prefix))
+    line = text[line_start:line_end].strip()
+    return prefix + line[-context_limit:] if context_limit else prefix
+
+
 class _BoundedStream:
     """Drain one subprocess stream, retaining head, tail and failure markers.
 
@@ -557,6 +570,7 @@ class _BoundedStream:
         self._total = 0
         self._pending = ""
         self._marker_evidence: str | None = None
+        self._marker_scan_overlap = ""
         self._lock = threading.Lock()
 
     def feed(self, chunk: str) -> None:
@@ -583,11 +597,13 @@ class _BoundedStream:
     def _feed_segment(self, segment: str) -> None:
         self._total += len(segment)
         if self._marker_evidence is None:
-            marker = FAILURE_MARKER_PATTERN.search(segment)
-            if marker:
-                self._marker_evidence = (
-                    f"{marker.group(0)}: {segment.strip()}"
-                )[:_MAX_MARKER_EVIDENCE_CHARS]
+            combined = self._marker_scan_overlap + segment
+            if marker := FAILURE_MARKER_PATTERN.search(combined):
+                self._marker_evidence = _marker_evidence_text(combined, marker)
+            if segment.endswith("\n"):
+                self._marker_scan_overlap = ""
+            else:
+                self._marker_scan_overlap = combined[-_MARKER_SCAN_OVERLAP_CHARS:]
         self._retain(segment)
 
     def _retain(self, segment: str) -> None:
@@ -719,6 +735,15 @@ def _cancel_active_fuzz_processes() -> None:
         _signal_fuzz_process_group(process, kill_signal)
 
 
+def _close_fuzz_process_pipes(process: subprocess.Popen) -> None:
+    """Close pipes that have no reader or outlived the bounded reader join."""
+    for pipe in (process.stdout, process.stderr):
+        if pipe is None or pipe.closed:
+            continue
+        with contextlib.suppress(OSError):
+            pipe.close()
+
+
 def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
     """Run one isolated cargo fuzz process group and capture its output."""
     cargo = _resolve_fuzz_cargo()
@@ -752,17 +777,18 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         for pipe, stream in ((process.stdout, stdout_stream),
                              (process.stderr, stderr_stream))
     ]
-    for reader in readers:
-        reader.start()
+    started_readers: list[threading.Thread] = []
     timed_out = False
     try:
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             _terminate_fuzz_process_group(process)
             returncode = process.returncode
-        _join_readers(readers)
     except KeyboardInterrupt:
         _FUZZ_CANCEL_REQUESTED.set()
         _terminate_fuzz_process_group(process)
@@ -771,7 +797,11 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         _terminate_fuzz_process_group(process)
         raise
     finally:
-        _unregister_fuzz_process(process)
+        try:
+            _join_readers(started_readers)
+        finally:
+            _close_fuzz_process_pipes(process)
+            _unregister_fuzz_process(process)
     result = {
         "stdout": stdout_stream.text(),
         "wall_elapsed": time.monotonic() - started,
@@ -809,13 +839,11 @@ def _parse_fuzz_output(stdout: str, stderr: str,
     match = STAT_ELAPSED_PATTERN.search(combined)
     elapsed = float(match.group(1)) if match else 0.0
     if elapsed <= 0.0:
-        match = DONE_RUNS_PATTERN.search(combined)
-        if match:
+        if match := DONE_RUNS_PATTERN.search(combined):
             elapsed = float(match.group(2))
     finding = marker_finding
     if finding is None:
-        marker = FAILURE_MARKER_PATTERN.search(combined)
-        if marker:
+        if marker := FAILURE_MARKER_PATTERN.search(combined):
             finding = f"{marker.group(0)}: {_marker_line(combined, marker.start())}"
     return executions, elapsed, finding
 
@@ -893,7 +921,8 @@ def _startup_corpus_size(corpus_dir: Path) -> int:
     """
     if not corpus_dir.is_dir():
         return 0
-    return sum(1 for entry in corpus_dir.iterdir() if entry.is_file())
+    return sum(bool(entry.is_file())
+           for entry in corpus_dir.iterdir())
 
 
 def _soak_invocation_schedule(
@@ -1106,14 +1135,14 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
         "started_at": started_at,
         "finished_at": _utc_now(),
         "per_target": per_target,
-        "blocking_pass": len(failures) == 0,
+        "blocking_pass": not failures,
         "blocking_failures": [entry["target"] for entry in failures],
     }
 
 
 def _write_record(record: dict, args) -> Path:
     """Persist the qualification record at its one canonical artifact path."""
-    requested = args.output if args.output else args.record
+    requested = args.output or args.record
     requested_path = Path(requested)
     if not requested_path.is_absolute():
         # Relative inputs (including the DEFAULT_RECORD default) resolve
@@ -1388,13 +1417,16 @@ def _per_target_reasons(entry, index: int) -> list[str]:
     if not isinstance(entry, dict):
         return [f"malformed: per_target[{index}] must be an object"]
     reasons = []
-    for field in OBSERVATION_FIELDS:
-        if field not in entry:
-            reasons.append(f"missing-observation: per_target[{index}] "
-                           f"missing {field}")
-    for field in PER_TARGET_IDENTITY_FIELDS:
-        if field not in entry:
-            reasons.append(f"malformed: per_target[{index}] missing {field}")
+    reasons.extend(
+        f"missing-observation: per_target[{index}] missing {field}"
+        for field in OBSERVATION_FIELDS
+        if field not in entry
+    )
+    reasons.extend(
+        f"malformed: per_target[{index}] missing {field}"
+        for field in PER_TARGET_IDENTITY_FIELDS
+        if field not in entry
+    )
     return reasons
 
 
@@ -1454,8 +1486,7 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     if record.get("schema_version") != SCHEMA_VERSION:
         reasons.append(f"malformed: record schema_version "
                        f"{record.get('schema_version')!r} != {SCHEMA_VERSION!r}")
-    error = _check_candidate_sha(record.get("candidate_sha"), "record")
-    if error:
+    if error := _check_candidate_sha(record.get("candidate_sha"), "record"):
         reasons.append(error)
     elif record["candidate_sha"] != manifest["candidate_sha"]:
         reasons.append("stale-digest: record candidate sha mismatch with "
@@ -1478,8 +1509,7 @@ def run_fixture_gate(args) -> int:
         raise ValueError("malformed: --record-input is required in "
                          "fixture mode")
     record = load_json(args.record_input, "fuzz-qualification record")
-    reasons = validate_record(record, manifest)
-    if reasons:
+    if reasons := validate_record(record, manifest):
         for reason in reasons:
             print(f"ERROR: {reason}", file=sys.stderr)
         return 1
