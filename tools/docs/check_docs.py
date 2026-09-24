@@ -1387,10 +1387,19 @@ def _pending_document_failures(
     path = root / rel
     if not path.is_file():
         return []
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    return _pending_text_failures(rel, text, pending_version)
+
+
+def _pending_text_failures(
+    rel: str,
+    text: str,
+    pending_version: str,
+    require_boundary: bool = True,
+) -> list[str]:
+    """Validate pending-release prose supplied from a named current-state block."""
     version_pattern = re.compile(rf"\bv?{re.escape(pending_version)}\b")
-    text = _without_fenced_blocks(
-        path.read_text(encoding="utf-8", errors="ignore")
-    )
+    text = _without_fenced_blocks(text)
     history = set(_document_update_table_lines(text))
     failures: list[str] = []
     boundary_seen = False
@@ -1407,12 +1416,26 @@ def _pending_document_failures(
             )
             failures.extend(sentence_failures)
             boundary_seen = boundary_seen or boundary
-    if not boundary_seen:
+    if require_boundary and not boundary_seen:
         failures.append(
             f"{rel}: pending {pending_version} needs one explicit "
             "publication boundary in current-state prose"
         )
     return failures
+
+
+def _current_unreleased_changelog_section(
+    changelog: str, pending_version: str
+) -> str:
+    """Return only the matching Unreleased section, excluding history/fences."""
+    text = _without_fenced_blocks(changelog)
+    for match in UNRELEASED_CHANGELOG_RE.finditer(text):
+        if match.group("version") != pending_version:
+            continue
+        next_heading = VERSION_HEADING_PREFIX_RE.search(text, match.end())
+        end = next_heading.start() if next_heading is not None else len(text)
+        return text[match.start():end]
+    return ""
 
 
 def check_pending_release_state(
@@ -1494,6 +1517,16 @@ def check_release_state_contract(
         return errors
     if pending_version is not None:
         failures = check_pending_release_state(root, pending_version, surface_rel_paths)
+        current_section = _current_unreleased_changelog_section(
+            changelog, pending_version
+        )
+        if current_section:
+            failures.extend(
+                _pending_text_failures(
+                    "CHANGELOG.md", current_section, pending_version,
+                    require_boundary=False,
+                )
+            )
         published_version = _first_dated_changelog_version(changelog)
         if published_version is not None:
             failures.extend(_published_baseline_failures(root, published_version))
