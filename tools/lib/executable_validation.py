@@ -219,15 +219,21 @@ def _resolve_rustup_tool_shim(
     # specific toolchain root, not any installed toolchain.
     rustup_dispatcher = home / _CARGO_DIR_NAME / "bin" / "rustup"
     try:
-        return _extracted_from__resolve_rustup_tool_shim_29(
+        return _resolve_active_toolchain_tool(
             rustup_dispatcher, resolved, rustup_toolchains, name
         )
     except (OSError, RuntimeError):
         return None
 
 
-# TODO Rename this here and in `_resolve_rustup_tool_shim`
-def _extracted_from__resolve_rustup_tool_shim_29(rustup_dispatcher, resolved, rustup_toolchains, name):
+def _resolve_active_toolchain_tool(rustup_dispatcher, resolved, rustup_toolchains, name):
+    """Return the tool binary under the active Rustup toolchain, or None.
+
+    Requires ``resolved`` to be the Rustup dispatcher (either the same
+    resolved path or the same file via hardlink), then resolves the tool
+    under the active toolchain root and validates it is an executable file
+    contained within that root.
+    """
     dispatcher_resolved = rustup_dispatcher.resolve(strict=True)
     try:
         same_file = os.path.samefile(resolved, dispatcher_resolved)

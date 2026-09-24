@@ -67,8 +67,14 @@ def test_git_resolved_through_opt_alias_is_accepted(
 
 
 @pytest.mark.parametrize("name", ["cargo", "rustc", "rustfmt"])
-@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
-def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, name, link_kind):
+@pytest.mark.parametrize(
+    "link_shim",
+    [
+        pytest.param(lambda shim, target: shim.symlink_to(target), id="symlink"),
+        pytest.param(lambda shim, target: shim.hardlink_to(target), id="hardlink"),
+    ],
+)
+def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, name, link_shim):
     """Every approved Rustup shim, symlinked or hardlinked, resolves to the tool."""
     home = tmp_path
     cargo_bin = home / ".cargo" / "bin"
@@ -88,10 +94,7 @@ def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, na
     dispatcher.chmod(0o755)
     tool.write_text(name, encoding="utf-8")
     tool.chmod(0o755)
-    if link_kind == "symlink":
-        shim.symlink_to(dispatcher)
-    else:
-        shim.hardlink_to(dispatcher)
+    link_shim(shim, dispatcher)
 
     monkeypatch.setattr(module.Path, "home", lambda: home)
     monkeypatch.setattr(module.shutil, "which", lambda _name: str(shim))
