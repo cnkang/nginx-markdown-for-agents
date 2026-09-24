@@ -145,9 +145,7 @@ def _fence_marker(line: str) -> tuple[str, int, str] | None:
     if run < 3:
         return None
     trailing = body[run:].strip()
-    if char == "`" and "`" in trailing:
-        return None
-    return char, run, trailing
+    return None if char == "`" and "`" in trailing else (char, run, trailing)
 
 
 def iter_lines_with_fences(text: str) -> list[tuple[int, str, bool]]:
@@ -349,9 +347,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
                 "'## [<version>] - Unreleased' or '## [<version>] - "
                 "Unreleased candidate' without suffix"
             )
-    if errors:
-        return None, errors
-    return version, []
+    return (None, errors) if errors else (version, [])
 
 
 def check_release_status_consistency(
@@ -380,7 +376,7 @@ def check_release_status_consistency(
             f"{project_status_path}: missing Current Release Line {version} section"
         ]
 
-    status = section_match.group("body")
+    status = section_match["body"]
     errors: list[str] = []
     if re.search(r"\bstable release\b", status, re.IGNORECASE):
         errors.append(
@@ -487,15 +483,14 @@ def _parse_document_update_version(
     for four-component versions.
     """
     normalized = version.strip().strip("`*[]()\"'")
-    if normalized.startswith("v"):
-        normalized = normalized[1:]
+    normalized = normalized.removeprefix("v")
     numeric: list[int] = []
     remainder = normalized
     while remainder:
         match = re.match(r"(\d+)", remainder)
         if match is None:
             break
-        numeric.append(int(match.group(1)))
+        numeric.append(int(match[1]))
         remainder = remainder[match.end():]
         if remainder.startswith("."):
             remainder = remainder[1:]
@@ -644,9 +639,7 @@ def _claimed_family_count(line: str) -> int | None:
         return 12
     claimed = (re.search(r"(\d{1,12})\s{0,64}metric\s{1,64}famil", line)
                or re.search(r"(\d{1,12})\s{0,64}famil", line))
-    if not claimed:
-        return None
-    return int(claimed.group(1))
+    return int(claimed.group(1)) if claimed else None
 
 
 def _family_count_mismatch(
@@ -718,9 +711,7 @@ _CHECKLIST_CLAIM_RE = re.compile(
 
 def _list_item_indent(line: str) -> int | None:
     """Return the indentation of a task-list item, or None when it is not one."""
-    if not _is_task_list_line(line):
-        return None
-    return len(line) - len(line.lstrip())
+    return len(line) - len(line.lstrip()) if _is_task_list_line(line) else None
 
 
 def _is_task_list_line(line: str) -> bool:
@@ -751,18 +742,16 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
             continue
         content = path.read_text(encoding="utf-8")
         history = _checklist_history(content)
-        for item in _checklist_items(content, history):
-            if _CHECKLIST_SHA_RE.search(item):
-                failures.append(
-                    f"{path}: a requirement names a commit; bind status to the "
-                    "candidate-bound release evidence instead"
-                )
-        for block in _logical_blocks(content, history):
-            if _CHECKLIST_CLAIM_RE.search(block):
-                failures.append(
-                    f"{path}: states mutable candidate status; keep the "
-                    "checklist to requirements"
-                )
+        failures.extend(
+            f"{path}: a requirement names a commit; bind status to the candidate-bound release evidence instead"
+            for item in _checklist_items(content, history)
+            if _CHECKLIST_SHA_RE.search(item)
+        )
+        failures.extend(
+            f"{path}: states mutable candidate status; keep the checklist to requirements"
+            for block in _logical_blocks(content, history)
+            if _CHECKLIST_CLAIM_RE.search(block)
+        )
     return failures
 
 
@@ -868,9 +857,7 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
 def _dated_heading(line: str) -> tuple[str, str] | None:
     """Return (version, date) for a dated release heading."""
     dated = DATED_CHANGELOG_RE.match(line)
-    if dated is None:
-        return None
-    return dated.group("version"), dated.group("date")
+    return None if dated is None else (dated.group("version"), dated.group("date"))
 
 
 def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
@@ -1027,9 +1014,7 @@ def _split_heading(line: str) -> tuple[int, str] | None:
     if not 1 <= hashes <= 6:
         return None
     rest = line[hashes:]
-    if not rest.startswith((" ", "\t")):
-        return None
-    return hashes, rest.strip()
+    return (hashes, rest.strip()) if rest.startswith((" ", "\t")) else None
 
 
 def _contextual_blocks(
@@ -1143,9 +1128,9 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
     status = re.search(r"^\*\*Status\*\*:(?P<value>.*)$", notes_text, re.MULTILINE)
     if status is None:
         return [f"{rel}: missing release status for released {version}"]
-    value = " ".join(status.group("value").split()).casefold()
+    value = " ".join(status["value"].split()).casefold()
     if value != "stable release":
-        return [f"{rel}: released {version} carries status {status.group('value')!r}"]
+        return [f"{rel}: released {version} carries status {status['value']!r}"]
     return []
 
 
@@ -1201,10 +1186,17 @@ PENDING_STATE_SURFACES = (
     "docs/guides/INSTALLATION.md",
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
+    BREAKING_CHANGES_GUIDE,
     "docs/releases/{version}-release-notes.md",
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
 )
+
+# Reference-only breaking-change guides are scanned for affirmative release
+# claims but do not need to repeat the publication boundary.
+PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
+    BREAKING_CHANGES_GUIDE,
+})
 
 # Wording that ties a mention of the pending version to a later publication.
 # A conditional instruction is honest; an unconditional one reads as a
@@ -1318,65 +1310,106 @@ def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
 ) -> re.Match[str] | None:
     """Return the version token closest to a completion verb."""
-    versions = list(_ANY_VERSION_RE.finditer(window))
-    if not versions:
+    if versions := list(_ANY_VERSION_RE.finditer(window)):
+        return min(versions, key=lambda span: abs(span.start() - claim.start()))
+    else:
         return None
-    return min(versions, key=lambda span: abs(span.start() - claim.start()))
 
 
-def _claim_belongs_to_pending_version(window: str, pending_version: str) -> bool:
+def _published_until_tag_exception(
+    window: str, claim: re.Match[str], pending_span: re.Match[str]
+) -> bool:
+    """Return whether a "published ... until ... tag" phrasing is exempt."""
+    if claim.start() >= pending_span.start() or claim.group(0).lower() != "published":
+        return False
+    between = window[claim.end():pending_span.start()]
+    return re.search(r"\buntil\b", between, re.IGNORECASE) is not None and re.search(
+        r"\btag\b", between, re.IGNORECASE
+    ) is not None
+
+
+def _claim_names_pending_version(
+    window: str,
+    claim: re.Match[str],
+    pending: "re.Pattern[str]",
+    version_context: bool,
+) -> bool:
+    """Return whether a single completion claim affirms the pending version."""
+    nearest = _nearest_version_to_claim(window, claim)
+    if nearest is None:
+        return version_context and not _completion_claim_is_nonaffirmative(
+            window, claim
+        )
+    if pending.fullmatch(nearest.group(0)) is None:
+        return False
+    if _published_until_tag_exception(window, claim, nearest):
+        return False
+    return not _completion_claim_is_nonaffirmative(window, claim)
+
+
+def _claim_belongs_to_pending_version(
+    window: str, pending_version: str, version_context: bool = False
+) -> bool:
     """Return whether an affirmative completion verb names the pending version.
 
     The nearest version token decides, so a published baseline is not mistaken
     for a claim about the pending line in a sentence that names both.
     """
     pending = re.compile(rf"\bv?{re.escape(pending_version)}\b")
-    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
-        nearest = _nearest_version_to_claim(window, claim)
-        if nearest is None or pending.fullmatch(nearest.group(0)) is None:
-            continue
-        pending_span = nearest
-        if claim.start() < pending_span.start() and claim.group(0).lower() == "published":
-            between = window[claim.end():pending_span.start()]
-            if re.search(r"\buntil\b", between, re.IGNORECASE) and re.search(
-                r"\btag\b", between, re.IGNORECASE
-            ):
-                continue
-        if not _completion_claim_is_nonaffirmative(window, claim):
-            return True
-    return False
+    return any(
+        _claim_names_pending_version(window, claim, pending, version_context)
+        for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window)
+    )
 
 
-def _claims_pending_latest_tag(block: str, pending_version: str) -> bool:
-    """Return whether the pending version is called the current latest tag."""
-    version = rf"\bv?{re.escape(pending_version)}\b"
+def _claims_pending_latest_tag(
+    block: str, pending_version: str, version_context: bool = False
+) -> bool:
+    """Return whether the pending version is called the latest tag or release."""
+    version = re.compile(rf"\bv?{re.escape(pending_version)}\b")
     latest_tag = (
         r"\b(?:latest|most recent)\s+"
-        r"(?:(?:public|published|stable)\s+)*tag\b"
+        r"(?:(?:public|published|stable)\s+)*(?:tag|release)\b"
     )
-    forward = re.compile(latest_tag + rf"\s*(?:is\s+)?[:=]?\s*{version}",
-                         re.IGNORECASE)
-    reverse = re.compile(version + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
-                         re.IGNORECASE)
+    forward = re.compile(
+        f"{latest_tag}\s*(?:is\s+)?[:=]?\s*{version.pattern}", re.IGNORECASE
+    )
+    reverse = re.compile(
+        version.pattern + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
+        re.IGNORECASE,
+    )
     for sentence in _SENTENCE_SPLIT_RE.split(block):
         plain = sentence.replace("**", "").replace("`", "")
         if forward.search(plain) or reverse.search(plain):
             return True
+        latest_match = re.search(latest_tag, plain, re.IGNORECASE)
+        if latest_match is not None and version_context:
+            nearest = _nearest_version_to_claim(plain, latest_match)
+            if nearest is None or version.fullmatch(nearest.group(0)) is not None:
+                return True
     return False
 
 
 def _pending_sentence_failures(
-    rel: str, sentence: str, pending_version: str,
+    rel: str,
+    sentence: str,
+    pending_version: str,
     version_pattern: "re.Pattern[str]",
+    version_context: bool = False,
 ) -> tuple[list[str], bool]:
     """Validate one current-state sentence about the pending release."""
-    if version_pattern.search(sentence) is None:
+    sentence_names_version = version_pattern.search(sentence) is not None
+    if not sentence_names_version and not version_context:
         return [], False
     boundary = _is_conditional_publication_block(sentence)
-    window = _publication_claim_window(sentence, version_pattern)
+    window = (
+        _publication_claim_window(sentence, version_pattern)
+        if sentence_names_version
+        else sentence
+    )
     claim = _PREPUBLICATION_COMPLETION_CLAIM_RE.search(window)
     if claim is not None and _claim_belongs_to_pending_version(
-        window, pending_version
+        window, pending_version, version_context
     ):
         return [
             f"{rel}: pending {pending_version} is described as "
@@ -1387,14 +1420,19 @@ def _pending_sentence_failures(
 
 
 def _pending_document_failures(
-    root: Path, rel: str, pending_version: str
+    root: Path,
+    rel: str,
+    pending_version: str,
+    require_boundary: bool = True,
 ) -> list[str]:
     """Validate all current-state blocks for one pending-release surface."""
     path = root / rel
     if not path.is_file():
         return []
     text = path.read_text(encoding="utf-8", errors="ignore")
-    return _pending_text_failures(rel, text, pending_version)
+    return _pending_text_failures(
+        rel, text, pending_version, require_boundary=require_boundary
+    )
 
 
 def _pending_text_failures(
@@ -1402,23 +1440,39 @@ def _pending_text_failures(
     text: str,
     pending_version: str,
     require_boundary: bool = True,
+    include_heading_context: bool = False,
 ) -> list[str]:
-    """Validate pending-release prose supplied from a named current-state block."""
+    """Validate pending-release prose in a named current-state surface.
+
+    Heading context is enabled only for the changelog's already-scoped current
+    Unreleased section; ordinary documents can contain historical version
+    headings whose prose is not a claim about today's pending release.
+    """
     version_pattern = re.compile(rf"\bv?{re.escape(pending_version)}\b")
     text = _without_fenced_blocks(text)
     history = set(_document_update_table_lines(text))
     failures: list[str] = []
     boundary_seen = False
-    for block in _logical_blocks(text, history):
-        if version_pattern.search(block) is None:
+    blocks = (
+        _contextual_blocks(text, history, version_pattern)
+        if include_heading_context
+        else [(block, False) for block in _logical_blocks(text, history)]
+    )
+    for block, version_context in blocks:
+        if not version_context and version_pattern.search(block) is None:
             continue
-        if _claims_pending_latest_tag(block, pending_version):
+        if _claims_pending_latest_tag(block, pending_version, version_context):
             failures.append(
-                f"{rel}: pending {pending_version} is identified as the latest tag"
+                f"{rel}: pending {pending_version} is identified as the latest tag "
+                "or stable release"
             )
         for sentence in _SENTENCE_SPLIT_RE.split(block):
             sentence_failures, boundary = _pending_sentence_failures(
-                rel, sentence, pending_version, version_pattern
+                rel,
+                sentence,
+                pending_version,
+                version_pattern,
+                version_context,
             )
             failures.extend(sentence_failures)
             boundary_seen = boundary_seen or boundary
@@ -1453,7 +1507,16 @@ def check_pending_release_state(
     failures: list[str] = []
     for template in surface_rel_paths:
         rel = template.format(version=pending_version)
-        failures.extend(_pending_document_failures(root, rel, pending_version))
+        failures.extend(
+            _pending_document_failures(
+                root,
+                rel,
+                pending_version,
+                require_boundary=(
+                    template not in PENDING_BOUNDARY_OPTIONAL_SURFACES
+                ),
+            )
+        )
     return failures
 
 
@@ -1492,13 +1555,12 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
             _without_fenced_blocks(notes.read_text(encoding="utf-8", errors="ignore")),
             re.MULTILINE,
         )
-        if declared is not None and declared.group("value").strip() != heading.group(
-            "date"
+        if (
+            declared is not None
+            and declared["value"].strip() != heading["date"]
         ):
             failures.append(
-                f"docs/releases/{published_version}-release-notes.md: date "
-                f"{declared.group('value').strip()!r} does not match CHANGELOG "
-                f"date {heading.group('date')!r}"
+                f"docs/releases/{published_version}-release-notes.md: date {declared['value'].strip()!r} does not match CHANGELOG date {heading['date']!r}"
             )
     return failures
 
@@ -1523,14 +1585,14 @@ def check_release_state_contract(
         return errors
     if pending_version is not None:
         failures = check_pending_release_state(root, pending_version, surface_rel_paths)
-        current_section = _current_unreleased_changelog_section(
+        if current_section := _current_unreleased_changelog_section(
             changelog, pending_version
-        )
-        if current_section:
+        ):
             failures.extend(
                 _pending_text_failures(
                     CHANGELOG_FILENAME, current_section, pending_version,
                     require_boundary=False,
+                    include_heading_context=True,
                 )
             )
         published_version = _first_dated_changelog_version(changelog)
@@ -1605,21 +1667,31 @@ def main() -> int:
 
     print("Documentation checks passed:")
     print(f"- Markdown files checked (excluding docs/archive and gitignored paths): {len(files)}")
-    print("- Local links: OK")
-    print("- Heading hierarchy: OK")
-    print("- English docs policy (Han-character scan): OK")
-    print("- Internal reference policy (tracked paths/no 'spec X'): OK")
+    _print_status_lines(
+        "- Local links: OK",
+        "- Heading hierarchy: OK",
+        "- English docs policy (Han-character scan): OK",
+        "- Internal reference policy (tracked paths/no 'spec X'): OK",
+    )
     print("- Operator configuration examples: OK")
     print("- Unreleased/stable release status consistency: OK")
     print(
         "- Stable release surface consistency: "
         + ("OK" if stable_ran else "SKIPPED (no dated release in CHANGELOG)")
     )
-    print("- Pending/released release-state contract: OK")
-    print("- Duplicate canonical/mirror sync: OK")
-    print("- Document Updates chronological order (descending): OK")
-    print("- Release checklist states requirements only: OK")
+    _print_status_lines(
+        "- Pending/released release-state contract: OK",
+        "- Duplicate canonical/mirror sync: OK",
+        "- Document Updates chronological order (descending): OK",
+        "- Release checklist states requirements only: OK",
+    )
     return 0
+
+
+def _print_status_lines(*lines: str) -> None:
+    """Print each status line on its own row."""
+    for line in lines:
+        print(line)
 
 
 if __name__ == "__main__":
