@@ -649,6 +649,9 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     false_cases = ("bare false", f"{drift}false && {installer}{component}"), (
         "quoted false",
         f'{drift}"false" && {installer}{component}',
+    ), (
+        "single-quoted false",
+        f"{drift}'false' && {installer}{component}",
     )
     scripts = [script for _label, script in false_cases]
     assert len(set(scripts)) == len(scripts)
@@ -757,6 +760,51 @@ def test_toolchain_gate_counts_called_function_bodies() -> None:
     )
 
 
+def test_toolchain_gate_uses_definition_active_at_each_call() -> None:
+    """A later uncalled redefinition cannot satisfy an earlier function call."""
+    called_before_redefinition = (
+        "provision() { echo safe; }\n"
+        "provision\n"
+        "provision() {\n"
+        + INSTALLER
+        + COMPONENT
+        + "}\n"
+        + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        called_before_redefinition
+    ) is not None
+
+    called_after_redefinition = (
+        "provision() { echo safe; }\n"
+        "provision() {\n"
+        + INSTALLER
+        + COMPONENT
+        + "}\n"
+        "provision\n"
+        + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        called_after_redefinition
+    ) is None
+
+    dead_redefinition = (
+        "provision() { echo safe; }\n"
+        "if false; then\n"
+        "  echo __release_gate_definition_1\n"
+        "  provision() {\n"
+        + INSTALLER
+        + COMPONENT
+        + "  }\n"
+        "fi\n"
+        "provision\n"
+        + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(
+        dead_redefinition
+    ) is not None
+
+
 def test_toolchain_gate_accepts_same_line_brace_groups() -> None:
     """A one-line brace group executes its commands in place."""
     script = (
@@ -817,6 +865,47 @@ def test_raw_install_detector_sees_command_wrappers() -> None:
         "          rustup toolchain install nightly --profile minimal\n"
     )
     assert packaging_gate._raw_toolchain_install_issue(conditional)
+
+
+def test_raw_install_workflow_rejects_nohup_with_valid_provisioning_present() -> None:
+    """A verified setup elsewhere in the workflow cannot hide a raw install."""
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - name: provision\n"
+        "        run: |\n"
+        "          bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        '          rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        "          nohup rustup toolchain install stable\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(workflow) is not None
+
+
+def test_raw_install_scan_reads_shell_stdin_heredocs_only() -> None:
+    """Shell-fed heredoc commands execute; inert heredoc bodies remain data."""
+    shell_input = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          bash -s <<'EOF'\n"
+        "          rustup toolchain install stable\n"
+        "          EOF\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(shell_input) is not None
+
+    inert_input = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          cat <<'EOF'\n"
+        "          rustup toolchain install stable\n"
+        "          EOF\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(inert_input) is None
 
 
 def test_toolchain_gate_accepts_partially_quoted_delimiters() -> None:
@@ -2581,6 +2670,20 @@ def test_virtualenv_install_in_one_step_does_not_feed_a_later_shell() -> None:
         )
         is None
     )
+
+
+def test_virtualenv_prefix_assignments_are_command_scoped() -> None:
+    """A prefixed virtualenv applies to that command, not the next one."""
+    prefix = "VIRTUAL_ENV=/workspace/.venv PATH=/workspace/.venv/bin:$PATH "
+    install = prefix + "python3 -m pip install -r requirements-release.txt"
+    docs_check = prefix + "make docs-check"
+
+    assert packaging_gate._python_deps_issue(
+        [install + "; make docs-check"]
+    ) is not None
+    assert packaging_gate._python_deps_issue(
+        [install + "; " + docs_check]
+    ) is None
 
 
 def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:

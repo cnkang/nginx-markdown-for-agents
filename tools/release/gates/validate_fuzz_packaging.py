@@ -978,29 +978,108 @@ def _effective_body_spans(
     return effective, superseded
 
 
-def _live_function_names(script: str, defined: set[str]) -> set[str]:
-    """Functions whose bodies actually run.
+def _direct_function_spans(
+    spans: list[tuple[str, int, int]], region: tuple[int, int]
+) -> list[tuple[str, int, int]]:
+    """Function bodies directly nested in a source region, in source order."""
+    start, end = region
+    contained = [
+        span for span in spans if start < span[1] and span[2] < end
+    ]
+    return sorted(
+        (
+            span
+            for span in contained
+            if not any(
+                other[1] < span[1] and span[2] < other[2]
+                for other in contained
+                if other != span
+            )
+        ),
+        key=lambda span: span[1],
+    )
 
-    Reachability is transitive: a call inside the body of a function nobody
-    calls never executes, so it cannot make its target live, and only the
-    last definition of a name can be live at all.  A fixpoint over the call
-    graph keeps both directions honest.
-    """
+
+def _live_definition_spans(
+    script: str,
+    region: tuple[int, int],
+    spans: list[tuple[str, int, int]],
+    heads: dict[tuple[str, int, int], tuple[int, int]],
+) -> set[tuple[str, int, int]]:
+    """Definitions whose containing shell path can execute in this region."""
+    start, end = region
+    direct = _direct_function_spans(spans, region)
+    masked = script[start:end]
+    markers: dict[str, tuple[str, int, int]] = {}
+    marker_prefix = "__release_gate_definition_"
+    while marker_prefix in script:
+        marker_prefix = "_" + marker_prefix
+    for index, span in reversed(list(enumerate(direct))):
+        head = heads.get(span)
+        if head is None:
+            continue
+        marker = f"{marker_prefix}{index}"
+        local_start = head[0] - start
+        local_end = span[2] - start
+        masked = masked[:local_start] + f"true {marker}" + masked[local_end:]
+        markers[marker] = span
+    live_commands = _live_command_segments(_strip_shell_comments(masked))
+    return {
+        span
+        for marker, span in markers.items()
+        if any(marker in command for command in live_commands)
+    }
+
+
+def _live_function_spans(
+    script: str, defined: set[str]
+) -> set[tuple[str, int, int]]:
+    """Bodies reachable through definitions active at each call site."""
     if not defined:
         return set()
-    effective, _superseded = _effective_body_spans(script)
-    spans_by_name: dict[str, list[tuple[int, int]]] = {}
-    for name, lo, hi in effective:
-        spans_by_name.setdefault(name, []).append((lo, hi))
-    live = _calls_in_region(script, defined, None)
-    frontier = list(live)
-    while frontier:
-        name = frontier.pop()
-        for region in spans_by_name.get(name, []):
-            for found in _calls_in_region(script, defined, region):
-                if found not in live:
-                    live.add(found)
-                    frontier.append(found)
+    spans = _function_body_spans(script)
+    heads = dict(zip(spans, _head_spans(script, spans)))
+    pending: list[
+        tuple[tuple[str, int, int], tuple[tuple[str, tuple[str, int, int]], ...]]
+    ] = []
+
+    def enqueue_calls(
+        region: tuple[int, int], active: dict[str, tuple[str, int, int]]
+    ) -> None:
+        for name in _calls_in_region(script, defined, region):
+            target = active.get(name)
+            if target is not None:
+                pending.append((target, tuple(sorted(active.items()))))
+
+    def scan_region(
+        region: tuple[int, int], active: dict[str, tuple[str, int, int]]
+    ) -> None:
+        cursor, end = region
+        direct = _direct_function_spans(spans, region)
+        live_definitions = _live_definition_spans(
+            script, region, spans, heads
+        )
+        for span in direct:
+            head_start = heads.get(span, (span[1], span[1]))[0]
+            enqueue_calls((cursor, min(head_start, end)), active)
+            if span in live_definitions and span[0] in defined:
+                active[span[0]] = span
+            cursor = span[2]
+        enqueue_calls((cursor, end), active)
+
+    scan_region((0, len(script)), {})
+    live: set[tuple[str, int, int]] = set()
+    visited: set[
+        tuple[tuple[str, int, int], tuple[tuple[str, tuple[str, int, int]], ...]]
+    ] = set()
+    while pending:
+        body, environment = pending.pop()
+        key = (body, environment)
+        if key in visited:
+            continue
+        visited.add(key)
+        live.add(body)
+        scan_region((body[1], body[2]), dict(environment))
     return live
 
 
@@ -1057,19 +1136,16 @@ def _strip_function_bodies(script: str) -> str:
     defined = _defined_function_names(script)
     if not defined:
         return script
-    live = _live_function_names(script, defined)
+    live = _live_function_spans(script, defined)
     chars = list(script)
-    effective, superseded = _effective_body_spans(script)
-    for name, lo, hi in effective:
+    for name, lo, hi in _function_body_spans(script):
         width = hi - lo
-        if name in live:
+        if (name, lo, hi) in live:
             trimmed = _trim_body_after_terminator(script[lo:hi])[:width]
             replacement = list(trimmed) + [" "] * (width - len(trimmed))
         else:
             replacement = [" "] * width
         chars[lo:hi] = replacement
-    for _name, lo, hi in superseded:
-        chars[lo:hi] = [" "] * (hi - lo)
     return "".join(chars)
 
 
@@ -3144,7 +3220,7 @@ def _raw_install_from_shell_wrapper(
     words: list[str], depth: int, variables: dict[str, str | None] | None
 ) -> bool:
     """Follow a modeled shell/wrapper command's static payload."""
-    wrappers = {"bash", "sh", "dash", "zsh", "sudo", "retry"}
+    wrappers = {"bash", "sh", "dash", "zsh", "nohup", "sudo", "retry"}
     if words[0] not in wrappers:
         return False
     serialized = shlex.join(words)
@@ -3263,6 +3339,129 @@ def _raw_install_in_script(
     return _raw_install_in_segments(_command_segments(script), depth, variables)
 
 
+_SHELL_COMMANDS_THAT_READ_STDIN = frozenset({"bash", "sh", "dash", "zsh"})
+
+
+def _is_shell_heredoc_redirect(argument: str) -> bool:
+    """Whether one token is a heredoc redirection passed to a shell."""
+    return argument.startswith("<<") or re.fullmatch(r"\d+<<.*", argument)
+
+
+def _shell_option_has_flag(argument: str, flag: str) -> bool:
+    """Whether a short shell option cluster includes one flag letter."""
+    return (
+        argument.startswith("-")
+        and not argument.startswith("--")
+        and flag in argument[1:]
+    )
+
+
+def _shell_argument_stdin_mode(argument: str) -> bool | None:
+    """Return whether one option selects shell code from stdin."""
+    if argument == "-c" or _shell_option_has_flag(argument, "c"):
+        return False
+    if argument == "-s" or _shell_option_has_flag(argument, "s"):
+        return True
+    return None
+
+
+def _shell_arguments_read_stdin_script(arguments: list[str]) -> bool:
+    """Whether modeled shell options select commands from standard input."""
+    for position, argument in enumerate(arguments):
+        if _is_shell_heredoc_redirect(argument):
+            continue
+        if argument == "--":
+            return all(
+                _is_shell_heredoc_redirect(rest)
+                for rest in arguments[position + 1:]
+            )
+        stdin_mode = _shell_argument_stdin_mode(argument)
+        if stdin_mode is not None:
+            return stdin_mode
+        if not argument.startswith("-"):
+            return False
+    return True
+
+
+def _shell_command_reads_heredoc_as_script(line: str) -> bool:
+    """Whether a shell command on a heredoc line executes its stdin as a script."""
+    for command_segment in _command_segments(line):
+        try:
+            command_words = shlex.split(command_segment, posix=True)
+        except ValueError:
+            continue
+        index, command_payload = _wrapper_prefix_length(command_words)
+        if command_payload or index >= len(command_words):
+            continue
+        command = _resolve_heredoc_word(command_words[index])[0]
+        if command not in _SHELL_COMMANDS_THAT_READ_STDIN:
+            continue
+        arguments = [
+            _resolve_heredoc_word(word)[0]
+            for word in command_words[index + 1:]
+        ]
+        if _shell_arguments_read_stdin_script(arguments):
+            return True
+    return False
+
+
+def _read_heredoc_body(
+    lines: list[str], index: int, delimiter: str, tab_stripped: bool
+) -> tuple[str, int]:
+    """Consume one heredoc body and return its text and following line index."""
+    body: list[str] = []
+    while index < len(lines):
+        body_line = lines[index]
+        index += 1
+        candidate = body_line.lstrip("\t") if tab_stripped else body_line
+        if candidate == delimiter:
+            break
+        body.append(body_line)
+    return "\n".join(body), index
+
+
+def _shell_stdin_heredoc_bodies(script: str) -> list[str]:
+    """Return heredoc bodies used as input scripts by a shell command."""
+    bodies: list[str] = []
+    lines = script.splitlines()
+    index = 0
+    quote: str | None = None
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        line, index = _join_command_line(lines, line, index, quote)
+        quote, markers = _scan_line_for_heredocs(line, quote)
+        reads_stdin = _shell_command_reads_heredoc_as_script(line)
+        for delimiter, tab_stripped, dynamic in markers:
+            if dynamic:
+                return bodies
+            body, index = _read_heredoc_body(
+                lines, index, delimiter, tab_stripped
+            )
+            if reads_stdin:
+                bodies.append(body)
+    return bodies
+
+
+def _raw_install_in_run_script(script: str) -> bool:
+    """Inspect executable run commands and shell-input heredocs recursively."""
+    pending = [script]
+    scanned: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in scanned:
+            continue
+        if len(scanned) >= 64:
+            return True
+        scanned.add(current)
+        uncommented = _strip_shell_comments(current)
+        stripped = _join_continuations(_strip_heredocs(uncommented))
+        if _raw_install_in_script(stripped):
+            return True
+        pending.extend(_shell_stdin_heredoc_bodies(uncommented))
+    return False
+
+
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     """Reject raw ``rustup toolchain install`` anywhere in the workflow.
 
@@ -3282,9 +3481,7 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "so raw Rust toolchain installs cannot be ruled out"
         )
     for run in runs:
-        stripped = _join_continuations(
-            _strip_heredocs(_strip_shell_comments(run)))
-        if _raw_install_in_script(stripped):
+        if _raw_install_in_run_script(run):
             return (
                 "release workflows must provision Rust toolchains "
                 "through the verified installer; found a raw or unresolved "
@@ -3762,12 +3959,23 @@ def _virtualenv_command_markers(segment: str) -> set[str]:
     except ValueError:
         return set()
     markers = set()
-    if len(words) > 1 and words[0] in (".", "source"):
-        root = _virtualenv_root(words[1])
+    command_index = _skip_env_assignments(words, 0)
+    for word in words[:command_index]:
+        markers.update(_virtualenv_markers_from_word(word))
+    if command_index == len(words):
+        return markers
+    command = words[command_index]
+    if command_index + 1 < len(words) and command in (".", "source"):
+        root = _virtualenv_root(words[command_index + 1])
         if root is not None:
             markers.add(VENV_MARKER_PREFIX + root)
-    for word in words:
-        markers.update(_virtualenv_markers_from_word(word))
+    elif command == "export":
+        for word in words[command_index + 1:]:
+            markers.update(_virtualenv_markers_from_word(word))
+    elif command == "env":
+        env_index = _skip_env_assignments(words, command_index + 1)
+        for word in words[command_index + 1:env_index]:
+            markers.update(_virtualenv_markers_from_word(word))
     return markers
 
 
@@ -3795,12 +4003,29 @@ def _is_virtualenv_deactivation(segment: str) -> bool:
     return command_index < len(words) and words[command_index] == "deactivate"
 
 
+def _virtualenv_command_scope(
+    segment: str,
+) -> tuple[set[str], set[str]]:
+    """Split command markers into persistent state and one-command scope."""
+    command_markers = _virtualenv_command_markers(segment)
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return set(), set()
+    command_index = _skip_env_assignments(words, 0)
+    command = words[command_index] if command_index < len(words) else None
+    if command is None or command in {"export", ".", "source"}:
+        return command_markers, set()
+    return set(), command_markers
+
+
 def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
     """Python-environment state established by a run-step prefix and its env."""
     commands = _step_live_commands(step)
     visible = commands if through is None else commands[:through + 1]
     environment = step.get("env") if isinstance(step, dict) else None
     markers = _virtualenv_environment_markers(environment)
+    command_scoped: set[str] = set()
     for segment in visible:
         if _is_virtualenv_deactivation(segment):
             markers = {
@@ -3808,8 +4033,12 @@ def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
                 for marker in markers
                 if not marker.startswith(VENV_MARKER_PREFIX)
             }
-        else:
-            markers.update(_virtualenv_command_markers(segment))
+            command_scoped.clear()
+            continue
+        persistent, command_scoped = _virtualenv_command_scope(segment)
+        markers.update(persistent)
+    if through is not None and through < len(commands) and visible:
+        return markers | command_scoped
     return markers
 
 
