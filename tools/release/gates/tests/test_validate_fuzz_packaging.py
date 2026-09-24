@@ -1502,21 +1502,31 @@ def test_step_shell_model_reads_success_always_and_shell_paths() -> None:
     its basename (`/bin/bash` is `bash`), and a non-string shell value
     fails closed like an unexpected `if`.
     """
-    _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(
+    _assert_step_field_accepts_shell_values(
         "if", "success()", "always()", "failure()"
     )
-    _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(
+    _assert_step_field_accepts_shell_values(
         "shell", "/bin/bash", "bash -e {0}", "python3"
     )
     assert not packaging_gate._step_runs_shell({"shell": 123, "run": "x"})
     assert not packaging_gate._step_runs_shell({"shell": [], "run": "x"})
 
 
-# TODO Rename this here and in `test_step_shell_model_reads_success_always_and_shell_paths`
-def _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(arg0, arg1, arg2, arg3):
-    assert packaging_gate._step_runs_shell({arg0: arg1, "run": "x"})
-    assert packaging_gate._step_runs_shell({arg0: arg2, "run": "x"})
-    assert not packaging_gate._step_runs_shell({arg0: arg3, "run": "x"})
+def _assert_step_field_accepts_shell_values(
+    field_name: str,
+    first_supported_value: str,
+    second_supported_value: str,
+    unsupported_value: str,
+) -> None:
+    assert packaging_gate._step_runs_shell(
+        {field_name: first_supported_value, "run": "x"}
+    )
+    assert packaging_gate._step_runs_shell(
+        {field_name: second_supported_value, "run": "x"}
+    )
+    assert not packaging_gate._step_runs_shell(
+        {field_name: unsupported_value, "run": "x"}
+    )
 
 
 def test_syntax_only_shell_modes_do_not_prove_execution() -> None:
@@ -1677,20 +1687,29 @@ def test_dynamic_return_status_is_not_proven_nonzero() -> None:
 
 def test_same_line_branch_markers_carry_live_commands() -> None:
     """Commands on then/else marker segments count only on live branches."""
-    _extracted_from_test_same_line_branch_markers_carry_live_commands_3(
+    _assert_provisioning_requires_a_live_branch(
         "if true; then ", "if false; then "
     )
-    _extracted_from_test_same_line_branch_markers_carry_live_commands_3(
+    _assert_provisioning_requires_a_live_branch(
         "if false; then echo skip; else ", "if true; then echo run; else "
     )
 
 
-# TODO Rename this here and in `test_same_line_branch_markers_carry_live_commands`
-def _extracted_from_test_same_line_branch_markers_carry_live_commands_3(arg0, arg1):
-    true_branch = ((f"{arg0}{INSTALLER.rstrip()}" + "; fi\n" + COMPONENT) + DRIFT)
-    assert packaging_gate._release_gate_toolchain_issue(true_branch) is None
-    false_branch = ((f"{arg1}{INSTALLER.rstrip()}" + "; fi\n" + COMPONENT) + DRIFT)
-    assert packaging_gate._release_gate_toolchain_issue(false_branch) is not None
+def _assert_provisioning_requires_a_live_branch(
+    live_branch_prefix: str, dead_branch_prefix: str
+) -> None:
+    live_branch = (
+        f"{live_branch_prefix}{INSTALLER.rstrip()}; fi\n"
+        + COMPONENT
+        + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(live_branch) is None
+    dead_branch = (
+        f"{dead_branch_prefix}{INSTALLER.rstrip()}; fi\n"
+        + COMPONENT
+        + DRIFT
+    )
+    assert packaging_gate._release_gate_toolchain_issue(dead_branch) is not None
 
 
 def test_raw_install_detector_reads_env_option_wrapped_commands() -> None:
@@ -2712,20 +2731,19 @@ def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:
 
 def test_release_gate_step_env_does_not_carry_to_later_docs_check() -> None:
     """A step-local VIRTUAL_ENV must not count as the next step's runtime."""
-    steps = _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(
+    steps = _release_gate_steps_from_yaml(
         ':\n    steps:\n      - run: pip install -r requirements-release.txt\n        env:\n          VIRTUAL_ENV: .venv\n          PATH: ".venv/bin:$PATH"\n      - run: make docs-check\n'
     )
     assert packaging_gate._python_deps_issue(steps) is not None
 
-    shared_steps = _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(
+    shared_steps = _release_gate_steps_from_yaml(
         ':\n    env:\n      VIRTUAL_ENV: .venv\n      PATH: ".venv/bin:$PATH"\n    steps:\n      - run: pip install -r requirements-release.txt\n      - run: make docs-check\n'
     )
     assert packaging_gate._python_deps_issue(shared_steps) is None
 
 
-# TODO Rename this here and in `test_release_gate_step_env_does_not_carry_to_later_docs_check`
-def _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(arg0):
-    workflow = f"jobs:\n  {packaging_gate.RELEASE_GATE_JOB_NAME}{arg0}"
+def _release_gate_steps_from_yaml(job_yaml_fragment: str) -> list[dict]:
+    workflow = f"jobs:\n  {packaging_gate.RELEASE_GATE_JOB_NAME}{job_yaml_fragment}"
     result = packaging_gate._job_run_step_records(
         workflow, packaging_gate.RELEASE_GATE_JOB_NAME
     )
