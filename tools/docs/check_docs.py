@@ -31,6 +31,7 @@ ARCHIVE_SEGMENT = "docs/archive/"
 README_FILENAME = "README.md"
 CHANGELOG_FILENAME = "CHANGELOG.md"
 CHINESE_README = "README_zh-CN.md"
+BREAKING_CHANGES_GUIDE = "docs/guides/{version}-breaking-changes.md"
 MAINTAINED_ROOT_DOCS = {"AGENTS.md", README_FILENAME, CHINESE_README}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
@@ -984,7 +985,7 @@ RELEASE_SURFACE_FILES = (
     "docs/guides/INSTALLATION.md",
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
-    "docs/guides/{version}-breaking-changes.md",
+    BREAKING_CHANGES_GUIDE,
     "docs/guides/MIGRATION-{version}.md",
     "docs/development/{version}-implementation-plan.md",
     "docs/releases/{version}-release-notes.md",
