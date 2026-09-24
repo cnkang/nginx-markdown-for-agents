@@ -28,10 +28,15 @@ from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
 ARCHIVE_SEGMENT = "docs/archive/"
+README_FILENAME = "README.md"
+CHANGELOG_FILENAME = "CHANGELOG.md"
 CHINESE_README = "README_zh-CN.md"
-MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", CHINESE_README}
+MAINTAINED_ROOT_DOCS = {"AGENTS.md", README_FILENAME, CHINESE_README}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
+MARKDOWN_HEADING_LINE_RE = re.compile(
+    r"^ {0,3}##(?!#)[^\n]*$", re.MULTILINE
+)
 SPEC_INDEX_RE = re.compile(
     r"\bspecs?\s*0*\d+(?:\s*[-–]\s*0*\d+)?\b",
     re.IGNORECASE,
@@ -329,11 +334,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     version: str | None = None
     errors: list[str] = []
     changelog = _without_fenced_blocks(changelog)
-    for match in re.finditer(
-        r"^ {0,3}##(?!#)[^\n]*$",
-        changelog,
-        re.MULTILINE,
-    ):
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(changelog):
         line = match.group(0)
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
@@ -342,7 +343,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
             continue
         if "unreleased" in line.lower():
             errors.append(
-                "CHANGELOG.md: malformed unreleased heading "
+                f"{CHANGELOG_FILENAME}: malformed unreleased heading "
                 f"{line.strip()!r}; expected "
                 "'## [<version>] - Unreleased' or '## [<version>] - "
                 "Unreleased candidate' without suffix"
@@ -876,7 +877,9 @@ def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
     try:
         date.fromisoformat(raw_date)
     except ValueError:
-        errors.append(f"CHANGELOG.md: invalid release date {raw_date!r} in {line!r}")
+        errors.append(
+            f"{CHANGELOG_FILENAME}: invalid release date {raw_date!r} in {line!r}"
+        )
         return False
     return True
 
@@ -891,7 +894,7 @@ def _order_error(
         return None
     if current[0] >= previous[0] or current[1] > previous[1]:
         return (
-            "CHANGELOG.md: release headings are not in descending "
+            f"{CHANGELOG_FILENAME}: release headings are not in descending "
             f"order at {line!r}"
         )
     return None
@@ -946,7 +949,7 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
     first_seen = False
     previous: tuple[tuple[int, ...], str] | None = None
     changelog = _without_fenced_blocks(changelog)
-    for match in re.finditer(r"^ {0,3}##(?!#)[^\n]*$", changelog, re.MULTILINE):
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(changelog):
         line = match.group(0)
         heading = _classify_changelog_heading(line)
         if heading is None:
@@ -955,7 +958,9 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
         first_seen = True
         kind, heading_version, raw_date = heading
         if kind == "bad":
-            errors.append(f"CHANGELOG.md: unrecognized release heading {line!r}")
+            errors.append(
+                f"{CHANGELOG_FILENAME}: unrecognized release heading {line!r}"
+            )
         elif kind == "dated":
             version, previous = _apply_dated_heading(
                 version,
@@ -967,12 +972,12 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
                 assign_version=first,
             )
     if not first_seen:
-        errors.append("CHANGELOG.md: missing release heading")
+        errors.append(f"{CHANGELOG_FILENAME}: missing release heading")
     return version, errors
 
 
 RELEASE_SURFACE_FILES = (
-    "README.md",
+    README_FILENAME,
     CHINESE_README,
     "docs/project/PROJECT_STATUS.md",
     "docs/project/VERSION_PLANNING.md",
@@ -986,7 +991,7 @@ RELEASE_SURFACE_FILES = (
     "docs/releases/{version}-upgrade-and-rollback.md",
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
-    "CHANGELOG.md",
+    CHANGELOG_FILENAME,
     "docs/project/README.md",
 )
 
@@ -1186,7 +1191,7 @@ def check_stable_release_surfaces(
 # release is judged on these documents, so one document cannot declare a
 # publication the others do not support.
 PENDING_STATE_SURFACES = (
-    "README.md",
+    README_FILENAME,
     CHINESE_README,
     "docs/project/PROJECT_STATUS.md",
     "docs/project/README.md",
@@ -1250,7 +1255,7 @@ def _first_dated_changelog_version(changelog: str) -> str | None:
     belongs to the pending line, and that line has no publication date yet.
     """
     text = _without_fenced_blocks(changelog)
-    for match in re.finditer(r"^ {0,3}##(?!#)[^\n]*$", text, re.MULTILINE):
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(text):
         dated = DATED_CHANGELOG_RE.match(match.group(0))
         if dated is not None:
             return dated.group("version")
@@ -1462,7 +1467,7 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
         root / "docs" / "releases" / f"{published_version}-release-notes.md",
         published_version,
     )
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / CHANGELOG_FILENAME
     if not changelog_path.is_file():
         return failures
     changelog = _without_fenced_blocks(
@@ -1476,7 +1481,7 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
     )
     if heading is None:
         failures.append(
-            f"CHANGELOG.md: published {published_version} has no dated heading"
+            f"{CHANGELOG_FILENAME}: published {published_version} has no dated heading"
         )
         return failures
     notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
@@ -1508,7 +1513,7 @@ def check_release_state_contract(
     entry means the released version must not read as pending, so the same
     contract accepts the post-publication state.
     """
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / CHANGELOG_FILENAME
     if not changelog_path.is_file():
         return []
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
@@ -1523,7 +1528,7 @@ def check_release_state_contract(
         if current_section:
             failures.extend(
                 _pending_text_failures(
-                    "CHANGELOG.md", current_section, pending_version,
+                    CHANGELOG_FILENAME, current_section, pending_version,
                     require_boundary=False,
                 )
             )
@@ -1563,7 +1568,7 @@ def main() -> int:
     failures.extend(check_english_policy(files))
     failures.extend(check_internal_reference_policy(files))
     failures.extend(check_operator_config_examples(files))
-    changelog_path = ROOT / "CHANGELOG.md"
+    changelog_path = ROOT / CHANGELOG_FILENAME
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
     # Use the unreleased-changelog regex so validation targets the version
     # under development, not the latest released version.
