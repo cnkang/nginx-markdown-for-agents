@@ -60,6 +60,9 @@ PKG_RELEASE_GATE_TOOLCHAIN_GATE = "pkg:release-gate-toolchain"
 PKG_RELEASE_GATE_PYTHON_DEPS_GATE = "pkg:release-gate-python-deps"
 DOCS_COMPATIBILITY_GATE = "docs:compatibility"
 
+RELEASE_PACKAGES_WORKFLOW_MISSING = "release-packages.yml not found"
+VENV_MARKER_PREFIX = "venv:"
+
 # The release-gate job runs this command; the gate scopes its toolchain
 # expectation to the job that actually carries the command so a future job
 # split must move the provisioning with it.
@@ -241,7 +244,7 @@ def check_release_workflow(result: ValidationResult) -> None:
     """Validate release package workflow (Req 2.7, 2.9, 2.11)."""
     content = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not content:
-        result.fail("pkg:release-workflow", "release-packages.yml not found")
+        result.fail("pkg:release-workflow", RELEASE_PACKAGES_WORKFLOW_MISSING)
         return
     result.pass_("pkg:release-workflow", "release-packages.yml exists")
 
@@ -380,7 +383,7 @@ def _strip_shell_comment_command(
         if len(command_lines) == 1:
             merged = stripped
         else:
-            merged = merged[:-1] + " " + stripped.lstrip()
+            merged = f"{merged[:-1]} {stripped.lstrip()}"
         index += 1
         if not _line_continues(stripped, line_quote):
             break
@@ -408,20 +411,18 @@ def _walk_ansi_c_removal(
     char = raw[index]
     if char == chr(92) and index + 1 < len(raw):
         return "ansi-c", 2, raw[index + 1], False
-    if char == "'":
-        return None, 1, None, False
-    return "ansi-c", 1, char, False
+    return (None, 1, None, False) if char == "'" else ("ansi-c", 1, char, False)
 
 
 def _walk_removal_escape(
     raw: str, index: int, quote: str | None
 ) -> tuple[str | None, int, str | None, bool]:
     """Remove a backslash when it quotes a shell-special character."""
-    char = raw[index]
     if index + 1 < len(raw) and (
         quote is None or raw[index + 1] in ("$", "`", '"', chr(92))
     ):
         return quote, 2, raw[index + 1], False
+    char = raw[index]
     return quote, 1, char, False
 
 
@@ -611,7 +612,7 @@ def _join_command_line(
     returned to the caller for the next line's scan.
     """
     while _line_continues(line, quote) and index < len(lines):
-        line = line[:-1] + " " + lines[index].lstrip()
+        line = f"{line[:-1]} {lines[index].lstrip()}"
         index += 1
     return line, index
 
@@ -797,9 +798,9 @@ def _definition_name(script: str, index: int) -> str | None:
         r"(?:function\s+)?([A-Za-z_](?a:\w)*)\s*\(\s*\)\s*$", prefix
     )
     if match is not None:
-        return match.group(1)
+        return match[1]
     keyword = re.search(r"function\s+([A-Za-z_](?a:\w)*)\s*$", prefix)
-    return keyword.group(1) if keyword is not None else None
+    return keyword[1] if keyword is not None else None
 
 
 @functools.lru_cache(maxsize=64)
@@ -867,9 +868,7 @@ def _function_body_walk_uncached(
             spans.append((name, body_start, index))
     if depth != 0:
         return spans, "body"
-    if quote is not None:
-        return spans, "quote"
-    return spans, ""
+    return (spans, "quote") if quote is not None else (spans, "")
 
 
 def _function_body_spans(script: str) -> list[tuple[str, int, int]]:
@@ -885,7 +884,7 @@ def _unclosed_structure_issue(script: str) -> str | None:
     script, so an unclosed body or quoted string is rejected outright.
     """
     code = _masked_quotes(_strip_shell_comments(script))
-    if re.search(r"(?<![A-Za-z0-9_])(?:@|\?|\+|\*|!)\(", code):
+    if re.search(r"(?<!(?a:\w))[@?+*!]\(", code):
         return (
             "the release-gate job's run script uses extglob syntax that the "
             "static shell model cannot delimit safely; rewrite it without "
@@ -968,9 +967,9 @@ def _effective_body_spans(
     same name can never execute on a later call: they are superseded.
     """
     spans = _function_body_spans(script)
-    last: dict[str, int] = {}
-    for position, (name, _lo, _hi) in enumerate(spans):
-        last[name] = position
+    last: dict[str, int] = {
+        name: position for position, (name, _lo, _hi) in enumerate(spans)
+    }
     effective: list[tuple[str, int, int]] = []
     superseded: list[tuple[str, int, int]] = []
     for position, span in enumerate(spans):
@@ -1097,6 +1096,16 @@ _NON_BUILTIN_COMMANDS = frozenset({
     "env", "command", "exec", "nohup", "sudo",
 })
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_](?a:\w)*=")
+_SHELL_VARIABLE_REFERENCE_RE = re.compile(
+    r"\$\{([A-Za-z_](?a:\w)*)\}|\$([A-Za-z_](?a:\w)*)"
+)
+_INERT_SHELL_COMMANDS = frozenset({
+    "echo", "printf", "test", "[", "true", "false", ":",
+})
+_SHELL_CONTROL_FLOW_WORDS = frozenset({
+    "case", "do", "done", "elif", "else", "esac", "fi", "for", "if",
+    "select", "then", "until", "while",
+})
 
 # Bash invocation options.  Value-taking options consume a file word;
 # flag-only options the option parser steps over keep parsing.  Anything
@@ -1195,9 +1204,7 @@ def _env_option_step(words: list[str], index: int) -> int | None:
         return index + 2 if index + 1 < len(words) else None
     if word.startswith("--") and "=" in word:
         option, value = word.split("=", 1)
-        if option in _ENV_LONG_VALUE_OPTIONS and value:
-            return index + 1
-        return None
+        return index + 1 if option in _ENV_LONG_VALUE_OPTIONS and value else None
     return index + 1 if word in _ENV_FLAG_OPTIONS else None
 
 
@@ -1299,9 +1306,7 @@ def _shell_option_step(words: list[str], probe: int) -> tuple[int, bool] | None:
     if stepped is None:
         return None
     span, command_mode = stepped
-    if probe + span > len(words):
-        return None
-    return probe + span, command_mode
+    return None if probe + span > len(words) else (probe + span, command_mode)
 
 
 def _shell_scan_outcome(
@@ -1317,9 +1322,7 @@ def _shell_scan_outcome(
     """
     cleaned = _resolve_heredoc_word(words[probe])[0]
     if cleaned == "--":
-        if command_mode and probe + 1 < len(words):
-            return probe + 1
-        return -1
+        return probe + 1 if command_mode and probe + 1 < len(words) else -1
     if cleaned.startswith(("-", "+")) and cleaned not in ("-", "+"):
         return None
     return probe if command_mode else -1
@@ -1369,9 +1372,7 @@ def _wrapper_command_step(words: list[str], index: int) -> int | None:
         return None
     if wrapper == "command":
         rest, lookup = _command_operand(words[index + 1:])
-        if lookup:
-            return None
-        return len(words) - len(rest)
+        return None if lookup else len(words) - len(rest)
     probe = _skip_option_words(
         words, index + 1, _SUDO_VALUE_FLAGS, _SUDO_FLAG_FLAGS
     )
@@ -1519,10 +1520,9 @@ def _possibly_reached_segments(script: str) -> list[str]:
             _possible_branch_state(
                 branches, keyword, condition, prior_chain
             )
-            carried = _possible_marker_carry(
+            if carried := _possible_marker_carry(
                 segment, separator, previous, branches
-            )
-            if carried:
+            ):
                 live.append(carried)
             previous = None
             continue
@@ -1626,7 +1626,7 @@ def _quote_removed_command(text: str) -> str:
 def _quoted_separator_at(line: str, index: int, quote: str) -> int:
     """Separator length inside a quoted string (0 = data)."""
     char = line[index]
-    if quote in ("'", "ansi-c"):
+    if quote in {"'", "ansi-c"}:
         return 0
     if char == "`":
         return 1
@@ -1694,14 +1694,10 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     if char == ";":
         return 1
     if char in "&|":
-        if char == "&":
-            if (index > 0 and line[index - 1] in "<>") or line.startswith(
-                "&>", index
-            ):
-                # In a redirection such as ``2>&1`` or ``&>file``, the
-                # ampersand is part of the redirection token, not a command
-                # separator.
-                return 0
+        if char == "&" and ((index > 0 and line[index - 1] in "<>") or line.startswith(
+                        "&>", index
+                    )):
+            return 0
         return 2 if line.startswith(char * 2, index) else 1
     return 1 if char in "()`" else 0
 
@@ -1710,8 +1706,7 @@ def _flush_segment(
     segments: list[tuple[str, str]], current: list[str], separator: str
 ) -> None:
     """Append the finished segment with its separator, when non-empty."""
-    segment = "".join(current).strip()
-    if segment:
+    if segment := "".join(current).strip():
         segments.append((segment, separator))
 
 
@@ -1725,8 +1720,7 @@ def _scan_segment_line(
     """Scan one line for separators; returns (current, quote, separator)."""
     index = 0
     while index < len(line):
-        length = _separator_at(line, index, quote)
-        if length:
+        if length := _separator_at(line, index, quote):
             _flush_segment(segments, current, separator)
             separator = line[index : index + length]
             current = []
@@ -1818,9 +1812,7 @@ def _peel_one_wrapper(words: list[str]) -> list[str] | None:
     first = _resolve_heredoc_word(words[0])[0]
     if first == "command" and len(words) > 1:
         rest, lookup = _command_operand(words[1:])
-        if lookup:
-            return None
-        return rest
+        return None if lookup else rest
     if _ENV_ASSIGN_RE.match(words[0]) and len(words) > 1:
         return words[1:]
     if first == "env" and len(words) > 1:
@@ -1858,22 +1850,25 @@ def _segment_literal(segment: str) -> bool | None:
     if first == "--":
         return False
     if first == "builtin":
-        rest = words[1:]
-        if rest and rest[0] == "--":
-            rest = rest[1:]
-        if not rest:
-            return None
-        name = _resolve_heredoc_word(rest[0])[0]
-        if name in _BUILTIN_LITERAL_WORDS:
-            return _BUILTIN_LITERAL_WORDS[name]
-        if name in _NON_BUILTIN_COMMANDS:
-            return False
-        return None
+        return _builtin_command_literal(words)
     if first in (":", "true"):
         return True
     if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
         return False
     return None
+
+
+def _builtin_command_literal(words):
+    """Literal tristate of an explicit ``builtin`` invocation."""
+    rest = words[1:]
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    if not rest:
+        return None
+    name = _resolve_heredoc_word(rest[0])[0]
+    if name in _BUILTIN_LITERAL_WORDS:
+        return _BUILTIN_LITERAL_WORDS[name]
+    return False if name in _NON_BUILTIN_COMMANDS else None
 
 
 _OPEN_KEYWORDS = {"while", "until", "for", "case", "select"}
@@ -1899,24 +1894,26 @@ def _pair_condition(
     pairs: list[tuple[str, str]], index: int, keyword: str
 ) -> bool | None:
     """The literal condition of an ``if``/``elif`` header (None otherwise)."""
-    if keyword not in ("if", "elif"):
-        return None
-    return _condition_tristate(pairs, index)
+    return _condition_tristate(pairs, index) if keyword in {"if", "elif"} else None
 
 
 def _combine_tristate(operator: str, left: bool | None, right: bool | None) -> bool | None:
     """Fold two literal parts under ``&&``/``||`` (None = unevaluated)."""
     if operator == "&&":
-        if left is False or right is False:
-            return False
-        if left is None or right is None:
-            return None
-        return True
-    if left is True or right is True:
-        return True
-    if left is None or right is None:
-        return None
-    return False
+        return _short_circuit_fold(left, False, right, True)
+    return _short_circuit_fold(left, True, right, False)
+
+
+def _short_circuit_fold(left, dominating, right, both):
+    """Fold two tristate operands under one short-circuit operator.
+
+    ``dominating`` is the value that decides the fold as soon as either
+    operand equals it; ``both`` is the result when neither operand is the
+    dominating value and both are known.
+    """
+    if left is dominating or right is dominating:
+        return dominating
+    return None if left is None or right is None else both
 
 
 def _condition_tristate(
@@ -1957,9 +1954,7 @@ def _condition_literal(segment: str) -> bool | None:
     rest = [word for word in rest if word and not _is_redirection_word(word)]
     if rest in (["true"], [":"]):
         return True
-    if rest == ["false"]:
-        return False
-    return None
+    return False if rest == ["false"] else None
 
 
 # Branch chain states, tracked per enclosing construct: an earlier branch
@@ -1991,9 +1986,7 @@ def _set_errexit_state(segment: str) -> bool | None:
     """Whether the segment enables (True), disables (False) errexit or
     leaves it alone (None)."""
     words = segment.split()
-    if not words or words[0] != "set":
-        return None
-    return _set_flags_state(words[1:])
+    return None if not words or words[0] != "set" else _set_flags_state(words[1:])
 
 
 def _flags_word_state(word: str) -> bool | None:
@@ -2006,9 +1999,7 @@ def _flags_word_state(word: str) -> bool | None:
         return True
     if word.startswith("+") and "e" in word[1:]:
         return False
-    if word.startswith("-") and "e" in word[1:]:
-        return True
-    return None
+    return True if word.startswith("-") and "e" in word[1:] else None
 
 
 def _set_flags_state(flags: list[str]) -> bool | None:
@@ -2037,7 +2028,7 @@ def _chain_skips(separator: str, previous: bool | None) -> bool:
     succeeded, so the chained command cannot count as unconditional
     provisioning.
     """
-    return separator in ("&&", "||") and (
+    return separator in {"&&", "||"} and (
         previous is None or _segment_unreachable(separator, previous)
     )
 
@@ -2046,9 +2037,7 @@ def _branch_chain_state(condition: bool | None) -> int:
     """The chain state after a branch whose condition evaluates so."""
     if condition is True:
         return _OPEN_CHAIN
-    if condition is None:
-        return _UNKNOWN_CHAIN
-    return _CLEAR_CHAIN
+    return _UNKNOWN_CHAIN if condition is None else _CLEAR_CHAIN
 
 
 def _branch_select(
@@ -2171,7 +2160,7 @@ def _possible_branch_state(
     _runs, chain = branches[-1]
     if keyword in _OPEN_KEYWORDS:
         branches[-1] = (True, chain)
-    elif keyword in ("if", "elif"):
+    elif keyword in {"if", "elif"}:
         branches[-1] = (condition is not False, chain)
     elif keyword == "else":
         previous_chain = chain if prior_chain is None else prior_chain
@@ -2182,9 +2171,7 @@ def _body_marker_command(segment: str) -> str:
     """The command a ``then``/``do``/``else`` marker carries on its own
     segment (``then return 1``); ``""`` when the marker stands alone."""
     words = segment.split()
-    if len(words) < 2:
-        return ""
-    return " ".join(words[1:])
+    return "" if len(words) < 2 else " ".join(words[1:])
 
 
 def _return_failure(segment: str) -> bool | None:
@@ -2210,7 +2197,7 @@ def _return_kind(segment: str) -> str | None:
         return "zero"
     if not arg:
         return "bare"
-    if re.fullmatch(r"[0-9]+", arg):
+    if re.fullmatch(r"(?a:\d)+", arg):
         value = int(arg)
         if value == 0:
             return "zero"
@@ -2256,7 +2243,7 @@ def _contained_list(separator: str, following: str) -> bool:
     puts the end in a child: an ``exit`` is contained there, and only the
     status the container reports reaches the enclosing shell.
     """
-    return separator in ("(", "`", "|", "&") or following in ("|", "&")
+    return separator in {"(", "`", "|", "&"} or following in {"|", "&"}
 
 
 def _contained_failure(
@@ -2270,11 +2257,9 @@ def _contained_failure(
     operator makes the failure conditional, and a standalone container
     (``x=$(...)``, ``(...)``) dies under errexit through its own status.
     """
-    if following in ("|", "&", ")"):
+    if following in {"|", "&", ")"}:
         return None, None
-    if following in ("&&", "||"):
-        return None, False
-    return "fail", None
+    return (None, False) if following in {"&&", "||"} else ("fail", None)
 
 
 def _exit_segment_state(
@@ -2314,9 +2299,7 @@ def _return_segment_state(
     kind = _return_kind(segment)
     if kind == "nonzero":
         return "fail", None
-    if kind == "bare" and previous is False:
-        return "fail", None
-    return "ok", None
+    return ("fail", None) if kind == "bare" and previous is False else ("ok", None)
 
 
 def _failing_segment_state(
@@ -2324,7 +2307,7 @@ def _failing_segment_state(
     following: str,
 ) -> tuple[str | None, bool | None]:
     """Verdict/status for a segment whose literal value is False."""
-    if following in ("&&", "||"):
+    if following in {"&&", "||"}:
         return None, False
     if _contained_list(separator, following):
         return _contained_failure(following)
@@ -2370,9 +2353,7 @@ def _live_segment_state(
 
 def _verdict_ends(verdict: str | None, errexit: bool) -> bool:
     """Whether a segment verdict ends the shell under the errexit state."""
-    if verdict == "exit":
-        return True
-    return verdict == "fail" and errexit
+    return True if verdict == "exit" else verdict == "fail" and errexit
 
 
 def _condition_exit(segment: str, exiting: frozenset[str]) -> bool:
@@ -2403,18 +2384,17 @@ def _branch_step_state(
     status feeds the chain tracker exactly like a plain segment's does, so
     a carried ``then false`` still short-circuits the ``||`` after it.
     """
-    if keyword in ("then", "do", "else"):
+    if keyword in {"then", "do", "else"}:
         if not _region_runs(branches) or _chain_skips(separator, previous):
             return None, None
-        carried = _body_marker_command(segment)
-        if not carried:
+        if carried := _body_marker_command(segment):
+            return _live_segment_state(
+                carried, ";", following, previous, failing, exiting
+            )
+        else:
             return None, None
-        return _live_segment_state(
-            carried, ";", following, previous, failing, exiting
-        )
-    if keyword in ("if", "elif", "while", "until"):
-        if _condition_exit(segment, exiting):
-            return "exit", None
+    if _condition_exit(segment, exiting) and keyword in {"if", "elif", "while", "until"}:
+        return "exit", None
     return None, None
 
 
@@ -2426,10 +2406,10 @@ def _body_can_succeed(body: str) -> bool:
     carry the always-failing label; the possible-path walk keeps loops and
     unevaluated branches alive for exactly this check.
     """
-    for segment in _possibly_reached_segments(body):
-        if _return_kind(segment) in ("zero", "bare", "unknown"):
-            return True
-    return False
+    return any(
+        _return_kind(segment) in ("zero", "bare", "unknown")
+        for segment in _possibly_reached_segments(body)
+    )
 
 
 def _verdict_disposition(
@@ -2443,9 +2423,7 @@ def _verdict_disposition(
     """
     if verdict == "exit":
         return False, True
-    if verdict == "fail":
-        return (not can_succeed), False
-    return None
+    return (not can_succeed, False) if verdict == "fail" else None
 
 
 def _body_step_verdict(
@@ -2510,9 +2488,7 @@ def _body_verdict(
             return disposition
         if not dead:
             previous = previous_out
-    if previous is False:
-        return (not can_succeed), False
-    return False, False
+    return (not can_succeed, False) if previous is False else (False, False)
 
 
 def _live_scan_step(
@@ -2609,7 +2585,7 @@ def _live_command_segments(
                 if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
                 else ""
             )
-            live.append(carried if carried else segment)
+            live.append(carried or segment)
         if carry:
             exited = exited_out
             previous = previous_out
@@ -2661,9 +2637,8 @@ def _syntax_only_shell_mode(words: list[str]) -> bool:
             return True
         if word.startswith("-") and not word.startswith("--") and "n" in word[1:]:
             return True
-        if word in {"-o", "-O"} and index + 1 < len(words):
-            if words[index + 1] == "noexec":
-                return True
+        if word in {"-o", "-O"} and index + 1 < len(words) and words[index + 1] == "noexec":
+            return True
     return False
 
 
@@ -2780,7 +2755,7 @@ def _merge_environment_scopes(
     """Apply workflow → job → step precedence to a run step."""
     effective: dict[str, object] = {}
     for scope in scopes.values():
-        effective.update(scope)
+        effective |= scope
     return effective
 
 
@@ -2828,9 +2803,7 @@ def _job_run_step_records(
 def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
     """Return one executable run script per step, or None when absent."""
     records = _job_run_step_records(workflow_content, job_name)
-    if records is None:
-        return None
-    return [record["run"] for record in records]
+    return None if records is None else [record["run"] for record in records]
 
 
 def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
@@ -2848,9 +2821,11 @@ def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
     for job in jobs.values():
         if not isinstance(job, dict):
             continue
-        for step in job.get("steps") or []:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
-                scripts.append(step["run"])
+        scripts.extend(
+            step["run"]
+            for step in job.get("steps") or []
+            if isinstance(step, dict) and isinstance(step.get("run"), str)
+        )
     return scripts
 
 
@@ -2862,7 +2837,7 @@ def _quote_cleaned_command(text: str) -> str:
     """
     first, _, rest = text.partition(" ")
     cleaned = _resolve_heredoc_word(first)[0]
-    return cleaned + ((" " + rest) if rest else "")
+    return cleaned + (f" {rest}" if rest else "")
 
 
 def _mentions_raw_install(text: str) -> bool:
@@ -2922,10 +2897,7 @@ def _timeout_command_index(words: list[str]) -> int | None:
         if word.startswith("--") and "=" in word:
             index += 1
             continue
-        if word.startswith("-") and word != "-":
-            return None
-        # timeout requires one duration before its command.
-        return index + 1
+        return None if word.startswith("-") and word != "-" else index + 1
     return index
 
 
@@ -2941,98 +2913,354 @@ def _find_exec_argv(words: list[str]) -> list[list[str]] | None:
         end = start
         while end < len(words) and words[end] not in (";", "+"):
             end += 1
-        if end == len(words) or end == start:
+        if end in [len(words), start]:
             return None
         commands.append(words[start:end])
         index = end + 1
     return commands
 
 
-def _raw_install_from_dispatcher(words: list[str], depth: int) -> bool:
+def _shell_assignment_parts(word: str) -> tuple[str, str] | None:
+    """Return a static shell assignment word as (name, value)."""
+    if _ENV_ASSIGN_RE.match(word) is None:
+        return None
+    name, separator, value = word.partition("=")
+    if not separator or re.fullmatch(r"[A-Za-z_](?a:\w)*", name) is None:
+        return None
+    return name, value
+
+
+def _static_assignment_value(value: str) -> str | None:
+    """Keep only literal assignment values; expansions remain unknown."""
+    return None if "$" in value else value
+
+
+def _shell_variable_reference_is_escaped(text: str, start: int) -> bool:
+    """Whether a simple variable token is joined to an escape or dollar."""
+    return start > 0 and text[start - 1] in {"\\", "$"}
+
+
+def _expand_static_variable_pass(
+    text: str, variables: dict[str, str | None]
+) -> str | None:
+    """Expand one layer of simple shell references or reject the layer."""
+    references = list(_SHELL_VARIABLE_REFERENCE_RE.finditer(text))
+    if not references:
+        return None
+    pieces: list[str] = []
+    cursor = 0
+    for reference in references:
+        if _shell_variable_reference_is_escaped(text, reference.start()):
+            return None
+        name = reference.group(1) or reference.group(2)
+        value = variables.get(name)
+        if value is None:
+            return None
+        pieces.extend((text[cursor:reference.start()], value))
+        cursor = reference.end()
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
+def _expand_static_shell_variables(
+    text: str, variables: dict[str, str | None] | None
+) -> str | None:
+    """Expand a bounded chain of simple variables with known literal values."""
+    known = variables or {}
+    for _ in range(8):
+        if "$" not in text:
+            return text
+        expanded = _expand_static_variable_pass(text, known)
+        if expanded is None:
+            return None
+        text = expanded
+    return None if "$" in text else text
+
+
+def _eval_payload_is_inert(
+    payload: str, variables: dict[str, str | None] | None
+) -> bool:
+    """Whether every unresolved eval command is provably an inert builtin."""
+    if "$(" in payload or "`" in payload:
+        return False
+    for segment in _command_segments(payload):
+        try:
+            words = shlex.split(segment, posix=True)
+        except ValueError:
+            return False
+        command_index = _skip_env_assignments(words, 0)
+        if command_index >= len(words):
+            continue
+        command = _resolve_heredoc_word(words[command_index])[0]
+        command = _expand_static_shell_variables(command, variables)
+        if command not in _INERT_SHELL_COMMANDS:
+            return False
+    return True
+
+
+def _segment_has_shell_control_flow(segment: str) -> bool:
+    """Whether a segment makes sequential variable values path-dependent."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return True
+    command_index = _skip_env_assignments(words, 0)
+    if command_index >= len(words):
+        return False
+    command = _resolve_heredoc_word(words[command_index])[0]
+    return command in _SHELL_CONTROL_FLOW_WORDS or bool(
+        re.match(
+            r"^\s*(?:function\s+[A-Za-z_]\w*|[A-Za-z_]\w*\s*\(\s*\))\s*\{",
+            segment,
+        )
+    )
+
+
+def _update_static_shell_variables(
+    segment: str, variables: dict[str, str | None]
+) -> None:
+    """Record unconditional literal assignment statements for later eval."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return
+    if not words:
+        return
+    command = _resolve_heredoc_word(words[0])[0]
+    if command == "unset":
+        for name in words[1:]:
+            if re.fullmatch(r"[A-Za-z_](?a:\w)*", name):
+                variables[name] = None
+        return
+    assignment_words = (
+        words[1:] if command in {"export", "local", "readonly"} else words
+    )
+    assignments = [_shell_assignment_parts(word) for word in assignment_words]
+    if not assignments or any(assignment is None for assignment in assignments):
+        return
+    for assignment in assignments:
+        if assignment is not None:
+            name, value = assignment
+            variables[name] = _static_assignment_value(value)
+
+
+def _raw_install_in_segments(
+    segments: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None = None,
+) -> bool:
+    """Scan sequential shell segments with bounded literal-variable state."""
+    local_variables = dict(variables or {})
+    path_dependent = any(_segment_has_shell_control_flow(segment) for segment in segments)
+    if path_dependent:
+        local_variables.clear()
+    for segment in segments:
+        if _raw_install_in_segment(segment, depth + 1, local_variables):
+            return True
+        if not path_dependent:
+            _update_static_shell_variables(segment, local_variables)
+    return False
+
+
+def _raw_install_in_script(
+    script: str, depth: int = 0, variables: dict[str, str | None] | None = None
+) -> bool:
+    """Scan a script's ordered commands with conservative variable flow."""
+    return _raw_install_in_segments(_command_segments(script), depth, variables)
+
+
+def _raw_install_from_dispatcher(
+    words: list[str], depth: int, variables: dict[str, str | None] | None = None
+) -> bool:
     """Follow indirect command launchers with statically locatable operands."""
     if words[0] == "xargs":
         command_index = _xargs_command_index(words)
         if command_index is None:
             return _mentions_raw_install(" ".join(words))
-        return _raw_install_from_words(words[command_index:], depth + 1)
+        return _raw_install_from_words(words[command_index:], depth + 1, variables)
     if words[0] == "timeout":
         command_index = _timeout_command_index(words)
         if command_index is None or command_index >= len(words):
             return _mentions_raw_install(" ".join(words))
-        return _raw_install_from_words(words[command_index:], depth + 1)
+        return _raw_install_from_words(words[command_index:], depth + 1, variables)
     if words[0] == "find":
         commands = _find_exec_argv(words)
         if commands is None:
             return _mentions_raw_install(" ".join(words))
-        return any(_raw_install_from_words(command, depth + 1)
-                   for command in commands)
+        return any(
+            _raw_install_from_words(command, depth + 1, variables)
+            for command in commands
+        )
     return False
 
 
-def _raw_install_from_wrapper(words: list[str], depth: int) -> bool:
-    """Follow shell and command wrappers while preserving quoted word boundaries."""
-    if words[0] == "exec":
-        return _raw_install_from_words(words[1:], depth + 1)
-    if words[0] == "eval":
-        # Bash eval joins its expanded arguments with spaces before parsing
-        # them; shlex.join would preserve argv boundaries Bash discards.
-        return _raw_install_in_segment(" ".join(words[1:]), depth + 1)
-    if words[0] == "env":
-        command_index = _skip_env_prefix(words, 1)
-        return _raw_install_from_words(words[command_index:], depth + 1)
-    if words[0] == "command":
-        operands, lookup = _command_operand(words[1:])
-        return False if lookup else _raw_install_from_words(operands, depth + 1)
+def _raw_install_from_exec_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Follow a direct shell ``exec`` command."""
+    return _raw_install_from_words(words[1:], depth + 1, variables)
+
+
+def _raw_install_from_eval_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Reparse eval text after resolving statically known variable values."""
+    payload = " ".join(words[1:])
+    expanded = _expand_static_shell_variables(payload, variables)
+    if expanded is not None:
+        return _raw_install_in_script(expanded, depth + 1, variables)
+    if _raw_install_in_segment(payload, depth + 1, variables):
+        return True
+    return not _eval_payload_is_inert(payload, variables)
+
+
+def _raw_install_from_env_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Follow an env wrapper while carrying its literal assignments."""
+    command_index = _skip_env_prefix(words, 1)
+    local_variables = dict(variables or {})
+    for word in words[1:command_index]:
+        assignment = _shell_assignment_parts(word)
+        if assignment is not None:
+            name, value = assignment
+            local_variables[name] = _static_assignment_value(value)
+    return _raw_install_from_words(
+        words[command_index:], depth + 1, local_variables
+    )
+
+
+def _raw_install_from_command_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Follow a modeled `command` invocation and its operands."""
+    operands, lookup = _command_operand(words[1:])
+    return False if lookup else _raw_install_from_words(
+        operands, depth + 1, variables
+    )
+
+
+def _raw_install_from_shell_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Follow a modeled shell/wrapper command's static payload."""
     wrappers = {"bash", "sh", "dash", "zsh", "sudo", "retry"}
-    if words[0] in wrappers:
-        serialized = shlex.join(words)
-        stripped = _strip_provision_wrappers(serialized)
-        if stripped != serialized:
-            return any(
-                _raw_install_in_segment(inner, depth + 1)
-                for inner in _command_segments(stripped)
-            )
-    return False
+    if words[0] not in wrappers:
+        return False
+    serialized = shlex.join(words)
+    stripped = _strip_provision_wrappers(serialized)
+    if stripped == serialized:
+        return False
+    return _raw_install_in_script(stripped, depth + 1, variables)
 
 
-def _raw_install_from_words(words: list[str], depth: int = 0) -> bool:
+def _raw_install_from_wrapper(
+    words: list[str], depth: int, variables: dict[str, str | None] | None = None
+) -> bool:
+    """Dispatch recognized wrappers to their bounded analyzers."""
+    if not words:
+        return False
+    wrapper_handlers = {
+        "exec": _raw_install_from_exec_wrapper,
+        "eval": _raw_install_from_eval_wrapper,
+        "env": _raw_install_from_env_wrapper,
+        "command": _raw_install_from_command_wrapper,
+    }
+    handler = wrapper_handlers.get(words[0])
+    if handler is not None:
+        return handler(words, depth, variables)
+    return _raw_install_from_shell_wrapper(words, depth, variables)
+
+
+def _raw_install_depth_limit_exceeded(
+    words: list[str], variables: dict[str, str | None] | None
+) -> bool:
+    """Fail closed when wrapper recursion exceeds its static analysis bound."""
+    joined = " ".join(words)
+    expanded = _expand_static_shell_variables(joined, variables)
+    return _mentions_raw_install(expanded or joined) or (
+        expanded is None and "$" in joined
+    )
+
+
+def _raw_install_from_assignment_prefix(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool | None:
+    """Follow command-scoped assignments without leaking them to later commands."""
+    command_index = _skip_env_assignments(words, 0)
+    if not command_index:
+        return None
+    local_variables = dict(variables or {})
+    for word in words[:command_index]:
+        assignment = _shell_assignment_parts(word)
+        if assignment is not None:
+            name, value = assignment
+            local_variables[name] = _static_assignment_value(value)
+    return _raw_install_from_words(
+        words[command_index:], depth + 1, local_variables
+    )
+
+
+def _raw_install_from_command(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Check a parsed command word against inert, direct, and wrapper forms."""
+    if words[0] in _INERT_SHELL_COMMANDS:
+        return False
+    if words[0] == "rustup":
+        return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
+    return _raw_install_from_dispatcher(words, depth, variables) or _raw_install_from_wrapper(
+        words, depth, variables
+    )
+
+
+def _raw_install_from_words(
+    words: list[str],
+    depth: int = 0,
+    variables: dict[str, str | None] | None = None,
+) -> bool:
     """Follow a bounded set of command-position dispatchers to their target."""
     if not words:
         return False
     if depth > 12:
-        return _mentions_raw_install(" ".join(words))
+        return _raw_install_depth_limit_exceeded(words, variables)
     if words[0] in ("if", "then", "elif", "else", "!"):
-        return _raw_install_from_words(words[1:], depth + 1)
-    command_index = _skip_env_assignments(words, 0)
-    if command_index:
-        return _raw_install_from_words(words[command_index:], depth + 1)
-    if words[0] in {"echo", "printf", "test", "[", "true", "false", ":"}:
-        return False
-    if words[0] == "rustup":
-        return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
-    return _raw_install_from_dispatcher(words, depth) or _raw_install_from_wrapper(
-        words, depth
+        return _raw_install_from_words(words[1:], depth + 1, variables)
+    assignment_result = _raw_install_from_assignment_prefix(
+        words, depth, variables
     )
+    if assignment_result is not None:
+        return assignment_result
+    return _raw_install_from_command(words, depth, variables)
 
 
-def _raw_install_in_segment(segment: str, depth: int = 0) -> bool:
+def _raw_install_in_segment(
+    segment: str,
+    depth: int = 0,
+    variables: dict[str, str | None] | None = None,
+) -> bool:
     """Whether the segment runs a raw install, directly or through dispatchers."""
     if depth > 12:
-        return _mentions_raw_install(segment)
+        return _mentions_raw_install(segment) or "$" in segment
     commands = _command_segments(segment)
     if len(commands) > 1:
-        return any(
-            _raw_install_in_segment(command, depth + 1) for command in commands
-        )
+        return _raw_install_in_segments(commands, depth + 1, variables)
     try:
         words = shlex.split(segment, posix=True)
     except ValueError:
         first = _resolve_heredoc_word(segment.split(maxsplit=1)[0])[0] \
             if segment.split() else ""
-        if first in {"echo", "printf", "test", "[", "true", "false", ":"}:
+        if first in _INERT_SHELL_COMMANDS:
             return False
         return _mentions_raw_install(segment)
-    return _raw_install_from_words(words, depth)
+    return _raw_install_from_words(words, depth, variables)
+
+
+def _raw_install_in_script(
+    script: str, depth: int = 0, variables: dict[str, str | None] | None = None
+) -> bool:
+    """Scan a script's ordered commands with conservative variable flow."""
+    return _raw_install_in_segments(_command_segments(script), depth, variables)
 
 
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
@@ -3042,10 +3270,10 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     installer, which validates the downloaded rustup-init checksum before
     execution.  Every run line is scanned -- including conditional steps
     and function bodies -- because a raw install must fail the gate
-    wherever it could ever appear.  The scan models static shell command
-    lines; a payload assembled at runtime (a ``python3 -c`` program, an
-    expanded variable) is outside its scope and such a form never counts
-    as provisioning either.
+    wherever it could ever appear. Simple literal variable assignments are
+    followed through ``eval``. Unresolved eval payloads fail closed unless
+    every command is a provably inert builtin; runtime-generated programs
+    never count as provisioning.
     """
     runs = _all_job_run_scripts(workflow_content)
     if runs is None:
@@ -3056,13 +3284,12 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     for run in runs:
         stripped = _join_continuations(
             _strip_heredocs(_strip_shell_comments(run)))
-        for segment in _command_segments(stripped):
-            if _raw_install_in_segment(segment):
-                return (
-                    "release workflows must provision Rust toolchains "
-                    "through the verified installer; found a raw `rustup "
-                    "toolchain install` command"
-                )
+        if _raw_install_in_script(stripped):
+            return (
+                "release workflows must provision Rust toolchains "
+                "through the verified installer; found a raw or unresolved "
+                "toolchain-install command"
+            )
     return None
 
 
@@ -3126,15 +3353,15 @@ def _shadowing_issue(
     provisioning job: a no-op wrapper in either job defeats its own checks
     the same way.
     """
-    shadowed = _defined_function_names(script) & _SHADOWED_NAMES
-    if not shadowed:
+    if shadowed := _defined_function_names(script) & _SHADOWED_NAMES:
+        return (
+            f"the {job_name} job defines shell functions that shadow commands "
+            "used by the provisioning checks ("
+            + ", ".join(sorted(shadowed))
+            + "); rename them so the checks trust the commands they read"
+        )
+    else:
         return None
-    return (
-        f"the {job_name} job defines shell functions that shadow commands "
-        "used by the provisioning checks ("
-        + ", ".join(sorted(shadowed))
-        + "); rename them so the checks trust the commands they read"
-    )
 
 
 def _provisioning_shadow_issue(workflow_content: str) -> str | None:
@@ -3151,10 +3378,9 @@ def _provisioning_shadow_issue(workflow_content: str) -> str | None:
         if run_scripts is None:
             continue
         for step in run_scripts:
-            issue = _shadowing_issue(
+            if issue := _shadowing_issue(
                 _strip_heredocs(_strip_shell_comments(step)), job_name
-            )
-            if issue:
+            ):
                 return issue
     return None
 
@@ -3206,11 +3432,9 @@ def _release_gate_step_candidates(
     """Analyze one independent workflow shell step for provisioning commands."""
     stripped = _strip_heredocs(_strip_shell_comments(step))
     executable_source = _join_continuations(stripped)
-    structure_issue = _unclosed_structure_issue(executable_source)
-    if structure_issue:
+    if structure_issue := _unclosed_structure_issue(executable_source):
         return [], structure_issue
-    shadow_issue = _shadowing_issue(executable_source)
-    if shadow_issue:
+    if shadow_issue := _shadowing_issue(executable_source):
         return [], shadow_issue
     executable = _strip_function_bodies(executable_source)
     if _dynamic_heredoc_markers(executable):
@@ -3322,7 +3546,7 @@ def check_release_gate_toolchain(result: ValidationResult) -> None:
     if not content:
         result.fail(
             PKG_RELEASE_GATE_TOOLCHAIN_GATE,
-            "release-packages.yml not found",
+            RELEASE_PACKAGES_WORKFLOW_MISSING,
         )
         return
 
@@ -3382,16 +3606,17 @@ def _requirements_pin_issue(requirements: str) -> str | None:
             "requirements-release.txt not found; the release-gate job "
             "cannot be verified to install its pinned Python dependencies"
         )
-    for name, pattern in (
-        ("jsonschema[format]", r"^jsonschema\[format\]=="),
-        ("PyYAML", r"^PyYAML=="),
-    ):
-        if not re.search(pattern + r"[^#\s]", requirements, re.M):
-            return (
-                f"requirements-release.txt must pin {name} to a version "
-                "(a bare name or a lone separator is not a pin)"
+    return next(
+        (
+            f"requirements-release.txt must pin {name} to a version (a bare name or a lone separator is not a pin)"
+            for name, pattern in (
+                ("jsonschema[format]", r"^jsonschema\[format\]=="),
+                ("PyYAML", r"^PyYAML=="),
             )
-    return None
+            if not re.search(pattern + r"[^#\s]", requirements, re.M)
+        ),
+        None,
+    )
 
 
 def _step_script(step: str | dict) -> str | None:
@@ -3500,19 +3725,23 @@ def _virtualenv_root(path: str) -> str | None:
     if normalized.endswith(suffix):
         return normalized[:-len(suffix)]
     parts = normalized.split("/")
-    for index, part in enumerate(parts):
-        if re.fullmatch(r"\.?venv\d*|virtualenvs?", part, re.IGNORECASE):
-            return "/".join(parts[:index + 1])
-    return None
+    return next(
+        (
+            "/".join(parts[: index + 1])
+            for index, part in enumerate(parts)
+            if re.fullmatch(r"\.?venv\d*|virtualenvs?", part, re.IGNORECASE)
+        ),
+        None,
+    )
 
 
 def _virtualenv_markers_from_path(value: str) -> set[str]:
     """Marker set for PATH entries that name a virtual environment."""
     markers = set()
     for entry in value.split(":"):
-        root = _virtualenv_root(entry + "/activate")
+        root = _virtualenv_root(f"{entry}/activate")
         if root is not None:
-            markers.add("venv:" + root)
+            markers.add(VENV_MARKER_PREFIX + root)
     return markers
 
 
@@ -3522,10 +3751,8 @@ def _virtualenv_markers_from_word(word: str) -> set[str]:
     if not separator:
         return set()
     if key == "VIRTUAL_ENV" and value:
-        return {"venv:" + value.rstrip("/")}
-    if key == "PATH":
-        return _virtualenv_markers_from_path(value)
-    return set()
+        return {VENV_MARKER_PREFIX + value.rstrip("/")}
+    return _virtualenv_markers_from_path(value) if key == "PATH" else set()
 
 
 def _virtualenv_command_markers(segment: str) -> set[str]:
@@ -3538,7 +3765,7 @@ def _virtualenv_command_markers(segment: str) -> set[str]:
     if len(words) > 1 and words[0] in (".", "source"):
         root = _virtualenv_root(words[1])
         if root is not None:
-            markers.add("venv:" + root)
+            markers.add(VENV_MARKER_PREFIX + root)
     for word in words:
         markers.update(_virtualenv_markers_from_word(word))
     return markers
@@ -3551,7 +3778,7 @@ def _virtualenv_environment_markers(environment: object) -> set[str]:
     markers = set()
     virtual_env = environment.get("VIRTUAL_ENV")
     if isinstance(virtual_env, str) and virtual_env:
-        markers.add("venv:" + virtual_env.rstrip("/"))
+        markers.add(VENV_MARKER_PREFIX + virtual_env.rstrip("/"))
     path_value = environment.get("PATH")
     if isinstance(path_value, str):
         markers.update(_virtualenv_markers_from_path(path_value))
@@ -3576,7 +3803,11 @@ def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
     markers = _virtualenv_environment_markers(environment)
     for segment in visible:
         if _is_virtualenv_deactivation(segment):
-            markers = {marker for marker in markers if not marker.startswith("venv:")}
+            markers = {
+                marker
+                for marker in markers
+                if not marker.startswith(VENV_MARKER_PREFIX)
+            }
         else:
             markers.update(_virtualenv_command_markers(segment))
     return markers
@@ -3725,7 +3956,7 @@ def check_release_gate_python_deps(result: ValidationResult) -> None:
     if not content:
         result.fail(
             PKG_RELEASE_GATE_PYTHON_DEPS_GATE,
-            "release-packages.yml not found",
+            RELEASE_PACKAGES_WORKFLOW_MISSING,
         )
         return
     run_steps = _job_run_step_records(content, RELEASE_GATE_JOB_NAME)

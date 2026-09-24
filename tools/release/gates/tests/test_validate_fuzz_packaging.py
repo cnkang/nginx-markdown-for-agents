@@ -103,14 +103,14 @@ def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
     assert packaging_gate._release_gate_toolchain_issue(installer + component)
     # A commented-out installer or drift check never counts.
     assert packaging_gate._release_gate_toolchain_issue(
-        drift + "# " + installer + component
+        f"{drift}# {installer}{component}"
     )
     assert packaging_gate._release_gate_toolchain_issue(
-        "# " + drift + installer + component
+        f"# {drift}{installer}{component}"
     )
 
     # Command position matters: echoes and heredoc bodies must not count.
-    echo_install = "echo '" + installer.strip() + "'\n"
+    echo_install = f"echo '{installer.strip()}" + "'\n"
     assert packaging_gate._release_gate_toolchain_issue(
         drift + echo_install + component
     )
@@ -646,9 +646,9 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     installer = INSTALLER
     component = COMPONENT
     # `false &&` skips the installer; quoted command names remain executable.
-    false_cases = (
-        ("bare false", drift + "false && " + installer + component),
-        ("quoted false", drift + '"false" && ' + installer + component),
+    false_cases = ("bare false", f"{drift}false && {installer}{component}"), (
+        "quoted false",
+        f'{drift}"false" && {installer}{component}',
     )
     scripts = [script for _label, script in false_cases]
     assert len(set(scripts)) == len(scripts)
@@ -657,13 +657,12 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
 
     # The chain stays dead through further `&&` links...
     assert packaging_gate._release_gate_toolchain_issue(
-        drift + "false && " + installer.strip() + " && " + component.strip()
-        + "\n"
+        (f"{drift}false && {installer.strip()} && {component.strip()}" + "\n")
     )
     # ...while `||` revives it, so a compliant script stays accepted.
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift + "false && echo skipped || " + installer + component
+            f"{drift}false && echo skipped || {installer}{component}"
         )
         is None
     )
@@ -678,7 +677,7 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     # ...including the live side: a quoted `true` keeps the chain running.
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift + '"true" && ' + installer + component
+            f'{drift}"true" && {installer}{component}'
         )
         is None
     )
@@ -706,7 +705,7 @@ def test_toolchain_gate_skips_conditional_and_foreign_shell_steps() -> None:
         "      - name: a\n"
         "        if: false\n"
         "        run: |\n"
-        + "".join("          " + line + "\n" for line in runs.splitlines())
+        + "".join(f"          {line}" + "\n" for line in runs.splitlines())
     )
     scripts = packaging_gate._job_run_scripts(conditional, "release-gate")
     assert packaging_gate._release_gate_toolchain_issue(scripts) is not None
@@ -878,29 +877,29 @@ def test_toolchain_gate_rejects_redirection_carrying_false() -> None:
     installer = INSTALLER
     component = COMPONENT
     assert packaging_gate._release_gate_toolchain_issue(
-        drift + "false >/dev/null && " + installer + component
+        f"{drift}false >/dev/null && {installer}{component}"
     )
     # Any chain whose left side is not an evaluated literal is conditional.
     assert packaging_gate._release_gate_toolchain_issue(
-        drift + "command -v cargo && " + installer + component
+        f"{drift}command -v cargo && {installer}{component}"
     )
     # A literal-true chain still counts, redirections included.
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift + "true && " + installer + component
+            f"{drift}true && {installer}{component}"
         )
         is None
     )
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift + "true >/dev/null && " + installer + component
+            f"{drift}true >/dev/null && {installer}{component}"
         )
         is None
     )
     # A dead left side revives the chain under `||`.
     assert (
         packaging_gate._release_gate_toolchain_issue(
-            drift + "false >/dev/null || " + installer + component
+            f"{drift}false >/dev/null || {installer}{component}"
         )
         is None
     )
@@ -1097,6 +1096,36 @@ def test_eval_reparses_bash_joined_arguments_and_keeps_echo_control() -> None:
         "eval 'echo rustup toolchain install stable'"
     )
     assert packaging_gate._raw_toolchain_install_issue(echo_control) is None
+
+
+def test_eval_expands_static_variable_before_raw_install_check() -> None:
+    """Variable-held raw installs cannot hide behind Bash eval."""
+    scripts = (
+        ("cmd='rustup toolchain install nightly'\neval \"$cmd\"\n", True),
+        ("cmd='echo rustup toolchain install nightly'\neval \"$cmd\"\n", False),
+        ("eval \"$unknown_command\"\n", True),
+    )
+    for eval_script, has_raw_install in scripts:
+        workflow = packaging_gate.yaml.safe_dump(
+            {
+                "jobs": {
+                    "release-gate": {
+                        "steps": [
+                            {
+                                "shell": "bash",
+                                "run": DRIFT + INSTALLER + COMPONENT + eval_script,
+                            }
+                        ]
+                    }
+                }
+            },
+            sort_keys=False,
+        )
+        records = packaging_gate._job_run_step_records(workflow, "release-gate")
+        assert records is not None
+        assert packaging_gate._release_gate_toolchain_issue(records) is None
+        issue = packaging_gate._raw_toolchain_install_issue(workflow)
+        assert (issue is not None) is has_raw_install
 
 
 def test_toolchain_gate_unwraps_drift_check() -> None:
@@ -1384,17 +1413,21 @@ def test_step_shell_model_reads_success_always_and_shell_paths() -> None:
     its basename (`/bin/bash` is `bash`), and a non-string shell value
     fails closed like an unexpected `if`.
     """
-    assert packaging_gate._step_runs_shell({"if": "success()", "run": "x"})
-    assert packaging_gate._step_runs_shell({"if": "always()", "run": "x"})
-    assert not packaging_gate._step_runs_shell({"if": "failure()", "run": "x"})
-    assert packaging_gate._step_runs_shell(
-        {"shell": "/bin/bash", "run": "x"})
-    assert packaging_gate._step_runs_shell(
-        {"shell": "bash -e {0}", "run": "x"})
-    assert not packaging_gate._step_runs_shell(
-        {"shell": "python3", "run": "x"})
+    _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(
+        "if", "success()", "always()", "failure()"
+    )
+    _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(
+        "shell", "/bin/bash", "bash -e {0}", "python3"
+    )
     assert not packaging_gate._step_runs_shell({"shell": 123, "run": "x"})
     assert not packaging_gate._step_runs_shell({"shell": [], "run": "x"})
+
+
+# TODO Rename this here and in `test_step_shell_model_reads_success_always_and_shell_paths`
+def _extracted_from_test_step_shell_model_reads_success_always_and_shell_paths_9(arg0, arg1, arg2, arg3):
+    assert packaging_gate._step_runs_shell({arg0: arg1, "run": "x"})
+    assert packaging_gate._step_runs_shell({arg0: arg2, "run": "x"})
+    assert not packaging_gate._step_runs_shell({arg0: arg3, "run": "x"})
 
 
 def test_syntax_only_shell_modes_do_not_prove_execution() -> None:
@@ -1555,26 +1588,20 @@ def test_dynamic_return_status_is_not_proven_nonzero() -> None:
 
 def test_same_line_branch_markers_carry_live_commands() -> None:
     """Commands on then/else marker segments count only on live branches."""
-    true_branch = (
-        "if true; then " + INSTALLER.rstrip() + "; fi\n"
-        + COMPONENT + DRIFT
+    _extracted_from_test_same_line_branch_markers_carry_live_commands_3(
+        "if true; then ", "if false; then "
     )
+    _extracted_from_test_same_line_branch_markers_carry_live_commands_3(
+        "if false; then echo skip; else ", "if true; then echo run; else "
+    )
+
+
+# TODO Rename this here and in `test_same_line_branch_markers_carry_live_commands`
+def _extracted_from_test_same_line_branch_markers_carry_live_commands_3(arg0, arg1):
+    true_branch = ((f"{arg0}{INSTALLER.rstrip()}" + "; fi\n" + COMPONENT) + DRIFT)
     assert packaging_gate._release_gate_toolchain_issue(true_branch) is None
-    false_branch = (
-        "if false; then " + INSTALLER.rstrip() + "; fi\n"
-        + COMPONENT + DRIFT
-    )
+    false_branch = ((f"{arg1}{INSTALLER.rstrip()}" + "; fi\n" + COMPONENT) + DRIFT)
     assert packaging_gate._release_gate_toolchain_issue(false_branch) is not None
-    else_live = (
-        "if false; then echo skip; else " + INSTALLER.rstrip() + "; fi\n"
-        + COMPONENT + DRIFT
-    )
-    assert packaging_gate._release_gate_toolchain_issue(else_live) is None
-    else_dead = (
-        "if true; then echo run; else " + INSTALLER.rstrip() + "; fi\n"
-        + COMPONENT + DRIFT
-    )
-    assert packaging_gate._release_gate_toolchain_issue(else_dead) is not None
 
 
 def test_raw_install_detector_reads_env_option_wrapped_commands() -> None:
@@ -1948,7 +1975,7 @@ def test_literally_true_bool_conditions_keep_steps() -> None:
         "      - name: a\n"
         "        if: true\n"
         "        run: |\n"
-        + "".join("          " + line + "\n" for line in runs.splitlines())
+        + "".join(f"          {line}" + "\n" for line in runs.splitlines())
     )
     scripts = packaging_gate._job_run_scripts(workflow, "release-gate")
     assert packaging_gate._release_gate_toolchain_issue(scripts) is None
@@ -2075,14 +2102,10 @@ def test_toolchain_gate_takes_escaped_payload_quotes() -> None:
 
 def test_toolchain_gate_takes_env_separator_and_assignments() -> None:
     """`env -- FOO=bar cmd` keeps the command reachable."""
-    drift = DRIFT
     installer = INSTALLER
     component = COMPONENT
-    script = (
-        drift
-        + "env -- FOO=bar " + installer
-        + "env -- FOO=bar " + component
-    )
+    drift = DRIFT
+    script = f"{drift}env -- FOO=bar {installer}env -- FOO=bar {component}"
     assert packaging_gate._release_gate_toolchain_issue(script) is None
 
 
@@ -2375,7 +2398,8 @@ def test_raw_install_detector_models_shell_invocation_options() -> None:
     # `-n`/`-D`/`+D` suppress execution: nothing runs behind them.
     for suppress in ("-n", "-D", "+D"):
         assert not packaging_gate._raw_install_in_segment(
-            "bash " + suppress + " -c 'PAY'".replace("PAY", raw))
+            f"bash {suppress}" + " -c 'PAY'".replace("PAY", raw)
+        )
 
     # A quoted `retry` still calls the local function: the shadow check's
     # view of a retry call must resolve the name through quote removal.
@@ -2402,7 +2426,7 @@ def test_toolchain_gate_requires_unquoted_or_resolvable_wrapper_names() -> None:
 
 def _raw_install_workflow(script: str) -> str:
     """Put one literal script in a parseable workflow run step."""
-    body = "".join("          " + line + "\n" for line in script.splitlines())
+    body = "".join(f"          {line}" + "\n" for line in script.splitlines())
     return "jobs:\n  probe:\n    steps:\n      - run: |\n" + body
 
 
@@ -2551,9 +2575,12 @@ def test_virtualenv_install_in_one_step_does_not_feed_a_later_shell() -> None:
     assert packaging_gate._python_deps_issue(
         ["python3 -m pip install -r requirements-release.txt", "make docs-check"]
     ) is None
-    assert packaging_gate._python_deps_issue(
-        [scoped_install + "; make docs-check"]
-    ) is None
+    assert (
+        packaging_gate._python_deps_issue(
+            [f"{scoped_install}; make docs-check"]
+        )
+        is None
+    )
 
 
 def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:
@@ -2582,34 +2609,22 @@ def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:
 
 def test_release_gate_step_env_does_not_carry_to_later_docs_check() -> None:
     """A step-local VIRTUAL_ENV must not count as the next step's runtime."""
-    workflow = (
-        "jobs:\n"
-        f"  {packaging_gate.RELEASE_GATE_JOB_NAME}:\n"
-        "    steps:\n"
-        "      - run: pip install -r requirements-release.txt\n"
-        "        env:\n"
-        "          VIRTUAL_ENV: .venv\n"
-        '          PATH: ".venv/bin:$PATH"\n'
-        "      - run: make docs-check\n"
+    steps = _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(
+        ':\n    steps:\n      - run: pip install -r requirements-release.txt\n        env:\n          VIRTUAL_ENV: .venv\n          PATH: ".venv/bin:$PATH"\n      - run: make docs-check\n'
     )
-    steps = packaging_gate._job_run_step_records(
-        workflow, packaging_gate.RELEASE_GATE_JOB_NAME
-    )
-    assert steps is not None
     assert packaging_gate._python_deps_issue(steps) is not None
 
-    shared_workflow = (
-        "jobs:\n"
-        f"  {packaging_gate.RELEASE_GATE_JOB_NAME}:\n"
-        "    env:\n"
-        "      VIRTUAL_ENV: .venv\n"
-        '      PATH: ".venv/bin:$PATH"\n'
-        "    steps:\n"
-        "      - run: pip install -r requirements-release.txt\n"
-        "      - run: make docs-check\n"
+    shared_steps = _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(
+        ':\n    env:\n      VIRTUAL_ENV: .venv\n      PATH: ".venv/bin:$PATH"\n    steps:\n      - run: pip install -r requirements-release.txt\n      - run: make docs-check\n'
     )
-    shared_steps = packaging_gate._job_run_step_records(
-        shared_workflow, packaging_gate.RELEASE_GATE_JOB_NAME
-    )
-    assert shared_steps is not None
     assert packaging_gate._python_deps_issue(shared_steps) is None
+
+
+# TODO Rename this here and in `test_release_gate_step_env_does_not_carry_to_later_docs_check`
+def _extracted_from_test_release_gate_step_env_does_not_carry_to_later_docs_check_3(arg0):
+    workflow = f"jobs:\n  {packaging_gate.RELEASE_GATE_JOB_NAME}{arg0}"
+    result = packaging_gate._job_run_step_records(
+        workflow, packaging_gate.RELEASE_GATE_JOB_NAME
+    )
+    assert result is not None
+    return result
