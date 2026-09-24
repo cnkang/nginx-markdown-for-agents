@@ -788,7 +788,6 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         except subprocess.TimeoutExpired:
             timed_out = True
             _terminate_fuzz_process_group(process)
-            returncode = process.returncode
     except KeyboardInterrupt:
         _FUZZ_CANCEL_REQUESTED.set()
         _terminate_fuzz_process_group(process)
