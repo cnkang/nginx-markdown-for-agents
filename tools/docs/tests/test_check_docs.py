@@ -7,6 +7,7 @@ directory/glob references while allowing tracked file references.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -1399,3 +1400,24 @@ def test_pending_claim_window_scopes_a_verb_to_its_own_version():
     assert not docs_checker._claim_belongs_to_pending_version(window, "9.9.9")
     window = "9.9.9 was published as the final breaking release."
     assert docs_checker._claim_belongs_to_pending_version(window, "9.9.9")
+
+
+def test_unreleased_context_alone_does_not_flag_ordinary_availability():
+    """Heading context without a version needs a release subject to be a claim."""
+    version_pattern = re.compile(r"\bv?9\.9\.9\b")
+    ordinary, _ = docs_checker._pending_sentence_failures(
+        "CHANGELOG.md",
+        "The new directive is available.",
+        "9.9.9",
+        version_pattern,
+        True,
+    )
+    assert ordinary == []
+    claim, _ = docs_checker._pending_sentence_failures(
+        "CHANGELOG.md",
+        "The release has been published.",
+        "9.9.9",
+        version_pattern,
+        True,
+    )
+    assert claim
