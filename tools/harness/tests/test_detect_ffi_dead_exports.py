@@ -186,7 +186,7 @@ def test_current_lifecycle_pairs_all_belong_to_the_export_universe() -> None:
     }.isdisjoint(detector.LIFECYCLE_PAIRS)
 
 
-def test_reintroduced_dynconf_lifecycle_pair_is_rejected() -> None:
+def test_reintroduced_dynconf_lifecycle_pair_is_rejected(monkeypatch) -> None:
     """A pair naming a removed export must fail the universe invariant.
 
     This is the mutation the fix guards against: restoring an obsolete pair
@@ -201,20 +201,18 @@ def test_reintroduced_dynconf_lifecycle_pair_is_rejected() -> None:
     mutated = dict(detector.LIFECYCLE_PAIRS)
     mutated.update(obsolete_pair)
     restored = detector.LIFECYCLE_PAIRS
-    detector.LIFECYCLE_PAIRS = mutated
-    try:
-        dangling = detector.dangling_lifecycle_pairs(universe)
-        assert dangling == [
-            ("markdown_dynconf_result_free", "markdown_dynconf_parse"),
-            ("markdown_dynconf_result_init", "markdown_dynconf_parse"),
-        ]
-        with pytest.raises(ValueError, match="declared FFI export universe"):
-            detector._reject_dangling_lifecycle_pairs(universe)
-        with pytest.raises(ValueError, match="markdown_dynconf_parse"):
-            detector.run_audit()
-    finally:
-        detector.LIFECYCLE_PAIRS = restored
+    monkeypatch.setattr(detector, "LIFECYCLE_PAIRS", mutated)
+    dangling = detector.dangling_lifecycle_pairs(universe)
+    assert dangling == [
+        ("markdown_dynconf_result_free", "markdown_dynconf_parse"),
+        ("markdown_dynconf_result_init", "markdown_dynconf_parse"),
+    ]
+    with pytest.raises(ValueError, match="declared FFI export universe"):
+        detector._reject_dangling_lifecycle_pairs(universe)
+    with pytest.raises(ValueError, match="markdown_dynconf_parse"):
+        detector.run_audit()
 
+    monkeypatch.undo()
     assert detector.LIFECYCLE_PAIRS is restored
     assert detector.dangling_lifecycle_pairs(universe) == []
 
