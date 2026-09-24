@@ -3332,13 +3332,6 @@ def _raw_install_in_segment(
     return _raw_install_from_words(words, depth, variables)
 
 
-def _raw_install_in_script(
-    script: str, depth: int = 0, variables: dict[str, str | None] | None = None
-) -> bool:
-    """Scan a script's ordered commands with conservative variable flow."""
-    return _raw_install_in_segments(_command_segments(script), depth, variables)
-
-
 _SHELL_COMMANDS_THAT_READ_STDIN = frozenset({"bash", "sh", "dash", "zsh"})
 
 
