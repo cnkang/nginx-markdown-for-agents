@@ -762,47 +762,42 @@ def test_toolchain_gate_counts_called_function_bodies() -> None:
 
 def test_toolchain_gate_uses_definition_active_at_each_call() -> None:
     """A later uncalled redefinition cannot satisfy an earlier function call."""
-    called_before_redefinition = (
-        "provision() { echo safe; }\n"
-        "provision\n"
-        "provision() {\n"
-        + INSTALLER
-        + COMPONENT
-        + "}\n"
-        + DRIFT
-    )
-    assert packaging_gate._release_gate_toolchain_issue(
-        called_before_redefinition
-    ) is not None
-
-    called_after_redefinition = (
-        "provision() { echo safe; }\n"
-        "provision() {\n"
-        + INSTALLER
-        + COMPONENT
-        + "}\n"
-        "provision\n"
-        + DRIFT
+    called_after_redefinition = _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(
+        "provision() { echo safe; }\n" "provision\n" "provision() {\n",
+        "}\n",
+        "provision() { echo safe; }\n" "provision() {\n",
+        "}\n" "provision\n",
     )
     assert packaging_gate._release_gate_toolchain_issue(
         called_after_redefinition
     ) is None
 
-    dead_redefinition = (
+    call_in_false_branch_after_definition = _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(
         "provision() { echo safe; }\n"
         "if false; then\n"
         "  echo __release_gate_definition_1\n"
-        "  provision() {\n"
-        + INSTALLER
-        + COMPONENT
-        + "  }\n"
-        "fi\n"
-        "provision\n"
-        + DRIFT
+        "  provision() {\n",
+        "  }\n" "fi\n" "provision\n",
+        "provision() {\n",
+        "}\n"
+        "if false; then\n"
+        "  unused() { :; };\n"
+        "  provision;\n"
+        "fi\n",
     )
     assert packaging_gate._release_gate_toolchain_issue(
-        dead_redefinition
+        call_in_false_branch_after_definition
     ) is not None
+
+
+# TODO Rename this here and in `test_toolchain_gate_uses_definition_active_at_each_call`
+def _extracted_from_test_toolchain_gate_uses_definition_active_at_each_call_3(arg0, arg1, arg2, arg3):
+    called_before_redefinition = arg0 + INSTALLER + COMPONENT + arg1 + DRIFT
+    assert packaging_gate._release_gate_toolchain_issue(
+        called_before_redefinition
+    ) is not None
+
+    return arg2 + INSTALLER + COMPONENT + arg3 + DRIFT
 
 
 def test_toolchain_gate_accepts_same_line_brace_groups() -> None:
@@ -839,12 +834,14 @@ def test_toolchain_gate_treats_steps_as_separate_shells() -> None:
 
 
 def test_raw_install_detector_sees_command_wrappers() -> None:
-    """`command`/`env`/`bash -c` wrappers do not hide a raw install."""
+    """Modeled shell and command wrappers do not hide raw installs."""
     for wrapped in (
         "command rustup toolchain install nightly --profile minimal",
         "env FOO=1 rustup toolchain install nightly --profile minimal",
         "exec rustup toolchain install nightly --profile minimal",
         "bash -c 'rustup toolchain install nightly --profile minimal'",
+        "zsh -c 'rustup toolchain install nightly --profile minimal'",
+        "zsh --unmodeled-option -c 'rustup toolchain install nightly'",
     ):
         workflow = (
             "jobs:\n"
@@ -885,16 +882,32 @@ def test_raw_install_workflow_rejects_nohup_with_valid_provisioning_present() ->
 
 def test_raw_install_scan_reads_shell_stdin_heredocs_only() -> None:
     """Shell-fed heredoc commands execute; inert heredoc bodies remain data."""
-    shell_input = (
+    for shell_command in (
+        "bash -s",
+        "bash -o pipefail",
+        "bash -eo pipefail",
+    ):
+        shell_input = (
+            "jobs:\n"
+            "  release-gate:\n"
+            "    steps:\n"
+            "      - run: |\n"
+            f"          {shell_command} <<'EOF'\n"
+            "          rustup toolchain install stable\n"
+            "          EOF\n"
+        )
+        assert packaging_gate._raw_toolchain_install_issue(shell_input) is not None
+
+    inert_shell_input = (
         "jobs:\n"
         "  release-gate:\n"
         "    steps:\n"
         "      - run: |\n"
-        "          bash -s <<'EOF'\n"
+        "          bash --noprofile -c 'true' <<'EOF'\n"
         "          rustup toolchain install stable\n"
         "          EOF\n"
     )
-    assert packaging_gate._raw_toolchain_install_issue(shell_input) is not None
+    assert packaging_gate._raw_toolchain_install_issue(inert_shell_input) is None
 
     inert_input = (
         "jobs:\n"
@@ -2694,15 +2707,14 @@ def test_virtualenv_install_in_one_step_does_not_feed_a_later_shell() -> None:
 def test_virtualenv_prefix_assignments_are_command_scoped() -> None:
     """A prefixed virtualenv applies to that command, not the next one."""
     prefix = "VIRTUAL_ENV=/workspace/.venv PATH=/workspace/.venv/bin:$PATH "
-    install = prefix + "python3 -m pip install -r requirements-release.txt"
-    docs_check = prefix + "make docs-check"
+    install = f"{prefix}python3 -m pip install -r requirements-release.txt"
+    docs_check = f"{prefix}make docs-check"
 
-    assert packaging_gate._python_deps_issue(
-        [install + "; make docs-check"]
-    ) is not None
-    assert packaging_gate._python_deps_issue(
-        [install + "; " + docs_check]
-    ) is None
+    assert (
+        packaging_gate._python_deps_issue([f"{install}; make docs-check"])
+        is not None
+    )
+    assert packaging_gate._python_deps_issue([f"{install}; {docs_check}"]) is None
 
 
 def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:
