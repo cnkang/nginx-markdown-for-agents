@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 # Allow imports from tools/docs/
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -463,14 +465,24 @@ def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
 
 def test_iter_unfenced_lines_respects_fence_run_rules():
     """A longer fence closes a shorter one; four leading spaces is not a fence."""
-    text = "```\ninner\n````\nstill inside\n```\nafter\n"
-    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert "still inside" in kept  # the 4-backtick run closed the 3 run
+    kept = _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(
+        "```\ninner\n````\nstill inside\n```\nafter\n", "still inside"
+    )
     assert "after" not in kept  # the 4 run then opened a new block
-    indented = "    ```\nnot a fence\n"
-    kept2 = [line for _n, line in docs_checker.iter_unfenced_lines(indented)]
-    assert "    ```" in kept2
+    kept2 = (
+        _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(
+            "    ```\nnot a fence\n", "    ```"
+        )
+    )
     assert "not a fence" in kept2
+
+
+# TODO Rename this here and in `test_iter_unfenced_lines_respects_fence_run_rules`
+def _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(arg0, arg1):
+    text = arg0
+    result = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert arg1 in result
+    return result
 
 
 def test_checklist_guard_accepts_plus_markers(tmp_path):
@@ -732,17 +744,15 @@ def test_stable_release_surface_check_ignores_history_table_rows(tmp_path):
     )
 
 
-def test_stable_release_surface_check_flags_unreleased_wording(tmp_path):
-    for phrase in ("v9.9.9 remains unreleased", "v9.9.9 stays unpublished"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+@pytest.mark.parametrize(
+    "phrase", ("v9.9.9 remains unreleased", "v9.9.9 stays unpublished")
+)
+def test_stable_release_surface_check_flags_unreleased_wording(tmp_path, phrase):
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
     errors = docs_checker.check_stable_release_surfaces(
         tmp_path, "9.9.9", ("README.md",)
     )
-    assert any("pre-release wording" in error for error in errors), errors
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
 def test_stable_surface_check_skips_while_unreleased(tmp_path):
@@ -779,13 +789,15 @@ def test_stable_surface_check_flags_missing_surfaces(tmp_path):
     assert any("missing release surface" in error for error in failures)
 
 
-def test_stable_surface_check_flags_pending_publication_wording(tmp_path):
-    for phrase in ("v9.9.9 release pending", "pending publication of v9.9.9"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+@pytest.mark.parametrize(
+    "phrase", ("v9.9.9 release pending", "pending publication of v9.9.9")
+)
+def test_stable_surface_check_flags_pending_publication_wording(tmp_path, phrase):
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
 def test_release_notes_status_flags_development_candidate(tmp_path):
@@ -852,15 +864,16 @@ def test_stable_surface_check_scans_changelog_by_default(tmp_path):
     assert any("pre-release wording" in failure for failure in failures), failures
 
 
-def test_release_surface_manifest_covers_release_docs():
-    for template in (
+@pytest.mark.parametrize(
+    "template",
+    (
         "docs/releases/{version}-upgrade-and-rollback.md",
         "docs/releases/{version}-deployment-recommendation.md",
-        "docs/releases/{version}-implementation-plan.md".replace(
-            "docs/releases", "docs/development"
-        ),
-    ):
-        assert template in docs_checker.RELEASE_SURFACE_FILES
+        "docs/development/{version}-implementation-plan.md",
+    ),
+)
+def test_release_surface_manifest_covers_release_docs(template):
+    assert template in docs_checker.RELEASE_SURFACE_FILES
 
 
 def test_latest_dated_changelog_version_requires_a_heading():
@@ -959,24 +972,28 @@ def test_latest_dated_changelog_version_ignores_fenced_headings():
     assert errors == []
 
 
-def test_stable_claim_failures_flag_pending_claims(tmp_path):
+@pytest.mark.parametrize(
+    "phrase", ("9.9.9 is pending", "v9.9.9 release is still pending")
+)
+def test_stable_claim_failures_flag_pending_claims(tmp_path, phrase):
     _write_stable_notes(tmp_path, "9.9.9")
-    for phrase in ("9.9.9 is pending", "v9.9.9 release is still pending"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
-def test_stable_claim_failures_flag_candidate_headings(tmp_path):
+@pytest.mark.parametrize(
+    "heading", ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate")
+)
+def test_stable_claim_failures_flag_candidate_headings(tmp_path, heading):
     _write_stable_notes(tmp_path, "9.9.9")
-    for heading in ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate"):
-        (tmp_path / "README.md").write_text(heading + "\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), heading
+    (tmp_path / "README.md").write_text(heading + "\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), heading
 
 
 # --------------------------------------------------------------------------
@@ -1059,9 +1076,12 @@ def _write_pending_state(root, *, changelog=_CHANGELOG_PENDING, **overrides):
         "# Release Notes: 9.8.8\n\n**Date**: 2026-01-01\n**Status**: Stable release\n",
         encoding="utf-8",
     )
-    bodies = dict(_PENDING_SURFACES)
-    bodies.update(overrides)
-    for rel, body in bodies.items():
+    _write_surfaces(root, dict(_PENDING_SURFACES) | overrides)
+
+
+def _write_surfaces(root, surfaces):
+    """Write each ``rel -> body`` surface under ``root``, creating parents."""
+    for rel, body in surfaces.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
@@ -1070,6 +1090,36 @@ def _write_pending_state(root, *, changelog=_CHANGELOG_PENDING, **overrides):
 def test_release_state_contract_accepts_canonical_pre_publication_state(tmp_path):
     """The real pre-publication shape passes: v9.8.8 stable, v9.9.9 pending."""
     _write_pending_state(tmp_path)
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_checks_current_unreleased_changelog_prose(
+    tmp_path,
+):
+    """A published claim under the current Unreleased heading must fail."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The v9.9.9 release has been published and its assets are available.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("CHANGELOG.md" in failure and "published" in failure for failure in failures)
+
+
+def test_release_state_contract_ignores_published_claims_in_changelog_history(
+    tmp_path,
+):
+    """A historical release description does not violate pending-state prose."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\nPending work.\n\n"
+        "## [9.8.8] - 2026-01-01\n\n"
+        "The v9.8.8 release was published with its assets.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
 
     assert docs_checker.check_release_state_contract(tmp_path) == []
 
@@ -1240,8 +1290,7 @@ def test_release_state_contract_accepts_post_publication_state(tmp_path):
         tmp_path,
         changelog="## [9.9.9] - 2026-02-02\n\nReleased work.\n",
     )
-    for rel, body in _PUBLISHED_SURFACES.items():
-        (tmp_path / rel).write_text(body, encoding="utf-8")
+    _write_surfaces(tmp_path, _PUBLISHED_SURFACES)
 
     assert docs_checker.check_release_state_contract(tmp_path) == []
 
