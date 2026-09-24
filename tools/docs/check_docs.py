@@ -1239,6 +1239,14 @@ _NEGATED_COMPLETION_CLAIM_RE = re.compile(
 # or carries a sentence break between the two.
 _ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+\b")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+# A completion verb with no nearby version token only reads as a claim about the
+# pending line when the sentence also names a release subject.  Heading context
+# alone must not turn ordinary wording (e.g. "The new directive is available.")
+# into a publication claim.
+_RELEASE_SUBJECT_RE = re.compile(
+    r"\b(?:release|version|tag|build|package|artifact|assets?)\b",
+    re.IGNORECASE,
+)
 
 
 def _first_dated_changelog_version(changelog: str) -> str | None:
@@ -1337,9 +1345,12 @@ def _claim_names_pending_version(
     """Return whether a single completion claim affirms the pending version."""
     nearest = _nearest_version_to_claim(window, claim)
     if nearest is None:
-        return version_context and not _completion_claim_is_nonaffirmative(
-            window, claim
-        )
+        # Without a version token, heading context alone is not enough: the
+        # sentence must also name a release subject, and a bare "available"
+        # (no such subject) stays ordinary wording rather than a claim.
+        if not version_context or _RELEASE_SUBJECT_RE.search(window) is None:
+            return False
+        return not _completion_claim_is_nonaffirmative(window, claim)
     if pending.fullmatch(nearest.group(0)) is None:
         return False
     if _published_until_tag_exception(window, claim, nearest):
