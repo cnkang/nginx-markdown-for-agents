@@ -923,41 +923,6 @@ def _head_spans(
     return heads
 
 
-def _masked_region(script: str, region: tuple[int, int] | None) -> str:
-    """Region text with nested bodies and definition heads replaced by spaces."""
-    if region is None:
-        text = script
-        bodies = _function_body_spans(script)
-    else:
-        text = script[region[0] : region[1]]
-        bodies = [
-            (name, lo - region[0], hi - region[0])
-            for name, lo, hi in _function_body_spans(script)
-            if lo > region[0] and hi < region[1]
-        ]
-    chars = list(text)
-    for lo, hi in [
-        (lo, hi) for _, lo, hi in bodies
-    ] + _head_spans(text, bodies):
-        for position in range(lo, min(hi, len(chars))):
-            chars[position] = " "
-    return "".join(chars)
-
-
-def _calls_in_region(
-    script: str, defined: set[str], region: tuple[int, int] | None
-) -> set[str]:
-    """Calls made by the live code of a region.
-
-    Nested function bodies and definition heads are masked, then the same
-    reachability rules drop dead branches, so a call behind ``if false``
-    or inside quoted text never activates its target.
-    """
-    masked = _masked_region(script, region)
-    live = _live_command_segments(masked)
-    return _called_function_names("\n".join(live), defined)
-
-
 def _effective_body_spans(
     script: str,
 ) -> tuple[list[tuple[str, int, int]], list[tuple[str, int, int]]]:
@@ -1000,13 +965,13 @@ def _direct_function_spans(
     )
 
 
-def _live_definition_spans(
+def _live_commands_with_function_markers(
     script: str,
     region: tuple[int, int],
     spans: list[tuple[str, int, int]],
     heads: dict[tuple[str, int, int], tuple[int, int]],
-) -> set[tuple[str, int, int]]:
-    """Definitions whose containing shell path can execute in this region."""
+) -> tuple[list[str], dict[str, tuple[str, int, int]]]:
+    """Scan a whole region and mark definitions without splitting its branches."""
     start, end = region
     direct = _direct_function_spans(spans, region)
     masked = script[start:end]
@@ -1023,12 +988,29 @@ def _live_definition_spans(
         local_end = span[2] - start
         masked = masked[:local_start] + f"true {marker}" + masked[local_end:]
         markers[marker] = span
-    live_commands = _live_command_segments(_strip_shell_comments(masked))
-    return {
-        span
-        for marker, span in markers.items()
-        if any(marker in command for command in live_commands)
-    }
+    return _live_command_segments(_strip_shell_comments(masked)), markers
+
+
+def _apply_definition_markers(
+    command: str,
+    markers: dict[str, tuple[str, int, int]],
+    defined: set[str],
+    active: dict[str, tuple[str, int, int]],
+) -> None:
+    """Record definitions that become active within ``command``."""
+    for marker, span in markers.items():
+        if marker in command and span[0] in defined:
+            active[span[0]] = span
+
+
+def _calls_in_command(
+    command: str,
+    defined: set[str],
+    active: dict[str, tuple[str, int, int]],
+) -> list[tuple[str, int, int]]:
+    """Return active-definition targets called from ``command``."""
+    targets = (active.get(name) for name in _called_function_names(command, defined))
+    return [target for target in targets if target is not None]
 
 
 def _live_function_spans(
@@ -1043,29 +1025,16 @@ def _live_function_spans(
         tuple[tuple[str, int, int], tuple[tuple[str, tuple[str, int, int]], ...]]
     ] = []
 
-    def enqueue_calls(
-        region: tuple[int, int], active: dict[str, tuple[str, int, int]]
-    ) -> None:
-        for name in _calls_in_region(script, defined, region):
-            target = active.get(name)
-            if target is not None:
-                pending.append((target, tuple(sorted(active.items()))))
-
     def scan_region(
         region: tuple[int, int], active: dict[str, tuple[str, int, int]]
     ) -> None:
-        cursor, end = region
-        direct = _direct_function_spans(spans, region)
-        live_definitions = _live_definition_spans(
+        live_commands, markers = _live_commands_with_function_markers(
             script, region, spans, heads
         )
-        for span in direct:
-            head_start = heads.get(span, (span[1], span[1]))[0]
-            enqueue_calls((cursor, min(head_start, end)), active)
-            if span in live_definitions and span[0] in defined:
-                active[span[0]] = span
-            cursor = span[2]
-        enqueue_calls((cursor, end), active)
+        for command in live_commands:
+            _apply_definition_markers(command, markers, defined, active)
+            for target in _calls_in_command(command, defined, active):
+                pending.append((target, tuple(sorted(active.items()))))
 
     scan_region((0, len(script)), {})
     live: set[tuple[str, int, int]] = set()
@@ -1162,13 +1131,13 @@ _WRAPPER_COMMANDS = frozenset({"command", "exec", "builtin", "nohup", "sudo"})
 # including names stripped outside `_WRAPPER_COMMANDS`, like `eval` — or a
 # redefined no-op defeats the gate while the literal text still matches.
 _PREFIX_STRIPPED_NAMES = _WRAPPER_COMMANDS | frozenset({
-    "bash", "dash", "env", "eval", "sh",
+    "bash", "dash", "env", "eval", "sh", "zsh",
 })
 # `builtin` only runs shell builtins: a known literal builtin keeps its
 # literal, and a command that is surely not a builtin makes it fail.
 _BUILTIN_LITERAL_WORDS = {":": True, "true": True, "false": False}
 _NON_BUILTIN_COMMANDS = frozenset({
-    "bash", "sh", "dash", "python", "python3", "rustup",
+    "bash", "sh", "dash", "zsh", "python", "python3", "rustup",
     "env", "command", "exec", "nohup", "sudo",
 })
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_](?a:\w)*=")
@@ -1512,7 +1481,8 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
         return index, False
     if (
         index < len(words)
-        and _resolve_heredoc_word(words[index])[0] in ("bash", "sh", "dash")
+        and _resolve_heredoc_word(words[index])[0]
+        in ("bash", "sh", "dash", "zsh")
     ):
         payload = _skip_shell_c(words, index)
         if payload != index:
@@ -3226,7 +3196,9 @@ def _raw_install_from_shell_wrapper(
     serialized = shlex.join(words)
     stripped = _strip_provision_wrappers(serialized)
     if stripped == serialized:
-        return False
+        return words[0] == "zsh" and any(
+            _shell_argument_stdin_mode(word) is False for word in words[1:]
+        )
     return _raw_install_in_script(stripped, depth + 1, variables)
 
 
@@ -3358,21 +3330,76 @@ def _shell_argument_stdin_mode(argument: str) -> bool | None:
     return None
 
 
-def _shell_arguments_read_stdin_script(arguments: list[str]) -> bool:
+def _shell_bash_option_step(
+    shell: str, argument: str, arguments: list[str], position: int
+) -> "tuple[bool | None, int] | None":
+    """Advance past a known bash value/flag option, if ``argument`` is one."""
+    if shell != "bash":
+        return None
+    if argument in _SHELL_VALUE_OPTIONS:
+        if position + 1 >= len(arguments):
+            return (False, position)
+        return (None, position + 2)
+    if argument in _SHELL_FLAG_OPTIONS:
+        return (None, position + 1)
+    return None
+
+
+def _shell_short_option_step(
+    argument: str, arguments: list[str], position: int
+) -> "tuple[bool | None, int] | None":
+    """Advance past a clustered short-option token like ``-abc``."""
+    if not re.fullmatch(r"[+-][A-Za-z]*", argument):
+        return None
+    span = _short_shell_option_span(argument[1:], argument[0])
+    if span is None:
+        return (True, position)
+    if position + span > len(arguments):
+        return (False, position)
+    return (None, position + span)
+
+
+def _shell_argument_step(
+    shell: str, arguments: list[str], position: int
+) -> "tuple[bool | None, int]":
+    """Classify one argument: return (decision-or-None, next-position).
+
+    A non-``None`` first element is the final answer for the whole scan; a
+    ``None`` first element means "keep scanning from the returned position".
+    """
+    argument = _resolve_heredoc_word(arguments[position])[0]
+    if _is_shell_heredoc_redirect(argument):
+        return (None, position + 1)
+    if argument == "--":
+        rest_all_redirects = all(
+            _is_shell_heredoc_redirect(rest) for rest in arguments[position + 1:]
+        )
+        return (rest_all_redirects, position)
+    stdin_mode = _shell_argument_stdin_mode(argument)
+    if stdin_mode is not None:
+        return (stdin_mode, position)
+    for step in (
+        _shell_bash_option_step(shell, argument, arguments, position),
+        _shell_short_option_step(argument, arguments, position),
+    ):
+        if step is not None:
+            return step
+    if argument.startswith(("-", "+")) and argument != "-":
+        return (True, position)
+    if not argument.startswith("-"):
+        return (False, position)
+    return (None, position + 1)
+
+
+def _shell_arguments_read_stdin_script(
+    shell: str, arguments: list[str]
+) -> bool:
     """Whether modeled shell options select commands from standard input."""
-    for position, argument in enumerate(arguments):
-        if _is_shell_heredoc_redirect(argument):
-            continue
-        if argument == "--":
-            return all(
-                _is_shell_heredoc_redirect(rest)
-                for rest in arguments[position + 1:]
-            )
-        stdin_mode = _shell_argument_stdin_mode(argument)
-        if stdin_mode is not None:
-            return stdin_mode
-        if not argument.startswith("-"):
-            return False
+    position = 0
+    while position < len(arguments):
+        decision, position = _shell_argument_step(shell, arguments, position)
+        if decision is not None:
+            return decision
     return True
 
 
@@ -3393,7 +3420,7 @@ def _shell_command_reads_heredoc_as_script(line: str) -> bool:
             _resolve_heredoc_word(word)[0]
             for word in command_words[index + 1:]
         ]
-        if _shell_arguments_read_stdin_script(arguments):
+        if _shell_arguments_read_stdin_script(command, arguments):
             return True
     return False
 
