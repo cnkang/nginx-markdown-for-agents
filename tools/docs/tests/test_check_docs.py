@@ -465,23 +465,21 @@ def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
 
 def test_iter_unfenced_lines_respects_fence_run_rules():
     """A longer fence closes a shorter one; four leading spaces is not a fence."""
-    kept = _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(
+    kept = _assert_expected_line_is_unfenced(
         "```\ninner\n````\nstill inside\n```\nafter\n", "still inside"
     )
     assert "after" not in kept  # the 4 run then opened a new block
     kept2 = (
-        _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(
+        _assert_expected_line_is_unfenced(
             "    ```\nnot a fence\n", "    ```"
         )
     )
     assert "not a fence" in kept2
 
 
-# TODO Rename this here and in `test_iter_unfenced_lines_respects_fence_run_rules`
-def _extracted_from_test_iter_unfenced_lines_respects_fence_run_rules_3(arg0, arg1):
-    text = arg0
+def _assert_expected_line_is_unfenced(text: str, expected_line: str) -> list[str]:
     result = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert arg1 in result
+    assert expected_line in result
     return result
 
 
@@ -1124,6 +1122,18 @@ def test_release_state_contract_ignores_published_claims_in_changelog_history(
     assert docs_checker.check_release_state_contract(tmp_path) == []
 
 
+def _v092_is_pending() -> bool:
+    changelog = (docs_checker.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    return any(
+        line.strip() == "## [0.9.2] - Unreleased"
+        for line in changelog.splitlines()
+    )
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
 def test_implementation_plan_distinguishes_prepared_notes_from_publication():
     """WI-11 must separate prepared notes from unpublished release assets."""
     plan_text = (
@@ -1142,6 +1152,10 @@ def test_implementation_plan_distinguishes_prepared_notes_from_publication():
     assert "Publication of the tag and assets remains pending." in wi11_row
 
 
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
 def test_implementation_plan_scopes_historical_pending_labels():
     """Historical work-item notes must not imply publication is historical."""
     plan_text = (
@@ -1164,6 +1178,10 @@ def test_implementation_plan_scopes_historical_pending_labels():
     assert "plan-era `pending` wording below is historical" not in intro
 
 
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
 def test_rollback_guide_history_does_not_claim_v092_was_released():
     """The revision log must reflect the unpublished release candidate."""
     rollback = (
@@ -1181,6 +1199,10 @@ def test_rollback_guide_history_does_not_claim_v092_was_released():
     assert "released v0.9.2" not in history_row.lower()
 
 
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
 def test_upgrade_guide_does_not_substitute_an_older_release_tag():
     """A pending target release must not silently downgrade the download."""
     guide = (

@@ -36,7 +36,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** The project has not published 0.9.2 yet (see `docs/releases/0.9.2-release-notes.md`, Status: Pending release). Run the sequence only after the v0.9.2 publication. Until then, set `RELEASE_TAG` to the latest published tag (`v0.9.1`) or to `<published-release-tag>`.
+> **Release publication note:** Run the sequence only after publication of the official v0.9.2 release assets. The command targets the official `v0.9.2` release tag.
 
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any
@@ -44,7 +44,7 @@ privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
-# RELEASE_TAG must be a published tag; v0.9.2 becomes available after publication
+# RELEASE_TAG selects the official v0.9.2 release assets below
 # Key setup (once per operator, before the download step):
 #   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
 #   RELEASE_KEY_PATH="$(pwd)/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
