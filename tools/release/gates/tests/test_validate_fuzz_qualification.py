@@ -1,7 +1,9 @@
 """Regression tests for the fuzz qualification gate validator."""
 
+
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -100,9 +102,12 @@ def _marker_stream_script(padding_chars_per_side: int, marker: str | None) -> st
              " w(b'P' * 99 + b'\\n')"]
     if marker is not None:
         lines.append(f"w({marker.encode()!r})")
-    lines.append(f"for _ in range({padding_chars_per_side} // 100):"
-                 " w(b'Q' * 99 + b'\\n')")
-    lines.append("w(b'stat::number_of_executed_units: 7\\n')")
+    lines.extend(
+        (
+            f"for _ in range({padding_chars_per_side} // 100): w(b'Q' * 99 + b'\\n')",
+            "w(b'stat::number_of_executed_units: 7\\n')",
+        )
+    )
     return "\n".join(lines)
 
 
@@ -641,6 +646,36 @@ def test_streaming_capture_keeps_a_clean_large_stream_passing(
     assert executions == 7
 
 
+def test_streaming_capture_detects_marker_split_at_forced_line_flush() -> None:
+    """A marker crossing the pending-line flush must not qualify as a pass."""
+    marker = "==ERROR: AddressSanitizer: heap-use-after-free"
+    split = 15
+    prefix, suffix = marker[:split], marker[split:]
+    assert validator.FAILURE_MARKER_PATTERN.search(marker)
+    assert not validator.FAILURE_MARKER_PATTERN.search(prefix)
+    assert not validator.FAILURE_MARKER_PATTERN.search(suffix)
+
+    stream = validator._BoundedStream()
+    stats = "stat::number_of_executed_units: 5\nstat::elapsed_seconds: 1.0\n"
+    head_limit = validator._MAX_CAPTURE_CHARS // 2
+    stream.feed(stats + "a" * (head_limit - len(stats) - 1) + "\n")
+    padding = "x" * (validator._MAX_PENDING_LINE_CHARS - len(prefix) + 1)
+    stream.feed(padding + prefix)
+    stream.feed(suffix + "y" * (validator._MAX_CAPTURE_CHARS // 2 + 100) + "\n")
+    stream.finish()
+
+    invocation = {
+        "returncode": 0,
+        "stdout": stream.text(),
+        "stderr": "",
+        "wall_elapsed": 1.0,
+        "marker_finding": stream.marker_finding(),
+    }
+    _, _, failure = validator._soak_outcome(invocation)
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+
+
 def test_streaming_capture_retains_the_same_head_and_tail_as_the_cap(
     monkeypatch,
 ) -> None:
@@ -967,7 +1002,7 @@ def test_soak_rejects_sub_second_continuation_budgets(
 
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
-    assert not any("-max_total_time=0" in flag for call in calls for flag in call)
+    assert all("-max_total_time=0" not in flag for call in calls for flag in call)
     # the sub-second leftover never schedules another invocation
     assert len(calls) == 2
 
@@ -1019,7 +1054,7 @@ def test_soak_stops_immediately_when_the_job_deadline_passed(
 
     assert result["status"] == "fail"
     assert "job budget exhausted" in result["failure_reason"]
-    assert calls == []
+    assert not calls
 
 
 def test_soak_continuation_budget_charges_wall_time(
@@ -1300,7 +1335,8 @@ def _scope_fuzz_targets() -> list[str]:
         (Path(__file__).resolve().parents[4] / "release" / "scope"
          / "fuzz-scope.json").read_text(encoding="utf-8"))
     targets = scope["targets"]
-    assert isinstance(targets, list) and targets
+    assert isinstance(targets, list)
+    assert targets
     return targets
 
 
@@ -1895,23 +1931,17 @@ def _kill_test_child_pid(child_pid: int) -> None:
     """Signal only the test's recorded child, never an ambient process group."""
     if child_pid in {os.getpid(), os.getppid()}:
         return
-    try:
+    with contextlib.suppress(OSError):
         os.kill(child_pid, signal.SIGKILL)
-    except OSError:
-        pass
 
 
 def _kill_and_reap_process(process) -> None:
     """Stop one subprocess handle and reap it within a bounded interval."""
-    try:
+    with contextlib.suppress(OSError):
         if process.poll() is None:
             process.kill()
-    except OSError:
-        pass
-    try:
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
         process.wait(timeout=1.0)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
 
 
 def _kill_test_processes(pid_path: Path, processes) -> None:
@@ -1987,16 +2017,61 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
 
     try:
-        result = validator._invoke_fuzz("corpus_population", [], 2.0)
-
-        assert result["returncode"] == -1
-        assert result["stderr"].startswith("timed out: ")
-        _wait_for_file(child_pid_path)
-        time.sleep(marker_delay + 0.1)
-        assert not child_marker.exists(), "a descendant survived the timeout"
-        assert not validator._ACTIVE_FUZZ_PROCESSES
+        _extracted_from_test_invoke_fuzz_timeout_terminates_descendant_processes_13(
+            child_pid_path, marker_delay, child_marker
+        )
     finally:
         _kill_test_processes(child_pid_path, processes)
+
+
+# TODO Rename this here and in `test_invoke_fuzz_timeout_terminates_descendant_processes`
+def _extracted_from_test_invoke_fuzz_timeout_terminates_descendant_processes_13(child_pid_path, marker_delay, child_marker):
+    result = validator._invoke_fuzz("corpus_population", [], 2.0)
+
+    assert result["returncode"] == -1
+    assert result["stderr"].startswith("timed out: ")
+    _wait_for_file(child_pid_path)
+    time.sleep(marker_delay + 0.1)
+    assert not child_marker.exists(), "a descendant survived the timeout"
+    assert not validator._ACTIVE_FUZZ_PROCESSES
+
+
+def test_invoke_fuzz_reader_start_failure_reaps_registered_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A reader startup error must not leak its registered fuzz process."""
+    script = (
+        "import os, time\n"
+        "os.write(1, b'x' * 1048576)\n"
+        "time.sleep(30)\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    original_start = threading.Thread.start
+    start_count = 0
+
+    def start_one_then_fail(thread):
+        nonlocal start_count
+        start_count += 1
+        if start_count == 2:
+            raise RuntimeError("reader startup failed")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start_one_then_fail)
+    try:
+        with pytest.raises(RuntimeError, match="reader startup failed"):
+            validator._invoke_fuzz("corpus_population", [], 30)
+
+        assert start_count == 2
+        assert len(processes) == 1
+        process = processes[0]
+        assert process.poll() is not None
+        assert process not in validator._ACTIVE_FUZZ_PROCESSES
+        assert process.stdout.closed
+        assert process.stderr.closed
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
 
 
 def test_parent_interrupt_cancels_active_process_groups(
