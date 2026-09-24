@@ -29,6 +29,43 @@ def test_literal_bin_entry_is_trusted_when_bin_is_a_symlink() -> None:
     assert module._is_under(literal_bin, roots)
 
 
+def test_homebrew_opt_alias_dirs_are_trusted() -> None:
+    """Homebrew `opt` version-alias dirs join the trusted roots (Rule 33)."""
+    roots = module._trusted_roots()
+
+    assert Path("/opt/homebrew/opt") in roots
+    assert Path("/usr/local/opt") in roots
+
+
+def test_git_resolved_through_opt_alias_is_accepted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A git under an `opt`-style alias resolving into Cellar is trusted.
+
+    Reproduces the pre-commit failure on Homebrew macOS: `git commit`
+    prepends `GIT_EXEC_PATH` (an `opt/.../libexec/git-core` path) to PATH, so
+    the hook's `shutil.which("git")` finds the executable at its literal `opt`
+    location while it resolves into the `Cellar` install.  The literal `opt`
+    directory must be trusted or the resolver rejects a legitimate git.
+    """
+    opt_root = tmp_path / "opt"
+    cellar_root = tmp_path / "Cellar"
+    opt_core = opt_root / "git" / "libexec" / "git-core"
+    cellar_bin = cellar_root / "git" / "2.55.0" / "bin"
+    opt_core.mkdir(parents=True)
+    cellar_bin.mkdir(parents=True)
+    real_git = cellar_bin / "git"
+    real_git.write_text("git", encoding="utf-8")
+    real_git.chmod(0o755)
+    opt_git = opt_core / "git"
+    opt_git.symlink_to(real_git)
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: str(opt_git))
+    monkeypatch.setattr(module, "_trusted_roots", lambda: (opt_root, cellar_root))
+
+    assert module.resolve_approved_executable("git") == str(real_git.resolve())
+
+
 @pytest.mark.parametrize("name", ["cargo", "rustc", "rustfmt"])
 @pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
 def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, name, link_kind):
@@ -89,16 +126,22 @@ def test_rustup_shim_resolver_rejects_foreign_binary(
     home = tmp_path
     cargo_bin = home / ".cargo" / "bin"
     cargo_bin.mkdir(parents=True)
-    dispatcher = cargo_bin / "rustup"
-    dispatcher.write_text("dispatcher", encoding="utf-8")
-    dispatcher.chmod(0o755)
-    foreign = cargo_bin / "cargo"
-    foreign.write_text("concrete", encoding="utf-8")
-    foreign.chmod(0o755)
-
+    _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(
+        cargo_bin, "rustup", "dispatcher"
+    )
+    _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(
+        cargo_bin, "cargo", "concrete"
+    )
     monkeypatch.setattr(module.Path, "home", lambda: home)
 
     assert module.resolve_rustup_tool_shim("cargo") is None
+
+
+# TODO Rename this here and in `test_rustup_shim_resolver_rejects_foreign_binary`
+def _extracted_from_test_rustup_shim_resolver_rejects_foreign_binary_7(cargo_bin, arg1, arg2):
+    dispatcher = cargo_bin / arg1
+    dispatcher.write_text(arg2, encoding="utf-8")
+    dispatcher.chmod(0o755)
 
 
 def test_rustup_shim_resolver_rejects_non_shim_tool(tmp_path: Path, monkeypatch) -> None:
