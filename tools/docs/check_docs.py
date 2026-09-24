@@ -1372,7 +1372,7 @@ def _claims_pending_latest_tag(
         r"(?:(?:public|published|stable)\s+)*(?:tag|release)\b"
     )
     forward = re.compile(
-        f"{latest_tag}\s*(?:is\s+)?[:=]?\s*{version.pattern}", re.IGNORECASE
+        rf"{latest_tag}\s*(?:is\s+)?[:=]?\s*{version.pattern}", re.IGNORECASE
     )
     reverse = re.compile(
         version.pattern + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
