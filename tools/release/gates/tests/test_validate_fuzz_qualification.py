@@ -2017,15 +2017,16 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
     monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
 
     try:
-        _extracted_from_test_invoke_fuzz_timeout_terminates_descendant_processes_13(
+        _assert_timeout_kills_descendants(
             child_pid_path, marker_delay, child_marker
         )
     finally:
         _kill_test_processes(child_pid_path, processes)
 
 
-# TODO Rename this here and in `test_invoke_fuzz_timeout_terminates_descendant_processes`
-def _extracted_from_test_invoke_fuzz_timeout_terminates_descendant_processes_13(child_pid_path, marker_delay, child_marker):
+def _assert_timeout_kills_descendants(
+    child_pid_path: Path, marker_delay: float, child_marker: Path
+) -> None:
     result = validator._invoke_fuzz("corpus_population", [], 2.0)
 
     assert result["returncode"] == -1
