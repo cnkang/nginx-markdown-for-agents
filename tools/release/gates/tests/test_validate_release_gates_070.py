@@ -273,6 +273,31 @@ def test_gate_three_items_rejects_false_or_negated_tag_conditions() -> None:
         assert not _gate_3_item(workflow), condition
 
 
+def test_github_negation_binds_tighter_than_comparison() -> None:
+    """Negation AST shape matches Actions precedence; unknown operands fail closed."""
+    unparenthesized = gates._github_condition_ast(
+        "!github.ref_type != 'tag'"
+    )
+    assert isinstance(unparenthesized, ast.Compare)
+    assert isinstance(unparenthesized.left, ast.UnaryOp)
+    assert isinstance(unparenthesized.left.op, ast.Invert)
+    assert gates._evaluate_tag_condition(
+        unparenthesized, {"github.ref_type": "tag"}
+    ) is None
+
+    parenthesized = gates._github_condition_ast(
+        "!(github.ref_type == 'tag')"
+    )
+    assert isinstance(parenthesized, ast.UnaryOp)
+    assert isinstance(parenthesized.op, ast.Invert)
+    assert gates._evaluate_tag_condition(
+        parenthesized, {"github.ref_type": "tag"}
+    ) is False
+    assert gates._evaluate_tag_condition(
+        parenthesized, {"github.ref_type": "branch"}
+    ) is True
+
+
 def test_gate_three_items_requires_the_manual_dispatch_path() -> None:
     """A tag-only condition must not silently drop workflow_dispatch runs."""
     needs = "    needs: [prepare, smoke-test, fuzz-qualification]\n"
@@ -409,6 +434,18 @@ def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
     assert isinstance(other_call, ast.Call)
     assert gates._is_always_condition_call(always_call)
     assert not gates._is_always_condition_call(other_call)
+
+    negated_success = gates._github_condition_ast(
+        "!(needs.release-gate.result == 'success')"
+    )
+    assert isinstance(negated_success, ast.UnaryOp)
+    assert isinstance(negated_success.op, ast.Invert)
+    assert gates._evaluate_publish_condition(
+        negated_success, context
+    ) is False
+    assert gates._evaluate_publish_condition(
+        negated_success, {"needs.release_gate.result": "failure"}
+    ) is True
 
 
 def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(
