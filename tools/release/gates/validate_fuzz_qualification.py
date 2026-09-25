@@ -1644,9 +1644,32 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
 def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
     """Return reasons for missing, non-pass, or below-threshold blocking runs."""
     reasons = []
+    per_target = record.get("per_target")
+    if not isinstance(per_target, list):
+        reasons.append("malformed: record per_target must be an array")
+        return reasons
+    # Reject duplicate target names before building the lookup dict.
+    seen_names = set()
+    for index, entry in enumerate(per_target):
+        if not isinstance(entry, dict):
+            reasons.append(
+                f"malformed: per_target[{index}] must be an object"
+            )
+            continue
+        name = entry.get("target")
+        if not isinstance(name, str):
+            reasons.append(
+                f"malformed: per_target[{index}] target must be a string"
+            )
+            continue
+        if name in seen_names:
+            reasons.append(
+                f"malformed: duplicate target name {name!r} in per_target"
+            )
+        seen_names.add(name)
     by_name = {
         entry.get("target"): entry
-        for entry in record.get("per_target", [])
+        for entry in per_target
         if isinstance(entry, dict)
     }
     for spec in manifest["targets"]:

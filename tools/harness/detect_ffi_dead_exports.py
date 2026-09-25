@@ -42,7 +42,7 @@ FFI_HEADER = MODULE_SRC / "markdown_converter.h"
 RUST_FFI_DIR = ROOT / "components" / "rust-converter" / "src" / "ffi"
 # Rust-owned FFI exports are discovered under this source directory, while the
 # generated header also includes reason-code generator declarations.
-RUST_FFI_NO_MANGLE_RE = re.compile(r"#\[unsafe\(no_mangle\)\]")
+RUST_FFI_NO_MANGLE_RE = re.compile(r"#\[(?:unsafe\(no_mangle\)|no_mangle)\]")
 RUST_FFI_C_FUNCTION_RE = re.compile(
     r'pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
 )

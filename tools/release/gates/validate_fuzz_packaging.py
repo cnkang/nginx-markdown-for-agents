@@ -3295,12 +3295,50 @@ def _raw_install_in_segments(
     path_dependent = any(_segment_has_shell_control_flow(segment) for segment in segments)
     if path_dependent:
         local_variables.clear()
-    for segment in segments:
+
+    i = 0
+    while i < len(segments):
+        segment = segments[i]
+        # Handle multi-segment loop constructs: for/while/until ...; do BODY; done
+        # where ; splits the header from 'do BODY'.
+        if _is_loop_header(segment):
+            # Look ahead for 'do' segment
+            if i + 1 < len(segments) and _is_do_segment(segments[i + 1]):
+                # Combine header + do body for analysis
+                combined = segment + " " + segments[i + 1]
+                if _raw_install_in_segment(combined, depth + 1, local_variables):
+                    return True
+                # Skip the 'do' segment and look for 'done'
+                i += 2
+                while i < len(segments) and not _is_done_segment(segments[i]):
+                    i += 1
+                if i < len(segments):
+                    i += 1  # skip 'done'
+                continue
         if _raw_install_in_segment(segment, depth + 1, local_variables):
             return True
         if not path_dependent:
             _update_static_shell_variables(segment, local_variables)
+        i += 1
     return False
+
+
+def _is_loop_header(segment: str) -> bool:
+    """Whether the segment starts with a loop header (for/while/until)."""
+    words = segment.strip().split()
+    return len(words) > 0 and words[0] in ("for", "while", "until")
+
+
+def _is_do_segment(segment: str) -> bool:
+    """Whether the segment starts with 'do'."""
+    words = segment.strip().split()
+    return len(words) > 0 and words[0] == "do"
+
+
+def _is_done_segment(segment: str) -> bool:
+    """Whether the segment starts with 'done'."""
+    words = segment.strip().split()
+    return len(words) > 0 and words[0] == "done"
 
 
 def _raw_install_in_script(
@@ -3854,7 +3892,17 @@ def _raw_install_from_command(
     if words[0] in _INERT_SHELL_COMMANDS:
         return False
     if Path(words[0]).name == "rustup":
-        return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
+        # Skip global options (short -v/-V/-q, long --verbose/--quiet/--version)
+        i = 1
+        while i < len(words) and words[i].startswith("-"):
+            opt = words[i]
+            if opt in ("-v", "-V", "-q", "--verbose", "--quiet", "--version"):
+                i += 1
+                continue
+            # Unknown option - stop parsing options
+            break
+        # Now words[i:i+2] should be ["toolchain", "install"]
+        return len(words) >= i + 2 and words[i:i + 2] == ["toolchain", "install"]
     if _raw_install_from_python_command(words, depth, variables):
         return True
     return _raw_install_from_dispatcher(words, depth, variables) or _raw_install_from_wrapper(
@@ -3872,8 +3920,48 @@ def _raw_install_from_words(
         return False
     if depth > 12:
         return _raw_install_depth_limit_exceeded(words, variables)
+    # Shell control-flow constructs: their body is the command position.
     if words[0] in ("if", "then", "elif", "else", "!"):
         return _raw_install_from_words(words[1:], depth + 1, variables)
+    if words[0] in ("for", "while", "until"):
+        # for VAR in LIST; do BODY; done
+        # while/until COND; do BODY; done
+        # Scan past the header to find "do" then the body.
+        try:
+            do_index = words.index("do")
+        except ValueError:
+            return _mentions_raw_install(" ".join(words))
+        return _raw_install_from_words(words[do_index + 1:], depth + 1, variables)
+    if words[0] == "case":
+        # case WORD in PATTERN) BODY ;; ... esac
+        # Scan past "in" to the patterns, then check each body.
+        try:
+            in_index = words.index("in")
+        except ValueError:
+            return _mentions_raw_install(" ".join(words))
+        # Find closing "esac" and process bodies between patterns
+        body_start = in_index + 1
+        try:
+            esac_index = words.index("esac", body_start)
+        except ValueError:
+            return _mentions_raw_install(" ".join(words))
+        # Split on ";;" to find individual case bodies
+        case_bodies = []
+        current = []
+        for word in words[body_start:esac_index]:
+            if word == ";;":
+                if current:
+                    case_bodies.append(current)
+                    current = []
+            else:
+                current.append(word)
+        if current:
+            case_bodies.append(current)
+        # Any case body with a raw install is a hit
+        return any(
+            _raw_install_from_words(body, depth + 1, variables)
+            for body in case_bodies
+        )
     assignment_result = _raw_install_from_assignment_prefix(
         words, depth, variables
     )

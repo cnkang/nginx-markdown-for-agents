@@ -2994,6 +2994,75 @@ def test_raw_install_detector_handles_timeout_separator_and_xargs_short_i() -> N
     ) is None
 
 
+def test_raw_install_detector_follows_for_while_until_loops() -> None:
+    """Loop bodies are scanned for raw installs."""
+    loop_forms = (
+        "for i in a b; do rustup toolchain install stable; done",
+        "while true; do rustup toolchain install stable; done",
+        "until false; do rustup toolchain install stable; done",
+    )
+    for loop in loop_forms:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(loop)
+        ) is not None, loop
+
+    # Safe loop bodies
+    for loop in (
+        "for i in a b; do echo safe; done",
+        "while true; do echo safe; done",
+        "until false; do echo safe; done",
+    ):
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(loop)
+        ) is None, loop
+
+
+def test_raw_install_detector_follows_case_statement() -> None:
+    """Case statement bodies are scanned for raw installs."""
+    case_script = """case "$ARCH" in
+        x86_64) rustup toolchain install stable ;;
+        arm64) rustup toolchain install stable ;;
+        *) echo safe ;;
+    esac"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(case_script)
+    ) is not None
+
+    safe_case = """case "$ARCH" in
+        x86_64) echo safe ;;
+        arm64) echo safe ;;
+        *) echo safe ;;
+    esac"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(safe_case)
+    ) is None
+
+
+def test_raw_install_detector_skips_rustup_global_options() -> None:
+    """Rustup global options (-v, --verbose, etc.) are skipped before subcommand."""
+    raw_forms = (
+        "rustup -v toolchain install stable",
+        "rustup --verbose toolchain install stable",
+        "rustup -V toolchain install stable",
+        "rustup --version toolchain install stable",
+        "rustup -q toolchain install stable",
+        "rustup --quiet toolchain install stable",
+        "rustup -v -V --verbose toolchain install stable",
+    )
+    for form in raw_forms:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(form)
+        ) is not None, form
+
+    # Global option without toolchain install is not a hit
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("rustup -v component list")
+    ) is None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("rustup --verbose self update")
+    ) is None
+
+
 def test_make_docs_check_rejects_missing_option_operand() -> None:
     """A dangling `-C` cannot prove that make ran the required target."""
     assert packaging_gate._make_targets_after_options(["-C"], 0) is None

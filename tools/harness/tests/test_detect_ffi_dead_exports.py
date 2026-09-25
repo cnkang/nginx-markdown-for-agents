@@ -174,6 +174,28 @@ def test_declared_rust_exports_discover_added_ffi_modules(
     assert detector.declared_rust_exports() == ["base_export", "future_export"]
 
 
+def test_declared_rust_exports_recognizes_old_style_no_mangle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The legacy #[no_mangle] attribute is recognized alongside #[unsafe(no_mangle)]."""
+    (tmp_path / "legacy.rs").write_text(
+        '#[no_mangle] pub extern "C" fn legacy_export() {}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "mixed.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn mixed_export() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert set(detector.declared_rust_exports()) == {"legacy_export", "mixed_export"}
+
+
 def test_current_lifecycle_pairs_all_belong_to_the_export_universe() -> None:
     """Every current pair names live exports, so the invariant passes."""
     universe = detector.declared_ffi_export_universe()

@@ -651,9 +651,18 @@ def _github_condition_ast(condition: str) -> ast.expr | None:
     Only boolean operators and comparisons are evaluated by the gate. Calls,
     unknown contexts, and unsupported operators remain unverifiable and fail
     closed. The hyphenated release-gate name is normalized only for parsing.
+
+    Unquoted '#' is rejected because ast.parse would treat it as a comment
+    and silently drop the remainder of the condition.
     """
     text = _github_expression_text(condition)
     if text is None or _has_python_boolean_keyword(text):
+        return None
+    # Reject unquoted '#' before AST parsing to prevent comment truncation.
+    # Only single-quoted string literals are supported in the bounded syntax;
+    # '#' outside a literal is not a valid character in a GitHub boolean
+    # expression and would be consumed by Python's parser as a comment.
+    if _unquoted_hash(text):
         return None
     python_expression = _translate_github_expression(text)
     try:
@@ -666,6 +675,26 @@ def _github_condition_ast(condition: str) -> ast.expr | None:
     ):
         return None
     return parsed.body
+
+
+def _unquoted_hash(text: str) -> bool:
+    """Return True if '#' appears outside single-quoted string literals."""
+    in_literal = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "'" and not in_literal:
+            in_literal = True
+            i += 1
+            continue
+        if ch == "'" and in_literal:
+            in_literal = False
+            i += 1
+            continue
+        if ch == "#" and not in_literal:
+            return True
+        i += 1
+    return False
 
 
 def _expression_attribute_name(node: ast.AST) -> str | None:

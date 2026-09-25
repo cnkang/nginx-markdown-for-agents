@@ -229,6 +229,47 @@ def test_missing_observation_fixture_fails(tmp_path: Path, monkeypatch,
     assert "executions_total" in captured.err
 
 
+def test_fixture_rejects_duplicate_target_names(tmp_path: Path, monkeypatch,
+                                                capsys) -> None:
+    """Duplicate target names in per_target must be rejected."""
+    manifest = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8"))
+    # Duplicate the first target entry with same name
+    record["per_target"].append(dict(record["per_target"][0]))
+    record_path = tmp_path / "record-dup.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    rc = _run(monkeypatch, capsys,
+              "validate_fuzz_qualification.py", "--mode", "fixture",
+              "--manifest", str(manifest), "--record-input", str(record_path))
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "duplicate target name" in captured.err
+
+
+def test_fixture_rejects_non_string_target(tmp_path: Path, monkeypatch,
+                                           capsys) -> None:
+    """Non-string target in per_target must be rejected."""
+    manifest = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8"))
+    record["per_target"][0]["target"] = 123
+    record_path = tmp_path / "record-bad-target.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    rc = _run(monkeypatch, capsys,
+              "validate_fuzz_qualification.py", "--mode", "fixture",
+              "--manifest", str(manifest), "--record-input", str(record_path))
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "target must be a string" in captured.err
+
+
 @pytest.mark.parametrize("field", ["elapsed_seconds_total", "crashes",
                                     "sanitizer_findings"])
 def test_non_finite_or_non_integer_observations_fail(
