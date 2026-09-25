@@ -2678,6 +2678,36 @@ def test_raw_install_detector_follows_indirect_command_positions() -> None:
         ) is None, command
 
 
+def test_raw_install_detector_follows_transparent_process_prefixes() -> None:
+    """Process-control prefixes cannot hide a raw Rust install."""
+    commands = (
+        "time rustup toolchain install stable",
+        "/usr/bin/time --format=%E rustup toolchain install stable",
+        "nice -n 10 rustup toolchain install stable",
+        "nice --adjustment=10 rustup toolchain install stable",
+        "nice -10 rustup toolchain install stable",
+        "setsid -f rustup toolchain install stable",
+        "stdbuf -oL rustup toolchain install stable",
+        "stdbuf --output=L rustup toolchain install stable",
+        "nice stdbuf -oL rustup toolchain install stable",
+    )
+    for command in commands:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(command)
+        ) is not None, command
+
+    controls = (
+        "time -p echo rustup toolchain install stable",
+        "nice -n 10 printf '%s' rustup toolchain install stable",
+        "setsid -f echo rustup toolchain install stable",
+        "stdbuf -oL printf '%s' rustup toolchain install stable",
+    )
+    for command in controls:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(command)
+        ) is None, command
+
+
 def test_toolchain_liveness_respects_explicit_shell_errexit() -> None:
     """A custom ``bash {0}`` shell does not inherit GitHub's implicit ``-e``."""
     script = "false\n" + DRIFT + INSTALLER + COMPONENT
@@ -2816,6 +2846,19 @@ def test_virtualenv_prefix_assignments_are_command_scoped() -> None:
         is not None
     )
     assert packaging_gate._python_deps_issue([f"{install}; {docs_check}"]) is None
+
+
+def test_system_bin_path_does_not_create_virtualenv_mismatch() -> None:
+    """Ordinary system PATH entries do not imply a virtual environment."""
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    docs_check = {
+        "run": "make docs-check",
+        "env": {"PATH": "/usr/local/bin:/usr/bin:/bin"},
+    }
+    assert packaging_gate._python_deps_issue([install, docs_check]) is None
+    assert packaging_gate._virtualenv_markers_from_path(
+        "/workspace/.venv/bin:/usr/local/bin"
+    ) == {"venv:/workspace/.venv"}
 
 
 def test_virtualenv_deactivation_invalidates_same_step_runtime() -> None:

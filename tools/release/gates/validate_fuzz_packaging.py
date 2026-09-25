@@ -3010,6 +3010,80 @@ def _timeout_command_index(words: list[str]) -> int | None:
     return index
 
 
+_PROCESS_PREFIX_FLAGS = {
+    "time": frozenset({
+        "-a", "--append", "-p", "--portability", "-q", "--quiet",
+        "-v", "--verbose",
+    }),
+    "nice": frozenset(),
+    "setsid": frozenset({
+        "-c", "--ctty", "-f", "--fork", "-w", "--wait",
+    }),
+    "stdbuf": frozenset(),
+}
+_PROCESS_PREFIX_VALUES = {
+    "time": frozenset({"-f", "--format", "-o", "--output"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "setsid": frozenset(),
+    "stdbuf": frozenset({
+        "-i", "--input", "-o", "--output", "-e", "--error",
+    }),
+}
+_PROCESS_PREFIX_ATTACHED = {
+    "time": ("-f", "-o"),
+    "nice": ("-n",),
+    "setsid": (),
+    "stdbuf": ("-i", "-o", "-e"),
+}
+
+
+def _process_prefix_option_advance(word: str, prefix: str) -> int | None:
+    """Number of argv words consumed by one recognized process option."""
+    values = _PROCESS_PREFIX_VALUES[prefix]
+    if word in values:
+        return 2
+    if word.startswith("--") and "=" in word:
+        return 1 if word.partition("=")[0] in values else None
+    if any(word.startswith(option) for option in _PROCESS_PREFIX_ATTACHED[prefix]):
+        return 1
+    return 1 if word in _PROCESS_PREFIX_FLAGS[prefix] else None
+
+
+def _process_prefix_argument_step(
+    words: list[str], index: int, prefix: str
+) -> tuple[int, bool] | None:
+    """Return the next argv index and whether it names the wrapped command."""
+    word = words[index]
+    if word == "--":
+        return index + 1, True
+    if word == "-" or not word.startswith("-"):
+        return index, True
+    if prefix == "nice" and re.fullmatch(r"-\d+", word):
+        return index + 1, False
+    advance = _process_prefix_option_advance(word, prefix)
+    if advance is None or index + advance > len(words):
+        return None
+    return index + advance, False
+
+
+def _process_prefix_command_index(words: list[str]) -> int | None:
+    """Return a transparent process prefix's command after its options."""
+    if not words:
+        return None
+    prefix = Path(words[0]).name
+    if prefix not in _PROCESS_PREFIX_FLAGS:
+        return None
+    index = 1
+    while index < len(words):
+        step = _process_prefix_argument_step(words, index, prefix)
+        if step is None:
+            return None
+        index, is_command = step
+        if is_command:
+            return index
+    return None
+
+
 def _find_exec_argv(words: list[str]) -> list[list[str]] | None:
     """Extract find's static -exec/-execdir commands, if well formed."""
     commands: list[list[str]] = []
@@ -3258,6 +3332,13 @@ def _raw_install_from_dispatcher(
         return any(
             _raw_install_from_words(command, depth + 1, variables)
             for command in commands
+        )
+    if Path(words[0]).name in _PROCESS_PREFIX_FLAGS:
+        command_index = _process_prefix_command_index(words)
+        if command_index is None:
+            return _mentions_raw_install(" ".join(words))
+        return _raw_install_from_words(
+            words[command_index:], depth + 1, variables
         )
     return False
 
@@ -4508,7 +4589,7 @@ def _virtualenv_markers_from_path(value: str) -> set[str]:
     """Marker set for PATH entries that name a virtual environment."""
     markers = set()
     for entry in value.split(":"):
-        root = _virtualenv_root(f"{entry}/activate")
+        root = _virtualenv_root(entry)
         if root is not None:
             markers.add(VENV_MARKER_PREFIX + root)
     return markers
