@@ -1242,11 +1242,32 @@ _NEGATED_COMPLETION_CLAIM_RE = re.compile(
 # a claim about it.  A verb that belongs to another release sits further away
 # or carries a sentence break between the two.
 _ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+(?![\w.-])")
-_SENTENCE_SPLIT_RE = re.compile(r"(?<!e\.g\.)(?<=[.!?])\s+", re.IGNORECASE)
-# A completion verb with no nearby version token only reads as a claim about the
-# pending line when the sentence also names a release subject.  Heading context
-# alone must not turn ordinary wording (e.g. "The new directive is available.")
-# into a publication claim.
+
+# Abbreviations that must not trigger sentence splits.
+_ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "al.", "et al.")
+
+# Placeholder for protected abbreviations during sentence splitting.
+_ABBR_PLACEHOLDER = "\uE000"  # Private use area, won't appear in docs
+
+def _protect_abbreviations(text: str) -> str:
+    """Replace known abbreviations with placeholders to prevent false splits."""
+    for abbr in _ABBREVIATIONS:
+        text = text.replace(abbr, abbr.replace(".", _ABBR_PLACEHOLDER))
+    return text
+
+
+def _restore_abbreviations(text: str) -> str:
+    """Restore abbreviations from placeholders."""
+    return text.replace(_ABBR_PLACEHOLDER, ".")
+
+
+# Sentence splitting must handle missing space after period (common in prose).
+# Split on: punctuation + whitespace, OR punctuation + uppercase letter.
+# Known abbreviations are temporarily protected to prevent false splits.
+_SENTENCE_SPLIT_RE = re.compile(
+    r"(?<=[.!?])(?:\s+|(?=[A-Z]))",
+    re.IGNORECASE,
+)
 _RELEASE_SUBJECT_RE = re.compile(
     r"\b(?:release|version|tag|build|package|artifact|assets?)\b",
     re.IGNORECASE,
@@ -1274,15 +1295,23 @@ def _is_conditional_publication_block(block: str) -> bool:
     return _PREPUBLICATION_BOUNDARY_RE.search(block) is not None
 
 
+def _split_sentences_protected(text: str) -> list[str]:
+    """Split text into sentences while protecting known abbreviations."""
+    protected = _protect_abbreviations(text)
+    return [_restore_abbreviations(s) for s in _SENTENCE_SPLIT_RE.split(protected)]
+
+
 def _publication_claim_window(block: str, version_pattern: "re.Pattern[str]") -> str:
     """Return sentence text about the pending version, including its context.
 
     Sentence boundaries keep claims about another release out of scope while
     preserving nearby negation or publication timing that qualifies a verb.
+    Abbreviations are protected to prevent false splits.
     """
+    protected = _protect_abbreviations(block)
     return " ".join(
-        sentence
-        for sentence in _SENTENCE_SPLIT_RE.split(block)
+        _restore_abbreviations(sentence)
+        for sentence in _SENTENCE_SPLIT_RE.split(protected)
         if version_pattern.search(sentence) is not None
     )
 
@@ -1503,7 +1532,7 @@ def _pending_text_failures(
                 f"{rel}: pending {pending_version} is identified as the latest tag "
                 "or stable release"
             )
-        for sentence in _SENTENCE_SPLIT_RE.split(block):
+        for sentence in _split_sentences_protected(block):
             sentence_failures, boundary = _pending_sentence_failures(
                 rel,
                 sentence,

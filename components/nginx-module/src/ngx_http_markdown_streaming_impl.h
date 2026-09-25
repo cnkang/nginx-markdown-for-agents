@@ -1815,6 +1815,7 @@ ngx_http_markdown_streaming_resume_success(
     if (pending_safe_finish) {
         ctx->streaming.completion.safe_finish_error_pending = 0;
         ctx->streaming.completion.safe_finish_error_code = ERROR_SUCCESS;
+        ngx_http_markdown_inflight_release(ctx);
         ngx_http_markdown_streaming_record_postcommit_category_metrics(
             r, ctx, conf, pending_error);
         ngx_http_markdown_streaming_record_postcommit_success(
@@ -2152,6 +2153,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 
     rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_inflight_release(ctx);
         ngx_http_markdown_streaming_record_postcommit_category_metrics(
             r, ctx, conf, error_code);
         ngx_http_markdown_streaming_record_postcommit_success(
@@ -2360,6 +2362,63 @@ ngx_http_markdown_streaming_error_reason(uint32_t error_code)
  * is returned so that the body filter can forward the unconsumed
  * chain via ngx_http_next_body_filter.
  */
+
+/*
+ * Track budget exceeded as auxiliary classification.
+ * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
+ * from markdown_streaming_feed/finalize) and C-side size-limit
+ * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
+ * as well as the decompression and parser resource-limit codes:
+ *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
+ *   ERROR_PARSE_TIMEOUT (10),
+ *   ERROR_PARSE_BUDGET_EXCEEDED (11).
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_streaming_is_budget_error(uint32_t error_code)
+{
+    return (error_code == ERROR_MEMORY_LIMIT
+            || error_code == ERROR_BUDGET_EXCEEDED
+            || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+            || error_code == ERROR_PARSE_TIMEOUT
+            || error_code == ERROR_PARSE_BUDGET_EXCEEDED);
+}
+
+static ngx_inline void
+ngx_http_markdown_streaming_track_budget_exceeded(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_ctx_t *ctx,
+    uint32_t error_code)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.budget_exceeded_total);
+    ngx_http_markdown_log_decision_event(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL),
+        "streaming_budget_exceeded");
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+                   r->connection->log, 0,
+                   "markdown: budget exceeded "
+                   "(auxiliary classification, code=%ui)",
+                   (ngx_uint_t) error_code);
+}
+
+
+/*
+ * Pre-Commit error handler: apply unified markdown_error_policy.
+ *
+ * On any precommit error, the Rust handle is aborted and the inflight
+ * slot is released immediately; the pool cleanup handler provides an
+ * idempotent backstop.
+ *
+ * Returns:
+ *   NGX_DECLINED - fallback to full-buffer or fail-open
+ *   NGX_ERROR    - fail-closed (reject)
+ *
+ * The caller must NOT advance the buffer position when NGX_DECLINED
+ * is returned so that the body filter can forward the unconsumed
+ * chain via ngx_http_next_body_filter.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_precommit_error(
     ngx_http_request_t *r,
@@ -2374,6 +2433,10 @@ ngx_http_markdown_streaming_precommit_error(
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
     }
+
+    /* Release the inflight slot on precommit error; the cleanup
+     * handler on r->pool provides an idempotent backstop. */
+    ngx_http_markdown_inflight_release(ctx);
 
     if (error_code == ERROR_STREAMING_FALLBACK) {
         /*
@@ -2404,39 +2467,12 @@ ngx_http_markdown_streaming_precommit_error(
     }
     ctx->error.has_category = 1;
 
-    /*
-     * Track budget exceeded as auxiliary classification.
-     * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
-     * from markdown_streaming_feed/finalize) and C-side size-limit
-     * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
-     * as well as the decompression and parser resource-limit codes:
-     *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
-     *   ERROR_PARSE_TIMEOUT (10),
-     *   ERROR_PARSE_BUDGET_EXCEEDED (11).
-     * The terminal state is determined by markdown_error_policy
-     * policy below.
-     */
-    if (error_code == ERROR_MEMORY_LIMIT
-        || error_code == ERROR_BUDGET_EXCEEDED
-        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-        || error_code == ERROR_PARSE_TIMEOUT
-        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.budget_exceeded_total);
-        ngx_http_markdown_log_decision_event(
-            r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_from_error_category(
-                NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL),
-            "streaming_budget_exceeded");
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: budget exceeded "
-            "(auxiliary classification, code=%ui)",
-            (ngx_uint_t) error_code);
-    }
+        /* Track budget exceeded as auxiliary classification. */
+        if (ngx_http_markdown_streaming_is_budget_error(error_code)) {
+            ngx_http_markdown_streaming_track_budget_exceeded(r, conf, ctx, error_code);
+        }
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
     /*
      * Increment global conversions_failed to maintain consistency
@@ -2538,6 +2574,9 @@ ngx_http_markdown_streaming_precommit_error(
         canonical_reason,
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0);
+    /* Fail-open: release the inflight slot since we're passing
+     * through to original content. */
+    ngx_http_markdown_inflight_release(ctx);
     return NGX_DECLINED;
 }
 

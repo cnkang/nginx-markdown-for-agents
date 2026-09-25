@@ -427,13 +427,52 @@ def _fuzz_record_passes(path: Path, candidate_sha: str) -> bool:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
+    # Also load the candidate-bound manifest to validate per_target.
+    manifest_path = path.parent / "blocking-fuzz-target-manifest.json"
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
     return (
         isinstance(record, dict)
         and record.get("schema_version") == FUZZ_QUALIFICATION_SCHEMA_VERSION
         and record.get("candidate_sha") == candidate_sha
         and record.get("blocking_pass") is True
         and not validate_toolchain_identity(record.get("toolchain_identity"))
+        # Validate per_target against manifest: every blocking target must have
+        # a passing entry, no duplicates, no extra failures.
+        and _validate_fuzz_record_per_target(record, manifest)
     )
+
+
+def _validate_fuzz_record_per_target(record: dict, manifest: dict) -> bool:
+    """Validate that per_target covers all blocking targets with pass status."""
+    per_target = record.get("per_target")
+    if not isinstance(per_target, list):
+        return False
+    # Build lookup from per_target; reject duplicates and non-string targets.
+    by_name = {}
+    for entry in per_target:
+        if not isinstance(entry, dict):
+            return False
+        name = entry.get("target")
+        if not isinstance(name, str):
+            return False
+        if name in by_name:
+            return False
+        by_name[name] = entry
+    # Every blocking target in manifest must have a passing entry.
+    for spec in manifest.get("targets", []):
+        if not spec.get("blocking"):
+            continue
+        entry = by_name.get(spec["name"])
+        if entry is None:
+            return False
+        if entry.get("status") != "pass":
+            return False
+    return True
 
 
 def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, dict]:

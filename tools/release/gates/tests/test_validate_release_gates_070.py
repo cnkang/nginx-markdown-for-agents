@@ -522,6 +522,17 @@ jobs:
     assert not _publish_gate_item(workflow)
 
 
+def test_github_expression_parser_rejects_inline_hash_comment() -> None:
+    """An inline unquoted '#' comment in a publish condition is rejected."""
+    workflow = """
+jobs:
+  publish:
+    needs: [release-gate]
+    if: always() && needs.release-gate.result == 'success' # && false
+"""
+    assert not _publish_gate_item(workflow)
+
+
 def test_github_publish_condition_rejects_unmodeled_order_comparisons() -> None:
     """A Python-parsable but unsupported comparison remains unverifiable."""
     expression = gates._github_condition_ast(
