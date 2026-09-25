@@ -33,6 +33,10 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools"), str(_GATES_DIR)):
         sys.path.insert(0, _p)
 
 from generate_soak_scenario_manifest import build_manifest  # noqa: E402
+from tools.release.gates.validate_fuzz_qualification import (  # noqa: E402
+    SCHEMA_VERSION as FUZZ_QUALIFICATION_SCHEMA_VERSION,
+    validate_toolchain_identity,
+)
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
@@ -415,10 +419,28 @@ def _record_value(path: Path, field: str = "status"):
     return value.get(field) if isinstance(value, dict) else None
 
 
+def _fuzz_record_passes(path: Path, candidate_sha: str) -> bool:
+    """Accept only a passing, candidate-bound record with pinned provenance."""
+    if not path.is_file():
+        return False
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(record, dict)
+        and record.get("schema_version") == FUZZ_QUALIFICATION_SCHEMA_VERSION
+        and record.get("candidate_sha") == candidate_sha
+        and record.get("blocking_pass") is True
+        and not validate_toolchain_identity(record.get("toolchain_identity"))
+    )
+
+
 def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, dict]:
     """Build transparent evidence for this job and its separate CI jobs."""
     root = _release_state()[2]
-    fuzz_pass = _record_value(root / FUZZ_QUALIFICATION_RECORD_NAME, "blocking_pass")
+    fuzz_pass = _fuzz_record_passes(
+        root / FUZZ_QUALIFICATION_RECORD_NAME, candidate_sha)
     soak_status = _record_value(root / SOAK_QUALIFICATION_RECORD_NAME)
     # The blocking performance evidence is produced by the release-gate job's
     # `make release-perf-evidence-blocking BASELINE_VERSION=092` step, which

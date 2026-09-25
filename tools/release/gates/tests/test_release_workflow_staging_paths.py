@@ -38,7 +38,7 @@ ENV_REFERENCE = re.compile(r"\$\{\{\s*env\.([A-Za-z_](?a:\w)*)\s*\}\}")
 _GH_EXPR_OPEN = "$" + "{{"
 
 # Each iteration of the resolution loop below substitutes one ``env.NAME``
-# reference; a path whose reference chain outlasts this bound fails closed
+# reference; a path whose reference chain reaches this bound fails closed
 # instead of being trusted.  The workflow's own paths substitute a single
 # static value, so only a crafted chain can reach the bound.
 _MAX_ENV_SUBSTITUTIONS = 8
@@ -183,7 +183,8 @@ def _stages_into_repository_root(step: object) -> bool:
         # the step cannot be attributed to a git-ignored staging directory.
         return True
     if not isinstance(path, str):
-        return False
+        # GitHub's action input cannot be proven from a non-string YAML value.
+        return True
     path = _resolve_static_env(path, _step_effective_env(step))
     if path is None or path.startswith("/"):
         return False
@@ -213,8 +214,10 @@ def _unresolvable_repository_path(step: object) -> str | None:
     if not isinstance(step, dict):
         return None
     path = _step_path(step)
-    if not isinstance(path, str):
+    if path is None:
         return None
+    if not isinstance(path, str):
+        return f"<non-string path: {type(path).__name__}>"
     resolved = _resolve_static_env(path, _step_effective_env(step))
     if resolved is None:
         return path
@@ -349,6 +352,7 @@ def test_root_staging_detection() -> None:
         {"with": {"path": "${{ runner.temp }}/x"}}
     )
     assert not _stages_into_repository_root({"with": {"path": "/abs"}})
+    assert _stages_into_repository_root({"with": {"path": ["dist/"]}})
 
 
 def test_unresolvable_repository_path_detection() -> None:
@@ -459,6 +463,18 @@ def test_malformed_step_shapes_never_crash_the_guard() -> None:
     assert not _stages_into_repository_root(None)
     assert _stages_into_repository_root({"uses": "actions/download-artifact@v8"})
     assert _repository_path({"with": {"path": "release-assets/"}}) == "release-assets"
+
+
+def test_non_string_download_path_fails_closed() -> None:
+    """A malformed nested path cannot bypass the repository staging guard."""
+    step = {
+        "uses": "actions/download-artifact@v8",
+        "with": {"path": ["dist/"]},
+    }
+
+    assert _repository_path(step) is None
+    assert _stages_into_repository_root(step)
+    assert _unresolvable_repository_path(step) == "<non-string path: list>"
 
 
 def test_download_steps_skips_malformed_containers() -> None:

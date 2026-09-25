@@ -96,6 +96,7 @@ permissions: {}
 env:
   RELEASE_VERSION: "0.9.2"
   RUST_TOOLCHAIN: 1.98.1
+  FUZZ_TOOLCHAIN: nightly-2026-09-21
   RUST_FEATURES: streaming,prune_noise_regions
 
 jobs:
@@ -1124,7 +1125,7 @@ jobs:
           python3 -m pip install --requirement requirements-release.txt
         shell: bash
 
-      - name: Verify Python Brotli dependency
+      - name: Verify release gate dependencies
         run: |
           set -euo pipefail
           dependency_versions="$(python3 -c 'import brotli, yaml, jsonschema; print(brotli.__version__, yaml.__version__, jsonschema.__version__)')"
@@ -1515,7 +1516,7 @@ jobs:
             --candidate-sha "$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
         shell: bash
 
-      - name: Install nightly Rust toolchain for fuzz qualification
+      - name: Install pinned Rust toolchain for fuzz qualification
         run: |
           set -euo pipefail
           # Provision every toolchain serially, up front, with retries.  The
@@ -1543,17 +1544,17 @@ jobs:
           # front so no component download happens mid-qualification.
           retry 5 bash ./packaging/scripts/install-verified-rustup.sh \
             --arch amd64 \
-            --toolchain nightly
-          retry 5 rustup component add --toolchain nightly rust-src
+            --toolchain nightly-2026-09-21
+          retry 5 rustup component add --toolchain nightly-2026-09-21 rust-src
           retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
         shell: bash
 
       - name: Run fuzz qualification
         env:
-          # Resolve every rustup shim to the pinned toolchain: without this,
-          # shims fall back to the channel-based default and concurrent shims
-          # can race to sync the channel.
-          RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
+          # Keep automatic rustup shim resolution and explicit cargo +toolchain
+          # invocations on the same dated nightly used for qualification.
+          FUZZ_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
+          RUSTUP_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REF: ${{ github.ref }}
