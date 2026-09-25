@@ -451,10 +451,10 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-23 | Hermes | Planned publication date recorded in the release metadata, pending publication |
-| 0.9.2 | 2026-09-22 | Hermes | Planned publication date adjusted in the release metadata, pending publication |
+| 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
+| 0.9.2 | 2026-09-22 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
-| 0.9.2 | 2026-09-21 | Hermes | Planned publication date corrected in the release metadata, pending publication |
+| 0.9.2 | 2026-09-21 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-19 | Kang | Release-state wording prepared across the status page for the v0.9.2 candidate |
 | 0.9.2 | 2026-08-24 | Kang | Trimmed historical release recaps and kept the active status page linked to release notes and the changelog |
 | 0.9.2 | 2026-08-15 | Kang | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |

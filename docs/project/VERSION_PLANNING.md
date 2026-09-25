@@ -10,8 +10,8 @@ compatibility or release scope.
 ## Current Release State
 
 - v0.9.2 is the current development line and is a release candidate. The
-  project publishes it after the merge and the candidate-bound gates, on
-  the v0.9.1 baseline-consolidation and compatibility-reset release.
+  project plans to publish it after the merge and candidate-bound gates pass.
+  The release consolidates the v0.9.1 baseline and resets compatibility.
 - 0.9.1 is the latest released version (2026-07-29).
 - Development version metadata is 0.9.2. The release tag, assets, and
   checksums stay pending until the blocking gates pass.
@@ -156,10 +156,10 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-09-23 | Hermes | Planned publication date recorded in the release metadata, pending publication |
-| 0.9.2 | 2026-09-22 | Hermes | Planned publication date adjusted in the release metadata, pending publication |
+| 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
+| 0.9.2 | 2026-09-22 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
-| 0.9.2 | 2026-09-21 | Hermes | Planned publication date corrected in the release metadata, pending publication |
+| 0.9.2 | 2026-09-21 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-19 | Kang | Release-state wording and release evidence prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
