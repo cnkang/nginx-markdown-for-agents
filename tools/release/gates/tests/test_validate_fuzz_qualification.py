@@ -2204,6 +2204,37 @@ def test_invoke_fuzz_allows_a_process_tree_to_finish_without_timeout(
         _kill_test_processes(tmp_path / "unused-child.pid", processes)
 
 
+def test_invoke_fuzz_kills_descendants_after_parent_exits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A successful parent cannot leave pipe-holding descendants alive."""
+    child_pid_path = tmp_path / "child.pid"
+    child_marker = tmp_path / "child-survived"
+    child_code = (
+        "import time\n"
+        "time.sleep(0.3)\n"
+        f"open({str(child_marker)!r}, 'w').write('survived')\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
+        "print('stat::number_of_executed_units: 1')\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_STREAM_JOIN_GRACE_SECONDS", 0.05)
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 5)
+
+        assert result["returncode"] == 0
+        assert "stat::number_of_executed_units: 1" in result["stdout"]
+        assert not child_marker.exists(), "a descendant survived parent exit"
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(child_pid_path, processes)
+
+
 def _assert_timeout_kills_descendants(
     child_pid_path: Path, marker_delay: float, child_marker: Path
 ) -> None:
