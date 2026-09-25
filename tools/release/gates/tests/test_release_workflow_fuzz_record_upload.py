@@ -7,7 +7,7 @@ workflow's other upload steps sit on success paths, so the record upload
 step is asserted to be unconditional (``if: always()``), fail-closed
 (``if-no-files-found: error``) and to point at the paths the validator
 actually writes.  The paths are resolved from the workflow's own
-RELEASE_VERSION variable and checked against the validator's constants,
+RELEASE_VERSION variable and checked against the validator's path builder,
 so a version bump cannot desync the two ends.  This module also covers
 the job-level pipeline structure (the fuzz job owning a full budget, the
 publish junctions requiring it, the release gate no longer running it)
@@ -19,11 +19,13 @@ shell-semantics suite for that gate lives in
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 import re
 from pathlib import Path
 
 import yaml
+import pytest
 
 import tools.release.gates.validate_fuzz_qualification as validator
 from tools.release.gates import validate_fuzz_packaging as packaging_gate
@@ -38,30 +40,25 @@ def _workflow() -> dict:
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
-def _live_segments(script: str) -> list[str]:
-    """Executable command segments of one workflow run script.
-
-    Mirrors the production composition exactly, including the
-    ``_function_kill_sets`` arguments: a copy that calls
-    ``_live_command_segments(executable)`` without them would credit
-    commands inside functions whose invocation provably fails or exits,
-    so the pipeline assertions could pass on a script whose commands
-    never run.
-    """
-    stripped = packaging_gate._strip_heredocs(
-        packaging_gate._strip_shell_comments(script))
-    executable = packaging_gate._join_continuations(
-        packaging_gate._strip_function_bodies(stripped))
-    failing, exiting = packaging_gate._function_kill_sets(stripped)
-    return packaging_gate._live_command_segments(executable, failing, exiting)
+def _workflow_with_run_command(command: str, shell: str | None = None) -> str:
+    """Build a minimal workflow containing one public-gate run command."""
+    step = {"run": command}
+    if shell is not None:
+        step["shell"] = shell
+    return yaml.safe_dump(
+        {"jobs": {"release-gate": {"steps": [step]}}},
+        sort_keys=False,
+    )
 
 
 def _job_live_text(workflow_text: str, job_name: str) -> str:
     """Live command text of every executable step of one job."""
-    scripts = packaging_gate._job_run_scripts(workflow_text, job_name)
-    assert scripts is not None, f"the {job_name} job must be parseable"
+    steps = packaging_gate._job_run_step_records(workflow_text, job_name)
+    assert steps is not None, f"the {job_name} job must be parseable"
     return "\n".join(
-        segment for script in scripts for segment in _live_segments(script)
+        segment
+        for step in steps
+        for segment in packaging_gate._step_live_commands(step)
     )
 
 
@@ -74,6 +71,57 @@ def _named_step(job: dict, name: str) -> dict:
     assert len(matches) == 1, (
         f"expected exactly one step named {name!r}, found {len(matches)}")
     return matches[0]
+
+
+def _assert_record_handoff(workflow: dict) -> None:
+    """Check producer, download, and exact-file verification as one contract."""
+    job = workflow["jobs"]["release-gate"]
+    assert "fuzz-qualification" in job["needs"]
+    names = [step.get("name", "") for step in job["steps"]]
+    download_at = names.index("Download fuzz qualification record")
+    verify_at = names.index("Verify fuzz qualification record was downloaded")
+    gate_at = names.index("Run release gates")
+    assert download_at < verify_at < gate_at
+    download = job["steps"][download_at]
+    verify = job["steps"][verify_at]
+    assert download.get("uses", "").startswith("actions/download-artifact")
+    assert download.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
+    assert download.get("if") not in (False, "false", "${{ false }}")
+    assert download.get("continue-on-error") not in (True, "true", "${{ true }}")
+    assert verify.get("if") not in (False, "false", "${{ false }}")
+    assert verify.get("continue-on-error") not in (True, "true", "${{ true }}")
+    version = workflow.get("env", {}).get("RELEASE_VERSION")
+    assert isinstance(version, str) and version
+    paths = validator._release_artifact_paths(version)
+    expected_record = paths["record"]
+    download_path = download.get("with", {}).get("path")
+    assert isinstance(download_path, str)
+    assert download_path.replace("${{ env.RELEASE_VERSION }}", version).rstrip("/") == (
+        expected_record.rsplit("/", 1)[0]
+    )
+    verify_run = verify.get("run", "")
+    resolved_record = verify_run.replace("${RELEASE_VERSION}", version)
+    assert expected_record in resolved_record
+    assert "-f " in verify_run or "test -f" in verify_run
+    upload = _named_step(
+        workflow["jobs"]["fuzz-qualification"],
+        "Upload fuzz qualification record",
+    )
+    assert upload.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
+
+
+def test_release_workflow_trigger_matrix_is_explicit() -> None:
+    """Only version-tag pushes and explicit dispatch start release packaging."""
+    workflow = _workflow()
+    triggers = workflow.get("on", workflow.get(True))
+
+    assert isinstance(triggers, dict)
+    assert set(triggers) == {"push", "workflow_dispatch"}
+    assert triggers["push"] == {"tags": ["v*"]}
+    dispatch = triggers["workflow_dispatch"]
+    assert isinstance(dispatch, dict)
+    assert set(dispatch.get("inputs", {})) == {"version"}
+    assert dispatch["inputs"]["version"].get("type") == "string"
 
 
 def test_fuzz_record_upload_is_unconditional_and_matches_the_validator() -> None:
@@ -98,8 +146,9 @@ def test_fuzz_record_upload_is_unconditional_and_matches_the_validator() -> None
     assert release_version
     resolved = path_text.replace(
         "${{ env.RELEASE_VERSION }}", release_version)
-    record = validator.DEFAULT_RECORD.rstrip("/")
-    log_dir = validator.DEFAULT_LOG_DIR.rstrip("/")
+    artifact_paths = validator._release_artifact_paths(release_version)
+    record = artifact_paths["record"].rstrip("/")
+    log_dir = artifact_paths["log_dir"].rstrip("/")
     assert record in resolved
     assert log_dir + "/" in resolved
     assert record == f"artifacts/release/{release_version}/" + record.rsplit("/", 1)[-1]
@@ -119,6 +168,28 @@ def test_fuzz_job_generates_its_manifests_and_runs_the_qualification() -> None:
         WORKFLOW.read_text(encoding="utf-8"), "fuzz-qualification")
     assert "generate_release_gate_manifests.py" in run_text
     assert "validate_fuzz_qualification.py --mode real --git-head" in run_text
+
+
+def test_fuzz_job_pins_and_exports_the_recorded_toolchain() -> None:
+    """The installed compiler and runtime environment use the same date pin."""
+    workflow = _workflow()
+    job = workflow["jobs"]["fuzz-qualification"]
+    pinned_toolchain = validator.FUZZ_TOOLCHAIN
+    assert workflow.get("env", {}).get("FUZZ_TOOLCHAIN") == pinned_toolchain
+
+    install = _named_step(job, "Install pinned Rust toolchain for fuzz qualification")
+    install_run = install.get("run", "")
+    assert f"--toolchain {pinned_toolchain}" in install_run
+    assert f"rustup component add --toolchain {pinned_toolchain} rust-src" in install_run
+    assert (
+        "cargo install cargo-fuzz --version "
+        f"{validator.FUZZ_CARGO_FUZZ_PACKAGE_VERSION} --locked"
+    ) in install_run
+    assert not re.search(r"--toolchain\s+nightly(?:\s|$)", install_run)
+
+    run = _named_step(job, "Run fuzz qualification")
+    assert run.get("env", {}).get("FUZZ_TOOLCHAIN") == "${{ env.FUZZ_TOOLCHAIN }}"
+    assert run.get("env", {}).get("RUSTUP_TOOLCHAIN") == "${{ env.FUZZ_TOOLCHAIN }}"
 
 
 def test_fuzz_job_structure_contract_rejects_dead_and_commented_commands() -> None:
@@ -194,7 +265,7 @@ def test_release_gate_job_provisions_the_pinned_rust_toolchain() -> None:
     Gate scripts resolve cargo, rustc and rustfmt through Rustup shims
     (streaming evidence generation, the reason-codegen drift check), so the
     gate job must install the pinned toolchain itself; the fuzz job installs
-    its own nightly toolchain separately.
+    its own dated nightly toolchain separately.
     """
     scripts = packaging_gate._job_run_scripts(
         WORKFLOW.read_text(encoding="utf-8"), "release-gate"
@@ -248,6 +319,77 @@ def test_workflow_rejects_raw_toolchain_installs() -> None:
             WORKFLOW.read_text(encoding="utf-8")
         )
         is None
+    )
+
+
+def test_python_inline_launchers_cannot_hide_raw_toolchain_installs() -> None:
+    """Python process APIs cannot conceal raw provisioning in a run step."""
+    # These are inert YAML fixtures; the gate parses them and never executes them.
+    commands = (
+        "python3 -c 'import os; os.system(\"rustup toolchain install stable\")'",
+        "python3 -c 'from os import system as run; run(\"rustup toolchain install stable\")'",
+        "python3 -c 'from os import *; system(\"rustup toolchain install stable\")'",
+        "python3 -c 'import subprocess; subprocess.run([\"rustup\", \"toolchain\", \"install\", \"stable\"])'",
+        "python3 -c 'import subprocess as sp; sp.run([\"rustup\", \"toolchain\", \"install\", \"stable\"])'",
+        "python3 -c 'from subprocess import *; run([\"rustup\", \"toolchain\", \"install\", \"stable\"])'",
+        "python3 -c 'import asyncio; asyncio.create_subprocess_exec(\"rustup\", \"toolchain\", \"install\", \"stable\")'",
+    )
+    for command in commands:
+        workflow = _workflow_with_run_command(command)
+        assert packaging_gate._raw_toolchain_install_issue(workflow), command
+
+
+def test_python_inline_literal_data_and_safe_launchers_remain_accepted() -> None:
+    """Quoted install text and a literal harmless launcher are not installs."""
+    commands = (
+        "python3 -c 'print(\"rustup toolchain install stable\")'",
+        "python3 -c 'import os; os.system(\"echo safe\")'",
+    )
+    for command in commands:
+        workflow = _workflow_with_run_command(command)
+        assert packaging_gate._raw_toolchain_install_issue(workflow) is None
+
+
+def test_opaque_python_inline_process_command_fails_closed() -> None:
+    """A dynamic process command cannot be proven free of raw provisioning."""
+    workflow = _workflow_with_run_command(
+        "python3 -c 'import os; os.system(command)'"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(workflow)
+
+
+def test_python_stdin_heredocs_are_analyzed_as_python_source() -> None:
+    """Python stdin is checked without confusing string literals for commands."""
+    unsafe = _workflow_with_run_command(
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "os.system('rustup toolchain install stable')\n"
+        "PY"
+    )
+    safe = _workflow_with_run_command(
+        "python3 - <<'PY'\n"
+        "print('rustup toolchain install stable')\n"
+        "PY"
+    )
+
+    assert packaging_gate._raw_toolchain_install_issue(unsafe)
+    assert packaging_gate._raw_toolchain_install_issue(safe) is None
+
+
+def test_public_release_gate_check_rejects_python_launcher(monkeypatch) -> None:
+    """The public toolchain gate applies the inline-Python scanner."""
+    workflow = _workflow_with_run_command(
+        "python3 -c 'import os; os.system(\"rustup toolchain install stable\")'"
+    )
+    monkeypatch.setattr(packaging_gate, "read_safe", lambda _path: workflow)
+    result = packaging_gate.ValidationResult()
+
+    packaging_gate.check_release_gate_toolchain(result)
+
+    assert result.has_failures
+    assert any(
+        status == "FAIL" and check_id == packaging_gate.PKG_RELEASE_GATE_TOOLCHAIN_GATE
+        for status, check_id, _message in result.results
     )
 
 
@@ -383,48 +525,53 @@ def test_release_gate_preflight_proves_the_jsonschema_format_extras() -> None:
 
 
 def test_release_gate_job_downloads_fuzz_record_before_evidence() -> None:
-    """The final evidence reads the fuzz record: the release-gate job must
-    take the artifact handoff, and the producer must run first."""
-    workflow = _workflow()
-    job = workflow["jobs"]["release-gate"]
-    assert "fuzz-qualification" in job["needs"]
-    names = [step.get("name", "") for step in job["steps"]]
-    assert "Download fuzz qualification record" in names
-    download_at = names.index("Download fuzz qualification record")
-    gate_at = names.index("Run release gates")
-    assert download_at < gate_at
-    download = job["steps"][download_at]
-    assert download.get("uses", "").startswith("actions/download-artifact"), (
-        "the handoff step must actually download the artifact, found "
-        f"uses={download.get('uses')!r}")
-    assert download.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
-    # The download path derives from the workflow's own RELEASE_VERSION
-    # variable, and that variable must match the version directory the
-    # validator actually writes into -- otherwise the handoff silently
-    # targets a stale directory after a version bump.
-    download_path = download.get("with", {}).get("path")
-    assert isinstance(download_path, str)
-    assert "${{ env.RELEASE_VERSION }}" in download_path
-    record_dir = validator.DEFAULT_RECORD.rsplit("/", 1)[0]
-    release_version = workflow.get("env", {}).get("RELEASE_VERSION")
-    assert isinstance(release_version, str)
-    assert release_version
-    assert record_dir == f"artifacts/release/{release_version}"
-    resolved_path = download_path.replace(
-        "${{ env.RELEASE_VERSION }}", release_version)
-    assert resolved_path.rstrip("/") == record_dir
-    # The handoff is followed by an explicit existence assertion on the
-    # record itself: the download action only proves the artifact arrived,
-    # not that the record file is in it.
-    verify_at = names.index("Verify fuzz qualification record was downloaded")
-    assert download_at < verify_at < gate_at
-    verify_run = job["steps"][verify_at].get("run", "")
-    assert "fuzz-qualification-record.json" in verify_run
-    assert "-f " in verify_run or "test -f" in verify_run
-    upload = _named_step(
-        workflow["jobs"]["fuzz-qualification"],
-        "Upload fuzz qualification record")
-    assert upload.get("with", {}).get("name") == RECORD_ARTIFACT_NAME
+    """The final evidence consumes the exact record from the producer job."""
+    _assert_record_handoff(_workflow())
+
+
+def test_release_dependency_preflight_name_covers_all_python_gate_deps() -> None:
+    """The preflight label must describe its Python and schema checks."""
+    job = _workflow()["jobs"]["release-gate"]
+    step = _named_step(job, "Verify release gate dependencies")
+    command = step.get("run", "")
+
+    assert "import brotli, yaml, jsonschema" in command
+    assert "FormatChecker" in command
+
+
+@pytest.mark.parametrize(
+    ("step_name", "field", "value"),
+    [
+        ("Download fuzz qualification record", "if", "false"),
+        ("Download fuzz qualification record", "continue-on-error", True),
+        ("Verify fuzz qualification record was downloaded", "if", "false"),
+        ("Verify fuzz qualification record was downloaded", "continue-on-error", True),
+    ],
+)
+def test_record_handoff_rejects_disabled_or_soft_failed_steps(
+    step_name, field, value
+) -> None:
+    """A disabled handoff or verifier cannot satisfy the release contract."""
+    workflow = copy.deepcopy(_workflow())
+    step = _named_step(workflow["jobs"]["release-gate"], step_name)
+    step[field] = value
+
+    with pytest.raises(AssertionError):
+        _assert_record_handoff(workflow)
+
+
+def test_job_live_text_uses_production_shell_segmenting_for_semicolon_chains():
+    """The test reader matches production shell behavior without implicit -e."""
+    command = "false; make docs-check"
+    workflow = _workflow_with_run_command(command, shell="bash {0}")
+    live = _job_live_text(workflow, "release-gate")
+
+    assert live == "\n".join(packaging_gate._step_live_commands({
+        "run": command,
+        "shell": "bash {0}",
+    }))
+    assert "false" in live
+    assert "make docs-check" in live
 
 
 def test_fuzz_job_runs_the_qualification_before_uploading() -> None:
@@ -491,9 +638,18 @@ def test_packaging_gate_main_runs_every_check_against_the_repo() -> None:
         rc = packaging_gate.main()
     report = buffer.getvalue()
     assert rc == 0, report
-    assert "FAIL" not in report, report
-    assert "pkg:release-gate-toolchain" in report, report
-    assert "Summary: 15 passed, 0 failed, 0 skipped" in report, report
+    pass_rows = [line for line in report.splitlines() if line.startswith("  PASS")]
+    fail_rows = [line for line in report.splitlines() if line.startswith("  FAIL")]
+    summary = re.search(
+        r"Summary: (?P<passed>\d+) passed, (?P<failed>\d+) failed, "
+        r"(?P<skipped>\d+) skipped",
+        report,
+    )
+    assert summary is not None, report
+    assert int(summary["passed"]) == len(pass_rows), report
+    assert int(summary["failed"]) == len(fail_rows) == 0, report
+    pass_ids = {line.split()[1] for line in pass_rows}
+    assert packaging_gate.PKG_RELEASE_GATE_TOOLCHAIN_GATE in pass_ids, report
 
 
 def test_packaging_gate_main_fails_when_the_workflow_is_unreadable(

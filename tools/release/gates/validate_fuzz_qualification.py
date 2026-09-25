@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Fuzz qualification gate validator.
 
-Real mode runs every blocking fuzz target with ``cargo +nightly fuzz``
+Real mode runs every blocking fuzz target with the pinned
+``cargo +nightly-YYYY-MM-DD fuzz``.
 until BOTH floors from the blocking-fuzz-target manifest are met:
 elapsed time >= required_minutes * 60 AND executed units >=
 required_executions (libFuzzer stops at whichever limit it hits first,
@@ -38,8 +39,10 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import tomllib
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,26 +60,51 @@ from lib.executable_validation import (  # noqa: E402
     resolve_rustup_tool_shim,
 )
 
-SCHEMA_VERSION = "release.fuzz-qualification.v1"
+SCHEMA_VERSION = "release.fuzz-qualification.v2"
 CORPUS_ROOT = REPO_ROOT / "components" / "rust-converter" / "fuzz" / "corpus"
 FUZZ_CRATE_DIR = REPO_ROOT / "components" / "rust-converter"
+FUZZ_TOOLCHAIN = "nightly-2026-09-21"
+FUZZ_CARGO_FUZZ_PACKAGE_VERSION = "0.13.1"
+_EXPECTED_FUZZ_TOOLCHAIN_IDENTITY = {
+    "rustup_toolchain": FUZZ_TOOLCHAIN,
+    "rustc_version": "rustc 1.100.0-nightly (bba531001 2026-09-20)",
+    "rustc_commit_hash": "bba531001d4de6d7f49693e0836a2668ca063282",
+    "rustc_commit_date": "2026-09-20",
+    "rustc_host": "x86_64-unknown-linux-gnu",
+    "rustc_release": "1.100.0-nightly",
+    "llvm_version": "23.1.1",
+    "cargo_version": "cargo 1.100.0-nightly (495c385d0 2026-09-16)",
+    "cargo_fuzz_version": "cargo-fuzz 0.13.1",
+}
 
 
-def _cargo_package_version() -> str:
-    """Read the active converter crate version from its package table."""
-    cargo_toml = FUZZ_CRATE_DIR / "Cargo.toml"
-    section = None
-    for line in cargo_toml.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            section = stripped
-            continue
-        if section == "[package]":
-            if match := re.fullmatch(
-                r'version\s*=\s*"([^\"]+)"\s*(?:#.*)?', stripped
-            ):
-                return match[1]
-    raise ValueError(f"package version not found in {cargo_toml}")
+def _cargo_package_version(cargo_toml: Path | None = None) -> str:
+    """Read a literal or workspace-inherited Cargo package version."""
+    cargo_toml = cargo_toml or FUZZ_CRATE_DIR / "Cargo.toml"
+    try:
+        cargo_toml = validate_read_path(cargo_toml, purpose="Cargo manifest")
+        with cargo_toml.open("rb") as cargo_file:
+            document = tomllib.load(cargo_file)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"invalid Cargo manifest {cargo_toml}: {exc}") from exc
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"cannot read Cargo manifest {cargo_toml}: {exc}") from exc
+
+    package = document.get("package")
+    version = package.get("version") if isinstance(package, dict) else None
+    if isinstance(version, dict) and version.get("workspace") is True:
+        workspace = document.get("workspace")
+        workspace_package = (
+            workspace.get("package") if isinstance(workspace, dict) else None
+        )
+        version = (
+            workspace_package.get("version")
+            if isinstance(workspace_package, dict)
+            else None
+        )
+    if not isinstance(version, str) or not version:
+        raise ValueError(f"package version not found in {cargo_toml}")
+    return version
 
 
 def _release_artifact_paths(version: str) -> dict[str, str]:
@@ -89,15 +117,12 @@ def _release_artifact_paths(version: str) -> dict[str, str]:
         "corpus_manifest": (root / "corpus-seed-manifest.json").as_posix(),
         "record": (root / "fuzz-qualification-record.json").as_posix(),
         "log_dir": (root / "fuzz-logs").as_posix(),
-        "record_root": root.as_posix(),
     }
 
 
-_DEFAULT_ARTIFACT_PATHS = _release_artifact_paths(_cargo_package_version())
-DEFAULT_MANIFEST = _DEFAULT_ARTIFACT_PATHS["manifest"]
-DEFAULT_CORPUS_MANIFEST = _DEFAULT_ARTIFACT_PATHS["corpus_manifest"]
-DEFAULT_RECORD = _DEFAULT_ARTIFACT_PATHS["record"]
-DEFAULT_LOG_DIR = _DEFAULT_ARTIFACT_PATHS["log_dir"]
+def _default_artifact_paths() -> dict[str, str]:
+    """Resolve release artifact defaults only when a CLI path needs them."""
+    return _release_artifact_paths(_cargo_package_version())
 
 SKIP_ENV = "RELEASE_GATE_ALLOW_SKIP_FUZZ"
 TIME_CONTINUATION_CEILING = 3600
@@ -211,23 +236,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Validate fuzz qualification evidence for blocking targets")
     parser.add_argument("--mode", choices=("real", "fixture"), default="real")
-    parser.add_argument("--manifest",
-                        default=str(REPO_ROOT / DEFAULT_MANIFEST))
-    parser.add_argument("--corpus-manifest",
-                        default=str(REPO_ROOT / DEFAULT_CORPUS_MANIFEST))
-    parser.add_argument("--record", default=DEFAULT_RECORD)
+    parser.add_argument("--manifest")
+    parser.add_argument("--corpus-manifest")
+    parser.add_argument("--record")
     parser.add_argument("--record-input",
                         help="fixture mode: qualification record to validate")
     parser.add_argument(
         "--output",
         help=(
             "real mode: compatibility option; output is always written to "
-            "the canonical DEFAULT_RECORD path, so the supplied path must "
+            "the versioned canonical record path, so the supplied path must "
             "equal DEFAULT_RECORD (validated by _write_record)"
         ),
     )
     parser.add_argument("--allow-skip-fuzz", action="store_true",
-                        help="exit 0 when cargo +nightly is unavailable")
+                        help="exit 0 when the pinned fuzz toolchain is unavailable")
     parser.add_argument(
         "--git-head",
         action="store_true",
@@ -454,28 +477,106 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
 
 
 def _resolve_fuzz_cargo() -> str | None:
-    """Cargo for ``+nightly`` work: the Rustup shim, not the concrete binary.
+    """Cargo for pinned fuzz work: the Rustup shim, not the concrete binary.
 
     ``resolve_approved_executable`` returns the concrete active-toolchain
     binary, which rejects ``+toolchain`` directives; fuzz qualification needs
-    the shim so Rustup resolves the nightly toolchain.
+    the shim so Rustup resolves the pinned fuzz toolchain.
     """
     return resolve_rustup_tool_shim("cargo")
 
 
 def _cargo_fuzz_available() -> bool:
-    """Return whether the cargo +nightly toolchain can be invoked."""
+    """Return whether the pinned fuzz Cargo toolchain can be invoked."""
     cargo = _resolve_fuzz_cargo()
     if cargo is None:
         return False
     try:
         result = subprocess.run(
-            [cargo, "+nightly", "--version"],
+            [cargo, f"+{FUZZ_TOOLCHAIN}", "--version"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0
+
+
+def validate_toolchain_identity(identity: object) -> list[str]:
+    """Reject missing, malformed, or drifted fuzz toolchain provenance."""
+    if not isinstance(identity, dict):
+        return ["missing-observation: toolchain_identity must be an object"]
+    reasons = []
+    expected_fields = set(_EXPECTED_FUZZ_TOOLCHAIN_IDENTITY)
+    for field in sorted(expected_fields):
+        if field not in identity:
+            reasons.append(
+                f"missing-observation: toolchain_identity missing {field}")
+        elif not isinstance(identity[field], str) or (
+                identity[field] != _EXPECTED_FUZZ_TOOLCHAIN_IDENTITY[field]):
+            reasons.append(
+                f"malformed: toolchain_identity {field} does not match the "
+                "pinned fuzz toolchain")
+    if set(identity) - expected_fields:
+        reasons.append("malformed: toolchain_identity has unexpected fields")
+    return reasons
+
+
+def _run_toolchain_version_command(command: list[str], label: str) -> str:
+    """Return bounded stdout from a toolchain identity command."""
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(
+            f"unable to collect fuzz toolchain identity for {label}") from exc
+    if result.returncode != 0:
+        raise ValueError(
+            f"unable to collect fuzz toolchain identity for {label}")
+    output = result.stdout.strip()
+    if not output or len(output) > 4096:
+        raise ValueError(
+            f"invalid fuzz toolchain identity output for {label}")
+    return output
+
+
+def _collect_fuzz_toolchain_identity() -> dict:
+    """Capture and pin-check the exact compiler and cargo-fuzz versions."""
+    if os.environ.get("FUZZ_TOOLCHAIN") != FUZZ_TOOLCHAIN:
+        raise ValueError("FUZZ_TOOLCHAIN does not match the pinned toolchain")
+    if os.environ.get("RUSTUP_TOOLCHAIN") != FUZZ_TOOLCHAIN:
+        raise ValueError("RUSTUP_TOOLCHAIN does not match the pinned toolchain")
+    cargo = _resolve_fuzz_cargo()
+    rustc = resolve_rustup_tool_shim("rustc")
+    if cargo is None or rustc is None:
+        raise ValueError("Rustup cargo/rustc shims are unavailable")
+
+    rustc_output = _run_toolchain_version_command(
+        [rustc, f"+{FUZZ_TOOLCHAIN}", "-vV"], "rustc -vV")
+    rustc_lines = rustc_output.splitlines()
+    rustc_fields = {}
+    if rustc_lines and rustc_lines[0].startswith("rustc "):
+        rustc_fields["rustc_version"] = rustc_lines[0]
+    for line in rustc_lines[1:]:
+        if ":" in line:
+            key, value = line.split(":", 1)
+            rustc_fields[key.strip()] = value.strip()
+    identity = {
+        "rustup_toolchain": FUZZ_TOOLCHAIN,
+        "rustc_version": rustc_fields.get("rustc_version"),
+        "rustc_commit_hash": rustc_fields.get("commit-hash"),
+        "rustc_commit_date": rustc_fields.get("commit-date"),
+        "rustc_host": rustc_fields.get("host"),
+        "rustc_release": rustc_fields.get("release"),
+        "llvm_version": rustc_fields.get("LLVM version"),
+        "cargo_version": _run_toolchain_version_command(
+            [cargo, f"+{FUZZ_TOOLCHAIN}", "--version"], "cargo --version"),
+        "cargo_fuzz_version": _run_toolchain_version_command(
+            [cargo, f"+{FUZZ_TOOLCHAIN}", "fuzz", "--version"],
+            "cargo fuzz --version"),
+    }
+    if reasons := validate_toolchain_identity(identity):
+        raise ValueError("; ".join(reasons))
+    return identity
 
 
 # Cap on the captured output a single fuzz invocation may retain.  The
@@ -502,6 +603,7 @@ _STREAM_READ_BYTES = 1 << 16
 _MAX_PENDING_LINE_CHARS = 1 << 20
 _STREAM_JOIN_GRACE_SECONDS = 30
 _PROCESS_TERMINATION_GRACE_SECONDS = 1.0
+_PROCESS_KILL_REAP_SECONDS = 1.0
 _ACTIVE_FUZZ_PROCESSES: set[subprocess.Popen] = set()
 _ACTIVE_FUZZ_PROCESSES_LOCK = threading.Lock()
 _FUZZ_CANCEL_REQUESTED = threading.Event()
@@ -674,8 +776,9 @@ def _join_readers(readers: list[threading.Thread]) -> None:
     holding the gate open.  The readers are daemon threads, so one still
     draining after the grace cannot block interpreter exit either.
     """
+    deadline = time.monotonic() + _STREAM_JOIN_GRACE_SECONDS
     for reader in readers:
-        reader.join(_STREAM_JOIN_GRACE_SECONDS)
+        reader.join(max(0.0, deadline - time.monotonic()))
 
 
 def _signal_fuzz_process_group(
@@ -704,7 +807,12 @@ def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
     )
-    process.wait()
+    try:
+        process.wait(timeout=_PROCESS_KILL_REAP_SECONDS)
+    except subprocess.TimeoutExpired:
+        # SIGKILL has been sent. Do not let a stuck kernel task hold the
+        # release gate indefinitely while its asynchronous exit completes.
+        pass
 
 
 def _register_fuzz_process(process: subprocess.Popen) -> None:
@@ -760,7 +868,8 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
                 "marker_finding": None}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
-        cargo, "+nightly", "fuzz", "run", validated_target, "--", *flags
+        cargo, f"+{FUZZ_TOOLCHAIN}", "fuzz", "run", validated_target,
+        "--", *flags
     ]
     try:
         process = subprocess.Popen(
@@ -895,7 +1004,7 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     # crashes and zero sanitizer findings, not as a crash.
     if invocation["returncode"] == -1:
         stderr = invocation.get("stderr", "")
-        if "timed out:" in stderr:
+        if stderr.startswith("timed out:"):
             return executions, elapsed, "timed out: fuzz invocation exceeded its time cap"
         if "spawn failed:" in stderr:
             return executions, elapsed, "spawn failed: fuzz target could not be launched"
@@ -1112,7 +1221,8 @@ def _run_target_record(entry: dict, seed_path: str,
     """Run one blocking target and build its qualification record entry."""
     required_seconds = int(entry["required_minutes"] * 60)
     required_executions = int(entry["required_executions"])
-    log_path = REPO_ROOT / DEFAULT_LOG_DIR / f"{entry['name']}.log"
+    log_dir = _default_artifact_paths()["log_dir"]
+    log_path = REPO_ROOT / log_dir / f"{entry['name']}.log"
     record = _run_target_soak(entry["name"], int(entry["seed"]),
                               required_executions, required_seconds, log_path,
                               deadline=deadline)
@@ -1121,7 +1231,8 @@ def _run_target_record(entry: dict, seed_path: str,
 
 
 def _compose_record(candidate_sha: str, blocking_names: set[str],
-                    per_target: list[dict], started_at: str) -> dict:
+                    per_target: list[dict], started_at: str,
+                    toolchain_identity: dict | None) -> dict:
     """Assemble the top-level qualification record from per-target entries."""
     blocking_entries = [entry for entry in per_target
                         if entry["target"] in blocking_names]
@@ -1133,31 +1244,60 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
         "run_id": _run_id_from(started_at),
         "started_at": started_at,
         "finished_at": _utc_now(),
+        "toolchain_identity": toolchain_identity,
         "per_target": per_target,
         "blocking_pass": not failures,
         "blocking_failures": [entry["target"] for entry in failures],
     }
 
 
+def _atomic_write_record(path: Path, record: dict) -> None:
+    """Write a complete JSON record beside its destination, then replace it."""
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump(record, temporary, indent=2)
+            temporary.write("\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def _write_record(record: dict, args) -> Path:
     """Persist the qualification record at its one canonical artifact path."""
-    requested = args.output or args.record
+    canonical_record = _default_artifact_paths()["record"]
+    requested = args.output or args.record or canonical_record
     requested_path = Path(requested)
     if not requested_path.is_absolute():
         # Relative inputs (including the DEFAULT_RECORD default) resolve
         # against the repository root, never the current working directory.
         requested_path = REPO_ROOT / requested_path
     requested_output = requested_path.resolve()
-    expected_output = (REPO_ROOT / DEFAULT_RECORD).resolve()
+    expected_output = (REPO_ROOT / canonical_record).resolve()
     if requested_output != expected_output:
         raise ValueError(
             "Output path is fixed to "
-            f"'{DEFAULT_RECORD}' for {RECORD_OUTPUT_LABEL}"
+            f"'{canonical_record}' for {RECORD_OUTPUT_LABEL}"
         )
     safe_name = validate_filename_strict(
         expected_output.name, purpose=RECORD_OUTPUT_LABEL
     )
-    candidate_output = REPO_ROOT / Path(DEFAULT_RECORD).parent / safe_name
+    candidate_output = REPO_ROOT / Path(canonical_record).parent / safe_name
     resolved_candidate = candidate_output.resolve(strict=False)
     resolved_root = REPO_ROOT.resolve(strict=False)
     if not resolved_candidate.is_relative_to(resolved_root):
@@ -1170,9 +1310,7 @@ def _write_record(record: dict, args) -> Path:
     validated_path.parent.mkdir(parents=True, exist_ok=True)
     # NOSONAR suppression for pythonsecurity:S2083: the fixed output root and
     # strict filename validation prevent CLI-selected targets.
-    validated_path.write_text(  # NOSONAR
-        json.dumps(record, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_write_record(validated_path, record)  # NOSONAR
     # SONAR_NOTE(S2083): Filename is allowlisted and the path is built from
     # the trusted generated-output root, so CLI input cannot select a target.
     return validated_path
@@ -1194,18 +1332,19 @@ def _print_target(record: dict) -> None:
 
 def _handle_cargo_missing(args, candidate_sha: str,
                           targets: list[dict]) -> int:
-    """Handle an unavailable cargo +nightly, honoring the skip contract."""
+    """Handle an unavailable pinned Cargo toolchain, honoring skip policy."""
     allow = args.allow_skip_fuzz or os.environ.get(SKIP_ENV) == "1"
     if not allow:
-        print("ERROR: cargo +nightly unavailable; pass --allow-skip-fuzz or "
+        print("ERROR: pinned fuzz Cargo toolchain unavailable; "
+              "pass --allow-skip-fuzz or "
               f"set {SKIP_ENV}=1 to skip fuzz qualification", file=sys.stderr)
         return 1
     started_at = _utc_now()
-    skip_reason = f"cargo +nightly unavailable ({SKIP_ENV}=1)"
+    skip_reason = f"pinned fuzz toolchain unavailable ({SKIP_ENV}=1)"
     blocking_names = {entry["name"] for entry in targets if entry["blocking"]}
     per_target = [_skipped_record(entry, skip_reason) for entry in targets]
     record = _compose_record(candidate_sha, blocking_names, per_target,
-                             started_at)
+                             started_at, None)
     record["blocking_pass"] = False
     record["skip_reason"] = skip_reason
     out_path = _write_record(record, args)
@@ -1214,6 +1353,34 @@ def _handle_cargo_missing(args, candidate_sha: str,
     print(f"WARNING: fuzz qualification skipped ({SKIP_ENV}=1); record "
           f"written to {out_path}", file=sys.stderr)
     return 0
+
+
+def _handle_toolchain_identity_failure(args, candidate_sha: str,
+                                       targets: list[dict],
+                                       reason: str) -> int:
+    """Persist a failed qualification when the pinned identity drifts."""
+    started_at = _utc_now()
+    blocking_names = {entry["name"] for entry in targets if entry["blocking"]}
+    per_target = []
+    for entry in targets:
+        if entry["name"] in blocking_names:
+            per_target.append({
+                "target": entry["name"],
+                "status": "fail",
+                "failure_reason": "pinned fuzz toolchain identity failed",
+            })
+        else:
+            per_target.append(_skipped_record(
+                entry, "toolchain identity failed before fuzzing"))
+    record = _compose_record(candidate_sha, blocking_names, per_target,
+                             started_at, None)
+    record["toolchain_error"] = "pinned fuzz toolchain identity failed"
+    out_path = _write_record(record, args)
+    for entry in per_target:
+        _print_target(entry)
+    print("ERROR: pinned fuzz toolchain identity verification failed: "
+          f"{reason}; record written to {out_path}", file=sys.stderr)
+    return 1
 
 
 def _worker_queue(entries: list[dict], worker_count: int) -> list[list[dict]]:
@@ -1385,6 +1552,12 @@ def run_real_gate(args) -> int:
     if not _cargo_fuzz_available():
         return _handle_cargo_missing(args, manifest["candidate_sha"], targets)
 
+    try:
+        toolchain_identity = _collect_fuzz_toolchain_identity()
+    except ValueError as exc:
+        return _handle_toolchain_identity_failure(
+            args, manifest["candidate_sha"], targets, str(exc))
+
     started_at = _utc_now()
     fuzz_deadline = time.monotonic() + FUZZ_JOB_BUDGET
     blocking_entries = [entry for entry in targets
@@ -1400,7 +1573,7 @@ def run_real_gate(args) -> int:
         per_target.append(record)
         _print_target(record)
     record = _compose_record(manifest["candidate_sha"], blocking_names,
-                             per_target, started_at)
+                             per_target, started_at, toolchain_identity)
     out_path = _write_record(record, args)
     if record["blocking_pass"]:
         print(f"PASS: fuzz qualification complete; record written to "
@@ -1490,6 +1663,8 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     elif record["candidate_sha"] != manifest["candidate_sha"]:
         reasons.append("stale-digest: record candidate sha mismatch with "
                        "manifest")
+    reasons.extend(validate_toolchain_identity(
+        record.get("toolchain_identity")))
     per_target = record.get("per_target")
     if not isinstance(per_target, list):
         reasons.append("malformed: record per_target must be an array")
@@ -1524,6 +1699,20 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = build_arg_parser().parse_args(argv)
     try:
+        defaults = (
+            _default_artifact_paths()
+            if args.mode == "real" or args.manifest is None
+            else {}
+        )
+        if args.manifest is None:
+            args.manifest = str(REPO_ROOT / defaults["manifest"])
+        if args.mode == "real":
+            if args.corpus_manifest is None:
+                args.corpus_manifest = str(
+                    REPO_ROOT / defaults["corpus_manifest"]
+                )
+            if args.record is None:
+                args.record = defaults["record"]
         if args.mode == "fixture":
             return run_fixture_gate(args)
         return run_real_gate(args)

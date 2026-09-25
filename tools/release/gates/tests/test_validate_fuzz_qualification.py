@@ -83,6 +83,11 @@ def _fixture_argv(tmp_path: Path, record_name: str) -> list[str]:
     ]
 
 
+def _valid_toolchain_identity() -> dict:
+    """Return the exact release toolchain identity captured by the gate."""
+    return dict(validator._EXPECTED_FUZZ_TOOLCHAIN_IDENTITY)
+
+
 def _run(monkeypatch, capsys, *flags: str) -> int:
     """Run the validator CLI with staged argv."""
     monkeypatch.setattr(sys, "argv", list(flags))
@@ -137,6 +142,31 @@ def test_valid_fixture_passes(tmp_path: Path, monkeypatch, capsys) -> None:
 
     assert rc == 0
     assert "PASS:" in captured.out
+
+
+def test_fixture_rejects_missing_or_drifted_toolchain_identity(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """Missing and wrong compiler provenance must fail closed."""
+    argv = _fixture_argv(tmp_path, "fuzz-qualification-valid.json")
+    record_path = Path(argv[-1])
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record.pop("toolchain_identity")
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    rc = _run(monkeypatch, capsys, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain_identity" in captured.err
+
+    record["toolchain_identity"] = _valid_toolchain_identity()
+    record["toolchain_identity"]["llvm_version"] = "22.1.8"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    rc = _run(monkeypatch, capsys, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain_identity llvm_version" in captured.err
 
 
 def test_below_threshold_fixture_fails(tmp_path: Path, monkeypatch,
@@ -269,6 +299,9 @@ def test_run_real_gate_writes_the_qualification_record(
     monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
     monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
     monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity",
+        _valid_toolchain_identity)
+    monkeypatch.setattr(
         validator, "validate_corpus_seeds",
         lambda data, sha, names: {"parser_html": {"seed_path": "seed"}})
     corpus_path = tmp_path / "corpus.json"
@@ -298,10 +331,16 @@ def test_run_real_gate_writes_the_qualification_record(
     assert rc == 0
     assert "[PASS] parser_html" in captured.out
     assert "[SKIPPED] convert_html" in captured.out
-    record_path = (tmp_path / validator.DEFAULT_RECORD)
+    record_path = (
+        tmp_path
+        / validator._release_artifact_paths(
+            validator._cargo_package_version()
+        )["record"]
+    )
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["schema_version"] == validator.SCHEMA_VERSION
     assert record["candidate_sha"] == manifest["candidate_sha"]
+    assert record["toolchain_identity"] == _valid_toolchain_identity()
     assert record["blocking_pass"] is True
     assert record["blocking_failures"] == []
     statuses = {entry["target"]: entry["status"]
@@ -320,6 +359,9 @@ def test_run_real_gate_reports_blocking_failures(
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
     monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity",
+        _valid_toolchain_identity)
     monkeypatch.setattr(
         validator, "validate_corpus_seeds",
         lambda data, sha, names: {name: {"seed_path": "seed"}
@@ -347,11 +389,56 @@ def test_run_real_gate_reports_blocking_failures(
     captured = capsys.readouterr()
     assert rc == 1
     assert "FAIL: blocking fuzz targets not qualified" in captured.out
-    record = json.loads(
-        (tmp_path / validator.DEFAULT_RECORD).read_text(encoding="utf-8"))
+    default_record = validator._release_artifact_paths(
+        validator._cargo_package_version()
+    )["record"]
+    record = json.loads((tmp_path / default_record).read_text(encoding="utf-8"))
     assert record["blocking_pass"] is False
     assert sorted(record["blocking_failures"]) == ["convert_html",
                                                    "parser_html"]
+
+
+def test_run_real_gate_fails_closed_on_toolchain_identity_drift(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """Compiler identity drift writes a failed, non-qualifying record."""
+    manifest_path = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {name: {"seed_path": "seed"}
+                                  for name in names})
+
+    def drifted_identity():
+        raise ValueError("malformed: toolchain_identity llvm_version")
+
+    monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity", drifted_identity)
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(corpus_path),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain identity verification failed" in captured.err
+    default_record = validator._release_artifact_paths(
+        validator._cargo_package_version()
+    )["record"]
+    record_path = tmp_path / default_record
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["candidate_sha"] == manifest["candidate_sha"]
+    assert record["toolchain_identity"] is None
+    assert record["blocking_pass"] is False
+    assert record["toolchain_error"] == (
+        "pinned fuzz toolchain identity failed")
+    assert all(entry["status"] == "fail" for entry in record["per_target"])
 
 
 def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
@@ -374,10 +461,10 @@ def test_record_output_path_cannot_change_artifact_name() -> None:
 def test_record_write_target_tracks_default_record_version_root(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The actual record write follows the version in DEFAULT_RECORD."""
+    """The actual record write follows the active Cargo package version."""
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "_cargo_package_version", lambda: "7.8.9")
     record_path = "artifacts/release/7.8.9/fuzz-qualification-record.json"
-    monkeypatch.setattr(validator, "DEFAULT_RECORD", record_path)
     args = type("Args", (), {"output": None, "record": record_path})()
     record = {"candidate_sha": "a" * 40, "blocking_pass": True}
 
@@ -561,6 +648,62 @@ def test_cargo_fuzz_available_uses_the_rustup_shim(
     assert validator._cargo_fuzz_available() is True
 
 
+def test_cargo_fuzz_availability_uses_the_dated_toolchain(monkeypatch) -> None:
+    """Availability checks cannot silently fall back to floating nightly."""
+    commands = []
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/shim/cargo")
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+
+    assert validator._cargo_fuzz_available() is True
+    assert commands == [[
+        "/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "--version"]]
+
+
+def test_collect_toolchain_identity_uses_pinned_rustup_shims(monkeypatch) -> None:
+    """The record captures actual rustc, LLVM, Cargo and cargo-fuzz output."""
+    monkeypatch.setenv("FUZZ_TOOLCHAIN", validator.FUZZ_TOOLCHAIN)
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", validator.FUZZ_TOOLCHAIN)
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/shim/cargo")
+    monkeypatch.setattr(
+        validator, "resolve_rustup_tool_shim",
+        lambda name: f"/shim/{name}")
+    outputs = iter((
+        "rustc 1.100.0-nightly (bba531001 2026-09-20)\n"
+        "binary: rustc\n"
+        "commit-hash: bba531001d4de6d7f49693e0836a2668ca063282\n"
+        "commit-date: 2026-09-20\n"
+        "host: x86_64-unknown-linux-gnu\n"
+        "release: 1.100.0-nightly\n"
+        "LLVM version: 23.1.1\n",
+        "cargo 1.100.0-nightly (495c385d0 2026-09-16)\n",
+        "cargo-fuzz 0.13.1\n",
+    ))
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["timeout"] == 30
+        return types.SimpleNamespace(returncode=0, stdout=next(outputs))
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+
+    identity = validator._collect_fuzz_toolchain_identity()
+
+    assert identity == _valid_toolchain_identity()
+    assert commands == [
+        ["/shim/rustc", f"+{validator.FUZZ_TOOLCHAIN}", "-vV"],
+        ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "--version"],
+        ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "fuzz", "--version"],
+    ]
+
+
 def test_cargo_fuzz_available_rejects_broken_cargo(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -594,7 +737,7 @@ def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
     result = validator._invoke_fuzz("corpus_population", [], 10)
     assert result["returncode"] == 0
     assert seen["command"][0] == "/fake/cargo"
-    assert seen["command"][1] == "+nightly"
+    assert seen["command"][1] == f"+{validator.FUZZ_TOOLCHAIN}"
     assert "stat::number_of_executed_units: 3" in result["stdout"]
 
 
@@ -736,6 +879,7 @@ def test_streaming_capture_decodes_split_multibyte_characters(
     script = ("import sys\n"
               "sys.stdout.buffer.write('crash near \\u00e9\\u00e8\\u20ac ok\\n'"
               ".encode('utf-8'))\n")
+    monkeypatch.setattr(validator, "_STREAM_READ_BYTES", 1)
     _install_streaming_popen(monkeypatch, script)
 
     result = validator._invoke_fuzz("corpus_population", [], 30)
@@ -1886,10 +2030,12 @@ def _process_tree_script(
 ) -> tuple[str, Path, Path]:
     """Create parent/child scripts whose child survives TERM unless group-killed."""
     child_pid_path = tmp_path / "child.pid"
+    child_ready_path = tmp_path / "child.ready"
     child_marker = tmp_path / "child-survived"
     child_code = (
         "import signal, time\n"
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"open({str(child_ready_path)!r}, 'w').write('ready')\n"
         f"time.sleep({marker_delay})\n"
         f"open({str(child_marker)!r}, 'w').write('survived')\n"
         "time.sleep(30)\n"
@@ -1898,10 +2044,16 @@ def _process_tree_script(
         f"time.sleep({parent_startup_delay})\n" if parent_startup_delay else ""
     )
     parent_code = (
-        "import subprocess, sys, time\n"
+        "import os, subprocess, sys, time\n"
         + startup_delay
         + "child = subprocess.Popen([sys.executable, '-c', "
         f"{child_code!r}])\n"
+        f"ready = {str(child_ready_path)!r}\n"
+        "deadline = time.monotonic() + 5\n"
+        "while not os.path.exists(ready) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
+        "if not os.path.exists(ready):\n"
+        "    raise RuntimeError('child did not install its TERM handler')\n"
         f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
         "time.sleep(30)\n"
     )
@@ -2024,6 +2176,34 @@ def test_invoke_fuzz_timeout_terminates_descendant_processes(
         _kill_test_processes(child_pid_path, processes)
 
 
+def test_invoke_fuzz_allows_a_process_tree_to_finish_without_timeout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The timeout harness also preserves a clean, naturally exiting run."""
+    child_marker = tmp_path / "child-finished"
+    child_code = (
+        "import signal\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"open({str(child_marker)!r}, 'w').write('finished')\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        "child.wait()\n"
+        "print('stat::number_of_executed_units: 1')\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 5)
+        assert result["returncode"] == 0
+        assert "stat::number_of_executed_units: 1" in result["stdout"]
+        assert child_marker.read_text(encoding="utf-8") == "finished"
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
 def _assert_timeout_kills_descendants(
     child_pid_path: Path, marker_delay: float, child_marker: Path
 ) -> None:
@@ -2131,10 +2311,8 @@ def test_default_artifact_paths_follow_the_cargo_package_version() -> None:
     """Artifact defaults are derived from Cargo and work for another version."""
     current_version = validator._cargo_package_version()
     current = validator._release_artifact_paths(current_version)
-    assert validator.DEFAULT_MANIFEST == current["manifest"]
-    assert validator.DEFAULT_CORPUS_MANIFEST == current["corpus_manifest"]
-    assert validator.DEFAULT_RECORD == current["record"]
-    assert validator.DEFAULT_LOG_DIR == current["log_dir"]
+    assert validator._default_artifact_paths() == current
+    assert set(current) == {"manifest", "corpus_manifest", "record", "log_dir"}
 
     alternate = validator._release_artifact_paths("7.8.9")
     assert alternate["manifest"] == (
@@ -2147,3 +2325,219 @@ def test_default_artifact_paths_follow_the_cargo_package_version() -> None:
         "artifacts/release/7.8.9/fuzz-qualification-record.json"
     )
     assert alternate["log_dir"] == "artifacts/release/7.8.9/fuzz-logs"
+
+
+def test_cargo_package_version_reads_single_quoted_toml(tmp_path: Path) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = '1.2.3'\n",
+        encoding="utf-8",
+    )
+    assert validator._cargo_package_version(cargo_toml) == "1.2.3"
+
+
+def test_cargo_package_version_resolves_workspace_inheritance(
+    tmp_path: Path,
+) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = { workspace = true }\n"
+        "\n[workspace.package]\nversion = '4.5.6'\n",
+        encoding="utf-8",
+    )
+    assert validator._cargo_package_version(cargo_toml) == "4.5.6"
+
+
+@pytest.mark.parametrize(
+    ("contents", "error"),
+    [("[package\n", "invalid Cargo manifest"),
+     ("[package]\nname = 'converter'\n", "package version not found")],
+)
+def test_cargo_package_version_rejects_invalid_or_missing_version(
+    tmp_path: Path, contents: str, error: str
+) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError, match=error):
+        validator._cargo_package_version(cargo_toml)
+
+
+def test_cargo_package_version_reports_missing_manifest(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="cannot read Cargo manifest"):
+        validator._cargo_package_version(tmp_path / "missing-Cargo.toml")
+
+
+def test_cargo_package_version_rejects_parent_traversal(tmp_path: Path) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = '1.2.3'\n",
+        encoding="utf-8",
+    )
+    traversal_path = tmp_path / "missing" / ".." / "Cargo.toml"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Refusing path with '\.\.' traversal component",
+    ):
+        validator._cargo_package_version(traversal_path)
+
+
+def test_help_does_not_read_the_cargo_manifest(monkeypatch, capsys) -> None:
+    """Argparse help exits before package-version path defaults are resolved."""
+    monkeypatch.setattr(
+        validator,
+        "_cargo_package_version",
+        lambda: pytest.fail("--help must not inspect Cargo.toml"),
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        validator.main(["--help"])
+    assert exit_info.value.code == 0
+    assert "--manifest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("has_existing_record", [False, True])
+def test_atomic_record_write_preserves_canonical_file_on_interruption(
+    tmp_path: Path, monkeypatch, has_existing_record: bool
+) -> None:
+    """A partial temporary write never replaces an old or absent record."""
+    record_path = tmp_path / "fuzz-qualification-record.json"
+    original = '{"candidate_sha":"' + "a" * 40 + '"}\n'
+    if has_existing_record:
+        record_path.write_text(original, encoding="utf-8")
+
+    def interrupt_after_partial_write(record, stream, *, indent=None):
+        stream.write('{"partial":')
+        raise OSError("simulated interrupted write")
+
+    monkeypatch.setattr(validator.json, "dump", interrupt_after_partial_write)
+    with pytest.raises(OSError, match="interrupted"):
+        validator._atomic_write_record(record_path, {"complete": True})
+
+    if has_existing_record:
+        assert record_path.read_text(encoding="utf-8") == original
+        assert json.loads(record_path.read_text(encoding="utf-8"))[
+            "candidate_sha"
+        ] == "a" * 40
+    else:
+        assert not record_path.exists()
+    assert list(tmp_path.iterdir()) == ([record_path] if has_existing_record else [])
+
+
+def test_soak_timeout_marker_must_start_the_stderr_record() -> None:
+    """Mentioning a timeout marker later in worker output is not a timeout."""
+    invocation = {
+        "returncode": -1,
+        "stdout": "",
+        "stderr": "worker note: timed out: while reading prior logs",
+        "wall_elapsed": 1.0,
+        "marker_finding": None,
+    }
+    _, _, failure = validator._soak_outcome(invocation)
+    assert failure == "fuzz run failed with exit code -1"
+
+
+def test_reader_join_uses_one_shared_deadline(monkeypatch) -> None:
+    """Each reader receives only the remainder of the common grace window."""
+    clock = [100.0]
+    waits: list[float] = []
+
+    class _Reader:
+        def join(self, timeout=None):
+            waits.append(timeout)
+            clock[0] += 0.2
+
+    monkeypatch.setattr(validator, "_STREAM_JOIN_GRACE_SECONDS", 0.3)
+    monkeypatch.setattr(validator.time, "monotonic", lambda: clock[0])
+    validator._join_readers([_Reader(), _Reader()])
+    assert waits[0] == pytest.approx(0.3)
+    assert waits[1] == pytest.approx(0.1)
+
+
+def test_process_group_reap_wait_is_bounded(monkeypatch) -> None:
+    """Post-KILL cleanup never calls an unbounded Popen.wait()."""
+    signals: list[int] = []
+    waits: list[float | None] = []
+
+    class _UnreapedProcess:
+        pid = 123
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired("fuzz", timeout)
+
+    monkeypatch.setattr(
+        validator, "_signal_fuzz_process_group", lambda _p, value: signals.append(value)
+    )
+    monkeypatch.setattr(validator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(validator, "_PROCESS_KILL_REAP_SECONDS", 0.25)
+
+    validator._terminate_fuzz_process_group(_UnreapedProcess())
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert waits == [0.25]
+
+
+def test_empty_blocking_worker_pool_returns_empty_records() -> None:
+    """An empty target set has no workers to join and returns cleanly."""
+    assert validator._run_blocking_targets([], {}, deadline=0) == {}
+
+
+def test_invoke_fuzz_first_reader_start_failure_reaps_registered_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Failure to start the first reader still kills and reaps the process."""
+    processes = _install_real_script_popen(
+        monkeypatch, "import time\ntime.sleep(30)\n"
+    )
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    starts: list[int] = []
+
+    def fail_first_start(_thread):
+        starts.append(1)
+        raise RuntimeError("first reader startup failed")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_first_start)
+    try:
+        with pytest.raises(RuntimeError, match="first reader startup failed"):
+            validator._invoke_fuzz("corpus_population", [], 30)
+        assert starts == [1]
+        assert len(processes) == 1
+        assert processes[0].poll() is not None
+        assert processes[0].stdout.closed
+        assert processes[0].stderr.closed
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_invoke_fuzz_registration_cancellation_reaps_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Cancellation arriving just after Popen closes the registration race."""
+    script = "import time\ntime.sleep(30)\n"
+    processes = []
+    cancel = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", cancel)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    def cancel_after_spawn(command, **kwargs):
+        process = _real_popen([sys.executable, "-c", script], **kwargs)
+        processes.append(process)
+        cancel.set()
+        return process
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", cancel_after_spawn)
+
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 10)
+        assert result["returncode"] != 0
+        assert len(processes) == 1
+        assert processes[0].poll() is not None
+        assert processes[0].stdout.closed
+        assert processes[0].stderr.closed
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
