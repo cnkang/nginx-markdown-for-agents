@@ -9,7 +9,9 @@ import pytest
 from tools.harness import detect_ffi_dead_exports as detector
 
 
-def test_header_fallback_finds_multiline_declarations(tmp_path: Path) -> None:
+def test_header_fallback_finds_multiline_declarations(
+    tmp_path: Path, monkeypatch
+) -> None:
     """Fallback parsing retains declarations missed by the typed pattern."""
     header = tmp_path / "markdown_converter.h"
     header.write_text(
@@ -19,6 +21,7 @@ def test_header_fallback_finds_multiline_declarations(tmp_path: Path) -> None:
         ");\n",
         encoding="utf-8",
     )
+    monkeypatch.setattr(detector, "ROOT", tmp_path)
 
     assert "markdown_custom_export" in detector.parse_header_exports(header)
 
@@ -207,7 +210,7 @@ def test_reintroduced_dynconf_lifecycle_pair_is_rejected(monkeypatch) -> None:
         ("markdown_dynconf_result_free", "markdown_dynconf_parse"),
         ("markdown_dynconf_result_init", "markdown_dynconf_parse"),
     ]
-    with pytest.raises(ValueError, match="declared FFI export universe"):
+    with pytest.raises(ValueError, match="live Rust exports"):
         detector._reject_dangling_lifecycle_pairs(universe)
     with pytest.raises(ValueError, match="markdown_dynconf_parse"):
         detector.run_audit()
@@ -288,6 +291,77 @@ def test_declared_rust_exports_ignore_comments_and_string_literals(
     )
     dangling = detector.dangling_lifecycle_pairs(stale_header, rust_exports)
     assert ("markdown_converter_new", "markdown_converter_free") in dangling
+
+
+def test_rust_character_literals_do_not_hide_later_exports(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Quote characters inside Rust char literals leave later code visible."""
+    module = tmp_path / "character_literals.rs"
+    module.write_text(
+        r'''const DOUBLE_QUOTE: char = '"';
+const SINGLE_QUOTE: char = '\'';
+const BYTE_QUOTE: u8 = b'"';
+const HEX_QUOTE: char = '\x22';
+const UNICODE_QUOTE: char = '\u{27}';
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_after_character_literals() {}
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == [
+        "markdown_after_character_literals"
+    ]
+
+
+def test_declared_rust_exports_allow_stacked_attributes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Attributes between no_mangle and the declaration do not hide exports."""
+    module = tmp_path / "stacked_attributes.rs"
+    module.write_text(
+        '#[unsafe(no_mangle)]\n'
+        '#[allow(non_snake_case)]\n'
+        'pub extern "C" fn first_stacked_export() {}\n'
+        '#[cfg(feature = "extra_export")]\n'
+        '#[unsafe(no_mangle)]\n'
+        'pub unsafe extern "C" fn second_stacked_export() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == [
+        "first_stacked_export",
+        "second_stacked_export",
+    ]
+
+
+def test_scanner_rejects_source_symlink_outside_repository(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A symlink inside the source tree cannot authorize reading outside it."""
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.c"
+    outside.write_text("void f(void) { markdown_convert(NULL); }\n", encoding="utf-8")
+    (source_dir / "outside.c").symlink_to(outside)
+    monkeypatch.setattr(detector, "ROOT", repository)
+
+    with pytest.raises(ValueError, match="outside repository root"):
+        detector.scan_c_callsites(source_dir)
 
 
 def test_mask_keeps_string_literal_callsites() -> None:
