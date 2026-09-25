@@ -7,8 +7,9 @@
 > HTML 进，Markdown 出。
 > 客户端请求时返回，或者由你决定何时提供。
 
-> 当前版本线：v0.9.2 已正式发布（2026-09-21）。
-> 这是 v1.0 前最后一次破坏性版本，请使用 v0.9.2 标签安装。
+> 当前版本线：v0.9.2 是发布候选版本，尚未发布。
+> 这是 v1.0 前最后一次破坏性版本。最新公开稳定版本是 v0.9.1，
+> v0.9.2 尚未发布时，请使用 v0.9.1 公开稳定版安装。
 
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
 表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
@@ -150,7 +151,7 @@ curl -sS -D - -o /dev/null \
 
 ## 0.9.2 的变化
 
-0.9.2 是破坏性发布版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
+0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
 - 0.9.2 冻结 20 条有效指令。所列七个退役名称——移除清单中的常用子集，即五个收敛名称加上
   `markdown_profile` 与 `markdown_streaming_zero_copy`——已不再注册，`nginx -t` 会以 NGINX

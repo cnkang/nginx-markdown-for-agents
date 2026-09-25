@@ -96,6 +96,7 @@ permissions: {}
 env:
   RELEASE_VERSION: "0.9.2"
   RUST_TOOLCHAIN: 1.98.1
+  FUZZ_TOOLCHAIN: nightly-2026-09-21
   RUST_FEATURES: streaming,prune_noise_regions
 
 jobs:
@@ -986,7 +987,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   release-gate:
     name: Release Gate
-    needs: [prepare, smoke-test]
+    # The final evidence generation reads the fuzz qualification record this
+    # separate job produces, and artifacts only cross jobs after the producer
+    # finishes; the release gate therefore waits for the fuzz qualification.
+    needs: [prepare, smoke-test, fuzz-qualification]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # This environment supplies the independent candidate promotion anchor and
@@ -1121,12 +1125,28 @@ jobs:
           python3 -m pip install --requirement requirements-release.txt
         shell: bash
 
-      - name: Verify Python Brotli dependency
+      - name: Verify release gate dependencies
         run: |
           set -euo pipefail
-          dependency_versions="$(python3 -c 'import brotli, yaml; print(brotli.__version__, yaml.__version__)')"
-          [[ "${dependency_versions}" == "1.2.0 6.0.2" ]] || {
+          dependency_versions="$(python3 -c 'import brotli, yaml, jsonschema; print(brotli.__version__, yaml.__version__, jsonschema.__version__)')"
+          # jsonschema imports and reports its version without its [format]
+          # extras, but registers none of the format checkers the release
+          # schemas rely on (date-time), and validation silently skips an
+          # unregistered format.  Read the checker registry here so a pin
+          # stripped to a bare `jsonschema` fails this preflight instead of
+          # quietly dropping those checks.
+          format_checkers="$(python3 -c 'from jsonschema import FormatChecker; print("date-time" in FormatChecker().checkers)')"
+          [[ "${format_checkers}" == "True" ]] || {
+            echo "ERROR: jsonschema [format] extras are not installed; the date-time format checker is missing" >&2
+            exit 1
+          }
+          [[ "${dependency_versions}" == "1.2.0 6.0.2 "* ]] || {
             echo "ERROR: release gate requires Brotli==1.2.0 and PyYAML==6.0.2, found ${dependency_versions}" >&2
+            exit 1
+          }
+          jsonschema_version="${dependency_versions##* }"
+          [[ "${jsonschema_version}" == "4.23.0" ]] || {
+            echo "ERROR: release gate requires jsonschema==4.23.0, found ${jsonschema_version}" >&2
             exit 1
           }
           echo "Python release dependencies ${dependency_versions} are available."
@@ -1272,6 +1292,40 @@ jobs:
           GH_TOKEN="${RELEASE_RULESET_TOKEN:-$GH_TOKEN}" \
             python3 tools/release/gates/verify_tag_ref_protection.py \
             --repo "${GITHUB_REPOSITORY}"
+        shell: bash
+
+      - name: Download fuzz qualification record
+        # The final evidence generation in the gate script below reads this
+        # record from the release state; the fuzz qualification runs in its
+        # own job, so the record only reaches this workspace through the
+        # artifact handoff.  A failed fuzz qualification uploads its record
+        # with `if: always()`; this job only runs when that job succeeded
+        # (same `if:` plus the `needs:` gate above), so a missing artifact
+        # here means the producer never wrote it.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fuzz-qualification-record
+          # env.RELEASE_VERSION is this workflow's own static env value
+          # (defined in the top-level env: block), not untrusted input, and
+          # `with.path` is consumed by the action, never evaluated by a
+          # shell; deriving the path from the shared variable keeps the
+          # upload and download ends in sync across version bumps.
+          path: artifacts/release/${{ env.RELEASE_VERSION }}/
+
+      - name: Verify fuzz qualification record was downloaded
+        # The handoff above is the only path the record reaches this job by,
+        # and the final evidence generator reads that record to decide the
+        # blocking fuzz verdict.  The download action fails for a missing
+        # artifact, but an artifact that arrived without the record file
+        # (an upload whose paths matched only the logs) would otherwise
+        # surface much later, as a fuzz failure in the evidence manifest.
+        # Assert the exact file here so the handoff failure names itself.
+        run: |
+          record="artifacts/release/${RELEASE_VERSION}/fuzz-qualification-record.json"
+          [[ -f "${record}" ]] || {
+            echo "ERROR: ${record} is missing; the fuzz-qualification record did not arrive through the artifact handoff" >&2
+            exit 1
+          }
         shell: bash
 
       - name: Run release gates
@@ -1462,7 +1516,7 @@ jobs:
             --candidate-sha "$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
         shell: bash
 
-      - name: Install nightly Rust toolchain for fuzz qualification
+      - name: Install pinned Rust toolchain for fuzz qualification
         run: |
           set -euo pipefail
           # Provision every toolchain serially, up front, with retries.  The
@@ -1490,17 +1544,17 @@ jobs:
           # front so no component download happens mid-qualification.
           retry 5 bash ./packaging/scripts/install-verified-rustup.sh \
             --arch amd64 \
-            --toolchain nightly
-          retry 5 rustup component add --toolchain nightly rust-src
+            --toolchain nightly-2026-09-21
+          retry 5 rustup component add --toolchain nightly-2026-09-21 rust-src
           retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
         shell: bash
 
       - name: Run fuzz qualification
         env:
-          # Resolve every rustup shim to the pinned toolchain: without this,
-          # shims fall back to the channel-based default and concurrent shims
-          # can race to sync the channel.
-          RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
+          # Keep automatic rustup shim resolution and explicit cargo +toolchain
+          # invocations on the same dated nightly used for qualification.
+          FUZZ_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
+          RUSTUP_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REF: ${{ github.ref }}
@@ -1518,10 +1572,16 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-qualification-record
+          # The version comes from this workflow's own static env block,
+          # not untrusted input; `with.path` is an action input (never
+          # shell-evaluated), and one variable keeps both ends in sync.
           path: |
-            artifacts/release/0.9.2/fuzz-qualification-record.json
-            artifacts/release/0.9.2/fuzz-logs/
-          if-no-files-found: warn
+            artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-qualification-record.json
+            artifacts/release/${{ env.RELEASE_VERSION }}/fuzz-logs/
+          # `warn` would let the producer job pass while uploading nothing,
+          # leaving the release-gate download to fail far from the cause;
+          # `error` fails this job instead, next to the missing evidence.
+          if-no-files-found: error
 
   # The official Docker matrix is release-blocking for Docker artifacts in
   # tools/release-matrix.json. Call the reusable workflow with this exact

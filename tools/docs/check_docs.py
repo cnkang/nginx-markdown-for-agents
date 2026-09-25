@@ -28,10 +28,16 @@ from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
 ARCHIVE_SEGMENT = "docs/archive/"
+README_FILENAME = "README.md"
+CHANGELOG_FILENAME = "CHANGELOG.md"
 CHINESE_README = "README_zh-CN.md"
-MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", CHINESE_README}
+BREAKING_CHANGES_GUIDE = "docs/guides/{version}-breaking-changes.md"
+MAINTAINED_ROOT_DOCS = {"AGENTS.md", README_FILENAME, CHINESE_README}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
+MARKDOWN_HEADING_LINE_RE = re.compile(
+    r"^ {0,3}##(?!#)[^\n]*$", re.MULTILINE
+)
 SPEC_INDEX_RE = re.compile(
     r"\bspecs?\s*0*\d+(?:\s*[-–]\s*0*\d+)?\b",
     re.IGNORECASE,
@@ -52,7 +58,9 @@ DATED_CHANGELOG_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
     re.MULTILINE,
 )
-VERSION_HEADING_PREFIX_RE = re.compile(r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]")
+VERSION_HEADING_PREFIX_RE = re.compile(
+    r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]", re.MULTILINE
+)
 
 
 def is_maintained_markdown(rel_path: str) -> bool:
@@ -139,9 +147,7 @@ def _fence_marker(line: str) -> tuple[str, int, str] | None:
     if run < 3:
         return None
     trailing = body[run:].strip()
-    if char == "`" and "`" in trailing:
-        return None
-    return char, run, trailing
+    return None if char == "`" and "`" in trailing else (char, run, trailing)
 
 
 def iter_lines_with_fences(text: str) -> list[tuple[int, str, bool]]:
@@ -329,11 +335,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     version: str | None = None
     errors: list[str] = []
     changelog = _without_fenced_blocks(changelog)
-    for match in re.finditer(
-        r"^ {0,3}##(?!#)[^\n]*$",
-        changelog,
-        re.MULTILINE,
-    ):
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(changelog):
         line = match.group(0)
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
@@ -342,14 +344,12 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
             continue
         if "unreleased" in line.lower():
             errors.append(
-                "CHANGELOG.md: malformed unreleased heading "
+                f"{CHANGELOG_FILENAME}: malformed unreleased heading "
                 f"{line.strip()!r}; expected "
                 "'## [<version>] - Unreleased' or '## [<version>] - "
                 "Unreleased candidate' without suffix"
             )
-    if errors:
-        return None, errors
-    return version, []
+    return (None, errors) if errors else (version, [])
 
 
 def check_release_status_consistency(
@@ -378,7 +378,7 @@ def check_release_status_consistency(
             f"{project_status_path}: missing Current Release Line {version} section"
         ]
 
-    status = section_match.group("body")
+    status = section_match["body"]
     errors: list[str] = []
     if re.search(r"\bstable release\b", status, re.IGNORECASE):
         errors.append(
@@ -485,15 +485,14 @@ def _parse_document_update_version(
     for four-component versions.
     """
     normalized = version.strip().strip("`*[]()\"'")
-    if normalized.startswith("v"):
-        normalized = normalized[1:]
+    normalized = normalized.removeprefix("v")
     numeric: list[int] = []
     remainder = normalized
     while remainder:
         match = re.match(r"(\d+)", remainder)
         if match is None:
             break
-        numeric.append(int(match.group(1)))
+        numeric.append(int(match[1]))
         remainder = remainder[match.end():]
         if remainder.startswith("."):
             remainder = remainder[1:]
@@ -642,9 +641,7 @@ def _claimed_family_count(line: str) -> int | None:
         return 12
     claimed = (re.search(r"(\d{1,12})\s{0,64}metric\s{1,64}famil", line)
                or re.search(r"(\d{1,12})\s{0,64}famil", line))
-    if not claimed:
-        return None
-    return int(claimed.group(1))
+    return int(claimed.group(1)) if claimed else None
 
 
 def _family_count_mismatch(
@@ -716,9 +713,7 @@ _CHECKLIST_CLAIM_RE = re.compile(
 
 def _list_item_indent(line: str) -> int | None:
     """Return the indentation of a task-list item, or None when it is not one."""
-    if not _is_task_list_line(line):
-        return None
-    return len(line) - len(line.lstrip())
+    return len(line) - len(line.lstrip()) if _is_task_list_line(line) else None
 
 
 def _is_task_list_line(line: str) -> bool:
@@ -749,18 +744,16 @@ def check_release_checklist_is_static(files: list[Path]) -> list[str]:
             continue
         content = path.read_text(encoding="utf-8")
         history = _checklist_history(content)
-        for item in _checklist_items(content, history):
-            if _CHECKLIST_SHA_RE.search(item):
-                failures.append(
-                    f"{path}: a requirement names a commit; bind status to the "
-                    "candidate-bound release evidence instead"
-                )
-        for block in _logical_blocks(content, history):
-            if _CHECKLIST_CLAIM_RE.search(block):
-                failures.append(
-                    f"{path}: states mutable candidate status; keep the "
-                    "checklist to requirements"
-                )
+        failures.extend(
+            f"{path}: a requirement names a commit; bind status to the candidate-bound release evidence instead"
+            for item in _checklist_items(content, history)
+            if _CHECKLIST_SHA_RE.search(item)
+        )
+        failures.extend(
+            f"{path}: states mutable candidate status; keep the checklist to requirements"
+            for block in _logical_blocks(content, history)
+            if _CHECKLIST_CLAIM_RE.search(block)
+        )
     return failures
 
 
@@ -866,9 +859,7 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
 def _dated_heading(line: str) -> tuple[str, str] | None:
     """Return (version, date) for a dated release heading."""
     dated = DATED_CHANGELOG_RE.match(line)
-    if dated is None:
-        return None
-    return dated.group("version"), dated.group("date")
+    return None if dated is None else (dated.group("version"), dated.group("date"))
 
 
 def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
@@ -876,7 +867,9 @@ def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
     try:
         date.fromisoformat(raw_date)
     except ValueError:
-        errors.append(f"CHANGELOG.md: invalid release date {raw_date!r} in {line!r}")
+        errors.append(
+            f"{CHANGELOG_FILENAME}: invalid release date {raw_date!r} in {line!r}"
+        )
         return False
     return True
 
@@ -891,7 +884,7 @@ def _order_error(
         return None
     if current[0] >= previous[0] or current[1] > previous[1]:
         return (
-            "CHANGELOG.md: release headings are not in descending "
+            f"{CHANGELOG_FILENAME}: release headings are not in descending "
             f"order at {line!r}"
         )
     return None
@@ -946,7 +939,7 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
     first_seen = False
     previous: tuple[tuple[int, ...], str] | None = None
     changelog = _without_fenced_blocks(changelog)
-    for match in re.finditer(r"^ {0,3}##(?!#)[^\n]*$", changelog, re.MULTILINE):
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(changelog):
         line = match.group(0)
         heading = _classify_changelog_heading(line)
         if heading is None:
@@ -955,7 +948,9 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
         first_seen = True
         kind, heading_version, raw_date = heading
         if kind == "bad":
-            errors.append(f"CHANGELOG.md: unrecognized release heading {line!r}")
+            errors.append(
+                f"{CHANGELOG_FILENAME}: unrecognized release heading {line!r}"
+            )
         elif kind == "dated":
             version, previous = _apply_dated_heading(
                 version,
@@ -967,26 +962,26 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
                 assign_version=first,
             )
     if not first_seen:
-        errors.append("CHANGELOG.md: missing release heading")
+        errors.append(f"{CHANGELOG_FILENAME}: missing release heading")
     return version, errors
 
 
 RELEASE_SURFACE_FILES = (
-    "README.md",
+    README_FILENAME,
     CHINESE_README,
     "docs/project/PROJECT_STATUS.md",
     "docs/project/VERSION_PLANNING.md",
     "docs/guides/INSTALLATION.md",
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
-    "docs/guides/{version}-breaking-changes.md",
+    BREAKING_CHANGES_GUIDE,
     "docs/guides/MIGRATION-{version}.md",
     "docs/development/{version}-implementation-plan.md",
     "docs/releases/{version}-release-notes.md",
     "docs/releases/{version}-upgrade-and-rollback.md",
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
-    "CHANGELOG.md",
+    CHANGELOG_FILENAME,
     "docs/project/README.md",
 )
 
@@ -1021,9 +1016,7 @@ def _split_heading(line: str) -> tuple[int, str] | None:
     if not 1 <= hashes <= 6:
         return None
     rest = line[hashes:]
-    if not rest.startswith((" ", "\t")):
-        return None
-    return hashes, rest.strip()
+    return (hashes, rest.strip()) if rest.startswith((" ", "\t")) else None
 
 
 def _contextual_blocks(
@@ -1137,9 +1130,9 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
     status = re.search(r"^\*\*Status\*\*:(?P<value>.*)$", notes_text, re.MULTILINE)
     if status is None:
         return [f"{rel}: missing release status for released {version}"]
-    value = " ".join(status.group("value").split()).casefold()
+    value = " ".join(status["value"].split()).casefold()
     if value != "stable release":
-        return [f"{rel}: released {version} carries status {status.group('value')!r}"]
+        return [f"{rel}: released {version} carries status {status['value']!r}"]
     return []
 
 
@@ -1182,6 +1175,486 @@ def check_stable_release_surfaces(
     return failures
 
 
+# Surfaces that carry the current release state a reader acts on.  A pending
+# release is judged on these documents, so one document cannot declare a
+# publication the others do not support.
+PENDING_STATE_SURFACES = (
+    README_FILENAME,
+    CHINESE_README,
+    "docs/project/PROJECT_STATUS.md",
+    "docs/project/README.md",
+    "docs/project/VERSION_PLANNING.md",
+    "docs/development/{version}-implementation-plan.md",
+    "docs/guides/INSTALLATION.md",
+    "docs/guides/UPGRADE-TO-{version}.md",
+    "docs/guides/VERSION_ROLLBACK-{version}.md",
+    BREAKING_CHANGES_GUIDE,
+    "docs/releases/{version}-release-notes.md",
+    "docs/releases/{version}-deployment-recommendation.md",
+    "packaging/repo/apt/README.md",
+)
+
+# Reference-only breaking-change guides are scanned for affirmative release
+# claims but do not need to repeat the publication boundary.
+PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
+    BREAKING_CHANGES_GUIDE,
+})
+
+# Wording that ties a mention of the pending version to a later publication.
+# A conditional instruction is honest; an unconditional one reads as a
+# download that works today.
+_PREPUBLICATION_BOUNDARY_RE = re.compile(
+    r"after (?:the )?(?:publication|release)"
+    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+|version|tag)|it|"
+    r"this (?:version|release)|that (?:version|release))"
+    r"\s+(?:is|has been|will be|gets)\s+(?:published|released)"
+    r"|after (?:the )?merge\b"
+    r"|following (?:the )?publication"
+    r"|once (?:the project )?(?:publishes|has published)"
+    r"|once published"
+    r"|post-publication"
+    r"|will become available"
+    r"|release[- ]time template"
+    r"|(?:release|development)[- ]candidate"
+    r"|before (?:the )?(?:publication|release)"
+    r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
+    r"|not (?:yet |currently |presently |now )?(?:published|released)"
+    r"|no\b.{0,100}\b(?:published|released)\b"
+    r"|将(?:会)?(?:已)?(?:正式)?发布|即将(?:正式)?发布"
+    r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
+    re.IGNORECASE,
+)
+
+# Completion verbs.  A sentence that names the pending version with one of these
+# and no local negation or future-publication qualifier states a completed release.
+_PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
+    r"\b(?:shipped|published|released|available)\b|已发布|已正式发布",
+    re.IGNORECASE,
+)
+_NEGATED_COMPLETION_CLAIM_RE = re.compile(
+    r"\b(?:not|never|no)\s+(?:(?:yet|still|currently|presently|now|longer|been|be|become|officially|formally)\s+)*$"
+    r"|\b(?:isn't|aren't|wasn't|weren't|hasn't|haven't)\s+"
+    r"(?:(?:yet|still|currently|presently|now|been)\s+)*$"
+    r"|\bno\b.{0,100}\b(?:is|are|was|were|has been|have been)\s*$",
+    re.IGNORECASE,
+)
+# How far a completion verb may sit from the pending version and still read as
+# a claim about it.  A verb that belongs to another release sits further away
+# or carries a sentence break between the two.
+_ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+(?![\w.-])")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<!e\.g\.)(?<=[.!?])\s+", re.IGNORECASE)
+# A completion verb with no nearby version token only reads as a claim about the
+# pending line when the sentence also names a release subject.  Heading context
+# alone must not turn ordinary wording (e.g. "The new directive is available.")
+# into a publication claim.
+_RELEASE_SUBJECT_RE = re.compile(
+    r"\b(?:release|version|tag|build|package|artifact|assets?)\b",
+    re.IGNORECASE,
+)
+
+
+def _first_dated_changelog_version(changelog: str) -> str | None:
+    """Return the newest released version, or None while none is dated.
+
+    The first dated heading is the released one: an unreleased entry above it
+    belongs to the pending line, and that line has no publication date yet.
+    """
+    text = _without_fenced_blocks(changelog)
+    for match in MARKDOWN_HEADING_LINE_RE.finditer(text):
+        dated = DATED_CHANGELOG_RE.match(match.group(0))
+        if dated is not None:
+            return dated.group("version")
+    return None
+
+
+def _is_conditional_publication_block(block: str) -> bool:
+    """Return whether a block marks the pending version as not yet published."""
+    if _STALE_RELEASE_CLAIM_RE.search(block) is not None:
+        return True
+    return _PREPUBLICATION_BOUNDARY_RE.search(block) is not None
+
+
+def _publication_claim_window(block: str, version_pattern: "re.Pattern[str]") -> str:
+    """Return sentence text about the pending version, including its context.
+
+    Sentence boundaries keep claims about another release out of scope while
+    preserving nearby negation or publication timing that qualifies a verb.
+    """
+    return " ".join(
+        sentence
+        for sentence in _SENTENCE_SPLIT_RE.split(block)
+        if version_pattern.search(sentence) is not None
+    )
+
+
+def _completion_claim_is_nonaffirmative(
+    sentence: str, claim: re.Match[str]
+) -> bool:
+    """Ignore a negated claim or future availability tied to publication."""
+    prefix = re.sub(r"\s+", " ", sentence[:claim.start()].replace(">", " "))
+    context = re.sub(r"\s+", " ", sentence.replace(">", " ").replace("`", ""))
+    if _NEGATED_COMPLETION_CLAIM_RE.search(prefix) is not None:
+        return True
+    if claim.group(0) in {"已发布", "已正式发布"} and re.search(
+        r"(?:将会|将|即将)\s*$", prefix
+    ):
+        return True
+    claim_word = claim.group(0).lower()
+    if claim_word in {"published", "released", "shipped"}:
+        future_publication = re.search(
+            r"\b(?:once|will\s+be|after\b[^!?]*\b"
+            r"(?:is|has been|will be|gets))\s*$",
+            prefix,
+            re.IGNORECASE,
+        )
+        if (
+            future_publication is not None
+            and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None
+        ):
+            return True
+    if claim_word != "available":
+        return False
+    future = re.search(
+        r"\b(?:will\s+)?become(?:s)?\s*$|\bwill\s+be\s*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    if future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None:
+        return True
+    after_claim = sentence[claim.end() :]
+    return re.search(
+        r"^\s*(?:only\s+)?(?:after\s+(?:the\s+)?(?:publication|release)\b"
+        r"|after\s+(?:(?:the\s+)?(?:v?\d+\.\d+\.\d+|version|tag|release)\s+)?"
+        r"(?:is|has been|will be|gets)\s+(?:published|released)\b"
+        r"|once\s+(?:it\s+is\s+)?published\b"
+        r"|following\s+(?:the\s+)?publication\b)",
+        after_claim,
+        re.IGNORECASE,
+    ) is not None
+
+
+def _nearest_version_to_claim(
+    window: str, claim: re.Match[str]
+) -> re.Match[str] | None:
+    """Return the version token closest to a completion verb."""
+    if versions := list(_ANY_VERSION_RE.finditer(window)):
+        return min(versions, key=lambda span: abs(span.start() - claim.start()))
+    else:
+        return None
+
+
+def _published_until_tag_exception(
+    window: str, claim: re.Match[str], pending_span: re.Match[str]
+) -> bool:
+    """Return whether a "published ... until ... tag" phrasing is exempt."""
+    if claim.start() >= pending_span.start() or claim.group(0).lower() != "published":
+        return False
+    between = window[claim.end():pending_span.start()]
+    return re.search(r"\buntil\b", between, re.IGNORECASE) is not None and re.search(
+        r"\btag\b", between, re.IGNORECASE
+    ) is not None
+
+
+def _claim_names_pending_version(
+    window: str,
+    claim: re.Match[str],
+    pending: "re.Pattern[str]",
+    version_context: bool,
+) -> bool:
+    """Return whether a single completion claim affirms the pending version."""
+    nearest = _nearest_version_to_claim(window, claim)
+    if nearest is None:
+        # Without a version token, heading context alone is not enough: the
+        # sentence must also name a release subject, and a bare "available"
+        # (no such subject) stays ordinary wording rather than a claim.
+        if not version_context or _RELEASE_SUBJECT_RE.search(window) is None:
+            return False
+        return not _completion_claim_is_nonaffirmative(window, claim)
+    if pending.fullmatch(nearest.group(0)) is None:
+        return False
+    if _published_until_tag_exception(window, claim, nearest):
+        return False
+    return not _completion_claim_is_nonaffirmative(window, claim)
+
+
+def _pending_completion_claim(
+    window: str, pending_version: str, version_context: bool = False
+) -> re.Match[str] | None:
+    """Return the first affirmative completion claim tied to the pending version."""
+    pending = re.compile(rf"\bv?{re.escape(pending_version)}(?![\w.-])")
+    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
+        if _claim_names_pending_version(window, claim, pending, version_context):
+            return claim
+    return None
+
+
+def _claim_belongs_to_pending_version(
+    window: str, pending_version: str, version_context: bool = False
+) -> bool:
+    """Return whether an affirmative completion verb names the pending version.
+
+    The nearest version token decides, so a published baseline is not mistaken
+    for a claim about the pending line in a sentence that names both.
+    """
+    return _pending_completion_claim(window, pending_version, version_context) is not None
+
+
+def _claims_pending_latest_tag(
+    block: str, pending_version: str, version_context: bool = False
+) -> bool:
+    """Return whether the pending version is called the latest tag or release."""
+    version = re.compile(rf"\bv?{re.escape(pending_version)}\b")
+    latest_tag = (
+        r"\b(?:latest|most recent)\s+"
+        r"(?:(?:public|published|stable)\s+)*(?:tag|release)\b"
+    )
+    forward = re.compile(
+        rf"{latest_tag}\s*(?:is\s+)?[:=]?\s*{version.pattern}", re.IGNORECASE
+    )
+    reverse = re.compile(
+        version.pattern + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
+        re.IGNORECASE,
+    )
+    for sentence in _SENTENCE_SPLIT_RE.split(block):
+        plain = sentence.replace("**", "").replace("`", "")
+        if forward.search(plain) or reverse.search(plain):
+            return True
+        latest_match = re.search(latest_tag, plain, re.IGNORECASE)
+        if latest_match is not None and version_context:
+            nearest = _nearest_version_to_claim(plain, latest_match)
+            if nearest is None or version.fullmatch(nearest.group(0)) is not None:
+                return True
+    return False
+
+
+def _pending_sentence_failures(
+    rel: str,
+    sentence: str,
+    pending_version: str,
+    version_pattern: "re.Pattern[str]",
+    version_context: bool = False,
+) -> tuple[list[str], bool]:
+    """Validate one current-state sentence about the pending release."""
+    sentence_names_version = version_pattern.search(sentence) is not None
+    if not sentence_names_version and not version_context:
+        return [], False
+    boundary = _is_conditional_publication_block(sentence)
+    window = (
+        _publication_claim_window(sentence, version_pattern)
+        if sentence_names_version
+        else sentence
+    )
+    claim = _pending_completion_claim(window, pending_version, version_context)
+    if claim is not None:
+        return [
+            f"{rel}: pending {pending_version} is described as "
+            f"{claim.group(0)!r} without a publication boundary in: "
+            f"{sentence[:80]!r}"
+        ], boundary
+    return [], boundary
+
+
+def _pending_document_failures(
+    root: Path,
+    rel: str,
+    pending_version: str,
+    require_boundary: bool = True,
+) -> list[str]:
+    """Validate all current-state blocks for one pending-release surface."""
+    path = root / rel
+    if not path.is_file():
+        return [f"{rel}: required release-state surface is missing"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    return _pending_text_failures(
+        rel, text, pending_version, require_boundary=require_boundary
+    )
+
+
+def _pending_text_failures(
+    rel: str,
+    text: str,
+    pending_version: str,
+    require_boundary: bool = True,
+    include_heading_context: bool = False,
+) -> list[str]:
+    """Validate pending-release prose in a named current-state surface.
+
+    Heading context is enabled only for the changelog's already-scoped current
+    Unreleased section; ordinary documents can contain historical version
+    headings whose prose is not a claim about today's pending release.
+    """
+    version_pattern = re.compile(
+        rf"\bv?{re.escape(pending_version)}(?![\w.-])"
+    )
+    text = _without_fenced_blocks(text)
+    history = set(_document_update_table_lines(text))
+    failures: list[str] = []
+    boundary_seen = False
+    blocks = (
+        _contextual_blocks(text, history, version_pattern)
+        if include_heading_context
+        else [(block, False) for block in _logical_blocks(text, history)]
+    )
+    for block, version_context in blocks:
+        if not version_context and version_pattern.search(block) is None:
+            continue
+        if _claims_pending_latest_tag(block, pending_version, version_context):
+            failures.append(
+                f"{rel}: pending {pending_version} is identified as the latest tag "
+                "or stable release"
+            )
+        for sentence in _SENTENCE_SPLIT_RE.split(block):
+            sentence_failures, boundary = _pending_sentence_failures(
+                rel,
+                sentence,
+                pending_version,
+                version_pattern,
+                version_context,
+            )
+            failures.extend(sentence_failures)
+            boundary_seen = boundary_seen or boundary
+    if require_boundary and not boundary_seen:
+        failures.append(
+            f"{rel}: pending {pending_version} needs one explicit "
+            "publication boundary in current-state prose"
+        )
+    return failures
+
+
+def _current_unreleased_changelog_section(
+    changelog: str, pending_version: str
+) -> str:
+    """Return only the matching Unreleased section, excluding history/fences."""
+    text = _without_fenced_blocks(changelog)
+    for match in UNRELEASED_CHANGELOG_RE.finditer(text):
+        if match.group("version") != pending_version:
+            continue
+        next_heading = VERSION_HEADING_PREFIX_RE.search(text, match.end())
+        end = next_heading.start() if next_heading is not None else len(text)
+        return text[match.start():end]
+    return ""
+
+
+def check_pending_release_state(
+    root: Path,
+    pending_version: str,
+    surface_rel_paths: tuple[str, ...] = PENDING_STATE_SURFACES,
+) -> list[str]:
+    """Reject current-state claims that a pending release is published."""
+    failures: list[str] = []
+    for template in surface_rel_paths:
+        rel = template.format(version=pending_version)
+        failures.extend(
+            _pending_document_failures(
+                root,
+                rel,
+                pending_version,
+                require_boundary=(
+                    template not in PENDING_BOUNDARY_OPTIONAL_SURFACES
+                ),
+            )
+        )
+    return failures
+
+
+def _published_baseline_failures(root: Path, published_version: str) -> list[str]:
+    """Require the published baseline release to stay canonical.
+
+    A pending line sits on top of a real publication, so the checks confirm
+    that the published release notes still carry the stable status and the
+    changelog date that the release declared.
+    """
+    failures = _release_notes_status_failures(
+        root / "docs" / "releases" / f"{published_version}-release-notes.md",
+        published_version,
+    )
+    changelog_path = root / CHANGELOG_FILENAME
+    if not changelog_path.is_file():
+        return failures
+    changelog = _without_fenced_blocks(
+        changelog_path.read_text(encoding="utf-8", errors="ignore")
+    )
+    heading = re.search(
+        rf"^ {{0,3}}##[ \t]+\[{re.escape(published_version)}\][ \t]*-[ \t]*"
+        rf"(?P<date>\d{{4}}-\d{{2}}-\d{{2}})[ \t]*$",
+        changelog,
+        re.MULTILINE,
+    )
+    if heading is None:
+        failures.append(
+            f"{CHANGELOG_FILENAME}: published {published_version} has no dated heading"
+        )
+        return failures
+    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
+    if notes.is_file():
+        declared = re.search(
+            r"^\*\*Date\*\*:(?P<value>.*)$",
+            _without_fenced_blocks(notes.read_text(encoding="utf-8", errors="ignore")),
+            re.MULTILINE,
+        )
+        if (
+            declared is not None
+            and declared["value"].strip() != heading["date"]
+        ):
+            failures.append(
+                f"docs/releases/{published_version}-release-notes.md: date {declared['value'].strip()!r} does not match CHANGELOG date {heading['date']!r}"
+            )
+    return failures
+
+
+def check_release_state_contract(
+    root: Path,
+    surface_rel_paths: tuple[str, ...] = PENDING_STATE_SURFACES,
+) -> list[str]:
+    """Run the release-state contract in the direction the changelog declares.
+
+    An unreleased top entry means the pending version must not read as
+    published while the latest dated release stays canonical.  A dated top
+    entry means the released version must not read as pending, so the same
+    contract accepts the post-publication state.
+    """
+    changelog_path = root / CHANGELOG_FILENAME
+    if not changelog_path.is_file():
+        return []
+    changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
+    pending_version, errors = _find_unreleased_changelog_line(changelog)
+    if errors:
+        return errors
+    if pending_version is not None:
+        failures = check_pending_release_state(root, pending_version, surface_rel_paths)
+        if current_section := _current_unreleased_changelog_section(
+            changelog, pending_version
+        ):
+            failures.extend(
+                _pending_text_failures(
+                    CHANGELOG_FILENAME, current_section, pending_version,
+                    require_boundary=False,
+                    include_heading_context=True,
+                )
+            )
+        published_version = _first_dated_changelog_version(changelog)
+        if published_version is not None:
+            failures.extend(_published_baseline_failures(root, published_version))
+        return failures
+    published_version = _first_dated_changelog_version(changelog)
+    if published_version is None:
+        return []
+    failures: list[str] = []
+    for template in surface_rel_paths:
+        rel = template.format(version=published_version)
+        path = root / rel
+        if not path.is_file():
+            continue
+        failures.extend(
+            _stable_claim_failures(
+                rel,
+                published_version,
+                path.read_text(encoding="utf-8", errors="ignore"),
+            )
+        )
+    return failures
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -1195,7 +1668,7 @@ def main() -> int:
     failures.extend(check_english_policy(files))
     failures.extend(check_internal_reference_policy(files))
     failures.extend(check_operator_config_examples(files))
-    changelog_path = ROOT / "CHANGELOG.md"
+    changelog_path = ROOT / CHANGELOG_FILENAME
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
     # Use the unreleased-changelog regex so validation targets the version
     # under development, not the latest released version.
@@ -1217,10 +1690,12 @@ def main() -> int:
     )
     stable_ran, stable_failures = _stable_surface_check(changelog, ROOT)
     failures.extend(stable_failures)
+    failures.extend(check_release_state_contract(ROOT))
     failures.extend(check_duplicate_sync())
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
     failures.extend(check_release_checklist_is_static(files))
+    failures = list(dict.fromkeys(failures))
 
     if failures:
         print("Documentation checks failed:")
@@ -1230,20 +1705,31 @@ def main() -> int:
 
     print("Documentation checks passed:")
     print(f"- Markdown files checked (excluding docs/archive and gitignored paths): {len(files)}")
-    print("- Local links: OK")
-    print("- Heading hierarchy: OK")
-    print("- English docs policy (Han-character scan): OK")
-    print("- Internal reference policy (tracked paths/no 'spec X'): OK")
+    _print_status_lines(
+        "- Local links: OK",
+        "- Heading hierarchy: OK",
+        "- English docs policy (Han-character scan): OK",
+        "- Internal reference policy (tracked paths/no 'spec X'): OK",
+    )
     print("- Operator configuration examples: OK")
     print("- Unreleased/stable release status consistency: OK")
     print(
         "- Stable release surface consistency: "
         + ("OK" if stable_ran else "SKIPPED (no dated release in CHANGELOG)")
     )
-    print("- Duplicate canonical/mirror sync: OK")
-    print("- Document Updates chronological order (descending): OK")
-    print("- Release checklist states requirements only: OK")
+    _print_status_lines(
+        "- Pending/released release-state contract: OK",
+        "- Duplicate canonical/mirror sync: OK",
+        "- Document Updates chronological order (descending): OK",
+        "- Release checklist states requirements only: OK",
+    )
     return 0
+
+
+def _print_status_lines(*lines: str) -> None:
+    """Print each status line on its own row."""
+    for line in lines:
+        print(line)
 
 
 if __name__ == "__main__":

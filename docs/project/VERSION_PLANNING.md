@@ -9,10 +9,12 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current released line (published 2026-09-21), building on
-  the v0.9.1 baseline-consolidation and compatibility-reset release.
-- Release version metadata is 0.9.2. The release shipped with the tag,
-  assets, and checksums.
+- v0.9.2 is the current development line and is a release candidate. The
+  project plans to publish it after the merge and candidate-bound gates pass.
+  The release consolidates the v0.9.1 baseline and resets compatibility.
+- 0.9.1 is the latest released version (2026-07-29).
+- Development version metadata is 0.9.2. The release tag, assets, and
+  checksums stay pending until the blocking gates pass.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
@@ -49,10 +51,10 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Release Evidence
 
-The exact branch head passed the release-gates-check-092 evidence chain,
-and the team reviewed the release artifacts before publication. v0.9.2 is a
-published stable release. Passing local gates alone does not declare a
-published stable release.
+v0.9.2 remains a release candidate until the merge lands, the exact branch
+head passes the release-gates-check-092 evidence chain, and the team
+reviews the release artifacts. Passing local gates alone does not declare
+a published stable release.
 
 ## Historical v0.9.1 baseline
 
@@ -63,7 +65,8 @@ for the current plan, not an active release objective.
 
 ## v1.0 Contract Freeze
 
-With v0.9.2 published, v1.0 preparation is a stabilization phase rather
+After the project publishes v0.9.2, v1.0 preparation is a stabilization
+phase rather
 than another baseline reset.
 
 ### Freeze Rules
@@ -72,8 +75,8 @@ than another baseline reset.
   and failure behavior.
 - Existing structures and exported functions at the bundled internal Rust/C
   boundary retain their documented layout and ownership rules. This is an
-  internal bundled boundary, not a public external ABI. Additions must be
-  append-only or versioned within that contract.
+  internal bundled boundary, not a public external ABI. Additions must stay
+  append-only or take a versioned form within that contract.
 - Diagnostics, metrics, and reason labels follow their declared stability
   level, stable names are not repurposed.
 - Supported NGINX/OS/libc/architecture targets do not shrink silently.
@@ -115,7 +118,7 @@ The comparison needs a frozen previous-release baseline, a reproducible way to
 produce it, and per-surface compatibility rules that distinguish an additive
 extension from a break.  Negative fixtures must show that editing source and the
 new inventory together cannot hide a breaking change.  The gate belongs behind a
-generic target, not one named after a specification number.
+generic target, not one whose name cites a specification number.
 
 This is deliberately not part of v0.9.2: the release keeps the detector and its
 current-release shape constants as they are, and a compatibility gate is a v1.0
@@ -153,9 +156,11 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
+| 0.9.2 | 2026-09-22 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
-| 0.9.2 | 2026-09-21 | Hermes | Release date corrected to the actual publication day |
-| 0.9.2 | 2026-09-19 | Kang | Release finalization: current release state and release evidence updated for the published v0.9.2 |
+| 0.9.2 | 2026-09-21 | Hermes | Updated status: publication pending; no release date is set |
+| 0.9.2 | 2026-09-19 | Kang | Release-state wording and release evidence prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
 | 0.9.1 | 2026-07-14 | Codex | Replaced obsolete 0.4-to-0.6 planning with the final pre-v1.0 baseline, freeze, and post-v1.0 compatibility contract |

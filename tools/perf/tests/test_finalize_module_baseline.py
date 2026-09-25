@@ -224,7 +224,6 @@ def test_git_outside_allowlist_is_controlled_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A git path rejected by the allowlist returns a controlled warning."""
-    import finalize_module_baseline as mod
     from lib import executable_validation
 
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)

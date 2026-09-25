@@ -9,7 +9,9 @@ import pytest
 from tools.harness import detect_ffi_dead_exports as detector
 
 
-def test_header_fallback_finds_multiline_declarations(tmp_path: Path) -> None:
+def test_header_fallback_finds_multiline_declarations(
+    tmp_path: Path, monkeypatch
+) -> None:
     """Fallback parsing retains declarations missed by the typed pattern."""
     header = tmp_path / "markdown_converter.h"
     header.write_text(
@@ -19,6 +21,7 @@ def test_header_fallback_finds_multiline_declarations(tmp_path: Path) -> None:
         ");\n",
         encoding="utf-8",
     )
+    monkeypatch.setattr(detector, "ROOT", tmp_path)
 
     assert "markdown_custom_export" in detector.parse_header_exports(header)
 
@@ -126,6 +129,239 @@ def test_callsite_names_ignores_multiline_comment_body() -> None:
     names = detector._callsite_names(text)
     assert "markdown_convert" in names
     assert "markdown_decompress" not in names
+
+
+def test_declared_export_universe_covers_header_and_rust_modules() -> None:
+    """The universe is the declared Rust exports plus the generated header."""
+    universe = detector.declared_ffi_export_universe()
+
+    rust_exports = detector.declared_rust_exports()
+    assert rust_exports
+    assert {"markdown_convert", "markdown_abi_version"} <= set(rust_exports)
+    # The removed dynconf surface must not be part of the current universe.
+    assert {
+        "markdown_dynconf_parse",
+        "markdown_dynconf_result_init",
+        "markdown_dynconf_result_free",
+    }.isdisjoint(universe)
+    # Reason-code helpers are generated into the header only, so the universe
+    # is the union of both sides rather than the Rust modules alone.
+    header_exports = detector.parse_header_exports(detector.FFI_HEADER)
+    assert universe == set(header_exports) | set(rust_exports)
+    assert set(header_exports) <= universe
+    assert set(rust_exports) <= universe
+
+
+def test_declared_rust_exports_discover_added_ffi_modules(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A new Rust module is included without updating a fixed module list."""
+    (tmp_path / "exports.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn base_export() {}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "future.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn future_export() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == ["base_export", "future_export"]
+
+
+def test_current_lifecycle_pairs_all_belong_to_the_export_universe() -> None:
+    """Every current pair names live exports, so the invariant passes."""
+    universe = detector.declared_ffi_export_universe()
+
+    assert detector.dangling_lifecycle_pairs(universe) == []
+    assert set(detector.LIFECYCLE_PAIRS) <= universe
+    assert set(detector.LIFECYCLE_PAIRS.values()) <= universe
+    # The removed dynconf pairs are the stale entries this invariant exists
+    # to catch; they must be gone from the table itself.
+    assert {
+        "markdown_dynconf_result_init",
+        "markdown_dynconf_result_free",
+    }.isdisjoint(detector.LIFECYCLE_PAIRS)
+
+
+def test_reintroduced_dynconf_lifecycle_pair_is_rejected(monkeypatch) -> None:
+    """A pair naming a removed export must fail the universe invariant.
+
+    This is the mutation the fix guards against: restoring an obsolete pair
+    the current tree no longer declares.
+    """
+    universe = detector.declared_ffi_export_universe()
+    obsolete_pair = {
+        "markdown_dynconf_result_init": "markdown_dynconf_parse",
+        "markdown_dynconf_result_free": "markdown_dynconf_parse",
+    }
+
+    mutated = dict(detector.LIFECYCLE_PAIRS)
+    mutated.update(obsolete_pair)
+    restored = detector.LIFECYCLE_PAIRS
+    monkeypatch.setattr(detector, "LIFECYCLE_PAIRS", mutated)
+    dangling = detector.dangling_lifecycle_pairs(universe)
+    assert dangling == [
+        ("markdown_dynconf_result_free", "markdown_dynconf_parse"),
+        ("markdown_dynconf_result_init", "markdown_dynconf_parse"),
+    ]
+    with pytest.raises(ValueError, match="live Rust exports"):
+        detector._reject_dangling_lifecycle_pairs(universe)
+    with pytest.raises(ValueError, match="markdown_dynconf_parse"):
+        detector.run_audit()
+
+    monkeypatch.undo()
+    assert detector.LIFECYCLE_PAIRS is restored
+    assert detector.dangling_lifecycle_pairs(universe) == []
+
+
+def test_run_audit_wires_the_universe_invariant() -> None:
+    """The production audit path enforces the invariant on this tree."""
+    inventory = detector.run_audit()
+
+    assert inventory["summary"]["dead"] == 0
+    assert inventory["total_exports"] == len(
+        detector.parse_header_exports(detector.FFI_HEADER)
+    )
+
+
+def test_lifecycle_pairs_reject_a_rust_removed_export_even_if_header_is_stale(
+    monkeypatch,
+) -> None:
+    """A stale generated header cannot hide a removed Rust lifecycle symbol."""
+    export_name = sorted(detector.LIFECYCLE_PAIRS)[0]
+    header_exports = detector.parse_header_exports(detector.FFI_HEADER)
+    rust_exports = detector.declared_rust_exports()
+    assert export_name in header_exports
+    assert export_name in rust_exports
+
+    stale_rust_exports = [name for name in rust_exports if name != export_name]
+    universe = detector.declared_ffi_export_universe(
+        header_exports, stale_rust_exports
+    )
+    assert export_name in universe  # the stale generated header still says it exists
+    dangling = detector.dangling_lifecycle_pairs(universe, stale_rust_exports)
+    assert any(key == export_name or value == export_name for key, value in dangling)
+    with pytest.raises(ValueError, match=export_name):
+        detector._reject_dangling_lifecycle_pairs(universe, stale_rust_exports)
+
+    monkeypatch.setattr(
+        detector, "declared_rust_exports", lambda: stale_rust_exports
+    )
+    with pytest.raises(ValueError, match=export_name):
+        detector.run_audit()
+
+
+def test_declared_rust_exports_ignore_comments_and_string_literals(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Only live Rust declarations belong to the FFI export set."""
+    module = tmp_path / "commented_exports.rs"
+    module.write_text(
+        'const DOC: &str = r###"#[unsafe(no_mangle)] pub extern "C" '
+        'fn markdown_converter_free() {}"###;\n'
+        'const COOKED: &str = "literal // and /* markers";\n'
+        '// #[unsafe(no_mangle)] pub extern "C" fn markdown_converter_free() {}\n'
+        '/* outer /* nested */ #[unsafe(no_mangle)] pub extern "C" '
+        'fn markdown_result_init() {} */\n'
+        '#[unsafe(no_mangle)]\npub extern "C" fn markdown_converter_new() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    nested_comment = "/* outer /* inner */ tail */"
+    assert (
+        detector._rust_block_comment_end(nested_comment, 0) == len(nested_comment)
+    )
+
+    rust_exports = detector.declared_rust_exports()
+    assert rust_exports == ["markdown_converter_new"]
+    stale_header = frozenset(
+        {"markdown_converter_new", "markdown_converter_free"}
+    )
+    dangling = detector.dangling_lifecycle_pairs(stale_header, rust_exports)
+    assert ("markdown_converter_new", "markdown_converter_free") in dangling
+
+
+def test_rust_character_literals_do_not_hide_later_exports(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Quote characters inside Rust char literals leave later code visible."""
+    module = tmp_path / "character_literals.rs"
+    module.write_text(
+        r'''const DOUBLE_QUOTE: char = '"';
+const SINGLE_QUOTE: char = '\'';
+const BYTE_QUOTE: u8 = b'"';
+const HEX_QUOTE: char = '\x22';
+const UNICODE_QUOTE: char = '\u{27}';
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_after_character_literals() {}
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == [
+        "markdown_after_character_literals"
+    ]
+
+
+def test_declared_rust_exports_allow_stacked_attributes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Attributes between no_mangle and the declaration do not hide exports."""
+    module = tmp_path / "stacked_attributes.rs"
+    module.write_text(
+        '#[unsafe(no_mangle)]\n'
+        '#[allow(non_snake_case)]\n'
+        'pub extern "C" fn first_stacked_export() {}\n'
+        '#[cfg(feature = "extra_export")]\n'
+        '#[unsafe(no_mangle)]\n'
+        'pub unsafe extern "C" fn second_stacked_export() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert detector.declared_rust_exports() == [
+        "first_stacked_export",
+        "second_stacked_export",
+    ]
+
+
+def test_scanner_rejects_source_symlink_outside_repository(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A symlink inside the source tree cannot authorize reading outside it."""
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.c"
+    outside.write_text("void f(void) { markdown_convert(NULL); }\n", encoding="utf-8")
+    (source_dir / "outside.c").symlink_to(outside)
+    monkeypatch.setattr(detector, "ROOT", repository)
+
+    with pytest.raises(ValueError, match="outside repository root"):
+        detector.scan_c_callsites(source_dir)
 
 
 def test_mask_keeps_string_literal_callsites() -> None:

@@ -654,6 +654,53 @@ test_copy_content_encoding_reports_malformed_list(void)
     TEST_PASS("Content-Encoding copy reports malformed lists explicitly");
 }
 
+
+static void
+test_measure_content_encoding_rejects_malformed_and_overflow(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t     headers[2];
+    ngx_str_t           sentinel;
+    const ngx_str_t    *single_value;
+    ngx_uint_t          match_count;
+    size_t              total_len;
+
+    TEST_SUBSECTION("Content-Encoding measurement error guards");
+    init_request(&r);
+    sentinel.data = (u_char *) "sentinel";
+    sentinel.len = sizeof("sentinel") - 1;
+    single_value = &sentinel;
+    match_count = 7;
+    total_len = 11;
+    r.headers_out.headers.part.elts = NULL;
+    r.headers_out.headers.part.nelts = 1;
+
+    TEST_ASSERT(ngx_http_markdown_measure_content_encoding(
+                    &r, &single_value, &match_count, &total_len) == NGX_ERROR,
+        "measurement must reject a nonempty list part without storage");
+    TEST_ASSERT(single_value == NULL && match_count == 0 && total_len == 0,
+        "malformed-list failure must clear measured output state");
+
+    memset(headers, 0, sizeof(headers));
+    headers[0].key.data = (u_char *) "Content-Encoding";
+    headers[0].key.len = sizeof("Content-Encoding") - 1;
+    headers[0].hash = 1;
+    headers[0].value.data = (u_char *) "x";
+    headers[0].value.len = SIZE_MAX - 1;
+    headers[1].key = headers[0].key;
+    headers[1].hash = 1;
+    headers[1].value.data = (u_char *) "y";
+    headers[1].value.len = 1;
+    r.headers_out.headers.part.elts = headers;
+    r.headers_out.headers.part.nelts = 2;
+
+    TEST_ASSERT(ngx_http_markdown_measure_content_encoding(
+                    &r, &single_value, &match_count, &total_len) == NGX_ERROR,
+        "measurement must reject separator addition overflow");
+    TEST_PASS("Content-Encoding measurement rejects malformed and "
+        "overflow inputs");
+}
+
 /*
  * Regression: Content-Encoding collection failure must mark the request
  * ineligible and record the error category BEFORE any error-policy
@@ -2106,6 +2153,7 @@ main(void)
     test_collect_content_encoding_repeated_fields();
     test_collect_content_encoding_allocation_failure();
     test_copy_content_encoding_reports_malformed_list();
+    test_measure_content_encoding_rejects_malformed_and_overflow();
     test_collection_failure_handler_dispatch();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();

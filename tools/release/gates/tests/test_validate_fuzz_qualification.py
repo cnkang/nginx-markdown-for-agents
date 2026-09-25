@@ -1,9 +1,17 @@
 """Regression tests for the fuzz qualification gate validator."""
 
+
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
+import subprocess
 import sys
+import threading
+import time
+import types
 from pathlib import Path
 
 import pytest
@@ -11,6 +19,43 @@ import pytest
 from tools.release.gates import validate_fuzz_qualification as validator
 
 MANIFEST_FIXTURE = "fuzz-qualification-manifest.json"
+
+_real_popen = subprocess.Popen
+
+
+class _PopenAdapter:
+    """Expose a real ``Popen`` behind the surface ``_invoke_fuzz`` uses.
+
+    ``_invoke_fuzz`` drives ``subprocess.Popen`` through the module's
+    ``subprocess`` reference, so the tests substitute a spawner that runs
+    a scripted stream producer instead of the fuzzer; the adapter keeps
+    the pipe, ``wait``/``kill`` and ``returncode`` contract identical.
+    """
+
+    def __init__(self, process) -> None:
+        self._process = process
+        self.stdout = process.stdout
+        self.stderr = process.stderr
+        self.returncode = None
+
+    @property
+    def pid(self) -> int:
+        """Return the real child's process id for process-group signaling."""
+        return self._process.pid
+
+    def poll(self):
+        """Poll the process, mirroring ``Popen.poll``."""
+        self.returncode = self._process.poll()
+        return self.returncode
+
+    def wait(self, timeout=None):
+        """Wait for the process, mirroring ``Popen.wait``."""
+        self.returncode = self._process.wait(timeout=timeout)
+        return self.returncode
+
+    def kill(self) -> None:
+        """Kill the process, mirroring ``Popen.kill``."""
+        self._process.kill()
 
 
 def _fixture_path(name: str) -> Path:
@@ -38,10 +83,55 @@ def _fixture_argv(tmp_path: Path, record_name: str) -> list[str]:
     ]
 
 
+def _valid_toolchain_identity() -> dict:
+    """Return the exact release toolchain identity captured by the gate."""
+    return dict(validator._EXPECTED_FUZZ_TOOLCHAIN_IDENTITY)
+
+
 def _run(monkeypatch, capsys, *flags: str) -> int:
     """Run the validator CLI with staged argv."""
     monkeypatch.setattr(sys, "argv", list(flags))
     return validator.main()
+
+
+def _marker_stream_script(padding_chars_per_side: int, marker: str | None) -> str:
+    """Return a subprocess script emitting a large stream with a marker.
+
+    The stream is deliberately much larger than the validator's capture
+    cap so the marker line (when requested) lands in the elided middle
+    region of the retained text, while the script remains a single
+    short-lived Python process so the test stays bounded.
+    """
+    lines = ["import sys", "w = sys.stdout.buffer.write",
+             f"for _ in range({padding_chars_per_side} // 100):"
+             " w(b'P' * 99 + b'\\n')"]
+    if marker is not None:
+        lines.append(f"w({marker.encode()!r})")
+    lines.extend(
+        (
+            f"for _ in range({padding_chars_per_side} // 100): w(b'Q' * 99 + b'\\n')",
+            "w(b'stat::number_of_executed_units: 7\\n')",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _install_streaming_popen(monkeypatch, script: str) -> None:
+    """Route _invoke_fuzz's Popen to a real subprocess running ``script``.
+
+    The pipe wiring, the reader threads and the timeout path stay
+    production code under test; only the fuzzer command itself is
+    replaced by the scripted stream producer.
+    """
+    def fake_popen(command, **kwargs):
+        real = _real_popen(
+            [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"),
+            start_new_session=kwargs.get("start_new_session", False))
+        return _PopenAdapter(real)
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
 
 
 def test_valid_fixture_passes(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -52,6 +142,31 @@ def test_valid_fixture_passes(tmp_path: Path, monkeypatch, capsys) -> None:
 
     assert rc == 0
     assert "PASS:" in captured.out
+
+
+def test_fixture_rejects_missing_or_drifted_toolchain_identity(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """Missing and wrong compiler provenance must fail closed."""
+    argv = _fixture_argv(tmp_path, "fuzz-qualification-valid.json")
+    record_path = Path(argv[-1])
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record.pop("toolchain_identity")
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    rc = _run(monkeypatch, capsys, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain_identity" in captured.err
+
+    record["toolchain_identity"] = _valid_toolchain_identity()
+    record["toolchain_identity"]["llvm_version"] = "22.1.8"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    rc = _run(monkeypatch, capsys, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain_identity llvm_version" in captured.err
 
 
 def test_below_threshold_fixture_fails(tmp_path: Path, monkeypatch,
@@ -166,6 +281,166 @@ def test_target_manifest_rejects_path_like_target_name() -> None:
         validator.validate_target_manifest(manifest)
 
 
+def test_run_real_gate_writes_the_qualification_record(
+    tmp_path: Path, monkeypatch, capsys) -> None:
+    """The real gate must persist the composed record after the pool ran.
+
+    Everything heavy is mocked (cargo availability, the worker pool, the
+    corpus-seed validation); the recorded wiring under test is the record
+    composition and its single canonical write path, including the
+    non-blocking target's skipped entry and the printed PASS lines.
+    """
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8"))
+    manifest["targets"][1]["blocking"] = False  # convert_html skips
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity",
+        _valid_toolchain_identity)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {"parser_html": {"seed_path": "seed"}})
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": [
+        {"target": "parser_html", "seed_path": "seed",
+         "digest": "sha256:" + "0" * 64}]}), encoding="utf-8")
+
+    def fake_run_blocking(entries, seeds, deadline):
+        assert [entry["name"] for entry in entries] == ["parser_html"]
+        return {"parser_html": {
+            "target": "parser_html", "seed": 12345,
+            "elapsed_seconds_total": 900, "executions_total": 100000,
+            "crashes": 0, "sanitizer_findings": 0, "corpus_dir": "",
+            "seed_path": "seed", "raw_log_ref": "", "status": "pass",
+            "failure_reason": None,
+        }}
+
+    monkeypatch.setattr(validator, "_run_blocking_targets", fake_run_blocking)
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(tmp_path / "corpus.json"),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[PASS] parser_html" in captured.out
+    assert "[SKIPPED] convert_html" in captured.out
+    record_path = (
+        tmp_path
+        / validator._release_artifact_paths(
+            validator._cargo_package_version()
+        )["record"]
+    )
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["schema_version"] == validator.SCHEMA_VERSION
+    assert record["candidate_sha"] == manifest["candidate_sha"]
+    assert record["toolchain_identity"] == _valid_toolchain_identity()
+    assert record["blocking_pass"] is True
+    assert record["blocking_failures"] == []
+    statuses = {entry["target"]: entry["status"]
+                for entry in record["per_target"]}
+    assert statuses == {"parser_html": "pass", "convert_html": "skipped"}
+
+
+def test_run_real_gate_reports_blocking_failures(
+    tmp_path: Path, monkeypatch, capsys) -> None:
+    """A failing blocking target must produce rc 1 and a FAIL record.
+
+    The record is still written (it is the diagnostic evidence for the
+    failed job), with the target named in ``blocking_failures``.
+    """
+    manifest_path = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity",
+        _valid_toolchain_identity)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {name: {"seed_path": "seed"}
+                                  for name in names})
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
+
+    def fake_run_blocking(entries, seeds, deadline):
+        return {entry["name"]: {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 900, "executions_total": 100000,
+            "crashes": 1, "sanitizer_findings": 0, "corpus_dir": "",
+            "seed_path": "seed", "raw_log_ref": "", "status": "fail",
+            "failure_reason": "ERROR: libFuzzer: deadly signal",
+        } for entry in entries}
+
+    monkeypatch.setattr(validator, "_run_blocking_targets", fake_run_blocking)
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(tmp_path / "corpus.json"),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "FAIL: blocking fuzz targets not qualified" in captured.out
+    default_record = validator._release_artifact_paths(
+        validator._cargo_package_version()
+    )["record"]
+    record = json.loads((tmp_path / default_record).read_text(encoding="utf-8"))
+    assert record["blocking_pass"] is False
+    assert sorted(record["blocking_failures"]) == ["convert_html",
+                                                   "parser_html"]
+
+
+def test_run_real_gate_fails_closed_on_toolchain_identity_drift(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """Compiler identity drift writes a failed, non-qualifying record."""
+    manifest_path = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
+    monkeypatch.setattr(validator, "_cargo_fuzz_available", lambda: True)
+    monkeypatch.setattr(
+        validator, "validate_corpus_seeds",
+        lambda data, sha, names: {name: {"seed_path": "seed"}
+                                  for name in names})
+
+    def drifted_identity():
+        raise ValueError("malformed: toolchain_identity llvm_version")
+
+    monkeypatch.setattr(
+        validator, "_collect_fuzz_toolchain_identity", drifted_identity)
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({"seeds": []}), encoding="utf-8")
+    args = validator.build_arg_parser().parse_args([
+        "--mode", "real", "--manifest", str(manifest_path),
+        "--corpus-manifest", str(corpus_path),
+    ])
+
+    rc = validator.run_real_gate(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "toolchain identity verification failed" in captured.err
+    default_record = validator._release_artifact_paths(
+        validator._cargo_package_version()
+    )["record"]
+    record_path = tmp_path / default_record
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["candidate_sha"] == manifest["candidate_sha"]
+    assert record["toolchain_identity"] is None
+    assert record["blocking_pass"] is False
+    assert record["toolchain_error"] == (
+        "pinned fuzz toolchain identity failed")
+    assert all(entry["status"] == "fail" for entry in record["per_target"])
+
+
 def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
     """Real-mode output cannot be redirected by a caller."""
     args = type("Args", (), {"output": str(tmp_path / "record.json"),
@@ -181,6 +456,26 @@ def test_record_output_path_cannot_change_artifact_name() -> None:
 
     with pytest.raises(ValueError, match="fixed"):
         validator._write_record({}, args)
+
+
+def test_record_write_target_tracks_default_record_version_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The actual record write follows the active Cargo package version."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "_cargo_package_version", lambda: "7.8.9")
+    record_path = "artifacts/release/7.8.9/fuzz-qualification-record.json"
+    args = type("Args", (), {"output": None, "record": record_path})()
+    record = {"candidate_sha": "a" * 40, "blocking_pass": True}
+
+    written = validator._write_record(record, args)
+
+    expected = tmp_path / record_path
+    assert written == expected
+    assert json.loads(written.read_text(encoding="utf-8")) == record
+    assert not (
+        tmp_path / "artifacts/release/0.9.2/fuzz-qualification-record.json"
+    ).exists()
 
 
 def test_seed_digest_rejects_escape_when_called_directly(
@@ -353,6 +648,62 @@ def test_cargo_fuzz_available_uses_the_rustup_shim(
     assert validator._cargo_fuzz_available() is True
 
 
+def test_cargo_fuzz_availability_uses_the_dated_toolchain(monkeypatch) -> None:
+    """Availability checks cannot silently fall back to floating nightly."""
+    commands = []
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/shim/cargo")
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+
+    assert validator._cargo_fuzz_available() is True
+    assert commands == [[
+        "/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "--version"]]
+
+
+def test_collect_toolchain_identity_uses_pinned_rustup_shims(monkeypatch) -> None:
+    """The record captures actual rustc, LLVM, Cargo and cargo-fuzz output."""
+    monkeypatch.setenv("FUZZ_TOOLCHAIN", validator.FUZZ_TOOLCHAIN)
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", validator.FUZZ_TOOLCHAIN)
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/shim/cargo")
+    monkeypatch.setattr(
+        validator, "resolve_rustup_tool_shim",
+        lambda name: f"/shim/{name}")
+    outputs = iter((
+        "rustc 1.100.0-nightly (bba531001 2026-09-20)\n"
+        "binary: rustc\n"
+        "commit-hash: bba531001d4de6d7f49693e0836a2668ca063282\n"
+        "commit-date: 2026-09-20\n"
+        "host: x86_64-unknown-linux-gnu\n"
+        "release: 1.100.0-nightly\n"
+        "LLVM version: 23.1.1\n",
+        "cargo 1.100.0-nightly (495c385d0 2026-09-16)\n",
+        "cargo-fuzz 0.13.1\n",
+    ))
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["timeout"] == 30
+        return types.SimpleNamespace(returncode=0, stdout=next(outputs))
+
+    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+
+    identity = validator._collect_fuzz_toolchain_identity()
+
+    assert identity == _valid_toolchain_identity()
+    assert commands == [
+        ["/shim/rustc", f"+{validator.FUZZ_TOOLCHAIN}", "-vV"],
+        ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "--version"],
+        ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "fuzz", "--version"],
+    ]
+
+
 def test_cargo_fuzz_available_rejects_broken_cargo(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -370,22 +721,261 @@ def test_cargo_fuzz_unavailable_without_a_shim(monkeypatch) -> None:
 
 def test_invoke_fuzz_runs_through_the_shim(tmp_path: Path, monkeypatch) -> None:
     seen: dict = {}
+    script = ("import sys\n"
+              "sys.stdout.write('stat::number_of_executed_units: 3\\n')\n")
 
-    class _Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         seen["command"] = list(command)
-        return _Result()
+        real = _real_popen(
+            [sys.executable, "-c", script], cwd=kwargs.get("cwd"),
+            stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr"),
+            start_new_session=kwargs.get("start_new_session", False))
+        return _PopenAdapter(real)
 
     monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
-    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
     result = validator._invoke_fuzz("corpus_population", [], 10)
     assert result["returncode"] == 0
     assert seen["command"][0] == "/fake/cargo"
-    assert seen["command"][1] == "+nightly"
+    assert seen["command"][1] == f"+{validator.FUZZ_TOOLCHAIN}"
+    assert "stat::number_of_executed_units: 3" in result["stdout"]
+
+
+def test_streaming_capture_detects_a_marker_past_the_capture_cap(
+    monkeypatch,
+) -> None:
+    """A failure marker past the capture cap must still fail the target.
+
+    The retained text keeps only a head and a rolling tail, so a marker
+    line in the elided middle is invisible to a post-hoc parse of the
+    capped text; the streaming scan must surface it, with the marker text
+    in the finding, and the invocation must not classify as a pass.
+    """
+    cap = validator._MAX_CAPTURE_CHARS
+    marker = "==ERROR: AddressSanitizer: heap-buffer-overflow on address\n"
+    script = _marker_stream_script(cap, marker)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    assert result["returncode"] == 0
+    # The mid-stream marker line is not in the retained text at all; only
+    # the streaming scan can see it, which is exactly the regression.
+    assert marker.strip() not in result["stdout"]
+    assert "elided by the capture cap" in result["stdout"]
+    assert result["marker_finding"] is not None
+    assert "AddressSanitizer" in result["marker_finding"]
+    _, _, failure = validator._soak_outcome(dict(result))
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+    assert validator._classify_finding(failure) == (0, 1)
+
+
+def test_streaming_capture_keeps_a_clean_large_stream_passing(
+    monkeypatch,
+) -> None:
+    """A clean stream larger than the cap must still pass and stay capped."""
+    script = _marker_stream_script(validator._MAX_CAPTURE_CHARS, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    assert result["returncode"] == 0
+    assert result["marker_finding"] is None
+    assert len(result["stdout"]) <= validator._MAX_CAPTURE_CHARS + 100
+    assert "elided by the capture cap" in result["stdout"]
+    executions, _, failure = validator._soak_outcome(dict(result))
+    assert failure is None
+    assert executions == 7
+
+
+def test_streaming_capture_detects_marker_split_at_forced_line_flush() -> None:
+    """A marker crossing the pending-line flush must not qualify as a pass."""
+    marker = "==ERROR: AddressSanitizer: heap-use-after-free"
+    split = 15
+    prefix, suffix = marker[:split], marker[split:]
+    assert validator.FAILURE_MARKER_PATTERN.search(marker)
+    assert not validator.FAILURE_MARKER_PATTERN.search(prefix)
+    assert not validator.FAILURE_MARKER_PATTERN.search(suffix)
+
+    stream = validator._BoundedStream()
+    stats = "stat::number_of_executed_units: 5\nstat::elapsed_seconds: 1.0\n"
+    head_limit = validator._MAX_CAPTURE_CHARS // 2
+    stream.feed(stats + "a" * (head_limit - len(stats) - 1) + "\n")
+    padding = "x" * (validator._MAX_PENDING_LINE_CHARS - len(prefix) + 1)
+    stream.feed(padding + prefix)
+    stream.feed(suffix + "y" * (validator._MAX_CAPTURE_CHARS // 2 + 100) + "\n")
+    stream.finish()
+
+    invocation = {
+        "returncode": 0,
+        "stdout": stream.text(),
+        "stderr": "",
+        "wall_elapsed": 1.0,
+        "marker_finding": stream.marker_finding(),
+    }
+    _, _, failure = validator._soak_outcome(invocation)
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+
+
+def test_streaming_capture_retains_the_same_head_and_tail_as_the_cap(
+    monkeypatch,
+) -> None:
+    """The streamed retention must equal ``_bounded_capture`` of the full text."""
+    cap = validator._MAX_CAPTURE_CHARS
+    script = _marker_stream_script(cap, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 120)
+
+    lines_per_side = cap // 100
+    full = (("P" * 99 + "\n") * lines_per_side
+            + ("Q" * 99 + "\n") * lines_per_side
+            + "stat::number_of_executed_units: 7\n")
+    assert result["stdout"] == validator._bounded_capture(full)
+
+
+def test_streaming_capture_bounds_memory_below_the_full_stream(
+    monkeypatch,
+) -> None:
+    """The drained buffers must not hold the full stream in memory.
+
+    Measured with ``tracemalloc``: the traced peak stays bounded by the
+    capture cap no matter how many times the cap the stream produces,
+    which is the difference between draining a pipe and buffering it
+    whole (the latter peaks at or above the produced size).
+    """
+    import tracemalloc
+
+    cap = validator._MAX_CAPTURE_CHARS
+    script = _marker_stream_script(cap * 8, None)
+    _install_streaming_popen(monkeypatch, script)
+
+    tracemalloc.start()
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 600)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    produced = (cap * 8 // 100) * 100 * 2  # two padded halves
+    assert produced > cap * 4, "the stream must dwarf the cap for this test"
+    assert len(result["stdout"]) <= cap + 100
+    # A buffering capture would peak at (at least) the produced size; the
+    # streaming drain peaks at the retained buffers plus the joined text.
+    assert peak < produced // 2, (peak, produced)
+
+
+def test_streaming_capture_decodes_split_multibyte_characters(
+    monkeypatch,
+) -> None:
+    """A multi-byte character split across reads must survive the drain.
+
+    Decoding each raw read independently would turn a character straddling
+    a read boundary into replacement characters; the incremental decoder
+    must keep the text intact.
+    """
+    script = ("import sys\n"
+              "sys.stdout.buffer.write('crash near \\u00e9\\u00e8\\u20ac ok\\n'"
+              ".encode('utf-8'))\n")
+    monkeypatch.setattr(validator, "_STREAM_READ_BYTES", 1)
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 30)
+
+    assert result["returncode"] == 0
+    assert "crash near \u00e9\u00e8\u20ac ok" in result["stdout"]
+    assert "\ufffd" not in result["stdout"]
+
+
+def test_streaming_capture_timeout_kills_and_keeps_partial_output(
+    monkeypatch,
+) -> None:
+    """A timed-out invocation keeps the partial streams and its wall time."""
+    script = ("import sys, time\n"
+              "w = sys.stdout.buffer.write\n"
+              "w(b'INFO: starting up\\n')\n"
+              "w(b'stat::number_of_executed_units: 11\\n')\n"
+              "sys.stdout.flush()\n"
+              "time.sleep(60)\n")
+    _install_streaming_popen(monkeypatch, script)
+
+    result = validator._invoke_fuzz("corpus_population", [], 1)
+
+    assert result["returncode"] == -1
+    assert result["stderr"].startswith("timed out: ")
+    assert "wall_elapsed" in result
+    assert result["wall_elapsed"] >= 0
+    assert "stat::number_of_executed_units: 11" in result["stdout"]
+    executions, _, failure = validator._soak_outcome(dict(result))
+    assert executions == 11
+    assert failure == "timed out: fuzz invocation exceeded its time cap"
+
+
+def test_invoke_fuzz_returns_wall_elapsed_on_every_return_path(
+    monkeypatch,
+) -> None:
+    """Timeout, spawn failure and success must all carry ``wall_elapsed``.
+
+    The soak's continuation budget charges chase invocations their wall
+    time, so a return path without the field silently mis-charges them.
+    """
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: None)
+    missing_cargo = validator._invoke_fuzz("corpus_population", [], 10)
+    assert missing_cargo["returncode"] == -1
+    assert "wall_elapsed" in missing_cargo
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+
+    def failing_popen(command, **kwargs):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(validator.subprocess, "Popen", failing_popen)
+    spawn_failed = validator._invoke_fuzz("corpus_population", [], 10)
+    assert spawn_failed["returncode"] == -1
+    assert spawn_failed["stderr"].startswith("spawn failed:")
+    assert "wall_elapsed" in spawn_failed
+
+
+def test_soak_uses_the_streamed_marker_when_the_capped_text_hides_it() -> None:
+    """``_soak_outcome`` must prefer the streamed marker evidence.
+
+    The invocation shape here mirrors a real one: capped text whose only
+    marker line is gone, plus the marker the streaming scan retained.
+    """
+    invocation = {
+        "returncode": 0,
+        "stdout": ("INFO: running\n[... 9000000 chars elided ...]\n"
+                   "stat::number_of_executed_units: 900000\n"),
+        "stderr": "",
+        "wall_elapsed": 901.0,
+        "marker_finding": "==ERROR: AddressSanitizer: heap-buffer-overflow on address",
+    }
+
+    executions, _, failure = validator._soak_outcome(invocation)
+
+    assert executions == 900000
+    assert failure is not None
+    assert "AddressSanitizer" in failure
+    assert validator._classify_finding(failure) == (0, 1)
+
+
+def test_soak_ignores_marker_evidence_when_there_is_none() -> None:
+    """A clean invocation keeps passing with the streaming field present."""
+    invocation = {
+        "returncode": 0,
+        "stdout": "stat::number_of_executed_units: 900000\n",
+        "stderr": "",
+        "wall_elapsed": 901.0,
+        "marker_finding": None,
+    }
+
+    executions, elapsed, failure = validator._soak_outcome(invocation)
+
+    assert executions == 900000
+    assert elapsed == 901.0
+    assert failure is None
 
 
 def test_soak_chases_time_before_runs_without_a_runs_cap(
@@ -482,6 +1072,10 @@ def test_soak_fails_fast_when_the_continuation_budget_is_spent(
     consuming the release job budget until CI kills the job."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the invocation-count arithmetic
+    # below stays deterministic; the production tuning is asserted by the
+    # envelope arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -520,6 +1114,10 @@ def test_soak_rejects_sub_second_continuation_budgets(
     """A fractional leftover budget must not become -max_total_time=0."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the leftover arithmetic below
+    # stays deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -548,7 +1146,7 @@ def test_soak_rejects_sub_second_continuation_budgets(
 
     assert result["status"] == "fail"
     assert "continuation budget" in result["failure_reason"]
-    assert not any("-max_total_time=0" in flag for call in calls for flag in call)
+    assert all("-max_total_time=0" not in flag for call in calls for flag in call)
     # the sub-second leftover never schedules another invocation
     assert len(calls) == 2
 
@@ -600,7 +1198,7 @@ def test_soak_stops_immediately_when_the_job_deadline_passed(
 
     assert result["status"] == "fail"
     assert "job budget exhausted" in result["failure_reason"]
-    assert calls == []
+    assert not calls
 
 
 def test_soak_continuation_budget_charges_wall_time(
@@ -609,6 +1207,10 @@ def test_soak_continuation_budget_charges_wall_time(
     """Parsed fuzz time must not shrink the wall-clock continuation charge."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the invocation-count arithmetic
+    # below stays deterministic; the production tuning is asserted by the
+    # envelope arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -686,6 +1288,10 @@ def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
     continuation budget (so the margin cannot push past it)."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the cap arithmetic below stays
+    # deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     seen_timeouts: list[int] = []
     seen_flags: list[list[str]] = []
 
@@ -740,6 +1346,10 @@ def test_soak_chase_cap_shrinks_with_the_remaining_budget(
     doomed invocation."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the cap arithmetic below stays
+    # deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     seen_timeouts: list[int] = []
     seen_flags: list[list[str]] = []
 
@@ -789,6 +1399,10 @@ def test_soak_never_schedules_a_chase_without_room_for_its_margin(
     (killed at the cap before it can exit)."""
     import tools.release.gates.validate_fuzz_qualification as validator
 
+    # Pin a mid-range continuation budget so the leftover arithmetic below
+    # stays deterministic; the production tuning is asserted by the envelope
+    # arithmetic test instead.
+    monkeypatch.setattr(validator, "TIME_CONTINUATION_BUDGET", 5400)
     calls: list[list[str]] = []
 
     def fake_invoke(target, flags, timeout):
@@ -853,6 +1467,39 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
     assert elapsed == 5.0
 
 
+def _scope_fuzz_targets() -> list[str]:
+    """Return the fuzz target names in the tracked scope file, in order.
+
+    The scope file is the tracked source the manifest generator counts and
+    orders the blocking targets by, so a clean checkout (the generated
+    blocking manifest is ignored by git) can still model the schedule
+    exactly: the round-robin queue layout follows this order.
+    """
+    scope = json.loads(
+        (Path(__file__).resolve().parents[4] / "release" / "scope"
+         / "fuzz-scope.json").read_text(encoding="utf-8"))
+    targets = scope["targets"]
+    assert isinstance(targets, list)
+    assert targets
+    return targets
+
+
+def _blocking_target_count() -> int:
+    """How many fuzz binaries the crate declares (from tracked inputs).
+
+    The blocking manifest is generated at run time and ignored by git, so a
+    clean checkout cannot read it; the fuzz crate's binary list is the
+    tracked source of truth for the target set, and the envelope model
+    cross-checks it against the scope file's target list.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[4]
+    cargo = (root / "components" / "rust-converter" / "fuzz" / "Cargo.toml")
+    return len(re.findall(
+        r"^\[\[bin\]\]", cargo.read_text(encoding="utf-8"), re.MULTILINE))
+
+
 def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     """The fuzz envelope must leave room for setup and the single invocation
     that may still be running at expiry inside the dedicated fuzz job."""
@@ -870,10 +1517,1058 @@ def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     # post-envelope reserve; enforce the reserve floor as well.
     reserve = validator.RELEASE_JOB_LIMIT_SECONDS - total
     assert reserve >= validator.MIN_POST_ENVELOPE_RESERVE_SECONDS
-    # The normal-mode schedule (twelve soak-only targets, the slow target's
-    # soak plus a chase at 20 executions/second, one closing soak) must fit
-    # inside the envelope with the per-invocation overheads.
-    twelve_soaks = 12 * (900 + 10)
-    slow_soak_chase = (900 + 10) + (100000 // 20 - 900 + 10)
-    closing_soak = 900 + 10
-    assert twelve_soaks + slow_soak_chase + closing_soak <= validator.FUZZ_JOB_BUDGET
+    # The worker pool must fit the worst-case schedule inside the envelope:
+    # the slow decode target is scheduled last, so it starts once a worker
+    # frees -- floor(fast targets / workers) fast soaks in -- and then chases
+    # the executions floor at the slowest supported rate.  The model charges
+    # each invocation its cap plus a generous startup, replay and shutdown
+    # overhead; the measured CI band is above the floor.
+    per_invocation_overhead = 60
+    supported_rate = 7  # executions per second
+    fast_soak = 900 + per_invocation_overhead
+    scope_targets = _scope_fuzz_targets()
+    fast_targets = len(scope_targets) - 1
+    # The crate's binary list and the scope file must describe the same
+    # target set, or the schedule model below is built on the wrong count.
+    assert _blocking_target_count() == len(scope_targets)
+    workers = validator.TARGET_WORKER_COUNT
+    # Pin the slow target's queue position the model above relies on: the
+    # slow decode target must be the last entry of its worker's queue (so
+    # no further work follows it), and the number of fast soaks ahead of it
+    # in the actual round-robin layout must equal the model's start term.
+    # A scope reorder that changes its position (or puts work after it)
+    # fails here instead of silently invalidating the envelope arithmetic.
+    slow_target = "fuzz_multilayer_decode"
+    slow_index = scope_targets.index(slow_target)
+    queues = validator._worker_queue(
+        [{"name": name} for name in scope_targets], workers)
+    slow_queue_names = [entry["name"]
+                        for entry in queues[slow_index % workers]]
+    assert slow_queue_names[-1] == slow_target, slow_queue_names
+    fast_ahead_of_slow = len(slow_queue_names) - 1
+    assert fast_ahead_of_slow == fast_targets // workers, slow_queue_names
+    slow_start = fast_ahead_of_slow * fast_soak
+    chase_seconds = 100000 // supported_rate - 900
+    chase_invocations = -(-chase_seconds // validator.TIME_CONTINUATION_CEILING)
+    slow_chase = chase_seconds + chase_invocations * per_invocation_overhead
+    slow_total = fast_soak + slow_chase
+    assert slow_start + slow_total <= validator.FUZZ_JOB_BUDGET
+    # The chase must also fit the per-target continuation budget together
+    # with its invocation margin.
+    assert (slow_chase + validator.INVOCATION_TIMEOUT_MARGIN
+            <= validator.TIME_CONTINUATION_BUDGET)
+    # The margin is a budget bound, not spendable capacity: if every chase
+    # invocation ran to its subprocess timeout (a hung fuzzer), the budget
+    # could not host the floor at the supported rate -- and that case fails
+    # the target by design, because a hung invocation means a broken target.
+    worst_case_executions = 900 * supported_rate
+    spent = 0.0
+    for _ in range(validator.MAX_FUZZ_INVOCATIONS):
+        remaining = validator.TIME_CONTINUATION_BUDGET - spent
+        cap_max = int(remaining) - validator.INVOCATION_TIMEOUT_MARGIN
+        if remaining < 1 or cap_max < 1:
+            break
+        cap = min(validator.TIME_CONTINUATION_CEILING, cap_max)
+        spent += cap + validator.INVOCATION_TIMEOUT_MARGIN
+        worst_case_executions += cap * supported_rate
+    assert worst_case_executions < 100000
+    # Overlapping workers are what makes the schedule fit; a pool of one
+    # would serialize the chase behind every fast soak.
+    assert 2 <= validator.TARGET_WORKER_COUNT <= 4
+
+
+def test_blocking_targets_run_on_an_overlapping_worker_pool(
+    monkeypatch,
+) -> None:
+    """The slow target's chase must overlap the fast soaks instead of
+    queueing behind them.
+
+    The schedule is made deterministic with a barrier handshake: each
+    target blocks until its partner is running, so overlap is proven by
+    the handshake itself instead of a timing margin.  A queueing schedule
+    would deadlock the barrier (and fail via the timeout), while an
+    overlapping one passes regardless of machine load.
+    """
+    import threading
+    import time as time_module
+
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    # Two workers, round-robin over [fast-0, fast-1, fast-2, slow]: worker 0
+    # gets fast-0 and fast-2, worker 1 gets fast-1 and the slow target.  The
+    # handshake pairs fast-0 with slow: the barrier releases only when both
+    # are inside the faked record call at the same time, so overlap is
+    # proven by the handshake itself (a queueing schedule would deadlock the
+    # barrier and fail via its timeout) instead of a timing margin.
+    barrier = threading.Barrier(2, timeout=10)
+    spans: list[tuple[str, float, float]] = []
+    spans_lock = threading.Lock()
+
+    def fake_record(entry, seed_path, deadline=None):
+        start = time_module.monotonic()
+        if entry["name"] in ("fast-0", "slow"):
+            barrier.wait()
+        time_module.sleep(0.05)
+        with spans_lock:
+            spans.append((entry["name"], start, time_module.monotonic()))
+        return {
+            "target": entry["name"], "seed": entry["seed"],
+            "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+            "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+            "raw_log_ref": "", "status": "pass", "failure_reason": None,
+        }
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    # Pin the pool so the schedule is deterministic: with two workers the
+    # slow chase shares the pool with a fast soak.
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    entries = [{"name": f"fast-{index}", "seed": 1} for index in range(3)]
+    entries.append({"name": "slow", "seed": 1})
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    # Pin the queue layout the handshake relies on instead of trusting the
+    # round-robin order implicitly.
+    queues = validator._worker_queue(entries, 2)
+    assert [entry["name"] for entry in queues[0]] == ["fast-0", "fast-2"]
+    assert [entry["name"] for entry in queues[1]] == ["fast-1", "slow"]
+    start = time_module.monotonic()
+    records = validator._run_blocking_targets(
+        entries, seeds, deadline=start + 60)
+    assert set(records) == {entry["name"] for entry in entries}
+    # Both handshake participants recorded; overlap was proven by the
+    # barrier (both were running together, or the wait timed out).
+    names = {span[0] for span in spans}
+    assert {"fast-0", "slow"} <= names, spans
+
+
+def _patch_threading(monkeypatch, *, event_class=None, thread_factory=None):
+    """Swap the validator's ``threading`` for a shim with test seams.
+
+    ``validator.threading`` is the real module, so mutating its attributes
+    would change ``threading`` process-wide (including the test's own
+    events).  The shim is a namespace exposing the three names the pool
+    uses -- ``Thread``, ``Lock`` and ``Event`` -- with the real objects by
+    default; only the production lookups are redirected.
+    """
+    shim = types.SimpleNamespace(
+        Thread=thread_factory or threading.Thread,
+        Lock=threading.Lock,
+        Event=event_class or threading.Event,
+    )
+    monkeypatch.setattr(validator, "threading", shim)
+
+
+def _signaling_event(monkeypatch, *, thread_factory=None) -> threading.Event:
+    """Return an Event that fires whenever the pool's stop event is set.
+
+    The pool creates its stop event internally, so a test that needs to
+    order sibling work against the stop cannot poll it.  The validator's
+    ``threading`` is shimmed with a delegating Event subclass (identical
+    behaviour) whose ``set()`` also signals the returned event; the
+    handshake then triggers on the production call itself instead of
+    racing it with a sleep.  The stop event is the only Event the pool
+    creates, so what the test observes is exactly the sibling-stop signal.
+    ``thread_factory``, when given, shims the worker-thread factory in the
+    same pass.
+    """
+    observed = threading.Event()
+
+    class _SignalingEvent(threading.Event):
+        """A real Event whose set() also signals the test's observer."""
+
+        def set(self) -> None:
+            super().set()
+            observed.set()
+
+    _patch_threading(
+        monkeypatch, event_class=_SignalingEvent, thread_factory=thread_factory)
+    return observed
+
+
+def _record_stub(entry: dict, seed_path: str) -> dict:
+    """Return a passing per-target record for a faked target run."""
+    return {
+        "target": entry["name"], "seed": entry["seed"],
+        "elapsed_seconds_total": 1, "executions_total": 1, "crashes": 0,
+        "sanitizer_findings": 0, "corpus_dir": "", "seed_path": seed_path,
+        "raw_log_ref": "", "status": "pass", "failure_reason": None,
+    }
+
+
+def _run_pool_with_stop_gate(monkeypatch, failing_name, failure) -> dict:
+    """Run the production pool behind a deterministic stop-gate handshake.
+
+    Two workers, round-robin over ``[failing, gate, pad, queued]``: worker
+    0 owns ``failing`` and ``pad``, worker 1 owns ``gate`` and ``queued``.
+    ``gate`` runs only while ``failing`` has not yet raised, and it returns
+    only once the pool's stop event is set; the queued entry behind it must
+    then be skipped at the boundary.  Every step is ordered by events (the
+    failing entry raises after the gate is in flight; the gate resumes only
+    after the stop), so "exactly the in-flight sibling entry ran" is a
+    deterministic fact rather than a timing race.
+
+    Returns ``ran`` (sibling entries that completed), the observed stop
+    event and whether the gate ever timed out.
+    """
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    stop_observed = _signaling_event(monkeypatch)
+    gate_in_flight = threading.Event()
+    ran: list[str] = []
+    state = {"gate_timeout": False}
+
+    def fake_record(entry, seed_path, deadline=None):
+        if entry["name"] == "gate":
+            gate_in_flight.set()
+            if not stop_observed.wait(10):
+                state["gate_timeout"] = True
+            ran.append(entry["name"])
+            return _record_stub(entry, seed_path)
+        if entry["name"] == failing_name:
+            # Raise only once the gate (the sibling's in-flight entry) is
+            # provably running, so it is the entry the stop interrupts.
+            assert gate_in_flight.wait(10), "the gate never started"
+            raise failure
+        ran.append(entry["name"])
+        return _record_stub(entry, seed_path)
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    entries = [{"name": failing_name, "seed": 1},
+               {"name": "gate", "seed": 1},
+               {"name": "pad", "seed": 1},
+               {"name": "queued", "seed": 1}]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    state["ran"] = ran
+    state["stop_observed"] = stop_observed
+    state["entries"] = entries
+    state["seeds"] = seeds
+    return state
+
+
+def test_worker_interrupt_stops_siblings_and_is_recorded_for_join(
+    monkeypatch,
+) -> None:
+    """An interpreter-level exit in a worker stops siblings and re-raises.
+
+    KeyboardInterrupt/SystemExit are recorded like any other worker error and
+    re-raised at join time (``errors[0]``), while the in-thread re-raise
+    keeps the exit visible to the interpreter's thread-exception hook
+    instead of silently swallowing it.  The hook is captured here so the
+    assertion covers the re-raise itself, not a pytest warning.  The
+    sibling handshake is deterministic (see ``_run_pool_with_stop_gate``).
+    """
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "exit", SystemExit("interrupted"))
+    seen: list[str] = []
+    monkeypatch.setattr(
+        threading, "excepthook",
+        lambda args: seen.append(type(args.exc_value).__name__))
+
+    try:
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the worker exit must re-raise at join")
+
+    assert not state["gate_timeout"], "the gate never saw the stop event"
+    assert state["stop_observed"].is_set()
+    # The in-thread re-raise reached the interpreter's thread-exception
+    # hook: the exit stays visible instead of being swallowed.
+    assert "SystemExit" in seen, seen
+    # Only the sibling entry already in flight completed; the queued entry
+    # behind it was skipped at its boundary.
+    assert state["ran"] == ["gate"], state["ran"]
+
+
+def test_worker_failure_stops_siblings_and_leaves_in_flight_work_only(
+    monkeypatch,
+) -> None:
+    """A failing worker stops its siblings at their next queue boundary.
+
+    The early-stop event must prevent sibling queues from draining the
+    whole envelope after one worker fails (their records would be wasted
+    runs), and the first error must still re-raise at join.  The handshake
+    makes both facts deterministic: the failure fires only once the gate
+    entry is in flight, and the gate returns only once the stop event is
+    set, so the queued entry behind it can never start.
+    """
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "boom", RuntimeError("worker exploded"))
+
+    try:
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
+    except RuntimeError as exc:
+        assert "worker exploded" in str(exc)
+    else:
+        raise AssertionError("the first worker error must re-raise")
+
+    assert not state["gate_timeout"], "the gate never saw the stop event"
+    assert state["stop_observed"].is_set()
+    assert state["ran"] == ["gate"], state["ran"]
+
+
+def test_run_blocking_targets_skips_queued_entries_after_an_external_stop(
+    monkeypatch,
+) -> None:
+    """A stop set at interrupt time must keep queued entries from running.
+
+    The interrupt-at-join path sets the pool's stop event before it joins
+    the workers; a worker that is mid-entry when the interrupt fires must
+    finish that entry and leave the rest of its queue untouched.  The
+    interrupt stands in for an external stop (ctrl-c in the fuzz job's
+    terminal) and fires only once a real sibling worker is provably in
+    flight, so ordering is deterministic; that sibling runs the production
+    worker loop, so the boundary check under test is the real one.
+    """
+    real_thread = threading.Thread
+    in_flight = threading.Event()
+    calls: list[str] = []
+
+    class _InterruptingJoin:
+        """Thread stand-in whose unbounded join raises KeyboardInterrupt.
+
+        It takes the first worker slot (whose queue never runs), so the
+        interrupt fires exactly in the join loop the fix guards; its
+        cleanup join records the bounded grace it was given.
+        """
+
+        def __init__(self) -> None:
+            self.cleanup_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None):
+            if timeout is None:
+                assert in_flight.wait(10), "the sibling never started"
+                raise KeyboardInterrupt("external interrupt at join")
+            self.cleanup_timeouts.append(timeout)
+            return None
+
+    stand_in = _InterruptingJoin()
+    handed_out: list = []
+
+    def fake_thread(target=None, args=(), name=None):
+        if not handed_out:
+            handed_out.append(True)
+            return stand_in
+        return real_thread(target=target, args=args, name=name)
+
+    stop_observed = _signaling_event(monkeypatch, thread_factory=fake_thread)
+
+    def fake_record(entry, seed_path, deadline=None):
+        calls.append(entry["name"])
+        in_flight.set()
+        # Only the interrupt handler's stop can release this entry, so the
+        # queued entry behind it is skipped deterministically.
+        assert stop_observed.wait(10), "the interrupt never set the stop"
+        return _record_stub(entry, seed_path)
+
+    monkeypatch.setattr(validator, "_run_target_record", fake_record)
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    # Round-robin over [pad, first, pad-2, queued] with two workers: worker
+    # 0 (the interrupting stand-in, whose queue never runs) owns the pads,
+    # worker 1 (a real thread running the production worker loop) owns
+    # [first, queued].  first is in flight when the interrupt fires and
+    # releases only after the handler's stop; the queued entry behind it on
+    # the same real queue is then the boundary check under test.
+    entries = [{"name": "pad", "seed": 1}, {"name": "first", "seed": 1},
+               {"name": "pad-2", "seed": 1}, {"name": "queued", "seed": 1}]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+
+    with pytest.raises(KeyboardInterrupt, match="external interrupt"):
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+
+    # The in-flight entry completed, and the stop the interrupt handler
+    # set stopped the queued entry behind it from ever starting.
+    assert calls == ["first"], calls
+    assert stop_observed.is_set()
+    assert stand_in.cleanup_timeouts == [
+        validator._INTERRUPT_JOIN_GRACE_SECONDS]
+
+
+def test_start_worker_interrupt_cleans_attempted_threads(monkeypatch) -> None:
+    """An interrupt during startup stops, cancels, and bounded-joins attempts."""
+    stop = threading.Event()
+    cancel_requested = threading.Event()
+    cancellations: list[str] = []
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", cancel_requested)
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancellations.append("cancelled"),
+    )
+
+    class _StartedThread(threading.Thread):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = False
+            self.join_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            self.started = True
+
+        def join(self, timeout=None) -> None:
+            assert stop.is_set()
+            assert cancel_requested.is_set()
+            self.join_timeouts.append(timeout)
+
+    class _InterruptedStart(threading.Thread):
+        def __init__(self) -> None:
+            super().__init__()
+            self.join_timeouts: list[float | None] = []
+
+        def start(self) -> None:
+            raise KeyboardInterrupt("interrupt during startup")
+
+        def join(self, timeout=None) -> None:
+            self.join_timeouts.append(timeout)
+            raise RuntimeError("cannot join before thread start")
+
+    started = _StartedThread()
+    interrupted = _InterruptedStart()
+    with pytest.raises(KeyboardInterrupt, match="interrupt during startup"):
+        validator._start_and_join_workers([started, interrupted], stop)
+
+    assert started.started
+    assert stop.is_set()
+    assert cancel_requested.is_set()
+    assert cancellations == ["cancelled"]
+    assert started.join_timeouts == [validator._INTERRUPT_JOIN_GRACE_SECONDS]
+    assert interrupted.join_timeouts == [validator._INTERRUPT_JOIN_GRACE_SECONDS]
+
+
+def test_join_workers_interrupt_stops_siblings_and_waits_for_cleanup() -> None:
+    """An interrupt during the join must stop siblings, then re-raise.
+
+    The first join raises KeyboardInterrupt; the handler must set the
+    shared stop event (so the still-running worker returns at its next
+    boundary), join within the bounded cleanup grace, and re-raise so the
+    process still exits as interrupted.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    stop = threading.Event()
+    sibling_finished = threading.Event()
+
+    def sibling() -> None:
+        # Only the interrupt handler's stop can release this worker, so a
+        # successful cleanup join is proof the event was set.
+        assert stop.wait(10), "the interrupt never set the stop event"
+        sibling_finished.set()
+
+    worker = threading.Thread(target=sibling, name="fuzz-worker-sibling")
+    worker.start()
+    interrupt_raised = False
+
+    class _InterruptingJoin:
+        """Thread stand-in whose unbounded join raises once."""
+
+        def __init__(self) -> None:
+            self.cleanup_timeouts: list[float | None] = []
+
+        def join(self, timeout=None):
+            if timeout is None:
+                raise KeyboardInterrupt("ctrl-c at join")
+            self.cleanup_timeouts.append(timeout)
+
+    stand_in = _InterruptingJoin()
+    try:
+        validator._join_workers([stand_in, worker], stop)
+    except KeyboardInterrupt:
+        interrupt_raised = True
+
+    assert interrupt_raised, "the interrupt must re-raise after cleanup"
+    assert stop.is_set()
+    assert stand_in.cleanup_timeouts == [
+        validator._INTERRUPT_JOIN_GRACE_SECONDS]
+    assert sibling_finished.wait(10), "the cleanup join did not wait"
+    worker.join(10)
+    assert not worker.is_alive()
+
+
+def test_worker_failure_aggregates_errors_beyond_the_first(
+    monkeypatch,
+    capsys,
+) -> None:
+    """Both workers' errors are seen and the sibling one is printed.
+
+    The barrier puts both workers inside the failure path before either
+    raises, so the pool deterministically records exactly two errors: the
+    first re-raises and the aggregation must print every error beyond it
+    (one line here) instead of swallowing them.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    barrier = threading.Barrier(2, timeout=10)
+
+    def fail_all(entry, seed_path, deadline=None):
+        barrier.wait()
+        raise ValueError(f"failure for {entry['name']}")
+
+    monkeypatch.setattr(validator, "_run_target_record", fail_all)
+    entries = [{"name": f"t{index}", "seed": 1} for index in range(4)]
+    seeds = {entry["name"]: {"seed_path": "seed"} for entry in entries}
+    try:
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+    except ValueError as exc:
+        assert "failure for" in str(exc)
+    else:
+        raise AssertionError("the first worker error must re-raise")
+    err = capsys.readouterr().err
+    # Exactly one sibling error exists beyond the raised first one (the two
+    # in-flight workers both failed before the stop could skip them), and
+    # the aggregation printed it rather than swallowing it.
+    assert err.count("additional worker error") == 1, err
+
+
+def _process_tree_script(
+    tmp_path: Path,
+    marker_delay: float = 4.0,
+    parent_startup_delay: float = 0.0,
+) -> tuple[str, Path, Path]:
+    """Create parent/child scripts whose child survives TERM unless group-killed."""
+    child_pid_path = tmp_path / "child.pid"
+    child_ready_path = tmp_path / "child.ready"
+    child_marker = tmp_path / "child-survived"
+    child_code = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"open({str(child_ready_path)!r}, 'w').write('ready')\n"
+        f"time.sleep({marker_delay})\n"
+        f"open({str(child_marker)!r}, 'w').write('survived')\n"
+        "time.sleep(30)\n"
+    )
+    startup_delay = (
+        f"time.sleep({parent_startup_delay})\n" if parent_startup_delay else ""
+    )
+    parent_code = (
+        "import os, subprocess, sys, time\n"
+        + startup_delay
+        + "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        f"ready = {str(child_ready_path)!r}\n"
+        "deadline = time.monotonic() + 5\n"
+        "while not os.path.exists(ready) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.01)\n"
+        "if not os.path.exists(ready):\n"
+        "    raise RuntimeError('child did not install its TERM handler')\n"
+        f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    return parent_code, child_pid_path, child_marker
+
+
+def _wait_for_file(path: Path, timeout: float = 5.0) -> None:
+    """Wait boundedly for a subprocess marker file."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not path.exists():
+        time.sleep(0.01)
+    assert path.exists(), f"timed out waiting for {path}"
+
+
+def _read_test_child_pid(pid_path: Path) -> int | None:
+    """Read a test-owned child PID without trusting malformed fixture text."""
+    if not pid_path.is_file():
+        return None
+    try:
+        child_pid = int(pid_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+    return child_pid if child_pid > 1 else None
+
+
+def _kill_test_child_pid(child_pid: int) -> None:
+    """Signal only the test's recorded child, never an ambient process group."""
+    if child_pid in {os.getpid(), os.getppid()}:
+        return
+    with contextlib.suppress(OSError):
+        os.kill(child_pid, signal.SIGKILL)
+
+
+def _kill_and_reap_process(process) -> None:
+    """Stop one subprocess handle and reap it within a bounded interval."""
+    with contextlib.suppress(OSError):
+        if process.poll() is None:
+            process.kill()
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        process.wait(timeout=1.0)
+
+
+def _kill_test_processes(pid_path: Path, processes) -> None:
+    """Clean up only PIDs owned by the test, never an ambient process group."""
+    child_pid = _read_test_child_pid(pid_path)
+    if child_pid is not None:
+        _kill_test_child_pid(child_pid)
+    for process in processes:
+        _kill_and_reap_process(process)
+
+
+def _install_real_script_popen(monkeypatch, script: str):
+    """Run the script and return owned process handles for safe cleanup."""
+    processes = []
+
+    def fake_popen(command, **kwargs):
+        process = _real_popen([sys.executable, "-c", script], **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
+    return processes
+
+
+def test_test_process_cleanup_signals_owned_pids_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test cleanup must never signal a process group that includes pytest."""
+    child_pid_path = tmp_path / "child.pid"
+    child_pid_path.write_text("424242", encoding="utf-8")
+    calls: list[tuple] = []
+
+    class _OwnedProcess:
+        pid = 424241
+
+        def poll(self):
+            return None
+
+        def kill(self) -> None:
+            calls.append(("process-kill", self.pid))
+
+        def wait(self, timeout=None) -> None:
+            calls.append(("wait", self.pid, timeout))
+
+    fake_os = types.SimpleNamespace(
+        getpid=lambda: 101,
+        getppid=lambda: 100,
+        getpgid=lambda _pid: 88,
+        kill=lambda pid, sig: calls.append(("pid-kill", pid, sig)),
+        killpg=lambda *_args: pytest.fail("cleanup must not signal a process group"),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "os", fake_os)
+
+    _kill_test_processes(child_pid_path, [_OwnedProcess()])
+
+    assert calls == [
+        ("pid-kill", 424242, signal.SIGKILL),
+        ("process-kill", 424241),
+        ("wait", 424241, 1.0),
+    ]
+
+
+def test_invoke_fuzz_timeout_terminates_descendant_processes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A timeout kills the whole invocation group and releases inherited pipes."""
+    marker_delay = 4.0
+    script, child_pid_path, child_marker = _process_tree_script(
+        tmp_path, marker_delay=marker_delay, parent_startup_delay=0.4
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
+
+    try:
+        _assert_timeout_kills_descendants(
+            child_pid_path, marker_delay, child_marker
+        )
+    finally:
+        _kill_test_processes(child_pid_path, processes)
+
+
+def test_invoke_fuzz_allows_a_process_tree_to_finish_without_timeout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The timeout harness also preserves a clean, naturally exiting run."""
+    child_marker = tmp_path / "child-finished"
+    child_code = (
+        "import signal\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"open({str(child_marker)!r}, 'w').write('finished')\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        "child.wait()\n"
+        "print('stat::number_of_executed_units: 1')\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 5)
+        assert result["returncode"] == 0
+        assert "stat::number_of_executed_units: 1" in result["stdout"]
+        assert child_marker.read_text(encoding="utf-8") == "finished"
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_invoke_fuzz_kills_descendants_after_parent_exits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A successful parent cannot leave pipe-holding descendants alive."""
+    child_pid_path = tmp_path / "child.pid"
+    child_marker = tmp_path / "child-survived"
+    child_code = (
+        "import time\n"
+        "time.sleep(0.3)\n"
+        f"open({str(child_marker)!r}, 'w').write('survived')\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        f"{child_code!r}])\n"
+        f"open({str(child_pid_path)!r}, 'w').write(str(child.pid))\n"
+        "print('stat::number_of_executed_units: 1')\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_STREAM_JOIN_GRACE_SECONDS", 0.05)
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 5)
+
+        assert result["returncode"] == 0
+        assert "stat::number_of_executed_units: 1" in result["stdout"]
+        assert not child_marker.exists(), "a descendant survived parent exit"
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(child_pid_path, processes)
+
+
+def _assert_timeout_kills_descendants(
+    child_pid_path: Path, marker_delay: float, child_marker: Path
+) -> None:
+    result = validator._invoke_fuzz("corpus_population", [], 2.0)
+
+    assert result["returncode"] == -1
+    assert result["stderr"].startswith("timed out: ")
+    _wait_for_file(child_pid_path)
+    time.sleep(marker_delay + 0.1)
+    assert not child_marker.exists(), "a descendant survived the timeout"
+    assert not validator._ACTIVE_FUZZ_PROCESSES
+
+
+def test_invoke_fuzz_reader_start_failure_reaps_registered_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A reader startup error must not leak its registered fuzz process."""
+    script = (
+        "import os, time\n"
+        "os.write(1, b'x' * 1048576)\n"
+        "time.sleep(30)\n"
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    original_start = threading.Thread.start
+    start_count = 0
+
+    def start_one_then_fail(thread):
+        nonlocal start_count
+        start_count += 1
+        if start_count == 2:
+            raise RuntimeError("reader startup failed")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start_one_then_fail)
+    try:
+        with pytest.raises(RuntimeError, match="reader startup failed"):
+            validator._invoke_fuzz("corpus_population", [], 30)
+
+        assert start_count == 2
+        assert len(processes) == 1
+        process = processes[0]
+        assert process.poll() is not None
+        assert process not in validator._ACTIVE_FUZZ_PROCESSES
+        assert process.stdout.closed
+        assert process.stderr.closed
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_parent_interrupt_cancels_active_process_groups(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Interrupt cleanup stops live fuzz workers and their descendants."""
+    marker_delay = 4.0
+    script, child_pid_path, child_marker = _process_tree_script(
+        tmp_path, marker_delay=marker_delay
+    )
+    processes = _install_real_script_popen(monkeypatch, script)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    results: list[dict] = []
+    worker = threading.Thread(
+        target=lambda: results.append(
+            validator._invoke_fuzz("corpus_population", [], 30)
+        ),
+        name="fuzz-process-worker",
+    )
+    worker.start()
+    try:
+        _wait_for_file(child_pid_path)
+
+        class _InterruptingJoin(threading.Thread):
+            """Raise once for the initial join, then tolerate cleanup joining."""
+
+            def __init__(self) -> None:
+                super().__init__(name="interrupt-trigger")
+
+            def join(self, timeout=None):
+                if timeout is None:
+                    raise KeyboardInterrupt("simulated parent interrupt")
+
+        stop = threading.Event()
+        try:
+            validator._join_workers([_InterruptingJoin(), worker], stop)
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("the parent interrupt must be re-raised")
+
+        worker.join(5)
+        assert stop.is_set()
+        assert not worker.is_alive()
+        assert len(results) == 1
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+        time.sleep(marker_delay + 0.1)
+        assert not child_marker.exists(), "a descendant survived parent cancellation"
+    finally:
+        _kill_test_processes(child_pid_path, processes)
+        worker.join(5)
+
+
+def test_default_artifact_paths_follow_the_cargo_package_version() -> None:
+    """Artifact defaults are derived from Cargo and work for another version."""
+    current_version = validator._cargo_package_version()
+    current = validator._release_artifact_paths(current_version)
+    assert validator._default_artifact_paths() == current
+    assert set(current) == {"manifest", "corpus_manifest", "record", "log_dir"}
+
+    alternate = validator._release_artifact_paths("7.8.9")
+    assert alternate["manifest"] == (
+        "artifacts/release/7.8.9/blocking-fuzz-target-manifest.json"
+    )
+    assert alternate["corpus_manifest"] == (
+        "artifacts/release/7.8.9/corpus-seed-manifest.json"
+    )
+    assert alternate["record"] == (
+        "artifacts/release/7.8.9/fuzz-qualification-record.json"
+    )
+    assert alternate["log_dir"] == "artifacts/release/7.8.9/fuzz-logs"
+
+
+def test_cargo_package_version_reads_single_quoted_toml(tmp_path: Path) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = '1.2.3'\n",
+        encoding="utf-8",
+    )
+    assert validator._cargo_package_version(cargo_toml) == "1.2.3"
+
+
+def test_cargo_package_version_resolves_workspace_inheritance(
+    tmp_path: Path,
+) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = { workspace = true }\n"
+        "\n[workspace.package]\nversion = '4.5.6'\n",
+        encoding="utf-8",
+    )
+    assert validator._cargo_package_version(cargo_toml) == "4.5.6"
+
+
+@pytest.mark.parametrize(
+    ("contents", "error"),
+    [("[package\n", "invalid Cargo manifest"),
+     ("[package]\nname = 'converter'\n", "package version not found")],
+)
+def test_cargo_package_version_rejects_invalid_or_missing_version(
+    tmp_path: Path, contents: str, error: str
+) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError, match=error):
+        validator._cargo_package_version(cargo_toml)
+
+
+def test_cargo_package_version_reports_missing_manifest(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="cannot read Cargo manifest"):
+        validator._cargo_package_version(tmp_path / "missing-Cargo.toml")
+
+
+def test_cargo_package_version_rejects_parent_traversal(tmp_path: Path) -> None:
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_text(
+        "[package]\nname = 'converter'\nversion = '1.2.3'\n",
+        encoding="utf-8",
+    )
+    traversal_path = tmp_path / "missing" / ".." / "Cargo.toml"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Refusing path with '\.\.' traversal component",
+    ):
+        validator._cargo_package_version(traversal_path)
+
+
+def test_help_does_not_read_the_cargo_manifest(monkeypatch, capsys) -> None:
+    """Argparse help exits before package-version path defaults are resolved."""
+    monkeypatch.setattr(
+        validator,
+        "_cargo_package_version",
+        lambda: pytest.fail("--help must not inspect Cargo.toml"),
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        validator.main(["--help"])
+    assert exit_info.value.code == 0
+    assert "--manifest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("has_existing_record", [False, True])
+def test_atomic_record_write_preserves_canonical_file_on_interruption(
+    tmp_path: Path, monkeypatch, has_existing_record: bool
+) -> None:
+    """A partial temporary write never replaces an old or absent record."""
+    record_path = tmp_path / "fuzz-qualification-record.json"
+    original = '{"candidate_sha":"' + "a" * 40 + '"}\n'
+    if has_existing_record:
+        record_path.write_text(original, encoding="utf-8")
+
+    def interrupt_after_partial_write(record, stream, *, indent=None):
+        stream.write('{"partial":')
+        raise OSError("simulated interrupted write")
+
+    monkeypatch.setattr(validator.json, "dump", interrupt_after_partial_write)
+    with pytest.raises(OSError, match="interrupted"):
+        validator._atomic_write_record(record_path, {"complete": True})
+
+    if has_existing_record:
+        assert record_path.read_text(encoding="utf-8") == original
+        assert json.loads(record_path.read_text(encoding="utf-8"))[
+            "candidate_sha"
+        ] == "a" * 40
+    else:
+        assert not record_path.exists()
+    assert list(tmp_path.iterdir()) == ([record_path] if has_existing_record else [])
+
+
+def test_soak_timeout_marker_must_start_the_stderr_record() -> None:
+    """Mentioning a timeout marker later in worker output is not a timeout."""
+    invocation = {
+        "returncode": -1,
+        "stdout": "",
+        "stderr": "worker note: timed out: while reading prior logs",
+        "wall_elapsed": 1.0,
+        "marker_finding": None,
+    }
+    _, _, failure = validator._soak_outcome(invocation)
+    assert failure == "fuzz run failed with exit code -1"
+
+
+def test_reader_join_uses_one_shared_deadline(monkeypatch) -> None:
+    """Each reader receives only the remainder of the common grace window."""
+    clock = [100.0]
+    waits: list[float] = []
+
+    class _Reader:
+        def join(self, timeout=None):
+            waits.append(timeout)
+            clock[0] += 0.2
+
+    monkeypatch.setattr(validator, "_STREAM_JOIN_GRACE_SECONDS", 0.3)
+    monkeypatch.setattr(validator.time, "monotonic", lambda: clock[0])
+    validator._join_readers([_Reader(), _Reader()])
+    assert waits[0] == pytest.approx(0.3)
+    assert waits[1] == pytest.approx(0.1)
+
+
+def test_process_group_reap_wait_is_bounded(monkeypatch) -> None:
+    """Post-KILL cleanup never calls an unbounded Popen.wait()."""
+    signals: list[int] = []
+    waits: list[float | None] = []
+
+    class _UnreapedProcess:
+        pid = 123
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired("fuzz", timeout)
+
+    monkeypatch.setattr(
+        validator, "_signal_fuzz_process_group", lambda _p, value: signals.append(value)
+    )
+    monkeypatch.setattr(validator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(validator, "_PROCESS_KILL_REAP_SECONDS", 0.25)
+
+    validator._terminate_fuzz_process_group(_UnreapedProcess())
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert waits == [0.25]
+
+
+def test_empty_blocking_worker_pool_returns_empty_records() -> None:
+    """An empty target set has no workers to join and returns cleanly."""
+    assert validator._run_blocking_targets([], {}, deadline=0) == {}
+
+
+def test_invoke_fuzz_first_reader_start_failure_reaps_registered_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Failure to start the first reader still kills and reaps the process."""
+    processes = _install_real_script_popen(
+        monkeypatch, "import time\ntime.sleep(30)\n"
+    )
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", threading.Event())
+    starts: list[int] = []
+
+    def fail_first_start(_thread):
+        starts.append(1)
+        raise RuntimeError("first reader startup failed")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_first_start)
+    try:
+        with pytest.raises(RuntimeError, match="first reader startup failed"):
+            validator._invoke_fuzz("corpus_population", [], 30)
+        assert starts == [1]
+        assert len(processes) == 1
+        assert processes[0].poll() is not None
+        assert processes[0].stdout.closed
+        assert processes[0].stderr.closed
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_invoke_fuzz_registration_cancellation_reaps_process(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Cancellation arriving just after Popen closes the registration race."""
+    script = "import time\ntime.sleep(30)\n"
+    processes = []
+    cancel = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", cancel)
+    monkeypatch.setattr(validator, "_PROCESS_TERMINATION_GRACE_SECONDS", 0.05)
+
+    def cancel_after_spawn(command, **kwargs):
+        process = _real_popen([sys.executable, "-c", script], **kwargs)
+        processes.append(process)
+        cancel.set()
+        return process
+
+    monkeypatch.setattr(validator, "_resolve_fuzz_cargo", lambda: "/fake/cargo")
+    monkeypatch.setattr(validator.subprocess, "Popen", cancel_after_spawn)
+
+    try:
+        result = validator._invoke_fuzz("corpus_population", [], 10)
+        assert result["returncode"] != 0
+        assert len(processes) == 1
+        assert processes[0].poll() is not None
+        assert processes[0].stdout.closed
+        assert processes[0].stderr.closed
+        assert not validator._ACTIVE_FUZZ_PROCESSES
+    finally:
+        _kill_test_processes(tmp_path / "unused-child.pid", processes)

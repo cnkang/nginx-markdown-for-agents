@@ -7,6 +7,7 @@ documentation gates required for the 0.7.0 release milestone.
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import shutil
@@ -59,6 +60,34 @@ GATE_LOCAL_SCRIPTS = {
 }
 RELEASE_GATES_070_DOC_GATE = "release-gates:070-doc"
 CARGO_VERSION_070_GATE = "cargo:version-070"
+# The release-gate job waits for the three upstream jobs whose artifacts it
+# consumes.  The dependency edge and the job's own tag condition are read
+# structurally from the workflow's own job entry (see _release_gate_needs), so
+# this job name must stay in step with the workflow's job key.
+RELEASE_GATE_JOB = "release-gate"
+RELEASE_GATE_REQUIRED_NEEDS = frozenset(
+    {"prepare", "smoke-test", "fuzz-qualification"}
+)
+RELEASE_PUBLISH_JOB = "publish"
+RELEASE_PUBLISH_REQUIRED_NEEDS = frozenset(
+    {
+        "release-gate",
+        "musl-build",
+        "integrity-checksums",
+        "integrity-signature",
+        "official-docker-release-gate",
+        "rc-release-gates",
+        "fuzz-qualification",
+    }
+)
+# Named failure row reported when the workflow cannot be parsed at all because
+# PyYAML is not importable.
+RELEASE_GATE_PYYAML_GATE = "release-gate:pyyaml-dependency"
+RELEASE_GATE_PYYAML_MESSAGE = (
+    "PyYAML is not importable, so the release-gate job's condition and "
+    "dependencies cannot be read structurally; install the pinned release "
+    "dependencies with `python3 -m pip install -r requirements-release.txt`"
+)
 BlockingItems = list[tuple[str, bool]]
 
 
@@ -414,13 +443,541 @@ def _gate_2_items(
     ]
 
 
+def _workflow_job(
+    workflow_content: str, job_name: str
+) -> dict[str, object] | None:
+    """Return one parsed workflow job mapping, or None when unreadable.
+
+    Block sequences, quoted scalars, and flow sequences are resolved by the
+    YAML parser; comments and unrelated jobs are not part of this mapping.
+
+    ``None`` means PyYAML is unavailable or the document did not parse into the
+    expected shape (bad YAML, missing jobs map, or missing job entry); callers
+    treat that as a failure so a malformed or restructured workflow fails
+    closed instead of passing by accident.
+    """
+    try:
+        import yaml
+    except ImportError:  # PyYAML is a release requirement; fail closed here
+        return None
+    try:
+        document = yaml.safe_load(workflow_content)
+    except yaml.YAMLError:
+        return None
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    if not isinstance(jobs, dict):
+        return None
+    job = jobs.get(job_name)
+    return job if isinstance(job, dict) else None
+
+
+def _release_gate_job(release_packages: str) -> dict[str, object] | None:
+    """Return the release-gate job mapping, or None when unreadable."""
+    return _workflow_job(release_packages, RELEASE_GATE_JOB)
+
+
+def check_release_workflow_dependencies(result: ValidationResult) -> None:
+    """Record an explicit failed gate row when PyYAML is not importable.
+
+    Without the parser the release-gate job's condition and dependency edges
+    cannot be read at all, so the run must fail with an actionable dependency
+    diagnostic instead of a generic unreadable-workflow failure.
+    """
+    try:
+        import yaml  # noqa: F401  (import probe only)
+    except ImportError:
+        result.fail(RELEASE_GATE_PYYAML_GATE, RELEASE_GATE_PYYAML_MESSAGE)
+
+
+def _release_gate_needs(release_packages: str) -> frozenset[str] | None:
+    """Return the release-gate job's ``needs`` entries, or None when unreadable.
+
+    Only the ``release-gate`` job entry is inspected, so a dependency list
+    belonging to another job -- or text sitting in a comment -- can never
+    satisfy the check.  ``None`` means the document did not parse into the
+    expected shape (bad YAML, missing job, or a ``needs`` value that is not a
+    string or a list of strings); callers treat that as a failure so a
+    malformed or restructured workflow fails closed instead of passing by
+    accident.
+    """
+    job = _release_gate_job(release_packages)
+    if job is None:
+        return None
+    needs = job.get("needs")
+    if isinstance(needs, str):
+        return frozenset({needs})
+    if isinstance(needs, list) and all(
+        isinstance(item, str) for item in needs
+    ):
+        return frozenset(needs)
+    return None
+
+
+def _release_gate_if_condition(release_packages: str) -> str | None:
+    """Return the release-gate job's own ``if`` expression, or None.
+
+    Only a non-empty string scalar on the ``release-gate`` job entry counts;
+    an unrelated scalar elsewhere in the document, or the decoy text sitting
+    in a comment, is invisible to this lookup.
+    """
+    job = _release_gate_job(release_packages)
+    if job is None:
+        return None
+    condition = job.get("if")
+    if isinstance(condition, str) and condition.strip():
+        return condition
+    return None
+
+
+def _github_expression_text(condition: str) -> str | None:
+    """Remove the optional GitHub expression wrapper from a parsed YAML value."""
+    text = condition.strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text or None
+
+
+def _github_single_quoted_literal(
+    text: str, start: int
+) -> tuple[str, int] | None:
+    """Decode one GitHub single-quoted string with doubled-quote escapes."""
+    if start >= len(text) or text[start] != "'":
+        return None
+    chars: list[str] = []
+    index = start + 1
+    while index < len(text):
+        if text[index] == "'":
+            if index + 1 < len(text) and text[index + 1] == "'":
+                chars.append("'")
+                index += 2
+                continue
+            return repr("".join(chars)), index + 1
+        chars.append(text[index])
+        index += 1
+    return None
+
+
+def _github_identifier_end(text: str, start: int) -> int:
+    end = start + 1
+    while end < len(text) and (text[end].isalnum() or text[end] == "_"):
+        end += 1
+    return end
+
+
+def _python_boolean_scan_step(text: str, index: int) -> tuple[bool, int | None]:
+    """Inspect one quoted literal, identifier, or ordinary character."""
+    if text[index] == "'":
+        literal = _github_single_quoted_literal(text, index)
+        if literal is None:
+            return False, None
+        return False, literal[1]
+    if text[index].isalpha() or text[index] == "_":
+        end = _github_identifier_end(text, index)
+        return text[index:end].lower() in {"and", "not", "or"}, end
+    return False, index + 1
+
+
+def _has_python_boolean_keyword(text: str) -> bool:
+    """Reject Python's word operators, which GitHub expressions do not use."""
+    index = 0
+    while index < len(text):
+        found, next_index = _python_boolean_scan_step(text, index)
+        if next_index is None:
+            return False
+        if found:
+            return True
+        index = next_index
+    return False
+
+
+def _github_boolean_operator(text: str, index: int) -> tuple[str, int] | None:
+    """Translate one unquoted GitHub boolean operator, if present."""
+    replacements = (("&&", " and "), ("||", " or "))
+    for operator, replacement in replacements:
+        if text.startswith(operator, index):
+            return replacement, len(operator)
+    char = text[index]
+    if ord(char) in (10, 13):
+        return " ", 1
+    if char == "!" and not text.startswith("!=", index):
+        return ("~ " if index == 0 else " ~ "), 1
+    return None
+
+
+_NEEDS_RESULT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])needs\.([A-Za-z0-9_-]+)\.result\b"
+)
+_GITHUB_EVENT_NAME = "github.event_name"
+_GITHUB_REF_TYPE = "github.ref_type"
+
+
+def _translate_github_expression(text: str) -> str:
+    """Translate boolean punctuation while preserving quoted string content."""
+    translated: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "'":
+            literal = _github_single_quoted_literal(text, index)
+            if literal is None:
+                return "\x00"
+            python_literal, index = literal
+            translated.append(python_literal)
+            continue
+        if char == '\"':
+            # GitHub expressions use single quotes; a Python-only double
+            # quoted literal must not pass this bounded syntax parser.
+            return "\x00"
+        needs_result = _NEEDS_RESULT_RE.match(text, index)
+        if needs_result is not None:
+            job_name = needs_result.group(1).replace("-", "_")
+            translated.append(f"needs.{job_name}.result")
+            index = needs_result.end()
+            continue
+        operator = _github_boolean_operator(text, index)
+        if operator is not None:
+            replacement, width = operator
+            translated.append(replacement)
+            index += width
+            continue
+        translated.append(char)
+        index += 1
+    return "".join(translated)
+
+
+def _github_condition_ast(condition: str) -> ast.expr | None:
+    """Parse a bounded GitHub boolean expression into a Python AST.
+
+    Only boolean operators and comparisons are evaluated by the gate. Calls,
+    unknown contexts, and unsupported operators remain unverifiable and fail
+    closed. The hyphenated release-gate name is normalized only for parsing.
+    """
+    text = _github_expression_text(condition)
+    if text is None or _has_python_boolean_keyword(text):
+        return None
+    python_expression = _translate_github_expression(text)
+    try:
+        parsed = ast.parse(python_expression, mode="eval")
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    if any(
+        isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+        for node in ast.walk(parsed)
+    ):
+        return None
+    return parsed.body
+
+
+def _expression_attribute_name(node: ast.AST) -> str | None:
+    """Return a dotted attribute path without evaluating arbitrary syntax."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _expression_attribute_name(node.value)
+        return f"{parent}.{node.attr}" if parent is not None else None
+    return None
+
+
+def _condition_value(
+    node: ast.AST, context: dict[str, str]
+) -> bool | str | None:
+    """Resolve literals and explicitly modeled GitHub context attributes."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (bool, str)):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id.lower() == "true":
+            return True
+        if node.id.lower() == "false":
+            return False
+    name = _expression_attribute_name(node)
+    if name is not None and (
+        name in {_GITHUB_EVENT_NAME, _GITHUB_REF_TYPE}
+        or (name.startswith("needs.") and name.endswith(".result"))
+    ):
+        return context.get(name)
+    return None
+
+
+_TAG_CONDITION_VALUES = {
+    _GITHUB_EVENT_NAME: frozenset({"push", "workflow_dispatch"}),
+    _GITHUB_REF_TYPE: frozenset({"tag"}),
+}
+
+
+def _condition_attribute_operand(node: ast.Compare) -> tuple[str, ast.AST] | None:
+    """Pair one modeled context attribute with its comparison literal."""
+    if len(node.ops) != 1:
+        return None
+    left_name = _expression_attribute_name(node.left)
+    right_name = _expression_attribute_name(node.comparators[0])
+    if left_name is not None and right_name is None:
+        return left_name, node.comparators[0]
+    if right_name is not None and left_name is None:
+        return right_name, node.left
+    return None
+
+
+def _supported_tag_predicate(attribute: str, literal_node: ast.AST) -> bool:
+    """Accept only tag/event literals whose context the gate models."""
+    values = _TAG_CONDITION_VALUES.get(attribute)
+    return (
+        values is not None
+        and _condition_value(literal_node, {}) in values
+    )
+
+
+def _evaluate_tag_comparison(
+    node: ast.Compare, context: dict[str, str]
+) -> bool | None:
+    """Evaluate one supported equality/inequality against tag context."""
+    operands = _condition_attribute_operand(node)
+    if operands is None:
+        return None
+    attribute, literal_node = operands
+    if not _supported_tag_predicate(attribute, literal_node):
+        return None
+    actual = _condition_value(node.left, context)
+    expected = _condition_value(node.comparators[0], context)
+    if actual is None or expected is None:
+        return None
+    operation = node.ops[0]
+    if isinstance(operation, ast.Eq):
+        return actual == expected
+    if isinstance(operation, ast.NotEq):
+        return actual != expected
+    return None
+
+
+def _evaluate_boolean_condition(
+    node: ast.BoolOp, context: dict[str, str]
+) -> bool | None:
+    """Evaluate an AND/OR only when every child is modeled."""
+    if not isinstance(node.op, (ast.And, ast.Or)):
+        return None
+    values = [_evaluate_tag_condition(value, context) for value in node.values]
+    if any(value is None for value in values):
+        return None
+    return all(values) if isinstance(node.op, ast.And) else any(values)
+
+
+def _evaluate_tag_condition(
+    node: ast.AST, context: dict[str, str]
+) -> bool | None:
+    """Evaluate a small boolean/comparison subset; unknown syntax is rejected."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.Name) and node.id.lower() in {"true", "false"}:
+        return node.id.lower() == "true"
+    if isinstance(node, ast.BoolOp):
+        return _evaluate_boolean_condition(node, context)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+        value = _evaluate_tag_condition(node.operand, context)
+        return None if value is None else not value
+    if isinstance(node, ast.Compare):
+        return _evaluate_tag_comparison(node, context)
+    return None
+
+
+def _condition_needs_result_attributes(node: ast.AST) -> set[str]:
+    """Collect job-result contexts referenced by a parsed condition."""
+    attributes = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Attribute):
+            continue
+        name = _expression_attribute_name(child)
+        if (
+            name is not None
+            and name.startswith("needs.")
+            and name.endswith(".result")
+        ):
+            attributes.add(name)
+    return attributes
+
+
+def _is_always_condition_call(node: ast.Call) -> bool:
+    """Whether a GitHub status-function call is the supported ``always()``."""
+    return (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "always"
+        and not node.args
+        and not node.keywords
+    )
+
+
+def _evaluate_publish_boolean_operator(
+    node: ast.BoolOp, context: dict[str, str]
+) -> bool | None:
+    """Evaluate a publish AND/OR after every child is proven boolean."""
+    values = [
+        _evaluate_publish_condition(value, context) for value in node.values
+    ]
+    if any(not isinstance(value, bool) for value in values):
+        return None
+    return all(values) if isinstance(node.op, ast.And) else any(values)
+
+
+def _evaluate_publish_comparison(
+    node: ast.Compare, context: dict[str, str]
+) -> bool | None:
+    """Evaluate one equality comparison over a modeled workflow context."""
+    if len(node.ops) != 1:
+        return None
+    actual = _condition_value(node.left, context)
+    expected = _condition_value(node.comparators[0], context)
+    if actual is None or expected is None:
+        return None
+    if isinstance(node.ops[0], ast.Eq):
+        return actual == expected
+    if isinstance(node.ops[0], ast.NotEq):
+        return actual != expected
+    return None
+
+
+def _evaluate_publish_condition(
+    node: ast.AST, context: dict[str, str]
+) -> bool | None:
+    """Evaluate the publish condition's bounded boolean subset."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.Name) and node.id.lower() in {"true", "false"}:
+        return node.id.lower() == "true"
+    if isinstance(node, ast.Call):
+        return True if _is_always_condition_call(node) else None
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+        return _evaluate_publish_boolean_operator(node, context)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+        value = _evaluate_publish_condition(node.operand, context)
+        return not value if isinstance(value, bool) else None
+    if isinstance(node, ast.Compare):
+        return _evaluate_publish_comparison(node, context)
+    return None
+
+
+def _publish_result_case_is_expected(
+    node: ast.expr,
+    context: dict[str, str],
+    job_name: str,
+    result: str,
+    event_name: str,
+) -> bool:
+    changed_context = dict(context)
+    result_attribute = f"needs.{job_name.replace('-', '_')}.result"
+    changed_context[result_attribute] = result
+    allowed_dispatch_skip = (
+        job_name == "integrity-signature"
+        and result == "skipped"
+        and event_name == "workflow_dispatch"
+    )
+    return _evaluate_publish_condition(node, changed_context) is allowed_dispatch_skip
+
+
+def _publish_dependency_failure_cases(
+    node: ast.expr,
+    context: dict[str, str],
+    event_name: str,
+) -> bool:
+    for job_name in RELEASE_PUBLISH_REQUIRED_NEEDS:
+        for result in ("failure", "cancelled", "skipped"):
+            if not _publish_result_case_is_expected(
+                node, context, job_name, result, event_name
+            ):
+                return False
+    return True
+
+
+def _publish_event_cases_are_valid(
+    node: ast.expr,
+    expected_attributes: set[str],
+    event_name: str,
+    ref_type: str,
+) -> bool:
+    success_context = dict.fromkeys(expected_attributes, "success")
+    success_context.update(
+        {_GITHUB_EVENT_NAME: event_name, _GITHUB_REF_TYPE: ref_type}
+    )
+    if _evaluate_publish_condition(node, success_context) is not True:
+        return False
+    return _publish_dependency_failure_cases(node, success_context, event_name)
+
+
+def _publish_condition_covers_dependency_results(condition: str) -> bool:
+    """Require every publish dependency to succeed with the signing exception."""
+    node = _github_condition_ast(condition)
+    if node is None:
+        return False
+    expected_attributes = {
+        f"needs.{job_name.replace('-', '_')}.result"
+        for job_name in RELEASE_PUBLISH_REQUIRED_NEEDS
+    }
+    if _condition_needs_result_attributes(node) != expected_attributes:
+        return False
+    events = (("push", "tag"), ("workflow_dispatch", "branch"))
+    return all(
+        _publish_event_cases_are_valid(node, expected_attributes, event, ref)
+        for event, ref in events
+    )
+
+
+def _publish_waits_for_release_gate(release_packages: str) -> bool:
+    """Check the parsed publish job's actual dependency and success condition."""
+    job = _workflow_job(release_packages, RELEASE_PUBLISH_JOB)
+    if job is None:
+        return False
+    needs = job.get("needs")
+    if isinstance(needs, str):
+        need_names = {needs}
+    elif isinstance(needs, list) and all(isinstance(item, str) for item in needs):
+        need_names = set(needs)
+    else:
+        return False
+    condition = job.get("if")
+    return (
+        need_names == RELEASE_PUBLISH_REQUIRED_NEEDS
+        and isinstance(condition, str)
+        and _publish_condition_covers_dependency_results(condition)
+    )
+
+
+def _release_gate_tag_condition_gate(release_packages: str) -> bool:
+    """True when the actual job condition runs on tags and rejects branch pushes.
+
+    The bounded evaluator accepts only known boolean operators and GitHub
+    context comparisons; unknown forms fail closed. Manual dispatch remains a
+    supported alternate path.
+    """
+    condition = _release_gate_if_condition(release_packages)
+    if condition is None:
+        return False
+    expression = _github_condition_ast(condition)
+    if expression is None:
+        return False
+    tag_push = _evaluate_tag_condition(
+        expression,
+        {_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "tag"},
+    )
+    branch_push = _evaluate_tag_condition(
+        expression,
+        {_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "branch"},
+    )
+    manual_dispatch = _evaluate_tag_condition(
+        expression,
+        {_GITHUB_EVENT_NAME: "workflow_dispatch", _GITHUB_REF_TYPE: "branch"},
+    )
+    return tag_push is True and branch_push is False and manual_dispatch is True
+
+
+def _release_gate_needs_gate(release_packages: str) -> bool:
+    """True when the release-gate job depends on every required upstream job."""
+    needs = _release_gate_needs(release_packages)
+    return needs is not None and RELEASE_GATE_REQUIRED_NEEDS <= needs
+
+
 def _gate_3_items(release_packages: str) -> BlockingItems:
     return [
         (
             "tag package workflow gate",
-            "release-gate:" in release_packages
-            and "github.ref_type == 'tag'" in release_packages
-            and "needs: [prepare, smoke-test]" in release_packages,
+            _release_gate_tag_condition_gate(release_packages)
+            and _release_gate_needs_gate(release_packages),
         ),
         (
             "release gate package tools",
@@ -440,8 +997,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         ),
         (
             "publish waits for release gate",
-            "needs: [release-gate" in release_packages
-            and "needs.release-gate.result == 'success'" in release_packages,
+            _publish_waits_for_release_gate(release_packages),
         ),
     ]
 
@@ -591,6 +1147,7 @@ def main() -> int:
     result = ValidationResult()
     check_structure(result)
     if args.mode in {"strict", "evidence"}:
+        check_release_workflow_dependencies(result)
         check_blocking_items(result, args.mode)
 
     print_report(result)

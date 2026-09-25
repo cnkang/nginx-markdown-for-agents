@@ -7,8 +7,11 @@ directory/glob references while allowing tracked file references.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+
+import pytest
 
 # Allow imports from tools/docs/
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -463,14 +466,22 @@ def test_checklist_guard_ignores_tilde_fenced_examples(tmp_path):
 
 def test_iter_unfenced_lines_respects_fence_run_rules():
     """A longer fence closes a shorter one; four leading spaces is not a fence."""
-    text = "```\ninner\n````\nstill inside\n```\nafter\n"
-    kept = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
-    assert "still inside" in kept  # the 4-backtick run closed the 3 run
+    kept = _assert_expected_line_is_unfenced(
+        "```\ninner\n````\nstill inside\n```\nafter\n", "still inside"
+    )
     assert "after" not in kept  # the 4 run then opened a new block
-    indented = "    ```\nnot a fence\n"
-    kept2 = [line for _n, line in docs_checker.iter_unfenced_lines(indented)]
-    assert "    ```" in kept2
+    kept2 = (
+        _assert_expected_line_is_unfenced(
+            "    ```\nnot a fence\n", "    ```"
+        )
+    )
     assert "not a fence" in kept2
+
+
+def _assert_expected_line_is_unfenced(text: str, expected_line: str) -> list[str]:
+    result = [line for _n, line in docs_checker.iter_unfenced_lines(text)]
+    assert expected_line in result
+    return result
 
 
 def test_checklist_guard_accepts_plus_markers(tmp_path):
@@ -732,17 +743,15 @@ def test_stable_release_surface_check_ignores_history_table_rows(tmp_path):
     )
 
 
-def test_stable_release_surface_check_flags_unreleased_wording(tmp_path):
-    for phrase in ("v9.9.9 remains unreleased", "v9.9.9 stays unpublished"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+@pytest.mark.parametrize(
+    "phrase", ("v9.9.9 remains unreleased", "v9.9.9 stays unpublished")
+)
+def test_stable_release_surface_check_flags_unreleased_wording(tmp_path, phrase):
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
     errors = docs_checker.check_stable_release_surfaces(
         tmp_path, "9.9.9", ("README.md",)
     )
-    assert any("pre-release wording" in error for error in errors), errors
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
 def test_stable_surface_check_skips_while_unreleased(tmp_path):
@@ -779,13 +788,15 @@ def test_stable_surface_check_flags_missing_surfaces(tmp_path):
     assert any("missing release surface" in error for error in failures)
 
 
-def test_stable_surface_check_flags_pending_publication_wording(tmp_path):
-    for phrase in ("v9.9.9 release pending", "pending publication of v9.9.9"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+@pytest.mark.parametrize(
+    "phrase", ("v9.9.9 release pending", "pending publication of v9.9.9")
+)
+def test_stable_surface_check_flags_pending_publication_wording(tmp_path, phrase):
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
 def test_release_notes_status_flags_development_candidate(tmp_path):
@@ -852,15 +863,16 @@ def test_stable_surface_check_scans_changelog_by_default(tmp_path):
     assert any("pre-release wording" in failure for failure in failures), failures
 
 
-def test_release_surface_manifest_covers_release_docs():
-    for template in (
+@pytest.mark.parametrize(
+    "template",
+    (
         "docs/releases/{version}-upgrade-and-rollback.md",
         "docs/releases/{version}-deployment-recommendation.md",
-        "docs/releases/{version}-implementation-plan.md".replace(
-            "docs/releases", "docs/development"
-        ),
-    ):
-        assert template in docs_checker.RELEASE_SURFACE_FILES
+        "docs/development/{version}-implementation-plan.md",
+    ),
+)
+def test_release_surface_manifest_covers_release_docs(template):
+    assert template in docs_checker.RELEASE_SURFACE_FILES
 
 
 def test_latest_dated_changelog_version_requires_a_heading():
@@ -959,21 +971,632 @@ def test_latest_dated_changelog_version_ignores_fenced_headings():
     assert errors == []
 
 
-def test_stable_claim_failures_flag_pending_claims(tmp_path):
+@pytest.mark.parametrize(
+    "phrase", ("9.9.9 is pending", "v9.9.9 release is still pending")
+)
+def test_stable_claim_failures_flag_pending_claims(tmp_path, phrase):
     _write_stable_notes(tmp_path, "9.9.9")
-    for phrase in ("9.9.9 is pending", "v9.9.9 release is still pending"):
-        (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), phrase
+    (tmp_path / "README.md").write_text(phrase + ".\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
 
 
-def test_stable_claim_failures_flag_candidate_headings(tmp_path):
+@pytest.mark.parametrize(
+    "heading", ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate")
+)
+def test_stable_claim_failures_flag_candidate_headings(tmp_path, heading):
     _write_stable_notes(tmp_path, "9.9.9")
-    for heading in ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate"):
-        (tmp_path / "README.md").write_text(heading + "\n", encoding="utf-8")
-        errors = docs_checker.check_stable_release_surfaces(
-            tmp_path, "9.9.9", ("README.md",)
-        )
-        assert any("pre-release wording" in error for error in errors), heading
+    (tmp_path / "README.md").write_text(heading + "\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), heading
+
+
+# --------------------------------------------------------------------------
+# Release-state contract: pre-publication and post-publication surfaces.
+# --------------------------------------------------------------------------
+
+_PENDING_SURFACES = {
+    "README.md": "> Current line: v9.9.9 is a release candidate and the project has\n"
+    "> not published it yet. The latest public stable release is v9.8.8.\n",
+    "README_zh-CN.md": "> 当前版本线：v9.9.9 是发布候选版本，尚未发布。\n",
+    "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+    "**Status:** Release candidate. 9.8.8 is the latest released version\n"
+    "(2026-01-01). 9.9.9 is the final pre-1.0 breaking release and the project\n"
+    "publishes it after the merge.\n",
+    "docs/project/README.md": "The v9.9.9 release is pending publication; v9.8.8\n"
+    "remains the latest published stable release.\n",
+    "docs/project/VERSION_PLANNING.md": "v9.9.9 is the current development line\n"
+    "and is a release candidate. The project publishes it after the merge.\n",
+    "docs/development/9.9.9-implementation-plan.md": "## Release Status\n\n"
+    "9.9.9 is a release candidate pending publication.\n"
+    "The latest published stable tag is v9.8.8. The planned tag is v9.9.9.\n",
+    "docs/guides/INSTALLATION.md": "The project has not published 9.9.9 yet.\n"
+    "Set RELEASE_TAG to the latest published tag until the v9.9.9 assets\n"
+    "become available.\n",
+    "docs/guides/UPGRADE-TO-9.9.9.md": "> Publication status: 9.9.9 is a release\n"
+    "> candidate and the project has not published it yet.\n",
+    "docs/guides/VERSION_ROLLBACK-9.9.9.md": "This guide covers rolling back\n"
+    "the 9.9.9 release candidate, which is not yet published.\n",
+    "docs/guides/9.9.9-breaking-changes.md":
+    "Breaking-change reference for the pending 9.9.9 release candidate.\n",
+    "docs/releases/9.9.9-release-notes.md": "# Release Notes: 9.9.9\n\n"
+    "**Date**: Pending publication\n\n"
+    "**Status**: Pending release. This document describes the release candidate\n"
+    "for the v9.9.9 line and does not assert that a tag or checksum exists.\n",
+    "docs/releases/9.9.9-deployment-recommendation.md":
+    "Record the v9.9.9 tag and commit SHA as the release identity once published.\n",
+    "packaging/repo/apt/README.md": "The example below uses the v9.8.8 release\n"
+    "assets, the latest published release. The v9.9.9 assets become available\n"
+    "after publication.\n",
+}
+
+# The same surfaces once the release is real: no pending wording survives.
+_PUBLISHED_SURFACES = {
+    "README.md": "> Current line: v9.9.9 shipped on 2026-02-02 as the final\n"
+    "> breaking release before v1.0.\n",
+    "README_zh-CN.md": "> 当前版本线：v9.9.9 已正式发布（2026-02-02）。\n",
+    "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+    "**Status:** Stable release. 9.9.9 is the latest released version,\n"
+    "published 2026-02-02.\n",
+    "docs/project/VERSION_PLANNING.md": "v9.9.9 is the current released line\n"
+    "(published 2026-02-02).\n",
+    "docs/project/README.md": "The v9.9.9 line is the latest published stable\n"
+    "release.\n",
+    "docs/development/9.9.9-implementation-plan.md": "## Release Status\n\n"
+    "The latest published stable tag is v9.9.9 (2026-02-02).\n",
+    "docs/guides/INSTALLATION.md": "Set RELEASE_TAG to the published v9.9.9 tag\n"
+    "and run the authenticated sequence.\n",
+    "docs/guides/UPGRADE-TO-9.9.9.md": "> Publication status: 9.9.9 shipped\n"
+    "> (2026-02-02). The release carries the tag and signed artifacts.\n",
+    "docs/guides/VERSION_ROLLBACK-9.9.9.md":
+    "This guide covers rolling back the released 9.9.9 version.\n",
+    "docs/guides/9.9.9-breaking-changes.md":
+    "Breaking-change reference for the released 9.9.9 version.\n",
+    "docs/releases/9.9.9-release-notes.md": "# Release Notes: 9.9.9\n\n"
+    "**Date**: 2026-02-02\n\n**Status**: Stable release\n",
+    "docs/releases/9.9.9-deployment-recommendation.md":
+    "Record the published v9.9.9 tag and commit SHA as the release identity.\n",
+    "packaging/repo/apt/README.md": "The example below uses the v9.9.9 release\n"
+    "assets and the published checksum manifest.\n",
+}
+
+_CHANGELOG_PENDING = (
+    "## [9.9.9] - Unreleased\n\nPending work.\n\n"
+    "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+)
+
+
+def _write_pending_state(root, *, changelog=_CHANGELOG_PENDING, **overrides):
+    """Write the canonical pre-publication surface set plus the changelog."""
+    (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    notes = root / "docs" / "releases"
+    notes.mkdir(parents=True, exist_ok=True)
+    (notes / "9.8.8-release-notes.md").write_text(
+        "# Release Notes: 9.8.8\n\n**Date**: 2026-01-01\n**Status**: Stable release\n",
+        encoding="utf-8",
+    )
+    _write_surfaces(root, dict(_PENDING_SURFACES) | overrides)
+
+
+def _write_surfaces(root, surfaces):
+    """Write each ``rel -> body`` surface under ``root``, creating parents."""
+    for rel, body in surfaces.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def test_release_state_contract_accepts_canonical_pre_publication_state(tmp_path):
+    """The real pre-publication shape passes: v9.8.8 stable, v9.9.9 pending."""
+    _write_pending_state(tmp_path)
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_checks_current_unreleased_changelog_prose(
+    tmp_path,
+):
+    """A published claim under the current Unreleased heading must fail."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The v9.9.9 release has been published and its assets are available.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("CHANGELOG.md" in failure and "published" in failure for failure in failures)
+
+
+def test_release_state_contract_uses_unreleased_heading_context(tmp_path):
+    """Claims under the pending heading apply to that release version."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The release has been published.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("CHANGELOG.md" in failure and "published" in failure for failure in failures)
+
+
+def test_release_state_contract_ignores_published_claims_in_changelog_history(
+    tmp_path,
+):
+    """A historical release description does not violate pending-state prose."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\nPending work.\n\n"
+        "## [9.8.8] - 2026-01-01\n\n"
+        "The v9.8.8 release was published with its assets.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def _v092_is_pending() -> bool:
+    changelog = (docs_checker.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    return any(
+        line.strip() == "## [0.9.2] - Unreleased"
+        for line in changelog.splitlines()
+    )
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
+def test_implementation_plan_distinguishes_prepared_notes_from_publication():
+    """WI-11 must separate prepared notes from unpublished release assets."""
+    plan_text = (
+        docs_checker.ROOT / "docs/development/0.9.2-implementation-plan.md"
+    ).read_text(encoding="utf-8")
+    wi11 = plan_text.partition("### WI-11:")[2].partition("### WI-12:")[0]
+    normalized_wi11 = " ".join(wi11.split())
+    assert "first prepared on 2026-09-19" in wi11
+    assert "revised through 2026-09-23" in wi11
+    assert "Publication of the tag and assets remains pending." in normalized_wi11
+
+    status_table = plan_text.partition("## 5. Task Status Tracking")[2]
+    wi11_row = next(
+        (line for line in status_table.splitlines() if line.startswith("| 11 |")),
+        "",
+    )
+    assert "first prepared on 2026-09-19" in wi11_row
+    assert "revised through 2026-09-23" in wi11_row
+    assert "Publication of the tag and assets remains pending." in wi11_row
+
+
+def test_release_document_history_does_not_claim_a_planned_publish_date():
+    """Document-update dates must not be presented as release metadata."""
+    paths = (
+        "docs/guides/UPGRADE-TO-0.9.2.md",
+        "docs/development/0.9.2-implementation-plan.md",
+        "docs/releases/0.9.2-release-notes.md",
+        "docs/project/VERSION_PLANNING.md",
+        "docs/project/PROJECT_STATUS.md",
+    )
+    unsupported_claims = (
+        "Planned publication date recorded in the release metadata",
+        "Planned publication date adjusted in the release metadata",
+        "Planned publication date corrected in the release metadata",
+    )
+
+    for relative_path in paths:
+        text = (docs_checker.ROOT / relative_path).read_text(encoding="utf-8")
+        assert not any(claim in text for claim in unsupported_claims), relative_path
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
+def test_version_planning_scopes_the_candidate_release_description():
+    """The release plan must keep its timing and compatibility scope clear."""
+    text = (docs_checker.ROOT / "docs/project/VERSION_PLANNING.md").read_text(
+        encoding="utf-8"
+    )
+    current_state = " ".join(
+        text.partition("## Current Release State")[2]
+        .partition("## ")[0]
+        .split()
+    )
+
+    assert (
+        "project plans to publish it after the merge and candidate-bound gates "
+        "pass"
+    ) in current_state
+    assert "consolidates the v0.9.1 baseline and resets compatibility" in current_state
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
+def test_implementation_plan_scopes_historical_pending_labels():
+    """Historical work-item notes must not imply publication is historical."""
+    plan_text = (
+        docs_checker.ROOT / "docs/development/0.9.2-implementation-plan.md"
+    ).read_text(encoding="utf-8")
+    intro = " ".join(
+        plan_text.partition("## 1. Baseline Information")[2]
+        .partition("### Historical 0.9.1 Baseline")[0]
+        .split()
+    )
+    assert (
+        "Completed work-item statuses and dated `Document Updates` entries are "
+        "historical snapshots."
+    ) in intro
+    assert "WI-8 publication section below show the current state" in intro
+    assert (
+        "v0.9.2 remains pending publication, including its tag, assets, and "
+        "checksums."
+    ) in intro
+    assert "plan-era `pending` wording below is historical" not in intro
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
+def test_rollback_guide_history_does_not_claim_v092_was_released():
+    """The revision log must reflect the unpublished release candidate."""
+    rollback = (
+        docs_checker.ROOT / "docs/guides/VERSION_ROLLBACK-0.9.2.md"
+    ).read_text(encoding="utf-8")
+    history_row = next(
+        (
+            line
+            for line in rollback.splitlines()
+            if "| 0.9.2 | 2026-09-19 | Kang |" in line
+        ),
+        "",
+    )
+    assert "v0.9.2 release candidate" in history_row
+    assert "released v0.9.2" not in history_row.lower()
+
+
+@pytest.mark.skipif(
+    not _v092_is_pending(),
+    reason="pending-release wording applies only before v0.9.2 publication",
+)
+def test_upgrade_guide_does_not_substitute_an_older_release_tag():
+    """A pending target release must not silently downgrade the download."""
+    guide = (
+        docs_checker.ROOT / "docs/guides/UPGRADE-TO-0.9.2.md"
+    ).read_text(encoding="utf-8")
+    assert "wait for its assets; do not substitute v0.9.1" in guide.lower()
+    assert "replace v0.9.2 with the latest published tag" not in guide.lower()
+
+
+def test_release_state_contract_accepts_future_publication_clause(tmp_path):
+    """Availability after the named version is published remains conditional."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "packaging/repo/apt/README.md":
+            "The v9.9.9 assets will be available after v9.9.9 is published.\n",
+        },
+    )
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_rejects_pending_version_as_latest_tag(tmp_path):
+    _write_pending_state(
+        tmp_path,
+        **{
+            "docs/development/9.9.9-implementation-plan.md":
+            "## Release Status\n\n"
+            "9.9.9 is a release candidate pending publication.\n\n"
+            "- Latest tag: v9.9.9\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("latest tag" in failure for failure in failures), failures
+
+
+def test_release_state_contract_rejects_pending_version_as_latest_stable_release(
+    tmp_path,
+):
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "v9.9.9 is pending publication. "
+            "The v9.9.9 is the latest stable release.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("latest tag" in failure for failure in failures), failures
+
+
+def test_release_state_contract_scans_versioned_breaking_changes_guide(tmp_path):
+    _write_pending_state(tmp_path)
+    guide = tmp_path / "docs/guides/9.9.9-breaking-changes.md"
+    guide.parent.mkdir(parents=True, exist_ok=True)
+    guide.write_text(
+        "The v9.9.9 release has been published.\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("9.9.9-breaking-changes.md" in failure for failure in failures)
+
+
+def test_release_state_contract_rejects_a_published_claim_while_pending(tmp_path):
+    """A current-state surface cannot call the pending version published."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "> Current line: v9.9.9 is a release candidate but shipped on\n"
+            "> 2026-01-01 despite publication being pending. Use the `v9.9.9` tag\n"
+            "> for installation.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("pending 9.9.9" in failure for failure in failures), failures
+
+
+def test_release_state_contract_rejects_a_stable_status_while_pending(tmp_path):
+    """The project status section cannot declare the pending line stable."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "docs/project/PROJECT_STATUS.md": "### Current Release Line 9.9.9\n\n"
+            "**Status:** Stable release. 9.9.9 is the latest released version, "
+            "published 2026-01-01.\n",
+        },
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("stable release" in failure or "pending 9.9.9" in failure
+               for failure in failures), failures
+
+
+def test_release_state_contract_requires_a_publication_boundary(tmp_path):
+    """Prose that names the pending version must state the publication gate."""
+    _write_pending_state(
+        tmp_path,
+        **{"docs/guides/INSTALLATION.md": "Install guide for 9.9.9 operators.\n"},
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("publication boundary" in failure for failure in failures), failures
+
+
+def test_release_state_contract_ignores_history_and_fenced_examples(tmp_path):
+    """Ledger rows and fenced commands may name the pending version freely."""
+    _write_pending_state(
+        tmp_path,
+        **{
+            "README.md": "> Current line: v9.9.9 is a release candidate and the\n"
+            "> project has not published it yet.\n"
+            "\n## Document Updates\n\n"
+            "| Version | Date | Change |\n"
+            "|---------|------|--------|\n"
+            "| 9.9.9 | 2026-01-01 | Release finalization prepared for the published 9.9.9 |\n"
+            "\n```bash\n"
+            "VERSION=v9.9.9  # 9.9.9 shipped on 2026-01-01\n"
+            "```\n",
+        },
+    )
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_accepts_post_publication_state(tmp_path):
+    """A dated top changelog entry flips the same contract to the released side."""
+    _write_pending_state(
+        tmp_path,
+        changelog="## [9.9.9] - 2026-02-02\n\nReleased work.\n",
+    )
+    _write_surfaces(tmp_path, _PUBLISHED_SURFACES)
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_requires_the_published_baseline_to_stay_canonical(
+    tmp_path,
+):
+    """The released baseline keeps its stable notes and changelog date."""
+    _write_pending_state(tmp_path)
+    (tmp_path / "docs" / "releases" / "9.8.8-release-notes.md").write_text(
+        "# Release Notes: 9.8.8\n\n**Date**: 2026-01-01\n**Status**: Pending release\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("9.8.8" in failure for failure in failures), failures
+
+
+def test_release_state_contract_surfaces_the_malformed_unreleased_heading(tmp_path):
+    """A malformed unreleased heading fails the contract instead of hiding."""
+    _write_pending_state(
+        tmp_path,
+        changelog="## [9.9.9] - Unreleased candidate (rc3)\n",
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("malformed unreleased heading" in failure for failure in failures)
+
+
+def test_release_state_contract_has_no_failures_without_a_changelog(tmp_path):
+    """A missing changelog leaves the decision to the checks that own it."""
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_pending_claim_window_scopes_a_verb_to_its_own_version():
+    """A completion verb credits the version nearest to it in the sentence."""
+    window = "9.9.9 is the current development line and 9.8.8 was published."
+    assert not docs_checker._claim_belongs_to_pending_version(window, "9.9.9")
+    window = "9.9.9 was published as the final breaking release."
+    assert docs_checker._claim_belongs_to_pending_version(window, "9.9.9")
+
+
+def test_unreleased_context_alone_does_not_flag_ordinary_availability():
+    """Heading context without a version needs a release subject to be a claim."""
+    version_pattern = re.compile(r"\bv?9\.9\.9\b")
+    ordinary, _ = docs_checker._pending_sentence_failures(
+        "CHANGELOG.md",
+        "The new directive is available.",
+        "9.9.9",
+        version_pattern,
+        True,
+    )
+    assert ordinary == []
+    claim, _ = docs_checker._pending_sentence_failures(
+        "CHANGELOG.md",
+        "The release has been published.",
+        "9.9.9",
+        version_pattern,
+        True,
+    )
+    assert claim
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "The v9.9.9 assets are available after publication.",
+        "The v9.9.9 assets become available once published.",
+        "The v9.9.9 release is not currently published.",
+        "No v9.9.9 assets have been published yet.",
+        "The v9.9.9 release 将已发布.",
+    ],
+)
+def test_release_state_contract_accepts_conditional_and_negated_claims(
+    tmp_path, claim
+):
+    """Publication conditions and current negation are not completed claims."""
+    _write_pending_state(
+        tmp_path,
+        **{"packaging/repo/apt/README.md": claim + "\n"},
+    )
+
+    assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "The v9.9.9 assets are available only after integration testing.",
+        "The v9.9.9 release is pending, e.g. the release build has been published.",
+        "The v9.9.9 release 已正式发布.",
+    ],
+)
+def test_release_state_contract_rejects_affirmative_claims_without_publication(
+    tmp_path, claim
+):
+    """Testing qualifiers and examples do not hide affirmative release claims."""
+    _write_pending_state(
+        tmp_path,
+        **{"packaging/repo/apt/README.md": claim + "\n"},
+    )
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("without a publication boundary" in failure for failure in failures)
+
+
+def test_pending_release_version_token_rejects_prerelease_and_longer_versions():
+    """A stable pending version does not match prerelease or longer versions."""
+    assert not docs_checker._claim_belongs_to_pending_version(
+        "v9.9.9-rc5 was published.", "9.9.9"
+    )
+    assert not docs_checker._claim_belongs_to_pending_version(
+        "v9.9.9.1 was published.", "9.9.9"
+    )
+    assert docs_checker._claim_belongs_to_pending_version(
+        "v9.9.9 was published.", "9.9.9"
+    )
+
+
+def test_pending_sentence_reports_the_claim_tied_to_the_pending_version():
+    """The diagnostic names the pending release's claim, not another release."""
+    failures, _ = docs_checker._pending_sentence_failures(
+        "guide.md",
+        "v9.8.8 was published, while v9.9.9 assets are available.",
+        "9.9.9",
+        re.compile(r"\bv?9\.9\.9\b"),
+    )
+
+    assert len(failures) == 1
+    assert "'available'" in failures[0]
+
+
+def test_pending_release_contract_fails_when_a_configured_surface_is_missing(
+    tmp_path,
+):
+    """Required release-state documents cannot silently disappear."""
+    failures = docs_checker.check_pending_release_state(
+        tmp_path, "9.9.9", surface_rel_paths=("docs/required.md",)
+    )
+
+    assert any("docs/required.md" in failure for failure in failures)
+    assert any("missing" in failure.lower() for failure in failures)
+
+
+def test_current_unreleased_changelog_section_excludes_dated_history():
+    """Pending-state parsing stops before older dated release entries."""
+    changelog = (
+        "## [9.9.9] - Unreleased\nPending work.\n"
+        "## [9.8.8] - 2026-01-01\nThe old release was published.\n"
+    )
+
+    section = docs_checker._current_unreleased_changelog_section(
+        changelog, "9.9.9"
+    )
+
+    assert "Pending work." in section
+    assert "9.8.8" not in section
+    assert "published" not in section
+
+
+def test_main_deduplicates_repeated_checker_diagnostics(tmp_path, monkeypatch, capsys):
+    """The top-level check prints a repeated diagnostic only once."""
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("## [9.9.9] - Unreleased\n", encoding="utf-8")
+    monkeypatch.setattr(docs_checker, "ROOT", tmp_path)
+    monkeypatch.setattr(docs_checker, "iter_markdown_files", lambda: [])
+    monkeypatch.setattr(
+        docs_checker, "_find_unreleased_changelog_line", lambda _: ("9.9.9", [])
+    )
+    def duplicate(*args, **kwargs):
+        return ["repeated diagnostic"] * 2
+
+    for name in (
+        "check_links",
+        "check_heading_hierarchy",
+        "check_english_policy",
+        "check_internal_reference_policy",
+        "check_operator_config_examples",
+        "check_release_status_consistency",
+        "check_release_state_contract",
+        "check_duplicate_sync",
+        "check_document_updates_order",
+        "check_metric_family_count",
+        "check_release_checklist_is_static",
+    ):
+        monkeypatch.setattr(docs_checker, name, duplicate)
+    monkeypatch.setattr(docs_checker, "_stable_surface_check", lambda *_: (False, []))
+
+    assert docs_checker.main() == 1
+    assert capsys.readouterr().out.count("- repeated diagnostic") == 1

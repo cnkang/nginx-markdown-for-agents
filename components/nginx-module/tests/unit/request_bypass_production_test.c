@@ -537,6 +537,9 @@ static struct MarkdownResult g_conditional_result;
 static ngx_int_t g_adopt_rc;
 static ngx_http_markdown_conditional_ownership_t g_adoption_record;
 static size_t g_adoption_scan_limit;
+static ngx_flag_t g_authenticated;
+static ngx_uint_t g_auth_cache_control_calls;
+static ngx_flag_t g_auth_cache_control_before_header;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -619,13 +622,14 @@ ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
 {
     UNUSED(r);
     UNUSED(conf);
-    return 0;
+    return g_authenticated;
 }
 
 ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
     UNUSED(r);
+    g_auth_cache_control_calls++;
     return NGX_OK;
 }
 
@@ -1081,6 +1085,9 @@ test_next_header_filter(ngx_http_request_t *r)
 {
     UNUSED(r);
     g_next_header_calls++;
+    if (g_authenticated && g_auth_cache_control_calls != 0) {
+        g_auth_cache_control_before_header = 1;
+    }
     return g_next_header_rc;
 }
 
@@ -1149,6 +1156,9 @@ reset_test_state(void)
     g_resume_send_header_calls = 0;
     g_adopt_rc = NGX_OK;
     g_adoption_scan_limit = 0;
+    g_authenticated = 0;
+    g_auth_cache_control_calls = 0;
+    g_auth_cache_control_before_header = 0;
     memset(&g_adoption_record, 0, sizeof(g_adoption_record));
     g_decision_category_calls = 0;
     memset(&g_conditional_result, 0, sizeof(g_conditional_result));
@@ -1349,6 +1359,43 @@ test_header_filter_bypass_forwards_once(void)
     TEST_ASSERT(ctx.eligible == 0,
                 "bypass re-entry must preserve ineligible state");
     TEST_PASS("header filter durable bypass forwards once and survives re-entry");
+}
+
+
+static void
+test_authenticated_head_pass_through_sets_cache_control_before_headers(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    reset_test_state();
+    request.main = &request;
+    request.method = NGX_HTTP_HEAD;
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    g_conf = &conf;
+    g_authenticated = 1;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+
+    TEST_ASSERT(rc == NGX_OK && ctx.eligible == 0,
+                "authenticated HEAD must take the rewritten pass-through path");
+    TEST_ASSERT(g_auth_cache_control_calls == 1,
+                "authenticated HEAD must apply cache policy once");
+    TEST_ASSERT(g_next_header_calls == 1
+                && g_auth_cache_control_before_header,
+                "HEAD cache policy must be applied before header emission");
+    TEST_ASSERT(g_next_body_calls == 1,
+                "HEAD pass-through must continue to the body filter");
+    TEST_PASS("authenticated HEAD pass-through applies cache policy first");
 }
 
 static void
@@ -1899,6 +1946,7 @@ main(void)
     test_preaccess_records_orphan_adoption();
     test_preaccess_handler_installs_durable_bypass();
     test_header_filter_bypass_forwards_once();
+    test_authenticated_head_pass_through_sets_cache_control_before_headers();
     test_preaccess_bypass_terminal_header_outcomes();
     test_preaccess_allocation_failure_uses_durable_bypass();
     test_preaccess_cleanup_failure_uses_durable_bypass();

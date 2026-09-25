@@ -10,12 +10,21 @@ from pathlib import Path
 _APPROVED_EXECUTABLES = frozenset(
     {"ab", "brotli", "cargo", "git", "ps", "rustc", "rustfmt"}
 )
+# Homebrew's `opt` directory holds version-alias symlinks (for example
+# `/opt/homebrew/opt/git`) that point into the matching `Cellar` install.
+# `git commit` prepends the tool's `GIT_EXEC_PATH` (an `opt/.../libexec`
+# path) to PATH for hooks, so a hook that resolves `git` finds the executable
+# under `opt` first.  The literal `opt` location is as trusted as `Cellar`
+# because Homebrew owns and manages both; the resolved-target check still runs
+# so a symlink whose target sits outside the trusted roots stays rejected.
 _APPROVED_EXECUTABLE_DIRS = (
     Path("/bin"),
     Path("/usr/bin"),
     Path("/usr/sbin"),
     Path("/usr/local/bin"),
+    Path("/usr/local/opt"),
     Path("/opt/homebrew/bin"),
+    Path("/opt/homebrew/opt"),
     Path("/opt/homebrew/Cellar"),
     Path("/opt/local/bin"),
     Path("/opt/local/libexec"),
@@ -83,17 +92,14 @@ def _channel_from_toolchain_file(
     channel key must not fall back to its first line (e.g. a
     `[toolchain]` header).
     """
-    match = re.search(
-        r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']",
-        content, re.MULTILINE)
-    if match:
-        return match.group(1)
+    if match := re.search(
+        r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']", content, re.MULTILINE
+    ):
+        return match[1]
     if is_toml:
         return None
     first = content.strip().splitlines()
-    if first and first[0].strip():
-        return first[0].strip()
-    return None
+    return first[0].strip() if first and first[0].strip() else None
 
 
 def _toolchain_from_directory(cwd: Path) -> str | None:
@@ -134,8 +140,7 @@ def _active_rustup_toolchain() -> str | None:
     installed (``1.98.1-aarch64-apple-darwin``), matching Rustup's own
     installed-toolchain naming.
     """
-    env_toolchain = os.environ.get("RUSTUP_TOOLCHAIN")
-    if env_toolchain:
+    if env_toolchain := os.environ.get("RUSTUP_TOOLCHAIN"):
         # Match the directory-override and settings.toml branches: a bare
         # channel (e.g. "1.98.1") is expanded to its installed host-triple
         # toolchain name so the dispatcher resolves against the same
@@ -147,8 +152,7 @@ def _active_rustup_toolchain() -> str | None:
     except OSError:
         cwd = None
     if cwd is not None:
-        directory_toolchain = _toolchain_from_directory(cwd)
-        if directory_toolchain:
+        if directory_toolchain := _toolchain_from_directory(cwd):
             return _expand_toolchain_name(directory_toolchain)
 
     settings = Path.home() / _RUSTUP_DIR_NAME / "settings.toml"
@@ -159,9 +163,7 @@ def _active_rustup_toolchain() -> str | None:
     match = re.search(
         r"^\s*default_toolchain\s*=\s*[\"']([^\"']+)[\"']",
         content, re.MULTILINE)
-    if not match:
-        return None
-    return _expand_toolchain_name(match.group(1))
+    return _expand_toolchain_name(match[1]) if match else None
 
 
 def _expand_toolchain_name(channel: str) -> str:
@@ -179,10 +181,14 @@ def _expand_toolchain_name(channel: str) -> str:
         return channel
     if (toolchain_root / channel).is_dir():
         return channel
-    for entry in toolchain_root.iterdir():
-        if entry.is_dir() and entry.name.startswith(channel + "-"):
-            return entry.name
-    return channel
+    return next(
+        (
+            entry.name
+            for entry in toolchain_root.iterdir()
+            if entry.is_dir() and entry.name.startswith(f"{channel}-")
+        ),
+        channel,
+    )
 
 
 def _resolve_rustup_tool_shim(
@@ -213,35 +219,48 @@ def _resolve_rustup_tool_shim(
     # specific toolchain root, not any installed toolchain.
     rustup_dispatcher = home / _CARGO_DIR_NAME / "bin" / "rustup"
     try:
-        dispatcher_resolved = rustup_dispatcher.resolve(strict=True)
-        try:
-            same_file = os.path.samefile(resolved, dispatcher_resolved)
-        except OSError:
-            same_file = False
-        # A hardlinked shim resolves to its own path, so accept it when the
-        # path is different but the file is the dispatcher itself.
-        if resolved != dispatcher_resolved and not same_file:
-            return None
-        toolchain_root = rustup_toolchains.resolve(strict=True)
-        active = _active_rustup_toolchain()
-        if not active:
-            return None
-        toolchain = toolchain_root / active
-        tool = toolchain / "bin" / name
-        try:
-            tool_resolved = tool.resolve(strict=True)
-        except OSError:
-            return None
-        if (
-            tool_resolved.name != name
-            or toolchain_root not in tool_resolved.parents
-            or not tool_resolved.is_file()
-            or not os.access(tool_resolved, os.X_OK)
-        ):
-            return None
-        return tool_resolved
+        return _resolve_active_toolchain_tool(
+            rustup_dispatcher, resolved, rustup_toolchains, name
+        )
     except (OSError, RuntimeError):
         return None
+
+
+def _resolve_active_toolchain_tool(rustup_dispatcher, resolved, rustup_toolchains, name):
+    """Return the tool binary under the active Rustup toolchain, or None.
+
+    Requires ``resolved`` to be the Rustup dispatcher (either the same
+    resolved path or the same file via hardlink), then resolves the tool
+    under the active toolchain root and validates it is an executable file
+    contained within that root.
+    """
+    dispatcher_resolved = rustup_dispatcher.resolve(strict=True)
+    try:
+        same_file = os.path.samefile(resolved, dispatcher_resolved)
+    except OSError:
+        same_file = False
+    # A hardlinked shim resolves to its own path, so accept it when the
+    # path is different but the file is the dispatcher itself.
+    if resolved != dispatcher_resolved and not same_file:
+        return None
+    toolchain_root = rustup_toolchains.resolve(strict=True)
+    active = _active_rustup_toolchain()
+    if not active:
+        return None
+    toolchain = toolchain_root / active
+    tool = toolchain / "bin" / name
+    try:
+        tool_resolved = tool.resolve(strict=True)
+    except OSError:
+        return None
+    if (
+        tool_resolved.name != name
+        or toolchain_root not in tool_resolved.parents
+        or not tool_resolved.is_file()
+        or not os.access(tool_resolved, os.X_OK)
+    ):
+        return None
+    return tool_resolved
 
 
 def resolve_rustup_tool_shim(name: str) -> str | None:

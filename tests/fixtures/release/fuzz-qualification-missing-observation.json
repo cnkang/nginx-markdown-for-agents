@@ -1,9 +1,20 @@
 {
-  "schema_version": "release.fuzz-qualification.v1",
+  "schema_version": "release.fuzz-qualification.v2",
   "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
-  "run_id": "fuzz-qualification-20260805T120000Z",
-  "started_at": "2026-08-05T12:00:00+00:00",
-  "finished_at": "2026-08-05T13:00:00+00:00",
+  "run_id": "fuzz-qualification-20260921T120000Z",
+  "started_at": "2026-09-21T12:00:00+00:00",
+  "finished_at": "2026-09-21T13:00:00+00:00",
+  "toolchain_identity": {
+    "rustup_toolchain": "nightly-2026-09-21",
+    "rustc_version": "rustc 1.100.0-nightly (bba531001 2026-09-20)",
+    "rustc_commit_hash": "bba531001d4de6d7f49693e0836a2668ca063282",
+    "rustc_commit_date": "2026-09-20",
+    "rustc_host": "x86_64-unknown-linux-gnu",
+    "rustc_release": "1.100.0-nightly",
+    "llvm_version": "23.1.1",
+    "cargo_version": "cargo 1.100.0-nightly (495c385d0 2026-09-16)",
+    "cargo_fuzz_version": "cargo-fuzz 0.13.1"
+  },
   "per_target": [
     {
       "target": "parser_html",
