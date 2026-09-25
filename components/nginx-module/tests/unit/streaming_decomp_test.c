@@ -5171,6 +5171,42 @@ test_feed_empty_and_large_size_paths(void)
     TEST_PASS("feed empty/large-size branches covered");
 }
 
+
+/* Exercise the growth wrapper's overflow mapper, not only expand_buf itself.
+ * A doubling overflow is an internal sizing error, not an allocation error. */
+static void
+test_grow_output_overflow_maps_internal(void)
+{
+    ngx_http_markdown_streaming_decomp_t decomp;
+    u_char                             *heap_buf;
+    u_char                             *buf;
+    size_t                              buf_size;
+    int                                 using_heap;
+    ngx_int_t                           rc;
+
+    TEST_SUBSECTION("output growth overflow maps to internal failure");
+    memset(&decomp, 0, sizeof(decomp));
+    heap_buf = ngx_alloc(1, &test_log);
+    TEST_ASSERT(heap_buf != NULL,
+        "overflow mapper setup must allocate one heap byte");
+    buf = heap_buf;
+    buf_size = SIZE_MAX / 2 + 1;
+    using_heap = 0;
+
+    rc = ngx_http_markdown_streaming_decomp_grow_output_buf(
+        &decomp, &buf, &buf_size, &heap_buf, &using_heap, &test_log);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "growth wrapper must turn expansion overflow into NGX_ERROR");
+    TEST_ASSERT(decomp.failure_origin == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL,
+        "expansion overflow must map to INTERNAL rather than ALLOCATION");
+    TEST_ASSERT(heap_buf == NULL,
+        "overflow cleanup must release and clear the prior heap buffer");
+    TEST_ASSERT(using_heap == 0,
+        "failed growth must not publish heap-buffer state");
+    TEST_PASS("output growth overflow maps to internal failure");
+}
+
 /*
  * test_feed_mocked_inflate_paths - Verify feed's inflate-loop error,
  * budget, and expansion paths using the controlled inflate mock.
@@ -6029,6 +6065,7 @@ main(void)
     test_feed_guard_and_overflow_branches();
     test_finish_guard_and_alloc_branches();
     test_feed_empty_and_large_size_paths();
+    test_grow_output_overflow_maps_internal();
     test_feed_mocked_inflate_paths();
     test_finish_zlib_paths_and_helpers();
     test_finish_wrapper_success_and_overflow_paths();

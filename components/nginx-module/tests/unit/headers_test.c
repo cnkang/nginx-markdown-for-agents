@@ -410,6 +410,9 @@ free_request(ngx_http_request_t *r)
 }
 
 static void
+push_trailer(ngx_http_request_t *r, const char *name, const char *value);
+
+static void
 test_update_headers_full_path(void)
 {
     ngx_http_request_t r = new_request();
@@ -418,6 +421,7 @@ test_update_headers_full_path(void)
     static uint8_t etag_value[] = "\"etag-1\"";
     ngx_table_elt_t *vary;
     ngx_table_elt_t *token_h;
+    ngx_table_elt_t *trailer;
 
     TEST_SUBSECTION("Update headers with ETag and token estimation enabled");
 
@@ -435,6 +439,8 @@ test_update_headers_full_path(void)
     r.headers_out.content_encoding = push_header(&r, "Content-Encoding", "gzip");
     r.headers_out.accept_ranges = push_header(&r, "Accept-Ranges", "bytes");
     r.headers_out.etag = push_header(&r, "ETag", "\"upstream\"");
+    push_header(&r, "Trailer", "Content-Digest");
+    push_trailer(&r, "Content-Digest", "sha-256=:html:");
 
     TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
                 "update_headers should succeed");
@@ -464,6 +470,13 @@ test_update_headers_full_path(void)
     TEST_ASSERT(token_h != NULL, "Token header should be present when enabled");
     TEST_ASSERT(find_substr(token_h->value.data, token_h->value.len, "123", 3),
                 "Token header value should contain token count");
+    TEST_ASSERT(find_header(&r, "Trailer") == NULL,
+                "full-buffer conversion must remove the upstream "
+                "Trailer declaration");
+    trailer = (ngx_table_elt_t *) r.headers_out.trailers.part.elts;
+    TEST_ASSERT(trailer != NULL && trailer[0].hash == 0,
+                "full-buffer conversion must suppress actual upstream "
+                "trailer entries");
 
     free_request(&r);
     TEST_PASS("Full header update path works");
@@ -965,6 +978,7 @@ test_head_representation_headers_strips_html_metadata(void)
     push_header(&r, "Content-Digest", "sha-256=:abc123:");
     push_header(&r, "Repr-Digest", "sha-256=:abc123:");
     push_header(&r, "X-Markdown-Tokens", "42");
+    push_header(&r, "Content-Location", "/article.html");
     push_header(&r, "Trailer", "Content-Digest");
     push_trailer(&r, "Content-Digest", "sha-256=:abc123:");
     r.headers_out.content_type.data = (u_char *) "text/html";
@@ -1004,6 +1018,8 @@ test_head_representation_headers_strips_html_metadata(void)
                 "HEAD strips Repr-Digest");
     TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") == NULL,
                 "HEAD strips X-Markdown-Tokens");
+    TEST_ASSERT(find_header(&r, "Content-Location") == NULL,
+                "HEAD strips the stale HTML Content-Location");
     TEST_ASSERT(find_header(&r, "Trailer") == NULL,
                 "HEAD strips Trailer declaration");
     TEST_ASSERT(find_header(&r, "ETag") == NULL,

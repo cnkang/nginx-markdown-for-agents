@@ -73,7 +73,29 @@ struct ngx_pool_cleanup_s {
  * The stub struct definitions below must stay layout-compatible with what
  * the included production sources access through ngx_http_request_t.
  */
+/* Match the module config layout for the Brotli allocator under test. */
+#define NGX_HTTP_BROTLI 1
 #include "../../src/ngx_http_markdown_filter_module.h"
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old, ngx_atomic_t set)
+{
+    if (*lock != old) {
+        return 0;
+    }
+    *lock = set;
+    return 1;
+}
+
+static ngx_inline ngx_atomic_t
+ngx_atomic_fetch_add(ngx_atomic_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_t old;
+
+    old = *value;
+    *value = (ngx_atomic_t) (old + add);
+    return old;
+}
 
 typedef struct {
     ngx_str_t  key;
@@ -654,6 +676,8 @@ markdown_chain_decode_free(struct FFIChainDecodeResult *result)
  */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+#define ngx_http_get_module_main_conf(request, module) NULL
+
 /*
  * Include the production implementations under test.  buffer.c must come
  * first: conversion/payload code resolves its buffer symbols from this
@@ -662,8 +686,58 @@ markdown_chain_decode_free(struct FFIChainDecodeResult *result)
  */
 #include "../../src/ngx_http_markdown_buffer.c"
 #include "../../src/ngx_http_markdown_decompression.c"
+#undef NGX_HTTP_BROTLI
 #include "../../src/ngx_http_markdown_decompression_route.h"
 #include "../../src/ngx_http_markdown_payload_impl.h"
+
+static void
+test_full_brotli_allocation_accounts_header(void)
+{
+    ngx_http_markdown_full_brotli_alloc_ctx_t ctx;
+    ngx_atomic_uint_t                        used;
+    ngx_log_t                                log;
+    void                                    *block;
+    size_t                                   overhead;
+    size_t                                   allocs_before;
+    size_t                                   frees_before;
+
+    TEST_SUBSECTION("full-buffer Brotli allocator accounts for its header");
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&log, 0, sizeof(log));
+    used = 0;
+    overhead = sizeof(ngx_http_markdown_full_brotli_allocation_t);
+    ctx.counter = &used;
+    ctx.limit = sizeof(u_char) + overhead - 1;
+    ctx.log = &log;
+
+    block = ngx_http_markdown_full_brotli_alloc(&ctx, 1);
+    TEST_ASSERT(block == NULL && used == 0,
+        "payload-only budget must reject the allocation header overhead");
+
+    ctx.limit = overhead + 12;
+    allocs_before = g_heap_alloc_count;
+    frees_before = g_heap_free_count;
+    block = ngx_http_markdown_full_brotli_alloc(&ctx, 12);
+    TEST_ASSERT(block != NULL,
+        "budget covering header and payload must accept the allocation");
+    TEST_ASSERT(used == overhead + 12,
+        "workspace accounting must include the allocation header");
+
+    TEST_ASSERT(ngx_http_markdown_full_brotli_alloc(&ctx, 1) == NULL,
+        "a second allocation must be rejected when the header-inclusive "
+        "budget is full");
+    TEST_ASSERT(used == overhead + 12,
+        "rejected allocation must not consume workspace budget");
+
+    ngx_http_markdown_full_brotli_free(&ctx, block);
+    TEST_ASSERT(used == 0,
+        "free must release the full header-inclusive reservation");
+    TEST_ASSERT(g_heap_alloc_count == allocs_before + 1
+                && g_heap_free_count == frees_before + 1,
+        "successful Brotli allocation must have one matching heap free");
+
+    TEST_PASS("full-buffer Brotli allocator accounts for its header");
+}
 
 /*
  * The payload path forwards fail-open output through the captured
@@ -964,6 +1038,7 @@ main(void)
     test_contiguous_single_buffer_skips_copy();
     test_multi_buffer_chain_linearizes();
     test_empty_decompressed_payload_releases_compressed_buffer();
+    test_full_brotli_allocation_accounts_header();
     test_failopen_accounting_uses_policy_helper();
 
     printf("\n========================================\n");
