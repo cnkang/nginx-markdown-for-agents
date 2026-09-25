@@ -3528,18 +3528,65 @@ def _python_inline_raw_install(
     )
 
 
-def _python_command_source(words: list[str]) -> tuple[str, int | None]:
-    """Classify Python arguments and locate a literal ``-c`` source word."""
+def _python_short_option_step(
+    option: str, words: list[str], index: int
+) -> tuple[str | None, str | int | None, int]:
+    """Inspect one grouped short-option word for source or a value option."""
+    short_options = option[1:]
+    for offset, flag in enumerate(short_options):
+        if flag == "c":
+            attached_source = short_options[offset + 1:]
+            if attached_source:
+                return "inline", attached_source, 1
+            source_index = index + 1 if index + 1 < len(words) else None
+            return "inline", source_index, 1
+        if flag in {"m", "W", "X"}:
+            has_attached_value = offset + 1 < len(short_options)
+            return None, None, 1 if has_attached_value else 2
+    return None, None, 1
+
+
+def _python_long_option_step(
+    option: str, words: list[str], index: int
+) -> tuple[str | None, str | int | None, int]:
+    """Inspect one long option and report its argument count or mode."""
+    if option == "--":
+        mode = "script" if index + 1 < len(words) else "interactive"
+        return mode, None, 0
+    if option == "--check-hash-based-pycs":
+        return None, None, 2
+    if option.startswith("--check-hash-based-pycs="):
+        return None, None, 1
+    return None, None, 1
+
+
+def _python_command_option(
+    words: list[str], index: int
+) -> tuple[str | None, str | int | None, int]:
+    """Inspect one Python argv word and return its mode or advance width."""
+    option = words[index]
+    if option == "-":
+        return "stdin", index, 0
+    if not option.startswith("-"):
+        return "script", None, 0
+    if option.startswith("--"):
+        return _python_long_option_step(option, words, index)
+    return _python_short_option_step(option, words, index)
+
+
+def _python_command_source(
+    words: list[str],
+) -> tuple[str, str | int | None]:
+    """Classify Python arguments and locate inline source or stdin input."""
     index = 1
     while index < len(words):
-        option = words[index]
-        if option == "-c":
-            return "inline", index + 1 if index + 1 < len(words) else None
-        if option == "-":
-            return "stdin", index
-        if not option.startswith("-"):
-            return "script", None
-        index += 2 if option in {"-W", "-X"} else 1
+        if _is_shell_heredoc_redirect(words[index]):
+            index += 1
+            continue
+        mode, source, consumed = _python_command_option(words, index)
+        if mode is not None:
+            return mode, source
+        index += consumed
     return "interactive", None
 
 
@@ -3561,9 +3608,13 @@ def _raw_install_from_python_command(
         return False
     mode, source_index = _python_command_source(words)
     if mode == "inline":
-        return source_index is None or _python_inline_raw_install(
-            words[source_index], depth + 1, variables
-        )
+        if isinstance(source_index, str):
+            source = source_index
+        elif isinstance(source_index, int) and source_index < len(words):
+            source = words[source_index]
+        else:
+            return True
+        return _python_inline_raw_install(source, depth + 1, variables)
     if mode == "stdin":
         return _python_stdin_source_is_raw(words, source_index)
     return False
@@ -3571,20 +3622,13 @@ def _raw_install_from_python_command(
 
 def _python_arguments_read_stdin_script(arguments: list[str]) -> bool:
     """Whether Python arguments select executable source from standard input."""
-    index = 0
-    while index < len(arguments):
-        option = arguments[index]
-        if _is_shell_heredoc_redirect(option):
-            index += 1
-            continue
-        if option == "-c":
-            return False
-        if option == "-":
-            return True
-        if not option.startswith("-"):
-            return False  # a named script file
-        index += 2 if option in {"-W", "-X"} else 1
-    return True  # no script means interactive stdin
+    command_words = [
+        "python3",
+        *(argument for argument in arguments
+          if not _is_shell_heredoc_redirect(argument)),
+    ]
+    mode, _source = _python_command_source(command_words)
+    return mode in {"stdin", "interactive"}
 
 
 def _python_command_reads_stdin_script(line: str) -> bool:
