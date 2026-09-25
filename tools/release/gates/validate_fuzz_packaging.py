@@ -1695,7 +1695,8 @@ _RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 _PIP_REQUIREMENT_RE = re.compile(
     r"^(?:python3?\s+-m\s+pip|pip3?)"
     r"\s+install\s+"
-    r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?\b"
+    r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?"
+    r"(?=\s|$)"
 )
 _DRIFT_CHECK_RE = re.compile(
     r"^(?:python3|python)\s+tools/reason-codegen/generate\.py\s+--check\b"
@@ -4182,6 +4183,8 @@ _SHADOWED_NAMES = _PREFIX_STRIPPED_NAMES | frozenset({
     ":",
     "exit",
     "false",
+    "pip",
+    "pip3",
     "python",
     "python3",
     "return",
@@ -4695,6 +4698,36 @@ def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
     return markers
 
 
+def _pip_install_is_dry_run(words: list[str], command_index: int) -> bool:
+    """Whether one pip invocation explicitly requests a dry run."""
+    return any(
+        word == "--dry-run" or word.startswith("--dry-run=")
+        for word in words[command_index:]
+    )
+
+
+def _step_retry_is_trusted(step: str | dict) -> bool:
+    """Whether a local retry function in one run step invokes its target."""
+    script = _step_script(step)
+    if script is None:
+        return True
+    executable_source = _join_continuations(
+        _strip_heredocs(_strip_shell_comments(script))
+    )
+    return _retry_runs_its_target(executable_source)
+
+
+def _pip_step_commands(segment: str) -> tuple[bool, bool]:
+    """Whether one executable segment installs pinned deps or runs docs-check."""
+    words = _shell_words(segment)
+    command_index = _skip_env_assignments(words, 0)
+    command = " ".join(words[command_index:])
+    install = bool(_PIP_REQUIREMENT_RE.search(command)) and not (
+        _pip_install_is_dry_run(words, command_index)
+    )
+    return install, _runs_make_docs_check(words)
+
+
 def _pip_first_steps(
     steps: Sequence[str | dict],
 ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
@@ -4702,14 +4735,15 @@ def _pip_first_steps(
     install_at: tuple[int, int] | None = None
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
+        retry_trusted = _step_retry_is_trusted(step)
         for command_index, segment in enumerate(_step_live_commands(step)):
-            words = _shell_words(segment)
+            if not retry_trusted and _is_retry_call(segment):
+                continue
             position = (step_index, command_index)
-            command_index_after_env = _skip_env_assignments(words, 0)
-            command = " ".join(words[command_index_after_env:])
-            if _PIP_REQUIREMENT_RE.search(command) and install_at is None:
+            installs, checks_docs = _pip_step_commands(segment)
+            if installs and install_at is None:
                 install_at = position
-            if _runs_make_docs_check(words) and docs_check_at is None:
+            if checks_docs and docs_check_at is None:
                 docs_check_at = position
     return install_at, docs_check_at
 

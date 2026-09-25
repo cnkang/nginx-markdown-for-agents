@@ -2099,6 +2099,8 @@ def test_toolchain_gate_rejects_shadowing_definitions() -> None:
         # never runs the provisioning behind it.
         "sudo() { :; }\n",
         "nohup() { :; }\n",
+        "pip() { :; }\n",
+        "pip3() { :; }\n",
     ):
         assert (
             packaging_gate._release_gate_toolchain_issue(
@@ -2400,6 +2402,23 @@ def test_release_gate_dependency_guard_takes_valid_pip_spellings() -> None:
     assert packaging_gate._python_deps_issue(["make docs-check"]) is not None
     assert packaging_gate._python_deps_issue(
         ["python3 -m pip install -r requirements-release.txt"]) is not None
+
+
+def test_python_dependency_gate_rejects_untrusted_retry_wrapper() -> None:
+    """A no-op local retry function cannot make pip look like an install."""
+    no_op = (
+        "retry() { :; }\n"
+        "retry 5 python3 -m pip install -r requirements-release.txt\n"
+        "make docs-check"
+    )
+    assert packaging_gate._python_deps_issue([no_op]) is not None
+
+    forwarding = (
+        'retry() { "$@"; }\n'
+        "retry 5 python3 -m pip install -r requirements-release.txt\n"
+        "make docs-check"
+    )
+    assert packaging_gate._python_deps_issue([forwarding]) is None
 
 
 def test_toolchain_gate_rejects_command_lookup_spellings() -> None:
@@ -2807,6 +2826,9 @@ def test_python_dependency_gate_accepts_only_supported_pip_command_forms() -> No
         "python3 install -r requirements-release.txt",
         "pip -m pip install -r requirements-release.txt",
         "pip3 -m pip install -r requirements-release.txt",
+        "pip install -r requirements-release.txt.bak",
+        "python3 -m pip install -r requirements-release.txt --dry-run",
+        "pip3 install --requirement=requirements-release.txt --dry-run",
     )
     for command in invalid:
         assert packaging_gate._python_deps_issue(
