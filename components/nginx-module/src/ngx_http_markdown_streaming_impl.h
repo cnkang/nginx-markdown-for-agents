@@ -1957,15 +1957,19 @@ ngx_http_markdown_streaming_resume_pending(
      * a duplicate terminal after a backpressured subrequest terminal has
      * already been confirmed downstream.
      */
+    /* This resume path also owns terminal release; the helper is idempotent
+     * with the earlier conversion-finalize release. */
     if (ngx_http_markdown_streaming_delivery_ok(rc)
         && r == r->main && pending.main_terminal)
     {
         ctx->streaming.main_terminal_sent = 1;
+        ngx_http_markdown_inflight_release(ctx);
     }
     if (ngx_http_markdown_streaming_delivery_ok(rc)
         && r != r->main && pending.subrequest_terminal)
     {
         ctx->streaming.subrequest_terminal_sent = 1;
+        ngx_http_markdown_inflight_release(ctx);
     }
 
     /*
