@@ -339,6 +339,34 @@ def test_python_inline_launchers_cannot_hide_raw_toolchain_installs() -> None:
         assert packaging_gate._raw_toolchain_install_issue(workflow), command
 
 
+def test_python_inline_launchers_handle_grouped_and_attached_c_options() -> None:
+    """Grouped flags and attached source still expose Python ``-c`` code."""
+    raw_payload = (
+        'import os; os.system("rustup toolchain install stable")'
+    )
+    raw_commands = (
+        f"python3 -Ic '{raw_payload}'",
+        f"python3 -Sc '{raw_payload}'",
+        f"python3 -c'{raw_payload}'",
+        f"python3 -Ic'{raw_payload}'",
+        f"python3 -Sc'{raw_payload}'",
+    )
+    for command in raw_commands:
+        workflow = _workflow_with_run_command(command)
+        assert packaging_gate._raw_toolchain_install_issue(workflow), command
+        assert not packaging_gate._python_command_reads_stdin_script(command)
+
+    safe_commands = (
+        'python3 -Ic \'print("rustup toolchain install stable")\'',
+        'python3 -Sc\'print("rustup toolchain install stable")\'',
+        'python3 -c\'print("rustup toolchain install stable")\'',
+    )
+    for command in safe_commands:
+        workflow = _workflow_with_run_command(command)
+        assert packaging_gate._raw_toolchain_install_issue(workflow) is None
+        assert not packaging_gate._python_command_reads_stdin_script(command)
+
+
 def test_python_inline_literal_data_and_safe_launchers_remain_accepted() -> None:
     """Quoted install text and a literal harmless launcher are not installs."""
     commands = (
