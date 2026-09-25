@@ -58,7 +58,9 @@ DATED_CHANGELOG_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
     re.MULTILINE,
 )
-VERSION_HEADING_PREFIX_RE = re.compile(r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]")
+VERSION_HEADING_PREFIX_RE = re.compile(
+    r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]", re.MULTILINE
+)
 
 
 def is_maintained_markdown(rel_path: str) -> bool:
@@ -1214,10 +1216,11 @@ _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"|will become available"
     r"|release[- ]time template"
     r"|(?:release|development)[- ]candidate"
-    r"|only after"
     r"|before (?:the )?(?:publication|release)"
     r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
-    r"|not (?:yet )?(?:published|released)"
+    r"|not (?:yet |currently |presently |now )?(?:published|released)"
+    r"|no\b.{0,100}\b(?:published|released)\b"
+    r"|将(?:会)?(?:已)?(?:正式)?发布|即将(?:正式)?发布"
     r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
     re.IGNORECASE,
 )
@@ -1229,16 +1232,17 @@ _PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 _NEGATED_COMPLETION_CLAIM_RE = re.compile(
-    r"\b(?:not|never|no)\s+(?:(?:yet|still|longer|been|be|become|officially|formally)\s+)*$"
+    r"\b(?:not|never|no)\s+(?:(?:yet|still|currently|presently|now|longer|been|be|become|officially|formally)\s+)*$"
     r"|\b(?:isn't|aren't|wasn't|weren't|hasn't|haven't)\s+"
-    r"(?:(?:yet|still|been)\s+)*$",
+    r"(?:(?:yet|still|currently|presently|now|been)\s+)*$"
+    r"|\bno\b.{0,100}\b(?:is|are|was|were|has been|have been)\s*$",
     re.IGNORECASE,
 )
 # How far a completion verb may sit from the pending version and still read as
 # a claim about it.  A verb that belongs to another release sits further away
 # or carries a sentence break between the two.
-_ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+\b")
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+(?![\w.-])")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<!e\.g\.)(?<=[.!?])\s+", re.IGNORECASE)
 # A completion verb with no nearby version token only reads as a claim about the
 # pending line when the sentence also names a release subject.  Heading context
 # alone must not turn ordinary wording (e.g. "The new directive is available.")
@@ -1291,6 +1295,10 @@ def _completion_claim_is_nonaffirmative(
     context = re.sub(r"\s+", " ", sentence.replace(">", " ").replace("`", ""))
     if _NEGATED_COMPLETION_CLAIM_RE.search(prefix) is not None:
         return True
+    if claim.group(0) in {"已发布", "已正式发布"} and re.search(
+        r"(?:将会|将|即将)\s*$", prefix
+    ):
+        return True
     claim_word = claim.group(0).lower()
     if claim_word in {"published", "released", "shipped"}:
         future_publication = re.search(
@@ -1311,7 +1319,18 @@ def _completion_claim_is_nonaffirmative(
         prefix,
         re.IGNORECASE,
     )
-    return future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None
+    if future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None:
+        return True
+    after_claim = sentence[claim.end() :]
+    return re.search(
+        r"^\s*(?:only\s+)?(?:after\s+(?:the\s+)?(?:publication|release)\b"
+        r"|after\s+(?:(?:the\s+)?(?:v?\d+\.\d+\.\d+|version|tag|release)\s+)?"
+        r"(?:is|has been|will be|gets)\s+(?:published|released)\b"
+        r"|once\s+(?:it\s+is\s+)?published\b"
+        r"|following\s+(?:the\s+)?publication\b)",
+        after_claim,
+        re.IGNORECASE,
+    ) is not None
 
 
 def _nearest_version_to_claim(
@@ -1358,6 +1377,17 @@ def _claim_names_pending_version(
     return not _completion_claim_is_nonaffirmative(window, claim)
 
 
+def _pending_completion_claim(
+    window: str, pending_version: str, version_context: bool = False
+) -> re.Match[str] | None:
+    """Return the first affirmative completion claim tied to the pending version."""
+    pending = re.compile(rf"\bv?{re.escape(pending_version)}(?![\w.-])")
+    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
+        if _claim_names_pending_version(window, claim, pending, version_context):
+            return claim
+    return None
+
+
 def _claim_belongs_to_pending_version(
     window: str, pending_version: str, version_context: bool = False
 ) -> bool:
@@ -1366,11 +1396,7 @@ def _claim_belongs_to_pending_version(
     The nearest version token decides, so a published baseline is not mistaken
     for a claim about the pending line in a sentence that names both.
     """
-    pending = re.compile(rf"\bv?{re.escape(pending_version)}\b")
-    return any(
-        _claim_names_pending_version(window, claim, pending, version_context)
-        for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window)
-    )
+    return _pending_completion_claim(window, pending_version, version_context) is not None
 
 
 def _claims_pending_latest_tag(
@@ -1418,10 +1444,8 @@ def _pending_sentence_failures(
         if sentence_names_version
         else sentence
     )
-    claim = _PREPUBLICATION_COMPLETION_CLAIM_RE.search(window)
-    if claim is not None and _claim_belongs_to_pending_version(
-        window, pending_version, version_context
-    ):
+    claim = _pending_completion_claim(window, pending_version, version_context)
+    if claim is not None:
         return [
             f"{rel}: pending {pending_version} is described as "
             f"{claim.group(0)!r} without a publication boundary in: "
@@ -1439,7 +1463,7 @@ def _pending_document_failures(
     """Validate all current-state blocks for one pending-release surface."""
     path = root / rel
     if not path.is_file():
-        return []
+        return [f"{rel}: required release-state surface is missing"]
     text = path.read_text(encoding="utf-8", errors="ignore")
     return _pending_text_failures(
         rel, text, pending_version, require_boundary=require_boundary
@@ -1459,7 +1483,9 @@ def _pending_text_failures(
     Unreleased section; ordinary documents can contain historical version
     headings whose prose is not a claim about today's pending release.
     """
-    version_pattern = re.compile(rf"\bv?{re.escape(pending_version)}\b")
+    version_pattern = re.compile(
+        rf"\bv?{re.escape(pending_version)}(?![\w.-])"
+    )
     text = _without_fenced_blocks(text)
     history = set(_document_update_table_lines(text))
     failures: list[str] = []
@@ -1669,6 +1695,7 @@ def main() -> int:
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
     failures.extend(check_release_checklist_is_static(files))
+    failures = list(dict.fromkeys(failures))
 
     if failures:
         print("Documentation checks failed:")

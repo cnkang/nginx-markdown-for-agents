@@ -42,8 +42,9 @@ FFI_HEADER = MODULE_SRC / "markdown_converter.h"
 RUST_FFI_DIR = ROOT / "components" / "rust-converter" / "src" / "ffi"
 # Rust-owned FFI exports are discovered under this source directory, while the
 # generated header also includes reason-code generator declarations.
-RUST_FFI_EXPORT_RE = re.compile(
-    r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
+RUST_FFI_NO_MANGLE_RE = re.compile(r"#\[unsafe\(no_mangle\)\]")
+RUST_FFI_C_FUNCTION_RE = re.compile(
+    r'pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
 )
 
 # Loader/ABI functions that are part of the module handshake lifecycle.
@@ -122,8 +123,22 @@ HEADER_INCLUDE_GUARDS = frozenset({
 
 def read_text(path: Path) -> str:
     """Read a file with path validation."""
-    validated = validate_read_path(str(path), purpose="FFI dead export audit")
+    validated = _validate_repository_read_path(
+        path, purpose="FFI dead export audit"
+    )
     return validated.read_text(encoding="utf-8")
+
+
+def _validate_repository_read_path(path: Path, *, purpose: str) -> Path:
+    """Resolve a repo input and reject symlinks that escape the repository."""
+    validated = validate_read_path(path, purpose=purpose)
+    try:
+        validated.relative_to(ROOT.resolve())
+    except ValueError as error:
+        raise ValueError(
+            f"Refusing {purpose} outside repository root: {validated}"
+        ) from error
+    return validated
 
 
 def _header_declaration_name(line: str) -> str | None:
@@ -214,6 +229,50 @@ def _rust_quoted_string_end(source: str, index: int) -> int:
     return len(source)
 
 
+def _rust_char_escape_end(source: str, slash: int) -> int | None:
+    """Return the position after one supported Rust character escape."""
+    escape = slash + 1
+    if escape >= len(source):
+        return None
+    kind = source[escape]
+    if kind == "x":
+        digits = source[escape + 1 : escape + 3]
+        if len(digits) != 2 or not re.fullmatch(r"[0-9a-fA-F]{2}", digits):
+            return None
+        return escape + 3
+    if kind == "u":
+        if source[escape + 1 : escape + 2] != "{":
+            return None
+        close = source.find("}", escape + 2)
+        if close < 0:
+            return None
+        digits = source[escape + 2 : close].replace("_", "")
+        if not re.fullmatch(r"[0-9a-fA-F]{1,6}", digits):
+            return None
+        return close + 1
+    if kind in {"n", "r", "t", "\\", "'", '"', "0"}:
+        return escape + 1
+    return None
+
+
+def _rust_char_literal_end(source: str, index: int) -> int | None:
+    """Return the end of a Rust character literal, excluding lifetimes."""
+    if index >= len(source) or source[index] != "'":
+        return None
+    content = index + 1
+    if content >= len(source) or source[content] in {"'", "\n", "\r"}:
+        return None
+    if source[content] == "\\":
+        content_end = _rust_char_escape_end(source, content)
+        if content_end is None:
+            return None
+    else:
+        content_end = content + 1
+    if content_end < len(source) and source[content_end] == "'":
+        return content_end + 1
+    return None
+
+
 def _rust_block_comment_end(source: str, index: int) -> int:
     """Return the end of a nested Rust block comment."""
     depth = 1
@@ -257,33 +316,83 @@ def _is_rust_abi_string(
     )
 
 
+def _mask_rust_non_code_at(source: str, masked: list[str], index: int) -> int | None:
+    """Mask one non-code span at ``index`` and return its end, if present."""
+    raw_end = (
+        _rust_raw_string_end(source, index)
+        if source[index] in {"b", "r"}
+        else None
+    )
+    if raw_end is not None:
+        _mask_rust_span(masked, index, raw_end)
+        return raw_end
+
+    char_quote = index + 1 if source.startswith("b'", index) else index
+    char_end = _rust_char_literal_end(source, char_quote)
+    if char_end is not None:
+        _mask_rust_span(masked, index, char_end)
+        return char_end
+
+    if source[index] == '"':
+        string_end = _rust_quoted_string_end(source, index)
+        if not _is_rust_abi_string(source, masked, index, string_end):
+            _mask_rust_span(masked, index, string_end)
+        return string_end
+
+    comment_end = _rust_comment_end(source, index)
+    if comment_end is not None:
+        _mask_rust_span(masked, index, comment_end)
+        return comment_end
+    return None
+
+
 def _mask_rust_non_code(source: str) -> str:
     """Mask comments and non-ABI string literals before matching exports."""
     masked = list(source)
     index = 0
     while index < len(source):
-        raw_end = (
-            _rust_raw_string_end(source, index)
-            if source[index] in {"b", "r"}
-            else None
-        )
-        if raw_end is not None:
-            _mask_rust_span(masked, index, raw_end)
-            index = raw_end
-            continue
-        if source[index] == '"':
-            string_end = _rust_quoted_string_end(source, index)
-            if not _is_rust_abi_string(source, masked, index, string_end):
-                _mask_rust_span(masked, index, string_end)
-            index = string_end
-            continue
-        comment_end = _rust_comment_end(source, index)
-        if comment_end is not None:
-            _mask_rust_span(masked, index, comment_end)
-            index = comment_end
-            continue
-        index += 1
+        span_end = _mask_rust_non_code_at(source, masked, index)
+        index = index + 1 if span_end is None else span_end
     return "".join(masked)
+
+
+def _rust_attribute_end(source: str, start: int) -> int | None:
+    """Return the end of one balanced Rust attribute beginning at ``start``."""
+    if not source.startswith("#[", start):
+        return None
+
+    depth = 1
+    index = start + 2
+    while index < len(source):
+        if source[index] == "[":
+            depth += 1
+        elif source[index] == "]":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+
+    return None
+
+
+def _declared_rust_exports(source: str) -> list[str]:
+    """Find C exports following no_mangle and any stacked attributes."""
+    code = _mask_rust_non_code(source)
+    names: list[str] = []
+    for attribute in RUST_FFI_NO_MANGLE_RE.finditer(code):
+        index = attribute.end()
+        while index < len(code):
+            while index < len(code) and code[index].isspace():
+                index += 1
+            attribute_end = _rust_attribute_end(code, index)
+            if attribute_end is None:
+                break
+            index = attribute_end
+
+        function = RUST_FFI_C_FUNCTION_RE.match(code, index)
+        if function is not None:
+            names.append(function.group(1))
+    return names
 
 
 def declared_rust_exports() -> list[str]:
@@ -293,7 +402,7 @@ def declared_rust_exports() -> list[str]:
         text = _read_text(path)
         if text is None:
             raise ValueError(f"cannot read declared Rust FFI exports from {path}")
-        names.update(RUST_FFI_EXPORT_RE.findall(_mask_rust_non_code(text)))
+        names.update(_declared_rust_exports(text))
     if not names:
         raise ValueError("no declared Rust FFI exports were found")
     return sorted(names)
@@ -331,7 +440,7 @@ def dangling_lifecycle_pairs(
     universe: frozenset[str],
     rust_exports: Iterable[str] | None = None,
 ) -> list[tuple[str, str]]:
-    """Return lifecycle pairs naming a symbol outside the export universe.
+    """Return lifecycle pairs missing from the Rust or header export set.
 
     ``LIFECYCLE_PAIRS`` exists to infer production calls for the CURRENT
     Rust-owned lifecycle surface, so a pair left behind by a removed export is
@@ -361,8 +470,8 @@ def _reject_dangling_lifecycle_pairs(
     if dangling:
         joined = ", ".join(f"{key} -> {value}" for key, value in dangling)
         raise ValueError(
-            "LIFECYCLE_PAIRS names symbols outside the declared FFI export "
-            f"universe: {joined}"
+            "LIFECYCLE_PAIRS names symbols missing from live Rust exports or "
+            f"outside the generated/header export universe: {joined}"
         )
 
 
@@ -381,7 +490,7 @@ def scan_c_callsites(
     }
     """
     callsites: dict[str, list[dict[str, Any]]] = {}
-    validated_directory = validate_read_path(
+    validated_directory = _validate_repository_read_path(
         directory, purpose="FFI callsite source directory"
     )
     suffixes = {".c", ".h"} if include_headers else {".c"}
@@ -539,7 +648,9 @@ def _is_non_callsite_line(line: str) -> bool:
 def _read_text(path: Path) -> str | None:
     """Read a text file, returning None when unreadable."""
     try:
-        validated_path = validate_read_path(path, purpose="FFI callsite source")
+        validated_path = _validate_repository_read_path(
+            path, purpose="FFI callsite source"
+        )
         return validated_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
@@ -644,14 +755,14 @@ def _record_callsite(
 def scan_test_references(test_directory: Path) -> set[str]:
     """Scan test files for references to markdown_* functions (stubs/mocks)."""
     references: set[str] = set()
-    validated_directory = validate_read_path(
+    validated_directory = _validate_repository_read_path(
         test_directory, purpose="FFI test reference directory"
     )
     for path in sorted(validated_directory.rglob("*")):
         if path.suffix not in (".c", ".h"):
             continue
         try:
-            validated_path = validate_read_path(
+            validated_path = _validate_repository_read_path(
                 path, purpose="FFI test reference source"
             )
             text = validated_path.read_text(encoding="utf-8")
