@@ -27,7 +27,6 @@ class NginxMarkdownModule < Formula
   depends_on "pkgconf" => :build
   depends_on "brotli"
   depends_on "nginx"
-  depends_on "openssl@3"
   depends_on "pcre2"
 
   # The Rust toolchain is installed with the repository's checksum-verifying
@@ -58,6 +57,7 @@ class NginxMarkdownModule < Formula
 
     nginx_version = Formula["nginx"].version.to_s
     odie "Unable to detect Homebrew nginx version" if nginx_version.blank?
+    openssl_formula = nginx_openssl_formula
 
     nginx_archive = "nginx-#{nginx_version}.tar.gz"
     system "curl", "--proto", "=https", "--tlsv1.2", "-fsSL",
@@ -74,15 +74,25 @@ class NginxMarkdownModule < Formula
       args = [
         "--with-compat",
         "--add-dynamic-module=#{buildpath}/components/nginx-module",
-        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} " \
+        "--with-cc-opt=-I#{formula_opt_include(openssl_formula)} " \
         "-I#{formula_opt_include("pcre2")} -I#{formula_opt_include("brotli")}",
-        "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} " \
+        "--with-ld-opt=-L#{formula_opt_lib(openssl_formula)} " \
         "-L#{formula_opt_lib("pcre2")} -L#{formula_opt_lib("brotli")}",
       ]
       system "./configure", *args
       system "make", "modules"
       (lib/"nginx/modules").install "objs/ngx_http_markdown_filter_module.so"
     end
+  end
+
+  def nginx_openssl_formula
+    dependencies = Formula["nginx"].deps.select do |dependency|
+      dependency.name.match?(/\Aopenssl(?:@\d+)?\z/)
+    end
+    odie "Unable to detect Homebrew nginx OpenSSL dependency" \
+      unless dependencies.one?
+
+    dependencies.first.name
   end
 
   def caveats
