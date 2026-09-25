@@ -199,13 +199,8 @@ def test_toolchain_gate_ignores_comments_and_unrelated_installs() -> None:
     )
 
 
-def test_toolchain_gate_rejects_runtime_expanded_heredoc_delimiters() -> None:
-    """A heredoc opened with ``<<$WORD`` cannot be delimited statically.
-
-    The shell expands a plain delimiter word at runtime, so the gate must
-    refuse to interpret the script instead of scanning fake commands inside
-    the body as executable content (or dropping a body it cannot find).
-    """
+def test_toolchain_gate_treats_expansion_chars_as_literal_delimiters() -> None:
+    """Bash removes quotes but does not expand heredoc delimiter words."""
     drift = DRIFT
     installer = (
         "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
@@ -214,10 +209,10 @@ def test_toolchain_gate_rejects_runtime_expanded_heredoc_delimiters() -> None:
     component = (
         'retry 5 rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
     )
-    fake = "cat <<$EOF\n" + installer + component + drift + "EOF\n"
+    fake = "cat <<$EOF\n" + installer + component + drift + "$EOF\n"
     assert packaging_gate._release_gate_toolchain_issue(fake)
-    # The raw-install detector must reject the unverifiable script too: a raw
-    # install could hide behind the runtime-expanded delimiter.
+    # This raw install is heredoc data passed to cat, not an executable
+    # command. A dollar sign in the delimiter is literal shell syntax.
     workflow = (
         "jobs:\n"
         "  fuzz-qualification:\n"
@@ -226,15 +221,53 @@ def test_toolchain_gate_rejects_runtime_expanded_heredoc_delimiters() -> None:
         "        run: |\n"
         "          cat <<$EOF\n"
         "          rustup toolchain install nightly --profile minimal\n"
-        "          EOF\n"
+        "          $EOF\n"
     )
-    assert packaging_gate._raw_toolchain_install_issue(workflow)
+    assert packaging_gate._raw_toolchain_install_issue(workflow) is None
+    backtick_heredoc = (
+        "cat <<`EOF`\n" + installer + component + drift + "`EOF`\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(backtick_heredoc)
     # A quoted delimiter is static: the literal word is the terminator, the
     # body is dropped, and real provisioning after it still satisfies.
     quoted = (
         "cat <<'$EOF'\nbody\n$EOF\n" + drift + installer + component
     )
     assert packaging_gate._release_gate_toolchain_issue(quoted) is None
+
+
+def test_raw_install_scan_continues_after_literal_dollar_delimiter() -> None:
+    """A dollar-sign delimiter must not hide a later shell-input body."""
+    dynamic_only = "delimiter=END\ncat <<$delimiter\nbenign data\n$delimiter\n"
+    static_raw = (
+        "bash -s <<'SCRIPT'\n"
+        "rustup toolchain install stable\n"
+        "SCRIPT\n"
+    )
+    combined = dynamic_only + static_raw
+
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(dynamic_only)
+    ) is None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(static_raw)
+    )
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(combined)
+    )
+
+
+def test_raw_install_scan_continues_after_unresolved_ansi_c_delimiter() -> None:
+    """An unsupported delimiter spelling cannot hide later shell input."""
+    opaque_delimiter = "cat <<$'E\\tOF'\nopaque data\nE\tOF\n"
+    static_raw = (
+        "bash -s <<'SCRIPT'\n"
+        "rustup toolchain install stable\n"
+        "SCRIPT\n"
+    )
+    workflow = _raw_install_workflow(opaque_delimiter + static_raw)
+
+    assert packaging_gate._raw_toolchain_install_issue(workflow)
 
 
 def test_toolchain_gate_sees_commands_after_a_multiline_quote_closes() -> None:
@@ -954,12 +987,12 @@ def test_toolchain_gate_accepts_partially_quoted_delimiters() -> None:
         script + drift + installer + component) is None
 
 
-def test_toolchain_gate_ignores_dynamic_markers_in_uncalled_functions() -> None:
-    """A dynamic delimiter in code that never runs cannot reject the script."""
+def test_toolchain_gate_ignores_literal_dollar_delimiter_in_uncalled_functions() -> None:
+    """An unused function's literal ``$DELIM`` heredoc cannot reject the script."""
     drift = DRIFT
     installer = INSTALLER
     component = COMPONENT
-    dead = "unused() {\ncat <<$DELIM\nbody\nDELIM\n}\n"
+    dead = "unused() {\ncat <<$DELIM\nbody\n$DELIM\n}\n"
     assert packaging_gate._release_gate_toolchain_issue(
         dead + drift + installer + component) is None
 
@@ -1221,6 +1254,25 @@ def test_eval_reparses_bash_joined_arguments_and_keeps_echo_control() -> None:
         "eval 'echo rustup toolchain install stable'"
     )
     assert packaging_gate._raw_toolchain_install_issue(echo_control) is None
+
+
+def test_eval_command_substitution_cannot_split_into_inert_fragments() -> None:
+    """Opaque eval substitutions fail closed across quotes and backticks."""
+    raw_substitutions = (
+        'eval "$(./gen.sh)"',
+        'eval "$(printf \'%s\' \'rustup toolchain install stable\')"',
+        'eval "`printf \'%s\' \'rustup toolchain install stable\'`"',
+    )
+    for script in raw_substitutions:
+        workflow = _raw_install_workflow(script)
+        assert packaging_gate._raw_toolchain_install_issue(workflow), script
+
+    safe_controls = (
+        _raw_install_workflow("eval 'echo safe'"),
+        _raw_install_workflow("echo 'eval \"$(./gen.sh)\"'"),
+    )
+    for safe_control in safe_controls:
+        assert packaging_gate._raw_toolchain_install_issue(safe_control) is None
 
 
 def test_eval_expands_static_variable_before_raw_install_check() -> None:
@@ -2775,6 +2827,94 @@ def test_release_gate_step_env_does_not_carry_to_later_docs_check() -> None:
         ':\n    env:\n      VIRTUAL_ENV: .venv\n      PATH: ".venv/bin:$PATH"\n    steps:\n      - run: pip install -r requirements-release.txt\n      - run: make docs-check\n'
     )
     assert packaging_gate._python_deps_issue(shared_steps) is None
+
+
+def test_toolchain_gate_ignores_final_dead_function_at_eof() -> None:
+    """A final function definition cannot satisfy provisioning before a call."""
+    dead = "unused() {\n" + DRIFT + INSTALLER + COMPONENT + "}"
+    assert packaging_gate._release_gate_toolchain_issue(dead) is not None
+    assert packaging_gate._release_gate_toolchain_issue(dead + "\nunused\n") is None
+
+
+def test_toolchain_gate_ignores_nested_dead_function_inside_live_function() -> None:
+    """A live outer function does not make its uncalled nested body live."""
+    script = (
+        "outer() {\n"
+        "  unused() {\n" + DRIFT + INSTALLER + COMPONENT + "  }\n"
+        "  :\n"
+        "}\n"
+        "outer\n"
+    )
+    assert packaging_gate._release_gate_toolchain_issue(script) is not None
+
+    called = script.replace("  :\n", "  unused\n", 1)
+    assert packaging_gate._release_gate_toolchain_issue(called) is None
+
+
+def test_toolchain_gate_preserves_function_closer_after_return() -> None:
+    """Stripping post-return commands keeps the function's closing delimiter."""
+    script = "run() { return; rustup toolchain install nightly; }\nrun\n"
+    stripped = packaging_gate._strip_function_bodies(script)
+    assert len(stripped) == len(script)
+    assert stripped.count("}") == 1
+    assert "rustup toolchain install nightly" not in stripped
+
+
+def test_toolchain_gate_models_quoted_set_flags() -> None:
+    """Quote removal still makes set's option flags effective shell options."""
+    provisioning = "set +e\nset '-e'\nfalse\n" + DRIFT + INSTALLER + COMPONENT
+    assert packaging_gate._release_gate_toolchain_issue(provisioning) is not None
+
+    option_word = "set +e\nset '-o' errexit\nfalse\n" + DRIFT + INSTALLER + COMPONENT
+    assert packaging_gate._release_gate_toolchain_issue(option_word) is not None
+
+
+def test_live_command_segments_models_negated_false_chain_operand() -> None:
+    """`! false` succeeds, so its following `&&` command is reachable."""
+    actual = subprocess.run(
+        ["bash", "-c", "! false && printf reached"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert actual.returncode == 0
+    assert actual.stdout == "reached"
+    assert packaging_gate._live_command_segments(
+        "! false && printf reached", errexit=False
+    ) == ["! false", "printf reached"]
+
+
+def test_raw_install_detector_handles_timeout_separator_and_xargs_short_i() -> None:
+    """Both wrappers leave their command operand visible to the detector."""
+    commands = (
+        "timeout -- 5s rustup toolchain install stable",
+        "printf stable | xargs -i rustup toolchain install stable",
+    )
+    for command in commands:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(command)
+        ) is not None, command
+
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("timeout -- 5s printf safe")
+    ) is None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("printf stable | xargs -i printf safe")
+    ) is None
+
+
+def test_make_docs_check_rejects_missing_option_operand() -> None:
+    """A dangling `-C` cannot prove that make ran the required target."""
+    assert packaging_gate._make_targets_after_options(["-C"], 0) is None
+    assert packaging_gate._make_targets_after_options(
+        ["-C", "tools", "docs-check"], 0
+    ) == ["docs-check"]
+
+
+def test_dynamic_eval_parser_fails_closed_on_unterminated_quote() -> None:
+    """Malformed shell quoting cannot hide whether eval receives dynamic text."""
+    assert packaging_gate._eval_has_dynamic_substitution("eval 'unterminated")
+    assert not packaging_gate._eval_has_dynamic_substitution("eval 'literal'")
 
 
 def _release_gate_steps_from_yaml(job_yaml_fragment: str) -> list[dict]:

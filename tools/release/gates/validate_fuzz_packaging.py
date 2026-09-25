@@ -31,6 +31,7 @@ No user-supplied patterns are compiled at runtime.
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Sequence
 import functools
 import re
@@ -459,33 +460,27 @@ def _walk_removal_char(
 
 
 def _resolve_heredoc_word(raw: str) -> tuple[str, bool]:
-    """Resolve a heredoc delimiter word; return (delimiter, dynamic).
+    """Resolve a heredoc delimiter word; return (delimiter, unresolved).
 
-    Quote removal models the shell.  When any part of the word is quoted
-    (quotes or backslashes), the shell performs quote removal only and never
-    expands it, so the delimiter is static; a fully unquoted word with a
-    live ``$`` or backtick depends on the environment at runtime.
+    Bash performs quote removal, but not parameter or command substitution,
+    on a here-document delimiter word. Unquoted ``$`` and backticks are
+    therefore literal delimiter characters. ``unresolved`` is reserved for
+    delimiter syntax this bounded quote-removal model cannot decode.
     """
     # ANSI-C escapes have more spellings than this quote-removal model
-    # resolves.  Treat an escaped delimiter as dynamic/unverifiable instead
+    # resolves. Treat an escaped delimiter as unresolved/unverifiable instead
     # of guessing a terminator and exposing heredoc body text as commands.
     if raw.startswith("$'") and "\\" in raw:
         return raw[2:-1] if raw.endswith("'") else raw[2:], True
     resolved: list[str] = []
-    dynamic = False
-    quoted = False
     quote: str | None = None
     index = 0
     while index < len(raw):
-        if raw[index] in ("'", '"', "\\"):
-            quoted = True
-        quote, consumed, keep, live = _walk_removal_char(raw, index, quote)
+        quote, consumed, keep, _ = _walk_removal_char(raw, index, quote)
         if keep is not None:
-            if live and quote != "'":
-                dynamic = True
             resolved.append(keep)
         index += consumed
-    return "".join(resolved), dynamic and not quoted
+    return "".join(resolved), False
 
 
 def _heredoc_marker_at(
@@ -494,9 +489,9 @@ def _heredoc_marker_at(
     """Parse a heredoc marker at ``index``; return (word, tab, dynamic, end).
 
     ``None`` when the position does not open a heredoc (including the
-    ``<<<`` herestring form).  Quoted delimiters are literal; a plain word
-    resolves through quote removal, so escaped spaces stay part of it and
-    escaped expansion characters do not make it dynamic.
+    ``<<<`` herestring form). Bash applies quote removal only, so unquoted
+    expansion metacharacters also remain literal in the delimiter. Escaped
+    spaces stay part of it.
     """
     if (
         not line.startswith("<<", index)
@@ -547,12 +542,12 @@ def _strip_heredocs(script: str) -> str:
     marker line reads its delimiter from the merged command, while heredoc
     bodies stay literal and never join.  Delimiters may be quoted
     (``<<'WORD'``, ``<<"WORD"``), escaped (``<<\\WORD``, ``<<EOF\\ BAR``) or
-    plain (any word without expansion characters).  The terminator must
+    plain (any unquoted word). The terminator must
     match the delimiter exactly -- ``<<-`` additionally strips leading tabs
     -- mirroring shell semantics, so a padded line never ends the body
-    early.  Bodies opened with a dynamic delimiter (``<<$WORD``) cannot be
-    delimited statically and are left intact; ``_dynamic_heredoc_markers``
-    reports them so the provisioning checks can reject the script.
+    early. Delimiter forms the bounded quote-removal model cannot decode are
+    left intact; ``_dynamic_heredoc_markers`` reports them so provisioning
+    checks can reject the script.
     """
     kept: list[str] = []
     pending: list[tuple[str, bool]] = []
@@ -618,11 +613,12 @@ def _join_command_line(
 
 
 def _dynamic_heredoc_markers(script: str) -> list[str]:
-    """Return the delimiters of heredocs whose word expands at runtime.
+    """Return delimiter spellings that this parser cannot resolve safely.
 
-    The shell expands a plain delimiter word containing ``$`` or backticks,
-    so the terminator depends on the environment; the provisioning checks
-    treat such scripts as unverifiable instead of guessing.
+    Bash does not expand ``$`` or backticks in delimiter words. The supported
+    quote-removal model does not decode some ANSI-C escaped delimiter forms,
+    so the provisioning check rejects those unsupported spellings rather
+    than guessing their terminator.
     """
     markers: list[str] = []
     quote: str | None = None
@@ -834,7 +830,32 @@ def _function_body_walk(
     the shell, so callers fail closed instead of trusting its spans.
     """
     spans, state = _function_body_walk_cached(script)
-    return list(spans), state
+    if state:
+        return list(spans), state
+
+    discovered = list(spans)
+    seen = set(discovered)
+    pending = list(discovered)
+    while pending:
+        _parent_name, body_start, body_end = pending.pop()
+        nested_spans, nested_state = _function_body_walk_cached(
+            script[body_start:body_end]
+        )
+        if nested_state:
+            return discovered, nested_state
+        for name, local_start, local_end in nested_spans:
+            nested = (
+                name,
+                body_start + local_start,
+                body_start + local_end,
+            )
+            if nested in seen:
+                continue
+            seen.add(nested)
+            discovered.append(nested)
+            pending.append(nested)
+
+    return sorted(discovered, key=lambda span: span[1]), ""
 
 
 def _function_body_walk_uncached(
@@ -949,7 +970,7 @@ def _direct_function_spans(
     """Function bodies directly nested in a source region, in source order."""
     start, end = region
     contained = [
-        span for span in spans if start < span[1] and span[2] < end
+        span for span in spans if start < span[1] and span[2] <= end
     ]
     return sorted(
         (
@@ -1072,24 +1093,42 @@ def _trim_body_after_terminator(body: str) -> str:
         search_from = found + len(segment)
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
-        if _branch_keyword_step(branches, segment, condition):
-            if _marker_return_status(
-                segment, separator, previous, branches
-            ) is not None:
-                cut = found
-                break
-            previous = None
-            continue
-        if not _region_runs(branches):
-            continue
-        if _chain_skips(separator, previous):
-            continue
-        if keyword == "return":
+        disposition = _body_segment_disposition(
+            segment, separator, keyword, condition, previous, branches
+        )
+        if disposition == "return":
             cut = found
             break
-        previous = _segment_literal(segment)
-    # The leading newline keeps the body's first command off the brace.
-    return "\n" + body[:cut]
+        if disposition == "branch":
+            previous = None
+            continue
+        if disposition == "live":
+            previous = _segment_literal(segment)
+    if cut == len(body):
+        return body
+    # Function spans include their closing brace or parenthesis. Preserve it
+    # after dropping commands that follow a top-level return.
+    closer = body[-1:] if body.endswith(("}", ")")) else ""
+    return body[:cut] + closer
+
+
+def _body_segment_disposition(
+    segment: str,
+    separator: str,
+    keyword: str,
+    condition: bool | None,
+    previous: bool | None,
+    branches: list[tuple[bool, int]],
+) -> str:
+    """Classify a body segment as branch, skipped, live, or terminating."""
+    if _branch_keyword_step(branches, segment, condition):
+        marker_returns = _marker_return_status(
+            segment, separator, previous, branches
+        ) is not None
+        return "return" if marker_returns else "branch"
+    if not _region_runs(branches) or _chain_skips(separator, previous):
+        return "skip"
+    return "return" if keyword == "return" else "live"
 
 
 def _strip_function_bodies(script: str) -> str:
@@ -1709,7 +1748,11 @@ def _body_brace_is_command_position(
     """
     if not _brace_separator_at(script, index):
         return False
+    if brace == "{" and _opens_function_body(script, index) is not None:
+        return True
     code = _masked_quotes(script[body_start:index])
+    if brace == "}" and re.search(r"(?:^|[;\n])\s*$", code) is not None:
+        return True
     current = re.split(r"[;&|\n]", code)[-1].strip()
     if not current:
         return True
@@ -1889,19 +1932,24 @@ def _segment_literal(segment: str) -> bool | None:
     by redirections is False, a leading ``true`` or ``:`` is True, and
     everything else may depend on runtime state.
     """
-    words = _peel_execution_wrappers(segment.split())
+    words, negated = _chain_prefix_words(segment)
+    words = _peel_execution_wrappers(words)
     if not words:
         return None
     first = _resolve_heredoc_word(words[0])[0]
     if first == "--":
-        return False
-    if first == "builtin":
-        return _builtin_command_literal(words)
-    if first in (":", "true"):
-        return True
-    if first == "false" and all(_is_redirection_word(w) for w in words[1:]):
-        return False
-    return None
+        value: bool | None = False
+    elif first == "builtin":
+        value = _builtin_command_literal(words)
+    elif first in (":", "true"):
+        value = True
+    elif first == "false" and all(
+        _is_redirection_word(w) for w in words[1:]
+    ):
+        value = False
+    else:
+        value = None
+    return not value if negated and value is not None else value
 
 
 def _builtin_command_literal(words):
@@ -2031,7 +2079,10 @@ def _is_exec_replacement(words: list[str]) -> bool:
 def _set_errexit_state(segment: str) -> bool | None:
     """Whether the segment enables (True), disables (False) errexit or
     leaves it alone (None)."""
-    words = segment.split()
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return None
     return None if not words or words[0] != "set" else _set_flags_state(words[1:])
 
 
@@ -2378,7 +2429,7 @@ def _live_segment_state(
     run of a function called there).  The status feeds the chain tracker
     (None = unknown).
     """
-    words, bang = _chain_prefix_words(segment)
+    words, _bang = _chain_prefix_words(segment)
     words = _peel_execution_wrappers(words)
     first = _resolve_heredoc_word(words[0])[0] if words else ""
     exit_state = _exit_segment_state(words, separator, following, exiting)
@@ -2390,8 +2441,6 @@ def _live_segment_state(
     value = _segment_literal(segment)
     if value is None and first in failing:
         value = False
-    if bang and value is not None:
-        value = not value
     if value is False:
         return _failing_segment_state(separator, following)
     return None, value
@@ -2898,8 +2947,8 @@ def _xargs_command_index(words: list[str]) -> int | None:
         "-t", "--verbose", "-x", "--exit",
     }
     valued = {
-        "-d", "--delimiter", "-E", "--eof", "-I", "--replace",
-        "-i", "-L", "--max-lines", "-n", "--max-args", "-P",
+        "-d", "--delimiter", "-E", "--eof", "-I",
+        "-L", "--max-lines", "-n", "--max-args", "-P",
         "--max-procs", "-s", "--max-chars", "-a", "--arg-file",
     }
     index = 1
@@ -2909,7 +2958,11 @@ def _xargs_command_index(words: list[str]) -> int | None:
             return index + 1
         if not word.startswith("-") or word == "-":
             return index
-        if word in valued:
+        if word in {"-i", "--replace"}:
+            # GNU xargs treats the replacement string on these aliases as
+            # optional; without an attached value the next word is command.
+            index += 1
+        elif word in valued:
             index += 2
         elif word.startswith("--") and "=" in word:
             index += 1
@@ -2924,24 +2977,31 @@ def _xargs_command_index(words: list[str]) -> int | None:
     return None
 
 
-def _timeout_command_index(words: list[str]) -> int | None:
-    """Return timeout's command operand after its duration and options."""
+def _timeout_option_next_index(words: list[str], index: int) -> int | None:
+    """Return the next index after one recognized timeout option."""
     value_options = {"-k", "--kill-after", "-s", "--signal"}
     flag_options = {"--foreground", "--preserve-status", "-v", "--verbose"}
+    word = words[index]
+    if word in flag_options:
+        return index + 1
+    if word in value_options:
+        return index + 2 if index + 1 < len(words) else None
+    if word.startswith("--") and "=" in word:
+        return index + 1
+    return None
+
+
+def _timeout_command_index(words: list[str]) -> int | None:
+    """Return timeout's command operand after its duration and options."""
     index = 1
     while index < len(words):
         word = words[index]
         if word == "--":
-            index += 1
-            break
-        if word in flag_options:
-            index += 1
-            continue
-        if word in value_options:
-            index += 2
-            continue
-        if word.startswith("--") and "=" in word:
-            index += 1
+            command_index = index + 2  # duration, then command
+            return command_index if command_index < len(words) else None
+        next_index = _timeout_option_next_index(words, index)
+        if next_index is not None:
+            index = next_index
             continue
         return None if word.startswith("-") and word != "-" else index + 1
     return index
@@ -3044,6 +3104,63 @@ def _eval_payload_is_inert(
     return True
 
 
+def _eval_command_has_dynamic_substitution(words: list[str]) -> bool:
+    """Whether this command runs eval with output from a shell substitution."""
+    index = _skip_env_assignments(words, 0)
+    controls = {"if", "then", "elif", "else", "while", "until", "do", "!"}
+    while index < len(words) and _resolve_heredoc_word(words[index])[0] in controls:
+        index += 1
+        index = _skip_env_assignments(words, index)
+    if index >= len(words):
+        return False
+    command = _resolve_heredoc_word(words[index])[0]
+    arguments = words[index + 1:]
+    if command == "command":
+        arguments, lookup = _command_operand(arguments)
+        if lookup or not arguments:
+            return False
+        command, *arguments = arguments
+        command = _resolve_heredoc_word(command)[0]
+    elif command in {"builtin", "exec"}:
+        if not arguments:
+            return False
+        command, *arguments = arguments
+        command = _resolve_heredoc_word(command)[0]
+    if command != "eval":
+        return False
+    return any("$(" in word or "`" in word for word in arguments)
+
+
+def _eval_has_dynamic_substitution(script: str) -> bool:
+    """Fail closed on opaque eval source before shell segmentation can split it."""
+    script = _strip_shell_comments(script)
+    try:
+        lexer = shlex.shlex(
+            script, posix=True, punctuation_chars=";&|{}\n"
+        )
+        lexer.whitespace = " \t"
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return re.search(
+            r"(?m)(?:^|[;&|]\s*)(?:(?:if|then|elif|else|while|until|do|!)\s+)*"
+            r"(?:(?:command|builtin|exec)\s+)*eval(?=\s|$)",
+            script,
+        ) is not None
+
+    current: list[str] = []
+    separators = ";&|{}\n"
+    for token in tokens:
+        if token and all(character in separators for character in token):
+            if _eval_command_has_dynamic_substitution(current):
+                return True
+            current = []
+        else:
+            current.append(token)
+    return _eval_command_has_dynamic_substitution(current)
+
+
 def _segment_has_shell_control_flow(segment: str) -> bool:
     """Whether a segment makes sequential variable values path-dependent."""
     try:
@@ -3112,6 +3229,8 @@ def _raw_install_in_script(
     script: str, depth: int = 0, variables: dict[str, str | None] | None = None
 ) -> bool:
     """Scan a script's ordered commands with conservative variable flow."""
+    if _eval_has_dynamic_substitution(script):
+        return True
     return _raw_install_in_segments(_command_segments(script), depth, variables)
 
 
@@ -3186,6 +3305,332 @@ def _raw_install_from_command_wrapper(
     )
 
 
+_PYTHON_COMMAND = re.compile(r"python(?:3(?:\.\d+)?)?\Z")
+_PYTHON_SHELL_LAUNCHERS = frozenset({
+    "os.system",
+    "os.popen",
+    "subprocess.getoutput",
+    "subprocess.getstatusoutput",
+    "asyncio.create_subprocess_shell",
+})
+_PYTHON_ARGV_LAUNCHERS = frozenset({
+    "asyncio.create_subprocess_exec",
+    "subprocess.Popen",
+    "subprocess.call",
+    "subprocess.check_call",
+    "subprocess.check_output",
+    "subprocess.run",
+})
+_PYTHON_STAR_IMPORTS = {
+    "os": (
+        "system", "popen", "execv", "execve", "execl", "execle", "execlp",
+        "execvp", "execvpe", "spawnl", "spawnle", "spawnlp", "spawnlpe",
+        "spawnv", "spawnve", "spawnvp", "spawnvpe",
+    ),
+    "subprocess": (
+        "Popen", "call", "check_call", "check_output", "run", "getoutput",
+        "getstatusoutput",
+    ),
+    "asyncio": ("create_subprocess_exec", "create_subprocess_shell"),
+}
+
+
+def _python_call_name(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve common imported Python launcher aliases to qualified names."""
+    attributes: list[str] = []
+    current = function
+    while isinstance(current, ast.Attribute):
+        attributes.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    root = current.id
+    if not attributes:
+        return imported_names.get(root, root)
+    prefix = imported_names.get(root, module_aliases.get(root, root))
+    return ".".join((prefix, *reversed(attributes)))
+
+
+def _python_launcher_payload_is_raw(
+    call: ast.Call,
+    target: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Inspect a statically known process payload or reject an opaque one."""
+    if not call.args:
+        return True
+    if target == "asyncio.create_subprocess_exec":
+        argv = _literal_python_argv(call.args)
+        if argv is None:
+            return True
+        return _raw_install_from_words(argv, depth + 1, variables)
+    try:
+        payload = ast.literal_eval(call.args[0])
+    except (ValueError, TypeError):
+        return True
+    return _python_payload_is_raw(
+        payload, _python_shell_mode(target, call), depth, variables
+    )
+
+
+def _literal_python_argv(arguments: list[ast.expr]) -> list[str] | None:
+    """Return a fully literal string argv, or None when any part is opaque."""
+    try:
+        argv = [ast.literal_eval(argument) for argument in arguments]
+    except (ValueError, TypeError):
+        return None
+    if not argv or not all(isinstance(part, str) for part in argv):
+        return None
+    argv[0] = Path(argv[0]).name
+    return argv
+
+
+def _python_shell_mode(target: str, call: ast.Call) -> bool:
+    """Whether a Python launcher interprets its payload as shell source."""
+    return target in _PYTHON_SHELL_LAUNCHERS or any(
+        _python_shell_keyword_is_true(keyword) for keyword in call.keywords
+    )
+
+
+def _python_shell_keyword_is_true(keyword: ast.keyword) -> bool:
+    return (
+        keyword.arg == "shell"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+    )
+
+
+def _python_payload_is_raw(
+    payload: object,
+    shell_mode: bool,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Check a literal shell string or argv using its launch mode."""
+    if isinstance(payload, str):
+        if shell_mode:
+            return _raw_install_in_script(payload, depth + 1, variables)
+        # subprocess with shell=False treats a string as one executable name;
+        # it does not split it into a command and arguments on POSIX.
+        return False
+    if not isinstance(payload, (list, tuple)):
+        return True
+    if not all(isinstance(part, str) for part in payload):
+        return True
+    argv = list(payload)
+    if not argv:
+        return True
+    argv[0] = Path(argv[0]).name
+    if shell_mode:
+        return _raw_install_in_script(shlex.join(argv), depth + 1, variables)
+    return _raw_install_from_words(argv, depth + 1, variables)
+
+
+def _python_from_import_bindings(
+    node: ast.ImportFrom, imported_names: dict[str, str]
+) -> None:
+    if not node.module:
+        return
+    for alias in node.names:
+        if alias.name == "*":
+            imported_names.update({
+                name: f"{node.module}.{name}"
+                for name in _PYTHON_STAR_IMPORTS.get(node.module, ())
+            })
+            continue
+        bound_name = alias.asname or alias.name
+        imported_names[bound_name] = f"{node.module}.{alias.name}"
+
+
+def _python_import_bindings(
+    tree: ast.AST,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Resolve import aliases used to recognize process-launching calls."""
+    module_aliases: dict[str, str] = {}
+    imported_names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound_name = alias.asname or alias.name.split(".", 1)[0]
+                module_aliases[bound_name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            _python_from_import_bindings(node, imported_names)
+    return module_aliases, imported_names
+
+
+def _python_eval_call_is_raw(
+    call: ast.Call,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    if not call.args:
+        return True
+    try:
+        source = ast.literal_eval(call.args[0])
+    except (ValueError, TypeError):
+        return True
+    return not isinstance(source, str) or _python_inline_raw_install(
+        source, depth + 1, variables
+    )
+
+
+def _python_call_is_raw(
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    target = _python_call_name(call.func, module_aliases, imported_names)
+    if target in {"exec", "eval"}:
+        return _python_eval_call_is_raw(call, depth, variables)
+    if target in _PYTHON_SHELL_LAUNCHERS | _PYTHON_ARGV_LAUNCHERS:
+        return _python_launcher_payload_is_raw(call, target, depth, variables)
+    return target is not None and re.fullmatch(r"os\.(?:exec|spawn).*", target) is not None
+
+
+def _python_calls_include_raw_install(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _python_call_is_raw(
+            node, module_aliases, imported_names, depth, variables
+        ):
+            return True
+    return False
+
+
+def _python_inline_raw_install(
+    payload: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Find raw installs launched by literal Python ``-c`` source."""
+    if depth > 12:
+        return True
+    try:
+        tree = ast.parse(payload)
+    except SyntaxError:
+        return _mentions_raw_install(payload)
+
+    module_aliases, imported_names = _python_import_bindings(tree)
+    return _python_calls_include_raw_install(
+        tree, module_aliases, imported_names, depth, variables
+    )
+
+
+def _python_command_source(words: list[str]) -> tuple[str, int | None]:
+    """Classify Python arguments and locate a literal ``-c`` source word."""
+    index = 1
+    while index < len(words):
+        option = words[index]
+        if option == "-c":
+            return "inline", index + 1 if index + 1 < len(words) else None
+        if option == "-":
+            return "stdin", index
+        if not option.startswith("-"):
+            return "script", None
+        index += 2 if option in {"-W", "-X"} else 1
+    return "interactive", None
+
+
+def _python_stdin_source_is_raw(words: list[str], index: int) -> bool:
+    """Treat unmodeled stdin source as unsafe unless a static heredoc is used."""
+    has_heredoc = any(
+        _is_shell_heredoc_redirect(word) for word in words[index + 1:]
+    )
+    return not has_heredoc
+
+
+def _raw_install_from_python_command(
+    words: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Analyze Python ``-c`` source without treating inert strings as commands."""
+    if not _PYTHON_COMMAND.fullmatch(Path(words[0]).name):
+        return False
+    mode, source_index = _python_command_source(words)
+    if mode == "inline":
+        return source_index is None or _python_inline_raw_install(
+            words[source_index], depth + 1, variables
+        )
+    if mode == "stdin":
+        return _python_stdin_source_is_raw(words, source_index)
+    return False
+
+
+def _python_arguments_read_stdin_script(arguments: list[str]) -> bool:
+    """Whether Python arguments select executable source from standard input."""
+    index = 0
+    while index < len(arguments):
+        option = arguments[index]
+        if _is_shell_heredoc_redirect(option):
+            index += 1
+            continue
+        if option == "-c":
+            return False
+        if option == "-":
+            return True
+        if not option.startswith("-"):
+            return False  # a named script file
+        index += 2 if option in {"-W", "-X"} else 1
+    return True  # no script means interactive stdin
+
+
+def _python_command_reads_stdin_script(line: str) -> bool:
+    """Whether one shell command invokes Python with stdin as its source."""
+    for segment in _command_segments(line):
+        try:
+            words = shlex.split(segment, posix=True)
+        except ValueError:
+            continue
+        if not words:
+            continue
+        index, shell_payload = _wrapper_prefix_length(words)
+        if shell_payload or index >= len(words):
+            continue
+        command = Path(_resolve_heredoc_word(words[index])[0]).name
+        if not _PYTHON_COMMAND.fullmatch(command):
+            continue
+        return _python_arguments_read_stdin_script(words[index + 1:])
+    return False
+
+
+def _python_stdin_heredoc_bodies(script: str) -> tuple[list[str], bool]:
+    """Return Python-source heredocs and whether an input delimiter is opaque."""
+    bodies: list[str] = []
+    lines = script.splitlines()
+    index = 0
+    quote: str | None = None
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        line, index = _join_command_line(lines, line, index, quote)
+        quote, markers = _scan_line_for_heredocs(line, quote)
+        reads_stdin = _python_command_reads_stdin_script(line)
+        for delimiter, tab_stripped, dynamic in markers:
+            if dynamic:
+                if reads_stdin:
+                    return bodies, True
+                continue
+            body, index = _read_heredoc_body(
+                lines, index, delimiter, tab_stripped
+            )
+            if reads_stdin:
+                bodies.append(body)
+    return bodies, False
+
+
 def _raw_install_from_shell_wrapper(
     words: list[str], depth: int, variables: dict[str, str | None] | None
 ) -> bool:
@@ -3257,6 +3702,8 @@ def _raw_install_from_command(
         return False
     if words[0] == "rustup":
         return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
+    if _raw_install_from_python_command(words, depth, variables):
+        return True
     return _raw_install_from_dispatcher(words, depth, variables) or _raw_install_from_wrapper(
         words, depth, variables
     )
@@ -3454,6 +3901,8 @@ def _shell_stdin_heredoc_bodies(script: str) -> list[str]:
         reads_stdin = _shell_command_reads_heredoc_as_script(line)
         for delimiter, tab_stripped, dynamic in markers:
             if dynamic:
+                if index < len(lines):
+                    bodies.append("\n".join(lines[index:]))
                 return bodies
             body, index = _read_heredoc_body(
                 lines, index, delimiter, tab_stripped
@@ -3477,6 +3926,13 @@ def _raw_install_in_run_script(script: str) -> bool:
         uncommented = _strip_shell_comments(current)
         stripped = _join_continuations(_strip_heredocs(uncommented))
         if _raw_install_in_script(stripped):
+            return True
+        python_bodies, opaque_python_stdin = _python_stdin_heredoc_bodies(
+            uncommented
+        )
+        if opaque_python_stdin or any(
+            _python_inline_raw_install(body, 0, None) for body in python_bodies
+        ):
             return True
         pending.extend(_shell_stdin_heredoc_bodies(uncommented))
     return False
@@ -3656,9 +4112,9 @@ def _release_gate_step_candidates(
     executable = _strip_function_bodies(executable_source)
     if _dynamic_heredoc_markers(executable):
         return [], (
-            "the release-gate job opens a heredoc with a runtime-expanded "
-            "delimiter, so its toolchain provisioning cannot be verified "
-            "statically; use a plain delimiter"
+            "the release-gate job uses an ANSI-C escaped heredoc delimiter "
+            "that this validator cannot resolve statically; use a plain or "
+            "quoted delimiter"
         )
     retry_trusted = _retry_runs_its_target(executable_source)
     failing, exiting = _function_kill_sets(executable_source)
@@ -3915,6 +4371,8 @@ def _make_targets_after_options(words: list[str], index: int) -> list[str] | Non
         if _make_option_prevents_execution(word):
             return None
         if word in _MAKE_VALUE_OPTIONS:
+            if index + 1 >= len(words):
+                return None
             index += 2
         elif word.startswith("--") and "=" in word:
             index += 1

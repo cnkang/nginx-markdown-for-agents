@@ -69,6 +69,17 @@ RELEASE_GATE_REQUIRED_NEEDS = frozenset(
     {"prepare", "smoke-test", "fuzz-qualification"}
 )
 RELEASE_PUBLISH_JOB = "publish"
+RELEASE_PUBLISH_REQUIRED_NEEDS = frozenset(
+    {
+        "release-gate",
+        "musl-build",
+        "integrity-checksums",
+        "integrity-signature",
+        "official-docker-release-gate",
+        "rc-release-gates",
+        "fuzz-qualification",
+    }
+)
 # Named failure row reported when the workflow cannot be parsed at all because
 # PyYAML is not importable.
 RELEASE_GATE_PYYAML_GATE = "release-gate:pyyaml-dependency"
@@ -518,67 +529,65 @@ def _release_gate_if_condition(release_packages: str) -> str | None:
     return None
 
 
-def _strip_yaml_line_comment(line: str, *, in_sq: bool, in_dq: bool) -> str:
-    """Drop an unquoted ``#`` comment from one line of a scalar.
-
-    ``if`` values are normally plain scalars, where YAML itself removes the
-    comment; inside a block scalar the text survives parsing, so a
-    commented-out predicate must be removed here before it is matched.  A
-    ``#`` inside a quoted segment is not a comment.
-    """
-    for index, char in enumerate(line):
-        if in_sq:
-            in_sq = char != "'"
-        elif in_dq:
-            in_dq = char != '"'
-        elif char == "'":
-            in_sq = True
-        elif char == '"':
-            in_dq = True
-        elif char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
-
-
-def _strip_yaml_comments(text: str) -> str:
-    """Remove YAML comments from a scalar, honoring quoted segments."""
-    lines: list[str] = []
-    in_sq = False
-    in_dq = False
-    for line in text.splitlines():
-        stripped = _strip_yaml_line_comment(line, in_sq=in_sq, in_dq=in_dq)
-        for char in stripped:
-            if in_sq:
-                in_sq = char != "'"
-            elif in_dq:
-                in_dq = char != '"'
-            elif char == "'":
-                in_sq = True
-            elif char == '"':
-                in_dq = True
-        lines.append(stripped)
-    return chr(10).join(lines)
-
-
 def _github_expression_text(condition: str) -> str | None:
-    """Strip YAML comments and the optional GitHub expression wrapper."""
-    text = _strip_yaml_comments(condition).strip()
+    """Remove the optional GitHub expression wrapper from a parsed YAML value."""
+    text = condition.strip()
     if text.startswith("${{") and text.endswith("}}"):
         text = text[3:-2].strip()
     return text or None
 
 
-def _advance_github_quote(
-    char: str, quote: str, escaped: bool
-) -> tuple[str | None, bool]:
-    """Advance quote/escape state for one character inside a string literal."""
-    if escaped:
-        return quote, False
-    if char == chr(92):
-        return quote, True
-    if char == quote:
-        return None, False
-    return quote, False
+def _github_single_quoted_literal(
+    text: str, start: int
+) -> tuple[str, int] | None:
+    """Decode one GitHub single-quoted string with doubled-quote escapes."""
+    if start >= len(text) or text[start] != "'":
+        return None
+    chars: list[str] = []
+    index = start + 1
+    while index < len(text):
+        if text[index] == "'":
+            if index + 1 < len(text) and text[index + 1] == "'":
+                chars.append("'")
+                index += 2
+                continue
+            return repr("".join(chars)), index + 1
+        chars.append(text[index])
+        index += 1
+    return None
+
+
+def _github_identifier_end(text: str, start: int) -> int:
+    end = start + 1
+    while end < len(text) and (text[end].isalnum() or text[end] == "_"):
+        end += 1
+    return end
+
+
+def _python_boolean_scan_step(text: str, index: int) -> tuple[bool, int | None]:
+    """Inspect one quoted literal, identifier, or ordinary character."""
+    if text[index] == "'":
+        literal = _github_single_quoted_literal(text, index)
+        if literal is None:
+            return False, None
+        return False, literal[1]
+    if text[index].isalpha() or text[index] == "_":
+        end = _github_identifier_end(text, index)
+        return text[index:end].lower() in {"and", "not", "or"}, end
+    return False, index + 1
+
+
+def _has_python_boolean_keyword(text: str) -> bool:
+    """Reject Python's word operators, which GitHub expressions do not use."""
+    index = 0
+    while index < len(text):
+        found, next_index = _python_boolean_scan_step(text, index)
+        if next_index is None:
+            return False
+        if found:
+            return True
+        index = next_index
+    return False
 
 
 def _github_boolean_operator(text: str, index: int) -> tuple[str, int] | None:
@@ -605,21 +614,20 @@ _GITHUB_REF_TYPE = "github.ref_type"
 def _translate_github_expression(text: str) -> str:
     """Translate boolean punctuation while preserving quoted string content."""
     translated: list[str] = []
-    quote: str | None = None
-    escaped = False
     index = 0
     while index < len(text):
         char = text[index]
-        if quote is not None:
-            translated.append(char)
-            quote, escaped = _advance_github_quote(char, quote, escaped)
-            index += 1
+        if char == "'":
+            literal = _github_single_quoted_literal(text, index)
+            if literal is None:
+                return "\x00"
+            python_literal, index = literal
+            translated.append(python_literal)
             continue
-        if char in ("'", '\"'):
-            quote = char
-            translated.append(char)
-            index += 1
-            continue
+        if char == '\"':
+            # GitHub expressions use single quotes; a Python-only double
+            # quoted literal must not pass this bounded syntax parser.
+            return "\x00"
         needs_result = _NEEDS_RESULT_RE.match(text, index)
         if needs_result is not None:
             job_name = needs_result.group(1).replace("-", "_")
@@ -645,12 +653,17 @@ def _github_condition_ast(condition: str) -> ast.expr | None:
     closed. The hyphenated release-gate name is normalized only for parsing.
     """
     text = _github_expression_text(condition)
-    if text is None:
+    if text is None or _has_python_boolean_keyword(text):
         return None
     python_expression = _translate_github_expression(text)
     try:
         parsed = ast.parse(python_expression, mode="eval")
     except (SyntaxError, ValueError, RecursionError):
+        return None
+    if any(
+        isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)
+        for node in ast.walk(parsed)
+    ):
         return None
     return parsed.body
 
@@ -757,9 +770,7 @@ def _evaluate_tag_condition(
         return node.id.lower() == "true"
     if isinstance(node, ast.BoolOp):
         return _evaluate_boolean_condition(node, context)
-    if isinstance(node, ast.UnaryOp) and isinstance(
-        node.op, (ast.Not, ast.Invert)
-    ):
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
         value = _evaluate_tag_condition(node.operand, context)
         return None if value is None else not value
     if isinstance(node, ast.Compare):
@@ -834,9 +845,7 @@ def _evaluate_publish_condition(
         return True if _is_always_condition_call(node) else None
     if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
         return _evaluate_publish_boolean_operator(node, context)
-    if isinstance(node, ast.UnaryOp) and isinstance(
-        node.op, (ast.Not, ast.Invert)
-    ):
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
         value = _evaluate_publish_condition(node.operand, context)
         return not value if isinstance(value, bool) else None
     if isinstance(node, ast.Compare):
@@ -844,36 +853,69 @@ def _evaluate_publish_condition(
     return None
 
 
-def _condition_contains_release_gate_success(condition: str) -> bool:
-    """Whether the full publish condition requires a successful release gate."""
+def _publish_result_case_is_expected(
+    node: ast.expr,
+    context: dict[str, str],
+    job_name: str,
+    result: str,
+    event_name: str,
+) -> bool:
+    changed_context = dict(context)
+    result_attribute = f"needs.{job_name.replace('-', '_')}.result"
+    changed_context[result_attribute] = result
+    allowed_dispatch_skip = (
+        job_name == "integrity-signature"
+        and result == "skipped"
+        and event_name == "workflow_dispatch"
+    )
+    return _evaluate_publish_condition(node, changed_context) is allowed_dispatch_skip
+
+
+def _publish_dependency_failure_cases(
+    node: ast.expr,
+    context: dict[str, str],
+    event_name: str,
+) -> bool:
+    for job_name in RELEASE_PUBLISH_REQUIRED_NEEDS:
+        for result in ("failure", "cancelled", "skipped"):
+            if not _publish_result_case_is_expected(
+                node, context, job_name, result, event_name
+            ):
+                return False
+    return True
+
+
+def _publish_event_cases_are_valid(
+    node: ast.expr,
+    expected_attributes: set[str],
+    event_name: str,
+    ref_type: str,
+) -> bool:
+    success_context = dict.fromkeys(expected_attributes, "success")
+    success_context.update(
+        {_GITHUB_EVENT_NAME: event_name, _GITHUB_REF_TYPE: ref_type}
+    )
+    if _evaluate_publish_condition(node, success_context) is not True:
+        return False
+    return _publish_dependency_failure_cases(node, success_context, event_name)
+
+
+def _publish_condition_covers_dependency_results(condition: str) -> bool:
+    """Require every publish dependency to succeed with the signing exception."""
     node = _github_condition_ast(condition)
     if node is None:
         return False
-    gate_result = "needs.release_gate.result"
-    attributes = _condition_needs_result_attributes(node)
-    if gate_result not in attributes:
+    expected_attributes = {
+        f"needs.{job_name.replace('-', '_')}.result"
+        for job_name in RELEASE_PUBLISH_REQUIRED_NEEDS
+    }
+    if _condition_needs_result_attributes(node) != expected_attributes:
         return False
-    success_context = dict.fromkeys(attributes, "success")
-    success_context.update({_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "tag"})
-    if _evaluate_publish_condition(node, success_context) is not True:
-        return False
-    for result in ("failure", "cancelled", "skipped"):
-        failed_context = dict(success_context)
-        failed_context[gate_result] = result
-        if _evaluate_publish_condition(node, failed_context) is not False:
-            return False
-    signature_result = "needs.integrity_signature.result"
-    if signature_result in attributes:
-        dispatch_context = dict(success_context)
-        dispatch_context[_GITHUB_EVENT_NAME] = "workflow_dispatch"
-        dispatch_context[signature_result] = "skipped"
-        if _evaluate_publish_condition(node, dispatch_context) is not True:
-            return False
-        tag_context = dict(dispatch_context)
-        tag_context[_GITHUB_EVENT_NAME] = "push"
-        if _evaluate_publish_condition(node, tag_context) is not False:
-            return False
-    return True
+    events = (("push", "tag"), ("workflow_dispatch", "branch"))
+    return all(
+        _publish_event_cases_are_valid(node, expected_attributes, event, ref)
+        for event, ref in events
+    )
 
 
 def _publish_waits_for_release_gate(release_packages: str) -> bool:
@@ -890,9 +932,9 @@ def _publish_waits_for_release_gate(release_packages: str) -> bool:
         return False
     condition = job.get("if")
     return (
-        RELEASE_GATE_JOB in need_names
+        need_names == RELEASE_PUBLISH_REQUIRED_NEEDS
         and isinstance(condition, str)
-        and _condition_contains_release_gate_success(condition)
+        and _publish_condition_covers_dependency_results(condition)
     )
 
 

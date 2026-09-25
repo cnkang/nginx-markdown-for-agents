@@ -222,6 +222,70 @@ def test_gate_three_items_accepts_the_release_packages_workflow() -> None:
     assert gates._publish_waits_for_release_gate(release_packages)
 
 
+def test_publish_gate_requires_every_dependency_result_guard() -> None:
+    """Each publish dependency must explicitly succeed; one guard is not enough."""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+
+    publish_prefix, publish_marker, publish_block = workflow.partition("  publish:\n")
+    assert publish_marker
+    required_success_guards = (
+        "release-gate",
+        "musl-build",
+        "integrity-checksums",
+        "official-docker-release-gate",
+        "rc-release-gates",
+        "fuzz-qualification",
+    )
+    for dependency in required_success_guards:
+        guard = f"      && needs.{dependency}.result == 'success'\n"
+        assert publish_block.count(guard) == 1, dependency
+        mutant = publish_prefix + publish_marker + publish_block.replace(guard, "", 1)
+        assert not _publish_gate_item(mutant), dependency
+
+
+def test_publish_gate_requires_the_exact_dependency_set() -> None:
+    """Missing and unguarded extra dependencies must fail closed."""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+
+    needs_line = (
+        "    needs: [release-gate, musl-build, integrity-checksums, "
+        "integrity-signature, official-docker-release-gate, "
+        "rc-release-gates, fuzz-qualification]\n"
+    )
+    assert workflow.count(needs_line) == 1
+    missing = workflow.replace(needs_line, needs_line.replace("musl-build, ", ""), 1)
+    extra = workflow.replace(
+        needs_line,
+        needs_line.replace(
+            "fuzz-qualification]", "fuzz-qualification, unverified-job]"
+        ),
+        1,
+    )
+    assert not _publish_gate_item(missing)
+    assert not _publish_gate_item(extra)
+
+
+def test_publish_gate_allows_a_skipped_signature_only_on_dispatch() -> None:
+    """A skipped signer is the sole dispatch exception, never a tag exception."""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+
+    publish_prefix, publish_marker, publish_block = workflow.partition("  publish:\n")
+    assert publish_marker
+    dispatch_exception = "&& github.event_name == 'workflow_dispatch'))"
+    assert publish_block.count(dispatch_exception) == 1
+    tag_exception = publish_block.replace(
+        dispatch_exception, "&& github.event_name == 'push'))", 1
+    )
+    mutant = publish_prefix + publish_marker + tag_exception
+    assert not _publish_gate_item(mutant)
+
+
 def test_gate_three_items_reads_the_job_if_structurally() -> None:
     """Only the release-gate job's own `if` may carry the tag predicate."""
     # The job condition is a quoted scalar: the parser resolves it, so the
@@ -366,18 +430,107 @@ def test_gate_three_items_rejects_commented_out_predicate_in_block_scalar() -> N
 
 
 def test_publish_gate_reads_the_publish_job_dependency_and_condition() -> None:
-    """A real YAML dependency plus a positive success conjunct passes."""
+    """A complete parsed needs set and success condition pass."""
     workflow = """
 jobs:
   publish:
-    needs:
-      - release-gate
-      - prepare
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
+            official-docker-release-gate, rc-release-gates, fuzz-qualification]
     if: >-
       always() &&
-      needs.release-gate.result == 'success'
+      needs.release-gate.result == 'success' &&
+      needs.musl-build.result == 'success' &&
+      needs.integrity-checksums.result == 'success' &&
+      needs.official-docker-release-gate.result == 'success' &&
+      needs.rc-release-gates.result == 'success' &&
+      needs.fuzz-qualification.result == 'success' &&
+      (needs.integrity-signature.result == 'success' ||
+       (needs.integrity-signature.result == 'skipped' &&
+        github.event_name == 'workflow_dispatch'))
 """
     assert _publish_gate_item(workflow)
+
+
+def test_publish_gate_requires_signature_success_for_tag_publication() -> None:
+    """The manual-dispatch skip exception cannot replace tag signing success."""
+    workflow = """
+jobs:
+  publish:
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
+            official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    if: >-
+      always() &&
+      needs.release-gate.result == 'success' &&
+      needs.musl-build.result == 'success' &&
+      needs.integrity-checksums.result == 'success' &&
+      needs.official-docker-release-gate.result == 'success' &&
+      needs.rc-release-gates.result == 'success' &&
+      needs.fuzz-qualification.result == 'success' &&
+      (needs.integrity-signature.result == 'success' ||
+       (needs.integrity-signature.result == 'skipped' &&
+        github.event_name == 'workflow_dispatch'))
+"""
+    assert _publish_gate_item(workflow)
+
+    missing_tag_success = workflow.replace(
+        "(needs.integrity-signature.result == 'success' ||\n",
+        "(false ||\n",
+    )
+    assert not _publish_gate_item(missing_tag_success)
+
+
+def test_github_expression_parser_rejects_python_only_operators() -> None:
+    """Python's `not` spelling and `and`/`or` words are outside GH grammar."""
+    assert gates._github_condition_ast(
+        "not (github.ref_type == 'tag')"
+    ) is None
+    assert gates._github_condition_ast(
+        "github.ref_type == 'tag' or github.event_name == 'push'"
+    ) is None
+    assert gates._github_condition_ast(
+        "github.ref_type == 'not tag'"
+    ) is not None
+
+
+def test_github_expression_parser_decodes_doubled_single_quotes() -> None:
+    """GH's doubled apostrophe escape stays inside one string literal."""
+    expression = gates._github_condition_ast(
+        "github.ref_type == 'ta''g'"
+    )
+    assert isinstance(expression, ast.Compare)
+    assert isinstance(expression.comparators[0], ast.Constant)
+    assert expression.comparators[0].value == "ta'g"
+
+
+def test_github_expression_parser_does_not_strip_block_scalar_hashes() -> None:
+    """A hash in parsed block-scalar text cannot erase a failed predicate."""
+    workflow = """
+jobs:
+  publish:
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
+            official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    if: >-
+      always() &&
+      needs.release-gate.result == 'success' &&
+      needs.musl-build.result == 'success' &&
+      needs.integrity-checksums.result == 'success' &&
+      needs.integrity-signature.result == 'success' &&
+      needs.official-docker-release-gate.result == 'success' &&
+      needs.rc-release-gates.result == 'success' &&
+      needs.fuzz-qualification.result == 'success' # && false
+"""
+    assert not _publish_gate_item(workflow)
+
+
+def test_github_publish_condition_rejects_unmodeled_order_comparisons() -> None:
+    """A Python-parsable but unsupported comparison remains unverifiable."""
+    expression = gates._github_condition_ast(
+        "needs.release-gate.result < 'success'"
+    )
+    assert isinstance(expression, ast.Compare)
+    assert gates._evaluate_publish_condition(
+        expression, {"needs.release_gate.result": "success"}
+    ) is None
 
 
 def test_publish_gate_rejects_comment_decoys_and_nested_or_success() -> None:
