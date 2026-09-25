@@ -27,6 +27,38 @@ from tools.release.gates.validate_config_directives import (  # noqa: E402
 from tools.release.gates import validate_k8s_manifests as validator  # noqa: E402
 
 
+def _valid_metrics_render() -> str:
+    """Return a rendered ConfigMap and sidecar with explicit resources."""
+    return """apiVersion: v1
+kind: ConfigMap
+data:
+  nginx.conf: |
+    http {
+        markdown_metrics_shm_size 8m;
+        server {
+            location = /_markdown_metrics {
+                markdown_metrics;
+            }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: metrics-sidecar
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+"""
+
+
 def test_helm_defaults_are_stock_nginx_safe() -> None:
     """Default Helm values must not require the markdown module."""
     assert "enabled: false" in HELM_VALUES_REQUIRED_SNIPPETS
@@ -245,20 +277,10 @@ def test_module_metrics_render_accepts_http_and_location_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The release gate must accept the NGINX metrics directive contract."""
-    valid_nginx_config = """
-    http {
-        markdown_metrics_shm_size 8m;
-        server {
-            location = /_markdown_metrics {
-                markdown_metrics;
-        }
-    }
-}
-"""
     completed = subprocess.CompletedProcess(
         args=["helm", "template"],
         returncode=0,
-        stdout=valid_nginx_config,
+        stdout=_valid_metrics_render(),
     )
     monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
 
@@ -266,6 +288,28 @@ def test_module_metrics_render_accepts_http_and_location_scopes(
     validator._validate_module_metrics_render(result, "helm", Path("chart"))
 
     assert not result.has_failures
+
+
+def test_module_metrics_render_rejects_sidecar_resource_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The enabled Helm render must retain exact sidecar requests and limits."""
+    rendered = _valid_metrics_render().replace("cpu: 50m", "cpu: 75m", 1)
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=0,
+        stdout=rendered,
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    validator._validate_module_metrics_render(result, "helm", Path("chart"))
+
+    assert any(
+        status == "FAIL"
+        and check_id == validator._CHECK_HELM_RENDER_SIDECAR_RESOURCES
+        for status, check_id, _ in result.results
+    ), result.results
 
 
 def test_module_enabled_render_rejects_duplicate_markdown_limits(
