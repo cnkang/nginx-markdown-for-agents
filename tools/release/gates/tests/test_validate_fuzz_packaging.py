@@ -721,6 +721,15 @@ def test_toolchain_gate_drops_literally_dead_branches() -> None:
     assert packaging_gate._release_gate_toolchain_issue(
         drift + "exit 0\n" + installer + component
     )
+    # A carried command on a branch marker cannot revive a terminated shell.
+    for terminator in ("exit 0", "false"):
+        unreachable_component = (
+            drift + installer + terminator + "\nif true; then "
+            + component.strip() + "; fi\n"
+        )
+        assert packaging_gate._release_gate_toolchain_issue(
+            unreachable_component
+        ) is not None
     # Nested conditionals stay dead for the whole construct.
     assert packaging_gate._release_gate_toolchain_issue(
         drift + "if true; then\nif false; then\n" + installer + component
@@ -2633,6 +2642,13 @@ def test_raw_install_detector_follows_indirect_command_positions() -> None:
         "timeout --signal=TERM 5s rustup toolchain install stable",
         r"find /tmp -maxdepth 1 -exec rustup toolchain install stable \;",
         "if rustup toolchain install stable; then echo done; fi",
+        "~/.cargo/bin/rustup toolchain install nightly-2026-09-21",
+        "/home/kang/.cargo/bin/rustup toolchain install nightly-2026-09-21",
+        "echo 'rustup toolchain install stable' | bash",
+        "echo 'rustup toolchain install stable' | bash -s",
+        "echo 'rustup toolchain install stable' | bash --rcfile -n",
+        "echo 'rustup toolchain install stable' | bash --rcfile -D",
+        "echo 'import os; os.system(\"rustup toolchain install stable\")' | python3",
     )
     for command in commands:
         issue = packaging_gate._raw_toolchain_install_issue(
@@ -2645,6 +2661,16 @@ def test_raw_install_detector_follows_indirect_command_positions() -> None:
         "timeout 5s printf safe",
         r"find /tmp -maxdepth 1 -exec echo rustup toolchain install stable \;",
         "if true; then echo rustup toolchain install stable; fi",
+        "echo safe | cat",
+        "bash <<'SH'\necho safe\nSH",
+        "python3 <<'PY'\nprint(\"safe\")\nPY",
+        "python3 --version",
+        "python3 -V",
+        "python3 --help",
+        "python3 -m json.tool",
+        "python3 -W ignore -m json.tool",
+        "bash --version",
+        "bash --help",
     )
     for command in controls:
         assert packaging_gate._raw_toolchain_install_issue(
