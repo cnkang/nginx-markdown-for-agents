@@ -905,6 +905,10 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         _terminate_fuzz_process_group(process)
         raise
     finally:
+        with contextlib.suppress(OSError):
+            _signal_fuzz_process_group(
+                process, getattr(signal, "SIGKILL", signal.SIGTERM)
+            )
         try:
             _join_readers(started_readers)
         finally:
