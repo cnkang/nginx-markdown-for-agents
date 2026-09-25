@@ -1,9 +1,9 @@
 {
   "schema_version": "release.fuzz-qualification.v2",
   "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
-  "run_id": "fuzz-qualification-20260805T120000Z",
-  "started_at": "2026-08-05T12:00:00+00:00",
-  "finished_at": "2026-08-05T12:30:00+00:00",
+  "run_id": "fuzz-qualification-20260921T120000Z",
+  "started_at": "2026-09-21T12:00:00+00:00",
+  "finished_at": "2026-09-21T12:30:00+00:00",
   "toolchain_identity": {
     "rustup_toolchain": "nightly-2026-09-21",
     "rustc_version": "rustc 1.100.0-nightly (bba531001 2026-09-20)",
