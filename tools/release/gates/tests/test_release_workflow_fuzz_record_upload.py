@@ -91,7 +91,8 @@ def _assert_record_handoff(workflow: dict) -> None:
     assert verify.get("if") not in (False, "false", "${{ false }}")
     assert verify.get("continue-on-error") not in (True, "true", "${{ true }}")
     version = workflow.get("env", {}).get("RELEASE_VERSION")
-    assert isinstance(version, str) and version
+    assert isinstance(version, str)
+    assert version
     paths = validator._release_artifact_paths(version)
     expected_record = paths["record"]
     download_path = download.get("with", {}).get("path")

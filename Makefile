@@ -86,6 +86,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
+        homebrew-formula-check \
         docs-check-base release-perf-evidence-blocking \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
@@ -366,6 +367,7 @@ TEST_ALL_CORE := \
 	workflow-context-check \
 	perf-gate-check \
 	security-static \
+	homebrew-formula-check \
 	license-check
 
 # ci-local-check runs the CI gate set through test-all, so the two entry points
@@ -412,6 +414,13 @@ perf-gate-check:
 	fi
 	bash tools/perf/tests/test_local_runner_output_paths.sh
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+
+homebrew-formula-check:
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		bash packaging/scripts/audit_homebrew_formula.sh; \
+	else \
+		echo "SKIP: Homebrew formula audit runs on macOS with Homebrew"; \
+	fi
 
 
 test-all:
