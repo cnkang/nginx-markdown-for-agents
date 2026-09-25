@@ -2613,8 +2613,11 @@ def _live_scan_step(
             if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
             else ""
         )
-        marker_is_live = bool(carried) and _region_runs(branches) and not (
-            _segment_unreachable(separator, previous)
+        marker_is_live = (
+            bool(carried)
+            and not exited
+            and _region_runs(branches)
+            and not _segment_unreachable(separator, previous)
         )
         verdict, status = _branch_step_state(
             segment,
@@ -3528,21 +3531,35 @@ def _python_inline_raw_install(
     )
 
 
+def _python_short_flag_step(
+    flag: str, short_options: str, words: list[str], index: int, offset: int
+) -> tuple[str | None, str | int | None, int] | None:
+    """Classify a Python flag that selects source or consumes a value."""
+    if flag in {"h", "V"}:
+        return "terminal", None, 1
+    if flag == "c":
+        attached_source = short_options[offset + 1:]
+        if attached_source:
+            return "inline", attached_source, 1
+        source_index = index + 1 if index + 1 < len(words) else None
+        return "inline", source_index, 1
+    if flag == "m":
+        return "script", None, 1
+    if flag in {"W", "X"}:
+        has_attached_value = offset + 1 < len(short_options)
+        return None, None, 1 if has_attached_value else 2
+    return None
+
+
 def _python_short_option_step(
     option: str, words: list[str], index: int
 ) -> tuple[str | None, str | int | None, int]:
     """Inspect one grouped short-option word for source or a value option."""
     short_options = option[1:]
     for offset, flag in enumerate(short_options):
-        if flag == "c":
-            attached_source = short_options[offset + 1:]
-            if attached_source:
-                return "inline", attached_source, 1
-            source_index = index + 1 if index + 1 < len(words) else None
-            return "inline", source_index, 1
-        if flag in {"m", "W", "X"}:
-            has_attached_value = offset + 1 < len(short_options)
-            return None, None, 1 if has_attached_value else 2
+        step = _python_short_flag_step(flag, short_options, words, index, offset)
+        if step is not None:
+            return step
     return None, None, 1
 
 
@@ -3550,6 +3567,8 @@ def _python_long_option_step(
     option: str, words: list[str], index: int
 ) -> tuple[str | None, str | int | None, int]:
     """Inspect one long option and report its argument count or mode."""
+    if option in {"--help", "--version"} or option.startswith("--help-"):
+        return "terminal", None, 1
     if option == "--":
         mode = "script" if index + 1 < len(words) else "interactive"
         return mode, None, 0
@@ -3590,10 +3609,13 @@ def _python_command_source(
     return "interactive", None
 
 
-def _python_stdin_source_is_raw(words: list[str], index: int) -> bool:
+def _python_stdin_source_is_raw(
+    words: list[str], index: int | None
+) -> bool:
     """Treat unmodeled stdin source as unsafe unless a static heredoc is used."""
+    source_start = index + 1 if index is not None else 1
     has_heredoc = any(
-        _is_shell_heredoc_redirect(word) for word in words[index + 1:]
+        _is_shell_heredoc_redirect(word) for word in words[source_start:]
     )
     return not has_heredoc
 
@@ -3615,7 +3637,7 @@ def _raw_install_from_python_command(
         else:
             return True
         return _python_inline_raw_install(source, depth + 1, variables)
-    if mode == "stdin":
+    if mode in {"stdin", "interactive"}:
         return _python_stdin_source_is_raw(words, source_index)
     return False
 
@@ -3680,14 +3702,19 @@ def _raw_install_from_shell_wrapper(
 ) -> bool:
     """Follow a modeled shell/wrapper command's static payload."""
     wrappers = {"bash", "sh", "dash", "zsh", "nohup", "sudo", "retry"}
-    if words[0] not in wrappers:
+    shell = Path(words[0]).name
+    if shell not in wrappers:
         return False
     serialized = shlex.join(words)
     stripped = _strip_provision_wrappers(serialized)
     if stripped == serialized:
-        return words[0] == "zsh" and any(
-            _shell_argument_stdin_mode(word) is False for word in words[1:]
+        has_static_heredoc = any(
+            _is_shell_heredoc_redirect(_resolve_heredoc_word(word)[0])
+            for word in words[1:]
         )
+        if shell in _SHELL_COMMANDS_THAT_READ_STDIN and not has_static_heredoc:
+            return _shell_arguments_read_stdin_script(shell, words[1:])
+        return False
     return _raw_install_in_script(stripped, depth + 1, variables)
 
 
@@ -3744,7 +3771,7 @@ def _raw_install_from_command(
     """Check a parsed command word against inert, direct, and wrapper forms."""
     if words[0] in _INERT_SHELL_COMMANDS:
         return False
-    if words[0] == "rustup":
+    if Path(words[0]).name == "rustup":
         return len(words) >= 3 and words[1:3] == ["toolchain", "install"]
     if _raw_install_from_python_command(words, depth, variables):
         return True
@@ -3861,6 +3888,8 @@ def _shell_argument_step(
     argument = _resolve_heredoc_word(arguments[position])[0]
     if _is_shell_heredoc_redirect(argument):
         return (None, position + 1)
+    if _shell_argument_stops_execution(shell, argument, arguments, position):
+        return (False, position)
     if argument == "--":
         rest_all_redirects = all(
             _is_shell_heredoc_redirect(rest) for rest in arguments[position + 1:]
@@ -3880,6 +3909,27 @@ def _shell_argument_step(
     if not argument.startswith("-"):
         return (False, position)
     return (None, position + 1)
+
+
+def _shell_argument_stops_execution(
+    shell: str, argument: str, arguments: list[str], position: int
+) -> bool:
+    """Whether one shell argument exits before running a script."""
+    if argument in {"--help", "--version"}:
+        return True
+    if shell in _SHELL_COMMANDS_THAT_READ_STDIN and (
+        argument == "--noexec" or _shell_option_has_flag(argument, "n")
+    ):
+        return True
+    if shell != "bash":
+        return False
+    if argument in {"-D", "+D"}:
+        return True
+    return (
+        argument == "-o"
+        and position + 1 < len(arguments)
+        and _resolve_heredoc_word(arguments[position + 1])[0] == "noexec"
+    )
 
 
 def _shell_arguments_read_stdin_script(
