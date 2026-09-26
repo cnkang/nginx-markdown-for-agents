@@ -2467,12 +2467,12 @@ ngx_http_markdown_streaming_precommit_error(
     }
     ctx->error.has_category = 1;
 
-        /* Track budget exceeded as auxiliary classification. */
-        if (ngx_http_markdown_streaming_is_budget_error(error_code)) {
-            ngx_http_markdown_streaming_track_budget_exceeded(r, conf, ctx, error_code);
-        }
+    /* Track budget exceeded as auxiliary classification. */
+    if (ngx_http_markdown_streaming_is_budget_error(error_code)) {
+        ngx_http_markdown_streaming_track_budget_exceeded(r, conf, ctx, error_code);
+    }
 
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
 
     /*
      * Increment global conversions_failed to maintain consistency
