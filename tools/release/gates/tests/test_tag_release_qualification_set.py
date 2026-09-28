@@ -747,3 +747,32 @@ def test_download_artifact_pins_use_the_exact_release_label() -> None:
         ]
         assert pinned_lines
         assert all(line.endswith("# v8.0.1") for line in pinned_lines), workflow
+
+
+def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
+    """Concurrent runs must not free each other's fixed-name release.
+
+    Regression for the ownership race: two runs on a shared cluster can both
+    observe the fixed release name as free, and the loser's cleanup would
+    then uninstall the winner's release.  A per-cluster lock must span the
+    ownership check through cleanup, and cleanup must release it.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "acquire_cluster_lock" in script
+    acquire_call = script.index("\nacquire_cluster_lock\n")
+    ownership_check = script.index("--filter \"^${RELEASE}$\"")
+    install = script.index("helm install \"${RELEASE}\"")
+    assert acquire_call < ownership_check < install, (
+        "the lock must be held before the ownership check and the install"
+    )
+    cleanup = script.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "release_cluster_lock" in cleanup, (
+        "cleanup must release the cluster lock"
+    )
+    assert "flock" in script and "mkdir" in script, (
+        "the lock needs the flock path and a directory fallback"
+    )

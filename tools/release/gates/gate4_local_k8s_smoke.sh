@@ -252,12 +252,28 @@ cleanup_owned_helm_resources() {
 # after acting and no-ops on a cleared flag — so a second run of the trap
 # after main's normal cleanup is safe.  A concurrent run's resources are
 # still preserved: the helpers only act on state this run recorded as its own.
-terminate() {
+#
+# EXIT alone runs the cleanup for every exit path; INT and TERM additionally
+# exit with the conventional signal status.  A returning INT/TERM handler
+# would resume the script after the interrupt (bash completes the trap and
+# continues the next command), letting a terminated validation reach its
+# success path and report PASS.
+cleanup_on_exit() {
     cleanup_owned_helm_resources
     delete_cluster
     return 0
 }
-trap terminate EXIT INT TERM
+
+exit_on_signal() {
+    local signal_status="$1"
+    cleanup_owned_helm_resources
+    delete_cluster
+    exit "$signal_status"
+}
+
+trap cleanup_on_exit EXIT
+trap 'exit_on_signal 130' INT
+trap 'exit_on_signal 143' TERM
 
 ##############################################################################
 # Helm validation

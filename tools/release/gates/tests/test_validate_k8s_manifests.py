@@ -330,13 +330,32 @@ def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:
         / "tools/release/gates/gate4_local_k8s_smoke.sh"
     ).read_text(encoding="utf-8")
 
-    assert "trap terminate EXIT INT TERM" in script, (
-        "gate4 must trap EXIT/INT/TERM so abnormal termination runs its "
-        "cleanup instead of leaking owned resources"
+    assert "trap cleanup_on_exit EXIT" in script, (
+        "gate4 must trap EXIT so abnormal termination runs its cleanup "
+        "instead of leaking owned resources"
     )
-    terminate = script.split("terminate() {", 1)[1].split("\n}", 1)[0]
-    assert "cleanup_owned_helm_resources" in terminate
-    assert "delete_cluster" in terminate
+    cleanup_on_exit = (
+        script.split("cleanup_on_exit() {", 1)[1].split("\n}", 1)[0]
+    )
+    assert "cleanup_owned_helm_resources" in cleanup_on_exit
+    assert "delete_cluster" in cleanup_on_exit
+
+    # A returning INT/TERM handler resumes the script after the interrupt and
+    # a terminated run could still reach its success path; the signal
+    # handlers must exit with the conventional statuses instead.
+    assert "trap 'exit_on_signal 130' INT" in script, (
+        "SIGINT must exit with status 130 after cleanup"
+    )
+    assert "trap 'exit_on_signal 143' TERM" in script, (
+        "SIGTERM must exit with status 143 after cleanup"
+    )
+    exit_on_signal = (
+        script.split("exit_on_signal() {", 1)[1].split("\n}", 1)[0]
+    )
+    assert "cleanup_owned_helm_resources" in exit_on_signal
+    assert "delete_cluster" in exit_on_signal
+    assert "exit \"$signal_status\"" in exit_on_signal
+
     # Idempotence: the delete clears its ownership flag so a second run of
     # the trap (signal handler plus EXIT) is a no-op.
     delete_cluster = script.split("delete_cluster() {", 1)[1].split("\n}", 1)[0]

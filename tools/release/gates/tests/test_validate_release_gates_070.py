@@ -810,3 +810,51 @@ def test_strict_run_parses_the_real_workflow_with_pyyaml() -> None:
     checks = dict(gates._gate_3_items(release_packages))
     assert checks["tag package workflow gate"]
     assert checks["publish waits for release gate"]
+
+
+def test_publish_gate_rejects_a_dispatch_tag_combined_failure_alternative() -> None:
+    """The truth table covers workflow_dispatch from a tag too.
+
+    Regression for the omitted event context: an alternative guarded by
+    `github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'`
+    was unsatisfiable (false) in both contexts the table enumerated, while a
+    tag dispatch with two blocking jobs failed made it true.  The third
+    context closes that hole.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternative = (
+        " || (github.event_name == 'workflow_dispatch'"
+        " && github.ref_type == 'tag'"
+        " && needs.release-gate.result == 'failure'"
+        " && needs.musl-build.result == 'failure')"
+    )
+    mutant = (
+        prefix
+        + marker
+        + head
+        + condition_marker
+        + condition_end
+        + alternative
+        + "\n"
+        + "".join(remainder_lines)
+    )
+    assert not _publish_gate_item(mutant), alternative

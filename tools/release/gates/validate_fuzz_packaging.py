@@ -3027,13 +3027,6 @@ def _load_workflow_object(workflow_content: str) -> dict | None:
     return workflow if isinstance(workflow, dict) else None
 
 
-def _workflow_jobs(workflow_content: str) -> dict | None:
-    """Parse a workflow and return its job mapping; None means unverifiable."""
-    workflow = _load_workflow_object(workflow_content)
-    jobs = workflow.get("jobs") if workflow is not None else None
-    return jobs if isinstance(jobs, dict) else None
-
-
 def _env_mapping(value: object) -> dict[str, object]:
     """Keep named environment values without dropping dynamic overrides."""
     if not isinstance(value, dict):
@@ -3092,6 +3085,47 @@ def _workflow_job_steps(job: object) -> list[dict] | None:
     return steps
 
 
+def _workflow_run_defaults(workflow: dict | None) -> str | list | None:
+    """Return the workflow-level ``defaults.run.shell``, if declared."""
+    if not isinstance(workflow, dict):
+        return None
+    defaults = workflow.get("defaults")
+    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
+    if not isinstance(run_defaults, dict):
+        return None
+    return run_defaults.get("shell")
+
+
+def _job_run_defaults(job: object) -> str | list | None:
+    """Return the job-level ``defaults.run.shell``, if declared."""
+    if not isinstance(job, dict):
+        return None
+    defaults = job.get("defaults")
+    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
+    if not isinstance(run_defaults, dict):
+        return None
+    return run_defaults.get("shell")
+
+
+def _effective_step_shell(
+    step: dict, job_default: str | list | None, workflow_default: str | list | None
+) -> str | list | None:
+    """Resolve a run step's shell by GitHub's precedence.
+
+    Step ``shell`` wins over job ``defaults.run.shell``, which wins over the
+    workflow-level default.  A step that declares none inherits them, so the
+    effective shell must be recorded: an inherited Python shell would
+    otherwise read as the bash fallback and a raw install inside it could be
+    missed by the shell-only scan.
+    """
+    shell = step.get("shell")
+    if shell is None:
+        shell = job_default
+    if shell is None:
+        shell = workflow_default
+    return shell
+
+
 def _job_run_step_records(
     workflow_content: str, job_name: str
 ) -> list[dict] | None:
@@ -3101,9 +3135,11 @@ def _job_run_step_records(
     if not isinstance(jobs, dict) or job_name not in jobs:
         return None
     workflow_env = workflow.get("env") if workflow is not None else None
+    workflow_default = _workflow_run_defaults(workflow)
     job = jobs[job_name]
     if not isinstance(job, dict):
         return None
+    job_default = _job_run_defaults(job)
     steps = _workflow_job_steps(job)
     if steps is None:
         return None
@@ -3116,7 +3152,7 @@ def _job_run_step_records(
         )
         records.append({
             "run": step["run"],
-            "shell": step.get("shell"),
+            "shell": _effective_step_shell(step, job_default, workflow_default),
             "env": _merge_environment_scopes(scopes),
             "env_scopes": scopes,
         })
@@ -3152,13 +3188,19 @@ def _local_reusable_workflow_path(uses: object) -> Path | None:
     return resolved
 
 
-def _ordinary_job_run_step_records(job: dict) -> list[dict] | None:
+def _ordinary_job_run_step_records(
+    job: dict, workflow_default: str | list | None = None
+) -> list[dict] | None:
     """Extract every shell run step from one ordinary workflow job."""
     steps = _workflow_job_steps(job)
     if steps is None:
         return None
+    job_default = _job_run_defaults(job)
     return [
-        {"run": step["run"], "shell": step.get("shell")}
+        {
+            "run": step["run"],
+            "shell": _effective_step_shell(step, job_default, workflow_default),
+        }
         for step in steps
         if isinstance(step.get("run"), str)
     ]
@@ -3196,9 +3238,14 @@ def _all_job_run_step_records(
     """
     if depth > 16:
         return None
-    jobs = _workflow_jobs(workflow_content)
-    if jobs is None:
+    workflow = _load_workflow_object(workflow_content)
+    jobs = workflow.get("jobs") if workflow is not None else None
+    if not isinstance(jobs, dict):
         return None
+    # The workflow-level default applies to jobs without their own default;
+    # resolve it once so a step that omits `shell` records the shell it
+    # actually runs under instead of falling back to bash.
+    workflow_default = _workflow_run_defaults(workflow)
     active = active_workflows if active_workflows is not None else set()
     records: list[dict] = []
     for job in jobs.values():
@@ -3207,7 +3254,7 @@ def _all_job_run_step_records(
         job_records = (
             _reusable_workflow_run_step_records(job, depth, active)
             if "uses" in job
-            else _ordinary_job_run_step_records(job)
+            else _ordinary_job_run_step_records(job, workflow_default)
         )
         if job_records is None:
             return None

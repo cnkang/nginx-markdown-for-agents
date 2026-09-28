@@ -11,6 +11,7 @@ with paired acceptance/rejection shapes wherever both directions matter.
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 
 import pytest
@@ -3752,8 +3753,13 @@ def _bash_negation_parity() -> dict[str, int] | None:
         check=False,
         capture_output=True,
         text=True,
-    )
-    if probe.returncode != 0:
+        timeout=300,
+    ) if shutil.which("docker") else None
+    if probe is None:
+        return None
+    try:
+        probe.check_returncode()
+    except subprocess.CalledProcessError:
         return None
     statuses = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
     if len(statuses) != len(expressions):
@@ -3832,3 +3838,74 @@ def test_negation_prefix_stays_transparent_after_time() -> None:
     """``! time f`` negates once, ``time f`` not at all."""
     assert packaging_gate._segment_literal("! time false") is True
     assert packaging_gate._segment_literal("time false") is False
+
+
+def test_run_step_records_resolve_effective_shell_precedence() -> None:
+    """Run-step records carry the effective shell, not only the step override.
+
+    Regression for the gate-integrity gap: a step that omits ``shell`` was
+    recorded as ``None`` and every consumer then assumed bash, so a job or
+    workflow ``defaults.run.shell`` naming Python would hide a raw install
+    inside that step from the shell-only scan.  Precedence is step, then
+    job default, then workflow default.
+    """
+    workflow = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: bash {0}\n"
+        "jobs:\n"
+        "  gate:\n"
+        "    defaults:\n"
+        "      run:\n"
+        "        shell: python3 {0}\n"
+        "    steps:\n"
+        "      - run: print(1)\n"
+        "      - run: echo hi\n"
+        "        shell: bash {0}\n"
+    )
+    records = packaging_gate._job_run_step_records(workflow, "gate")
+    assert records is not None
+    assert [record["shell"] for record in records] == [
+        "python3 {0}",
+        "bash {0}",
+    ]
+
+    workflow_level_only = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: python3 {0}\n"
+        "jobs:\n"
+        "  gate:\n"
+        "    steps:\n"
+        "      - run: print(1)\n"
+    )
+    records = packaging_gate._job_run_step_records(workflow_level_only, "gate")
+    assert records is not None
+    assert [record["shell"] for record in records] == ["python3 {0}"]
+
+    # The all-jobs helper (the raw-install scan's entry) resolves it too.
+    records = packaging_gate._all_job_run_step_records(workflow_level_only)
+    assert records is not None
+    assert [record["shell"] for record in records] == ["python3 {0}"]
+
+
+def test_job_default_python_shell_raw_install_is_flagged() -> None:
+    """An inherited Python default makes the raw-install scan see Python.
+
+    The scan routes a step to the Python payload analyzer when the resolved
+    shell names Python; with the precedence recorded, a raw install inside a
+    default-shelled step is caught instead of being read as bash text.
+    """
+    workflow = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: python3 {0}\n"
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - run: 'import subprocess; "
+        "subprocess.run([\"rustup\", \"toolchain\", \"install\", \"nightly\"])'\n"
+    )
+    records = packaging_gate._all_job_run_step_records(workflow)
+    assert records is not None
+    assert packaging_gate._workflow_shell_uses_python(records[0]["shell"])

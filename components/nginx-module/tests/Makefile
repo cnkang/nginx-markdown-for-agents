@@ -2,15 +2,19 @@ include make/targets.mk
 
 UNAME_S ?= $(shell uname -s)
 
-# Homebrew include/lib fallbacks for the Brotli cases below apply only on
-# macOS.  On Linux those paths do not exist and must not be added silently:
-# the pkg-config lookup is the only legitimate source there.
+# Brotli include/lib discovery for the cases below.  macOS (Homebrew) needs
+# explicit include/lib paths when pkg-config is unavailable; Linux keeps the
+# macOS paths OUT (they do not exist there) but still falls back to the bare
+# library names, which resolve through the default search path when
+# pkg-config is absent (the GCC parity container installs libbrotli-dev but
+# no pkg-config).  An empty fallback there drops -lbrotli* entirely and the
+# link fails, so the bare-name fallback is load-bearing.
 ifeq ($(UNAME_S),Darwin)
 HOMEBREW_BROTLI_CFLAGS ?= $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')
 HOMEBREW_BROTLI_LIBS ?= $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')
 else
-HOMEBREW_BROTLI_CFLAGS ?= $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null)
-HOMEBREW_BROTLI_LIBS ?= $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null)
+HOMEBREW_BROTLI_CFLAGS ?= $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || true)
+HOMEBREW_BROTLI_LIBS ?= $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-lbrotlidec -lbrotlienc')
 endif
 
 SECTION_GC_LDFLAGS ?=
