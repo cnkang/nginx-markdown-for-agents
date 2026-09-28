@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import itertools
 import os
 import re
 import shutil
@@ -968,6 +969,68 @@ def _publish_event_cases_are_valid(
     return _publish_dependency_failure_cases(node, success_context, event_name)
 
 
+# Every combination of dependency outcomes is checked (four outcomes over the
+# seven required dependencies is 4**7 = 16384 evaluations per event context,
+# measured at roughly 0.17 s per context on the review host).  The per-case
+# checks above validate individual outcomes; the exhaustive pass below
+# validates the condition's full Boolean behavior, catching alternatives such
+# as `|| (A == 'failure' && B == 'failure')` that pass the individual checks
+# yet would allow publication after two required jobs failed.
+_PUBLISH_RESULT_STATES = ("success", "failure", "cancelled", "skipped")
+
+
+def _publish_combination_is_expected(
+    results: tuple[str, ...], event_name: str
+) -> bool:
+    """Whether publication is allowed for one dependency-outcome combination.
+
+    Publication is allowed only when every required dependency succeeded, or
+    - for manual dispatch only - when every required dependency succeeded
+    except the signing job, which is the single documented skip exception.
+    """
+    for job_name, result in zip(sorted(RELEASE_PUBLISH_REQUIRED_NEEDS), results):
+        if result == "success":
+            continue
+        if (
+            event_name == "workflow_dispatch"
+            and job_name == "integrity-signature"
+            and result == "skipped"
+        ):
+            continue
+        return False
+    return True
+
+
+def _publish_condition_matches_truth_table(
+    node: ast.expr, event_name: str, ref_type: str
+) -> bool:
+    """Require the condition to allow publication exactly when it is expected.
+
+    Enumerates every dependency-outcome combination under one event context
+    and rejects the condition when the evaluator's verdict differs from the
+    expected verdict anywhere in the table, or when any combination fails to
+    evaluate (unmodeled syntax stays fail-closed).
+    """
+    job_names = sorted(RELEASE_PUBLISH_REQUIRED_NEEDS)
+    base_context = {
+        f"needs.{job_name.replace('-', '_')}.result": "success"
+        for job_name in job_names
+    }
+    base_context.update(
+        {_GITHUB_EVENT_NAME: event_name, _GITHUB_REF_TYPE: ref_type}
+    )
+    for results in itertools.product(
+        _PUBLISH_RESULT_STATES, repeat=len(job_names)
+    ):
+        context = dict(base_context)
+        for job_name, result in zip(job_names, results):
+            context[f"needs.{job_name.replace('-', '_')}.result"] = result
+        evaluated = _evaluate_publish_condition(node, context)
+        if evaluated is not _publish_combination_is_expected(results, event_name):
+            return False
+    return True
+
+
 def _publish_condition_covers_dependency_results(condition: str) -> bool:
     """Require every publish dependency to succeed with the signing exception."""
     node = _github_condition_ast(condition)
@@ -982,6 +1045,7 @@ def _publish_condition_covers_dependency_results(condition: str) -> bool:
     events = (("push", "tag"), ("workflow_dispatch", "branch"))
     return all(
         _publish_event_cases_are_valid(node, expected_attributes, event, ref)
+        and _publish_condition_matches_truth_table(node, event, ref)
         for event, ref in events
     )
 

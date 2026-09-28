@@ -27,7 +27,6 @@ env:
   # build version must match them, and the build runs in the same Alpine release
   # as those images.
   NGINX_VERSION: "1.30.4"
-  ALPINE_VERSION: "3.24"
   RUST_VERSION: "1.98.1"
   RUST_FEATURES: streaming,prune_noise_regions
   DOCKER_DEFAULT_PLATFORM: linux/amd64
@@ -129,6 +128,9 @@ jobs:
           set -euo pipefail
           nginx_bin_file="$(mktemp)"
           buildroot_file="$(mktemp)"
+          # Both temporary files are removed on every exit path, not only on
+          # success: a build failure below must not leave them behind either.
+          trap 'rm -f -- "${nginx_bin_file:-}" "${buildroot_file:-}"' EXIT
           ./tools/ci/verify_real_nginx_ims.sh \
             --keep-artifacts \
             --nginx-version "${NGINX_VERSION}" \
@@ -142,7 +144,6 @@ jobs:
           fi
           printf 'nginx_bin=%s\n' "${nginx_bin}" >> "${GITHUB_OUTPUT}"
           printf 'buildroot=%s\n' "${buildroot}" >> "${GITHUB_OUTPUT}"
-          rm -f -- "${nginx_bin_file}" "${buildroot_file}"
 
       - name: Run the real-NGINX end-to-end checks
         env:
@@ -179,7 +180,7 @@ jobs:
           # loop wrote one line per check before anything judges the contents.
           # This step runs without `set -e`, so the check fails explicitly.
           rows="$(wc -l < rc-evidence/results.tsv)"
-          if [ "${rows}" -ne 7 ]; then
+          if [[ "${rows}" -ne 7 ]]; then
             echo "::error::expected 7 evidence rows, found ${rows}"
             exit 1
           fi

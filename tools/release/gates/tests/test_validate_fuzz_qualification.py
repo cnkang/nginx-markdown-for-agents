@@ -192,7 +192,13 @@ def test_fixture_rejects_per_target_seed_not_bound_to_manifest(
 
     reasons = validator.validate_record(record, manifest)
 
-    assert any("seed" in reason for reason in reasons)
+    # Tightened from a bare `"seed" in reason` match, which also accepted
+    # unrelated seed_path wording: require exactly one reason and both
+    # recognized seed diagnostics.
+    assert len(reasons) == 1, reasons
+    assert reasons[0].startswith(
+        ("stale-seed: parser_html seed", "malformed: parser_html seed")
+    ), reasons
 
 
 @pytest.mark.parametrize("blocking_pass", [False, None, 1])
@@ -216,8 +222,10 @@ def test_fixture_requires_boolean_true_blocking_pass(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("elapsed_seconds_total", validator.FUZZ_JOB_BUDGET + 1,
-         "elapsed_seconds_total exceeds fuzz job budget"),
+        # The per-record ceiling is the phase envelope plus the one
+        # in-flight invocation's continuation margin and replay allowance.
+        ("elapsed_seconds_total", validator.MAX_RECORD_ELAPSED_SECONDS + 1,
+         "elapsed_seconds_total exceeds the per-record ceiling"),
         ("executions_total",
          validator.MAX_LIBFUZZER_EXECUTIONS
          * validator.MAX_FUZZ_INVOCATIONS + 1,
@@ -3120,3 +3128,110 @@ def test_invoke_fuzz_registration_cancellation_reaps_process(
         assert not validator._ACTIVE_FUZZ_PROCESSES
     finally:
         _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_record_elapsed_ceiling_allows_a_legal_near_max_run() -> None:
+    """A legal run may exceed the phase envelope and must stay accepted.
+
+    Regression for the reused-envelope ceiling: FUZZ_JOB_BUDGET bounds the
+    phase, not one record, and a record legitimately carries the envelope
+    plus the one in-flight invocation's continuation margin and replay
+    allowance.  A value between the envelope and the derived ceiling used
+    to be rejected as malformed.
+    """
+    assert validator.FUZZ_JOB_BUDGET < validator.MAX_RECORD_ELAPSED_SECONDS
+
+    at_envelope_plus_margin = validator.FUZZ_JOB_BUDGET + 100
+    assert validator._blocking_elapsed_reason(
+        "parser_html", at_envelope_plus_margin
+    ) is None
+    assert validator._blocking_elapsed_reason(
+        "parser_html", validator.MAX_RECORD_ELAPSED_SECONDS
+    ) is None
+    # Above the derived ceiling still fails closed.
+    assert validator._blocking_elapsed_reason(
+        "parser_html", validator.MAX_RECORD_ELAPSED_SECONDS + 1
+    ) is not None
+
+
+def test_record_elapsed_ceiling_arithmetic_matches_job_budget() -> None:
+    """The derived ceiling is exactly envelope + continuation + replay."""
+    assert validator.MAX_RECORD_ELAPSED_SECONDS == (
+        validator.FUZZ_JOB_BUDGET
+        + validator.INVOCATION_TIMEOUT_MARGIN
+        + validator.REPLAY_ALLOWANCE_SECONDS
+    )
+
+
+@pytest.mark.parametrize(
+    ("started_at", "expected"),
+    [
+        ("2026-09-28T10:07:42+00:00", "fuzz-qualification-20260928T100742Z"),
+        ("2026-09-28T10:07:42Z", "fuzz-qualification-20260928T100742Z"),
+        # Same instant expressed with an offset normalizes to UTC.
+        ("2026-09-28T18:07:42+08:00", "fuzz-qualification-20260928T100742Z"),
+        ("2026-09-28T05:07:42-05:00", "fuzz-qualification-20260928T100742Z"),
+        # A naive timestamp is treated as UTC.
+        ("2026-09-28T10:07:42", "fuzz-qualification-20260928T100742Z"),
+    ],
+)
+def test_run_id_normalizes_every_timestamp_form(
+    started_at: str, expected: str
+) -> None:
+    """Run ids are canonical UTC for naive, Z, and offset inputs."""
+    assert validator._run_id_from(started_at) == expected
+
+
+def test_run_id_rejects_a_malformed_timestamp() -> None:
+    """A non-ISO start time fails closed instead of producing a bent id."""
+    with pytest.raises(ValueError):
+        validator._run_id_from("yesterday-ish")
+
+
+def test_fixture_revalidation_survives_a_release_version_bump() -> None:
+    """A uniformly captured record re-validates after the version advances.
+
+    Regression for the fixture-mode version coupling: the expected log
+    directory used to come from the ACTIVE release version (Cargo.toml), so
+    re-validating a record captured under the previous release failed with
+    "raw_log_ref is not target-bound" after a version bump.  The expected
+    directory now follows the record's own uniform release directory; the
+    release identity stays bound by the candidate SHA.
+    """
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    bumped = []
+    for entry in record["per_target"]:
+        for field in ("corpus_dir", "seed_path", "raw_log_ref"):
+            value = entry.get(field)
+            if isinstance(value, str):
+                entry[field] = value.replace(
+                    "artifacts/release/0.9.2/", "artifacts/release/9.9.9/"
+                )
+        bumped.append(entry)
+
+    assert validator.validate_record(record, manifest) == []
+
+
+def test_fixture_rejects_a_mixed_release_directory_record() -> None:
+    """Refs spread across two release directories fail closed."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    # One target's ref points at another release directory than the rest.
+    record["per_target"][0]["raw_log_ref"] = (
+        "artifacts/release/0.9.1/fuzz-logs/parser_html.log"
+    )
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any("per_target[0] raw_log_ref" in reason for reason in reasons)

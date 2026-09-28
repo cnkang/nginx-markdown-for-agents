@@ -51,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import (  # noqa: E402
+    safe_repo_relative_ref,
     validate_filename_strict,
     validate_read_path,
     validate_write_path_within_root,
@@ -195,6 +196,15 @@ MAX_FUZZ_INVOCATIONS = 8
 # this margin plus its replay time; that tolerance is absorbed by the
 # slack between FUZZ_JOB_BUDGET and the release job's 360-minute cap.
 INVOCATION_TIMEOUT_MARGIN = 900
+# Per-record elapsed ceiling.  FUZZ_JOB_BUDGET is the phase-wide wall-clock
+# envelope, and a single record legitimately includes the envelope plus the
+# one in-flight invocation's continuation margin and replay allowance.  The
+# per-record check must therefore use this derived bound, not the envelope
+# itself: a target near the accepted `required_minutes` maximum plus a full
+# executions chase emits elapsed > FUZZ_JOB_BUDGET while still legal.
+MAX_RECORD_ELAPSED_SECONDS = (
+    FUZZ_JOB_BUDGET + INVOCATION_TIMEOUT_MARGIN + REPLAY_ALLOWANCE_SECONDS
+)
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
 RECORD_OUTPUT_LABEL = "fuzz qualification record"
@@ -301,9 +311,23 @@ def _git_head_sha() -> str:
 
 
 def _run_id_from(started_at: str) -> str:
-    """Derive a timestamp-based run id from the ISO-8601 start time."""
-    canonical = started_at.replace("+00:00", "Z")
-    return "fuzz-qualification-" + canonical.replace("-", "").replace(":", "")
+    """Derive a timestamp-based run id from the ISO-8601 start time.
+
+    The id is canonical UTC: a naive timestamp is treated as UTC and any
+    offset is normalized, so non-UTC inputs cannot produce malformed ids
+    (the previous text-replace only handled a literal '+00:00' suffix and
+    let offsets leak their digits into the id).
+    """
+    try:
+        moment = datetime.fromisoformat(started_at)
+    except ValueError as exc:
+        raise ValueError(
+            f"started_at is not a valid ISO-8601 timestamp: {started_at!r}"
+        ) from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    canonical = moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return "fuzz-qualification-" + canonical
 
 
 def load_json(path: str | Path, label: str) -> dict:
@@ -1224,6 +1248,9 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     # crashes and zero sanitizer findings, not as a crash.
     if invocation["returncode"] == -1:
         stderr = invocation.get("stderr", "")
+        # The timeout marker is a producer prefix: a later mention of the
+        # phrase in worker output must not classify as a timeout (see
+        # test_soak_timeout_marker_must_start_the_stderr_record).
         if stderr.startswith("timed out:"):
             return executions, elapsed, "timed out: fuzz invocation exceeded its time cap"
         if "spawn failed:" in stderr:
@@ -1837,19 +1864,10 @@ def _per_target_reasons(entry, index: int) -> list[str]:
     return reasons
 
 
-def _safe_record_path(value: object) -> PurePosixPath | None:
-    """Parse one normalized repository-relative POSIX record path."""
-    if not isinstance(value, str) or not value or "\\" in value:
-        return None
-    path = PurePosixPath(value)
-    if (
-        path.is_absolute()
-        or path.as_posix() != value
-        or ":" in path.parts[0]
-        or any(part in {"", ".", ".."} for part in path.parts)
-    ):
-        return None
-    return path
+# The canonical repository-relative reference parser is shared with the
+# gate-manifests generator (tools/lib/path_validation.py); both gates must
+# enforce identical reference semantics (Rule 31: one owner per rule).
+_safe_record_path = safe_repo_relative_ref
 
 
 def _per_target_reference_reasons(
@@ -1909,9 +1927,9 @@ def _blocking_elapsed_reason(name: str, elapsed: object) -> str | None:
     if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
         return (f"missing-observation: {name} elapsed_seconds_total "
                 "must be finite numeric")
-    if elapsed > FUZZ_JOB_BUDGET:
+    if elapsed > MAX_RECORD_ELAPSED_SECONDS:
         return (f"malformed: {name} elapsed_seconds_total exceeds "
-                "fuzz job budget")
+                "the per-record ceiling")
     if elapsed < 0:
         return (f"malformed: {name} elapsed_seconds_total must be "
                 "non-negative")
@@ -1949,7 +1967,11 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
     status_reason = _blocking_status_reason(name, entry)
     if status_reason is not None:
         return [status_reason]
-    assert entry is not None
+    if entry is None:
+        # _blocking_status_reason already returns for a missing entry; this
+        # guard keeps the invariant explicit instead of relying on an assert
+        # that `python -O` strips.
+        return [f"missing-observation: {name} entry is absent"]
     seed_reason = _blocking_seed_reason(name, spec.get("seed"), entry)
     if seed_reason is not None:
         return [seed_reason]
@@ -1958,11 +1980,14 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
     elapsed_reason = _blocking_elapsed_reason(name, elapsed)
     if elapsed_reason is not None:
         return [elapsed_reason]
-    assert isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
+        return [f"missing-observation: {name} elapsed_seconds_total "
+                "must be finite numeric"]
     execution_reason = _blocking_execution_reason(name, executions)
     if execution_reason is not None:
         return [execution_reason]
-    assert type(executions) is int
+    if type(executions) is not int:
+        return [f"missing-observation: {name} executions_total not an integer"]
     reasons = []
     required_seconds = int(spec["required_minutes"] * 60)
     required_executions = int(spec["required_executions"])
@@ -2013,6 +2038,54 @@ def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
     return reasons
 
 
+def _observed_release_dirs(record: dict) -> set[str]:
+    """Collect the release directories the record's per-target refs name."""
+    observed: set[str] = set()
+    per_target = record.get("per_target")
+    if not isinstance(per_target, list):
+        return observed
+    for entry in per_target:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("raw_log_ref", "corpus_dir", "seed_path"):
+            candidate = entry.get(key)
+            if not isinstance(candidate, str) or not candidate:
+                continue
+            # artifacts/release/<version>/... -> <version>
+            parts = PurePosixPath(candidate).parts
+            if (
+                len(parts) >= 3
+                and parts[0] == "artifacts"
+                and parts[1] == "release"
+            ):
+                observed.add(parts[2])
+    return observed
+
+
+def _expected_log_dir(record: dict, manifest: dict) -> PurePosixPath:
+    """Return the release-relative log directory the record's refs must use.
+
+    The expected directory is the record's own release directory when its
+    per-target refs agree on one (fixture re-validation of captured
+    evidence), and the active release version's default otherwise.  Deriving
+    from the record keeps re-validating a captured artifact possible after
+    the project bumps its Cargo version: the captured refs still point at
+    their own release directory instead of failing against a newer default.
+    """
+    observed = _observed_release_dirs(record)
+    if len(observed) == 1:
+        return (
+            PurePosixPath("artifacts") / "release" / next(iter(observed))
+            / "fuzz-logs"
+        )
+    if len(observed) > 1:
+        # Mixed release directories in one record are malformed; return an
+        # impossible path so the reference check fails closed with its normal
+        # reason instead of accepting a mixed record.
+        return PurePosixPath("artifacts") / "release" / "<mixed>" / "fuzz-logs"
+    return PurePosixPath(_default_artifact_paths()["log_dir"])
+
+
 def validate_record(record: dict, manifest: dict) -> list[str]:
     """Validate a qualification record against manifest threshold semantics."""
     reasons = []
@@ -2032,7 +2105,7 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     if not isinstance(per_target, list):
         reasons.append("malformed: record per_target must be an array")
         return reasons
-    log_dir = PurePosixPath(_default_artifact_paths()["log_dir"])
+    log_dir = _expected_log_dir(record, manifest)
     for index, entry in enumerate(per_target):
         reasons.extend(_per_target_reasons(entry, index))
         if isinstance(entry, dict):

@@ -218,7 +218,8 @@ def test_produced_seed_manifest_is_accepted_by_final_evidence(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("elapsed_seconds_total", fuzz_validator.FUZZ_JOB_BUDGET + 1),
+        ("elapsed_seconds_total",
+         fuzz_validator.MAX_RECORD_ELAPSED_SECONDS + 1),
         ("executions_total",
          fuzz_validator.MAX_LIBFUZZER_EXECUTIONS
          * fuzz_validator.MAX_FUZZ_INVOCATIONS + 1),

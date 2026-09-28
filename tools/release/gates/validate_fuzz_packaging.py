@@ -2491,16 +2491,17 @@ def _return_kind(segment: str) -> str | None:
 
 
 def _chain_prefix_words(segment: str) -> tuple[list[str], bool]:
-    """Segment words with a leading ``!`` and ``time`` prefix removed.
+    """Segment words with a leading ``!`` run and ``time`` prefix removed.
 
-    Returns the remaining words and whether a ``!`` negation came off: the
-    negation inverts a failure the way a chain operand does, while ``time``
-    is transparent (``time f`` runs ``f`` like a plain call).
+    Returns the remaining words and a negation flag: each ``!`` word
+    toggles it, so the flag carries the parity bash 5.2 computes (an even
+    count is a no-op, an odd count inverts the status), while ``time`` is
+    transparent (``time f`` runs ``f`` like a plain call).
     """
     words = segment.split()
     bang = False
     while words and words[0] == "!":
-        bang = True
+        bang = not bang
         words = words[1:]
     while words and _resolve_heredoc_word(words[0])[0] == "time":
         words = words[1:]
@@ -3662,6 +3663,8 @@ def _raw_install_segment_step(
 ) -> tuple[bool, int]:
     """Analyze one shell segment and return whether it found a raw install."""
     segment = segments[index]
+    if _rustup_segment_opens_dynamic_subcommand(segment, separators, index):
+        return True, index
     if _is_loop_header(segment):
         loop_result = _raw_install_in_loop_segments(
             segments, separators, index, depth, variables
@@ -5510,17 +5513,79 @@ def _raw_install_expand_command_word(
     ), words
 
 
+_RUSTUP_GLOBAL_FLAGS = frozenset(
+    {"-v", "-V", "-q", "--verbose", "--quiet", "--version"}
+)
+_COMMAND_SUBSTITUTION_MASK = "__shell_command_substitution__"
+
+
+def _rustup_subcommand_word_is_unresolved(word: str) -> bool:
+    """Whether a rustup operand word still carries an unresolved expansion.
+
+    Quote removal runs before this check, so a surviving ``$`` or backtick
+    means bash evaluates the word at run time, and the masked placeholder
+    marks a ``$(...)`` the scanner lifted out of the line.
+    """
+    return (
+        "$" in word
+        or "`" in word
+        or word == _COMMAND_SUBSTITUTION_MASK
+    )
+
+
 def _raw_rustup_command_installs_toolchain(words: list[str]) -> bool:
-    """Whether a rustup argv invokes its toolchain install subcommand."""
+    """Whether a rustup argv invokes its toolchain install subcommand.
+
+    A subcommand region that is not the literal ``toolchain install`` pair
+    and still carries an unresolved expansion fails closed: the expansion
+    could produce that pair at run time, so it must not pass as the benign
+    subcommand (``show``, ``component add``, ``toolchain list``) it merely
+    resembles.
+    """
     if Path(words[0]).name != "rustup":
         return False
     index = 1
-    global_flags = {"-v", "-V", "-q", "--verbose", "--quiet", "--version"}
     while index < len(words) and words[index].startswith("-"):
-        if words[index] not in global_flags:
+        if words[index] not in _RUSTUP_GLOBAL_FLAGS:
             break
         index += 1
-    return words[index : index + 2] == ["toolchain", "install"]
+    subcommand = words[index : index + 2]
+    if subcommand == ["toolchain", "install"]:
+        return True
+    return any(_rustup_subcommand_word_is_unresolved(word) for word in subcommand)
+
+
+def _rustup_segment_opens_dynamic_subcommand(
+    segment: str, separators: list[str], index: int
+) -> bool:
+    """Whether a backtick substitution fills a rustup subcommand slot.
+
+    The segment scanner splits a command substitution out of its command
+    line, so ``rustup `echo toolchain` install nightly`` reaches the argv
+    check as the bare word ``rustup`` plus a separate substitution body.
+    When a rustup command stops before its literal subcommand pair and a
+    backtick substitution follows, the subcommand text is runtime text and
+    the scan fails closed. A double-quoted substitution leaves the opening
+    quote stranded on this segment, so one dangling quote is dropped
+    before tokenizing.
+    """
+    if index + 1 >= len(separators) or separators[index + 1] != "`":
+        return False
+    text = segment.rstrip()
+    if text and text[-1] in "\"'":
+        text = text[:-1]
+    try:
+        words = shlex.split(text, posix=True)
+    except ValueError:
+        return False
+    if not words or Path(words[0]).name != "rustup":
+        return False
+    operand = words[1:]
+    while operand and operand[0].startswith("-"):
+        if operand[0] not in _RUSTUP_GLOBAL_FLAGS:
+            break
+        operand = operand[1:]
+    return operand == [] or operand == ["toolchain"]
 
 
 def _raw_install_from_command(

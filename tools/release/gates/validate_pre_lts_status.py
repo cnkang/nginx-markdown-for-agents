@@ -65,8 +65,11 @@ def _schema_errors(report: dict[str, Any], schema: dict[str, Any]) -> list[str]:
         import jsonschema
     except ImportError as exc:
         raise ValueError("jsonschema is required for pre-LTS status validation") from exc
+    from tools.release.gates.format_checker_guard import (
+        require_format_checker,
+    )
     validator_instance = jsonschema.Draft202012Validator(
-        schema, format_checker=jsonschema.FormatChecker()
+        schema, format_checker=require_format_checker()
     )
     return [
         error.message
