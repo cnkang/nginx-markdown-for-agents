@@ -4408,3 +4408,30 @@ def test_dynamic_import_call_targets_are_resolved_or_fail_closed() -> None:
     assert not packaging_gate._python_inline_raw_install(
         "print('hello')", 0, None
     )
+
+
+def test_dotted_import_resolves_by_import_semantics() -> None:
+    """``__import__``'s dotted-name behavior is modeled, not assumed.
+
+    Regression: `__import__('os.path')` returns the TOP-LEVEL ``os`` module
+    (no fromlist), so `.system` is really ``os.system``; resolving it as
+    ``os.path.system`` matched no launcher and the install went unflagged.
+    A non-empty literal fromlist returns the submodule instead.
+    """
+    payloads = [
+        # Bare dotted name returns the top-level package at runtime.
+        "__import__('os.path').system('rustup toolchain install stable')",
+        # A non-empty fromlist returns the submodule, whose launcher members
+        # still match.
+        "__import__('os', fromlist=['system']).system("
+        "'rustup toolchain install stable')",
+        "__import__('subprocess', fromlist=['run']).run(["
+        "'rustup', 'toolchain', 'install', 'stable'])",
+    ]
+    for payload in payloads:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), payload
+
+    # Control: a benign dotted dynamic import stays accepted.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os.path').join('a', 'b')", 0, None
+    )

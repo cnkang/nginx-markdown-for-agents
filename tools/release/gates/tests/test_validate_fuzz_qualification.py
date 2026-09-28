@@ -3302,3 +3302,42 @@ def test_wait_without_waitid_signals_the_group_after_the_leader_exits(
     validator._wait_fuzz_process_without_waitid(process, 5.0)
     time.sleep(1.9)
     assert not marker.exists(), "a descendant survived the fallback"
+
+
+def test_interrupt_signals_the_group_before_reaping_the_leader(
+    tmp_path, monkeypatch
+) -> None:
+    """An interrupt must signal the group before the leader is reaped.
+
+    Regression: the exceptional-exit path polled the leader first; when the
+    leader had already exited, that poll set its return code, the guarded
+    group signal returned early, and a descendant that inherited stdout
+    survived the interrupt.  The group is now signaled before any reap.
+    """
+    marker = tmp_path / "interrupt-descendant-survived"
+    leader = tmp_path / "leader.py"
+    leader.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c',\n"
+        "    \"import time; time.sleep(1.2); open(%r, 'w')\"\n"
+        f"    % {str(marker)!r}])\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+
+    def raising_wait(process, timeout):
+        time.sleep(0.6)  # the leader exits during this sleep
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", raising_wait)
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.6)
+    assert not marker.exists(), "a descendant survived the interrupt"

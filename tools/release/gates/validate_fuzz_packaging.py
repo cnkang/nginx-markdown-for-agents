@@ -4791,33 +4791,79 @@ def _python_getattr_literal_name(
     return None
 
 
+def _python_getattr_import_module(
+    target: str | None,
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve ``getattr(<dynamic-import>, '<name>')`` to its module.
+
+    Returns None when the call is not a literal two-argument getattr over a
+    dynamic import, so the caller treats it as unresolvable.
+    """
+    if target != "getattr" or len(call.args) != 2:
+        return None
+    inner, name = call.args
+    if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+        return None
+    if not isinstance(inner, ast.Call):
+        return None
+    return _python_dynamic_import_module(inner, module_aliases, imported_names)
+
+
 def _python_dynamic_import_module(
     call: ast.Call,
     module_aliases: dict[str, str],
     imported_names: dict[str, str],
 ) -> str | None:
-    """Resolve the module a dynamic-import call names, or None."""
+    """Resolve the module a dynamic-import call names, or None.
+
+    ``importlib.import_module`` returns the named module, dotted names
+    included.  ``__import__`` follows the import statement's semantics: a
+    bare dotted name returns the TOP-LEVEL package (``__import__('os.path')``
+    binds ``os``), while a non-empty ``fromlist`` returns the submodule
+    named.  Modeling this matters: a resolver that answered
+    ``os.path.system`` for ``__import__('os.path').system`` would miss that
+    the callable really is ``os.system``.
+    """
     target = _python_call_name(call.func, module_aliases, imported_names)
     if target not in {"__import__", "importlib.import_module"}:
-        # getattr(<dynamic-import>, '<name>') with a literal name resolves
-        # to the module itself when the inner call is an import.
-        if target == "getattr" and len(call.args) == 2:
-            inner, name = call.args
-            if not (
-                isinstance(name, ast.Constant) and isinstance(name.value, str)
-            ):
-                return None
-            if isinstance(inner, ast.Call):
-                return _python_dynamic_import_module(
-                    inner, module_aliases, imported_names
-                )
-        return None
+        return _python_getattr_import_module(
+            target, call, module_aliases, imported_names
+        )
     if not call.args:
         return None
     argument = call.args[0]
     if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
         return None
-    return argument.value
+    module_name = argument.value
+    if target == "importlib.import_module":
+        return module_name
+    if _python_import_fromlist_is_nonempty(call):
+        return module_name
+    return module_name.split(".", 1)[0]
+
+
+def _python_import_fromlist_is_nonempty(call: ast.Call) -> bool:
+    """Whether an ``__import__`` call passes a non-empty literal fromlist.
+
+    Positional index 3 and the ``fromlist`` keyword both name the parameter;
+    only a literal non-empty list/tuple proves the submodule is returned.
+    Anything else stays conservative for the top-level-package answer, which
+    is what a bare call returns.
+    """
+    fromlist_node: ast.expr | None = None
+    if len(call.args) >= 4:
+        fromlist_node = call.args[3]
+    for keyword in call.keywords:
+        if keyword.arg == "fromlist":
+            fromlist_node = keyword.value
+    if fromlist_node is None:
+        return False
+    if isinstance(fromlist_node, (ast.List, ast.Tuple)):
+        return len(fromlist_node.elts) > 0
+    return False
 
 
 def _python_call_name_or_dynamic(
