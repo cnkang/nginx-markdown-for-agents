@@ -5181,10 +5181,127 @@ _RAW_TOOLCHAIN_INSTALL_MARKER_RE = re.compile(
     r"\brustup(?:-init)?\b|\btoolchain\s+install\b", re.IGNORECASE
 )
 
+# Redirection and heredoc syntax tokens that appear as words of a command
+# segment but name no script operand (for example `2>&1`, `>file`, `<<PY`).
+_SEGMENT_SYNTAX_TOKEN_RE = re.compile(
+    r"(?:\d*>>?|<&?\d*|<<-?|&>>?|>)"
+)
+
 
 def _shell_script_mentions_toolchain_install(content: str) -> bool:
     """Select shell files whose contents can affect Rust toolchain install."""
     return _RAW_TOOLCHAIN_INSTALL_MARKER_RE.search(content) is not None
+
+
+def _shell_script_invokes_interpreter(content: str) -> bool:
+    """Whether a script can hand control to another script.
+
+    Used for scripts that do not themselves mention the install markers: the
+    conservative whole-file scan would false-positive on legitimate
+    constructs it cannot resolve (a local array expansion such as
+    ``"${build_cmd[@]}"`` fails closed), so such files are only followed
+    through the scripts they invoke.  A file that neither mentions the
+    markers nor invokes an interpreter cannot install a toolchain itself.
+    """
+    return any(
+        head is not None
+        for head in (
+            _invocation_head(segment)
+            for segment, _separator in _followable_command_segments(content)
+        )
+        if head is not None
+    )
+
+
+def _followable_command_segments(content: str):
+    """Yield parseable command segments of a shell file's own body.
+
+    Command substitutions are masked before segmentation, so fragments of a
+    ``$(...)`` body appear as unparseable remainders; those are skipped here
+    because the substitutions themselves are scanned separately elsewhere.
+    """
+    stripped = _join_continuations(_strip_heredocs(_strip_shell_comments(content)))
+    for segment, separator in _command_segments_with_separators(stripped):
+        if _parse_segment_words(segment) is None:
+            # A masked substitution or an unresolved quote leaves a fragment
+            # that cannot name a command; the substitution scan covers the
+            # body it came from.
+            continue
+        yield segment, separator
+
+
+def _parse_segment_words(segment: str) -> list[str] | None:
+    """Parse one command segment, or None when it is not resolvable."""
+    try:
+        return shlex.split(segment.strip(), posix=True)
+    except ValueError:
+        return None
+
+
+def _invocation_head(segment: str) -> str | None:
+    """Return the interpreter basename a segment invokes, if any."""
+    words = _parse_segment_words(segment)
+    if not words:
+        return None
+    head = Path(words[0]).name
+    if head in ("bash", "sh", "zsh", "source", "."):
+        return head
+    if head == "python" or _PYTHON_COMMAND.fullmatch(head):
+        return head
+    return None
+
+
+def _followed_script_is_raw(
+    operand: str,
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Scan one resolved operand of a shell or Python invocation."""
+    if head in ("bash", "sh", "zsh", "source", "."):
+        return _raw_install_from_shell_script_file(
+            operand, depth + 1, variables
+        ) or _python_script_file_is_raw(operand, depth + 1, variables)
+    return _python_script_file_is_raw(operand, depth + 1, variables)
+
+
+def _followable_operand(operand: str) -> bool:
+    """Whether an operand word can name a script this scan should follow."""
+    if operand.startswith("-") or "$" in operand or "`" in operand:
+        return False
+    # Redirection and heredoc tokens are syntax, not script operands:
+    # `python3 "$file" 2>&1 <<PY` must not scan `2>&1` or `<<PY`.
+    return _SEGMENT_SYNTAX_TOKEN_RE.match(operand) is None
+
+
+def _raw_install_from_invoked_scripts(
+    content: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Follow the scripts a marker-less shell file invokes.
+
+    The file's own body is deliberately not scanned as a whole (its
+    unresolved constructs would fail closed on legitimate code), so only the
+    literal script operands of its shell and Python invocations are resolved
+    and scanned.  A chain such as ``outer.sh`` -> ``bash inner.sh`` is
+    therefore caught, while a dynamic operand (``python3 "$file"``) is not
+    treated as evidence: this file does not mention the install markers, so
+    an operand this scan cannot resolve is not a reason to fail the gate.
+    """
+    for segment, _separator in _followable_command_segments(content):
+        words = _parse_segment_words(segment)
+        if not words or len(words) < 2:
+            continue
+        head = _invocation_head(segment)
+        if head is None:
+            continue
+        for operand in words[1:]:
+            if not _followable_operand(operand):
+                continue
+            if _followed_script_is_raw(operand, head, depth, variables):
+                return True
+    return False
 
 
 def _raw_install_from_shell_script_file(
@@ -5214,7 +5331,13 @@ def _raw_install_from_shell_script_file(
     except (OSError, ValueError):
         return True
     if not _shell_script_mentions_toolchain_install(content):
-        return False
+        # No marker text: this file cannot install a toolchain itself, but it
+        # may invoke one that does.  Follow its interpreter invocations so a
+        # multi-hop chain cannot hide an install; when it invokes nothing,
+        # the file is genuinely inert.
+        if not _shell_script_invokes_interpreter(content):
+            return False
+        return _raw_install_from_invoked_scripts(content, depth, variables)
     return _raw_install_in_script(content, depth + 1, variables)
 
 

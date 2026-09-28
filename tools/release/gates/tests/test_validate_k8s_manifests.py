@@ -324,21 +324,24 @@ def test_gate4_installs_atomically() -> None:
 
 
 def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:
-    """Without a trap, SIGINT/SIGTERM leaks the release and the cluster."""
+    """Termination traps run cleanup once and cannot repeat it."""
     script = (
         Path(__file__).resolve().parents[4]
         / "tools/release/gates/gate4_local_k8s_smoke.sh"
     ).read_text(encoding="utf-8")
 
-    assert "trap cleanup_on_exit EXIT" in script, (
-        "gate4 must trap EXIT so abnormal termination runs its cleanup "
-        "instead of leaking owned resources"
+    # A single guarded entry point performs the cleanup for EXIT and for the
+    # signal handlers, so cleanup runs at most once even when a signal lands
+    # after main() already cleaned up.
+    assert "CLEANUP_DONE=0" in script
+    run_cleanup_once = (
+        script.split("run_cleanup_once() {", 1)[1].split("\n}", 1)[0]
     )
-    cleanup_on_exit = (
-        script.split("cleanup_on_exit() {", 1)[1].split("\n}", 1)[0]
-    )
-    assert "cleanup_owned_helm_resources" in cleanup_on_exit
-    assert "delete_cluster" in cleanup_on_exit
+    guard = run_cleanup_once.index("CLEANUP_DONE}")
+    assert run_cleanup_once.index('"${CLEANUP_DONE}" -eq 1') < guard
+    assert "CLEANUP_DONE=1" in run_cleanup_once
+    assert "cleanup_owned_helm_resources" in run_cleanup_once
+    assert "delete_cluster" in run_cleanup_once
 
     # A returning INT/TERM handler resumes the script after the interrupt and
     # a terminated run could still reach its success path; the signal
@@ -352,12 +355,25 @@ def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:
     exit_on_signal = (
         script.split("exit_on_signal() {", 1)[1].split("\n}", 1)[0]
     )
-    assert "cleanup_owned_helm_resources" in exit_on_signal
-    assert "delete_cluster" in exit_on_signal
+    assert "run_cleanup_once" in exit_on_signal
     assert "exit \"$signal_status\"" in exit_on_signal
 
+    # The traps are installed only after parsing and prerequisites succeed:
+    # an early usage error must not emit cleanup messages for resources this
+    # run never touched.
+    assert "install_termination_traps() {" in script
+    main = script.split("main() {", 1)[1].split("\n}", 1)[0]
+    assert "install_termination_traps" in main
+    assert main.index("parse_args") < main.index("install_termination_traps")
+    assert main.index("check_prerequisites") < main.index(
+        "install_termination_traps"
+    )
+
+    # main's own cleanup marks the guard so the EXIT trap cannot repeat it.
+    assert "CLEANUP_DONE=1" in main
+
     # Idempotence: the delete clears its ownership flag so a second run of
-    # the trap (signal handler plus EXIT) is a no-op.
+    # the helper is a no-op.
     delete_cluster = script.split("delete_cluster() {", 1)[1].split("\n}", 1)[0]
     delete = delete_cluster.index("kind delete cluster")
     assert delete_cluster.index("CREATED_CLUSTER=0", delete) > delete

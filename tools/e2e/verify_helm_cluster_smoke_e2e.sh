@@ -137,10 +137,17 @@ acquire_cluster_lock() {
     local waited=0
     while ! mkdir "${LOCK_PATH}.d" 2>/dev/null; do
         # Break the lock only when its recorded owner is gone: a dead pid,
-        # or no owner record on a lock older than the write window.
+        # or no owner record on a lock older than the write window.  The
+        # break is an atomic rename to a unique name, so exactly one waiter
+        # can claim a stale lock: a second waiter's rename fails because the
+        # original path no longer exists, and it simply retries instead of
+        # deleting the winner's fresh lock.
         if ! dir_lock_owner_alive; then
-            rm -rf "${LOCK_PATH}.d"
-            continue
+            local stale_claim="${LOCK_PATH}.stale.$$"
+            if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
+                rm -rf "${stale_claim}"
+                continue
+            fi
         fi
         waited=$((waited + 2))
         if [[ "${waited}" -ge 600 ]]; then

@@ -489,7 +489,9 @@ def test_helm_cluster_smoke_leaves_a_preexisting_release_untouched(
     assert "helm install" not in command_log
     assert "helm upgrade" not in command_log
     assert "helm uninstall" not in command_log
-    assert "kubectl delete namespace" not in command_log
+    # Context-independent: the real command carries --context between
+    # 'kubectl' and 'delete', so the negative must match the operative part.
+    assert "delete namespace" not in command_log
     assert "kind delete cluster" not in command_log
 
 
@@ -569,7 +571,9 @@ def test_helm_cluster_smoke_uninstalls_a_release_it_created(
     assert "helm install" in command_log
     assert "helm upgrade" not in command_log
     assert "helm uninstall" in command_log
-    assert "kubectl delete namespace" not in command_log
+    # Context-independent: the real command carries --context between
+    # 'kubectl' and 'delete', so the negative must match the operative part.
+    assert "delete namespace" not in command_log
     assert "kind delete cluster" not in command_log
 
 
@@ -671,7 +675,9 @@ def test_helm_cluster_smoke_keeps_a_preexisting_namespace(
     )
 
     assert "create namespace markdown-smoke" not in command_log
-    assert "kubectl delete namespace" not in command_log
+    # Context-independent: the real command carries --context between
+    # 'kubectl' and 'delete', so the negative must match the operative part.
+    assert "delete namespace" not in command_log
 
 
 def test_manual_qualification_is_explicitly_defined() -> None:

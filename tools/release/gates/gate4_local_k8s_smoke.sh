@@ -258,22 +258,35 @@ cleanup_owned_helm_resources() {
 # would resume the script after the interrupt (bash completes the trap and
 # continues the next command), letting a terminated validation reach its
 # success path and report PASS.
-cleanup_on_exit() {
+# CLEANUP_DONE makes cleanup run at most once: main() performs its own
+# ordered cleanup and the EXIT trap is a no-op afterwards, and a signal that
+# arrives after cleanup cannot re-run the helpers.
+CLEANUP_DONE=0
+
+run_cleanup_once() {
+    if [[ "${CLEANUP_DONE}" -eq 1 ]]; then
+        return 0
+    fi
+    CLEANUP_DONE=1
     cleanup_owned_helm_resources
     delete_cluster
     return 0
 }
 
+cleanup_on_exit() {
+    run_cleanup_once
+    return 0
+}
+
 exit_on_signal() {
     local signal_status="$1"
-    cleanup_owned_helm_resources
-    delete_cluster
+    run_cleanup_once
     exit "$signal_status"
 }
 
-trap cleanup_on_exit EXIT
-trap 'exit_on_signal 130' INT
-trap 'exit_on_signal 143' TERM
+# The traps are installed by main() after argument parsing and prerequisite
+# checks succeed, so a usage error or a missing tool exits without cleanup
+# messages for a cluster this run never touched.
 
 ##############################################################################
 # Helm validation
@@ -556,9 +569,17 @@ deploy_and_verify() {
 # Main
 ##############################################################################
 
+install_termination_traps() {
+    trap cleanup_on_exit EXIT
+    trap 'exit_on_signal 130' INT
+    trap 'exit_on_signal 143' TERM
+    return 0
+}
+
 main() {
     parse_args "$@"
     check_prerequisites
+    install_termination_traps
 
     local had_failure=0
 
@@ -580,7 +601,9 @@ main() {
         cleanup_owned_helm_resources
     fi
 
-    # Cleanup
+    # Cleanup (mark done so the EXIT trap cannot repeat it)
+    CLEANUP_DONE=1
+    cleanup_owned_helm_resources
     delete_cluster
 
     # Summary

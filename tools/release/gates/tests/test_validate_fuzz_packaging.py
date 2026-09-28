@@ -3952,3 +3952,43 @@ def test_nested_interpreter_template_routes_python_to_the_python_scan() -> None:
     )
     assert packaging_gate._raw_toolchain_install_issue(benign) is None
     assert not packaging_gate._workflow_shell_uses_python('bash -c "echo {0}"')
+
+
+def test_script_chain_cannot_hide_a_raw_install_behind_a_markerless_file(
+    tmp_path, monkeypatch
+) -> None:
+    """A two-hop script chain is followed through invocation operands.
+
+    Regression: the marker prefilter skipped an outer script whose text did
+    not mention the install markers, so `outer.sh` -> `bash inner.sh` hid an
+    install in a file the gate never scanned.  A marker-less file is now
+    followed through the literal script operands of its shell and Python
+    invocations.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text("#!/bin/bash\nbash inner.sh\n", encoding="utf-8")
+
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+    # Controls: an inert file and a dynamic operand are not treated as
+    # evidence, so neither fails the gate.
+    inert = tmp_path / "inert.sh"
+    inert.write_text("#!/bin/bash\necho hello\n", encoding="utf-8")
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "inert.sh", 0, None
+    )
+    dynamic = tmp_path / "dynamic.sh"
+    dynamic.write_text(
+        '#!/bin/bash\npython3 "$toolchain_file" 2>&1 <<PY\nprint(1)\nPY\n',
+        encoding="utf-8",
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "dynamic.sh", 0, None
+    )
