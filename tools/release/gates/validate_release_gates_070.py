@@ -893,13 +893,24 @@ def _evaluate_publish_boolean_operator(
 def _evaluate_publish_comparison(
     node: ast.Compare, context: dict[str, str]
 ) -> bool | None:
-    """Evaluate one equality comparison over a modeled workflow context."""
+    """Evaluate one equality comparison over a modeled workflow context.
+
+    GitHub's expression engine compares strings with ordinal-ignore-case
+    equality (``toUpperSpecial(lhs) === toUpperSpecial(rhs)`` in
+    actions/languageservices), so ``== 'FAILURE'`` matches an actual
+    ``failure``.  A case-sensitive comparison here would model a mutant
+    differently from the runner and could accept a combined-failure
+    alternative the real workflow rejects.
+    """
     if len(node.ops) != 1:
         return None
     actual = _condition_value(node.left, context)
     expected = _condition_value(node.comparators[0], context)
     if actual is None or expected is None:
         return None
+    if isinstance(actual, str) and isinstance(expected, str):
+        actual = actual.casefold()
+        expected = expected.casefold()
     if isinstance(node.ops[0], ast.Eq):
         return actual == expected
     if isinstance(node.ops[0], ast.NotEq):
