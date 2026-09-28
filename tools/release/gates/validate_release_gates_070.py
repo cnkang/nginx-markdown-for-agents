@@ -497,7 +497,12 @@ def _workflow_trigger_map(
 def _release_publish_triggers_are_bounded(
     workflow_content: str,
 ) -> bool:
-    """Require tag pushes and manual dispatch, with no other trigger surface."""
+    """Require tag pushes and manual dispatch, with no other trigger surface.
+
+    A bare ``workflow_dispatch:`` line is valid GitHub syntax and parses to
+    ``None``; it enables the same manual trigger as the mapping form, so both
+    shapes are accepted (any other type stays rejected).
+    """
     triggers = _workflow_trigger_map(workflow_content)
     if triggers is None or set(triggers) != {"push", "workflow_dispatch"}:
         return False
@@ -507,7 +512,7 @@ def _release_publish_triggers_are_bounded(
         isinstance(push, dict)
         and set(push) == {"tags"}
         and push.get("tags") == ["v*"]
-        and isinstance(dispatch, dict)
+        and (dispatch is None or isinstance(dispatch, dict))
     )
 
 
