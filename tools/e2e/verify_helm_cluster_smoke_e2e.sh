@@ -156,7 +156,14 @@ acquire_cluster_lock() {
 
 release_cluster_lock() {
     if [[ "${LOCK_MODE}" == "dir" ]]; then
-        rm -rf "${LOCK_PATH}.d"
+        # Remove the lock only when this run still owns it: if the lock was
+        # broken (owner gone) and another run has since acquired it, deleting
+        # the path here would clear THAT run's lock and admit a third.
+        local owner
+        owner="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
+        if [[ "${owner}" == "$$" ]]; then
+            rm -rf "${LOCK_PATH}.d"
+        fi
     fi
     return 0
 }

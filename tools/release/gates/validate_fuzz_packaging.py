@@ -3270,6 +3270,35 @@ def _all_job_run_step_records(
     return records
 
 
+def _python_interpreter_before_placeholder(
+    words: list[str], command_index: int
+) -> bool:
+    """Whether a Python interpreter names GitHub's script operand.
+
+    Two template shapes reach the run block: the placeholder as its own word
+    (`python3 {0}`), and the placeholder nested inside a quoted argument
+    (`bash -c "python3 {0}"`, which shlex keeps as one word).  Both must be
+    recognized: an unrecognized template routes the step to the shell
+    analyzer, where a raw install written as a Python argument list matches
+    nothing.
+    """
+    tail = words[command_index + 1:]
+    if "{0}" in words and any(
+        _PYTHON_COMMAND.fullmatch(Path(word).name) is not None
+        for word in tail
+    ):
+        return True
+    for word in tail:
+        if "{0}" not in word:
+            continue
+        if any(
+            _PYTHON_COMMAND.fullmatch(Path(token).name)
+            for token in word.split("{0}", 1)[0].split()
+        ):
+            return True
+    return False
+
+
 def _workflow_shell_uses_python(shell: object) -> bool:
     """Whether a custom workflow shell executes its run block as Python."""
     if not isinstance(shell, str):
@@ -3293,14 +3322,10 @@ def _workflow_shell_uses_python(shell: object) -> bool:
         Path(words[command_index]).name
     ):
         return True
-
     # Custom runner templates can wrap the interpreter in another launcher;
     # recognizing a Python command before GitHub's script operand is
     # conservative and keeps shell-source from being mistaken for Python.
-    return "{0}" in words and any(
-        _PYTHON_COMMAND.fullmatch(Path(word).name) is not None
-        for word in words[command_index + 1:]
-    )
+    return _python_interpreter_before_placeholder(words, command_index)
 
 
 def _workflow_shell_name(shell: object) -> str:

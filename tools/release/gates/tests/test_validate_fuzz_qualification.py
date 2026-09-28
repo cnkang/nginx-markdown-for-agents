@@ -3235,3 +3235,70 @@ def test_fixture_rejects_a_mixed_release_directory_record() -> None:
     reasons = validator.validate_record(record, manifest)
 
     assert any("per_target[0] raw_log_ref" in reason for reason in reasons)
+
+
+def _write_descendant_leader(tmp_path, marker, child_sleep):
+    """Write a leader script that spawns a stdout-inheriting descendant.
+
+    The scripts live in files so no nested quoting can distort them; the
+    leader prints one line and exits while the descendant keeps running.
+    """
+    child_code = (
+        f"import time; time.sleep({child_sleep}); "
+        f"open({str(marker)!r}, 'w').write('survived')"
+    )
+    leader_path = tmp_path / "leader.py"
+    leader_path.write_text(
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        "print('v1.0', flush=True)\n",
+        encoding="utf-8",
+    )
+    return leader_path
+
+
+def test_toolchain_wait_terminates_a_descendant_holding_stdout(tmp_path) -> None:
+    """A toolchain version command must not leave descendants running.
+
+    Regression: the wait reaped the leader with ``process.wait()`` before
+    any group signal, so a descendant that inherited stdout kept the reader
+    open and survived cleanup (then wrote its marker).  The wait now signals
+    the group before the final reap, and the assertion reads the marker only
+    after the descendant's own write time.
+    """
+    marker = tmp_path / "descendant-survived"
+    leader_path = _write_descendant_leader(tmp_path, marker, 1.5)
+
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader_path)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe")
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.9)
+    assert not marker.exists(), "a descendant survived the wait"
+
+
+def test_wait_without_waitid_signals_the_group_after_the_leader_exits(
+    tmp_path,
+) -> None:
+    """The no-waitid fallback still terminates descendants.
+
+    Some macOS Python builds lack ``waitid``/``WNOWAIT``; the fallback polls
+    the leader and signals the group directly afterwards (the guarded helper
+    would skip once the leader has a return code), so a descendant that
+    inherited stdout cannot survive.
+    """
+    marker = tmp_path / "fallback-descendant-survived"
+    leader_path = _write_descendant_leader(tmp_path, marker, 1.5)
+
+    process = subprocess.Popen(
+        [sys.executable, str(leader_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    validator._wait_fuzz_process_without_waitid(process, 5.0)
+    time.sleep(1.9)
+    assert not marker.exists(), "a descendant survived the fallback"
