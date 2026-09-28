@@ -601,10 +601,14 @@ main() {
         cleanup_owned_helm_resources
     fi
 
-    # Cleanup (mark done so the EXIT trap cannot repeat it)
-    CLEANUP_DONE=1
+    # Cleanup: run the helpers first, then mark the guard.  A signal that
+    # arrives between the two calls makes the handler re-run them, which is
+    # safe (each clears its own ownership flag); marking the guard first
+    # would instead let a signal skip the remaining cleanup entirely and
+    # leave the cluster behind.
     cleanup_owned_helm_resources
     delete_cluster
+    CLEANUP_DONE=1
 
     # Summary
     printf '\n' >&2

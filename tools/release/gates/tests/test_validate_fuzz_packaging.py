@@ -4095,3 +4095,84 @@ def test_chain_follow_ignores_unresolvable_operands_but_scans_inline_c(
     assert packaging_gate._raw_install_from_shell_script_file(
         "outer.sh", 0, None
     )
+
+
+def test_wrapped_shell_invocations_are_followed(tmp_path, monkeypatch) -> None:
+    """A marker-less file's wrapped shell invocation is still followed.
+
+    Regression: only the first command word was recognized as an
+    interpreter, so `exec bash inner.sh`, `nohup bash inner.sh` and
+    `command bash inner.sh` were skipped and a two-hop raw install went
+    unanalyzed.  The same bounded wrapper unwrapper the marker-present scan
+    uses now resolves the head.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    for wrapper in (
+        "exec bash inner.sh",
+        "nohup bash inner.sh",
+        "command bash inner.sh",
+        "sudo bash inner.sh",
+        "retry 3 bash inner.sh",
+        "env X=1 bash inner.sh",
+    ):
+        outer = tmp_path / "outer.sh"
+        outer.write_text(f"#!/bin/bash\n{wrapper}\n", encoding="utf-8")
+        assert packaging_gate._raw_install_from_shell_script_file(
+            "outer.sh", 0, None
+        ), wrapper
+
+
+def test_conflicting_template_runs_the_other_analyzer(
+    tmp_path, monkeypatch
+) -> None:
+    """A dual-interpreter template fails closed via the un-routed analyzer.
+
+    Regression: when a template consumed GitHub's placeholder under both
+    Bash and Python, only the Python analyzer ran, so a shell script invoked
+    by the run body went unanalyzed and a raw install passed.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "run.sh").write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    for template in (
+        'bash -c "bash {0}; python3 {0}"',
+        'bash -c "python3 {0}; bash {0}"',
+    ):
+        workflow = (
+            "jobs:\n"
+            "  release-gate:\n"
+            "    steps:\n"
+            f"      - shell: '{template}'\n"
+            "        run: 'bash run.sh'\n"
+        )
+        assert packaging_gate._raw_toolchain_install_issue(workflow), template
+
+
+def test_interpreter_module_flag_is_not_a_script_operand(
+    tmp_path, monkeypatch
+) -> None:
+    """A ``-m`` module name is never followed as a script file.
+
+    `python3 -m name` resolves a module through sys.path, so a repository
+    file that happens to share the name is not executed by it.  The scan
+    must therefore stop at `-m` instead of following the following words as
+    paths: with a file named like the module present (and carrying a raw
+    install), the step must still not be flagged.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    collision = tmp_path / "package"
+    collision.write_text(
+        "rustup toolchain install nightly\n", encoding="utf-8"
+    )
+    module_step = tmp_path / "module_step.sh"
+    module_step.write_text(
+        "#!/bin/bash\npython3 -m package\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "module_step.sh", 0, None
+    )

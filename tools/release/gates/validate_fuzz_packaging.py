@@ -5299,12 +5299,29 @@ def _parse_segment_words(segment: str) -> list[str] | None:
 
 
 def _invocation_head(segment: str) -> str | None:
-    """Return the interpreter basename a segment invokes, if any."""
+    """Return the interpreter basename a segment invokes, if any.
+
+    Command wrappers are unwrapped first (``exec bash x.sh``, ``nohup
+    bash x.sh``, ``command bash x.sh``), reusing the same bounded unwrapper
+    the marker-present scan uses, so a wrapped shell invocation is followed
+    instead of skipped.
+    """
     words = _parse_segment_words(segment)
     if not words:
         return None
-    head = Path(words[0]).name
-    if head in ("bash", "sh", "zsh", "source", "."):
+    index = _skip_env_assignments(words, 0)
+    if (
+        index + 1 < len(words)
+        and _shell_word_basename(words[index]) == "retry"
+        and words[index + 1].isdigit()
+    ):
+        index += 2
+    index = _skip_bare_separators(words, index)
+    index, refused = _unwrap_stacked_wrappers(words, index)
+    if refused or index >= len(words):
+        return None
+    head = Path(_resolve_heredoc_word(words[index])[0]).name
+    if head in ("bash", "sh", "zsh", "dash", "source", "."):
         return head
     if head == "python" or _PYTHON_COMMAND.fullmatch(head):
         return head
@@ -5376,6 +5393,10 @@ def _invocation_operands_are_raw(
             if _raw_install_from_inline_script(words[index + 1], depth, variables):
                 return True
             continue
+        if operand == "-m":
+            # A module name is not a script file; the module's own code is not
+            # reachable from this scan, so stop rather than scan the name.
+            break
         if not _followable_operand(operand):
             continue
         if _followed_script_is_raw(operand, head, depth, variables):
@@ -6371,12 +6392,16 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
         else:
             raw_install = _raw_install_in_run_script(run)
         # A template whose consumers span both interpreters runs the same
-        # block under each, so neither analysis alone is sufficient: apply
-        # both and fail closed on either.
+        # block under each, so neither analysis alone is sufficient: run the
+        # OTHER analysis too (whichever the routing did not pick) and fail
+        # closed on either.
         if not raw_install and _shell_template_conflicting_placeholder_consumers(
             shell
         ):
-            raw_install = _python_inline_raw_install(run, 0, None)
+            if _workflow_shell_uses_python(shell):
+                raw_install = _raw_install_in_run_script(run)
+            else:
+                raw_install = _python_inline_raw_install(run, 0, None)
         if raw_install:
             return (
                 "release workflows must provision Rust toolchains "
