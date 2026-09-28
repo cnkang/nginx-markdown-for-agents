@@ -86,6 +86,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         streaming-evidence-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
+        homebrew-formula-check \
         docs-check-base release-perf-evidence-blocking \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
@@ -366,6 +367,7 @@ TEST_ALL_CORE := \
 	workflow-context-check \
 	perf-gate-check \
 	security-static \
+	homebrew-formula-check \
 	license-check
 
 # ci-local-check runs the CI gate set through test-all, so the two entry points
@@ -413,13 +415,23 @@ perf-gate-check:
 	bash tools/perf/tests/test_local_runner_output_paths.sh
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 
+# Runs Homebrew's strict formula lint only; archive digest and rendered-source
+# identity are verified by the Homebrew workflow's separate verification step.
+homebrew-formula-check:
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		bash packaging/scripts/audit_homebrew_formula.sh; \
+	else \
+		echo "SKIP: Homebrew formula audit runs on macOS with Homebrew" >&2; \
+	fi
+
 
 test-all:
 	@echo "=== test-all: running all CI-mirrored gates ==="
 	@$(MAKE) $(TEST_ALL_CORE)
 	@echo
 	@echo "=================================================="
-	@echo " test-all: ALL GATES PASSED"
+	@echo " test-all: HOST-APPLICABLE GATES PASSED"
+	@echo " See the SKIP lines above; skipped gates did not run."
 	@echo "=================================================="
 	@echo
 	@echo "E2E/coverage gates need a module-enabled NGINX:"
@@ -450,6 +462,7 @@ test-all-e2e:
 	$(MAKE) verify-chunked-native-e2e-smoke
 	$(MAKE) verify-large-e2e
 	$(MAKE) verify-brotli-streaming-e2e
+	$(MAKE) verify-encoding-chain-e2e
 	$(MAKE) verify-http2-alpn-e2e
 	@test -n "$(NGINX_BIN)" || { \
 		echo "SKIP: real-NGINX IMS / filter-ordering manage their own NGINX (NGINX_BIN-only; skipped in NGINX_URL fixture mode)" >&2; \
@@ -683,7 +696,8 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 	python3 tools/harness/detect_e2e_streaming_config.py --strict
 	python3 tools/harness/detect_regex_safety.py --strict
-	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py \
+		--path tools/harness --path tools/release/gates
 	PYTHONPATH=. python3 tools/harness/detect_auto_generated_naming.py --strict
 	bash tools/harness/detect_version_consistency.sh
 	bash tools/harness/detect_backpressure_resume.sh
@@ -715,7 +729,8 @@ release-supply-chain-check:
 complexity-check:
 	@echo "=== Complexity Check ==="
 	bash tools/complexity/check_complexity.sh
-	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py \
+		--path tools/harness --path tools/release/gates
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="

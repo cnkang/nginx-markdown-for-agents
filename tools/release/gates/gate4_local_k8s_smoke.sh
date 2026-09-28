@@ -155,6 +155,8 @@ check_prerequisites() {
 KEEP_CLUSTER=0
 CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
 CREATED_CLUSTER=0
+CREATED_NAMESPACE=0
+CREATED_RELEASE=0
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -215,6 +217,25 @@ delete_cluster() {
 
     info "Deleting kind cluster: ${CLUSTER_NAME}"
     kind delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1 || true
+    return 0
+}
+
+cleanup_owned_helm_resources() {
+    if [[ "$KEEP_CLUSTER" -eq 1 ]]; then
+        info "Keeping Helm release and namespace for inspection"
+        return 0
+    fi
+
+    if [[ "$CREATED_RELEASE" -eq 1 ]]; then
+        helm uninstall "${HELM_RELEASE_NAME}" --kube-context "kind-${CLUSTER_NAME}" \
+            --namespace "${HELM_NAMESPACE}" >/dev/null 2>&1 || true
+        CREATED_RELEASE=0
+    fi
+    if [[ "$CREATED_NAMESPACE" -eq 1 ]]; then
+        kubectl --context "kind-${CLUSTER_NAME}" delete namespace "${HELM_NAMESPACE}" \
+            --wait=false >/dev/null 2>&1 || true
+        CREATED_NAMESPACE=0
+    fi
     return 0
 }
 
@@ -359,10 +380,41 @@ deploy_and_verify() {
     info "Deploying Helm chart to kind cluster..."
     local kube_context="kind-${CLUSTER_NAME}"
 
-    # Create namespace
-    kubectl --context "$kube_context" create namespace "${HELM_NAMESPACE}" \
-        --dry-run=client -o yaml \
-        | kubectl --context "$kube_context" apply -f - >&2
+    # Reuse a namespace without claiming ownership; cleanup must not delete
+    # other workloads that already use it.
+    local existing_namespace
+    if ! existing_namespace="$(kubectl --context "$kube_context" get namespace \
+        "${HELM_NAMESPACE}" --ignore-not-found -o name 2>&1)"; then
+        fail "Unable to determine ownership of namespace ${HELM_NAMESPACE}"
+        printf '%s\n' "$existing_namespace" >&2
+        return 1
+    fi
+    if [[ -z "$existing_namespace" ]]; then
+        if ! kubectl --context "$kube_context" create namespace \
+            "${HELM_NAMESPACE}" >/dev/null 2>&1; then
+            fail "Unable to create namespace ${HELM_NAMESPACE}"
+            return 1
+        fi
+        CREATED_NAMESPACE=1
+    else
+        info "Reusing pre-existing namespace ${HELM_NAMESPACE}"
+    fi
+
+    # Refuse to adopt a release from another run. Helm install below also
+    # closes the race between this query and creation.
+    local existing_release
+    if ! existing_release="$(helm list --short --filter "^${HELM_RELEASE_NAME}$" \
+        --namespace "${HELM_NAMESPACE}" --kube-context "$kube_context" 2>&1)"; then
+        fail "Unable to determine ownership of Helm release ${HELM_RELEASE_NAME}"
+        printf '%s\n' "$existing_release" >&2
+        CREATED_NAMESPACE=0
+        return 1
+    fi
+    if [[ -n "$existing_release" ]]; then
+        fail "Pre-existing Helm release ${HELM_RELEASE_NAME}; refusing to replace it"
+        CREATED_NAMESPACE=0
+        return 1
+    fi
 
     # Validate the stock-nginx chart deployment path, security context,
     # writable runtime paths, and Helm installability. This smoke test does
@@ -384,8 +436,13 @@ deploy_and_verify() {
         info "Pod events:"
         kubectl --context "$kube_context" describe pods -n "${HELM_NAMESPACE}" \
             >&2 || true
+        # A failed install may leave partial state or race with another
+        # release creator. Preserve the namespace rather than deleting data
+        # whose ownership is no longer certain.
+        CREATED_NAMESPACE=0
         return 1
     fi
+    CREATED_RELEASE=1
 
     pass "Helm chart deployed successfully"
 
@@ -438,12 +495,6 @@ deploy_and_verify() {
         had_failure=1
     fi
 
-    # Cleanup helm release
-    helm uninstall "${HELM_RELEASE_NAME}" --kube-context "$kube_context" \
-        --namespace "${HELM_NAMESPACE}" >/dev/null 2>&1 || true
-    kubectl --context "$kube_context" delete namespace "${HELM_NAMESPACE}" \
-        --wait=false >/dev/null 2>&1 || true
-
     return "$had_failure"
 }
 
@@ -472,6 +523,7 @@ main() {
             || die "Cannot connect to kind cluster"
 
         deploy_and_verify || had_failure=1
+        cleanup_owned_helm_resources
     fi
 
     # Cleanup

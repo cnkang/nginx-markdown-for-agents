@@ -152,16 +152,69 @@ def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
     workflow = (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
         encoding="utf-8"
     )
+    release_requirements = (
+        repo_root / "requirements-release.txt"
+    ).read_text(encoding="utf-8")
+    jsonschema_requirement = next(
+        line.strip()
+        for line in release_requirements.splitlines()
+        if line.strip().startswith("jsonschema[format]==")
+    )
+    version_match = re.fullmatch(
+        r"jsonschema\[format\]==([^\s;#]+)", jsonschema_requirement
+    )
+    assert version_match is not None
+    jsonschema_version = version_match.group(1)
 
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
     assert "python3 -m pip install --requirement requirements-release.txt" in workflow
-    assert "import brotli, yaml; print(brotli.__version__, yaml.__version__)" in workflow
+    # The preflight must assert every pinned version the gate relies on:
+    # brotli and PyYAML from the start, plus jsonschema, whose transitive
+    # closure is the newest entry in requirements-release.txt.
+    assert "version(\"jsonschema\")" in workflow
+    assert "jsonschema.__version__" not in workflow
+    assert f"requires jsonschema=={jsonschema_version}" in workflow
     assert "Brotli==1.2.0" in (repo_root / "requirements-perf.txt").read_text(
         encoding="utf-8"
     )
     assert "PyYAML==6.0.2" in (repo_root / "requirements-release.txt").read_text(
         encoding="utf-8"
     )
+    assert jsonschema_requirement in release_requirements.splitlines()
+
+
+def test_release_gate_installs_checksum_pinned_helm_in_order() -> None:
+    """Helm setup must verify the pinned archive before extraction/install."""
+    repo_root = Path(__file__).resolve().parents[3]
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["release-gate"]["steps"]
+    step = next(
+        item for item in steps
+        if item.get("name") == "Install pinned Helm for manifest validation"
+    )
+    run = step["run"]
+
+    assert step.get("shell") == "bash"
+    assert "https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz" in run
+    assert (
+        "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496  "
+        "/tmp/helm.tgz"
+    ) in run
+    assert "sha256sum -c -" in run
+    assert "tar -xzf /tmp/helm.tgz -C /tmp" in run
+    assert "sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm" in run
+    assert "helm version --short" in run
+
+    download = run.index("curl --proto '=https'")
+    checksum = run.index("sha256sum -c -")
+    extraction = run.index("tar -xzf /tmp/helm.tgz")
+    installation = run.index("sudo install -m 0755")
+    version_check = run.index("helm version --short")
+    assert download < checksum < extraction < installation < version_check
 
 
 def test_release_gate_requires_exact_tag_sha_checks() -> None:

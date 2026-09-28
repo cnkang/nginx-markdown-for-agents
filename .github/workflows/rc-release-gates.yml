@@ -27,14 +27,19 @@ env:
   # build version must match them, and the build runs in the same Alpine release
   # as those images.
   NGINX_VERSION: "1.30.4"
-  ALPINE_VERSION: "3.21"
+  ALPINE_VERSION: "3.24"
   RUST_VERSION: "1.98.1"
   RUST_FEATURES: streaming,prune_noise_regions
+  DOCKER_DEFAULT_PLATFORM: linux/amd64
+  IMAGE: "nginx:1.30.4-alpine@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c"
+  INCOMPATIBLE_TAG: "1.26-alpine@sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
+  NGINX_BASE_IMAGE: "nginx:1.30.4-alpine3.24@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c"
+  RUST_BUILDER_IMAGE: "rust:1.98.1-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f"
 
 jobs:
   real-nginx-e2e:
     name: Real-NGINX E2E gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
@@ -53,8 +58,20 @@ jobs:
           # as-is.
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            apache2-utils \
+            build-essential \
             ca-certificates \
-            curl
+            curl \
+            libbrotli-dev \
+            pkg-config \
+            python3 \
+            rsync \
+            zlib1g-dev
+
+      - name: Set up Rust toolchain for native qualification
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.98.1
 
       - name: Install cluster tooling
         run: |
@@ -100,12 +117,36 @@ jobs:
             -e RUST_TARGET=x86_64-unknown-linux-musl \
             -e NGX_MARKDOWN_BROTLI_STREAMING \
             -e NGX_MARKDOWN_RUST_FEATURES \
-            "rust:${RUST_VERSION}-alpine${ALPINE_VERSION}@sha256:88a07cc2e9b783133cddf0ea84e759a1185eb6e7ff104deea18e985d84503af7" \
+            "${RUST_BUILDER_IMAGE}" \
             sh /src/tools/ci/build_musl_module_for_e2e.sh
           test -s build/ngx_http_markdown_filter_module.so
         shell: bash
 
+      - name: Build a native NGINX binary for encoding-chain validation
+        id: native_nginx
+        shell: bash
+        run: |
+          set -euo pipefail
+          nginx_bin_file="$(mktemp)"
+          buildroot_file="$(mktemp)"
+          ./tools/ci/verify_real_nginx_ims.sh \
+            --keep-artifacts \
+            --nginx-version "${NGINX_VERSION}" \
+            --nginx-bin-output "${nginx_bin_file}" \
+            --buildroot-output "${buildroot_file}"
+          nginx_bin="$(<"${nginx_bin_file}")"
+          buildroot="$(<"${buildroot_file}")"
+          if [[ ! -x "${nginx_bin}" || -z "${buildroot}" ]]; then
+            echo "ERROR: native NGINX build did not return a usable binary and buildroot" >&2
+            exit 1
+          fi
+          printf 'nginx_bin=%s\n' "${nginx_bin}" >> "${GITHUB_OUTPUT}"
+          printf 'buildroot=%s\n' "${buildroot}" >> "${GITHUB_OUTPUT}"
+          rm -f -- "${nginx_bin_file}" "${buildroot_file}"
+
       - name: Run the real-NGINX end-to-end checks
+        env:
+          NGINX_BIN: ${{ steps.native_nginx.outputs.nginx_bin }}
         run: |
           # No `set -e`: every check runs, and the job fails after collecting all
           # results, so one failure does not hide the state of the others.
@@ -119,6 +160,7 @@ jobs:
             "graceful_reload_streaming|verify-graceful-reload-streaming-e2e" \
             "module_version_mismatch|verify-module-version-mismatch-e2e" \
             "auth_subrequest_observability|verify-auth-subrequest-observability-e2e" \
+            "encoding_chain|verify-encoding-chain-e2e" \
             "helm_cluster_smoke|verify-helm-cluster-smoke-e2e"
           do
             name="${spec%%|*}"
@@ -137,13 +179,23 @@ jobs:
           # loop wrote one line per check before anything judges the contents.
           # This step runs without `set -e`, so the check fails explicitly.
           rows="$(wc -l < rc-evidence/results.tsv)"
-          if [ "${rows}" -ne 6 ]; then
-            echo "::error::expected 6 evidence rows, found ${rows}"
+          if [ "${rows}" -ne 7 ]; then
+            echo "::error::expected 7 evidence rows, found ${rows}"
             exit 1
           fi
 
           echo "=== collected results ==="
           cat rc-evidence/results.tsv
+        shell: bash
+
+      - name: Remove native NGINX qualification build
+        if: always()
+        env:
+          RC_NATIVE_BUILDROOT: ${{ steps.native_nginx.outputs.buildroot }}
+        run: |
+          if [[ -n "${RC_NATIVE_BUILDROOT}" && -d "${RC_NATIVE_BUILDROOT}" ]]; then
+            rm -rf -- "${RC_NATIVE_BUILDROOT}"
+          fi
         shell: bash
 
       - name: Write candidate-bound evidence
@@ -160,6 +212,25 @@ jobs:
               "repository": os.environ["GITHUB_REPOSITORY"],
               "ref": os.environ["GITHUB_REF"],
               "run_id": os.environ["GITHUB_RUN_ID"],
+              "module_builder_image": os.environ["RUST_BUILDER_IMAGE"],
+              "native_nginx_version": os.environ["NGINX_VERSION"],
+              "runner": {
+                  "image": "ubuntu-24.04",
+                  "os": os.environ["RUNNER_OS"],
+                  "arch": os.environ["RUNNER_ARCH"],
+              },
+              "runtime_images": {
+                  "realip_access_boundary": os.environ["IMAGE"],
+                  "slow_reader_backpressure": os.environ["IMAGE"],
+                  "graceful_reload_streaming": os.environ["IMAGE"],
+                  "auth_subrequest_observability": os.environ["IMAGE"],
+                  "module_version_mismatch": (
+                      "nginx:" + os.environ["INCOMPATIBLE_TAG"]
+                  ),
+                  "helm_cluster_smoke_base": os.environ["NGINX_BASE_IMAGE"],
+                  "helm_cluster_smoke_sidecar": os.environ["NGINX_BASE_IMAGE"],
+                  "platform": os.environ["DOCKER_DEFAULT_PLATFORM"],
+              },
               "checks": {},
           }
           for line in results.read_text(encoding="utf-8").splitlines():

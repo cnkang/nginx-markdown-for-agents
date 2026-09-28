@@ -42,8 +42,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # NGINX types commonly passed as non-const pointers that should be const
 # when the function only reads through them.
 NGINX_STRUCT_TYPES = re.compile(
-    r"ngx_http_markdown_(?:conf_t|ctx_t|request_ctx_t|effective_conf_t|"
-    r"dynconf_snapshot_t|metrics_t|otel_span_t)"
+    r"ngx_http_markdown_(?:conf_t|ctx_t|request_ctx_t|"
+    r"effective_conf_t|metrics_t)"
 )
 
 # Function parameter pattern: type *name or type *name,
@@ -72,11 +72,9 @@ EXEMPT_FILES = {
     "ngx_http_markdown_config_handlers_impl.h",
     "ngx_http_markdown_config_impl.h",
     "ngx_http_markdown_config_directives_impl.h",
-    "ngx_http_markdown_dynconf_impl.h",
     "ngx_http_markdown_filter_module.c",
     "ngx_http_markdown_module_state_impl.h",
     "ngx_http_markdown_lifecycle_impl.h",
-    "ngx_http_markdown_otel.c",
 }
 
 # Known function patterns where non-const is intentional
@@ -86,10 +84,13 @@ EXEMPT_FILES = {
 INTENTIONAL_MUTATOR_RE = re.compile(
     r"(?<![A-Za-z])(?:create|merge|init|set|apply|free|release|update|reset|destroy|alloc|"
     r"cleanup|write|handle_ctx_alloc_failure|bind_request_snapshot|"
-    r"dynconf_snapshot_from_conf|dynconf_apply_snapshot|"
     r"build_effective_conf|append|record|reclassify|rollback|"
-    r"end|export|ensure|snapshot|mark_header_reject|otel_span|reserve|forward)(?![A-Za-z])"
+    r"end|export|ensure|snapshot|mark_header_reject|reserve|forward)(?![A-Za-z])"
 )
+SHA256_FINAL_MUTATOR_NAMES = {
+    "sha256_final",
+    "ngx_http_markdown_sha256_final",
+}
 
 # NGINX callback signature patterns — adding const to these parameters
 # causes function-pointer type mismatches and compilation failures.
@@ -145,7 +146,15 @@ def _is_in_mutator_function(line: str, match_start: int) -> bool:
     func_name = _extract_func_name(context)
     if not func_name:
         return False
-    return bool(INTENTIONAL_MUTATOR_RE.search(func_name))
+    return _is_intentional_mutator_function(func_name)
+
+
+def _is_intentional_mutator_function(func_name: str) -> bool:
+    """Match mutator verbs in the function name, not its parameter names."""
+    return (
+        func_name in SHA256_FINAL_MUTATOR_NAMES
+        or INTENTIONAL_MUTATOR_RE.search(func_name) is not None
+    )
 
 
 def _extract_func_name(context: str) -> str | None:
@@ -163,9 +172,9 @@ def _extract_func_name(context: str) -> str | None:
 def _should_skip_line(line: str) -> bool:
     if COMMENT_RE.search(line):
         return True
-    if "(" not in line:
+    if re.match(r"^\s*for\s*\(", line):
         return True
-    if INTENTIONAL_MUTATOR_RE.search(line):
+    if "(" not in line:
         return True
     # Skip NGINX callback signatures — Rule 24 exception.
     # Adding const to these parameters causes compilation failures.
@@ -211,6 +220,8 @@ def _check_line_for_const_violations(
         type_name = m.group(1)
         param_name = m.group(2)
 
+        if not NGINX_STRUCT_TYPES.fullmatch(type_name):
+            continue
         if _has_const_prefix(line, m.start(), type_name, param_name):
             continue
         if _is_in_mutator_function(line, m.start()):

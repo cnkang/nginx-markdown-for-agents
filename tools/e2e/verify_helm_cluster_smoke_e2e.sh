@@ -13,8 +13,9 @@
 #   verify_helm_cluster_smoke_e2e.sh [--cluster NAME] [--image REF] [--keep]
 #
 # Environment:
-#   MODULE_SO   module to package (default: build/ngx_http_markdown_filter_module.so)
-#   IMAGE_REF   runtime image tag to build and load (default: markdown-smoke:local)
+#   MODULE_SO       module to package (default: build/ngx_http_markdown_filter_module.so)
+#   IMAGE_REF       runtime image tag to build and load (default: markdown-smoke:local)
+#   NGINX_BASE_IMAGE NGINX base image pinned by digest
 #
 # Exit codes:
 #   0  the release rolled out and the Service returned converted Markdown
@@ -30,12 +31,15 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CLUSTER="${CLUSTER:-markdown-helm-smoke}"
 IMAGE_REF="${IMAGE_REF:-markdown-smoke:local}"
+NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-nginx:1.30.4-alpine3.24@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c}"
+NGINX_BASE_DIGEST="${NGINX_BASE_IMAGE##*@}"
 MODULE_SO="${MODULE_SO:-${REPO_ROOT}/build/ngx_http_markdown_filter_module.so}"
 MODULE_PATH_IN_IMAGE="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
 RELEASE="markdown-smoke"
 NAMESPACE="markdown-smoke"
 KEEP=0
 CREATED_CLUSTER=0
+CREATED_RELEASE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,13 +66,16 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/helm-smoke.XXXXXX")"
 cleanup() {
     if [[ -n "${PF_PID:-}" ]]; then
         kill "${PF_PID}" >/dev/null 2>&1 || true
+        wait "${PF_PID}" 2>/dev/null || true
     fi
     if [[ "${KEEP}" -eq 0 ]]; then
         # Pin the context on uninstall too: a reused cluster is supported, and
         # without --kube-context the release name could resolve against
         # whatever cluster the current context points at.
-        helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" \
-            --kube-context "kind-${CLUSTER}" >/dev/null 2>&1 || true
+        if [[ "${CREATED_RELEASE}" -eq 1 ]]; then
+            helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" \
+                --kube-context "kind-${CLUSTER}" >/dev/null 2>&1 || true
+        fi
         # Delete only a cluster this run created.  Reusing an existing cluster
         # is supported, and removing the user's would be destructive.
         if [[ "${CREATED_CLUSTER}" -eq 1 ]]; then
@@ -80,10 +87,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if ! [[ "${NGINX_BASE_IMAGE}" =~ ^nginx:1[.]30[.]4-alpine3[.]24@sha256:[0-9a-f]{64}$ ]]; then
+    echo "ERROR: NGINX_BASE_IMAGE must be nginx:1.30.4-alpine3.24 pinned by sha256 digest" >&2
+    exit 1
+fi
+
 # A runtime image that carries the module, so the smoke exercises this build
 # rather than a previously published image.
 cat > "${WORK_DIR}/Dockerfile" <<DOCKERFILE
-FROM nginx:1.30.4-alpine3.24
+FROM ${NGINX_BASE_IMAGE}
 RUN apk add --no-cache libgcc curl
 COPY ngx_http_markdown_filter_module.so ${MODULE_PATH_IN_IMAGE}
 DOCKERFILE
@@ -96,6 +108,39 @@ if ! kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
     echo "=== creating kind cluster ${CLUSTER} ===" >&2
     kind create cluster --name "${CLUSTER}" --wait 180s >&2
     CREATED_CLUSTER=1
+fi
+
+# Ensure the namespace exists on the SAME cluster the release targets.  The
+# ignore-not-found query distinguishes an absent namespace from permission or
+# connection failures, which remain fatal.  Creating only when absent also
+# leaves a reused cluster's existing namespace untouched.
+existing_namespace=""
+if ! existing_namespace="$(kubectl --context "kind-${CLUSTER}" \
+    get namespace "${NAMESPACE}" --ignore-not-found -o name)"; then
+    echo "ERROR: unable to determine whether namespace ${NAMESPACE} exists" >&2
+    exit 1
+fi
+if [[ -z "${existing_namespace}" ]]; then
+    if ! kubectl --context "kind-${CLUSTER}" create namespace \
+        "${NAMESPACE}" >/dev/null; then
+        echo "ERROR: unable to create namespace ${NAMESPACE}" >&2
+        exit 1
+    fi
+fi
+
+# Refuse to adopt a release that belongs to the user.  `helm install` below
+# also closes the race between this query and creation; ownership is recorded
+# only after that install succeeds.
+existing_release=""
+if ! existing_release="$(helm list --all --short \
+    --filter "^${RELEASE}$" --namespace "${NAMESPACE}" \
+    --kube-context "kind-${CLUSTER}" 2>&1)"; then
+    echo "ERROR: unable to determine ownership of Helm release ${RELEASE}: ${existing_release}" >&2
+    exit 1
+fi
+if [[ -n "${existing_release}" ]]; then
+    echo "ERROR: pre-existing Helm release ${RELEASE} found in namespace ${NAMESPACE}; refusing to modify or remove it" >&2
+    exit 1
 fi
 
 echo "=== loading ${IMAGE_REF} into cluster ===" >&2
@@ -113,12 +158,7 @@ fi
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
-# Create the namespace on the SAME cluster the release targets: this run may
-# reuse an existing cluster (kind create is skipped below), so an unpinned
-# kubectl could create the namespace on an unrelated current context while
-# the following helm install targets kind-${CLUSTER}.
-kubectl --context "kind-${CLUSTER}" create namespace "${NAMESPACE}" >/dev/null 2>&1 || true
-helm upgrade --install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
+helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
     --set image.repository="${IMAGE_REPO}" \
@@ -126,7 +166,17 @@ helm upgrade --install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --set image.pullPolicy=IfNotPresent \
     --set markdown.enabled=true \
     --set markdown.loadModule="${MODULE_PATH_IN_IMAGE}" \
+    --set metrics.enabled=true \
+    --set metrics.sidecar.enabled=true \
+    --set metrics.expose=true \
+    --set-string metrics.sidecar.image.repository=nginx \
+    --set-string "metrics.sidecar.image.digest=${NGINX_BASE_DIGEST}" \
+    --set-string metrics.sidecar.resources.requests.cpu=50m \
+    --set-string metrics.sidecar.resources.requests.memory=64Mi \
+    --set-string metrics.sidecar.resources.limits.cpu=250m \
+    --set-string metrics.sidecar.resources.limits.memory=128Mi \
     --wait --timeout 180s >&2
+CREATED_RELEASE=1
 
 echo "=== rollout status ===" >&2
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
@@ -165,8 +215,16 @@ if [[ -z "${SVC_PORT}" ]]; then
     exit 1
 fi
 PF_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+METRICS_SVC_PORT="$(kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
+    get service "${SVC}" -o jsonpath='{.spec.ports[?(@.name=="metrics")].port}')"
+if [[ -z "${METRICS_SVC_PORT}" ]]; then
+    echo "ERROR: Service ${SVC} does not expose the metrics sidecar port" >&2
+    exit 1
+fi
+METRICS_PF_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
-    port-forward "service/${SVC}" "${PF_PORT}:${SVC_PORT}" >"${WORK_DIR}/port-forward.log" 2>&1 &
+    port-forward "service/${SVC}" "${PF_PORT}:${SVC_PORT}" \
+    "${METRICS_PF_PORT}:${METRICS_SVC_PORT}" >"${WORK_DIR}/port-forward.log" 2>&1 &
 PF_PID=$!
 
 forward_ready=0
@@ -206,5 +264,12 @@ if ! printf '%s' "${BODY}" | grep -q '^# '; then
     exit 1
 fi
 
-echo "PASS: the chart deployed, the pod converted the document, and the response carries the expected heading" >&2
+echo "=== scraping the metrics sidecar ===" >&2
+METRICS="$(curl -fsS "http://127.0.0.1:${METRICS_PF_PORT}/metrics")"
+if ! printf '%s\n' "${METRICS}" | grep -Eq '^nginx_markdown_requests_total\{[^}]*outcome="converted"[^}]*\} [1-9]'; then
+    echo "ERROR: /metrics did not expose a converted request sample from the module" >&2
+    exit 1
+fi
+
+echo "PASS: the chart deployed, converted the document, and exposed the module metrics family through the sidecar" >&2
 exit 0

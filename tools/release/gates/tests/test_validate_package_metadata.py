@@ -1029,6 +1029,22 @@ class TestModuleSnippetEdgeCases:
             tokens, "packaging/nfpm/modules/mod-markdown.conf"
         )
 
+    def test_hidden_source_name_keeps_its_leading_dot(self) -> None:
+        source = ".hidden/file"
+        mismatched = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  cp hidden/file "/tmp/${TARBALL_DIR}/hidden/file"\n'
+        )
+        valid = (
+            "run: |\n"
+            '  mkdir -p "/tmp/${TARBALL_DIR}"\n'
+            '  cp ./.hidden/file "/tmp/${TARBALL_DIR}/.hidden/file"\n'
+        )
+
+        assert not validator._workflow_stages_into_tarball(mismatched, source)
+        assert validator._workflow_stages_into_tarball(valid, source)
+
     def test_symlink_does_not_prove_staging(self) -> None:
         tokens = ["ln", "-s", "packaging/nfpm/modules/mod-markdown.conf", "${TARBALL_DIR}/"]
         assert not validator._is_staging_command(

@@ -199,49 +199,70 @@ def validate_index(index: dict, candidate_sha: str | None) -> list[str]:
     return reasons
 
 
-def _check_artifact_identity(
-    artifact: dict, index_pos: int, seen_ids: set,
-    candidate_sha: str | None, reasons: list
+def _check_required_artifact_fields(
+    artifact: dict, index_pos: int, reasons: list
 ) -> None:
-    """Validate required fields, identifiers, and candidate binding."""
+    """Report required identity fields absent from one artifact row."""
     for field in INDEX_REQUIRED_ARTIFACT_FIELDS:
         if artifact.get(field) is None:
             reasons.append(
                 f"missing-observation: artifacts[{index_pos}] missing "
                 f"{field}")
 
-    artifact_id = artifact.get("artifact_id")
-    if artifact_id is not None:
-        if not isinstance(artifact_id, (str, int, float, bool)) \
-                or artifact_id is None:
-            # Unhashable JSON values (lists/objects) cannot participate in
-            # set membership; report them as malformed instead of raising
-            # TypeError from the set operations below.
-            reasons.append(
-                f"malformed: artifacts[{index_pos}] artifact_id must be "
-                f"a scalar, got {type(artifact_id).__name__}"
-            )
-        elif artifact_id in seen_ids:
-            reasons.append(
-                f"blocking-pending: duplicate artifact id {artifact_id!r}")
-        else:
-            seen_ids.add(artifact_id)
 
+def _check_artifact_id(
+    artifact: dict, index_pos: int, seen_ids: set, reasons: list
+) -> None:
+    """Validate an artifact identifier and record it when unique."""
+    artifact_id = artifact.get("artifact_id")
+    if artifact_id is None:
+        return
+    if not isinstance(artifact_id, (str, int, float, bool)):
+        # Unhashable JSON values (lists/objects) cannot participate in
+        # set membership; report them as malformed instead of raising
+        # TypeError from the set operations below.
+        reasons.append(
+            f"malformed: artifacts[{index_pos}] artifact_id must be "
+            f"a scalar, got {type(artifact_id).__name__}"
+        )
+    elif artifact_id in seen_ids:
+        reasons.append(
+            f"blocking-pending: duplicate artifact id {artifact_id!r}")
+    else:
+        seen_ids.add(artifact_id)
+
+
+def _check_artifact_candidate_sha(
+    artifact: dict, index_pos: int, candidate_sha: str | None,
+    reasons: list
+) -> None:
+    """Validate the optional row-level candidate binding."""
     row_candidate_sha = artifact.get("candidate_sha")
-    if row_candidate_sha is not None:
-        if (
-            not isinstance(row_candidate_sha, str)
-            or not CANDIDATE_SHA_PATTERN.fullmatch(row_candidate_sha)
-        ):
-            reasons.append(
-                f"malformed: artifacts[{index_pos}] candidate_sha must be "
-                "40 lowercase hex"
-            )
-        elif candidate_sha is not None and row_candidate_sha != candidate_sha:
-            reasons.append(
-                f"stale-digest: artifacts[{index_pos}] candidate_sha "
-                f"{row_candidate_sha} != frozen candidate {candidate_sha}"
-            )
+    if row_candidate_sha is None:
+        return
+    if (
+        not isinstance(row_candidate_sha, str)
+        or not CANDIDATE_SHA_PATTERN.fullmatch(row_candidate_sha)
+    ):
+        reasons.append(
+            f"malformed: artifacts[{index_pos}] candidate_sha must be "
+            "40 lowercase hex"
+        )
+    elif candidate_sha is not None and row_candidate_sha != candidate_sha:
+        reasons.append(
+            f"stale-digest: artifacts[{index_pos}] candidate_sha "
+            f"{row_candidate_sha} != frozen candidate {candidate_sha}"
+        )
+
+
+def _check_artifact_identity(
+    artifact: dict, index_pos: int, seen_ids: set,
+    candidate_sha: str | None, reasons: list
+) -> None:
+    """Validate required fields, identifiers, and candidate binding."""
+    _check_required_artifact_fields(artifact, index_pos, reasons)
+    _check_artifact_id(artifact, index_pos, seen_ids, reasons)
+    _check_artifact_candidate_sha(artifact, index_pos, candidate_sha, reasons)
 
 
 def _check_artifact_bindings(

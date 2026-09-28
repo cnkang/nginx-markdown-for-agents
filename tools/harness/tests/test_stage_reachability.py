@@ -64,6 +64,14 @@ def test_disconnect_only_one_edge_then_restore(repo, stage):
     assert verdict(stage).status == sync.PASS
 
 
+def test_quoted_shell_operator_is_data_not_a_compound_recipe():
+    """A semicolon inside quoted text does not erase command reachability."""
+    assert reach.command_words('echo "first; second"') == [
+        "echo", "first; second"
+    ]
+    assert reach.command_words("echo first; make checked") == []
+
+
 @pytest.mark.parametrize("entry", ["echo root", "echo make root", "make other"])
 def test_hook_non_call_cannot_certify(repo, entry):
     path = repo / ".pre-commit-config.yaml"
@@ -153,6 +161,7 @@ def test_ci_filters_cover_build_and_harness_support_surfaces() -> None:
         ],
         "e2e": ["tools/ci/verify_real_nginx_ims.sh"],
         "harness_tooling": [
+            "tools/lib/executable_validation.py",
             "tools/ci/coverage_gate.py",
             "tools/ci/validate_required_workflow_contexts.py",
             "tools/ci/test_validate_required_workflow_contexts.py",
@@ -271,7 +280,27 @@ def test_a_conditional_assignment_keeps_the_earlier_value() -> None:
 def test_make_flags_from_the_environment_are_refused() -> None:
     """`MAKEFLAGS` can carry -n, which prints a recipe instead of running it."""
     assert reach.make_targets("MAKEFLAGS=-n make root") == []
+    assert reach.make_targets("GNUMAKEFLAGS=-i make root") == []
+    assert reach.make_targets("MFLAGS=-k make root") == []
     assert reach.make_targets("make root") == ["root"]
+
+
+@pytest.mark.parametrize("declaration", [
+    ".ONESHELL:",
+    "MAKEFLAGS += -i",
+    "GNUMAKEFLAGS = --ignore-errors",
+    "MFLAGS := -k",
+    "ifeq ($(MODE),strict)\nMAKEFLAGS += -i\nendif",
+])
+def test_makefile_shell_and_failure_flags_are_unverifiable(
+        declaration: str) -> None:
+    """Recipe failure propagation cannot be certified under these directives."""
+    makefile = (
+        declaration + "\nroot:\n\tpython3 " + CHECK + "\n"
+    )
+
+    with pytest.raises(ValueError, match="cannot verify blocking status"):
+        reach.reachable_commands(makefile, ["make root"], PROFILE, [])
 
 
 def test_a_directory_change_makes_a_script_uncertain() -> None:

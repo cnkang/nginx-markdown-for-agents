@@ -7,6 +7,7 @@ on:
       - "packaging/homebrew/**"
       - "packaging/checksums.sha256"
       - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/audit_homebrew_formula.sh"
       - "packaging/scripts/render_homebrew_formula.py"
       - "packaging/scripts/verify-checksum.sh"
       - "packaging/scripts/verify_homebrew_formula.py"
@@ -19,6 +20,7 @@ on:
       - "packaging/homebrew/**"
       - "packaging/checksums.sha256"
       - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/audit_homebrew_formula.sh"
       - "packaging/scripts/render_homebrew_formula.py"
       - "packaging/scripts/verify-checksum.sh"
       - "packaging/scripts/verify_homebrew_formula.py"
@@ -51,6 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          make homebrew-formula-check
           CORE_FORMULA_PATH="$(brew --repository homebrew/core)/Formula/n/nginx-markdown-module.rb"
           ARCHIVE_URL="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
           ARCHIVE_PATH="${RUNNER_TEMP}/nginx-markdown-source.tar.gz"
