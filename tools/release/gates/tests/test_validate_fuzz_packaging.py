@@ -3992,3 +3992,48 @@ def test_script_chain_cannot_hide_a_raw_install_behind_a_markerless_file(
     assert not packaging_gate._raw_install_from_shell_script_file(
         "dynamic.sh", 0, None
     )
+
+
+def test_decoy_python_token_cannot_route_a_shell_template_to_python() -> None:
+    """Only a command-position consumer decides the template's interpreter.
+
+    Regression: any `python3` token before the placeholder routed the step
+    to the Python analyzer, so `bash -c "echo python3 {0}; bash {0}"` sent a
+    shell block to the Python scan.  A shell launcher in an earlier segment
+    was masked and its script went unanalyzed.  Consumers are now read at
+    command position, and templates whose consumers span both interpreters
+    fail closed by applying both analyses.
+    """
+    decoy = 'bash -c "echo python3 {0}; bash {0}"'
+    assert not packaging_gate._workflow_shell_uses_python(decoy)
+    assert not packaging_gate._shell_template_conflicting_placeholder_consumers(
+        decoy
+    )
+
+    # The genuine nested-python shape still routes to Python.
+    assert packaging_gate._workflow_shell_uses_python('bash -c "python3 {0}"')
+
+    # A template consuming the block under both interpreters is flagged.
+    both = 'bash -c "bash {0}; python3 {0}"'
+    assert packaging_gate._shell_template_conflicting_placeholder_consumers(
+        both
+    )
+
+
+def test_decoy_template_step_with_shell_launcher_is_analyzed(
+    tmp_path, monkeypatch
+) -> None:
+    """The decoy template's shell launcher is followed by the scan."""
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "install-toolchain.sh").write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"echo python3 {0}; bash {0}\"'\n"
+        "        run: 'bash install-toolchain.sh'\n"
+    )
+
+    assert packaging_gate._raw_toolchain_install_issue(workflow) is not None

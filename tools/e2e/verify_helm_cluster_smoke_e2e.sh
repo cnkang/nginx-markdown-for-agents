@@ -117,8 +117,17 @@ dir_lock_owner_alive() {
     # No readable owner yet: a live run may be in the short window between
     # creating the lock directory and writing its pid.  Treat a recent lock
     # as live; a lock older than a minute with no owner record is a crashed
-    # run's leftover and is safe to break.
+    # run's leftover.  The age is re-checked after a short pause so a run
+    # that was merely paused across the first check (and has since
+    # published its pid) is never reclaimed.
     if [[ -n "$(find "${LOCK_PATH}.d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+        sleep 2
+        if [[ -s "${LOCK_OWNER_FILE}" ]]; then
+            return 0
+        fi
+        if [[ -z "$(find "${LOCK_PATH}.d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+            return 0
+        fi
         return 1
     fi
     return 0
