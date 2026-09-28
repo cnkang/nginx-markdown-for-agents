@@ -101,9 +101,28 @@ trap cleanup EXIT
 # install attempt).  The lock spans the ownership check, the install, and
 # cleanup, so a second run waits until the first has released everything it
 # owns.  flock is used when available (Linux); the directory fallback works
-# everywhere else, and a stale directory lock ages out after ten minutes so
-# a crashed run cannot wedge the smoke.
+# everywhere else and records the owner PID, so a lock is broken only when
+# its owner no longer exists - an age threshold would let a second run in
+# while a legitimate long smoke still held the lock.
 LOCK_PATH="${TMPDIR:-/tmp}/helm-cluster-smoke-${CLUSTER}"
+LOCK_OWNER_FILE="${LOCK_PATH}.d/pid"
+
+dir_lock_owner_alive() {
+    local owner
+    owner="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
+    if [[ -n "${owner}" ]]; then
+        kill -0 "${owner}" 2>/dev/null
+        return
+    fi
+    # No readable owner yet: a live run may be in the short window between
+    # creating the lock directory and writing its pid.  Treat a recent lock
+    # as live; a lock older than a minute with no owner record is a crashed
+    # run's leftover and is safe to break.
+    if [[ -n "$(find "${LOCK_PATH}.d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+        return 1
+    fi
+    return 0
+}
 
 acquire_cluster_lock() {
     if command -v flock >/dev/null 2>&1; then
@@ -117,7 +136,9 @@ acquire_cluster_lock() {
     fi
     local waited=0
     while ! mkdir "${LOCK_PATH}.d" 2>/dev/null; do
-        if [[ -n "$(find "${LOCK_PATH}.d" -maxdepth 0 -mmin +10 2>/dev/null)" ]]; then
+        # Break the lock only when its recorded owner is gone: a dead pid,
+        # or no owner record on a lock older than the write window.
+        if ! dir_lock_owner_alive; then
             rm -rf "${LOCK_PATH}.d"
             continue
         fi
@@ -128,6 +149,7 @@ acquire_cluster_lock() {
         fi
         sleep 2
     done
+    printf '%s\n' "$$" > "${LOCK_OWNER_FILE}"
     LOCK_MODE="dir"
     return 0
 }

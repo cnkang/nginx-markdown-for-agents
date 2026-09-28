@@ -11,7 +11,6 @@ with paired acceptance/rejection shapes wherever both directions matter.
 from __future__ import annotations
 
 import shlex
-import shutil
 import subprocess
 
 import pytest
@@ -3748,14 +3747,17 @@ def _bash_negation_parity() -> dict[str, int] | None:
     script = "\n".join(
         f"{expression}; printf '%s\\n' \"$?\"" for expression in expressions
     )
-    probe = subprocess.run(
-        ["docker", "run", "--rm", "bash:5.2", "bash", "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    ) if shutil.which("docker") else None
-    if probe is None:
+    try:
+        probe = subprocess.run(
+            ["docker", "run", "--rm", "bash:5.2", "bash", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # A host without a docker binary or with a hung daemon must degrade
+        # to the documented skip, not error the suite.
         return None
     try:
         probe.check_returncode()
@@ -3841,13 +3843,14 @@ def test_negation_prefix_stays_transparent_after_time() -> None:
 
 
 def test_run_step_records_resolve_effective_shell_precedence() -> None:
-    """Run-step records carry the effective shell, not only the step override.
+    """Run-step records resolve the effective shell and filter by it.
 
     Regression for the gate-integrity gap: a step that omits ``shell`` was
     recorded as ``None`` and every consumer then assumed bash, so a job or
     workflow ``defaults.run.shell`` naming Python would hide a raw install
-    inside that step from the shell-only scan.  Precedence is step, then
-    job default, then workflow default.
+    inside that step from the shell-only scan.  Precedence is step, then job
+    default, then workflow default; a step whose EFFECTIVE shell is not a
+    shell is excluded, exactly as an explicit non-shell override is.
     """
     workflow = (
         "defaults:\n"
@@ -3865,10 +3868,9 @@ def test_run_step_records_resolve_effective_shell_precedence() -> None:
     )
     records = packaging_gate._job_run_step_records(workflow, "gate")
     assert records is not None
-    assert [record["shell"] for record in records] == [
-        "python3 {0}",
-        "bash {0}",
-    ]
+    # The inherited python default excludes the first step; the explicit bash
+    # step stays.
+    assert [record["shell"] for record in records] == ["bash {0}"]
 
     workflow_level_only = (
         "defaults:\n"
@@ -3881,9 +3883,11 @@ def test_run_step_records_resolve_effective_shell_precedence() -> None:
     )
     records = packaging_gate._job_run_step_records(workflow_level_only, "gate")
     assert records is not None
-    assert [record["shell"] for record in records] == ["python3 {0}"]
+    assert records == []
 
-    # The all-jobs helper (the raw-install scan's entry) resolves it too.
+    # The all-jobs helper backs the raw-install scan, which analyzes python
+    # payloads itself; it must keep the step AND its resolved shell so the
+    # scan routes it to the python analyzer.
     records = packaging_gate._all_job_run_step_records(workflow_level_only)
     assert records is not None
     assert [record["shell"] for record in records] == ["python3 {0}"]

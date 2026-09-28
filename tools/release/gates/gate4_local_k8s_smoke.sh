@@ -417,14 +417,20 @@ deploy_and_verify() {
     local kube_context="kind-${CLUSTER_NAME}"
 
     # Reuse a namespace without claiming ownership; cleanup must not delete
-    # other workloads that already use it.
+    # other workloads that already use it.  kubectl stderr is kept out of the
+    # captured result so a warning cannot read as an existing namespace, and
+    # the temporary file is cleaned on both paths.
     local existing_namespace
+    local namespace_stderr_file
+    namespace_stderr_file="$(mktemp "${TMPDIR:-/tmp}/gate4-ns-list.XXXXXX")"
     if ! existing_namespace="$(kubectl --context "$kube_context" get namespace \
-        "${HELM_NAMESPACE}" --ignore-not-found -o name 2>&1)"; then
+        "${HELM_NAMESPACE}" --ignore-not-found -o name 2>"$namespace_stderr_file")"; then
         fail "Unable to determine ownership of namespace ${HELM_NAMESPACE}"
-        printf '%s\n' "$existing_namespace" >&2
+        cat "$namespace_stderr_file" >&2 || true
+        rm -f -- "$namespace_stderr_file"
         return 1
     fi
+    rm -f -- "$namespace_stderr_file"
     if [[ -z "$existing_namespace" ]]; then
         if ! kubectl --context "$kube_context" create namespace \
             "${HELM_NAMESPACE}" >/dev/null 2>&1; then
