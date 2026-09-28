@@ -220,12 +220,10 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
 /*
  * Actively release the inflight slot for one request (subrequest).
  *
- * Conversion terminal paths call this once the conversion result has
- * been delivered downstream, so the worker slot is freed before the
- * request pool is destroyed.  This matters for subrequests: they share
- * the parent request's pool, and pool-cleanup alone would hold the
- * slot until the whole main request completes (delayed release, and
- * with many subrequests an artificial inflight ceiling).
+ * Once conversion finishes or becomes pass-through, release the slot before
+ * the response delivery chain drains. The cleanup is a pool-lifetime backstop.
+ * This is important for subrequests because they share the parent pool and
+ * must not hold a conversion slot while waiting for the main request to finish.
  *
  * The release is idempotent: it routes through the same cleanup
  * handler used at pool destruction, and the decremented flag prevents

@@ -520,6 +520,8 @@ static u_char g_pool_storage[128 * 1024];
 static size_t g_pool_offset;
 static ngx_int_t g_next_header_rc;
 static ngx_int_t g_next_body_rc;
+static ngx_int_t g_buffer_init_rc;
+static ngx_int_t g_buffer_append_rc;
 static ngx_uint_t g_next_header_calls;
 static ngx_uint_t g_next_body_calls;
 static ngx_uint_t g_restore_calls;
@@ -540,6 +542,9 @@ static size_t g_adoption_scan_limit;
 static ngx_flag_t g_authenticated;
 static ngx_uint_t g_auth_cache_control_calls;
 static ngx_flag_t g_auth_cache_control_before_header;
+static ngx_int_t g_auth_cache_control_rc;
+static ngx_int_t g_head_representation_rc;
+static ngx_uint_t g_inflight_release_calls;
 
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
@@ -630,7 +635,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
     UNUSED(r);
     g_auth_cache_control_calls++;
-    return NGX_OK;
+    return g_auth_cache_control_rc;
 }
 
 ngx_flag_t
@@ -799,7 +804,10 @@ ngx_http_markdown_inflight_try_increment(
 void
 ngx_http_markdown_inflight_release(ngx_http_markdown_ctx_t *ctx)
 {
-    UNUSED(ctx);
+    g_inflight_release_calls++;
+    if (ctx != NULL) {
+        ctx->lifecycle.inflight_cleanup = NULL;
+    }
 }
 
 void
@@ -828,6 +836,9 @@ ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buffer,
     if (buffer == NULL) {
         return NGX_ERROR;
     }
+    if (g_buffer_init_rc != NGX_OK) {
+        return g_buffer_init_rc;
+    }
     memset(buffer, 0, sizeof(*buffer));
     buffer->max_size = max_size;
     return NGX_OK;
@@ -849,7 +860,7 @@ ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buffer,
     UNUSED(buffer);
     UNUSED(data);
     UNUSED(len);
-    return NGX_OK;
+    return g_buffer_append_rc;
 }
 
 ngx_http_markdown_error_category_t
@@ -871,7 +882,7 @@ ngx_int_t
 ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
 {
     UNUSED(r);
-    return NGX_OK;
+    return g_head_representation_rc;
 }
 
 ngx_int_t
@@ -1141,6 +1152,8 @@ reset_test_state(void)
     g_pool_offset = 0;
     g_next_header_rc = NGX_OK;
     g_next_body_rc = NGX_OK;
+    g_buffer_init_rc = NGX_OK;
+    g_buffer_append_rc = NGX_OK;
     g_next_header_calls = 0;
     g_next_body_calls = 0;
     g_restore_calls = 0;
@@ -1159,6 +1172,9 @@ reset_test_state(void)
     g_authenticated = 0;
     g_auth_cache_control_calls = 0;
     g_auth_cache_control_before_header = 0;
+    g_auth_cache_control_rc = NGX_OK;
+    g_head_representation_rc = NGX_OK;
+    g_inflight_release_calls = 0;
     memset(&g_adoption_record, 0, sizeof(g_adoption_record));
     g_decision_category_calls = 0;
     memset(&g_conditional_result, 0, sizeof(g_conditional_result));
@@ -1397,6 +1413,64 @@ test_authenticated_head_pass_through_sets_cache_control_before_headers(void)
                 "HEAD pass-through must continue to the body filter");
     TEST_PASS("authenticated HEAD pass-through applies cache policy first");
 }
+
+static void
+test_authenticated_cache_control_error_stops_header_forwarding(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    request.main = &request;
+    g_conf = &conf;
+    g_authenticated = 1;
+    g_auth_cache_control_rc = NGX_ERROR;
+    ngx_http_next_header_filter = test_next_header_filter;
+
+    rc = ngx_http_markdown_next_header_filter_with_auth(&request, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "cache-policy failure must be returned before header forwarding");
+    TEST_ASSERT(g_auth_cache_control_calls == 1,
+        "auth cache policy must be attempted before forwarding");
+    TEST_ASSERT(g_next_header_calls == 0,
+        "failed cache-policy updates must not commit headers downstream");
+    TEST_PASS("auth cache-control failure stops header forwarding");
+}
+
+
+static void
+test_head_header_error_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_cleanup_t cleanup;
+    ngx_int_t rc;
+
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&cleanup, 0, sizeof(cleanup));
+    request.main = &request;
+    request.method = NGX_HTTP_HEAD;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &cleanup;
+    g_head_representation_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_body_filter_handle_head(&request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "HEAD representation header errors must be returned");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+        "a terminal HEAD rewrite failure must release its inflight slot");
+    TEST_PASS("HEAD representation header failure releases inflight slot");
+}
+
 
 static void
 test_preaccess_bypass_terminal_header_outcomes(void)
@@ -1935,6 +2009,410 @@ test_304_header_error_is_propagated(void)
     TEST_PASS("304 header error is propagated");
 }
 
+static void
+test_buffer_append_fail_open_does_not_continue_conversion(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_buf_t body_buf;
+    ngx_chain_t body_chain;
+    u_char body[] = "oversized body";
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&body_buf, 0, sizeof(body_buf));
+    memset(&body_chain, 0, sizeof(body_chain));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    conf.max_size = 1;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+    body_buf.pos = body;
+    body_buf.last = body + sizeof(body) - 1;
+    body_buf.memory = 1;
+    body_buf.last_buf = 1;
+    body_chain.buf = &body_buf;
+    g_buffer_append_rc = NGX_ERROR;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_body_filter(&request, &body_chain);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "append fail-open must preserve downstream success");
+    TEST_ASSERT(ctx.eligible == 0 && !ctx.conversion.attempted,
+                "append fail-open must stop conversion after forwarding input");
+    TEST_ASSERT(g_next_body_calls == 1,
+                "append fail-open must not send a second representation");
+    TEST_ASSERT(g_metrics.conversions_attempted == 1,
+                "append failure must count one attempt, not a second conversion");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "append fail-open delivery must be counted once");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "append fail-open must release the completed conversion slot");
+    TEST_PASS("buffer append fail-open does not continue conversion");
+}
+
+static void
+test_buffer_init_fail_open_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_buf_t body_buf;
+    ngx_chain_t body_chain;
+    u_char body[] = "body";
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&body_buf, 0, sizeof(body_buf));
+    memset(&body_chain, 0, sizeof(body_chain));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    conf.max_size = 16;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+    body_buf.pos = body;
+    body_buf.last = body + sizeof(body) - 1;
+    body_buf.memory = 1;
+    body_buf.last_buf = 1;
+    body_chain.buf = &body_buf;
+    g_buffer_init_rc = NGX_ERROR;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_body_filter(&request, &body_chain);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "init fail-open must preserve downstream success");
+    TEST_ASSERT(ctx.eligible == 0 && !ctx.conversion.attempted,
+                "init fail-open must stop conversion after forwarding input");
+    TEST_ASSERT(g_next_body_calls == 1,
+                "init fail-open must forward the original body once");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "init fail-open must release the completed conversion slot");
+    TEST_PASS("buffer init fail-open releases inflight slot");
+}
+
+static void
+test_buffer_append_reject_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_buf_t body_buf;
+    ngx_chain_t body_chain;
+    u_char body[] = "oversized body";
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&body_buf, 0, sizeof(body_buf));
+    memset(&body_chain, 0, sizeof(body_chain));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    conf.max_size = 1;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+    body_buf.pos = body;
+    body_buf.last = body + sizeof(body) - 1;
+    body_buf.memory = 1;
+    body_buf.last_buf = 1;
+    body_chain.buf = &body_buf;
+    g_buffer_append_rc = NGX_ERROR;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_body_filter(&request, &body_chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "append reject must preserve finalizer result");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "append reject must release the terminal conversion slot");
+    TEST_ASSERT(g_next_body_calls == 0,
+                "append reject must not forward the original body");
+    TEST_PASS("buffer append reject releases inflight slot");
+}
+
+static void
+test_decompression_reject_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+
+    rc = ngx_http_markdown_handle_decompression_alloc_error(
+        &request, &ctx, &conf, NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "decompression reject must preserve finalizer result");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "decompression reject must release the terminal conversion slot");
+    TEST_PASS("decompression reject releases inflight slot");
+}
+
+static void
+test_decompression_fail_open_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.eligible = 1;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+    g_next_body_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_handle_decompression_alloc_error(
+        &request, &ctx, &conf, NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "decompression fail-open must preserve body backpressure");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "decompression fail-open must release the terminal conversion slot");
+    TEST_ASSERT(ctx.fullbuffer.failopen_delivery_pending,
+                "decompression fail-open must retain delivery-resume state");
+    TEST_PASS("decompression fail-open releases inflight slot");
+}
+
+static void
+test_pass_through_releases_inflight_slot(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    ctx.request = &request;
+    ctx.filter_enabled = 1;
+    ctx.eligible = 0;
+    ctx.lifecycle.inflight_cleanup =
+        (ngx_http_markdown_inflight_cleanup_t *) &ctx;
+    request.ctx[ngx_http_markdown_filter_module.ctx_index] = &ctx;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_body_filter(&request, NULL);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "pass-through must preserve downstream success");
+    TEST_ASSERT(g_inflight_release_calls == 1
+                && ctx.lifecycle.inflight_cleanup == NULL,
+                "pass-through must release a slot for a completed conversion");
+    TEST_PASS("pass-through releases inflight slot");
+}
+
+static void
+test_content_encoding_collection_failure_uses_production_handler(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t *ctx;
+    ngx_table_elt_t content_encoding;
+    ngx_buf_t body_buf;
+    ngx_chain_t body_chain;
+    u_char body[] = "compressed body";
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    memset(&content_encoding, 0, sizeof(content_encoding));
+    memset(&body_buf, 0, sizeof(body_buf));
+    memset(&body_chain, 0, sizeof(body_chain));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    content_encoding.value.data = (u_char *) "gzip";
+    content_encoding.value.len = sizeof("gzip") - 1;
+    request.headers_out.content_encoding = &content_encoding;
+    g_capture_rc = NGX_OK;
+    g_has_conditional = 0;
+    ngx_http_next_header_filter = test_next_header_filter;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_header_filter(&request);
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+
+    TEST_ASSERT(rc == NGX_OK && ctx != NULL,
+                "production header filter must install failure state");
+    TEST_ASSERT(!ctx->eligible && ctx->error.has_category
+                && ctx->error.last_category
+                   == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                "production failure handler must set ineligible error state");
+    TEST_ASSERT(ctx->headers_forwarded && g_next_header_calls == 1,
+                "production failure handler must forward headers once");
+    TEST_ASSERT(g_metrics.conversions_attempted == 1
+                && g_metrics.conversions_failed == 1,
+                "collection failure must be counted once in the header phase");
+
+    body_buf.pos = body;
+    body_buf.last = body + sizeof(body) - 1;
+    body_buf.memory = 1;
+    body_buf.last_buf = 1;
+    body_chain.buf = &body_buf;
+    rc = ngx_http_markdown_body_filter(&request, &body_chain);
+
+    TEST_ASSERT(rc == NGX_OK && g_next_body_calls == 1,
+                "ineligible body must pass through the production body filter");
+    TEST_ASSERT(!ctx->conversion.attempted
+                && g_metrics.conversions_attempted == 1,
+                "production body filter must not retry conversion");
+    TEST_ASSERT(g_next_header_calls == 1,
+                "body pass-through must not re-enter the header chain");
+    TEST_PASS("Content-Encoding collection failure uses production handler");
+}
+
+static void
+test_content_encoding_collection_failure_again_sets_header_latch(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t *ctx;
+    ngx_table_elt_t content_encoding;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    memset(&content_encoding, 0, sizeof(content_encoding));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    content_encoding.value.data = (u_char *) "gzip";
+    content_encoding.value.len = sizeof("gzip") - 1;
+    request.headers_out.content_encoding = &content_encoding;
+    g_capture_rc = NGX_OK;
+    g_has_conditional = 0;
+    g_next_header_rc = NGX_AGAIN;
+    ngx_http_next_header_filter = test_next_header_filter;
+
+    rc = ngx_http_markdown_header_filter(&request);
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+
+    TEST_ASSERT(rc == NGX_AGAIN && ctx != NULL,
+                "production failure handler must propagate header backpressure");
+    TEST_ASSERT(!ctx->eligible && ctx->error.has_category
+                && ctx->headers_forwarded
+                && ctx->fullbuffer.failopen_delivery_pending,
+                "header NGX_AGAIN must preserve ineligible state and resume latch");
+    TEST_ASSERT(g_next_header_calls == 1
+                && g_metrics.results.failopen_count == 0,
+                "header NGX_AGAIN must not count fail-open delivery");
+    TEST_PASS("Content-Encoding failure sets header NGX_AGAIN latch");
+}
+
+static void
+test_content_encoding_collection_failure_rejects_in_production(void)
+{
+    ngx_http_request_t request = make_request();
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_ctx_t *ctx;
+    ngx_table_elt_t content_encoding;
+    ngx_int_t rc;
+
+    request.main = &request;
+    reset_test_state();
+    memset(&conf, 0, sizeof(conf));
+    memset(&content_encoding, 0, sizeof(content_encoding));
+    conf.enabled = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    g_conf = &conf;
+    content_encoding.value.data = (u_char *) "gzip";
+    content_encoding.value.len = sizeof("gzip") - 1;
+    request.headers_out.content_encoding = &content_encoding;
+    g_capture_rc = NGX_OK;
+    g_has_conditional = 0;
+    ngx_http_next_header_filter = test_next_header_filter;
+
+    rc = ngx_http_markdown_header_filter(&request);
+    ctx = (ngx_http_markdown_ctx_t *)
+        request.ctx[ngx_http_markdown_filter_module.ctx_index];
+
+    TEST_ASSERT(rc == NGX_ERROR && ctx != NULL,
+                "production reject handler must return finalize failure");
+    TEST_ASSERT(!ctx->eligible && ctx->error.has_category
+                && ctx->error.last_category
+                   == NGX_HTTP_MARKDOWN_ERROR_SYSTEM
+                && !ctx->headers_forwarded,
+                "production reject handler must record failure before finalize");
+    TEST_ASSERT(g_next_header_calls == 0
+                && g_metrics.results.failopen_count == 0,
+                "reject must not forward headers or count fail-open delivery");
+    TEST_PASS("Content-Encoding collection failure rejects in production");
+}
+
 int
 main(void)
 {
@@ -1947,6 +2425,8 @@ main(void)
     test_preaccess_handler_installs_durable_bypass();
     test_header_filter_bypass_forwards_once();
     test_authenticated_head_pass_through_sets_cache_control_before_headers();
+    test_authenticated_cache_control_error_stops_header_forwarding();
+    test_head_header_error_releases_inflight_slot();
     test_preaccess_bypass_terminal_header_outcomes();
     test_preaccess_allocation_failure_uses_durable_bypass();
     test_preaccess_cleanup_failure_uses_durable_bypass();
@@ -1959,6 +2439,15 @@ main(void)
     test_304_again_resume_ok();
     test_304_again_resume_done();
     test_304_header_error_is_propagated();
+    test_buffer_append_fail_open_does_not_continue_conversion();
+    test_buffer_init_fail_open_releases_inflight_slot();
+    test_buffer_append_reject_releases_inflight_slot();
+    test_decompression_reject_releases_inflight_slot();
+    test_decompression_fail_open_releases_inflight_slot();
+    test_pass_through_releases_inflight_slot();
+    test_content_encoding_collection_failure_uses_production_handler();
+    test_content_encoding_collection_failure_again_sets_header_latch();
+    test_content_encoding_collection_failure_rejects_in_production();
 
     printf("\n========================================\n");
     printf("All request bypass tests passed!\n");

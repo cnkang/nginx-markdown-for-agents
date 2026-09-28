@@ -1343,6 +1343,13 @@ ngx_http_markdown_streaming_send_output(
 
     ctx->streaming.classify.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
 
+    /* A pending downstream-owned chain must drain before any new send. */
+    if (ctx->streaming.pending_output != NULL) {
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
+        return NGX_ERROR;
+    }
+
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
         ctx->streaming.classify.last_send_failure_origin =
@@ -2407,9 +2414,10 @@ ngx_http_markdown_streaming_track_budget_exceeded(
 /*
  * Pre-Commit error handler: apply unified markdown_error_policy.
  *
- * On any precommit error, the Rust handle is aborted and the inflight
- * slot is released immediately; the pool cleanup handler provides an
- * idempotent backstop.
+ * On a terminal precommit error, the Rust handle is aborted and the inflight
+ * slot is released before pass-through or rejection. Capability fallback keeps
+ * the slot until the full-buffer conversion finishes; the pool cleanup handler
+ * provides an idempotent backstop.
  *
  * Returns:
  *   NGX_DECLINED - fallback to full-buffer or fail-open
@@ -2428,25 +2436,27 @@ ngx_http_markdown_streaming_precommit_error(
 {
     ngx_http_markdown_stream_reason_e  mapped_reason;
     const ngx_str_t                   *canonical_reason;
+    ngx_int_t                           rc;
 
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
         ctx->streaming.handle = NULL;
     }
 
-    /* Release the inflight slot on precommit error; the cleanup
-     * handler on r->pool provides an idempotent backstop. */
-    ngx_http_markdown_inflight_release(ctx);
-
     if (error_code == ERROR_STREAMING_FALLBACK) {
         /*
-         * Capability fallback: always fall back to full-buffer
-         * regardless of markdown_error_policy setting.
+         * Capability fallback: keep the active-conversion slot while the
+         * buffered path consumes the prebuffered input.
          */
-        return ngx_http_markdown_streaming_fallback_to_fullbuffer(
+        rc = ngx_http_markdown_streaming_fallback_to_fullbuffer(
             r, ctx, conf);
+        if (rc != NGX_DECLINED) {
+            ngx_http_markdown_inflight_release(ctx);
+        }
+        return rc;
     }
 
+    ngx_http_markdown_inflight_release(ctx);
     mapped_reason = ngx_http_markdown_streaming_precommit_reason(
         ctx, error_code);
     canonical_reason = ngx_http_markdown_streaming_error_reason(
@@ -2469,7 +2479,8 @@ ngx_http_markdown_streaming_precommit_error(
 
     /* Track budget exceeded as auxiliary classification. */
     if (ngx_http_markdown_streaming_is_budget_error(error_code)) {
-        ngx_http_markdown_streaming_track_budget_exceeded(r, conf, ctx, error_code);
+        ngx_http_markdown_streaming_track_budget_exceeded(
+            r, conf, ctx, error_code);
     }
 
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.failed_total);
@@ -2574,9 +2585,6 @@ ngx_http_markdown_streaming_precommit_error(
         canonical_reason,
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0);
-    /* Fail-open: release the inflight slot since we're passing
-     * through to original content. */
-    ngx_http_markdown_inflight_release(ctx);
     return NGX_DECLINED;
 }
 
@@ -3783,19 +3791,19 @@ ngx_http_markdown_streaming_finalize_request(
     /* Handle is consumed by finalize regardless of result */
     ctx->streaming.handle = NULL;
 
-    /* Conversion is complete once the FFI handle is consumed: release
-     * the inflight slot immediately instead of holding it until the
-     * terminal last_buf is delivered.  A slow client can otherwise
-     * occupy the slot for the whole transfer, letting a few clients
-     * exhaust max_inflight while the worker is idle.  The terminal
-     * delivery release in stream_postcommit remains as an idempotent
-     * backstop for paths that never reach finalize. */
-    ngx_http_markdown_inflight_release(ctx);
-
     if (rc_ffi != ERROR_SUCCESS) {
+        if (ctx->streaming.commit_state
+            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        {
+            ngx_http_markdown_inflight_release(ctx);
+        }
         return ngx_http_markdown_streaming_handle_finalize_ffi_error(
             r, ctx, conf, &result, rc_ffi);
     }
+
+    /* Conversion is complete once the FFI handle is consumed. Keep the slot
+     * only when a precommit capability error resumes full-buffer work. */
+    ngx_http_markdown_inflight_release(ctx);
 
     rc = ngx_http_markdown_streaming_finalize_send_markdown(
         r, ctx, conf, &result, &final_send_rc);

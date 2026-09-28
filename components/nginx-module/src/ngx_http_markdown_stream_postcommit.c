@@ -261,6 +261,8 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
         markdown_streaming_abort(ctx->streaming.handle);
     }
     ctx->streaming.handle = NULL;
+    /* Conversion work ends here, even if closing bytes later backpressure. */
+    ngx_http_markdown_inflight_release(ctx);
 
     if (finish_rc == POST_COMMIT_ABORT) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,

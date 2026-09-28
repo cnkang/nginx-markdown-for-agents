@@ -5204,6 +5204,10 @@ test_grow_output_overflow_maps_internal(void)
         "overflow cleanup must release and clear the prior heap buffer");
     TEST_ASSERT(using_heap == 0,
         "failed growth must not publish heap-buffer state");
+    /* The helper owns the backing pointer; synchronize the test alias. */
+    buf = heap_buf;
+    TEST_ASSERT(buf == NULL,
+        "test-local alias must follow heap-buffer cleanup state");
     TEST_PASS("output growth overflow maps to internal failure");
 }
 

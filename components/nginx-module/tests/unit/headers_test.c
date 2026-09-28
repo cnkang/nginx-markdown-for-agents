@@ -955,9 +955,6 @@ test_header_snapshot_restore_failure_is_terminal(void)
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
-push_trailer(ngx_http_request_t *r, const char *name, const char *value);
-
-static void
 test_head_representation_headers_strips_html_metadata(void)
 {
     ngx_http_request_t r = new_request();

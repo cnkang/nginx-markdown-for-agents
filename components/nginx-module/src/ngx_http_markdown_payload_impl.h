@@ -75,6 +75,9 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
 {
     ngx_int_t  rc;
 
+    /* Conversion has terminated; downstream delivery does not own the slot. */
+    ngx_http_markdown_inflight_release(ctx);
+
     if (debug_message != NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, debug_message);
     }
@@ -117,6 +120,7 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     if (ngx_http_markdown_effective_error_policy(
             ctx->effective_conf, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_http_markdown_inflight_release(ctx);
         /*
          * Use ngx_http_filter_finalize_request to send the configured
          * error status (429/503/502).  In the body filter, returning a
@@ -504,6 +508,8 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 {
     ngx_int_t  rc;
 
+    ngx_http_markdown_inflight_release(ctx);
+
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                  "markdown: failed to initialize "
                  "buffer, category=system");
@@ -582,6 +588,8 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     ngx_int_t  rc;
     size_t     attempted_size;
     size_t     body_limit;
+
+    ngx_http_markdown_inflight_release(ctx);
 
     attempted_size = (((size_t) -1) - ctx->buffer.size < chunk_size)
         ? (size_t) -1
@@ -1841,6 +1849,11 @@ ngx_http_markdown_fail_open_with_buffered_prefix(ngx_http_request_t *r,
 
     if (ctx == NULL || ctx->buffer.size == 0) {
         return ngx_http_next_body_filter(r, remaining);
+    }
+
+    /* A nonempty prefix needs backing storage before pointer arithmetic. */
+    if (r->method != NGX_HTTP_HEAD && ctx->buffer.data == NULL) {
+        return NGX_ERROR;
     }
 
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
