@@ -3913,3 +3913,42 @@ def test_job_default_python_shell_raw_install_is_flagged() -> None:
     records = packaging_gate._all_job_run_step_records(workflow)
     assert records is not None
     assert packaging_gate._workflow_shell_uses_python(records[0]["shell"])
+
+
+def test_nested_interpreter_template_routes_python_to_the_python_scan() -> None:
+    """A Python interpreter nested inside a quoted argument is recognized.
+
+    Regression for the evasion: `shell: 'bash -c "python3 {0}"'` keeps
+    `python3 {0}` as a single shlex word, so the placeholder was not a
+    standalone token and the Python interpreter went unrecognized.  The
+    step was then routed to the shell analyzer, where a raw install written
+    as a Python argument list (quoted words separated by commas) matches
+    nothing, and the gate accepted an unverified installer invocation.
+    """
+    shell = 'bash -c "python3 {0}"'
+    assert packaging_gate._workflow_shell_uses_python(shell)
+
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"python3 {0}\"'\n"
+        "        run: |\n"
+        "          import subprocess\n"
+        "          subprocess.run([\"rustup\", \"toolchain\", \"install\","
+        " \"nightly\"])\n"
+    )
+    issue = packaging_gate._raw_toolchain_install_issue(workflow)
+    assert issue is not None
+
+    # Controls: the same template with a benign Python payload stays
+    # accepted, and a non-Python nested command is not misrouted.
+    benign = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"python3 {0}\"'\n"
+        "        run: 'print(\"hello\")'\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+    assert not packaging_gate._workflow_shell_uses_python('bash -c "echo {0}"')

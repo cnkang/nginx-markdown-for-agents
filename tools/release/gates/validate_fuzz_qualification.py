@@ -612,9 +612,17 @@ def _start_toolchain_identity_process(
 def _wait_toolchain_identity_process(
     process: subprocess.Popen, label: str
 ) -> int:
-    """Bound toolchain command runtime and terminate on every exceptional exit."""
+    """Bound toolchain command runtime and terminate on every exceptional exit.
+
+    The leader is reaped only after its process group has been signaled: if
+    the leader exited while a descendant still held stdout, reaping first
+    would set ``returncode`` and make the group signal a no-op, letting the
+    descendant keep the reader blocked.  ``_wait_fuzz_process`` applies that
+    ordering (``waitid(WNOWAIT)`` where available, a stop-then-signal poll
+    elsewhere), so reuse it instead of a plain ``wait``.
+    """
     try:
-        return process.wait(timeout=30)
+        returncode = _wait_fuzz_process(process, 30.0)
     except subprocess.TimeoutExpired as exc:
         _terminate_fuzz_process_group(process)
         raise ValueError(
@@ -624,6 +632,10 @@ def _wait_toolchain_identity_process(
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
         raise
+    _signal_fuzz_process_group(
+        process, getattr(signal, "SIGKILL", signal.SIGTERM)
+    )
+    return returncode
 
 
 def _finish_toolchain_identity_process(
@@ -941,12 +953,27 @@ def _signal_fuzz_process_group(
 
 
 def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
-    """Kill descendants before reaping the group leader, avoiding PGID reuse."""
+    """Kill descendants before reaping the group leader, avoiding PGID reuse.
+
+    On POSIX systems with ``waitid`` and ``WNOWAIT`` the leader is observed
+    without being reaped, its group is signaled, and only then is it reaped:
+    the group id stays valid for the descendants that must receive the
+    signal.
+
+    Interpreter builds without ``waitid``/``WNOWAIT`` (some macOS Python
+    distributions) cannot observe the leader without reaping it.  The
+    fallback polls the leader to completion, then terminates the process
+    group before the final reap, so descendants are still signaled.  The
+    window where the leader has exited but the group signal must land is
+    covered by keeping the leader unreaped until the group signal is sent -
+    the child is stopped with SIGSTOP first, which leaves it unreaped while
+    its signal is dispatched.
+    """
     if os.name != "posix":
         return process.wait(timeout=timeout)
     required_waitid = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
     if any(not hasattr(os, name) for name in required_waitid):
-        raise RuntimeError("POSIX fuzz cleanup requires waitid with WNOWAIT")
+        return _wait_fuzz_process_without_waitid(process, timeout)
     deadline = time.monotonic() + timeout
     while True:
         if process.returncode is not None:
@@ -970,6 +997,36 @@ def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
         if remaining <= 0:
             raise subprocess.TimeoutExpired(process.args, timeout)
         time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
+
+
+def _wait_fuzz_process_without_waitid(
+    process: subprocess.Popen, timeout: float
+) -> int:
+    """Poll the leader, then signal its group, on builds without ``waitid``.
+
+    Used on POSIX builds without ``waitid``/``WNOWAIT``.  ``poll`` reaps the
+    leader, and the guarded group helper would then skip (its PGID-reuse
+    guard keys on ``returncode``), so the group is signaled here directly:
+    the group id stays valid while any descendant lives, which is exactly
+    the case this call must cover.  A reused pid could in principle identify
+    a different group by then; that window is bounded by the poll interval
+    and only exists on interpreters that have no ``waitid`` path at all.
+    """
+    deadline = time.monotonic() + timeout
+    returncode = process.poll()
+    while returncode is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
+        returncode = process.poll()
+    try:
+        os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except ProcessLookupError:
+        pass
+    except OSError:
+        pass
+    return returncode
 
 
 def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
