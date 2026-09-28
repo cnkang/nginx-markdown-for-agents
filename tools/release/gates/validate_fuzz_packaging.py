@@ -3270,33 +3270,93 @@ def _all_job_run_step_records(
     return records
 
 
+_PLACEHOLDER_SEGMENT_SPLIT_RE = re.compile(r"[;&|]+|\n")
+
+
+def _placeholder_consumer_heads(
+    words: list[str], command_index: int
+) -> set[str]:
+    """Return the command-position heads of every segment consuming ``{0}``.
+
+    GitHub substitutes the script path for each ``{0}`` in the shell
+    template, so a segment that names it as an argument is a consumer of
+    the generated script.  Only a consumer's COMMAND POSITION proves which
+    interpreter runs the block: a Python token sitting in argument position
+    (``echo python3 {0}``) is data, not an interpreter, and a decoy in an
+    earlier segment (``echo python3 {0}; bash {0}``) must not mask the
+    shell launcher that actually executes the script.
+    """
+    heads: set[str] = set()
+    for index in range(command_index + 1, len(words)):
+        if words[index] == "{0}":
+            # A standalone placeholder is consumed by the preceding word.
+            heads.add(Path(words[index - 1]).name)
+            continue
+        if "{0}" in words[index]:
+            heads |= _segment_heads_consuming_placeholder(words[index])
+    return heads
+
+
+def _segment_heads_consuming_placeholder(word: str) -> set[str]:
+    """Return command-position heads of one word's ``{0}`` segments."""
+    heads: set[str] = set()
+    for segment in _PLACEHOLDER_SEGMENT_SPLIT_RE.split(word):
+        if "{0}" not in segment:
+            continue
+        try:
+            segment_words = shlex.split(segment.strip(), posix=True)
+        except ValueError:
+            segment_words = segment.strip().split()
+        if segment_words:
+            heads.add(Path(segment_words[0]).name)
+    return heads
+
+
 def _python_interpreter_before_placeholder(
     words: list[str], command_index: int
 ) -> bool:
-    """Whether a Python interpreter names GitHub's script operand.
+    """Whether a Python interpreter consumes GitHub's script operand.
 
     Two template shapes reach the run block: the placeholder as its own word
     (`python3 {0}`), and the placeholder nested inside a quoted argument
-    (`bash -c "python3 {0}"`, which shlex keeps as one word).  Both must be
-    recognized: an unrecognized template routes the step to the shell
-    analyzer, where a raw install written as a Python argument list matches
-    nothing.
+    (`bash -c "python3 {0}"`, which shlex keeps as one word).  The check is
+    command-position based so a Python token that is merely data or a decoy
+    in an earlier segment cannot route a shell template to the Python
+    analyzer, where a shell launcher would go unanalyzed.
     """
-    tail = words[command_index + 1:]
-    if "{0}" in words and any(
-        _PYTHON_COMMAND.fullmatch(Path(word).name) is not None
-        for word in tail
-    ):
-        return True
-    for word in tail:
-        if "{0}" not in word:
-            continue
-        if any(
-            _PYTHON_COMMAND.fullmatch(Path(token).name)
-            for token in word.split("{0}", 1)[0].split()
-        ):
-            return True
-    return False
+    return any(
+        _PYTHON_COMMAND.fullmatch(head)
+        for head in _placeholder_consumer_heads(words, command_index)
+    )
+
+
+def _shell_template_conflicting_placeholder_consumers(shell: object) -> bool:
+    """Whether more than one interpreter consumes the script placeholder.
+
+    A template such as ``bash -c "bash {0}; python3 {0}"`` runs the same
+    block under two interpreters.  Neither analysis alone covers it, so the
+    caller fails closed by applying both.
+    """
+    if not isinstance(shell, str):
+        return False
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    command_index = 0
+    command = Path(words[0]).name
+    if command == "env":
+        command_index = _skip_env_prefix(words, 1)
+    elif command in {"uv", "poetry", "pipenv"} and len(words) > 1:
+        if words[1] != "run":
+            return False
+        command_index = 2
+    heads = _placeholder_consumer_heads(words, command_index)
+    has_python = any(_PYTHON_COMMAND.fullmatch(head) for head in heads)
+    has_shell = any(head in ("bash", "sh", "zsh", "dash") for head in heads)
+    return has_python and has_shell
 
 
 def _workflow_shell_uses_python(shell: object) -> bool:
@@ -6257,10 +6317,18 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
         )
     for step in steps:
         run = step["run"]
-        if _workflow_shell_uses_python(step.get("shell")):
+        shell = step.get("shell")
+        if _workflow_shell_uses_python(shell):
             raw_install = _python_inline_raw_install(run, 0, None)
         else:
             raw_install = _raw_install_in_run_script(run)
+        # A template whose consumers span both interpreters runs the same
+        # block under each, so neither analysis alone is sufficient: apply
+        # both and fail closed on either.
+        if not raw_install and _shell_template_conflicting_placeholder_consumers(
+            shell
+        ):
+            raw_install = _python_inline_raw_install(run, 0, None)
         if raw_install:
             return (
                 "release workflows must provision Rust toolchains "
