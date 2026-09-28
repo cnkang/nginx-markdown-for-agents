@@ -4197,3 +4197,17 @@ def test_dash_headed_operand_routes_to_the_shell_scan(
     assert packaging_gate._raw_install_from_shell_script_file(
         "outer.sh", 0, None
     )
+
+    # The marker-less multi-hop form must also route through the shell scan:
+    # dash -> marker-less middle -> deeper file carrying the marker.
+    deep = tmp_path / "deep.sh"
+    deep.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    middle = tmp_path / "middle.sh"
+    middle.write_text("#!/bin/bash\nbash deep.sh\n", encoding="utf-8")
+    hop = tmp_path / "hop.sh"
+    hop.write_text("#!/bin/bash\ndash middle.sh\n", encoding="utf-8")
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "hop.sh", 0, None
+    )
