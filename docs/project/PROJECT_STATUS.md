@@ -433,10 +433,9 @@ the active release documentation.
 
 ### Current State
 The team has implemented and tested the core feature set. Production and
-release readiness stay pending publication: the release assets and the
-required verification evidence (performance baselines, SonarCloud scan on
-the final SHA, and the full release-gate suite) pass after the merge. The
-focus is on operational validation,
+release readiness remain pending publication. After the merge, the release
+process must pass the performance-baseline, final-SHA SonarCloud, and full
+release-gate checks before publishing assets. The focus is on operational validation,
 performance optimization, and community feedback integration.
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
