@@ -154,6 +154,20 @@ acquire_cluster_lock() {
         if ! dir_lock_owner_alive; then
             local stale_claim="${LOCK_PATH}.stale.$$"
             if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
+                # Re-check the owner recorded in the CLAIMED directory: the
+                # stale lock may have been released and re-taken by a live
+                # run between our liveness check and the rename, and
+                # deleting that run's lock would break mutual exclusion.
+                # Restore it (when the path is still free) and keep waiting;
+                # delete the claim only when its owner is genuinely stale.
+                local claimed_owner
+                claimed_owner="$(cat "${stale_claim}/pid" 2>/dev/null || true)"
+                if [[ -n "${claimed_owner}" ]] && kill -0 "${claimed_owner}" 2>/dev/null; then
+                    if [[ ! -e "${LOCK_PATH}.d" ]]; then
+                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null || true
+                    fi
+                    continue
+                fi
                 rm -rf "${stale_claim}"
                 continue
             fi

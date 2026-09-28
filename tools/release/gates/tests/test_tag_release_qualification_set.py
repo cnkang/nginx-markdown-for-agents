@@ -782,3 +782,33 @@ def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
     assert "flock" in script and "mkdir" in script, (
         "the lock needs the flock path and a directory fallback"
     )
+
+
+def test_helm_cluster_smoke_rechecks_a_claimed_lock_owner() -> None:
+    """A claimed lock whose owner is alive is restored, not deleted.
+
+    Regression: the stale-lock reclaim renamed the lock to a private claim
+    and deleted it unconditionally.  If the owner released and re-took the
+    lock between the liveness check and the rename, the claim held a LIVE
+    run's lock and deleting it broke mutual exclusion.  The claimed
+    directory's owner is now re-checked: alive -> restored, stale ->
+    deleted.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+
+    reclaim = script.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
+    reclaim = reclaim.split("rm -rf \"${stale_claim}\"", 2)
+    assert len(reclaim) >= 2
+    recheck_block = reclaim[0]
+    assert "claimed_owner=" in recheck_block, (
+        "the claim's recorded owner must be read before deletion"
+    )
+    assert "kill -0" in recheck_block, (
+        "a live claimed owner must be detected before deletion"
+    )
+    assert "mv \"${stale_claim}\" \"${LOCK_PATH}.d\"" in recheck_block, (
+        "a live claimed owner's lock must be restored"
+    )
