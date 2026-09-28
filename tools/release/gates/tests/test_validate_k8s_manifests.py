@@ -369,8 +369,17 @@ def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:
         "install_termination_traps"
     )
 
-    # main's own cleanup marks the guard so the EXIT trap cannot repeat it.
+    # main's own cleanup runs the helpers BEFORE marking the guard: a signal
+    # arriving mid-cleanup re-runs them (safe, idempotent) instead of
+    # skipping what is left.  The guard is then set so the EXIT trap is a
+    # no-op after the work completed.
     assert "CLEANUP_DONE=1" in main
+    cleanup_call = main.index("cleanup_owned_helm_resources")
+    delete_call = main.index("delete_cluster", cleanup_call)
+    guard_set = main.index("CLEANUP_DONE=1")
+    assert cleanup_call < delete_call < guard_set, (
+        "the cleanup helpers must run before the guard is marked"
+    )
 
     # Idempotence: the delete clears its ownership flag so a second run of
     # the helper is a no-op.
