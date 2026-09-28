@@ -4838,6 +4838,12 @@ def _python_dynamic_import_module(
     if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
         return None
     module_name = argument.value
+    if module_name.startswith("."):
+        # A relative import resolves against its package (a runtime concern);
+        # the module it names cannot be determined from this payload, so the
+        # caller fails closed instead of matching a launcher on a name that
+        # could resolve anywhere.
+        return None
     if target == "importlib.import_module":
         return module_name
     if _python_import_fromlist_is_nonempty(call):

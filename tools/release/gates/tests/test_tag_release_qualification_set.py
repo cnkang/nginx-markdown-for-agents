@@ -821,54 +821,57 @@ def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
     )
 
 
-def test_helm_cluster_smoke_rechecks_a_claimed_lock_owner() -> None:
-    """A claimed lock whose owner is alive is restored, not deleted.
+def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
+    """Stale-lock examination and reclaim are mutually exclusive.
 
-    Regression: the stale-lock reclaim renamed the lock to a private claim
-    and deleted it unconditionally.  If the owner released and re-took the
-    lock between the liveness check and the rename, the claim held a LIVE
-    run's lock and deleting it broke mutual exclusion.  The claimed
-    directory's owner is now re-checked: alive -> restored, stale ->
-    deleted.
+    Regression: two waiters could both see a stale lock; the winner could
+    re-acquire the canonical path, and the slower waiter's rename then
+    displaced that LIVE owner's lock, admitting a third run onto the shared
+    cluster.  A short-lived reaper mutex now serializes the examination and
+    reclaim, so a live owner's lock is never displaced, and a reaper held by
+    a dead pid is broken by the next waiter.
     """
     script = (
         Path(__file__).resolve().parents[4]
         / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
     ).read_text(encoding="utf-8")
 
-    reclaim = script.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
-    reclaim = reclaim.split("rm -rf \"${stale_claim}\"", 2)
-    assert len(reclaim) >= 2
-    recheck_block = reclaim[0]
-    assert "claimed_owner=" in recheck_block, (
-        "the claim's recorded owner must be read before deletion"
+    acquire = script.split("acquire_cluster_lock() {", 1)[1]
+    acquire = acquire.split("\n}\n", 1)[0]
+    assert "acquire_lock_reaper" in acquire, (
+        "stale-lock examination must run under the reaper mutex"
     )
-    assert "kill -0" in recheck_block, (
-        "a live claimed owner must be detected before deletion"
+    # The reaper wraps the liveness check and the reclaim together.
+    assert acquire.index("acquire_lock_reaper") < acquire.index(
+        "dir_lock_owner_alive"
     )
-    assert "mv \"${stale_claim}\" \"${LOCK_PATH}.d\"" in recheck_block, (
-        "a live claimed owner's lock must be restored"
+    assert acquire.index("dir_lock_owner_alive") < acquire.index(
+        "release_lock_reaper"
     )
 
+    reaper = script.split("acquire_lock_reaper() {", 1)[1]
+    reaper = reaper.split("\n}\n", 1)[0]
+    # A reaper held by a dead pid is broken so it cannot wedge the smoke.
+    assert "kill -0" in reaper
+    assert "rm -rf \"${LOCK_PATH}.reaper\"" in reaper
 
-def test_helm_cluster_smoke_reclaims_the_claim_after_a_failed_restore() -> None:
-    """A claim whose restore cannot land is deleted, not leaked.
 
-    Regression: when a claimed lock's owner was alive but the canonical
-    path had been re-created meanwhile, the branch continued without
-    deleting the claim, leaking a stale directory per occurrence.  Both the
-    failed-restore and already-recreated paths now delete the claim.
+def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:
+    """A claimed stale lock directory is removed, not leaked.
+
+    Under the reaper mutex a claim is only ever taken when the recorded
+    owner is dead, so the claim can be deleted immediately; the canonical
+    path is then free for this waiter's own acquisition attempt.
     """
     script = (
         Path(__file__).resolve().parents[4]
         / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
     ).read_text(encoding="utf-8")
 
-    block = script.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
-    block = block.split("continue", 1)[0]
-    restore = block.split("if [[ -n \"${claimed_owner}\" ]]", 1)[1]
-    # The restore falls back to deletion when the move fails...
-    assert "|| rm -rf \"${stale_claim}\"" in restore
-    # ...and the already-recreated branch deletes the claim too.
-    else_index = restore.index("else")
-    assert "rm -rf \"${stale_claim}\"" in restore[else_index:]
+    block = script.split("acquire_cluster_lock() {", 1)[1]
+    block = block.split("\n}\n", 1)[0]
+    claim = block.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
+    claim = claim.split("continue", 1)[0]
+    assert 'rm -rf "${stale_claim}"' in claim, (
+        "a claimed stale directory must be deleted"
+    )

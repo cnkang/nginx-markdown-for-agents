@@ -633,10 +633,14 @@ def _wait_toolchain_identity_process(
         # reap the leader and set `returncode`, after which the guarded group
         # signal returns early and a descendant that inherited stdout keeps
         # running.  `_signal_fuzz_process_group` handles the already-reaped
-        # case without touching the group, so this is safe either way.
+        # case without touching the group, so this is safe either way; when
+        # the wait path itself had already reaped the leader before
+        # unwinding, the direct post-reap signal covers the descendants.
         _signal_fuzz_process_group(process, signal.SIGTERM)
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
+        else:
+            _signal_reaped_fuzz_process_group(process)
         raise
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -956,6 +960,27 @@ def _signal_fuzz_process_group(
             process.terminate()
         else:
             process.kill()
+
+
+def _signal_reaped_fuzz_process_group(process: subprocess.Popen) -> None:
+    """Signal an owned process group whose leader has already been reaped.
+
+    ``_signal_fuzz_process_group`` skips a reaped leader to keep the PGID
+    reuse guard, but the interrupt path can unwind after the wait loop
+    reaped the leader while descendants still hold the group.  This
+    dedicated call covers exactly that window: the group id stays valid
+    while any member lives, so the kill reaches them.  It is only invoked
+    from the interrupt path, where leaving descendants running means an
+    orphaned process holding the output pipe.
+    """
+    if os.name != "posix":
+        return
+    try:
+        os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except ProcessLookupError:
+        return
+    except OSError:
+        return
 
 
 def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
