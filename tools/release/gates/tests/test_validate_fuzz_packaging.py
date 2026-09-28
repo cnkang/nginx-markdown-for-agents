@@ -4333,3 +4333,43 @@ def test_compound_backgrounded_list_does_not_satisfy_the_pip_gate() -> None:
     install_at, docs_at = packaging_gate._pip_first_steps([plain])
     assert install_at == (0, 0)
     assert docs_at == (0, 1)
+
+
+def test_virtualenv_markers_read_the_foreground_command_view() -> None:
+    """Marker lookup indexes the same list as the prerequisite positions.
+
+    Regression: `_pip_first_steps` indexes `_foreground_live_commands`, but
+    the marker walk read `_step_live_commands`.  A backgrounded segment
+    changes the two lists' offsets, so the marker prefix could be read from
+    the wrong command and a virtualenv mismatch accepted or rejected
+    spuriously.
+    """
+    step = {
+        "run": (
+            "export PATH=/venv/bin:$PATH &\n"
+            "python3 -m pip install -r r.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    foreground = packaging_gate._foreground_live_commands(step)
+    assert foreground == ["python3 -m pip install -r r.txt", "make docs-check"]
+    install_at, docs_at = packaging_gate._pip_first_steps([step])
+    assert docs_at == (0, 1)
+    # The backgrounded export must NOT contribute a marker: it ran in a
+    # different (asynchronous) context.  With the unfiltered list, the
+    # docs-check prefix reached the export and reported its venv marker.
+    markers = packaging_gate._virtualenv_markers(step, docs_at[1])
+    assert markers == set(), markers
+
+    # A foreground virtualenv on the docs-check command is observed.
+    with_venv = {
+        "run": (
+            "python3 -m pip install -r r.txt\n"
+            "PATH=/venv/bin:$PATH make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([with_venv])
+    assert docs_at == (0, 1)
+    assert packaging_gate._virtualenv_markers(with_venv, docs_at[1])

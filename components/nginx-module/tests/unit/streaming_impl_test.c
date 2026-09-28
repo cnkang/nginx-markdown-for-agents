@@ -6354,6 +6354,14 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
         "subrequest fail-open pending terminal resumes once (no duplicate)");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    /*
+     * Make this a subrequest BEFORE taking a slot: r->main points to a
+     * distinct request so (a) the terminal marker is last_in_chain, not
+     * last_buf, and (b) the slot is acquired in the subrequest context the
+     * test claims to cover.
+     */
+    ngx_memzero(&main_r, sizeof(main_r));
+    r.main = &main_r;
     conf.routing.max_inflight = 1;
     ngx_http_markdown_inflight_reset();
     rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
@@ -6361,13 +6369,6 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
         "subrequest fail-open test must acquire an active conversion slot");
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
-
-    /*
-     * Make this a subrequest: r->main points to a distinct request so
-     * the terminal marker is last_in_chain, not last_buf.
-     */
-    ngx_memzero(&main_r, sizeof(main_r));
-    r.main = &main_r;
 
     /*
      * Configuration: fail-open policy, no body-size limit (so
