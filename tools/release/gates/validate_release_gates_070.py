@@ -1031,10 +1031,30 @@ def _publish_condition_matches_truth_table(
     return True
 
 
+def _condition_contains_always_call(node: ast.AST) -> bool:
+    """Whether the condition calls ``always()`` anywhere.
+
+    ``always()`` is what makes the explicit ``needs.*.result`` checks
+    authoritative: without a status-check function, GitHub wraps the whole
+    condition in an implicit ``success()`` over the dependencies, so a
+    skipped job (dispatch-time signing) would skip publication even though
+    the explicit comparisons alone would allow it.  The validator models the
+    condition's own semantics, so it must require the explicit override.
+    """
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call) and _is_always_condition_call(child):
+            return True
+    return False
+
+
 def _publish_condition_covers_dependency_results(condition: str) -> bool:
     """Require every publish dependency to succeed with the signing exception."""
     node = _github_condition_ast(condition)
     if node is None:
+        return False
+    if not _condition_contains_always_call(node):
+        # An implicit success() would neutralize the explicit result checks on
+        # the dispatch path; require the explicit always() override.
         return False
     expected_attributes = {
         f"needs.{job_name.replace('-', '_')}.result"

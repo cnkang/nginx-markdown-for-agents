@@ -4037,3 +4037,61 @@ def test_decoy_template_step_with_shell_launcher_is_analyzed(
     )
 
     assert packaging_gate._raw_toolchain_install_issue(workflow) is not None
+
+
+def test_chain_follow_ignores_unresolvable_operands_but_scans_inline_c(
+    tmp_path, monkeypatch
+) -> None:
+    """Unresolvable operands are not evidence; ``-c`` strings are scripts.
+
+    Regression for the false-positive class the chain-follow introduced: a
+    marker-less helper that hands ``bash -c`` an inline string, names an
+    absolute/out-of-root operand, or names a not-yet-generated file must not
+    fail the gate, while a true two-hop chain and a raw install inside an
+    inline ``-c`` payload must still be caught.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+
+    inline_benign = tmp_path / "inline.sh"
+    inline_benign.write_text(
+        '#!/bin/bash\nbash -c "echo hello world"\n', encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "inline.sh", 0, None
+    )
+
+    inline_raw = tmp_path / "inline_raw.sh"
+    inline_raw.write_text(
+        '#!/bin/bash\nbash -c "rustup toolchain install nightly"\n',
+        encoding="utf-8",
+    )
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "inline_raw.sh", 0, None
+    )
+
+    absolute = tmp_path / "absolute.sh"
+    absolute.write_text(
+        "#!/bin/bash\nbash /src/packaging/scripts/verify-checksum.sh\n",
+        encoding="utf-8",
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "absolute.sh", 0, None
+    )
+
+    generated = tmp_path / "generated.sh"
+    generated.write_text(
+        "#!/bin/bash\npython3 generated_output.py\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "generated.sh", 0, None
+    )
+
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text("#!/bin/bash\nbash inner.sh\n", encoding="utf-8")
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
