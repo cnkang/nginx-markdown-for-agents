@@ -277,6 +277,7 @@ typedef struct ngx_pool_cleanup_s {
 } ngx_pool_cleanup_t;
 
 static ngx_pool_cleanup_t  test_cleanup;
+static void               *test_cleanup_payload;
 
 ngx_pool_cleanup_t *
 ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
@@ -284,6 +285,7 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     (void) pool;
     (void) size;
     memset(&test_cleanup, 0, sizeof(test_cleanup));
+    test_cleanup.data = test_cleanup_payload;
     return &test_cleanup;
 }
 
@@ -355,6 +357,9 @@ ngx_http_markdown_pending_output_current(void)
 
 /* Include the postcommit source (for guard function) */
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
+
+ngx_http_markdown_inflight_t ngx_http_markdown_g_inflight;
+static ngx_http_markdown_inflight_cleanup_t test_inflight_cleanup_data;
 
 static void test_setup(void)
 {
@@ -710,10 +715,61 @@ static void test_safe_finish_copies_rust_output_before_free(void)
     TEST_PASS("safe_finish copies Rust output before free");
 }
 
-/* Two backpressures in a row, then success: the pending chain must stay the
+/*
+ * Handle consumption ends conversion work before closure delivery. Release
+ * the slot even when downstream backpressures the closing bytes.
+ */
+static void
+test_safe_finish_releases_inflight_before_terminal_drain(void)
+{
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t                rc;
+    u_char                   closing[] = "\n```";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    conf.routing.max_inflight = 1;
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = closing;
+    test_safe_finish_len = sizeof(closing) - 1;
+    test_output_filter_rc = NGX_AGAIN;
+    memset(&test_inflight_cleanup_data, 0, sizeof(test_inflight_cleanup_data));
+    test_cleanup_payload = &test_inflight_cleanup_data;
+    ngx_http_markdown_inflight_reset();
+
+    rc = ngx_http_markdown_inflight_try_increment(
+        &test_request, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "safe-finish request must hold one conversion slot");
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "backpressured safe-finish output remains pending");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "safe-finish consumes its Rust handle before output drains");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "conversion completion releases its slot before terminal drain");
+
+    test_cleanup.handler(test_cleanup.data);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "later pool cleanup must not release the slot twice");
+    TEST_PASS("safe-finish releases inflight before terminal drain");
+}
+
+
+/*
+ * Two backpressures in a row, then success: the pending chain must stay the
  * one the downstream owns, the resume counter must count each resume, and the
- * terminal must be confirmed exactly once.  A resume that re-sent the original
- * chain, or cleared the pending state on the first NGX_AGAIN, fails here. */
+ * terminal must be confirmed exactly once. A resume that re-sent the original
+ * chain, or cleared the pending state on the first NGX_AGAIN, fails here.
+ */
 static void test_safe_finish_repeated_backpressure_resumes_without_resending(void)
 {
     ngx_http_markdown_ctx_t ctx;
@@ -1565,6 +1621,7 @@ int main(void)
     test_safe_finish_happy_path();
     test_safe_finish_empty_rust_output_sends_terminal();
     test_safe_finish_copies_rust_output_before_free();
+    test_safe_finish_releases_inflight_before_terminal_drain();
     test_safe_finish_backpressure_preserves_pending_chain();
     test_safe_finish_repeated_backpressure_resumes_without_resending();
     test_safe_finish_data_only_pending_continues_to_terminal();

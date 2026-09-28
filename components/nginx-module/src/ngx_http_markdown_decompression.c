@@ -198,7 +198,7 @@ ngx_http_markdown_measure_content_encoding(
     {
         const ngx_table_elt_t *headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
+            goto failed;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
@@ -208,7 +208,7 @@ ngx_http_markdown_measure_content_encoding(
                 continue;
             }
             if (headers[i].value.len > 0 && headers[i].value.data == NULL) {
-                return NGX_ERROR;
+                goto failed;
             }
 
             if (*match_count == 0) {
@@ -218,15 +218,20 @@ ngx_http_markdown_measure_content_encoding(
                     headers[i].value.len, *match_count, total_len)
                 != NGX_OK)
             {
-                return NGX_ERROR;
+                goto failed;
             }
             (*match_count)++;
         }
     }
 
     return NGX_OK;
-}
 
+failed:
+    *single_value = NULL;
+    *match_count = 0;
+    *total_len = 0;
+    return NGX_ERROR;
+}
 
 static ngx_int_t
 ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data,
