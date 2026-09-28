@@ -414,6 +414,10 @@ def _run_stubbed_helm_cluster_smoke(
         ),
         "helm": (
             "printf 'helm %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+            "if [[ \"$1\" == version ]]; then\n"
+            "  printf '%s\\n' \"${HELM_VERSION:-v3.19.0+fixture}\"\n"
+            "  exit 0\n"
+            "fi\n"
             "if [[ \"$1\" == list ]]; then\n"
             "  if [[ -n \"${HELM_LIST_STDERR:-}\" ]]; then "
             "printf '%s\\n' \"$HELM_LIST_STDERR\" >&2; fi\n"
@@ -578,7 +582,12 @@ def test_helm_cluster_smoke_uninstalls_a_release_it_created(
 
 
 def test_helm_cluster_smoke_installs_atomically(tmp_path: Path) -> None:
-    """A failed or timed-out install must be removed by helm itself."""
+    """A failed or timed-out install must be removed by helm itself.
+
+    The rollback flag is selected by the installed helm's major version:
+    Helm 3 spells it ``--atomic``, Helm 4 ``--rollback-on-failure``.  With
+    the fixture reporting a v3 version, the install must carry ``--atomic``.
+    """
     _result, command_log = _run_stubbed_helm_cluster_smoke(tmp_path, "")
 
     install_commands = [
@@ -588,8 +597,36 @@ def test_helm_cluster_smoke_installs_atomically(tmp_path: Path) -> None:
     assert install_commands, command_log
     for command in install_commands:
         assert " --atomic" in command, (
-            f"helm install must pass --atomic so a failed install is "
-            f"removed automatically: {command}"
+            f"helm install must pass --atomic for Helm 3 so a failed install "
+            f"is removed automatically: {command}"
+        )
+
+
+def test_helm_cluster_smoke_selects_the_v4_rollback_flag(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A Helm 4 binary gets its own rollback flag spelling.
+
+    Regression for the renamed flag: Helm 4 offers
+    ``--rollback-on-failure`` and keeps ``--atomic`` only as a deprecated
+    alias, so the smoke must pass the current spelling when it detects a
+    v4 binary (and never emit deprecation noise).
+    """
+    monkeypatch.setenv("HELM_VERSION", "v4.3.0+fixture")
+    _result, command_log = _run_stubbed_helm_cluster_smoke(tmp_path, "")
+
+    install_commands = [
+        command for command in command_log.splitlines()
+        if command.startswith("helm install ")
+    ]
+    assert install_commands, command_log
+    for command in install_commands:
+        assert " --rollback-on-failure" in command, (
+            f"a Helm 4 install must pass --rollback-on-failure: {command}"
+        )
+        assert " --atomic" not in command, (
+            f"a Helm 4 install must not pass the deprecated --atomic: "
+            f"{command}"
         )
 
 
@@ -812,3 +849,26 @@ def test_helm_cluster_smoke_rechecks_a_claimed_lock_owner() -> None:
     assert "mv \"${stale_claim}\" \"${LOCK_PATH}.d\"" in recheck_block, (
         "a live claimed owner's lock must be restored"
     )
+
+
+def test_helm_cluster_smoke_reclaims_the_claim_after_a_failed_restore() -> None:
+    """A claim whose restore cannot land is deleted, not leaked.
+
+    Regression: when a claimed lock's owner was alive but the canonical
+    path had been re-created meanwhile, the branch continued without
+    deleting the claim, leaking a stale directory per occurrence.  Both the
+    failed-restore and already-recreated paths now delete the claim.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+
+    block = script.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
+    block = block.split("continue", 1)[0]
+    restore = block.split("if [[ -n \"${claimed_owner}\" ]]", 1)[1]
+    # The restore falls back to deletion when the move fails...
+    assert "|| rm -rf \"${stale_claim}\"" in restore
+    # ...and the already-recreated branch deletes the claim too.
+    else_index = restore.index("else")
+    assert "rm -rf \"${stale_claim}\"" in restore[else_index:]

@@ -429,6 +429,25 @@ validate_helm_template() {
     return 1
 }
 
+helm_rollback_flag() {
+    # Helm's rollback-on-failure flag was renamed in Helm 4: `--atomic`
+    # (which implies --wait on v3) became `--rollback-on-failure`, with
+    # `--atomic` kept only as a deprecated alias.  Select by major version so
+    # each supported major runs with its own spelling.
+    local version
+    version="$(helm version --short 2>/dev/null || true)"
+    case "${version}" in
+        v4*|4.*)
+            printf '%s' "--rollback-on-failure"
+            ;;
+        *)
+            printf '%s' "--atomic"
+            ;;
+    esac
+    return 0
+}
+
+
 deploy_and_verify() {
     info "Deploying Helm chart to kind cluster..."
     local kube_context="kind-${CLUSTER_NAME}"
@@ -487,8 +506,12 @@ deploy_and_verify() {
     # Validate the stock-nginx chart deployment path, security context,
     # writable runtime paths, and Helm installability. This smoke test does
     # not validate a module-enabled image, so markdown directives stay off.
-    # --atomic removes a failed or timed-out install (on Helm v3 it also
-    # implies --wait, which is set explicitly here anyway).
+    # Helm's rollback-on-failure flag: Helm 3 spells it --atomic (which also
+    # implies --wait), Helm 4 offers --rollback-on-failure and keeps --atomic
+    # only as a deprecated alias.  Select by major version so the smoke uses
+    # each major's own spelling.
+    local rollback_flag
+    rollback_flag="$(helm_rollback_flag)"
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
@@ -498,7 +521,7 @@ deploy_and_verify() {
         --set markdown.enabled=false \
         --wait \
         --timeout "${POD_WAIT_TIMEOUT}" \
-        --atomic \
+        "${rollback_flag}" \
         >&2 2>&1; then
         fail "helm install failed"
         info "Pod status:"
