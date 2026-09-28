@@ -69,21 +69,27 @@ def _workflow_env() -> dict[str, str]:
     }
 
 
+def _string_keyed_environment(
+    values: Mapping[object, object],
+) -> dict[str, object]:
+    """Return only environment entries with string variable names."""
+    return {
+        key: value for key, value in values.items() if isinstance(key, str)
+    }
+
+
 def _step_effective_env(step: object) -> dict[str, object]:
     """Merge workflow, job, and step env values in GitHub precedence order."""
+    effective: dict[str, object] = {}
+    effective.update(_workflow_env())
     if not isinstance(step, dict):
-        return {name: value for name, value in _workflow_env().items()}
-    effective: dict[str, object] = {
-        name: value for name, value in _workflow_env().items()
-    }
+        return effective
     scoped = step.get("_effective_env")
     if isinstance(scoped, dict):
-        return {key: value for key, value in scoped.items()
-                if isinstance(key, str)}
+        return _string_keyed_environment(scoped)
     step_env = step.get("env")
     if isinstance(step_env, dict):
-        effective.update({key: value for key, value in step_env.items()
-                          if isinstance(key, str)})
+        effective.update(_string_keyed_environment(step_env))
     return effective
 
 

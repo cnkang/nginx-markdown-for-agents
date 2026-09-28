@@ -103,7 +103,12 @@ def _assert_record_handoff(workflow: dict) -> None:
     verify_run = verify.get("run", "")
     resolved_record = verify_run.replace("${RELEASE_VERSION}", version)
     assert expected_record in resolved_record
-    assert "-f " in verify_run or "test -f" in verify_run
+    expected_record_assignment = (
+        'record="artifacts/release/${RELEASE_VERSION}/'
+        'fuzz-qualification-record.json"'
+    )
+    assert expected_record_assignment in verify_run
+    assert '[[ -f "${record}" ]]' in verify_run
     upload = _named_step(
         workflow["jobs"]["fuzz-qualification"],
         "Upload fuzz qualification record",
@@ -180,8 +185,10 @@ def test_fuzz_job_pins_and_exports_the_recorded_toolchain() -> None:
 
     install = _named_step(job, "Install pinned Rust toolchain for fuzz qualification")
     install_run = install.get("run", "")
-    assert f"--toolchain {pinned_toolchain}" in install_run
-    assert f"rustup component add --toolchain {pinned_toolchain} rust-src" in install_run
+    assert install["env"]["FUZZ_TOOLCHAIN"] == "${{ env.FUZZ_TOOLCHAIN }}"
+    assert install["env"]["RUSTUP_TOOLCHAIN"] == "${{ env.FUZZ_TOOLCHAIN }}"
+    assert '"${FUZZ_TOOLCHAIN}"' in install_run
+    assert "rustup component add --toolchain" in install_run
     assert (
         "cargo install cargo-fuzz --version "
         f"{validator.FUZZ_CARGO_FUZZ_PACKAGE_VERSION} --locked"
@@ -532,6 +539,19 @@ def test_release_gate_job_installs_the_release_python_dependencies(
         assert f"must pin {name} to a version" in pin_issue, pin_issue
 
 
+def test_fuzz_toolchain_install_step_uses_the_pinned_rustup_toolchain() -> None:
+    """The cargo-fuzz install and qualification share the dated Rustup shim."""
+    step = _named_step(
+        _workflow()["jobs"]["fuzz-qualification"],
+        "Install pinned Rust toolchain for fuzz qualification",
+    )
+
+    assert step["env"]["FUZZ_TOOLCHAIN"] == "${{ env.FUZZ_TOOLCHAIN }}"
+    assert step["env"]["RUSTUP_TOOLCHAIN"] == "${{ env.FUZZ_TOOLCHAIN }}"
+    assert '"${FUZZ_TOOLCHAIN}"' in step["run"]
+    assert "cargo install cargo-fuzz" in step["run"]
+
+
 def test_release_gate_preflight_proves_the_jsonschema_format_extras() -> None:
     """The release preflight must prove the jsonschema [format] extras.
 
@@ -542,13 +562,17 @@ def test_release_gate_preflight_proves_the_jsonschema_format_extras() -> None:
     The preflight must therefore read the checker registry on its
     executable path, not merely the version string.
     """
-    run_text = _job_live_text(
-        WORKFLOW.read_text(encoding="utf-8"), "release-gate")
+    job = _workflow()["jobs"]["release-gate"]
+    step = _named_step(job, "Verify release gate dependencies")
+    run_script = step.get("run", "")
+    assert step.get("if") not in (False, "false", "${{ false }}")
+    assert step.get("continue-on-error") not in (True, "true", "${{ true }}")
+    assert "python3 -c" in run_script
     assert "jsonschema[format]" in (
         REPO_ROOT / "requirements-release.txt").read_text(encoding="utf-8")
-    assert "from jsonschema import FormatChecker" in run_text, (
+    assert "from jsonschema import FormatChecker" in run_script, (
         "the release preflight must import the format checker")
-    assert "FormatChecker().checkers" in run_text, (
+    assert "FormatChecker().checkers" in run_script, (
         "the preflight must read the checker registry, since the version "
         "string alone cannot prove the extras are installed")
 
@@ -564,7 +588,11 @@ def test_release_dependency_preflight_name_covers_all_python_gate_deps() -> None
     step = _named_step(job, "Verify release gate dependencies")
     command = step.get("run", "")
 
-    assert "import brotli, yaml, jsonschema" in command
+    assert "from importlib.metadata import version" in command
+    assert 'version("jsonschema")' in command
+    assert "jsonschema.__version__" not in command
+    assert "unable to import the pinned release Python dependencies" in command
+    assert "2>/dev/null" in command
     assert "FormatChecker" in command
 
 

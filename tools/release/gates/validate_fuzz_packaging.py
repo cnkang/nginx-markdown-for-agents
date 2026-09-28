@@ -36,6 +36,7 @@ from collections.abc import Sequence
 import functools
 import re
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -768,6 +769,136 @@ def _defined_function_names(script: str) -> set[str]:
     return names
 
 
+def _defined_alias_names(script: str, depth: int = 0) -> set[str]:
+    """Aliases that can expand after a real ``expand_aliases`` enablement."""
+    if depth > 12:
+        return set(_SHADOWED_NAMES)
+    aliases: set[str] = set()
+    expansion_enabled = False
+    code = _strip_shell_comments(script)
+    code, substitutions, opaque = _mask_command_substitutions(code)
+    if opaque:
+        return set(_SHADOWED_NAMES)
+    for segment in _command_segments(code):
+        step = _alias_name_segment_step(segment, expansion_enabled)
+        if step is None:
+            return set(_SHADOWED_NAMES)
+        expansion_enabled, found = step
+        aliases.update(found)
+    for substitution in substitutions:
+        aliases.update(_defined_alias_names(substitution, depth + 1))
+    return aliases
+
+
+def _alias_segment_words(segment: str) -> list[str] | None:
+    """Parse alias-analysis words; harmless output with broken quoting is inert."""
+    try:
+        return shlex.split(segment, posix=True)
+    except ValueError:
+        return [] if re.match(r"\s*(?:echo|printf)(?:\s|$)", segment) else None
+
+
+def _alias_name_segment_step(
+    segment: str, expansion_enabled: bool
+) -> tuple[bool, set[str]] | None:
+    """Update expansion state and aliases from one parsed shell segment."""
+    words = _alias_segment_words(segment)
+    if words is None:
+        return None
+    index = _skip_env_assignments(words, 0)
+    if index >= len(words):
+        return expansion_enabled, set()
+    command = _shell_word_basename(words[index])
+    options = words[index + 1:]
+    if command == "shopt":
+        return _shopt_alias_expansion_state(options, expansion_enabled), set()
+    if command == "alias" and expansion_enabled:
+        return expansion_enabled, _shadowed_alias_names(options)
+    return expansion_enabled, set()
+
+
+def _shopt_alias_expansion_state(
+    options: list[str], expansion_enabled: bool
+) -> bool:
+    """Track explicit enable/disable commands for alias expansion."""
+    if "expand_aliases" not in options:
+        return expansion_enabled
+    if "-s" in options or "--set" in options:
+        return True
+    if "-u" in options or "--unset" in options:
+        return False
+    return expansion_enabled
+
+
+def _alias_definitions_can_shadow(
+    script: str, shell_name: str, depth: int = 0
+) -> bool:
+    """Reject aliases when this shell can expand them into later commands."""
+    if depth > 12:
+        return True
+    expansion_enabled = shell_name in {"sh", "zsh"}
+    aliases_defined = False
+    code = _join_continuations(
+        _strip_heredocs(_strip_shell_comments(script))
+    )
+    masked, substitutions, opaque = _mask_command_substitutions(code)
+    if opaque:
+        return True
+    for segment in _command_segments(masked):
+        step = _alias_shadow_segment_step(
+            segment, expansion_enabled, aliases_defined
+        )
+        if step is None:
+            return True
+        expansion_enabled, aliases_defined, can_shadow = step
+        if can_shadow:
+            return True
+    return any(
+        _alias_definitions_can_shadow(body, shell_name, depth + 1)
+        for body in substitutions
+    )
+
+
+def _alias_shadow_segment_step(
+    segment: str, expansion_enabled: bool, aliases_defined: bool
+) -> tuple[bool, bool, bool] | None:
+    """Update alias state or report a command a future alias can shadow."""
+    words = _alias_segment_words(segment)
+    if words is None:
+        return None
+    index = _skip_env_assignments(words, 0)
+    if index >= len(words):
+        return expansion_enabled, aliases_defined, False
+    command = _shell_word_basename(words[index])
+    options = words[index + 1:]
+    if command == "alias" and any(
+        _shell_assignment_parts(_resolve_heredoc_word(word)[0])
+        is not None
+        for word in options
+    ):
+        aliases_defined = True
+        return expansion_enabled, aliases_defined, expansion_enabled
+    if command == "shopt":
+        expansion_enabled = _shopt_alias_expansion_state(
+            options, expansion_enabled
+        )
+        return expansion_enabled, aliases_defined, expansion_enabled and aliases_defined
+    return expansion_enabled, aliases_defined, False
+
+
+def _shadowed_alias_names(options: list[str]) -> set[str]:
+    """Names defined by alias assignments that shadow checked commands."""
+    aliases = set()
+    for word in options:
+        assignment = _resolve_heredoc_word(word)[0]
+        if "=" not in assignment:
+            continue
+        name = assignment.split("=", 1)[0]
+        if name in _SHADOWED_NAMES:
+            aliases.add(name)
+    return aliases
+
+
 def _called_function_names(script: str, defined: set[str]) -> set[str]:
     """Names the script calls: the first word of command-position lines.
 
@@ -1441,6 +1572,11 @@ def _skip_bare_separators(words: list[str], index: int) -> int:
     return index
 
 
+def _shell_word_basename(word: str) -> str:
+    """Resolve quotes and path prefixes before matching an executable name."""
+    return Path(_resolve_heredoc_word(word)[0]).name
+
+
 def _wrapper_command_step(words: list[str], index: int) -> int | None:
     """Advance past a leading command wrapper's own words; None when the
     wrapper must not be unwrapped (a `builtin`, a `command` lookup or
@@ -1449,7 +1585,7 @@ def _wrapper_command_step(words: list[str], index: int) -> int | None:
     The wrapper's name is read after quote removal, as bash resolves it:
     a quoted ``'command'``/``"sudo"`` still runs that wrapper.
     """
-    wrapper = _resolve_heredoc_word(words[index])[0]
+    wrapper = _shell_word_basename(words[index])
     if wrapper == "builtin":
         # `builtin` can only run shell builtins, never the external
         # commands the provisioning checks match.
@@ -1481,17 +1617,17 @@ def _unwrap_stacked_wrappers(
     for _ in range(_MAX_COMMAND_WRAPPER_DEPTH):
         if (
             index < len(words)
-            and _resolve_heredoc_word(words[index])[0] in _WRAPPER_COMMANDS
+            and _shell_word_basename(words[index]) in _WRAPPER_COMMANDS
         ):
             step = _wrapper_command_step(words, index)
             if step is None:
                 return index, True
             index = _skip_env_assignments(words, step)
-        if index < len(words) and _resolve_heredoc_word(words[index])[0] == "env":
+        if index < len(words) and _shell_word_basename(words[index]) == "env":
             index = _skip_env_prefix(words, index + 1)
     if index < len(words) and (
-        _resolve_heredoc_word(words[index])[0] in _WRAPPER_COMMANDS
-        or _resolve_heredoc_word(words[index])[0] == "env"
+        _shell_word_basename(words[index]) in _WRAPPER_COMMANDS
+        or _shell_word_basename(words[index]) == "env"
     ):
         return index, True
     return index, False
@@ -1510,7 +1646,7 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
     index = _skip_env_assignments(words, 0)
     if (
         index + 1 < len(words)
-        and _resolve_heredoc_word(words[index])[0] == "retry"
+        and _shell_word_basename(words[index]) == "retry"
         and words[index + 1].isdigit()
     ):
         index += 2
@@ -1520,7 +1656,7 @@ def _wrapper_prefix_length(words: list[str]) -> tuple[int, bool]:
         return index, False
     if (
         index < len(words)
-        and _resolve_heredoc_word(words[index])[0]
+        and _shell_word_basename(words[index])
         in ("bash", "sh", "dash", "zsh")
     ):
         payload = _skip_shell_c(words, index)
@@ -1569,6 +1705,31 @@ def _retry_runs_its_target(script: str) -> bool:
                 return True
         return False
     return True
+
+
+def _mask_verified_retry_forwarders(script: str) -> str:
+    """Treat a verified retry wrapper's ``$@`` as forwarding, not a command.
+
+    The raw-install scan still checks each retry call site; only the body
+    token that forwards the statically supplied argv is neutralized.
+    """
+    if not _retry_runs_its_target(script):
+        return script
+    characters = list(script)
+    forwarder = re.compile(
+        r'"(?:\$@|\$\{\@\})"|(?<![\\\w$])\$(?:@|\{\@\})(?![\w])'
+    )
+    for name, start, end in _function_body_spans(script):
+        if name != "retry":
+            continue
+        body = script[start:end]
+        for match in forwarder.finditer(body):
+            token_start = start + match.start()
+            token_end = start + match.end()
+            characters[token_start:token_end] = [":"] + [
+                " "
+            ] * (token_end - token_start - 1)
+    return "".join(characters)
 
 
 def _possible_marker_carry(
@@ -1676,7 +1837,8 @@ def _strip_provision_wrappers(segment: str) -> str:
 # (with an explicit `bash` invocation) and add the rustfmt component
 # separately; raw `rustup toolchain install` commands are rejected.
 _TOOLCHAIN_VALUE_RE = (
-    r"(?:\"\$\{RUST_TOOLCHAIN\}\"|(?<![\w'])\$\{RUST_TOOLCHAIN\}(?![\w']))"
+    r"(?:\"\$\{(?:RUST_TOOLCHAIN|FUZZ_TOOLCHAIN)\}\"|"
+    r"(?<![\w'])\$\{(?:RUST_TOOLCHAIN|FUZZ_TOOLCHAIN)\}(?![\w']))"
 )
 _VERIFIED_INSTALLER_RE = re.compile(
     r"^bash\s+[\"']?\./packaging/scripts/install-verified-rustup\.sh[\"']?"
@@ -1687,13 +1849,12 @@ _COMPONENT_ADD_RE = re.compile(
     r"^rustup\s+component\s+add\b[^;|&]*--toolchain\s+"
     + _TOOLCHAIN_VALUE_RE + r"(?=$|[\s;|&)])"
 )
-_RAW_INSTALL_RE = re.compile(r"^rustup\s+toolchain\s+install\b")
 # Shell-equivalent spellings of installing the pinned release requirements:
 # `python3 -m pip install -r requirements-release.txt`, `pip3 install
 # --requirement=requirements-release.txt`, quoted paths, and a leading
 # `sudo`/`retry N` wrapper (already peeled by the caller).
 _PIP_REQUIREMENT_RE = re.compile(
-    r"^(?:python3?\s+-m\s+pip|pip3?)"
+    r"^(?:python(?:3(?:\.\d+)?)?\s+-m\s+pip|pip(?:3(?:\.\d+)?)?)"
     r"\s+install\s+"
     r"(?:-r|--requirement)(?:\s+|=)[\"']?requirements-release\.txt[\"']?"
     r"(?=\s|$)"
@@ -1792,6 +1953,17 @@ def _separator_at(line: str, index: int, quote: str | None) -> int:
     return 1 if char in "()`" else 0
 
 
+def _array_assignment_group_starts(line: str, index: int) -> bool:
+    """Whether an opening parenthesis begins a shell array assignment."""
+    return (
+        line[index] == "("
+        and re.fullmatch(
+            r"\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]\s]+\])?\+?=",
+            line[:index],
+        ) is not None
+    )
+
+
 def _flush_segment(
     segments: list[tuple[str, str]], current: list[str], separator: str
 ) -> None:
@@ -1806,11 +1978,24 @@ def _scan_segment_line(
     quote: str | None,
     segments: list[tuple[str, str]],
     separator: str,
-) -> tuple[list[str], str | None, str]:
-    """Scan one line for separators; returns (current, quote, separator)."""
+    array_depth: int,
+) -> tuple[list[str], str | None, str, int]:
+    """Scan one line for separators and shell array-assignment groups."""
     index = 0
     while index < len(line):
-        if length := _separator_at(line, index, quote):
+        if array_depth == 0 and quote is None and _array_assignment_group_starts(
+            line, index
+        ):
+            current.append(line[index])
+            array_depth = 1
+            index += 1
+            continue
+        if array_depth and quote is None and line[index] in "()":
+            current.append(line[index])
+            array_depth += 1 if line[index] == "(" else -1
+            index += 1
+            continue
+        if array_depth == 0 and (length := _separator_at(line, index, quote)):
             _flush_segment(segments, current, separator)
             separator = line[index : index + length]
             current = []
@@ -1820,7 +2005,7 @@ def _scan_segment_line(
         current.append(line[index : index + consumed])
         quote = new_quote
         index += consumed
-    return current, quote, separator
+    return current, quote, separator, array_depth
 
 
 @functools.lru_cache(maxsize=64)
@@ -1832,10 +2017,11 @@ def _command_segments_with_separators_cached(
     current: list[str] = []
     quote: str | None = None
     separator = "\n"
+    array_depth = 0
     for line in script.splitlines():
-        current, quote, separator = _scan_segment_line(
-            line, current, quote, segments, separator)
-        if quote is None:
+        current, quote, separator, array_depth = _scan_segment_line(
+            line, current, quote, segments, separator, array_depth)
+        if quote is None and array_depth == 0:
             had_segment = bool("".join(current).strip())
             _flush_segment(segments, current, separator)
             if had_segment:
@@ -2750,6 +2936,8 @@ _EXECUTING_SHELL_TEMPLATE_PREFIXES = {
         ("-x",),
         ("-eu",),
         ("-eux",),
+        ("-euo", "pipefail"),
+        ("-euxo", "pipefail"),
         ("-e", "-o", "pipefail"),
         ("-eo", "pipefail"),
         ("--noprofile", "--norc", "-e", "-o", "pipefail"),
@@ -2763,15 +2951,24 @@ _EXECUTING_SHELL_TEMPLATE_PREFIXES = {
         ("-eu",),
         ("-eux",),
     }),
+    "zsh": frozenset({
+        (),
+        ("-e",),
+        ("-u",),
+        ("-x",),
+        ("-eu",),
+        ("-eux",),
+        ("-o", "pipefail"),
+    }),
 }
 
 
 def _step_runs_shell(step: dict) -> bool:
     """Whether a workflow step's ``run`` executes in a shell on every path.
 
-    A step the workflow gates with ``if`` may never run, and a step whose
-    ``shell`` is not bash/sh feeds ``run`` to another interpreter, so neither
-    can satisfy a provisioning check.  GitHub's default is
+    A step gated by ``if`` may never run. A step whose ``shell`` is not
+    bash/sh/zsh feeds ``run`` to another interpreter, so neither can satisfy
+    a provisioning check. GitHub's default is
     ``continue-on-error: false``; an explicit true or unparseable value means
     the step cannot prove successful provisioning.
     """
@@ -2820,13 +3017,19 @@ def _shell_template_executes_script(words: list[str]) -> bool:
     )
 
 
-def _workflow_jobs(workflow_content: str) -> dict | None:
-    """Parse a workflow and return its job mapping; None means unverifiable."""
+def _load_workflow_object(workflow_content: str) -> dict | None:
+    """Parse workflow YAML into a mapping, or fail closed on malformed input."""
     try:
         workflow = yaml.safe_load(workflow_content)
     except yaml.YAMLError:
         return None
-    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    return workflow if isinstance(workflow, dict) else None
+
+
+def _workflow_jobs(workflow_content: str) -> dict | None:
+    """Parse a workflow and return its job mapping; None means unverifiable."""
+    workflow = _load_workflow_object(workflow_content)
+    jobs = workflow.get("jobs") if workflow is not None else None
     return jobs if isinstance(jobs, dict) else None
 
 
@@ -2867,21 +3070,42 @@ def _is_shell_run_step(step: object) -> bool:
     )
 
 
+def _workflow_job_steps(job: object) -> list[dict] | None:
+    """Return structurally valid job steps, or fail closed on malformed YAML."""
+    if not isinstance(job, dict):
+        return None
+    steps = job.get("steps", [])
+    if not isinstance(steps, list):
+        return None
+    if any(not isinstance(step, dict) for step in steps):
+        return None
+    for step in steps:
+        has_run = "run" in step
+        has_uses = "uses" in step
+        if has_run == has_uses:
+            return None
+        if has_run and not isinstance(step["run"], str):
+            return None
+        if has_uses and not isinstance(step["uses"], str):
+            return None
+    return steps
+
+
 def _job_run_step_records(
     workflow_content: str, job_name: str
 ) -> list[dict] | None:
     """Return executable run steps with shell and scoped environment metadata."""
-    jobs = _workflow_jobs(workflow_content)
-    if jobs is None or job_name not in jobs:
+    workflow = _load_workflow_object(workflow_content)
+    jobs = workflow.get("jobs") if workflow is not None else None
+    if not isinstance(jobs, dict) or job_name not in jobs:
         return None
-    workflow = yaml.safe_load(workflow_content)
-    workflow_env = workflow.get("env") if isinstance(workflow, dict) else None
+    workflow_env = workflow.get("env") if workflow is not None else None
     job = jobs[job_name]
     if not isinstance(job, dict):
         return None
-    steps = job.get("steps")
-    if not isinstance(steps, list):
-        return []
+    steps = _workflow_job_steps(job)
+    if steps is None:
+        return None
     records: list[dict] = []
     for step in steps:
         if not _is_shell_run_step(step):
@@ -2905,38 +3129,138 @@ def _job_run_scripts(workflow_content: str, job_name: str) -> list[str] | None:
     return None if records is None else [record["run"] for record in records]
 
 
-def _all_job_run_scripts(workflow_content: str) -> list[str] | None:
-    """Return one run script per workflow step, or None when the
-    workflow cannot be parsed.
+def _local_reusable_workflow_path(uses: object) -> Path | None:
+    """Resolve one local reusable workflow within the repository root."""
+    if not isinstance(uses, str) or not uses.startswith("./"):
+        return None
+    relative = Path(uses)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+    root = PROJECT_ROOT.resolve()
+    try:
+        resolved = (root / relative).resolve(strict=True)
+        resolved.relative_to(root)
+        if (
+            not resolved.is_file()
+            or resolved.stat().st_size > 1_048_576
+            or resolved.suffix not in {".yml", ".yaml"}
+        ):
+            return None
+    except (OSError, ValueError):
+        return None
+    return resolved
 
-    Every run step feeds this scan -- including conditional and non-shell
-    steps: a raw toolchain install must fail the gate wherever it could ever
-    appear.
+
+def _ordinary_job_run_step_records(job: dict) -> list[dict] | None:
+    """Extract every shell run step from one ordinary workflow job."""
+    steps = _workflow_job_steps(job)
+    if steps is None:
+        return None
+    return [
+        {"run": step["run"], "shell": step.get("shell")}
+        for step in steps
+        if isinstance(step.get("run"), str)
+    ]
+
+
+def _reusable_workflow_run_step_records(
+    job: dict, depth: int, active_workflows: set[Path]
+) -> list[dict] | None:
+    """Load a local reusable workflow while rejecting cycles and ambiguity."""
+    reusable_path = _local_reusable_workflow_path(job.get("uses"))
+    if reusable_path is None or reusable_path in active_workflows or "steps" in job:
+        return None
+    try:
+        reusable_content = reusable_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    active_workflows.add(reusable_path)
+    try:
+        return _all_job_run_step_records(
+            reusable_content, depth + 1, active_workflows
+        )
+    finally:
+        active_workflows.remove(reusable_path)
+
+
+def _all_job_run_step_records(
+    workflow_content: str,
+    depth: int = 0,
+    active_workflows: set[Path] | None = None,
+) -> list[dict] | None:
+    """Return run text and shell metadata for every workflow step.
+
+    Keep every run step, including conditional steps; follow local reusable
+    workflows recursively. Unverifiable references and cycles fail closed.
     """
+    if depth > 16:
+        return None
     jobs = _workflow_jobs(workflow_content)
     if jobs is None:
         return None
-    scripts: list[str] = []
+    active = active_workflows if active_workflows is not None else set()
+    records: list[dict] = []
     for job in jobs.values():
         if not isinstance(job, dict):
-            continue
-        scripts.extend(
-            step["run"]
-            for step in job.get("steps") or []
-            if isinstance(step, dict) and isinstance(step.get("run"), str)
+            return None
+        job_records = (
+            _reusable_workflow_run_step_records(job, depth, active)
+            if "uses" in job
+            else _ordinary_job_run_step_records(job)
         )
-    return scripts
+        if job_records is None:
+            return None
+        records.extend(job_records)
+    return records
 
 
-def _quote_cleaned_command(text: str) -> str:
-    """The command with its first word's quotes removed.
+def _workflow_shell_uses_python(shell: object) -> bool:
+    """Whether a custom workflow shell executes its run block as Python."""
+    if not isinstance(shell, str):
+        return False
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return False
+    if not words:
+        return False
 
-    Bash resolves the unquoted name, so ``'rustup' toolchain install`` runs
-    the real ``rustup``.
-    """
-    first, _, rest = text.partition(" ")
-    cleaned = _resolve_heredoc_word(first)[0]
-    return cleaned + (f" {rest}" if rest else "")
+    command_index = 0
+    command = Path(words[0]).name
+    if command == "env":
+        command_index = _skip_env_prefix(words, 1)
+    elif command in {"uv", "poetry", "pipenv"} and len(words) > 1:
+        if words[1] != "run":
+            return False
+        command_index = 2
+    if command_index < len(words) and _PYTHON_COMMAND.fullmatch(
+        Path(words[command_index]).name
+    ):
+        return True
+
+    # Custom runner templates can wrap the interpreter in another launcher;
+    # recognizing a Python command before GitHub's script operand is
+    # conservative and keeps shell-source from being mistaken for Python.
+    return "{0}" in words and any(
+        _PYTHON_COMMAND.fullmatch(Path(word).name) is not None
+        for word in words[command_index + 1:]
+    )
+
+
+def _workflow_shell_name(shell: object) -> str:
+    """Resolve the shell executable for a recognized workflow template."""
+    if not isinstance(shell, str):
+        return "bash"
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return "bash"
+    if not words:
+        return "bash"
+    index = 0
+    if Path(words[0]).name == "env":
+        index = _skip_env_prefix(words, 1)
+    return Path(words[index]).name if index < len(words) else "bash"
 
 
 def _mentions_raw_install(text: str) -> bool:
@@ -2944,17 +3268,38 @@ def _mentions_raw_install(text: str) -> bool:
     return bool(re.search(r"(?:^|\s)rustup\s+toolchain\s+install(?:\s|$)", text))
 
 
+_XARGS_FLAGS = frozenset({
+    "-0", "--null", "-p", "--interactive", "-r", "--no-run-if-empty",
+    "-t", "--verbose", "-x", "--exit",
+})
+_XARGS_VALUE_OPTIONS = frozenset({
+    "-d", "--delimiter", "-E", "--eof", "-I", "-L", "--max-lines",
+    "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars",
+    "-a", "--arg-file",
+})
+_XARGS_OPTIONAL_VALUE_OPTIONS = frozenset({"-i", "--replace"})
+_XARGS_ATTACHED_VALUE_OPTIONS = frozenset(
+    {"-d", "-E", "-I", "-i", "-L", "-n", "-P", "-s", "-a"}
+)
+
+
+def _xargs_option_advance(word: str, index: int) -> int | None:
+    """Return the next argv index after one supported xargs option."""
+    if word in _XARGS_OPTIONAL_VALUE_OPTIONS:
+        return index + 1
+    if word in _XARGS_VALUE_OPTIONS:
+        return index + 2
+    if word.startswith("--") and "=" in word:
+        return index + 1
+    if len(word) > 2 and word[:2] in _XARGS_ATTACHED_VALUE_OPTIONS:
+        return index + 1
+    if word in _XARGS_FLAGS:
+        return index + 1
+    return None
+
+
 def _xargs_command_index(words: list[str]) -> int | None:
     """Return xargs' command operand after its supported static options."""
-    flags = {
-        "-0", "--null", "-p", "--interactive", "-r", "--no-run-if-empty",
-        "-t", "--verbose", "-x", "--exit",
-    }
-    valued = {
-        "-d", "--delimiter", "-E", "--eof", "-I",
-        "-L", "--max-lines", "-n", "--max-args", "-P",
-        "--max-procs", "-s", "--max-chars", "-a", "--arg-file",
-    }
     index = 1
     while index < len(words):
         word = words[index]
@@ -2962,21 +3307,8 @@ def _xargs_command_index(words: list[str]) -> int | None:
             return index + 1
         if not word.startswith("-") or word == "-":
             return index
-        if word in {"-i", "--replace"}:
-            # GNU xargs treats the replacement string on these aliases as
-            # optional; without an attached value the next word is command.
-            index += 1
-        elif word in valued:
-            index += 2
-        elif word.startswith("--") and "=" in word:
-            index += 1
-        elif len(word) > 2 and word[:2] in {
-            "-d", "-E", "-I", "-i", "-L", "-n", "-P", "-s", "-a",
-        }:
-            index += 1
-        elif word in flags:
-            index += 1
-        else:
+        index = _xargs_option_advance(word, index)
+        if index is None:
             return None
     return None
 
@@ -3165,7 +3497,7 @@ def _eval_payload_is_inert(
     payload: str, variables: dict[str, str | None] | None
 ) -> bool:
     """Whether every unresolved eval command is provably an inert builtin."""
-    if "$(" in payload or "`" in payload:
+    if "$" in payload or "`" in payload:
         return False
     for segment in _command_segments(payload):
         try:
@@ -3285,42 +3617,143 @@ def _update_static_shell_variables(
             variables[name] = _static_assignment_value(value)
 
 
+def _raw_install_in_loop_segments(
+    segments: list[str],
+    separators: list[str],
+    index: int,
+    depth: int,
+    variables: dict[str, str | None],
+) -> tuple[bool, int] | None:
+    """Inspect a split loop body and return its detection and resume position."""
+    if depth > 12:
+        remainder = " ".join(segments[index:])
+        found = _mentions_raw_install(remainder) or (
+            _deep_segment_has_opaque_launcher(remainder, variables)
+        )
+        return found, len(segments)
+    if index + 1 >= len(segments) or not _is_do_segment(segments[index + 1]):
+        return None
+    combined = segments[index] + " " + segments[index + 1]
+    if _raw_install_in_segment(combined, depth + 1, variables):
+        return True, index
+    do_segment = re.sub(r"^\s*do\b", "", segments[index + 1], count=1).strip()
+    body_segments = [do_segment] if do_segment else []
+    body_separators = ["\n"] if do_segment else []
+    index += 2
+    while index < len(segments) and not _is_done_segment(segments[index]):
+        body_segments.append(segments[index])
+        body_separators.append(separators[index])
+        index += 1
+    body_has_raw_install = _raw_install_in_segments(
+        body_segments, depth + 1, variables, body_separators
+    )
+    if index < len(segments):
+        index += 1
+    return body_has_raw_install, index
+
+
+def _raw_install_segment_step(
+    segments: list[str],
+    index: int,
+    depth: int,
+    variables: dict[str, str | None],
+    path_dependent: bool,
+    separators: list[str],
+) -> tuple[bool, int]:
+    """Analyze one shell segment and return whether it found a raw install."""
+    segment = segments[index]
+    if _is_loop_header(segment):
+        loop_result = _raw_install_in_loop_segments(
+            segments, separators, index, depth, variables
+        )
+        if loop_result is not None:
+            return loop_result
+    if _raw_install_in_segment(segment, depth + 1, variables):
+        return True, index
+    if not path_dependent:
+        _update_static_shell_variables(segment, variables)
+    return False, index + 1
+
+
+def _shell_test_segment_step(
+    segment: str,
+    index: int,
+    segments: list[str],
+    separators: list[str],
+) -> tuple[bool, int]:
+    """Skip a complete bracket test only across its logical-chain splits."""
+    opener = _shell_test_opener(segment)
+    if opener is None:
+        return False, index + 1
+    closer_index = _shell_test_closer_index(
+        segments, index, separators, opener
+    )
+    if closer_index is None:
+        return False, index + 1
+    return True, closer_index + 1
+
+
+def _shell_test_closer_index(
+    segments: list[str],
+    index: int,
+    separators: list[str],
+    closer: str,
+) -> int | None:
+    """Find a closing bracket word before a non-chain command boundary."""
+    for probe in range(index, len(segments)):
+        if probe > index and separators[probe] not in {"&&", "||"}:
+            return None
+        try:
+            lexer = shlex.shlex(segments[probe], posix=False)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            if closer in lexer:
+                return probe
+        except ValueError:
+            return None
+    return None
+
+
 def _raw_install_in_segments(
     segments: list[str],
     depth: int,
     variables: dict[str, str | None] | None = None,
+    separators: list[str] | None = None,
 ) -> bool:
     """Scan sequential shell segments with bounded literal-variable state."""
+    if separators is None:
+        separators = ["\n"] * len(segments)
+    elif len(separators) != len(segments):
+        return True
     local_variables = dict(variables or {})
     path_dependent = any(_segment_has_shell_control_flow(segment) for segment in segments)
     if path_dependent:
         local_variables.clear()
-
-    i = 0
-    while i < len(segments):
-        segment = segments[i]
-        # Handle multi-segment loop constructs: for/while/until ...; do BODY; done
-        # where ; splits the header from 'do BODY'.
-        if _is_loop_header(segment):
-            # Look ahead for 'do' segment
-            if i + 1 < len(segments) and _is_do_segment(segments[i + 1]):
-                # Combine header + do body for analysis
-                combined = segment + " " + segments[i + 1]
-                if _raw_install_in_segment(combined, depth + 1, local_variables):
-                    return True
-                # Skip the 'do' segment and look for 'done'
-                i += 2
-                while i < len(segments) and not _is_done_segment(segments[i]):
-                    i += 1
-                if i < len(segments):
-                    i += 1  # skip 'done'
-                continue
-        if _raw_install_in_segment(segment, depth + 1, local_variables):
+    index = 0
+    while index < len(segments):
+        segment = segments[index].strip()
+        skip_segment, next_index = _shell_test_segment_step(
+            segment, index, segments, separators
+        )
+        if skip_segment:
+            index = next_index
+            continue
+        found, index = _raw_install_segment_step(
+            segments, index, depth, local_variables, path_dependent, separators
+        )
+        if found:
             return True
-        if not path_dependent:
-            _update_static_shell_variables(segment, local_variables)
-        i += 1
     return False
+
+
+def _shell_test_opener(segment: str) -> str | None:
+    """Return the closing token for an executable-free shell test fragment."""
+    condition = re.sub(r"^(?:if|elif|while|until)\s+", "", segment)
+    if condition.startswith("[["):
+        return "]]"
+    if condition.startswith("[ ") or condition.startswith("[\t"):
+        return "]"
+    return None
 
 
 def _is_loop_header(segment: str) -> bool:
@@ -3341,13 +3774,167 @@ def _is_done_segment(segment: str) -> bool:
     return len(words) > 0 and words[0] == "done"
 
 
+def _command_substitution_quoted_step(
+    script: str,
+    index: int,
+    quote: str,
+    quote_stack: list[str | None],
+    depth: int,
+) -> tuple[int, str | None, int, bool]:
+    char = script[index]
+    if quote == "'":
+        return index + 1, None if char == "'" else quote, depth, False
+    if char == "\\" and index + 1 < len(script):
+        return index + 2, quote, depth, False
+    if script.startswith("$(", index):
+        quote_stack.append(quote)
+        return index + 2, None, depth + 1, False
+    return index + 1, None if char == '"' else quote, depth, False
+
+
+def _command_substitution_unquoted_step(
+    script: str,
+    index: int,
+    quote_stack: list[str | None],
+    depth: int,
+) -> tuple[int, str | None, int, bool]:
+    char = script[index]
+    if char == "\\" and index + 1 < len(script):
+        return index + 2, None, depth, False
+    if script.startswith("$(", index):
+        quote_stack.append(None)
+        return index + 2, None, depth + 1, False
+    if char == "'" or char == '"':
+        return index + 1, char, depth, False
+    if char == "(":
+        quote_stack.append(None)
+        return index + 1, None, depth + 1, False
+    if char != ")":
+        return index + 1, None, depth, False
+    if depth == 1:
+        return index + 1, None, depth, True
+    return index + 1, quote_stack.pop(), depth - 1, False
+
+
+def _command_substitution_scan_step(
+    script: str,
+    index: int,
+    quote: str | None,
+    quote_stack: list[str | None],
+    depth: int,
+) -> tuple[int, str | None, int, bool]:
+    if quote is None:
+        return _command_substitution_unquoted_step(
+            script, index, quote_stack, depth
+        )
+    return _command_substitution_quoted_step(
+        script, index, quote, quote_stack, depth
+    )
+
+
+def _command_substitution_end(script: str, start: int) -> int | None:
+    """Return the matching close for ``$(``, respecting nested shell quotes."""
+    if not script.startswith("$(", start):
+        return None
+    depth = 1
+    quote: str | None = None
+    quote_stack: list[str | None] = []
+    index = start + 2
+    while index < len(script):
+        index, quote, depth, done = _command_substitution_scan_step(
+            script, index, quote, quote_stack, depth
+        )
+        if done:
+            return index
+    return None
+
+
+def _dollar_is_escaped(script: str, index: int) -> bool:
+    """Whether an odd backslash run suppresses this shell dollar expansion."""
+    backslashes = 0
+    position = index - 1
+    while position >= 0 and script[position] == "\\":
+        backslashes += 1
+        position -= 1
+    return backslashes % 2 == 1
+
+
+def _mask_command_substitutions(
+    script: str,
+) -> tuple[str, list[str], bool]:
+    """Separate command-substitution bodies from their containing shell word."""
+    masked: list[str] = []
+    bodies: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(script):
+        if (
+            quote != "'"
+            and script.startswith("$(", index)
+            and not _dollar_is_escaped(script, index)
+        ):
+            end = _command_substitution_end(script, index)
+            if end is None:
+                return "".join(masked), bodies, True
+            bodies.append(script[index + 2 : end - 1])
+            masked.append("__shell_command_substitution__")
+            index = end
+            continue
+        next_quote, consumed = _scan_char(script, index, quote)
+        masked.append(script[index : index + consumed])
+        quote = next_quote
+        index += consumed
+    return "".join(masked), bodies, False
+
+
+def _shell_substitution_is_file_read(substitution: str) -> bool:
+    """Recognize Bash's command-free ``$(<file)`` read optimization."""
+    return re.fullmatch(
+        r"\s*<\s*(?:'[^']*'|\"(?:\\.|[^\"\\])*\"|[^\s;|&<>]+)\s*",
+        substitution,
+    ) is not None
+
+
 def _raw_install_in_script(
     script: str, depth: int = 0, variables: dict[str, str | None] | None = None
 ) -> bool:
-    """Scan a script's ordered commands with conservative variable flow."""
+    """Scan shell commands, nested substitutions and executable heredocs."""
     if _eval_has_dynamic_substitution(script):
         return True
-    return _raw_install_in_segments(_command_segments(script), depth, variables)
+    uncommented = _mask_verified_retry_forwarders(
+        _strip_shell_comments(script)
+    )
+    if _dynamic_heredoc_markers(uncommented):
+        return True
+    python_bodies, opaque_python = _python_stdin_heredoc_bodies(uncommented)
+    shell_bodies = _shell_stdin_heredoc_bodies(uncommented)
+    heredoc_free = _join_continuations(_strip_heredocs(uncommented))
+    masked, substitutions, opaque_substitution = _mask_command_substitutions(
+        heredoc_free
+    )
+    if opaque_python or opaque_substitution:
+        return True
+    command_pairs = _command_segments_with_separators(masked)
+    if _raw_install_in_segments(
+        [segment for segment, _separator in command_pairs],
+        depth,
+        variables,
+        [separator for _segment, separator in command_pairs],
+    ):
+        return True
+    if any(
+        _raw_install_in_script(body, depth + 1, variables)
+        for body in substitutions
+        if not _shell_substitution_is_file_read(body)
+    ) or any(
+        _raw_install_in_script(body, depth + 1, variables)
+        for body in shell_bodies
+    ):
+        return True
+    return any(
+        _python_inline_raw_install(body, depth + 1, variables)
+        for body in python_bodies
+    )
 
 
 def _raw_install_from_dispatcher(
@@ -3478,27 +4065,448 @@ def _python_call_name(
     return ".".join((prefix, *reversed(attributes)))
 
 
+def _python_static_sequence_value(
+    node: ast.List | ast.Tuple,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> object | None:
+    """Resolve a list or tuple only when all its elements are static."""
+    parts = [
+        _python_static_expression_value(
+            item, values, module_aliases, imported_names
+        )
+        for item in node.elts
+    ]
+    return parts if isinstance(node, ast.List) else tuple(parts)
+
+
+def _is_approved_executable_resolver(target: str | None) -> bool:
+    """Recognize helpers that return a named allowlisted binary."""
+    return target == "resolve_approved_executable" or (
+        target is not None and target.endswith(".resolve_approved_executable")
+    )
+
+
+def _is_rustup_shim_resolver(target: str | None) -> bool:
+    """Recognize the helper that returns only the cargo/rustc shims."""
+    return target == "resolve_rustup_tool_shim" or (
+        target is not None and target.endswith(".resolve_rustup_tool_shim")
+    )
+
+
+def _python_resolved_executable_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve known toolchain helper calls to their executable name."""
+    if not isinstance(node, ast.Call):
+        return None
+    target = _python_call_name(node.func, module_aliases, imported_names)
+    if target == "_resolve_fuzz_cargo" and not node.args:
+        return "cargo"
+    if target == "_validated_nginx_binary" and not node.args:
+        return "nginx"
+    if target == "str" and len(node.args) == 1:
+        value = _python_static_expression_value(
+            node.args[0], values, module_aliases, imported_names
+        )
+        return str(value) if value is not None else None
+    if not node.args:
+        return None
+    value = _python_static_expression_value(
+        node.args[0], values, module_aliases, imported_names
+    )
+    if not isinstance(value, str):
+        return None
+    if _is_approved_executable_resolver(target):
+        return value
+    if _is_rustup_shim_resolver(target) and value in {"cargo", "rustc"}:
+        return value
+    return None
+
+
+def _python_static_fstring_value(
+    node: ast.JoinedStr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve f-strings whose formatted values are statically known."""
+    parts: list[str] = []
+    for value_node in node.values:
+        if isinstance(value_node, ast.Constant) and isinstance(
+            value_node.value, str
+        ):
+            parts.append(value_node.value)
+        elif isinstance(value_node, ast.FormattedValue):
+            value = _python_static_expression_value(
+                value_node.value, values, module_aliases, imported_names
+            )
+            if value is None:
+                return None
+            parts.append(str(value))
+        else:
+            return None
+    return "".join(parts)
+
+
+def _python_path_root_value(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name) and node.id in {"REPO_ROOT", "PROJECT_ROOT"}:
+        return "."
+    return None
+
+
+def _python_path_parent_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    parent = node.value if isinstance(node, ast.Subscript) else node
+    if isinstance(parent, ast.Attribute) and parent.attr == "parents":
+        return _python_path_expression_value(
+            parent.value, values, module_aliases, imported_names
+        )
+    return None
+
+
+def _python_path_call_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    if not isinstance(node, ast.Call):
+        return None
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve":
+        return _python_path_expression_value(
+            node.func.value, values, module_aliases, imported_names
+        )
+    target = _python_call_name(node.func, module_aliases, imported_names)
+    if target not in {"Path", "pathlib.Path"} or not node.args:
+        return None
+    if isinstance(node.args[0], ast.Name) and node.args[0].id == "__file__":
+        return "."
+    value = _python_static_expression_value(
+        node.args[0], values, module_aliases, imported_names
+    )
+    return value if isinstance(value, str) else None
+
+
+def _python_path_join_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div):
+        return None
+    left = _python_static_expression_value(
+        node.left, values, module_aliases, imported_names
+    )
+    right = _python_static_expression_value(
+        node.right, values, module_aliases, imported_names
+    )
+    if isinstance(left, str) and isinstance(right, str):
+        return str(Path(left) / right)
+    return None
+
+
+def _python_path_expression_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve simple pathlib expressions under the repository root."""
+    return (
+        _python_path_root_value(node)
+        or _python_path_parent_value(
+            node, values, module_aliases, imported_names
+        )
+        or _python_path_call_value(node, values, module_aliases, imported_names)
+        or _python_path_join_value(node, values, module_aliases, imported_names)
+    )
+
+
+def _python_static_expression_value(
+    node: ast.expr,
+    values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> object | None:
+    """Resolve literal values and names assigned one unambiguous value."""
+    path_value = _python_path_expression_value(
+        node, values, module_aliases, imported_names
+    )
+    if path_value is not None:
+        return path_value
+    if isinstance(node, ast.Name):
+        return values.get(node.id)
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return _python_static_sequence_value(
+            node, values, module_aliases, imported_names
+        )
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == "executable"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "sys"
+    ):
+        return "python3"
+    if isinstance(node, ast.JoinedStr):
+        return _python_static_fstring_value(
+            node, values, module_aliases, imported_names
+        )
+    executable = _python_resolved_executable_value(
+        node, values, module_aliases, imported_names
+    )
+    if executable is not None:
+        return executable
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, TypeError):
+        return None
+
+
+def _python_assignment_parts(
+    node: ast.AST,
+) -> tuple[list[ast.expr], ast.expr | None]:
+    """Return simple assignment targets and their right-hand expression."""
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, ast.AnnAssign):
+        return [node.target], node.value
+    return [], None
+
+
+def _record_python_static_assignment(
+    name: str,
+    value: object | None,
+    values: dict[str, object],
+    assigned: set[str],
+) -> None:
+    """Keep a name only while every assignment has the same literal value."""
+    if name in assigned and values.get(name) != value:
+        values.pop(name, None)
+    elif value is not None:
+        values[name] = value
+    assigned.add(name)
+
+
+def _python_scope_maps(
+    tree: ast.AST,
+) -> tuple[dict[int, int | None], dict[int, str]]:
+    """Associate AST nodes with their enclosing function scope."""
+    node_scopes: dict[int, int | None] = {}
+    scope_names: dict[int, str] = {}
+
+    def visit(node: ast.AST, scope: int | None) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            node_scopes[id(node)] = scope
+            child_scope = id(node)
+            scope_names[child_scope] = node.name
+            for expression in (
+                *node.decorator_list,
+                *node.args.defaults,
+                *(value for value in node.args.kw_defaults if value is not None),
+            ):
+                visit(expression, scope)
+            for statement in node.body:
+                visit(statement, child_scope)
+            return
+        if isinstance(node, ast.Lambda):
+            node_scopes[id(node)] = scope
+            child_scope = id(node)
+            scope_names[child_scope] = "<lambda>"
+            visit(node.body, child_scope)
+            return
+        node_scopes[id(node)] = scope
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(tree, None)
+    return node_scopes, scope_names
+
+
+def _python_static_assignment_values(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    node_scopes: dict[int, int | None],
+    scope: int | None,
+    initial: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Collect unambiguous assignments from one Python lexical scope."""
+    values = dict(initial or {})
+    assigned: set[str] = set()
+    nodes = sorted(
+        ast.walk(tree), key=lambda item: getattr(item, "lineno", 0)
+    )
+    for node in nodes:
+        if node_scopes.get(id(node)) != scope:
+            continue
+        targets, expression = _python_assignment_parts(node)
+        if expression is None:
+            continue
+        value = _python_static_expression_value(
+            expression, values, module_aliases, imported_names
+        )
+        for target in targets:
+            if isinstance(target, ast.Name):
+                _record_python_static_assignment(
+                    target.id, value, values, assigned
+                )
+    return values
+
+
+def _python_release_gate_bash_launcher(
+    call: ast.Call, argv: list[object], caller_name: str | None
+) -> bool:
+    """Recognize the fixed local-gate runner's allowlisted script dispatch."""
+    if caller_name != "_run_local_gate" or len(argv) != 2 or argv[0] != "bash":
+        return False
+    payload = call.args[0] if call.args else None
+    return (
+        isinstance(payload, ast.List)
+        and len(payload.elts) == 2
+        and isinstance(payload.elts[1], ast.Call)
+        and isinstance(payload.elts[1].func, ast.Name)
+        and payload.elts[1].func.id == "str"
+        and len(payload.elts[1].args) == 1
+        and isinstance(payload.elts[1].args[0], ast.Name)
+        and payload.elts[1].args[0].id == "script_path"
+    )
+
+
+def _python_interpreter_argv_is_raw(
+    payload: list[object] | tuple[object, ...],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Inspect a known Python source operand despite later dynamic args."""
+    known_prefix: list[str] = []
+    for part in payload:
+        if not isinstance(part, str):
+            break
+        known_prefix.append(part)
+    if not known_prefix:
+        return True
+    return _raw_install_from_python_command(
+        known_prefix, depth + 1, variables
+    )
+
+
+def _python_rustup_argv_is_raw(
+    payload: list[object] | tuple[object, ...],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    if any(not isinstance(part, str) for part in payload):
+        return True
+    argv = [part for part in payload if isinstance(part, str)]
+    return _raw_install_from_words(argv, depth + 1, variables)
+
+
+def _python_shell_argv_is_raw(
+    call: ast.Call,
+    payload: list[object] | tuple[object, ...],
+    depth: int,
+    variables: dict[str, str | None] | None,
+    caller_name: str | None,
+) -> bool:
+    if "-c" in payload:
+        index = payload.index("-c")
+        if index + 1 >= len(payload):
+            return True
+        source = payload[index + 1]
+        if not isinstance(source, str):
+            return True
+        return _raw_install_in_script(source, depth + 1, variables)
+    if _python_release_gate_bash_launcher(call, list(payload), caller_name):
+        return False
+    if len(payload) < 2 or not isinstance(payload[1], str):
+        return True
+    return _raw_install_from_shell_script_file(
+        payload[1], depth + 1, variables
+    )
+
+
+def _python_subprocess_argv_is_raw(
+    call: ast.Call,
+    payload: object,
+    depth: int,
+    variables: dict[str, str | None] | None,
+    caller_name: str | None,
+) -> bool:
+    """Check process argv without confusing data arguments with executables."""
+    if not isinstance(payload, (list, tuple)) or not payload:
+        return True
+    executable = payload[0]
+    if not isinstance(executable, str):
+        return True
+    command = Path(executable).name
+    if command == "rustup":
+        return _python_rustup_argv_is_raw(payload, depth, variables)
+    if command in {"bash", "sh", "dash", "zsh", "ksh"}:
+        return _python_shell_argv_is_raw(
+            call, payload, depth, variables, caller_name
+        )
+    if command in {"python", "python2", "python3"} or command.startswith(
+        "python3."
+    ):
+        return _python_interpreter_argv_is_raw(payload, depth, variables)
+    if command in {
+        "command", "exec", "env", "nice", "nohup", "retry", "setsid",
+        "sudo", "stdbuf", "time", "timeout", "xargs",
+    }:
+        if not all(isinstance(part, str) for part in payload):
+            return True
+        return _raw_install_from_words(list(payload), depth + 1, variables)
+    if not all(isinstance(part, str) for part in payload):
+        return False
+    return _raw_install_from_words(list(payload), depth + 1, variables)
+
+
 def _python_launcher_payload_is_raw(
     call: ast.Call,
     target: str,
     depth: int,
     variables: dict[str, str | None] | None,
+    static_values: dict[str, object],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    caller_name: str | None,
 ) -> bool:
-    """Inspect a statically known process payload or reject an opaque one."""
+    """Inspect a process payload with scope-aware executable values."""
     if not call.args:
         return True
     if target == "asyncio.create_subprocess_exec":
-        argv = _literal_python_argv(call.args)
-        if argv is None:
-            return True
-        return _raw_install_from_words(argv, depth + 1, variables)
-    try:
-        payload = ast.literal_eval(call.args[0])
-    except (ValueError, TypeError):
-        return True
-    return _python_payload_is_raw(
-        payload, _python_shell_mode(target, call), depth, variables
+        payload = [
+            _python_static_expression_value(
+                argument, static_values, module_aliases, imported_names
+            )
+            for argument in call.args
+        ]
+        return _python_subprocess_argv_is_raw(
+            call, payload, depth, variables, caller_name
+        )
+    payload = _python_static_expression_value(
+        call.args[0], static_values, module_aliases, imported_names
     )
+    shell_mode = _python_shell_mode(target, call)
+    if shell_mode:
+        return _python_payload_is_raw(payload, True, depth, variables)
+    if payload is None:
+        return True
+    if isinstance(payload, (list, tuple)):
+        return _python_subprocess_argv_is_raw(
+            call, payload, depth, variables, caller_name
+        )
+    return _python_payload_is_raw(payload, False, depth, variables)
 
 
 def _literal_python_argv(arguments: list[ast.expr]) -> list[str] | None:
@@ -3608,13 +4616,170 @@ def _python_call_is_raw(
     imported_names: dict[str, str],
     depth: int,
     variables: dict[str, str | None] | None,
+    static_values: dict[str, object],
+    caller_name: str | None,
 ) -> bool:
     target = _python_call_name(call.func, module_aliases, imported_names)
     if target in {"exec", "eval"}:
         return _python_eval_call_is_raw(call, depth, variables)
     if target in _PYTHON_SHELL_LAUNCHERS | _PYTHON_ARGV_LAUNCHERS:
-        return _python_launcher_payload_is_raw(call, target, depth, variables)
+        return _python_launcher_payload_is_raw(
+            call,
+            target,
+            depth,
+            variables,
+            static_values,
+            module_aliases,
+            imported_names,
+            caller_name,
+        )
     return target is not None and re.fullmatch(r"os\.(?:exec|spawn).*", target) is not None
+
+
+def _python_command_wrapper_spec(
+    wrapper: str,
+) -> tuple[int, set[str]] | None:
+    """Return the payload index and executable allowlist for a wrapper."""
+    wrappers = {
+        "_run_toolchain_version_command": (0, {"cargo", "rustc"}),
+        "_run_helm": (2, {"helm", "kubectl"}),
+    }
+    return wrappers.get(wrapper)
+
+
+def _python_wrapper_call_executable(
+    call: ast.Call,
+    argument_index: int,
+    scope: int | None,
+    values_by_scope: dict[int | None, dict[str, object]],
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve the first executable from a wrapped command-list argument."""
+    if len(call.args) <= argument_index:
+        return None
+    payload = call.args[argument_index]
+    if not isinstance(payload, (ast.List, ast.Tuple)) or not payload.elts:
+        return None
+    first = payload.elts[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    values = values_by_scope.get(scope, values_by_scope[None])
+    value = _python_static_expression_value(
+        first, values, module_aliases, imported_names
+    )
+    if isinstance(value, str):
+        return value
+    return first.id if isinstance(first, ast.Name) else None
+
+
+def _python_command_wrapper_callers_are_safe(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    node_scopes: dict[int, int | None],
+    values_by_scope: dict[int | None, dict[str, object]],
+    wrapper: str,
+) -> bool:
+    """Verify every caller passes a statically approved executable."""
+    spec = _python_command_wrapper_spec(wrapper)
+    if spec is None:
+        return False
+    argument_index, allowed = spec
+    call_sites = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _python_call_name(node.func, module_aliases, imported_names) == wrapper
+    ]
+    if not call_sites:
+        return False
+    return all(
+        (executable := _python_wrapper_call_executable(
+            call,
+            argument_index,
+            node_scopes.get(id(call)),
+            values_by_scope,
+            module_aliases,
+            imported_names,
+        )) is not None
+        and Path(executable).name in allowed
+        for call in call_sites
+    )
+
+
+def _python_forwarded_argv_name(node: ast.expr) -> str | None:
+    """Name a command vector forwarded unchanged into a runner wrapper."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "list"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Name)
+    ):
+        return node.args[0].id
+    return None
+
+
+def _python_identity_spawn_call_is_safe(
+    call: ast.Call,
+    node_scopes: dict[int, int | None],
+    scope_names: dict[int, str],
+) -> bool:
+    scope = node_scopes.get(id(call))
+    return (
+        scope is not None
+        and scope_names.get(scope) == "_run_toolchain_version_command"
+        and bool(call.args)
+        and _python_forwarded_argv_name(call.args[0]) == "command"
+    )
+
+
+def _python_identity_spawn_callers_are_safe(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+    node_scopes: dict[int, int | None],
+    scope_names: dict[int, str],
+) -> bool:
+    """Require the Popen helper to forward only the checked version argv."""
+    call_sites = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _python_call_name(node.func, module_aliases, imported_names)
+        == "_start_toolchain_identity_process"
+    ]
+    return bool(call_sites) and all(
+        _python_identity_spawn_call_is_safe(call, node_scopes, scope_names)
+        for call in call_sites
+    )
+
+
+def _python_is_safe_forwarded_wrapper_call(
+    call: ast.Call,
+    function_name: str | None,
+    target: str | None,
+    safe_wrappers: dict[str, bool],
+) -> bool:
+    """Whether a process call forwards an approved command-vector argument."""
+    if function_name not in safe_wrappers or not safe_wrappers[function_name]:
+        return False
+    expected_target = (
+        "subprocess.Popen"
+        if function_name == "_start_toolchain_identity_process"
+        else "subprocess.run"
+    )
+    if target != expected_target or not call.args:
+        return False
+    parameter = {
+        "_run_toolchain_version_command": "command",
+        "_run_helm": "args",
+        "_start_toolchain_identity_process": "command",
+    }.get(function_name)
+    return parameter is not None and (
+        _python_forwarded_argv_name(call.args[0]) == parameter
+    )
 
 
 def _python_calls_include_raw_install(
@@ -3623,12 +4788,164 @@ def _python_calls_include_raw_install(
     imported_names: dict[str, str],
     depth: int,
     variables: dict[str, str | None] | None,
+    static_values: dict[int | None, dict[str, object]],
+    node_scopes: dict[int, int | None],
+    scope_names: dict[int, str],
 ) -> bool:
+    """Inspect launcher calls using values local to their function scopes."""
+    safe_toolchain_wrapper = _python_command_wrapper_callers_are_safe(
+        tree, module_aliases, imported_names, node_scopes, static_values,
+        "_run_toolchain_version_command",
+    )
+    safe_wrappers = {
+        "_run_toolchain_version_command": safe_toolchain_wrapper,
+        "_run_helm": _python_command_wrapper_callers_are_safe(
+            tree, module_aliases, imported_names, node_scopes, static_values,
+            "_run_helm",
+        ),
+        "_start_toolchain_identity_process": (
+            safe_toolchain_wrapper
+            and _python_identity_spawn_callers_are_safe(
+                tree, module_aliases, imported_names, node_scopes, scope_names
+            )
+        ),
+    }
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _python_call_is_raw(
-            node, module_aliases, imported_names, depth, variables
+        if not isinstance(node, ast.Call):
+            continue
+        scope = node_scopes.get(id(node))
+        function_name = scope_names.get(scope) if scope is not None else None
+        target = _python_call_name(node.func, module_aliases, imported_names)
+        if _python_is_safe_forwarded_wrapper_call(
+            node, function_name, target, safe_wrappers
+        ):
+            continue
+        values = static_values.get(scope, static_values[None])
+        if _python_call_is_raw(
+            node,
+            module_aliases,
+            imported_names,
+            depth,
+            variables,
+            values,
+            function_name,
         ):
             return True
+    return False
+
+
+def _python_relative_import_name(
+    node: ast.ImportFrom, source_path: Path | None, root: Path
+) -> str | None:
+    """Resolve one relative import; None means its package is unknown."""
+    if source_path is None:
+        return None
+    try:
+        parts = source_path.relative_to(root).with_suffix("").parts
+    except ValueError:
+        return None
+    package_parts = parts[:-1]
+    remove = node.level - 1
+    if node.level > len(package_parts):
+        return None
+    package = package_parts[:len(package_parts) - remove]
+    module_parts = node.module.split(".") if node.module else []
+    return ".".join((*package, *module_parts))
+
+
+def _python_import_node_names(
+    node: ast.AST, source_path: Path | None, root: Path
+) -> set[str] | None:
+    """Return statically named modules for one import node."""
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if not isinstance(node, ast.ImportFrom):
+        return set()
+    module_name = node.module or ""
+    if node.level:
+        module_name = _python_relative_import_name(node, source_path, root)
+        if module_name is None:
+            return None
+    if not module_name:
+        return set()
+    imported = {
+        f"{module_name}.{alias.name}"
+        for alias in node.names
+        if alias.name != "*"
+    }
+    imported.add(module_name)
+    return imported
+
+
+def _python_imported_module_names(
+    tree: ast.AST, source_path: Path | None, root: Path
+) -> set[str] | None:
+    """Collect statically named modules, resolving package-relative imports."""
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        imported = _python_import_node_names(node, source_path, root)
+        if imported is None:
+            return None
+        modules.update(imported)
+    return modules
+
+
+def _python_local_module_sources(
+    module_name: str, root: Path, execute_as_module: bool = False
+) -> tuple[list[Path], bool]:
+    """Resolve repository-local module files without importing their code."""
+    parts = module_name.split(".")
+    if not parts or not all(part.isidentifier() for part in parts):
+        return [], True
+    candidates = [
+        root.joinpath(*parts[:index], "__init__.py")
+        for index in range(1, len(parts))
+    ]
+    module_path = root.joinpath(*parts)
+    candidates.extend((module_path.with_suffix(".py"), module_path / "__init__.py"))
+    if execute_as_module:
+        candidates.append(module_path / "__main__.py")
+
+    sources: list[Path] = []
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(root)
+            if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
+                return [], True
+        except (OSError, ValueError):
+            return [], True
+        if resolved not in sources:
+            sources.append(resolved)
+    return sources, False
+
+
+def _python_imports_include_raw_install(
+    tree: ast.AST,
+    source_path: Path | None,
+    depth: int,
+    variables: dict[str, str | None] | None,
+    visited: set[Path] | None,
+) -> bool:
+    """Scan statically imported project modules under the repository root."""
+    root = PROJECT_ROOT.resolve()
+    if source_path is None:
+        source_path = root / "__inline__.py"
+    modules = _python_imported_module_names(tree, source_path, root)
+    if modules is None:
+        return True
+    seen = visited if visited is not None else set()
+    for module_name in sorted(modules):
+        sources, invalid = _python_local_module_sources(module_name, root)
+        if invalid:
+            return True
+        for source in sources:
+            if _python_script_file_is_raw(
+                str(source.relative_to(root)), depth, variables, seen
+            ):
+                return True
     return False
 
 
@@ -3636,8 +4953,10 @@ def _python_inline_raw_install(
     payload: str,
     depth: int,
     variables: dict[str, str | None] | None,
+    source_path: Path | None = None,
+    visited: set[Path] | None = None,
 ) -> bool:
-    """Find raw installs launched by literal Python ``-c`` source."""
+    """Find raw installs launched by literal Python source or scripts."""
     if depth > 12:
         return True
     try:
@@ -3646,8 +4965,33 @@ def _python_inline_raw_install(
         return _mentions_raw_install(payload)
 
     module_aliases, imported_names = _python_import_bindings(tree)
-    return _python_calls_include_raw_install(
-        tree, module_aliases, imported_names, depth, variables
+    node_scopes, scope_names = _python_scope_maps(tree)
+    global_values = _python_static_assignment_values(
+        tree, module_aliases, imported_names, node_scopes, None
+    )
+    static_values: dict[int | None, dict[str, object]] = {None: global_values}
+    for scope in set(node_scopes.values()) - {None}:
+        static_values[scope] = _python_static_assignment_values(
+            tree,
+            module_aliases,
+            imported_names,
+            node_scopes,
+            scope,
+            global_values,
+        )
+    if _python_calls_include_raw_install(
+        tree,
+        module_aliases,
+        imported_names,
+        depth,
+        variables,
+        static_values,
+        node_scopes,
+        scope_names,
+    ):
+        return True
+    return _python_imports_include_raw_install(
+        tree, source_path, depth, variables, visited
     )
 
 
@@ -3664,7 +5008,8 @@ def _python_short_flag_step(
         source_index = index + 1 if index + 1 < len(words) else None
         return "inline", source_index, 1
     if flag == "m":
-        return "script", None, 1
+        source_index = index + 1 if index + 1 < len(words) else None
+        return "module", source_index, 1
     if flag in {"W", "X"}:
         has_attached_value = offset + 1 < len(short_options)
         return None, None, 1 if has_attached_value else 2
@@ -3707,7 +5052,7 @@ def _python_command_option(
     if option == "-":
         return "stdin", index, 0
     if not option.startswith("-"):
-        return "script", None, 0
+        return "script", index, 0
     if option.startswith("--"):
         return _python_long_option_step(option, words, index)
     return _python_short_option_step(option, words, index)
@@ -3740,14 +5085,168 @@ def _python_stdin_source_is_raw(
     return not has_heredoc
 
 
+def _python_script_path(words: list[str], source_index: str | int) -> str | None:
+    """Return the selected Python script path from parsed argv."""
+    if isinstance(source_index, str):
+        return source_index
+    if source_index < len(words):
+        return words[source_index]
+    return None
+
+
+_RAW_TOOLCHAIN_INSTALL_MARKER_RE = re.compile(
+    r"\brustup(?:-init)?\b|\btoolchain\s+install\b", re.IGNORECASE
+)
+
+
+def _shell_script_mentions_toolchain_install(content: str) -> bool:
+    """Select shell files whose contents can affect Rust toolchain install."""
+    return _RAW_TOOLCHAIN_INSTALL_MARKER_RE.search(content) is not None
+
+
+def _raw_install_from_shell_script_file(
+    script_path: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Scan a bounded repository-local shell script; reject unknown paths."""
+    if depth > 12 or script_path.startswith("-"):
+        return True
+    root = PROJECT_ROOT.resolve()
+    unresolved_command_shaped_name = (
+        not Path(script_path).is_absolute()
+        and len(Path(script_path).parts) == 1
+        and _mentions_raw_install(script_path)
+        and not (root / script_path).exists()
+        and shutil.which(script_path) is None
+    )
+    if unresolved_command_shaped_name:
+        return False
+    try:
+        resolved = (root / script_path).resolve(strict=True)
+        resolved.relative_to(root)
+        if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
+            return True
+        content = resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError):
+        return True
+    if not _shell_script_mentions_toolchain_install(content):
+        return False
+    return _raw_install_in_script(content, depth + 1, variables)
+
+
+def _python_script_file_is_raw(
+    script_path: str | None,
+    depth: int,
+    variables: dict[str, str | None] | None,
+    visited: set[Path] | None = None,
+) -> bool:
+    """Analyze one bounded repo-local script; unknown paths fail closed."""
+    if script_path is None or script_path.startswith("-"):
+        return True
+    script_path = _repo_rooted_script_operand(script_path) or script_path
+    try:
+        root = PROJECT_ROOT.resolve()
+        resolved = (root / script_path).resolve(strict=True)
+        resolved.relative_to(root)
+        if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
+            return True
+        content = resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError):
+        return True
+    seen = visited if visited is not None else set()
+    if resolved in seen:
+        return False
+    if len(seen) >= 128:
+        return True
+    seen.add(resolved)
+    return _python_inline_raw_install(
+        content, depth + 1, variables, resolved, seen
+    )
+
+
+def _python_module_file_is_raw(
+    module_name: str | None,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Inspect repository-local Python module and package entry points."""
+    if module_name is None:
+        return True
+    root = PROJECT_ROOT.resolve()
+    sources, invalid = _python_local_module_sources(
+        module_name, root, execute_as_module=True
+    )
+    if invalid:
+        return True
+    visited: set[Path] = set()
+    for source in sources:
+        if _python_script_file_is_raw(
+            str(source.relative_to(root)), depth, variables, visited
+        ):
+            return True
+    return False
+
+
+def _python_command_here_string(
+    words: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> tuple[list[str], bool | None]:
+    """Analyze Python stdin source while removing the shell redirect tokens."""
+    here_string = _shell_here_string_parts(words[1:])
+    if here_string is None:
+        return words, None
+    index, source, consumed = here_string
+    args = words[1:]
+    cleaned = words[:1] + args[:index] + args[index + consumed:]
+    mode, _ = _python_command_source(cleaned)
+    if mode not in {"stdin", "interactive"}:
+        return cleaned, None
+    if "$" in source or "`" in source:
+        return cleaned, True
+    return cleaned, _python_inline_raw_install(source, depth + 1, variables)
+
+
+def _raw_install_from_python_module(
+    words: list[str],
+    source_index: int | str | None,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Analyze a Python module launch, including ``runpy`` script targets."""
+    module_name = (
+        _python_script_path(words, source_index)
+        if source_index is not None
+        else None
+    )
+    if module_name != "runpy":
+        return _python_module_file_is_raw(module_name, depth, variables)
+    target_index = (
+        source_index + 1
+        if isinstance(source_index, int)
+        else len(words)
+    )
+    if target_index >= len(words) or words[target_index].startswith("-"):
+        return True
+    return _python_module_file_is_raw(
+        words[target_index], depth, variables
+    )
+
+
 def _raw_install_from_python_command(
     words: list[str],
     depth: int,
     variables: dict[str, str | None] | None,
 ) -> bool:
-    """Analyze Python ``-c`` source without treating inert strings as commands."""
+    """Analyze inline and file-based Python sources for raw toolchain installs."""
     if not _PYTHON_COMMAND.fullmatch(Path(words[0]).name):
         return False
+    words, here_string_issue = _python_command_here_string(
+        words, depth, variables
+    )
+    if here_string_issue is not None:
+        return here_string_issue
     mode, source_index = _python_command_source(words)
     if mode == "inline":
         if isinstance(source_index, str):
@@ -3759,6 +5258,15 @@ def _raw_install_from_python_command(
         return _python_inline_raw_install(source, depth + 1, variables)
     if mode in {"stdin", "interactive"}:
         return _python_stdin_source_is_raw(words, source_index)
+    if mode == "script":
+        if source_index is None:
+            return False
+        script_path = _python_script_path(words, source_index)
+        return _python_script_file_is_raw(script_path, depth, variables)
+    if mode == "module":
+        return _raw_install_from_python_module(
+            words, source_index, depth, variables
+        )
     return False
 
 
@@ -3817,6 +5325,83 @@ def _python_stdin_heredoc_bodies(script: str) -> tuple[list[str], bool]:
     return bodies, False
 
 
+def _shell_script_operand(shell: str, arguments: list[str]) -> str | None:
+    """Return a file operand, excluding ``-c`` and stdin source modes."""
+    position = 0
+    while position < len(arguments):
+        if arguments[position] == "--":
+            return arguments[position + 1] if position + 1 < len(arguments) else None
+        decision, next_position = _shell_argument_step(
+            shell, arguments, position
+        )
+        if decision is True:
+            return None
+        if decision is False:
+            argument = _resolve_heredoc_word(arguments[position])[0]
+            return None if argument.startswith(("-", "+")) else argument
+        position = next_position
+    return None
+
+
+def _dequote_shell_argv(words: list[str]) -> str:
+    """Render parsed argv without shell quote syntax for allowlist matching."""
+    rendered = shlex.join(words)
+    return re.sub(r"'([^']*)'", lambda match: match.group(1), rendered)
+
+
+def _is_verified_installer_command(command: str) -> bool:
+    """Match the approved installer after shell tokenization."""
+    try:
+        words = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    return bool(words) and _VERIFIED_INSTALLER_RE.match(
+        _dequote_shell_argv(words)
+    ) is not None
+
+
+def _raw_install_from_shell_input(
+    shell: str,
+    arguments: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool | None:
+    """Scan a static shell stdin body or file operand when one is selected."""
+    if shell not in _SHELL_COMMANDS_THAT_READ_STDIN:
+        return None
+    if here_string := _shell_here_string_parts(arguments):
+        if _shell_arguments_read_stdin_script(shell, arguments):
+            return _raw_install_in_script(here_string[1], depth + 1, variables)
+    if script_path := _shell_script_operand(shell, arguments):
+        return _raw_install_from_shell_script_file(
+            script_path, depth + 1, variables
+        )
+    return None
+
+
+def _raw_install_from_stripped_shell_wrapper(
+    shell: str,
+    arguments: list[str],
+    serialized: str,
+    stripped: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Handle opaque stdin modes and recursively scan stripped wrapper text."""
+    if stripped != serialized:
+        return (
+            False
+            if _is_verified_installer_command(stripped)
+            else _raw_install_in_script(stripped, depth + 1, variables)
+        )
+    if shell in _SHELL_COMMANDS_THAT_READ_STDIN and not any(
+        _is_shell_heredoc_redirect(_resolve_heredoc_word(word)[0])
+        for word in arguments
+    ):
+        return _shell_arguments_read_stdin_script(shell, arguments)
+    return False
+
+
 def _raw_install_from_shell_wrapper(
     words: list[str], depth: int, variables: dict[str, str | None] | None
 ) -> bool:
@@ -3825,17 +5410,21 @@ def _raw_install_from_shell_wrapper(
     shell = Path(words[0]).name
     if shell not in wrappers:
         return False
+    arguments = words[1:]
     serialized = shlex.join(words)
     stripped = _strip_provision_wrappers(serialized)
-    if stripped == serialized:
-        has_static_heredoc = any(
-            _is_shell_heredoc_redirect(_resolve_heredoc_word(word)[0])
-            for word in words[1:]
-        )
-        if shell in _SHELL_COMMANDS_THAT_READ_STDIN and not has_static_heredoc:
-            return _shell_arguments_read_stdin_script(shell, words[1:])
+    if _is_verified_installer_command(serialized) or _is_verified_installer_command(
+        stripped
+    ):
         return False
-    return _raw_install_in_script(stripped, depth + 1, variables)
+    stdin_result = _raw_install_from_shell_input(
+        shell, arguments, depth, variables
+    )
+    if stdin_result is not None:
+        return stdin_result
+    return _raw_install_from_stripped_shell_wrapper(
+        shell, arguments, serialized, stripped, depth, variables
+    )
 
 
 def _raw_install_from_wrapper(
@@ -3885,29 +5474,133 @@ def _raw_install_from_assignment_prefix(
     )
 
 
+_REPO_ROOTED_SCRIPT_RE = re.compile(
+    r"\$(?:\{(?:PROJECT_ROOT|REPO_ROOT)\}|(?:PROJECT_ROOT|REPO_ROOT))"
+    r"/(?P<path>[A-Za-z0-9_./-]+\.(?:py|sh))\Z"
+)
+
+
+def _repo_rooted_script_operand(word: str) -> str | None:
+    """Resolve the literal repository-root prefix used by tracked scripts."""
+    match = _REPO_ROOTED_SCRIPT_RE.fullmatch(word)
+    return match.group("path") if match is not None else None
+
+
+def _raw_install_expand_command_word(
+    words: list[str], depth: int, variables: dict[str, str | None] | None
+) -> tuple[bool | None, list[str]]:
+    """Resolve a command-position variable before ordinary command dispatch."""
+    if "$" not in words[0]:
+        return None, words
+    expanded = _expand_static_shell_variables(words[0], variables)
+    if expanded is None:
+        executable = Path(words[0]).name
+        allowed_path_suffixes = {"rustup", "rustc", "cargo", "rustfmt"}
+        if executable not in allowed_path_suffixes:
+            return True, words
+        return None, [executable, *words[1:]]
+    try:
+        expanded_words = shlex.split(expanded, posix=True)
+    except ValueError:
+        return _mentions_raw_install(expanded), words
+    if not expanded_words:
+        return False, words
+    return _raw_install_from_words(
+        expanded_words + words[1:], depth + 1, variables
+    ), words
+
+
+def _raw_rustup_command_installs_toolchain(words: list[str]) -> bool:
+    """Whether a rustup argv invokes its toolchain install subcommand."""
+    if Path(words[0]).name != "rustup":
+        return False
+    index = 1
+    global_flags = {"-v", "-V", "-q", "--verbose", "--quiet", "--version"}
+    while index < len(words) and words[index].startswith("-"):
+        if words[index] not in global_flags:
+            break
+        index += 1
+    return words[index : index + 2] == ["toolchain", "install"]
+
+
 def _raw_install_from_command(
     words: list[str], depth: int, variables: dict[str, str | None] | None
 ) -> bool:
     """Check a parsed command word against inert, direct, and wrapper forms."""
     if words[0] in _INERT_SHELL_COMMANDS:
         return False
-    if Path(words[0]).name == "rustup":
-        # Skip global options (short -v/-V/-q, long --verbose/--quiet/--version)
-        i = 1
-        while i < len(words) and words[i].startswith("-"):
-            opt = words[i]
-            if opt in ("-v", "-V", "-q", "--verbose", "--quiet", "--version"):
-                i += 1
-                continue
-            # Unknown option - stop parsing options
-            break
-        # Now words[i:i+2] should be ["toolchain", "install"]
-        return len(words) >= i + 2 and words[i:i + 2] == ["toolchain", "install"]
-    if _raw_install_from_python_command(words, depth, variables):
+    if script_path := _repo_rooted_script_operand(words[0]):
+        if script_path.endswith(".py"):
+            return _python_script_file_is_raw(script_path, depth + 1, variables)
+        return _raw_install_from_shell_script_file(
+            script_path, depth + 1, variables
+        )
+    decision, words = _raw_install_expand_command_word(words, depth, variables)
+    if decision is not None:
+        return decision
+    if _raw_rustup_command_installs_toolchain(words):
         return True
-    return _raw_install_from_dispatcher(words, depth, variables) or _raw_install_from_wrapper(
-        words, depth, variables
+    return (
+        _raw_install_from_python_command(words, depth, variables)
+        or _raw_install_from_dispatcher(words, depth, variables)
+        or _raw_install_from_wrapper(words, depth, variables)
     )
+
+
+def _raw_install_from_shell_loop(
+    words: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Inspect a for/while/until body, failing closed on a missing do."""
+    try:
+        do_index = words.index("do")
+    except ValueError:
+        return _mentions_raw_install(" ".join(words))
+    return _raw_install_from_words(words[do_index + 1:], depth + 1, variables)
+
+
+def _raw_install_from_case_control(
+    words: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Inspect each case body after checking its structural delimiters."""
+    try:
+        body_start = words.index("in") + 1
+        esac_index = words.index("esac", body_start)
+    except ValueError:
+        return _mentions_raw_install(" ".join(words))
+    case_bodies: list[list[str]] = []
+    current: list[str] = []
+    for word in words[body_start:esac_index]:
+        if word == ";;":
+            if current:
+                case_bodies.append(current)
+                current = []
+        else:
+            current.append(word)
+    if current:
+        case_bodies.append(current)
+    return any(
+        _raw_install_from_words(body, depth + 1, variables)
+        for body in case_bodies
+    )
+
+
+def _raw_install_from_control_flow(
+    words: list[str],
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool | None:
+    """Inspect supported shell control-flow forms at command position."""
+    if words[0] in {"if", "then", "elif", "else", "!"}:
+        return _raw_install_from_words(words[1:], depth + 1, variables)
+    if words[0] in {"for", "while", "until"}:
+        return _raw_install_from_shell_loop(words, depth, variables)
+    if words[0] == "case":
+        return _raw_install_from_case_control(words, depth, variables)
+    return None
 
 
 def _raw_install_from_words(
@@ -3920,48 +5613,11 @@ def _raw_install_from_words(
         return False
     if depth > 12:
         return _raw_install_depth_limit_exceeded(words, variables)
-    # Shell control-flow constructs: their body is the command position.
-    if words[0] in ("if", "then", "elif", "else", "!"):
-        return _raw_install_from_words(words[1:], depth + 1, variables)
-    if words[0] in ("for", "while", "until"):
-        # for VAR in LIST; do BODY; done
-        # while/until COND; do BODY; done
-        # Scan past the header to find "do" then the body.
-        try:
-            do_index = words.index("do")
-        except ValueError:
-            return _mentions_raw_install(" ".join(words))
-        return _raw_install_from_words(words[do_index + 1:], depth + 1, variables)
-    if words[0] == "case":
-        # case WORD in PATTERN) BODY ;; ... esac
-        # Scan past "in" to the patterns, then check each body.
-        try:
-            in_index = words.index("in")
-        except ValueError:
-            return _mentions_raw_install(" ".join(words))
-        # Find closing "esac" and process bodies between patterns
-        body_start = in_index + 1
-        try:
-            esac_index = words.index("esac", body_start)
-        except ValueError:
-            return _mentions_raw_install(" ".join(words))
-        # Split on ";;" to find individual case bodies
-        case_bodies = []
-        current = []
-        for word in words[body_start:esac_index]:
-            if word == ";;":
-                if current:
-                    case_bodies.append(current)
-                    current = []
-            else:
-                current.append(word)
-        if current:
-            case_bodies.append(current)
-        # Any case body with a raw install is a hit
-        return any(
-            _raw_install_from_words(body, depth + 1, variables)
-            for body in case_bodies
-        )
+    control_flow_result = _raw_install_from_control_flow(
+        words, depth, variables
+    )
+    if control_flow_result is not None:
+        return control_flow_result
     assignment_result = _raw_install_from_assignment_prefix(
         words, depth, variables
     )
@@ -3970,17 +5626,102 @@ def _raw_install_from_words(
     return _raw_install_from_command(words, depth, variables)
 
 
+def _shell_command_is_double_quoted_variable(segment: str) -> bool:
+    """Whether the command word is one double-quoted variable expansion."""
+    words = segment.lstrip().split(maxsplit=1)
+    return bool(
+        words
+        and re.fullmatch(
+            r'"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"',
+            words[0],
+        )
+    )
+
+
+def _shell_array_assignment_is_data(segment: str) -> bool:
+    """Whether a complete shell array assignment is non-executable data."""
+    return re.fullmatch(
+        r"\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]\s]+\])?\+?=\(.*\)\s*",
+        segment,
+        re.S,
+    ) is not None
+
+
+def _raw_install_in_segmented_commands(
+    segment: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool | None:
+    """Scan commands split from one segment, preserving their separators."""
+    pairs = _command_segments_with_separators(segment)
+    if len(pairs) <= 1:
+        return None
+    return _raw_install_in_segments(
+        [command for command, _separator in pairs],
+        depth + 1,
+        variables,
+        [separator for _command, separator in pairs],
+    )
+
+
+def _deep_command_word_is_opaque(
+    command: str, variables: dict[str, str | None] | None
+) -> bool:
+    if "$" not in command:
+        return False
+    resolved = _expand_static_shell_variables(command, variables)
+    return resolved is None and Path(command).name not in {
+        "rustup", "rustc", "cargo", "rustfmt"
+    }
+
+
+def _deep_launcher_has_inline_code(executable: str, args: list[str]) -> bool:
+    if executable in {"bash", "sh", "dash", "zsh"}:
+        return "-c" in args or any(
+            _shell_option_has_flag(arg, "c") for arg in args
+        ) or _shell_here_string_parts(args) is not None
+    return _PYTHON_COMMAND.fullmatch(executable) is not None and "-c" in args
+
+
+def _deep_segment_has_opaque_launcher(
+    segment: str, variables: dict[str, str | None] | None
+) -> bool:
+    """Fail closed only on unresolved command code at the recursion limit."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return True
+    command_index = _skip_env_assignments(words, 0)
+    if command_index >= len(words):
+        return False
+    command = words[command_index]
+    executable = Path(command).name
+    return (
+        executable == "eval"
+        or _deep_command_word_is_opaque(command, variables)
+        or _deep_launcher_has_inline_code(
+            executable, words[command_index + 1 :]
+        )
+    )
+
+
 def _raw_install_in_segment(
     segment: str,
     depth: int = 0,
     variables: dict[str, str | None] | None = None,
 ) -> bool:
     """Whether the segment runs a raw install, directly or through dispatchers."""
+    if _shell_array_assignment_is_data(segment):
+        return False
     if depth > 12:
-        return _mentions_raw_install(segment) or "$" in segment
-    commands = _command_segments(segment)
-    if len(commands) > 1:
-        return _raw_install_in_segments(commands, depth + 1, variables)
+        return _mentions_raw_install(segment) or _deep_segment_has_opaque_launcher(
+            segment, variables
+        )
+    segmented_result = _raw_install_in_segmented_commands(
+        segment, depth, variables
+    )
+    if segmented_result is not None:
+        return segmented_result
     try:
         words = shlex.split(segment, posix=True)
     except ValueError:
@@ -3989,15 +5730,49 @@ def _raw_install_in_segment(
         if first in _INERT_SHELL_COMMANDS:
             return False
         return _mentions_raw_install(segment)
+    if _shell_command_is_double_quoted_variable(segment):
+        expanded_command = _expand_static_shell_variables(words[0], variables)
+        if expanded_command is None:
+            return True
+        return _raw_install_from_words(
+            [expanded_command, *words[1:]], depth, variables
+        )
     return _raw_install_from_words(words, depth, variables)
 
 
 _SHELL_COMMANDS_THAT_READ_STDIN = frozenset({"bash", "sh", "dash", "zsh"})
 
 
+def _is_shell_here_string_redirect(argument: str) -> bool:
+    """Whether a shell token supplies one inline string to standard input."""
+    token = _resolve_heredoc_word(argument)[0]
+    return re.match(r"^(?:0)?<<<", token) is not None
+
+
+def _shell_here_string_parts(
+    arguments: list[str],
+) -> tuple[int, str, int] | None:
+    """Locate a here-string and its statically visible input text."""
+    for index, argument in enumerate(arguments):
+        token = _resolve_heredoc_word(argument)[0]
+        match = re.match(r"^(?:0)?<<<(.*)$", token)
+        if match is None:
+            continue
+        inline = match.group(1)
+        if inline:
+            return index, inline, 1
+        if index + 1 < len(arguments):
+            return index, _resolve_heredoc_word(arguments[index + 1])[0], 2
+        return index, "", 1
+    return None
+
+
 def _is_shell_heredoc_redirect(argument: str) -> bool:
     """Whether one token is a heredoc redirection passed to a shell."""
-    return argument.startswith("<<") or re.fullmatch(r"\d+<<.*", argument)
+    token = _resolve_heredoc_word(argument)[0]
+    if _is_shell_here_string_redirect(token):
+        return False
+    return token.startswith("<<") or re.fullmatch(r"\d+<<.*", token) is not None
 
 
 def _shell_option_has_flag(argument: str, flag: str) -> bool:
@@ -4106,6 +5881,19 @@ def _shell_arguments_read_stdin_script(
     shell: str, arguments: list[str]
 ) -> bool:
     """Whether modeled shell options select commands from standard input."""
+    for index, argument in enumerate(arguments):
+        if not _is_shell_here_string_redirect(argument):
+            continue
+        position = 0
+        prefix = arguments[:index]
+        while position < len(prefix):
+            decision, next_position = _shell_argument_step(
+                shell, prefix, position
+            )
+            if decision is not None:
+                return decision
+            position = next_position
+        return True
     position = 0
     while position < len(arguments):
         decision, position = _shell_argument_step(shell, arguments, position)
@@ -4177,29 +5965,8 @@ def _shell_stdin_heredoc_bodies(script: str) -> list[str]:
 
 
 def _raw_install_in_run_script(script: str) -> bool:
-    """Inspect executable run commands and shell-input heredocs recursively."""
-    pending = [script]
-    scanned: set[str] = set()
-    while pending:
-        current = pending.pop()
-        if current in scanned:
-            continue
-        if len(scanned) >= 64:
-            return True
-        scanned.add(current)
-        uncommented = _strip_shell_comments(current)
-        stripped = _join_continuations(_strip_heredocs(uncommented))
-        if _raw_install_in_script(stripped):
-            return True
-        python_bodies, opaque_python_stdin = _python_stdin_heredoc_bodies(
-            uncommented
-        )
-        if opaque_python_stdin or any(
-            _python_inline_raw_install(body, 0, None) for body in python_bodies
-        ):
-            return True
-        pending.extend(_shell_stdin_heredoc_bodies(uncommented))
-    return False
+    """Inspect executable shell commands, source substitutions and heredocs."""
+    return _raw_install_in_script(script)
 
 
 def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
@@ -4214,14 +5981,19 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
     every command is a provably inert builtin; runtime-generated programs
     never count as provisioning.
     """
-    runs = _all_job_run_scripts(workflow_content)
-    if runs is None:
+    steps = _all_job_run_step_records(workflow_content)
+    if steps is None:
         return (
-            "release workflow YAML or its jobs mapping cannot be parsed, "
-            "so raw Rust toolchain installs cannot be ruled out"
+            "release workflow YAML or a referenced workflow cannot be "
+            "inspected, so raw Rust toolchain installs cannot be ruled out"
         )
-    for run in runs:
-        if _raw_install_in_run_script(run):
+    for step in steps:
+        run = step["run"]
+        if _workflow_shell_uses_python(step.get("shell")):
+            raw_install = _python_inline_raw_install(run, 0, None)
+        else:
+            raw_install = _raw_install_in_run_script(run)
+        if raw_install:
             return (
                 "release workflows must provision Rust toolchains "
                 "through the verified installer; found a raw or unresolved "
@@ -4241,7 +6013,7 @@ def _is_retry_call(segment: str) -> bool:
     index = _skip_env_assignments(words, 0)
     return (
         index + 1 < len(words)
-        and _resolve_heredoc_word(words[index])[0] == "retry"
+        and _shell_word_basename(words[index]) == "retry"
         and words[index + 1].isdigit()
     )
 
@@ -4271,6 +6043,8 @@ _SHADOWED_NAMES = _PREFIX_STRIPPED_NAMES | frozenset({
     ":",
     "exit",
     "false",
+    "gmake",
+    "make",
     "pip",
     "pip3",
     "python",
@@ -4282,7 +6056,9 @@ _SHADOWED_NAMES = _PREFIX_STRIPPED_NAMES | frozenset({
 
 
 def _shadowing_issue(
-    script: str, job_name: str = RELEASE_GATE_JOB_NAME
+    script: str,
+    job_name: str = RELEASE_GATE_JOB_NAME,
+    shell_name: str = "bash",
 ) -> str | None:
     """Reject functions that shadow commands the provisioning checks read.
 
@@ -4292,15 +6068,105 @@ def _shadowing_issue(
     provisioning job: a no-op wrapper in either job defeats its own checks
     the same way.
     """
-    if shadowed := _defined_function_names(script) & _SHADOWED_NAMES:
+    if _alias_definitions_can_shadow(script, shell_name):
         return (
-            f"the {job_name} job defines shell functions that shadow commands "
-            "used by the provisioning checks ("
-            + ", ".join(sorted(shadowed))
+            f"the {job_name} job enables alias expansion while defining aliases; "
+            "remove aliases from provisioning scripts so command checks stay valid"
+        )
+    shadowed_commands = (
+        _defined_function_names(script) | _defined_alias_names(script)
+    ) & _SHADOWED_NAMES
+    if shadowed_commands:
+        return (
+            f"the {job_name} job defines shell functions or aliases that shadow "
+            "commands used by the provisioning checks ("
+            + ", ".join(sorted(shadowed_commands))
             + "); rename them so the checks trust the commands they read"
         )
     else:
         return None
+
+
+def _provisioning_unparseable_shell_segment_issue(
+    segment: str,
+) -> str | None:
+    """Fail closed only when malformed syntax may load shell code."""
+    if re.search(r"\b(?:source|eval)\s+", segment):
+        return (
+            "an unparseable provisioning command may source or "
+            "evaluate shell code"
+        )
+    if re.search(r"(?:^|[;|&(){}\n])\s*\.\s+\S", segment):
+        return "an unparseable provisioning command may source shell code"
+    return None
+
+
+def _provisioning_nested_shell_issue(
+    words: list[str], index: int, depth: int
+) -> str | None:
+    """Inspect explicit ``shell -c`` payloads recursively."""
+    for option_index, option in enumerate(words[index + 1:], index + 1):
+        if option == "-c" and option_index + 1 < len(words):
+            return _provisioning_shell_indirection_issue(
+                words[option_index + 1], depth + 1
+            )
+    return None
+
+
+def _provisioning_shell_words_issue(
+    words: list[str], depth: int
+) -> str | None:
+    """Reject one parsed shell command that redirects execution."""
+    index = _skip_env_assignments(words, 0)
+    while index < len(words) and words[index] in {
+        "if", "then", "elif", "else", "do", "while", "until", "!", "time",
+    }:
+        index += 1
+    if index >= len(words):
+        return None
+    command_word = words[index]
+    command = Path(command_word).name
+    if command_word == ".":
+        command = "."
+    if command in {"builtin", "command"} and index + 1 < len(words):
+        index += 1
+        command = Path(words[index]).name
+    if command in {"source", ".", "eval"}:
+        return (
+            "provisioning scripts cannot source or evaluate external shell "
+            "code; inline the checked commands instead"
+        )
+    if command in {"bash", "sh", "zsh"}:
+        return _provisioning_nested_shell_issue(words, index, depth)
+    return None
+
+
+def _provisioning_shell_segment_issue(
+    segment: str, depth: int
+) -> str | None:
+    """Parse and check one segment, retaining fail-closed malformed-source rules."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        return _provisioning_unparseable_shell_segment_issue(segment)
+    return _provisioning_shell_words_issue(words, depth)
+
+
+def _provisioning_shell_indirection_issue(
+    script: str, depth: int = 0
+) -> str | None:
+    """Reject shell inputs that can inject unscanned command definitions."""
+    if depth > 8:
+        return "nested provisioning shells exceed the static-analysis limit"
+    code = _join_continuations(
+        _strip_heredocs(_strip_shell_comments(script))
+    )
+    if re.search(r"(?<![A-Za-z0-9_])BASH_ENV(?![A-Za-z0-9_])", code):
+        return "BASH_ENV is unsupported in provisioning jobs; remove it"
+    for segment in _command_segments(code):
+        if issue := _provisioning_shell_segment_issue(segment, depth):
+            return issue
+    return None
 
 
 def _provisioning_shadow_issue(workflow_content: str) -> str | None:
@@ -4313,12 +6179,22 @@ def _provisioning_shadow_issue(workflow_content: str) -> str | None:
     exactly as the provisioning checks skip them.
     """
     for job_name in PROVISIONING_JOB_NAMES:
-        run_scripts = _job_run_scripts(workflow_content, job_name)
-        if run_scripts is None:
+        records = _job_run_step_records(workflow_content, job_name)
+        if records is None:
             continue
-        for step in run_scripts:
+        for record in records:
+            if "BASH_ENV" in record["env"]:
+                return (
+                    f"the {job_name} job sets BASH_ENV, which can load "
+                    "unchecked shell definitions before provisioning"
+                )
+            step = record["run"]
+            if issue := _provisioning_shell_indirection_issue(step):
+                return f"the {job_name} job {issue}"
             if issue := _shadowing_issue(
-                _strip_heredocs(_strip_shell_comments(step)), job_name
+                _strip_heredocs(_strip_shell_comments(step)),
+                job_name,
+                _workflow_shell_name(record.get("shell")),
             ):
                 return issue
     return None
@@ -4583,21 +6459,56 @@ def _step_live_commands(step: str | dict) -> list[str]:
     )
 
 
+def _normalize_shell_command_words(words: list[str]) -> list[str]:
+    """Normalize a path-qualified executable without altering its arguments."""
+    return [_shell_word_basename(words[0]), *words[1:]] if words else words
+
+
+def _shell_command_after_prefix(words: list[str]) -> list[str] | None:
+    """Strip known execution wrappers and normalize path-based command names."""
+    if not words:
+        return []
+    command = _shell_word_basename(words[0])
+    if command == "timeout":
+        index = _timeout_command_index(words)
+        if index is None:
+            return None
+        return _normalize_shell_command_words(words[index:])
+    if command in _PROCESS_PREFIX_FLAGS:
+        index = _process_prefix_command_index(words)
+        if index is None:
+            return None
+        return _normalize_shell_command_words(words[index:])
+    wrappers = {
+        "bash", "sh", "dash", "zsh", "sudo", "env", "command",
+        "retry", "nohup", "nice", "stdbuf", "time",
+    }
+    if command not in wrappers:
+        return [_shell_word_basename(words[0]), *words[1:]]
+    serialized = shlex.join(words)
+    stripped = _strip_provision_wrappers(serialized)
+    command_source = stripped if stripped != serialized else serialized
+    try:
+        words = shlex.split(command_source, posix=True)
+    except ValueError:
+        return None
+    return _normalize_shell_command_words(words)
+
+
 def _shell_words(segment: str) -> list[str]:
-    """Tokenize a parsed command and peel only real execution wrappers."""
+    """Tokenize one command while retaining its environment assignments."""
     try:
         words = shlex.split(segment, posix=True)
     except ValueError:
         return []
-    wrappers = {"bash", "sh", "dash", "zsh", "sudo", "env", "command", "retry"}
-    if words and words[0] in wrappers:
-        text = _strip_provision_wrappers(segment)
-        if text != segment:
-            try:
-                return shlex.split(text, posix=True)
-            except ValueError:
-                return []
-    return words
+    command_index = _skip_env_assignments(words, 0)
+    if command_index == len(words):
+        return words
+    prefix = words[:command_index]
+    command = _shell_command_after_prefix(words[command_index:])
+    if command is None:
+        return []
+    return [*prefix, *command]
 
 
 _MAKE_VALUE_OPTIONS = frozenset({
@@ -4650,10 +6561,45 @@ def _make_targets_after_options(words: list[str], index: int) -> list[str] | Non
     return targets
 
 
+def _make_docs_wrapper_next_index(
+    words: list[str], index: int, command: str
+) -> int | None:
+    """Return the next command index for one recognized execution wrapper."""
+    if command == "env":
+        return _skip_env_prefix(words, index + 1)
+    if command == "timeout":
+        advance = _timeout_command_index(words[index:])
+    elif command in _PROCESS_PREFIX_FLAGS:
+        advance = _process_prefix_command_index(words[index:])
+    elif command in _WRAPPER_COMMANDS:
+        next_index = _wrapper_command_step(words, index)
+        return next_index if next_index is not None and next_index > index else None
+    else:
+        return None
+    return index + advance if advance is not None and advance > 0 else None
+
+
+def _make_docs_check_index(words: list[str]) -> int | None:
+    """Find make or gmake after transparent execution wrappers."""
+    index = _skip_env_assignments(words, 0)
+    for _ in range(_MAX_COMMAND_WRAPPER_DEPTH):
+        if index >= len(words):
+            return None
+        if _shell_word_basename(words[index]) in {"make", "gmake"}:
+            return index
+        next_index = _make_docs_wrapper_next_index(
+            words, index, _shell_word_basename(words[index])
+        )
+        if next_index is None:
+            return None
+        index = next_index
+    return None
+
+
 def _runs_make_docs_check(words: list[str]) -> bool:
     """Whether make's command and target positions invoke docs-check."""
-    command_index = _skip_env_assignments(words, 0)
-    if command_index >= len(words) or words[command_index] != "make":
+    command_index = _make_docs_check_index(words)
+    if command_index is None:
         return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets
@@ -4842,6 +6788,15 @@ def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
     if pin_issue is not None:
         return pin_issue
     steps = [run_scripts] if isinstance(run_scripts, str) else list(run_scripts)
+    for step in steps:
+        script = _step_script(step)
+        if script is None:
+            continue
+        executable = _join_continuations(
+            _strip_heredocs(_strip_shell_comments(script))
+        )
+        if shadow_issue := _shadowing_issue(executable):
+            return shadow_issue
     install_at, docs_check_at = _pip_first_steps(steps)
     if install_at is None:
         return (

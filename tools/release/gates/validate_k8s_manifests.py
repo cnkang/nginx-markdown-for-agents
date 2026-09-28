@@ -977,6 +977,24 @@ def _validate_module_enabled_render(
         )
 
 
+_METRICS_SIDECAR_REQUIRED_RESOURCES = {
+    "requests": {"cpu": "50m", "memory": "64Mi"},
+    "limits": {"cpu": "250m", "memory": "128Mi"},
+}
+
+
+def _metrics_sidecar_resource_args() -> list[str]:
+    """Return Helm overrides derived from the shared resource contract."""
+    arguments = []
+    for section, resources in _METRICS_SIDECAR_REQUIRED_RESOURCES.items():
+        for name, value in resources.items():
+            arguments.extend((
+                "--set-string",
+                f"metrics.sidecar.resources.{section}.{name}={value}",
+            ))
+    return arguments
+
+
 def _validate_module_metrics_render(
     result: ValidationResult,
     helm: str,
@@ -998,14 +1016,7 @@ def _validate_module_metrics_render(
             "metrics.sidecar.image.repository=nginx",
             "--set-string",
             "metrics.sidecar.image.tag=1.26.3",
-            "--set-string",
-            "metrics.sidecar.resources.requests.cpu=50m",
-            "--set-string",
-            "metrics.sidecar.resources.requests.memory=64Mi",
-            "--set-string",
-            "metrics.sidecar.resources.limits.cpu=250m",
-            "--set-string",
-            "metrics.sidecar.resources.limits.memory=128Mi",
+            *_metrics_sidecar_resource_args(),
         ],
     )
     if rendered is None:
@@ -1073,12 +1084,27 @@ def _rendered_metrics_sidecars(documents: list[object]) -> list[dict]:
     return sidecars
 
 
+def _resource_value_mismatches(actual: object, required: dict[str, str]) -> list[str]:
+    if not isinstance(actual, dict):
+        return list(required)
+    return [name for name, value in required.items() if actual.get(name) != value]
+
+
+def _sidecar_resource_mismatches(sidecar: dict) -> list[str]:
+    resources = sidecar.get("resources")
+    if not isinstance(resources, dict):
+        return ["resources"]
+    mismatches: list[str] = []
+    for section, values in _METRICS_SIDECAR_REQUIRED_RESOURCES.items():
+        mismatches.extend(
+            f"{section}.{name}"
+            for name in _resource_value_mismatches(resources.get(section), values)
+        )
+    return mismatches
+
+
 def _sidecar_resources_match(sidecar: dict) -> bool:
-    expected = {
-        "requests": {"cpu": "50m", "memory": "64Mi"},
-        "limits": {"cpu": "250m", "memory": "128Mi"},
-    }
-    return sidecar.get("resources") == expected
+    return not _sidecar_resource_mismatches(sidecar)
 
 
 def _sidecar_resource_errors(rendered: str) -> list[str]:
@@ -1097,11 +1123,12 @@ def _sidecar_resource_errors(rendered: str) -> list[str]:
         return [
             "rendered Deployment must contain exactly one metrics-sidecar container"
         ]
-    if _sidecar_resources_match(sidecars[0]):
+    mismatches = _sidecar_resource_mismatches(sidecars[0])
+    if not mismatches:
         return []
     return [
-        "rendered metrics-sidecar resources do not match the requested "
-        "CPU and memory limits and requests"
+        "rendered metrics-sidecar resources differ at required keys: "
+        + ", ".join(mismatches)
     ]
 
 

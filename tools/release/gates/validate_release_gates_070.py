@@ -471,6 +471,45 @@ def _workflow_job(
     return job if isinstance(job, dict) else None
 
 
+def _workflow_trigger_map(
+    workflow_content: str,
+) -> dict[str, object] | None:
+    """Return the parsed top-level event map, accounting for YAML 1.1 ``on``."""
+    try:
+        import yaml
+    except ImportError:
+        return None
+    try:
+        document = yaml.safe_load(workflow_content)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    triggers = document.get("on", document.get(True))
+    if not isinstance(triggers, dict):
+        return None
+    if any(not isinstance(event, str) for event in triggers):
+        return None
+    return triggers
+
+
+def _release_publish_triggers_are_bounded(
+    workflow_content: str,
+) -> bool:
+    """Require tag pushes and manual dispatch, with no other trigger surface."""
+    triggers = _workflow_trigger_map(workflow_content)
+    if triggers is None or set(triggers) != {"push", "workflow_dispatch"}:
+        return False
+    push = triggers.get("push")
+    dispatch = triggers.get("workflow_dispatch")
+    return (
+        isinstance(push, dict)
+        and set(push) == {"tags"}
+        and push.get("tags") == ["v*"]
+        and isinstance(dispatch, dict)
+    )
+
+
 def _release_gate_job(release_packages: str) -> dict[str, object] | None:
     """Return the release-gate job mapping, or None when unreadable."""
     return _workflow_job(release_packages, RELEASE_GATE_JOB)
@@ -967,6 +1006,22 @@ def _publish_waits_for_release_gate(release_packages: str) -> bool:
     )
 
 
+def _tag_condition_event_guards_are_bounded(node: ast.AST) -> bool:
+    """Only positive equalities to supported workflow event names are valid."""
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Compare):
+            continue
+        operands = _condition_attribute_operand(child)
+        if operands is None or operands[0] != _GITHUB_EVENT_NAME:
+            continue
+        if not isinstance(child.ops[0], ast.Eq):
+            return False
+        value = _condition_value(operands[1], {})
+        if value not in _TAG_CONDITION_VALUES[_GITHUB_EVENT_NAME]:
+            return False
+    return True
+
+
 def _release_gate_tag_condition_gate(release_packages: str) -> bool:
     """True when the actual job condition runs on tags and rejects branch pushes.
 
@@ -980,6 +1035,8 @@ def _release_gate_tag_condition_gate(release_packages: str) -> bool:
     expression = _github_condition_ast(condition)
     if expression is None:
         return False
+    if not _tag_condition_event_guards_are_bounded(expression):
+        return False
     tag_push = _evaluate_tag_condition(
         expression,
         {_GITHUB_EVENT_NAME: "push", _GITHUB_REF_TYPE: "tag"},
@@ -992,6 +1049,20 @@ def _release_gate_tag_condition_gate(release_packages: str) -> bool:
         expression,
         {_GITHUB_EVENT_NAME: "workflow_dispatch", _GITHUB_REF_TYPE: "branch"},
     )
+    unexpected_events = (
+        "pull_request",
+        "pull_request_target",
+        "workflow_run",
+        "schedule",
+        "repository_dispatch",
+    )
+    for event_name in unexpected_events:
+        event_result = _evaluate_tag_condition(
+            expression,
+            {_GITHUB_EVENT_NAME: event_name, _GITHUB_REF_TYPE: "branch"},
+        )
+        if event_result is not False:
+            return False
     return tag_push is True and branch_push is False and manual_dispatch is True
 
 
@@ -1027,6 +1098,10 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         (
             "publish waits for release gate",
             _publish_waits_for_release_gate(release_packages),
+        ),
+        (
+            "release package trigger matrix",
+            _release_publish_triggers_are_bounded(release_packages),
         ),
     ]
 

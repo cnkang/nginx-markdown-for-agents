@@ -36,6 +36,7 @@ class _PopenAdapter:
         self._process = process
         self.stdout = process.stdout
         self.stderr = process.stderr
+        self.args = process.args
         self.returncode = None
 
     @property
@@ -88,7 +89,14 @@ def _valid_toolchain_identity() -> dict:
     return dict(validator._EXPECTED_FUZZ_TOOLCHAIN_IDENTITY)
 
 
-def _run(monkeypatch, capsys, *flags: str) -> int:
+def test_cargo_fuzz_package_pin_matches_toolchain_identity() -> None:
+    """The installed package and recorded identity share one version pin."""
+    assert validator._EXPECTED_FUZZ_TOOLCHAIN_IDENTITY["cargo_fuzz_version"] == (
+        f"cargo-fuzz {validator.FUZZ_CARGO_FUZZ_PACKAGE_VERSION}"
+    )
+
+
+def _run(monkeypatch, *flags: str) -> int:
     """Run the validator CLI with staged argv."""
     monkeypatch.setattr(sys, "argv", list(flags))
     return validator.main()
@@ -136,12 +144,101 @@ def _install_streaming_popen(monkeypatch, script: str) -> None:
 
 def test_valid_fixture_passes(tmp_path: Path, monkeypatch, capsys) -> None:
     """A fully qualified record must pass fixture-mode validation."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(tmp_path, "fuzz-qualification-valid.json"))
     captured = capsys.readouterr()
 
     assert rc == 0
     assert "PASS:" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("corpus_dir", "../../outside-corpus"),
+        ("seed_path", "/tmp/outside-seed"),
+        ("raw_log_ref", "artifacts/release/0.9.1/fuzz-logs/parser_html.log"),
+    ],
+)
+def test_fixture_rejects_unbound_fuzz_path_references(
+        field: str, value: str) -> None:
+    """Fixture-mode references must remain rooted and target-specific."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    record["per_target"][0][field] = value
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any(f"per_target[0] {field}" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize("seed", [8, "7"])
+def test_fixture_rejects_per_target_seed_not_bound_to_manifest(
+        seed: object) -> None:
+    """Each blocking observation must use its manifest's integer seed."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    record["per_target"][0]["seed"] = seed
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any("seed" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize("blocking_pass", [False, None, 1])
+def test_fixture_requires_boolean_true_blocking_pass(
+        blocking_pass: object) -> None:
+    """A failed, missing, or non-boolean verdict cannot pass fixture mode."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    record["blocking_pass"] = blocking_pass
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any("blocking_pass must be true" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("elapsed_seconds_total", validator.FUZZ_JOB_BUDGET + 1,
+         "elapsed_seconds_total exceeds fuzz job budget"),
+        ("executions_total",
+         validator.MAX_LIBFUZZER_EXECUTIONS
+         * validator.MAX_FUZZ_INVOCATIONS + 1,
+         "executions_total exceeds supported per-target maximum"),
+    ],
+)
+def test_fixture_rejects_impossible_observation_totals(
+        field: str, value: int, message: str) -> None:
+    """A candidate record cannot claim more work than its budgets allow."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    record["per_target"][0][field] = value
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any(message in reason for reason in reasons)
 
 
 def test_fixture_rejects_missing_or_drifted_toolchain_identity(
@@ -153,7 +250,7 @@ def test_fixture_rejects_missing_or_drifted_toolchain_identity(
     record.pop("toolchain_identity")
     record_path.write_text(json.dumps(record), encoding="utf-8")
 
-    rc = _run(monkeypatch, capsys, *argv)
+    rc = _run(monkeypatch, *argv)
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -162,7 +259,7 @@ def test_fixture_rejects_missing_or_drifted_toolchain_identity(
     record["toolchain_identity"] = _valid_toolchain_identity()
     record["toolchain_identity"]["llvm_version"] = "22.1.8"
     record_path.write_text(json.dumps(record), encoding="utf-8")
-    rc = _run(monkeypatch, capsys, *argv)
+    rc = _run(monkeypatch, *argv)
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -172,7 +269,7 @@ def test_fixture_rejects_missing_or_drifted_toolchain_identity(
 def test_below_threshold_fixture_fails(tmp_path: Path, monkeypatch,
                                        capsys) -> None:
     """Below-threshold runs must be rejected with an identifiable reason."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(
                   tmp_path, "fuzz-qualification-below-threshold.json"))
     captured = capsys.readouterr()
@@ -183,7 +280,7 @@ def test_below_threshold_fixture_fails(tmp_path: Path, monkeypatch,
 
 def test_malformed_fixture_fails(tmp_path: Path, monkeypatch, capsys) -> None:
     """A truncated record must be rejected as malformed."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(tmp_path, "fuzz-qualification-malformed.json"))
     captured = capsys.readouterr()
 
@@ -194,7 +291,7 @@ def test_malformed_fixture_fails(tmp_path: Path, monkeypatch, capsys) -> None:
 def test_blocking_pending_fixture_fails(tmp_path: Path, monkeypatch,
                                         capsys) -> None:
     """A blocking target that is not pass must be rejected as pending."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(
                   tmp_path, "fuzz-qualification-blocking-pending.json"))
     captured = capsys.readouterr()
@@ -206,7 +303,7 @@ def test_blocking_pending_fixture_fails(tmp_path: Path, monkeypatch,
 def test_stale_digest_fixture_fails(tmp_path: Path, monkeypatch,
                                     capsys) -> None:
     """A record for a different candidate sha must be rejected as stale."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(
                   tmp_path, "fuzz-qualification-stale-digest.json"))
     captured = capsys.readouterr()
@@ -219,7 +316,7 @@ def test_stale_digest_fixture_fails(tmp_path: Path, monkeypatch,
 def test_missing_observation_fixture_fails(tmp_path: Path, monkeypatch,
                                            capsys) -> None:
     """Incomplete per-target observations must be rejected explicitly."""
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               *_fixture_argv(
                   tmp_path, "fuzz-qualification-missing-observation.json"))
     captured = capsys.readouterr()
@@ -241,7 +338,7 @@ def test_fixture_rejects_duplicate_target_names(tmp_path: Path, monkeypatch,
     record_path = tmp_path / "record-dup.json"
     record_path.write_text(json.dumps(record), encoding="utf-8")
 
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py", "--mode", "fixture",
               "--manifest", str(manifest), "--record-input", str(record_path))
     captured = capsys.readouterr()
@@ -250,18 +347,19 @@ def test_fixture_rejects_duplicate_target_names(tmp_path: Path, monkeypatch,
     assert "duplicate target name" in captured.err
 
 
-def test_fixture_rejects_non_string_target(tmp_path: Path, monkeypatch,
-                                           capsys) -> None:
+@pytest.mark.parametrize("bad_target", [123, ["unhashable"]])
+def test_fixture_rejects_non_string_target(
+        bad_target, tmp_path: Path, monkeypatch, capsys) -> None:
     """Non-string target in per_target must be rejected."""
     manifest = _write_staged(tmp_path, MANIFEST_FIXTURE)
     record = json.loads(
         _fixture_path("fuzz-qualification-valid.json").read_text(
             encoding="utf-8"))
-    record["per_target"][0]["target"] = 123
+    record["per_target"][0]["target"] = bad_target
     record_path = tmp_path / "record-bad-target.json"
     record_path.write_text(json.dumps(record), encoding="utf-8")
 
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py", "--mode", "fixture",
               "--manifest", str(manifest), "--record-input", str(record_path))
     captured = capsys.readouterr()
@@ -284,7 +382,7 @@ def test_non_finite_or_non_integer_observations_fail(
     record_path = tmp_path / "record.json"
     record_path.write_text(json.dumps(record), encoding="utf-8")
 
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py", "--mode", "fixture",
               "--manifest", str(manifest), "--record-input", str(record_path))
 
@@ -301,7 +399,7 @@ def test_fixture_mode_requires_record_input(tmp_path: Path, monkeypatch,
                                             capsys) -> None:
     """Fixture mode must fail closed when no record input is provided."""
     manifest = _write_staged(tmp_path, MANIFEST_FIXTURE)
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py",
               "--mode", "fixture",
               "--manifest", str(manifest))
@@ -309,6 +407,56 @@ def test_fixture_mode_requires_record_input(tmp_path: Path, monkeypatch,
 
     assert rc == 1
     assert "malformed" in captured.err
+
+
+@pytest.mark.parametrize("required_minutes", [
+    float("inf"), float("-inf"), float("nan"),
+])
+def test_target_manifest_rejects_non_finite_required_minutes(
+    required_minutes: float, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Qualification thresholds must be finite before integer conversion."""
+    argv = _fixture_argv(tmp_path, "fuzz-qualification-valid.json")
+    manifest_path = Path(argv[argv.index("--manifest") + 1])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["targets"][0]["required_minutes"] = required_minutes
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    rc = _run(monkeypatch, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "targets[0].required_minutes must be a positive number" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("required_minutes", 1e308,
+         "targets[0].required_minutes exceeds fuzz job budget"),
+        ("required_minutes", validator.FUZZ_JOB_BUDGET / 60 + 1,
+         "targets[0].required_minutes exceeds fuzz job budget"),
+        ("required_executions",
+         validator.MAX_LIBFUZZER_EXECUTIONS
+         * validator.MAX_FUZZ_INVOCATIONS + 1,
+         "targets[0].required_executions exceeds supported per-target maximum"),
+    ],
+)
+def test_target_manifest_rejects_unreachable_thresholds(
+        field: str, value: int | float, message: str,
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """Reject finite thresholds that exceed the qualification envelope."""
+    argv = _fixture_argv(tmp_path, "fuzz-qualification-valid.json")
+    manifest_path = Path(argv[argv.index("--manifest") + 1])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["targets"][0][field] = value
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    rc = _run(monkeypatch, *argv)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert message in captured.err
 
 
 def test_target_manifest_rejects_path_like_target_name() -> None:
@@ -534,7 +682,8 @@ def test_seed_digest_rejects_escape_when_called_directly(
     )
 
     assert error is not None
-    assert "unreadable" in error
+    assert "seed path" in error and "escapes the corpus root" in error
+    assert "unreadable" not in error
 
 
 def test_skipped_target_record_keeps_seed_path_field() -> None:
@@ -550,7 +699,7 @@ def test_real_mode_rejects_malformed_manifest(tmp_path: Path, monkeypatch,
     """Real mode must fail closed on a malformed target manifest."""
     manifest = tmp_path / "manifest.json"
     manifest.write_text("not json", encoding="utf-8")
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py",
               "--mode", "real",
               "--manifest", str(manifest),
@@ -576,7 +725,7 @@ def test_real_mode_fails_closed_when_corpus_seed_missing(
             "digest": "0123456789abcdef",
         }],
     }), encoding="utf-8")
-    rc = _run(monkeypatch, capsys,
+    rc = _run(monkeypatch,
               "validate_fuzz_qualification.py",
               "--mode", "real",
               "--manifest", str(manifest),
@@ -587,6 +736,19 @@ def test_real_mode_fails_closed_when_corpus_seed_missing(
     assert rc == 1
     assert "missing corpus seed entries" in captured.err
     assert "convert_html" in captured.err
+
+
+def test_run_id_normalizes_utc_offset_after_removing_time_colons() -> None:
+    """The generated UTC run id matches the checked-in evidence format."""
+    fixture = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert validator._run_id_from("2026-09-21T12:00:00+00:00") == (
+        "fuzz-qualification-20260921T120000Z"
+    )
+    assert validator._run_id_from(fixture["started_at"]) == fixture["run_id"]
 
 
 def test_parse_fuzz_output_extracts_stats() -> None:
@@ -600,6 +762,97 @@ def test_parse_fuzz_output_extracts_stats() -> None:
     assert executions == 150000
     assert elapsed == 950.0
     assert finding is None
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "stat::elapsed_seconds: 1.2.3",
+        "Done 5 runs in 1.2.3 seconds",
+        f"stat::elapsed_seconds: {'9' * 400}",
+        "stat::elapsed_seconds: 1e308",
+        f"stat::elapsed_seconds: {validator.RELEASE_JOB_LIMIT_SECONDS + 1}",
+    ],
+)
+def test_parse_fuzz_output_rejects_malformed_elapsed_statistics(output: str) -> None:
+    """Malformed elapsed stats fail the target instead of aborting the gate."""
+    executions, elapsed, finding = validator._parse_fuzz_output(output, "")
+
+    assert executions == 0
+    assert elapsed == 0.0
+    assert finding == "fuzz run produced malformed elapsed-time statistics"
+    assert validator._classify_finding(finding) == (0, 0)
+
+
+def test_parse_fuzz_output_rejects_conflicting_and_partial_stats() -> None:
+    """Every reported stats value must be whole and mutually consistent."""
+    cases = (
+        (
+            "stat::number_of_executed_units: 100000\n"
+            "stat::number_of_executed_units: 1\n"
+            "stat::elapsed_seconds: 900\n",
+            "fuzz run produced conflicting statistics",
+        ),
+        (
+            "stat::number_of_executed_units: 100000\n"
+            "stat::elapsed_seconds: 900\n"
+            "stat::elapsed_seconds: 1.2.3\n",
+            "fuzz run produced malformed elapsed-time statistics",
+        ),
+        (
+            "stat::number_of_executed_units: 100000\n"
+            "stat::elapsed_seconds: 900\n"
+            "stat::elapsed_seconds: 899\n",
+            "fuzz run produced conflicting statistics",
+        ),
+        (
+            "stat::number_of_executed_units: 100000junk\n"
+            "stat::elapsed_seconds: 900\n",
+            "fuzz run produced malformed execution-count statistics",
+        ),
+        (
+            "stat::number_of_executed_units: 100000\n"
+            "stat::elapsed_seconds: 900seconds\n",
+            "fuzz run produced malformed elapsed-time statistics",
+        ),
+    )
+    for output, expected_finding in cases:
+        _, _, finding = validator._parse_fuzz_output(output, "")
+        assert finding == expected_finding
+        assert finding is not None
+        assert validator._classify_finding(finding) == (0, 0)
+
+
+def test_parse_fuzz_output_accepts_identical_repeated_final_stats() -> None:
+    """Equivalent duplicate captures remain valid and do not skew counts."""
+    output = (
+        "stat::number_of_executed_units: 100000\n"
+        "stat::number_of_executed_units: 100000\n"
+        "stat::elapsed_seconds: 900.0\n"
+        "stat::elapsed_seconds: 900\n"
+    )
+
+    executions, elapsed, finding = validator._parse_fuzz_output(output, "")
+
+    assert executions == 100000
+    assert elapsed == 900.0
+    assert finding is None
+
+
+def test_parse_fuzz_output_rejects_oversized_execution_counts() -> None:
+    """Counts outside libFuzzer's 64-bit range never qualify a target."""
+    oversized_values = (str((1 << 64)), "9" * 5000)
+    for value in oversized_values:
+        output = (
+            f"stat::number_of_executed_units: {value}\n"
+            "stat::elapsed_seconds: 900\n"
+        )
+        executions, elapsed, finding = validator._parse_fuzz_output(output, "")
+
+        assert executions == 0
+        assert elapsed == 900.0
+        assert finding == "fuzz run reported oversized execution-count statistics"
+        assert validator._classify_finding(finding) == (0, 0)
 
 
 def test_parse_fuzz_output_detects_sanitizer_marker() -> None:
@@ -665,6 +918,153 @@ def test_soak_excludes_startup_overhead_from_executions(
     assert result["status"] == "pass"
 
 
+def test_target_soak_records_conflicting_statistics_as_failure(
+        tmp_path: Path, monkeypatch) -> None:
+    """Conflicting counters must fail the target, not credit its first line."""
+    corpus_dir = tmp_path / "fuzz_target"
+    corpus_dir.mkdir()
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    output = (
+        "stat::number_of_executed_units: 100010\n"
+        "stat::number_of_executed_units: 1\n"
+        "stat::elapsed_seconds: 900\n"
+    )
+    monkeypatch.setattr(
+        validator,
+        "_invoke_fuzz",
+        lambda target, flags, timeout: {
+            "returncode": 0,
+            "stdout": output,
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        },
+    )
+
+    result = validator._run_target_soak(
+        "fuzz_target", seed=7, required_executions=100000,
+        required_seconds=0, log_path=tmp_path / "soak.log",
+    )
+
+    assert result["status"] == "fail"
+    assert result["executions_total"] == 0
+    assert result["corpus_dir"] == f"{tmp_path.name}/fuzz_target"
+    assert result["failure_reason"] == "fuzz run produced conflicting statistics"
+    assert result["raw_log_ref"] == f"{tmp_path.name}/soak.log"
+
+
+def test_blocking_workers_record_each_oversized_execution_failure(
+        tmp_path: Path, monkeypatch) -> None:
+    """An oversized counter fails each target without aborting peer records."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    names = ("fuzz_test_a", "fuzz_test_b")
+    corpus_root = tmp_path / "corpus"
+    for name in names:
+        (corpus_root / name).mkdir(parents=True)
+    output = (
+        f"stat::number_of_executed_units: {(1 << 64)}\n"
+        "stat::elapsed_seconds: 900\n"
+    )
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", corpus_root)
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    monkeypatch.setattr(
+        validator, "_default_artifact_paths",
+        lambda: {"log_dir": "logs", "record": "record.json"},
+    )
+    monkeypatch.setattr(
+        validator,
+        "_invoke_fuzz",
+        lambda target, flags, timeout: {
+            "returncode": 0,
+            "stdout": output,
+            "stderr": "",
+            "wall_elapsed": 900.0,
+        },
+    )
+    entries = [
+        {
+            "name": name,
+            "seed": 7,
+            "required_minutes": 0,
+            "required_executions": 10,
+        }
+        for name in names
+    ]
+    seeds = {
+        name: {"seed_path": f"corpus/{name}/seed"}
+        for name in names
+    }
+
+    records = validator._run_blocking_targets(
+        entries, seeds, deadline=time.monotonic() + 30)
+
+    assert set(records) == set(names)
+    for name in names:
+        assert records[name]["status"] == "fail"
+        assert records[name]["executions_total"] == 0
+        assert records[name]["failure_reason"] == (
+            "fuzz run reported oversized execution-count statistics")
+
+
+def test_blocking_workers_record_each_malformed_elapsed_failure(
+        tmp_path: Path, monkeypatch) -> None:
+    """Malformed elapsed stats fail every target in the blocking record."""
+    names = ("fuzz_test_a", "fuzz_test_b")
+    corpus_root = tmp_path / "corpus"
+    for name in names:
+        (corpus_root / name).mkdir(parents=True)
+    output = (
+        "stat::number_of_executed_units: 100\n"
+        "stat::elapsed_seconds: 1.2.3\n"
+    )
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "CORPUS_ROOT", corpus_root)
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    monkeypatch.setattr(
+        validator, "_default_artifact_paths",
+        lambda: {"log_dir": "logs", "record": "record.json"},
+    )
+    monkeypatch.setattr(
+        validator,
+        "_invoke_fuzz",
+        lambda target, flags, timeout: {
+            "returncode": 0,
+            "stdout": output,
+            "stderr": "",
+            "wall_elapsed": 1.0,
+        },
+    )
+    entries = [
+        {
+            "name": name,
+            "seed": 7,
+            "required_minutes": 0,
+            "required_executions": 10,
+        }
+        for name in names
+    ]
+    seeds = {
+        name: {"seed_path": f"corpus/{name}/seed"}
+        for name in names
+    }
+
+    records = validator._run_blocking_targets(
+        entries, seeds, deadline=time.monotonic() + 30)
+    qualification = validator._compose_record(
+        "9d" * 20, set(names), list(records.values()),
+        "2026-09-27T12:00:00Z", None)
+
+    assert set(records) == set(names)
+    assert qualification["blocking_pass"] is False
+    assert qualification["blocking_failures"] == list(names)
+    for name in names:
+        assert records[name]["status"] == "fail"
+        assert records[name]["failure_reason"] == (
+            "fuzz run produced malformed elapsed-time statistics")
+
+
 def test_startup_corpus_size_counts_seed_files(tmp_path: Path) -> None:
     """_startup_corpus_size counts files, and reports 0 for absent dirs."""
     import tools.release.gates.validate_fuzz_qualification as validator
@@ -726,14 +1126,20 @@ def test_collect_toolchain_identity_uses_pinned_rustup_shims(monkeypatch) -> Non
     ))
     commands = []
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         commands.append(command)
-        assert kwargs["capture_output"] is True
-        assert kwargs["text"] is True
-        assert kwargs["timeout"] == 30
-        return types.SimpleNamespace(returncode=0, stdout=next(outputs))
+        assert kwargs["stdout"] == subprocess.PIPE
+        assert kwargs["stderr"] == subprocess.DEVNULL
+        assert kwargs["start_new_session"] is True
+        script = f"import sys; sys.stdout.write({next(outputs)!r})"
+        return _real_popen(
+            [sys.executable, "-c", script],
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+            start_new_session=kwargs["start_new_session"],
+        )
 
-    monkeypatch.setattr(validator.subprocess, "run", fake_run)
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
 
     identity = validator._collect_fuzz_toolchain_identity()
 
@@ -743,6 +1149,45 @@ def test_collect_toolchain_identity_uses_pinned_rustup_shims(monkeypatch) -> Non
         ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "--version"],
         ["/shim/cargo", f"+{validator.FUZZ_TOOLCHAIN}", "fuzz", "--version"],
     ]
+
+
+def test_toolchain_version_command_bounds_large_process_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A noisy toolchain shim is drained with a small retained cap."""
+    output_size = 1_000_000
+    streams = []
+    bounded_stream = validator._BoundedStream
+
+    def tracking_stream(*args, **kwargs):
+        stream = bounded_stream(*args, **kwargs)
+        streams.append(stream)
+        return stream
+
+    def noisy_popen(command, **kwargs):
+        script = (
+            "import sys; "
+            "[sys.stdout.write('x' * 10000) for _ in range(100)]"
+        )
+        return _real_popen(
+            [sys.executable, "-c", script],
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+            start_new_session=kwargs["start_new_session"],
+        )
+
+    monkeypatch.setattr(validator, "_BoundedStream", tracking_stream)
+    monkeypatch.setattr(validator.subprocess, "Popen", noisy_popen)
+    with pytest.raises(ValueError, match="invalid fuzz toolchain identity output"):
+        validator._run_toolchain_version_command(
+            ["/shim/cargo", "--version"], "cargo"
+        )
+
+    assert len(streams) == 1
+    assert streams[0].total_chars() == output_size
+    assert streams[0].retained_chars() <= (
+        validator._MAX_TOOLCHAIN_IDENTITY_CHARS + 1
+    )
 
 
 def test_cargo_fuzz_available_rejects_broken_cargo(
@@ -2387,6 +2832,13 @@ def test_default_artifact_paths_follow_the_cargo_package_version() -> None:
     assert set(current) == {"manifest", "corpus_manifest", "record", "log_dir"}
 
     alternate = validator._release_artifact_paths("7.8.9")
+    prerelease_build = validator._release_artifact_paths(
+        "1.2.3-rc.1+build.5"
+    )
+    assert prerelease_build["manifest"] == (
+        "artifacts/release/1.2.3-rc.1+build.5/"
+        "blocking-fuzz-target-manifest.json"
+    )
     assert alternate["manifest"] == (
         "artifacts/release/7.8.9/blocking-fuzz-target-manifest.json"
     )
@@ -2548,6 +3000,60 @@ def test_process_group_reap_wait_is_bounded(monkeypatch) -> None:
 
     assert signals == [signal.SIGTERM, signal.SIGKILL]
     assert waits == [0.25]
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT"),
+    reason="safe process-group cleanup requires POSIX waitid(WNOWAIT)",
+)
+def test_fuzz_process_group_is_killed_before_leader_reap(monkeypatch) -> None:
+    """A completed leader stays unreaped until its descendants are signaled."""
+    events: list[str] = []
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"], start_new_session=True
+    )
+    original_wait = process.wait
+
+    def tracked_wait(timeout=None):
+        events.append("wait")
+        return original_wait(timeout=timeout)
+
+    monkeypatch.setattr(
+        process,
+        "wait",
+        tracked_wait,
+    )
+    monkeypatch.setattr(
+        validator.os, "waitid", lambda *_args: types.SimpleNamespace(si_pid=process.pid)
+    )
+    monkeypatch.setattr(
+        validator,
+        "_signal_fuzz_process_group",
+        lambda _process, _signal: events.append("signal"),
+    )
+
+    try:
+        assert validator._wait_fuzz_process(process, timeout=1.0) == 0
+        assert events == ["signal", "wait"]
+    finally:
+        if process.returncode is None:
+            process.kill()
+            process.wait(timeout=1.0)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
+def test_reaped_fuzz_process_is_not_signaled_by_stale_group_id(monkeypatch) -> None:
+    """A reaped PID may be reused, so no later group signal may target it."""
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"], start_new_session=True
+    )
+    process.wait(timeout=1.0)
+
+    def fail_if_signaled(*_args):
+        pytest.fail("a reaped process group ID must not be signaled")
+
+    monkeypatch.setattr(validator.os, "killpg", fail_if_signaled)
+    validator._signal_fuzz_process_group(process, signal.SIGKILL)
 
 
 def test_empty_blocking_worker_pool_returns_empty_records() -> None:
