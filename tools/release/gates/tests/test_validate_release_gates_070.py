@@ -887,3 +887,33 @@ def test_publish_condition_requires_an_explicit_always_override() -> None:
     assert not gates._publish_condition_covers_dependency_results(
         without_always
     )
+
+
+def test_bare_workflow_dispatch_trigger_is_accepted() -> None:
+    """A bare ``workflow_dispatch:`` line is valid and bounded.
+
+    Regression: the trigger guard required a mapping, so the common bare
+    form (used across the repository's other workflows) was rejected even
+    though GitHub treats it as the same manual trigger.
+    """
+    bare = (
+        "on:\n"
+        "  push:\n"
+        '    tags: ["v*"]\n'
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  release-gate:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo\n"
+    )
+    assert gates._release_publish_triggers_are_bounded(bare)
+
+    # A mapping form stays accepted, and an unrelated type stays rejected.
+    mapping = bare.replace(
+        "  workflow_dispatch:\n",
+        "  workflow_dispatch:\n    inputs:\n      version:\n        type: string\n",
+    )
+    assert gates._release_publish_triggers_are_bounded(mapping)
+    rejected = bare.replace("  workflow_dispatch:\n", "  workflow_dispatch: enabled\n")
+    assert not gates._release_publish_triggers_are_bounded(rejected)

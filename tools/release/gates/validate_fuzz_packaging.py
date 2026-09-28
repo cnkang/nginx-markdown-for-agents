@@ -5352,7 +5352,7 @@ def _followed_script_is_raw(
             return False
     except (OSError, ValueError):
         return False
-    if head in ("bash", "sh", "zsh", "source", "."):
+    if head in ("bash", "sh", "zsh", "dash", "source", "."):
         return _raw_install_from_shell_script_file(
             operand, depth + 1, variables
         ) or _python_script_file_is_raw(operand, depth + 1, variables)

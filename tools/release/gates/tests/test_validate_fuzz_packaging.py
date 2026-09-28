@@ -4176,3 +4176,24 @@ def test_interpreter_module_flag_is_not_a_script_operand(
     assert not packaging_gate._raw_install_from_shell_script_file(
         "module_step.sh", 0, None
     )
+
+
+def test_dash_headed_operand_routes_to_the_shell_scan(
+    tmp_path, monkeypatch
+) -> None:
+    """A ``dash`` invocation follows its script like the other shells.
+
+    Regression: ``_invocation_head`` accepts dash, but the follow routing
+    tuple omitted it, so a dash-headed operand fell through to the
+    Python-only branch and a shell script's raw install went unanalyzed.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text("#!/bin/bash\ndash inner.sh\n", encoding="utf-8")
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
