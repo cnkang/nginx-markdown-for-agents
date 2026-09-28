@@ -7205,8 +7205,14 @@ def _virtualenv_command_scope(
 
 
 def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
-    """Python-environment state established by a run-step prefix and its env."""
-    commands = _step_live_commands(step)
+    """Python-environment state established by a run-step prefix and its env.
+
+    The command list must be the same foreground view ``_pip_first_steps``
+    indexes: with the unfiltered list, a backgrounded segment shifts every
+    subsequent index and the marker prefix would be read from the wrong
+    command.
+    """
+    commands = _foreground_live_commands(step)
     visible = commands if through is None else commands[:through + 1]
     environment = step.get("env") if isinstance(step, dict) else None
     markers = _virtualenv_environment_markers(environment)
