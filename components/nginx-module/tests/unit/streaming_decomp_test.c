@@ -5198,6 +5198,8 @@ test_grow_output_overflow_maps_internal(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "growth wrapper must turn expansion overflow into NGX_ERROR");
+    TEST_ASSERT(buf_size == SIZE_MAX / 2 + 1,
+        "overflow must leave the buffer size unchanged at SIZE_MAX/2 + 1");
     TEST_ASSERT(decomp.failure_origin == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL,
         "expansion overflow must map to INTERNAL rather than ALLOCATION");
     TEST_ASSERT(heap_buf == NULL,
