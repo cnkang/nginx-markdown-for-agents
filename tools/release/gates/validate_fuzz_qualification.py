@@ -201,10 +201,10 @@ RECORD_OUTPUT_LABEL = "fuzz qualification record"
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(
-    r"stat::number_of_executed_units:[ \t]*([0-9]+)[ \t]*")
+    r"stat::number_of_executed_units:[ \t]*(\d+)[ \t]*")
 STAT_ELAPSED_PATTERN = re.compile(
     r"stat::elapsed_seconds:[ \t]*"
-    r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)[ \t]*")
+    r"((?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)[ \t]*")
 MALFORMED_EXECUTIONS_FINDING = (
     "fuzz run produced malformed execution-count statistics")
 MALFORMED_ELAPSED_FINDING = (
@@ -935,7 +935,9 @@ def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
             )
         except InterruptedError:
             continue
-        if status is not None and status.si_pid == process.pid:
+        # os.waitid() with WNOHANG returns a falsy result (None) when no child
+        # has changed state yet; only a populated result carries si_pid.
+        if status and status.si_pid == process.pid:
             _signal_fuzz_process_group(
                 process, getattr(signal, "SIGKILL", signal.SIGTERM)
             )
@@ -1460,6 +1462,10 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
                         if entry["target"] in blocking_names]
     failures = [entry for entry in blocking_entries
                 if entry["status"] == "fail"]
+    # Sort by target name so the failure list is deterministic regardless of
+    # the order per-target records were produced in (blocking targets run on a
+    # worker pool, so records.values() completion order is not stable).
+    failure_names = sorted(entry["target"] for entry in failures)
     return {
         "schema_version": SCHEMA_VERSION,
         "candidate_sha": candidate_sha,
@@ -1469,7 +1475,7 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
         "toolchain_identity": toolchain_identity,
         "per_target": per_target,
         "blocking_pass": not failures,
-        "blocking_failures": [entry["target"] for entry in failures],
+        "blocking_failures": failure_names,
     }
 
 

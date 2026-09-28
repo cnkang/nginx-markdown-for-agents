@@ -631,7 +631,8 @@ def test_github_publish_condition_rejects_unmodeled_order_comparisons() -> None:
 def test_publish_gate_rejects_comment_decoys_and_nested_or_success() -> None:
     """Comments and a success test nested in OR cannot establish the gate."""
     workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
-    assert workflow and _publish_gate_item(workflow)
+    assert workflow
+    assert _publish_gate_item(workflow)
     prefix, marker, publish_block = workflow.partition("  publish:\n")
     assert marker
     guard = "needs.release-gate.result == 'success'"
@@ -656,7 +657,8 @@ def test_publish_gate_rejects_comment_decoys_and_nested_or_success() -> None:
 def test_publish_gate_rejects_a_false_conjunct_after_gate_success() -> None:
     """A positive gate-success comparison cannot outweigh a false term."""
     workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
-    assert workflow and _publish_gate_item(workflow)
+    assert workflow
+    assert _publish_gate_item(workflow)
     prefix, marker, publish_block = workflow.partition("  publish:\n")
     assert marker
     guard = "needs.release-gate.result == 'success'"

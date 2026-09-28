@@ -1907,6 +1907,44 @@ def test_family_count_gate_detects_nonlegacy_numeric_and_spelled_claims(
     assert docs_checker.check_metric_family_count([doc_path]) == []
 
 
+def test_family_count_gate_ignores_dotted_version_trailing_digits(
+        tmp_path, monkeypatch):
+    """A version number's trailing digit must not read as a family count.
+
+    Lines like "0.9.2 family names", "0.0.4 family catalog", and
+    "0.9.0 Metric Family" describe versions and headings, not a claim about
+    how many metric families the current contract defines.
+    """
+    root = tmp_path
+    registry = root / "schemas" / "metrics-v1.registry.json"
+    registry.parent.mkdir()
+    registry.write_text(
+        json.dumps({"families": [{"name": f"family_{n}"} for n in range(10)]}),
+        encoding="utf-8",
+    )
+    doc_path = root / "docs" / "release.md"
+    doc_path.parent.mkdir()
+    monkeypatch.setattr(docs_checker, "ROOT", root)
+
+    for benign in (
+        "0.9.2 family names and label sets do not exist under 0.9.1.",
+        "Prometheus text 0.0.4 family catalog, content type.",
+        "| 0.8.x Metric Key | 0.9.0 Metric Family | Label |",
+    ):
+        doc_path.write_text(benign + "\n", encoding="utf-8")
+        assert docs_checker.check_metric_family_count([doc_path]) == [], benign
+
+    # A genuine wrong claim on a line that also carries a dotted version is
+    # still caught: the count token here is space-delimited, not a version tail.
+    doc_path.write_text(
+        "Under 0.9.2 the contract still defines 4 metric families.\n",
+        encoding="utf-8",
+    )
+    failures = docs_checker.check_metric_family_count([doc_path])
+    assert len(failures) == 1
+    assert "claims 4 metric families" in failures[0]
+
+
 def test_main_propagates_release_state_contract_failures(tmp_path, monkeypatch, capsys):
     """Removing the release-state checker call must make this test fail."""
     (tmp_path / "CHANGELOG.md").write_text(

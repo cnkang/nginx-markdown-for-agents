@@ -605,27 +605,48 @@ def _fuzz_record_passes(path: Path, candidate_sha: str) -> bool:
     )
 
 
-def _manifest_target_spec_valid(spec: object, seen_names: set[str]) -> bool:
-    if not isinstance(spec, dict):
-        return False
-    name = spec.get("name")
-    minutes = spec.get("required_minutes")
-    executions = spec.get("required_executions")
+_TARGET_NAME_RE = re.compile(r"[A-Za-z_]\w*")
+
+
+def _manifest_target_name_valid(name: object, seen_names: set[str]) -> bool:
+    """A target name is a fresh, non-empty, unpadded identifier token."""
     return (
         isinstance(name, str)
         and bool(name)
         and name == name.strip()
-        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is not None
-        and type(spec.get("seed")) is int
-        and type(spec.get("blocking")) is bool
+        and _TARGET_NAME_RE.fullmatch(name) is not None
         and name not in seen_names
-        and not isinstance(minutes, bool)
+    )
+
+
+def _manifest_required_minutes_valid(minutes: object) -> bool:
+    """Required minutes are a finite, positive number within the job budget."""
+    return (
+        not isinstance(minutes, bool)
         and isinstance(minutes, (int, float))
         and (not isinstance(minutes, float) or math.isfinite(minutes))
         and 0 < minutes <= FUZZ_JOB_BUDGET / 60
-        and type(executions) is int
-        and executions > 0
-        and executions <= MAX_FUZZ_TARGET_EXECUTIONS
+    )
+
+
+def _manifest_required_executions_valid(executions: object) -> bool:
+    """Required executions are a positive int within the per-target ceiling."""
+    return (
+        type(executions) is int
+        and 0 < executions <= MAX_FUZZ_TARGET_EXECUTIONS
+    )
+
+
+def _manifest_target_spec_valid(spec: object, seen_names: set[str]) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    return (
+        _manifest_target_name_valid(spec.get("name"), seen_names)
+        and type(spec.get("seed")) is int
+        and type(spec.get("blocking")) is bool
+        and _manifest_required_minutes_valid(spec.get("required_minutes"))
+        and _manifest_required_executions_valid(
+            spec.get("required_executions"))
     )
 
 
