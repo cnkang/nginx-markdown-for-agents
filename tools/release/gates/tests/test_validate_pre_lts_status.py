@@ -63,6 +63,16 @@ def test_valid_report_passes() -> None:
     assert validator.validate_report(_valid_report(), SCHEMA) == []
 
 
+def test_schema_format_checker_rejects_invalid_date_time() -> None:
+    """Declared date-time values are validated by the production format checker."""
+    report = _valid_report()
+    report["captured_at"] = "2026-02-30T00:00:00Z"
+
+    errors = validator.validate_report(report, SCHEMA)
+
+    assert any("date-time" in error for error in errors), errors
+
+
 def test_schema_rejects_pass_with_conditions() -> None:
     report = _valid_report()
     checker = jsonschema.Draft202012Validator(SCHEMA)

@@ -5,7 +5,7 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-09-21
+## [0.9.2] - Unreleased
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, records the removal and historical disposition of the experimental OTel
@@ -139,7 +139,7 @@ before/after examples.
   misclassified stream, fails with a decompression error that follows the
   configured `markdown_error_policy` (only the pass policy forwards the
   original response) — streaming cannot replay committed bytes. The
-  divergence is deliberate and pinned by tests on both paths.
+  divergence is deliberate, and tests pin it on both paths.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
   the fallback decision) instead of the incorrect

@@ -338,7 +338,7 @@ signature on `SHA256SUMS` therefore covers it.
 
 ## Security Policy
 
-- Release checksums are GPG-signed with the project release key (`SHA256SUMS.asc` signs `SHA256SUMS`). Users verify package authenticity by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
+- The project release key GPG-signs the release checksums (`SHA256SUMS.asc` signs `SHA256SUMS`). Users verify package authenticity by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
 - The default `postinst` script does NOT add `load_module` to `nginx.conf`.
 - Operators must explicitly enable the module, ensuring intentional activation.
 - The module loads as a dynamic module (`--add-dynamic-module`), not compiled in.

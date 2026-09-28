@@ -27,6 +27,38 @@ from tools.release.gates.validate_config_directives import (  # noqa: E402
 from tools.release.gates import validate_k8s_manifests as validator  # noqa: E402
 
 
+def _valid_metrics_render() -> str:
+    """Return a rendered ConfigMap and sidecar with explicit resources."""
+    return """apiVersion: v1
+kind: ConfigMap
+data:
+  nginx.conf: |
+    http {
+        markdown_metrics_shm_size 8m;
+        server {
+            location = /_markdown_metrics {
+                markdown_metrics;
+            }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: metrics-sidecar
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+"""
+
+
 def test_helm_defaults_are_stock_nginx_safe() -> None:
     """Default Helm values must not require the markdown module."""
     assert "enabled: false" in HELM_VALUES_REQUIRED_SNIPPETS
@@ -214,51 +246,68 @@ def test_gate4_documents_stock_nginx_smoke_scope() -> None:
     assert "stock-nginx chart deployment path" in GATE4_LOCAL_REQUIRED_SNIPPETS
 
 
-def test_module_metrics_render_rejects_invalid_directives_and_scopes(
+def test_gate4_cleanup_removes_only_resources_created_by_the_run() -> None:
+    """Gate 4 must preserve a pre-existing release and namespace."""
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    cleanup = script.split("cleanup_owned_helm_resources() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+
+    assert "CREATED_RELEASE=0" in script
+    assert "CREATED_NAMESPACE=0" in script
+    assert "CREATED_RELEASE=1" in script
+    assert "CREATED_NAMESPACE=1" in script
+    assert cleanup.index('if [[ "$CREATED_RELEASE" -eq 1 ]]') < (
+        cleanup.index("helm uninstall")
+    )
+    assert cleanup.index('if [[ "$CREATED_NAMESPACE" -eq 1 ]]') < (
+        cleanup.index("delete namespace")
+    )
+    assert "helm list --short" in script
+    assert "helm install" in script
+    assert "helm upgrade --install" not in script
+
+
+def test_module_metrics_render_rejects_invalid_directives_with_valid_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The release gate must reject the legacy invalid Helm metrics layout."""
-    invalid_nginx_config = """
-http {
-    server {
-        markdown_metrics on;
-        markdown_metrics_uri /_markdown_metrics;
-        markdown_metrics_format auto;
-        markdown_metrics_shm_size 8m;
-    }
-}
-"""
+    """A valid sidecar cannot mask an invalid NGINX metrics directive."""
+    invalid_render = _valid_metrics_render().replace(
+        "markdown_metrics;", "markdown_metrics on;", 1
+    )
     completed = subprocess.CompletedProcess(
         args=["helm", "template"],
         returncode=0,
-        stdout=invalid_nginx_config,
+        stdout=invalid_render,
     )
     monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
 
     result = ValidationResult()
     validator._validate_module_metrics_render(result, "helm", Path("chart"))
 
-    assert result.has_failures
+    assert any(
+        status == "FAIL"
+        and check_id == validator._CHECK_HELM_RENDER_MODULE_METRICS
+        for status, check_id, _ in result.results
+    ), result.results
+    assert any(
+        status == "PASS"
+        and check_id == validator._CHECK_HELM_RENDER_SIDECAR_RESOURCES
+        for status, check_id, _ in result.results
+    ), result.results
 
 
 def test_module_metrics_render_accepts_http_and_location_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The release gate must accept the NGINX metrics directive contract."""
-    valid_nginx_config = """
-    http {
-        markdown_metrics_shm_size 8m;
-        server {
-            location = /_markdown_metrics {
-                markdown_metrics;
-        }
-    }
-}
-"""
     completed = subprocess.CompletedProcess(
         args=["helm", "template"],
         returncode=0,
-        stdout=valid_nginx_config,
+        stdout=_valid_metrics_render(),
     )
     monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
 
@@ -266,6 +315,54 @@ def test_module_metrics_render_accepts_http_and_location_scopes(
     validator._validate_module_metrics_render(result, "helm", Path("chart"))
 
     assert not result.has_failures
+
+
+def test_module_metrics_render_rejects_sidecar_resource_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The enabled Helm render must retain exact sidecar requests and limits."""
+    rendered = _valid_metrics_render().replace("cpu: 50m", "cpu: 75m", 1)
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=0,
+        stdout=rendered,
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    validator._validate_module_metrics_render(result, "helm", Path("chart"))
+
+    assert any(
+        status == "FAIL"
+        and check_id == validator._CHECK_HELM_RENDER_SIDECAR_RESOURCES
+        for status, check_id, _ in result.results
+    ), result.results
+    assert any(
+        "requests.cpu" in message
+        for status, check_id, message in result.results
+        if status == "FAIL"
+        and check_id == validator._CHECK_HELM_RENDER_SIDECAR_RESOURCES
+    ), result.results
+
+
+def test_module_metrics_sidecar_allows_additional_resource_limits() -> None:
+    """Required CPU/memory values allow valid extra Kubernetes resources."""
+    sidecar = {
+        "resources": {
+            "requests": {
+                "cpu": "50m",
+                "memory": "64Mi",
+                "ephemeral-storage": "1Gi",
+            },
+            "limits": {
+                "cpu": "250m",
+                "memory": "128Mi",
+                "ephemeral-storage": "2Gi",
+            },
+        }
+    }
+
+    assert validator._sidecar_resources_match(sidecar)
 
 
 def test_module_enabled_render_rejects_duplicate_markdown_limits(

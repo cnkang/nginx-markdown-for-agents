@@ -56,21 +56,7 @@ def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[
         return flattened
     if not isinstance(payload, dict):
         return []
-    if collection_key is not None:
-        if collection_key not in payload:
-            # No collection key at all — treat the payload itself as a
-            # single API object (callers may pass a bare check-run dict).
-            return [payload]
-        collection = payload.get(collection_key)
-        if collection is None:
-            return []
-        if not isinstance(collection, list):
-            raise MalformedPayloadError(
-                f"API collection '{collection_key}' must be a list or null "
-                f"(got {type(collection).__name__})"
-            )
-        return [item for item in collection if isinstance(item, dict)]
-    return [payload]
+    return _flatten_api_collection(payload, collection_key)
 
 
 def _flatten_status_pages(payload: Any) -> list[dict[str, Any]]:
@@ -191,6 +177,24 @@ class MalformedPayloadError(ValueError):
     successful release gate; the caller fails closed with an explicit
     release-gate error instead of crashing or defaulting to success.
     """
+
+
+def _flatten_api_collection(
+    payload: dict[str, Any], collection_key: str | None
+) -> list[dict[str, Any]]:
+    """Extract a named API collection or retain a bare API object."""
+    if collection_key is None or collection_key not in payload:
+        # No collection key — callers may pass one bare check-run object.
+        return [payload]
+    collection = payload.get(collection_key)
+    if collection is None:
+        return []
+    if not isinstance(collection, list):
+        raise MalformedPayloadError(
+            f"API collection '{collection_key}' must be a list or null "
+            f"(got {type(collection).__name__})"
+        )
+    return [item for item in collection if isinstance(item, dict)]
 
 
 def _normalize_status_context(value: Any) -> str:

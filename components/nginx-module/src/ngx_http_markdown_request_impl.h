@@ -2157,6 +2157,7 @@ ngx_http_markdown_body_filter_handle_head(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown: HEAD representation header "
                           "rewrite failed");
+            ngx_http_markdown_inflight_release(ctx);
             return rc;
         }
         /* Release the inflight slot: the HEAD request performs no
@@ -2190,6 +2191,7 @@ ngx_http_markdown_body_filter_pass_through(ngx_http_request_t *r, ngx_chain_t *i
 {
     ngx_int_t rc;
 
+    ngx_http_markdown_inflight_release(ctx);
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
@@ -2301,6 +2303,12 @@ ngx_http_markdown_body_filter_main(ngx_http_request_t *r, ngx_chain_t *in,
     }
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    /* A fail-open append/init handler can forward the original chain and
+     * clear eligibility while returning NGX_OK. Do not convert it again. */
+    if (!ctx->eligible) {
+        return NGX_OK;
     }
 
     ctx->conversion.attempted = 1;

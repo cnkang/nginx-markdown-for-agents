@@ -106,3 +106,11 @@ def test_data_driven_summary_counter_stays_under_threshold(det, tmp_path):
 
     assert _score_by_name(functions, "_count_by_category") <= det.DEFAULT_THRESHOLD
     assert _score_by_name(functions, "_count_containing") <= det.DEFAULT_THRESHOLD
+
+
+def test_complexity_gate_scans_release_gate_validators() -> None:
+    """Both local detector entry points include release-gate Python tools."""
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    scan_scope = "--path tools/harness --path tools/release/gates"
+
+    assert makefile.count(scan_scope) == 2

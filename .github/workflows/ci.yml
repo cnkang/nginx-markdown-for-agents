@@ -201,8 +201,9 @@ jobs:
               - 'AGENTS.md'
               - 'Makefile'
               - '.gitattributes'
-              - '.sonarcloud.properties'
               - 'tools/harness/**'
+              - 'tools/lib/**'
+              - '.sonarcloud.properties'
               # The hooks are part of the harness surface: the wiring tests read
               # this file, so a change to it has to select the harness job.
               - '.pre-commit-config.yaml'
@@ -791,6 +792,11 @@ jobs:
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_brotli_streaming_e2e.sh
+
+      - name: Run encoding-chain native E2E verification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_encoding_chain_e2e.sh
 
       - name: Run native SSI and filter-ordering qualification
         env:

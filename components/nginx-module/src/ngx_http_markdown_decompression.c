@@ -143,6 +143,9 @@ static ngx_int_t ngx_http_markdown_measure_content_encoding(
     ngx_uint_t *match_count, size_t *total_len);
 static ngx_int_t ngx_http_markdown_add_content_encoding_length(
     size_t value_len, ngx_uint_t match_count, size_t *total_len);
+static ngx_int_t ngx_http_markdown_measure_content_encoding_header(
+    const ngx_table_elt_t *header, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len);
 static ngx_int_t ngx_http_markdown_copy_content_encoding(
     ngx_http_request_t *r, u_char *data, size_t *written_out);
 
@@ -177,6 +180,40 @@ ngx_http_markdown_add_content_encoding_length(
 }
 
 
+/*
+ * Measure one Content-Encoding header field, accumulating into the running
+ * totals. Returns NGX_OK when the field was measured or skipped, and
+ * NGX_ERROR when the field is malformed or the length would overflow.
+ * Non-matching fields leave the accumulators untouched.
+ */
+static ngx_int_t
+ngx_http_markdown_measure_content_encoding_header(
+    const ngx_table_elt_t *header, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len)
+{
+    if (header->hash == 0
+        || !ngx_http_markdown_is_content_encoding_header(header))
+    {
+        return NGX_OK;
+    }
+    if (header->value.len > 0 && header->value.data == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (*match_count == 0) {
+        *single_value = &header->value;
+    }
+    if (ngx_http_markdown_add_content_encoding_length(
+            header->value.len, *match_count, total_len)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    (*match_count)++;
+    return NGX_OK;
+}
+
+
 static ngx_int_t
 ngx_http_markdown_measure_content_encoding(
     ngx_http_request_t *r, const ngx_str_t **single_value,
@@ -198,35 +235,26 @@ ngx_http_markdown_measure_content_encoding(
     {
         const ngx_table_elt_t *headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
-            return NGX_ERROR;
+            goto failed;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash == 0) {
-                continue;
-            }
-            if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
-                continue;
-            }
-            if (headers[i].value.len > 0 && headers[i].value.data == NULL) {
-                return NGX_ERROR;
-            }
-
-            if (*match_count == 0) {
-                *single_value = &headers[i].value;
-            }
-            if (ngx_http_markdown_add_content_encoding_length(
-                    headers[i].value.len, *match_count, total_len)
+            if (ngx_http_markdown_measure_content_encoding_header(
+                    &headers[i], single_value, match_count, total_len)
                 != NGX_OK)
             {
-                return NGX_ERROR;
+                goto failed;
             }
-            (*match_count)++;
         }
     }
 
     return NGX_OK;
-}
 
+failed:
+    *single_value = NULL;
+    *match_count = 0;
+    *total_len = 0;
+    return NGX_ERROR;
+}
 
 static ngx_int_t
 ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data,

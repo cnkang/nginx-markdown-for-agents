@@ -73,7 +73,29 @@ struct ngx_pool_cleanup_s {
  * The stub struct definitions below must stay layout-compatible with what
  * the included production sources access through ngx_http_request_t.
  */
+/* Match the module config layout for the Brotli allocator under test. */
+#define NGX_HTTP_BROTLI 1
 #include "../../src/ngx_http_markdown_filter_module.h"
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_t *lock, ngx_atomic_t old, ngx_atomic_t set)
+{
+    if (*lock != old) {
+        return 0;
+    }
+    *lock = set;
+    return 1;
+}
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_fetch_add(ngx_atomic_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_t old;
+
+    old = *value;
+    *value = (ngx_atomic_t) (old + add);
+    return old;
+}
 
 typedef struct {
     ngx_str_t  key;
@@ -654,6 +676,8 @@ markdown_chain_decode_free(struct FFIChainDecodeResult *result)
  */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+#define ngx_http_get_module_main_conf(request, module) NULL
+
 /*
  * Include the production implementations under test.  buffer.c must come
  * first: conversion/payload code resolves its buffer symbols from this
@@ -662,8 +686,60 @@ markdown_chain_decode_free(struct FFIChainDecodeResult *result)
  */
 #include "../../src/ngx_http_markdown_buffer.c"
 #include "../../src/ngx_http_markdown_decompression.c"
+#undef NGX_HTTP_BROTLI
 #include "../../src/ngx_http_markdown_decompression_route.h"
+#include "../../src/ngx_http_markdown_inflight_impl.h"
+ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
 #include "../../src/ngx_http_markdown_payload_impl.h"
+
+static void
+test_full_brotli_allocation_accounts_header(void)
+{
+    ngx_http_markdown_full_brotli_alloc_ctx_t ctx;
+    ngx_atomic_uint_t                        used;
+    ngx_log_t                                log;
+    void                                    *block;
+    size_t                                   overhead;
+    size_t                                   allocs_before;
+    size_t                                   frees_before;
+
+    TEST_SUBSECTION("full-buffer Brotli allocator accounts for its header");
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&log, 0, sizeof(log));
+    used = 0;
+    overhead = sizeof(ngx_http_markdown_full_brotli_allocation_t);
+    ctx.counter = &used;
+    ctx.limit = sizeof(u_char) + overhead - 1;
+    ctx.log = &log;
+
+    block = ngx_http_markdown_full_brotli_alloc(&ctx, 1);
+    TEST_ASSERT(block == NULL && used == 0,
+        "payload-only budget must reject the allocation header overhead");
+
+    ctx.limit = overhead + 12;
+    allocs_before = g_heap_alloc_count;
+    frees_before = g_heap_free_count;
+    block = ngx_http_markdown_full_brotli_alloc(&ctx, 12);
+    TEST_ASSERT(block != NULL,
+        "budget covering header and payload must accept the allocation");
+    TEST_ASSERT(used == overhead + 12,
+        "workspace accounting must include the allocation header");
+
+    TEST_ASSERT(ngx_http_markdown_full_brotli_alloc(&ctx, 1) == NULL,
+        "a second allocation must be rejected when the header-inclusive "
+        "budget is full");
+    TEST_ASSERT(used == overhead + 12,
+        "rejected allocation must not consume workspace budget");
+
+    ngx_http_markdown_full_brotli_free(&ctx, block);
+    TEST_ASSERT(used == 0,
+        "free must release the full header-inclusive reservation");
+    TEST_ASSERT(g_heap_alloc_count == allocs_before + 1
+                && g_heap_free_count == frees_before + 1,
+        "successful Brotli allocation must have one matching heap free");
+
+    TEST_PASS("full-buffer Brotli allocator accounts for its header");
+}
 
 /*
  * The payload path forwards fail-open output through the captured
@@ -869,26 +945,39 @@ test_empty_decompressed_payload_releases_compressed_buffer(void)
 
 /* ── Test: fail-open accounting routes through the shared policy helper ── */
 
+/* A nonempty prefix without backing storage must fail before pointer use. */
+static void
+test_failopen_buffered_prefix_rejects_missing_data(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t               rc;
+
+    TEST_SUBSECTION("nonempty fail-open prefix requires backing storage");
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    r.method = NGX_HTTP_GET;
+    ctx.buffer.size = 4;
+    g_next_body_calls = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
+
+    rc = ngx_http_markdown_fail_open_with_buffered_prefix(&r, &ctx, NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "missing buffered-prefix storage must fail closed");
+    TEST_ASSERT(g_next_body_calls == 0,
+        "invalid buffered-prefix state must not reach downstream");
+
+    TEST_PASS("missing fail-open prefix storage fails closed");
+}
+
 /*
  * The buffered-append overflow path delivers the original response and then
- * counts a fail-open delivery.  That counter is a POLICY-gated metric: the
- * canonical increment lives in ngx_http_markdown_metric_inc_failopen(), which
- * only counts when the effective error policy is fail-open (Rule 38/23).
- * Inlining NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count) here would
- * count fail-open deliveries even for an on_error=reject configuration and
- * would bypass the one place the gate is defined.
- *
+ * counts a fail-open delivery. The delivery counter must only increment
+ * after downstream accepts the response, through the shared policy helper.
  * This test drives the production handler with an effective view whose
- * error_policy is PASS (fail-open) and asserts:
- *   - the helper stub was invoked exactly once (the production code calls
- *     it rather than incrementing the counter inline), and
- *   - the raw metric macro was not used for failopen_count (the helper
- *     stub owns that increment; a raw inline increment would add a second
- *     uncounted-by-helper metric event).
- *
- * MUTATION SENSITIVITY: reverting the call to
- * NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count) leaves
- * g_failopen_helper_calls at 0 and fails the first assertion.
+ * error_policy is PASS (fail-open) and asserts the helper owns the increment.
+ * Replacing the helper with a raw metric macro leaves the helper call count
+ * unchanged and fails the assertion below.
  */
 static void
 test_failopen_accounting_uses_policy_helper(void)
@@ -902,6 +991,9 @@ test_failopen_accounting_uses_policy_helper(void)
     ngx_chain_t                      cl;
     ngx_buf_t                        buf;
     u_char                           chunk[8];
+    u_char                           prefix[4] = {
+        (u_char) 'p', (u_char) 'r', (u_char) 'e', (u_char) 'f'
+    };
     size_t                           calls_before;
 
     TEST_SUBSECTION("fail-open accounting uses the shared policy helper");
@@ -928,6 +1020,7 @@ test_failopen_accounting_uses_policy_helper(void)
     /* Buffer is already at its ceiling, so the append must fail. */
     ctx.buffer.max_size = 4;
     ctx.buffer.size = 4;
+    ctx.buffer.data = prefix;
     ctx.effective_conf = &eff;
     eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
@@ -964,6 +1057,8 @@ main(void)
     test_contiguous_single_buffer_skips_copy();
     test_multi_buffer_chain_linearizes();
     test_empty_decompressed_payload_releases_compressed_buffer();
+    test_full_brotli_allocation_accounts_header();
+    test_failopen_buffered_prefix_rejects_missing_data();
     test_failopen_accounting_uses_policy_helper();
 
     printf("\n========================================\n");

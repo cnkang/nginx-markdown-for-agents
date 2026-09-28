@@ -9,6 +9,8 @@ the two surfaces together so they cannot drift.
 from __future__ import annotations
 
 import re
+import os
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -146,6 +148,7 @@ def test_publish_hard_depends_on_release_gate() -> None:
 
 
 RC_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "rc-release-gates.yml"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _release_jobs() -> dict:
@@ -241,6 +244,260 @@ def test_the_candidate_gates_run_the_called_commit() -> None:
     assert 'os.environ["GITHUB_SHA"]' in RC_WORKFLOW.read_text(encoding="utf-8")
 
 
+def test_encoding_chain_e2e_is_wired_to_ci_and_local_e2e_aggregate() -> None:
+    """The existing encoding-chain scenario runs in CI and the local profile."""
+    import yaml
+
+    ci = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    steps = ci["jobs"]["runtime-regressions"]["steps"]
+    step = next(
+        step
+        for step in steps
+        if step.get("name") == "Run encoding-chain native E2E verification"
+    )
+    assert step["run"] == "./tools/e2e/verify_encoding_chain_e2e.sh"
+    assert step["env"]["NGINX_BIN"] == "${{ steps.ims_runtime.outputs.nginx_bin }}"
+    assert "$(MAKE) verify-encoding-chain-e2e" in MAKEFILE.read_text(encoding="utf-8")
+
+
+def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
+    """Candidate evidence binds every runtime and builder image to a digest."""
+    import yaml
+
+    workflow = RC_WORKFLOW.read_text(encoding="utf-8")
+    jobs = _rc_jobs()
+    job = jobs["real-nginx-e2e"]
+    assert job["runs-on"] == "ubuntu-24.04"
+    environment = yaml.safe_load(workflow)["env"]
+    assert environment["NGINX_VERSION"] == "1.30.4"
+    assert environment["ALPINE_VERSION"] == "3.24"
+    for key, prefix in (
+        ("IMAGE", r"nginx:1\.30\.4-alpine"),
+        ("NGINX_BASE_IMAGE", r"nginx:1\.30\.4-alpine3\.24"),
+        ("RUST_BUILDER_IMAGE", r"rust:1\.98\.1-alpine3\.24"),
+    ):
+        assert re.fullmatch(prefix + r"@sha256:[0-9a-f]{64}", environment[key])
+    assert re.fullmatch(
+        r"1\.26-alpine@sha256:[0-9a-f]{64}", environment["INCOMPATIBLE_TAG"]
+    )
+
+    steps = job["steps"]
+    native_build = next(
+        step
+        for step in steps
+        if step.get("name") == "Build a native NGINX binary for encoding-chain validation"
+    )
+    assert "verify_real_nginx_ims.sh" in native_build["run"]
+    assert "printf 'nginx_bin=%s" in native_build["run"]
+    real_checks = next(
+        step
+        for step in steps
+        if step.get("name") == "Run the real-NGINX end-to-end checks"
+    )
+    assert real_checks["env"]["NGINX_BIN"] == "${{ steps.native_nginx.outputs.nginx_bin }}"
+    checks = real_checks["run"]
+    assert "encoding_chain|verify-encoding-chain-e2e" in checks
+    assert '"${rows}" -ne 7' in checks
+
+    evidence = next(
+        step for step in steps if step.get("name") == "Write candidate-bound evidence"
+    )["run"]
+    for field in (
+        '"module_builder_image"',
+        '"runtime_images"',
+        '"native_nginx_version"',
+        '"runner"',
+        'os.environ["RUNNER_OS"]',
+        'os.environ["RUNNER_ARCH"]',
+    ):
+        assert field in evidence
+    for scenario in (
+        "realip_access_boundary", "slow_reader_backpressure",
+        "graceful_reload_streaming", "module_version_mismatch",
+        "auth_subrequest_observability", "helm_cluster_smoke_base",
+        "helm_cluster_smoke_sidecar",
+    ):
+        assert scenario in evidence
+
+
+def test_helm_cluster_smoke_scrapes_the_module_metrics_sidecar() -> None:
+    """The real chart smoke proves the metrics family traverses its sidecar."""
+    script = (REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    for setting in (
+        "--set metrics.enabled=true",
+        "--set metrics.sidecar.enabled=true",
+        "--set metrics.expose=true",
+        "metrics.sidecar.image.digest=${NGINX_BASE_DIGEST}",
+    ):
+        assert setting in script
+    assert 'get service "${SVC}" -o jsonpath=' in script
+    assert '"${METRICS_PF_PORT}:${METRICS_SVC_PORT}"' in script
+    assert 'http://127.0.0.1:${METRICS_PF_PORT}/metrics' in script
+    assert "nginx_markdown_requests_total" in script
+    assert 'outcome="converted"' in script
+
+
+def _run_stubbed_helm_cluster_smoke(
+    tmp_path: Path,
+    existing_release: str,
+    *,
+    cluster_exists: bool = True,
+    namespace_exists: bool = True,
+    namespace_create_fails: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run the smoke script against owned command stubs."""
+    tools = tmp_path / "bin"
+    temp_root = tmp_path / "tmp"
+    tools.mkdir()
+    temp_root.mkdir()
+    calls = tmp_path / "calls.log"
+    module = tmp_path / "module.so"
+    module.write_bytes(b"fixture module")
+    stubs = {
+        "docker": "printf 'docker %s\\n' \"$*\" >> \"$CALL_LOG\"\n",
+        "kind": (
+            "printf 'kind %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+            "if [[ \"$1 $2\" == 'get clusters' && "
+            "\"$CLUSTER_EXISTS\" == 1 ]]; then "
+            "printf '%s\\n' \"$CLUSTER\"; fi\n"
+        ),
+        "helm": (
+            "printf 'helm %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+            "if [[ \"$1\" == list ]]; then printf '%s\\n' \"$EXISTING_RELEASES\"; fi\n"
+        ),
+        "kubectl": (
+            "printf 'kubectl %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+            "if [[ \"$*\" == *'get namespace "
+            "markdown-smoke --ignore-not-found -o name'* ]]; then\n"
+            "  if [[ \"$NAMESPACE_EXISTS\" == 1 ]]; then "
+            "printf 'namespace/markdown-smoke\\n'; fi\n"
+            "fi\n"
+            "if [[ \"$*\" == *'create namespace markdown-smoke'* && "
+            "\"$NAMESPACE_CREATE_FAILS\" == 1 ]]; then\n"
+            "  echo 'simulated namespace creation failure' >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "if [[ \"$*\" == *'rollout status'* ]]; then exit 1; fi\n"
+            "if [[ \"$*\" == *'get pods'* ]]; then printf 'pod\\n'; fi\n"
+        ),
+    }
+    for name, body in stubs.items():
+        stub = tools / name
+        stub.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
+        stub.chmod(0o755)
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{tools}{os.pathsep}{env['PATH']}",
+        "TMPDIR": str(temp_root),
+        "CALL_LOG": str(calls),
+        "MODULE_SO": str(module),
+        "CLUSTER": "existing-cluster",
+        "EXISTING_RELEASES": existing_release,
+        "CLUSTER_EXISTS": "1" if cluster_exists else "0",
+        "NAMESPACE_EXISTS": "1" if namespace_exists else "0",
+        "NAMESPACE_CREATE_FAILS": "1" if namespace_create_fails else "0",
+    })
+
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    command_log = calls.read_text(encoding="utf-8")
+    return result, command_log
+
+
+def test_helm_cluster_smoke_leaves_a_preexisting_release_untouched(
+    tmp_path: Path,
+) -> None:
+    """A reused cluster's existing release is neither adopted nor removed."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path, "markdown-smoke")
+
+    assert result.returncode != 0
+    assert "pre-existing Helm release" in result.stderr
+    assert "helm list" in command_log
+    assert "helm install" not in command_log
+    assert "helm upgrade" not in command_log
+    assert "helm uninstall" not in command_log
+    assert "kubectl delete namespace" not in command_log
+    assert "kind delete cluster" not in command_log
+
+
+def test_helm_cluster_smoke_initializes_a_fresh_cluster_namespace_first(
+    tmp_path: Path,
+) -> None:
+    """A fresh cluster gets its namespace before Helm lists releases."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=False,
+        namespace_exists=False,
+    )
+
+    assert result.returncode != 0
+    commands = command_log.splitlines()
+    cluster_create = next(
+        index for index, command in enumerate(commands)
+        if command.startswith("kind create cluster ")
+    )
+    namespace_lookup = next(
+        index for index, command in enumerate(commands)
+        if "get namespace markdown-smoke --ignore-not-found -o name" in command
+    )
+    namespace_create = next(
+        index for index, command in enumerate(commands)
+        if "create namespace markdown-smoke" in command
+    )
+    helm_list = next(
+        index for index, command in enumerate(commands)
+        if command.startswith("helm list ")
+    )
+
+    assert cluster_create < namespace_lookup < namespace_create < helm_list
+    assert "--all" in commands[helm_list]
+    assert "helm install" in command_log
+
+
+def test_helm_cluster_smoke_fails_when_namespace_creation_fails(
+    tmp_path: Path,
+) -> None:
+    """Namespace permission and API errors must not be hidden."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=False,
+        namespace_exists=False,
+        namespace_create_fails=True,
+    )
+
+    assert result.returncode != 0
+    assert "simulated namespace creation failure" in result.stderr
+    assert "ERROR: unable to create namespace markdown-smoke" in result.stderr
+    assert "helm list" not in command_log
+    assert "helm install" not in command_log
+
+
+def test_helm_cluster_smoke_uninstalls_a_release_it_created(
+    tmp_path: Path,
+) -> None:
+    """The ownership guard must retain cleanup for a successful own install."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(tmp_path, "")
+
+    assert result.returncode != 0
+    assert "helm install" in command_log
+    assert "helm upgrade" not in command_log
+    assert "helm uninstall" in command_log
+    assert "kubectl delete namespace" not in command_log
+    assert "kind delete cluster" not in command_log
+
+
 def test_manual_qualification_is_explicitly_defined() -> None:
     """A hand-run candidate gate is defined, and it is not a second tag path."""
     assert "workflow_dispatch" in _rc_triggers()
@@ -297,3 +554,20 @@ def test_manual_dispatch_does_not_sign() -> None:
     """An artifact-only dispatch skips signing on purpose."""
     green = {"rc-release-gates": "success"}
     assert _signing_allowed(green, event="workflow_dispatch", ref_type="branch") is False
+
+
+def test_download_artifact_pins_use_the_exact_release_label() -> None:
+    """Pinned download-artifact references carry the v8.0.1 tag comment."""
+    action_sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    workflows = (
+        REPO_ROOT / ".github" / "workflows" / "release-binaries.yml",
+        WORKFLOW,
+    )
+    for workflow in workflows:
+        pinned_lines = [
+            line.strip()
+            for line in workflow.read_text(encoding="utf-8").splitlines()
+            if f"actions/download-artifact@{action_sha}" in line
+        ]
+        assert pinned_lines
+        assert all(line.endswith("# v8.0.1") for line in pinned_lines), workflow

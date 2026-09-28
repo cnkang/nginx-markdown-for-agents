@@ -1467,6 +1467,8 @@ ngx_http_markdown_test_postcommit_log(ngx_uint_t level, ngx_log_t *log,
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
 
+ngx_http_markdown_inflight_t ngx_http_markdown_g_inflight;
+
 /*
  * Reset all global stub control variables to their default (success)
  * state.  Must be called at the start of every test function to ensure
@@ -2128,7 +2130,83 @@ test_send_output_and_resume_paths(void)
            == g_next_body_filter_last_in->buf->pos,
         "empty terminal buffers must have explicit zero-length bounds");
 
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "terminal-resume test must acquire an active conversion slot");
+
+    ngx_memzero(&b_ok, sizeof(b_ok));
+    ngx_memzero(&c_ok, sizeof(c_ok));
+    b_ok.last_buf = 1;
+    c_ok.buf = &b_ok;
+    ctx.streaming.pending_output = &c_ok;
+    ctx.streaming.pending_meta.has_data = 1;
+    ctx.streaming.pending_meta.main_terminal = 1;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN
+                && ngx_http_markdown_inflight_current() == 1
+                && ctx.streaming.main_terminal_sent == 0,
+        "backpressured terminal resume must retain the slot and latch");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK
+                && ngx_http_markdown_inflight_current() == 0
+                && ctx.lifecycle.inflight_cleanup == NULL
+                && ctx.streaming.main_terminal_sent == 1,
+        "confirmed main terminal delivery must release its active slot");
+
     TEST_PASS("send_output/resume_pending branches covered");
+}
+
+
+/* A second send while the first chain is pending is an internal invariant
+ * failure. Keep the first pending chain and record INVARIANT provenance. */
+static void
+test_send_output_pending_reentry_sets_invariant_origin(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t             *pending;
+    u_char                   data[] = "pending";
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("pending output re-entry records invariant origin");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_send_output(
+        &r, &ctx, data, sizeof(data) - 1, 0);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "first downstream backpressure must retain pending output");
+    pending = ctx.streaming.pending_output;
+    TEST_ASSERT(pending != NULL,
+        "first downstream backpressure must publish a pending chain");
+
+    rc = ngx_http_markdown_streaming_send_output(
+        &r, &ctx, data, sizeof(data) - 1, 0);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "a second send must fail while the prior chain remains pending");
+    TEST_ASSERT(ctx.streaming.pending_output == pending,
+        "re-entry failure must preserve the original pending chain");
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "re-entry guard must reject before resubmitting downstream");
+    TEST_ASSERT(ctx.streaming.classify.last_send_failure_origin
+                    == NGX_HTTP_MD_SEND_ORIGIN_INVARIANT,
+        "pending re-entry failure must record INVARIANT provenance");
+
+    TEST_PASS("pending output re-entry records invariant origin");
 }
 
 /*
@@ -2434,17 +2512,37 @@ test_postcommit_and_precommit_error_paths(void)
 
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     ctx.eligible = 1;
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "capability-fallback test must acquire a conversion slot");
+    ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x5;
     rc = ngx_http_markdown_streaming_precommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
     TEST_ASSERT(rc == NGX_DECLINED, "precommit pass policy should fail-open");
     TEST_ASSERT(ctx.eligible == 0, "precommit fail-open should mark ineligible");
     TEST_ASSERT(metrics.streaming.precommit_failopen_total == 1,
         "precommit fail-open metric should increment");
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "fail-open ends conversion and releases its slot immediately");
 
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    ctx.eligible = 1;
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "capability-fallback test must reacquire an active conversion slot");
+    ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x5;
     rc = ngx_http_markdown_streaming_precommit_error(
         &r, &ctx, &conf, ERROR_STREAMING_FALLBACK);
     TEST_ASSERT(rc == NGX_DECLINED,
         "streaming fallback error should route through fallback");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup != NULL
+                && ngx_http_markdown_inflight_current() == 1,
+        "capability fallback continues conversion and must retain its slot");
+    ngx_http_markdown_inflight_release(&ctx);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "completed fallback conversion releases the slot");
 
     TEST_PASS("postcommit/precommit branches covered");
 }
@@ -2595,6 +2693,7 @@ static void
 test_finalize_time_fallback_reentry(void)
 {
     ngx_http_request_t       r;
+    ngx_http_request_t       subrequest_main;
     ngx_http_markdown_ctx_t  ctx;
     ngx_http_markdown_conf_t conf;
     ngx_pool_t               pool;
@@ -2610,6 +2709,11 @@ test_finalize_time_fallback_reentry(void)
     TEST_SUBSECTION("finalize-time fallback re-enters full-buffer");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "precommit fallback test must acquire an active conversion slot");
 
     ngx_memzero(&in, sizeof(in));
     ngx_memzero(&in_buf, sizeof(in_buf));
@@ -2648,12 +2752,24 @@ test_finalize_time_fallback_reentry(void)
         && g_body_filter_last_in->buf != NULL
         && g_body_filter_last_in->buf->last_buf == 1,
         "finalize-time fallback should synthesize a terminal main buffer");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup != NULL
+                && ngx_http_markdown_inflight_current() == 1,
+        "full-buffer fallback must retain the slot while conversion continues");
+    ngx_http_markdown_inflight_release(&ctx);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "completed fallback conversion releases its active slot");
 
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_http_request_t subrequest_main;
     ngx_memzero(&subrequest_main, sizeof(subrequest_main));
+    subrequest_main.main = &subrequest_main;
+    subrequest_main.pool = &pool;
     r.main = &subrequest_main;
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "subrequest fallback must acquire an active conversion slot");
     ctx.eligible = 1;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
@@ -2683,6 +2799,12 @@ test_finalize_time_fallback_reentry(void)
         && g_body_filter_last_in->buf->last_buf == 0
         && g_body_filter_last_in->buf->last_in_chain == 1,
         "subrequest fallback should synthesize last_in_chain only");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup != NULL
+                && ngx_http_markdown_inflight_current() == 1,
+        "subrequest fallback must keep its slot while the buffered path runs");
+    ngx_http_markdown_inflight_release(&ctx);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "subrequest buffered conversion completion releases its slot");
 
     TEST_PASS("finalize-time fallback reentry is complete");
 }
@@ -3172,8 +3294,12 @@ test_commit_feed_and_finalize_core_paths(void)
     TEST_ASSERT(rc == NGX_OK,
         "empty successful feed output should no-op");
 
-    ctx.streaming.handle = NULL;
     g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "backpressured feed output should drain before finalization");
+
+    ctx.streaming.handle = NULL;
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
         "finalize should emit terminal buffer when handle is null");
@@ -3242,6 +3368,13 @@ test_commit_feed_and_finalize_core_paths(void)
     TEST_ASSERT(strstr(g_last_info_log_fmt, "uri_len=%uz") != NULL,
         "finalize info log should retain URI length observability");
 
+    ngx_http_markdown_inflight_reset();
+    conf.routing.max_inflight = 1;
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK
+                && ngx_http_markdown_inflight_current() == 1,
+        "successful finalize backpressure case must own an active slot");
+
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x18;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
@@ -3259,6 +3392,9 @@ test_commit_feed_and_finalize_core_paths(void)
         "finalize should defer terminal last_buf when markdown send is NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.completion.finalize_pending_lastbuf == 1,
         "finalize should latch deferred terminal last_buf");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "successful finalize must release the slot before backpressured delivery resumes");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x19;
@@ -6218,6 +6354,11 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
         "subrequest fail-open pending terminal resumes once (no duplicate)");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "subrequest fail-open test must acquire an active conversion slot");
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
 
@@ -6314,6 +6455,10 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
     TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
         "subrequest-resumes-once: NGX_AGAIN must not confirm terminal "
         "delivery");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "subrequest precommit failure must release its conversion slot "
+        "before fail-open delivery waits on downstream backpressure");
 
     /*
      * Call 1 must be the multi-link fail-open chain (in != NULL) with
@@ -6403,6 +6548,10 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
     TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1,
         "subrequest-resumes-once: confirmed NULL resume must latch "
         "subrequest terminal delivery");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "subrequest fail-open resume must not retain or double-release "
+        "the conversion slot");
 
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(metrics.results.failopen_count == 1,
@@ -6698,6 +6847,220 @@ test_postcommit_terminal_only_backpressure_metrics(void)
         "postcommit terminal metrics: no duplicate terminal submission");
 
     TEST_PASS("postcommit terminal-only backpressure metrics");
+}
+
+
+/* A main request's slot must be released when its terminal chain drains. */
+static void
+test_main_request_terminal_releases_inflight_after_resume(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_pool_cleanup_t         *cleanup;
+    u_char                      data[] = "main response";
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION(
+        "main request releases conversion slot after terminal resume");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK
+                && ngx_http_markdown_inflight_current() == 1,
+        "main request must acquire one worker inflight slot");
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_send_output(
+        &r, &ctx, data, sizeof(data) - 1, /* last_buf */ 1);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "backpressured main terminal must remain pending");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 1
+                && ctx.streaming.main_terminal_sent == 0,
+        "NGX_AGAIN must retain the main terminal without latching it");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup != NULL
+                && ngx_http_markdown_inflight_current() == 1,
+        "main-request slot must remain owned until confirmed delivery");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "successful terminal resume must complete the main request");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1
+                && ctx.streaming.subrequest_terminal_sent == 0,
+        "successful resume must latch only the main-request terminal");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "main terminal callback must release the slot after delivery");
+
+    cleanup = pool.cleanups;
+    TEST_ASSERT(cleanup != NULL && cleanup->handler != NULL,
+        "the request pool retains an idempotent cleanup backstop");
+    cleanup->handler(cleanup->data);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "later pool cleanup must not decrement the released slot twice");
+
+    TEST_PASS("main request terminal releases inflight after resume");
+}
+
+
+/* A subrequest shares the parent pool, so its inflight slot must be released
+ * when the terminal chain drains, before that parent pool is destroyed. */
+static void
+test_subrequest_terminal_releases_inflight_after_resume(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_request_t          parent;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_pool_cleanup_t         *cleanup;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION(
+        "subrequest releases conversion slot before terminal resume");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&parent, sizeof(parent));
+    parent.main = &parent;
+    parent.pool = &pool;
+    r.main = &parent;
+    r.ctx = &ctx;
+    r.loc_conf = &conf;
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK
+                && ngx_http_markdown_inflight_current() == 1,
+        "subrequest must acquire one worker inflight slot");
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x96;
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "backpressured subrequest terminal must remain pending");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 1
+                && ctx.streaming.subrequest_terminal_sent == 0,
+        "NGX_AGAIN must retain the subrequest terminal without latching it");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "consumed conversion handle must release its slot before delivery resumes");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "successful terminal resume must complete the subrequest");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1
+                && ctx.streaming.main_terminal_sent == 0,
+        "successful resume must latch only the subrequest terminal");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "terminal callback must release the slot before parent-pool cleanup");
+
+    cleanup = pool.cleanups;
+    TEST_ASSERT(cleanup != NULL && cleanup->handler != NULL,
+        "the shared parent pool retains its idempotent cleanup backstop");
+    cleanup->handler(cleanup->data);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "later pool cleanup must not decrement the released slot twice");
+
+    TEST_PASS("subrequest terminal releases inflight after resume");
+}
+
+
+/* A subrequest precommit fail-open can deliver immediately, but must release
+ * its shared-pool inflight slot before its terminal response is forwarded. */
+static void
+test_subrequest_precommit_failopen_releases_inflight_immediately(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_request_t          parent;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_pool_cleanup_t         *cleanup;
+    ngx_chain_t                 in;
+    ngx_buf_t                   in_buf;
+    ngx_http_markdown_metrics_t metrics;
+    u_char                      in_data[] = "subrequest body";
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION(
+        "subrequest precommit fail-open releases inflight immediately");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ngx_memzero(&parent, sizeof(parent));
+    parent.main = &parent;
+    parent.pool = &pool;
+    r.main = &parent;
+    conf.routing.max_inflight = 1;
+    conf.max_size = 0;
+    conf.limits.conversion_memory = 0;
+    conf.decompress.parser_budget = 0;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    ctx.eligible = 1;
+    ctx.headers_forwarded = 1;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0xa7;
+
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "subrequest must own one inflight slot before conversion starts");
+
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    in_buf.pos = in_data;
+    in_buf.last = in_data + (sizeof(in_data) - 1);
+    in_buf.last_in_chain = 1;
+    in.buf = &in_buf;
+    in.next = NULL;
+
+    g_streaming_feed_rc = ERROR_BUDGET_EXCEEDED;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, &in);
+
+    TEST_ASSERT(rc == NGX_OK,
+        "precommit fail-open must deliver the subrequest chain immediately");
+    TEST_ASSERT(ctx.failopen_completed == 1
+                && ctx.streaming.subrequest_terminal_sent == 1,
+        "immediate fail-open delivery must complete the subrequest terminal");
+    TEST_ASSERT(metrics.results.failopen_count == 1,
+        "fail-open delivery metrics must increment after downstream success");
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "immediate precommit fail-open must submit the chain once");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup == NULL
+                && ngx_http_markdown_inflight_current() == 0,
+        "precommit failure must release the slot before chain delivery");
+
+    cleanup = pool.cleanups;
+    TEST_ASSERT(cleanup != NULL && cleanup->handler != NULL,
+        "the parent pool must retain its idempotent cleanup backstop");
+    cleanup->handler(cleanup->data);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "later parent-pool cleanup must not release the slot twice");
+
+    TEST_PASS("subrequest precommit fail-open releases inflight immediately");
 }
 
 
@@ -7084,6 +7447,21 @@ test_streaming_decomp_error_origin_classification(void)
         "finalize INTERNAL pre-commit must return ERROR_INTERNAL");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
         "finalize INTERNAL must not increment io_error_total");
+
+    /* Finalize mapper: NONE pre-commit → ERROR_INTERNAL, no I/O metric. */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "finalize NONE must fail closed as ERROR_INTERNAL");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "finalize NONE must not increment io_error_total");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.truncated_input_total == 0
+                && metrics.decompressions.budget_exceeded_total == 0,
+        "finalize NONE must not increment typed decompression counters");
 
     /*
      * Per-call lifecycle: allocation failure followed by internal
@@ -7553,6 +7931,7 @@ main(void)
     test_selection_size_independence();
     test_update_headers_paths();
     test_send_output_and_resume_paths();
+    test_send_output_pending_reentry_sets_invariant_origin();
     test_failopen_chain_declares_zero_pending_bytes();
     test_send_output_error_and_deferred_paths();
     test_fallback_to_fullbuffer_paths();
@@ -7588,6 +7967,9 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_main_request_terminal_releases_inflight_after_resume();
+    test_subrequest_terminal_releases_inflight_after_resume();
+    test_subrequest_precommit_failopen_releases_inflight_immediately();
     test_postcommit_abort_outcome_across_backpressure();
     test_postcommit_terminal_immediate_failure_no_handle_no_retry();
     test_postcommit_terminal_immediate_failure_live_handle_no_retry();

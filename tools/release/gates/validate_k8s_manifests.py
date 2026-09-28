@@ -147,6 +147,7 @@ _CHECK_HELM_RENDER_MODULE_MISSING = "helm:render-module-missing"
 _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE = "helm:render-metrics-without-module"
 _CHECK_HELM_RENDER_MODULE_ENABLED = "helm:render-module-enabled"
 _CHECK_HELM_RENDER_MODULE_METRICS = "helm:render-module-metrics"
+_CHECK_HELM_RENDER_SIDECAR_RESOURCES = "helm:render-sidecar-resources"
 _CHECK_HELM_TEMPLATE_EXPLICIT = "helm:template:explicit-image"
 _CHECK_HELM_TEMPLATE_DIGEST = "helm:template:digest-image"
 
@@ -976,6 +977,24 @@ def _validate_module_enabled_render(
         )
 
 
+_METRICS_SIDECAR_REQUIRED_RESOURCES = {
+    "requests": {"cpu": "50m", "memory": "64Mi"},
+    "limits": {"cpu": "250m", "memory": "128Mi"},
+}
+
+
+def _metrics_sidecar_resource_args() -> list[str]:
+    """Return Helm overrides derived from the shared resource contract."""
+    arguments = []
+    for section, resources in _METRICS_SIDECAR_REQUIRED_RESOURCES.items():
+        for name, value in resources.items():
+            arguments.extend((
+                "--set-string",
+                f"metrics.sidecar.resources.{section}.{name}={value}",
+            ))
+    return arguments
+
+
 def _validate_module_metrics_render(
     result: ValidationResult,
     helm: str,
@@ -997,6 +1016,7 @@ def _validate_module_metrics_render(
             "metrics.sidecar.image.repository=nginx",
             "--set-string",
             "metrics.sidecar.image.tag=1.26.3",
+            *_metrics_sidecar_resource_args(),
         ],
     )
     if rendered is None:
@@ -1019,6 +1039,97 @@ def _validate_module_metrics_render(
             _CHECK_HELM_RENDER_MODULE_METRICS,
             "module-enabled metrics render uses valid HTTP and location scopes",
         )
+    if errors := _sidecar_resource_errors(rendered.stdout):
+        result.fail(
+            _CHECK_HELM_RENDER_SIDECAR_RESOURCES,
+            "; ".join(errors),
+        )
+    else:
+        result.pass_(
+            _CHECK_HELM_RENDER_SIDECAR_RESOURCES,
+            "rendered metrics sidecar has the requested resource limits and requests",
+        )
+
+
+def _is_metrics_sidecar(container: object) -> bool:
+    return (
+        isinstance(container, dict)
+        and container.get("name") == "metrics-sidecar"
+    )
+
+
+def _deployment_metrics_sidecars(document: object) -> list[dict]:
+    """Extract metrics sidecars from one rendered Deployment document."""
+    if not isinstance(document, dict) or document.get("kind") != "Deployment":
+        return []
+    spec = document.get("spec")
+    if not isinstance(spec, dict):
+        return []
+    template = spec.get("template")
+    if not isinstance(template, dict):
+        return []
+    pod_spec = template.get("spec")
+    if not isinstance(pod_spec, dict):
+        return []
+    containers = pod_spec.get("containers")
+    if not isinstance(containers, list):
+        return []
+    return [container for container in containers if _is_metrics_sidecar(container)]
+
+
+def _rendered_metrics_sidecars(documents: list[object]) -> list[dict]:
+    sidecars = []
+    for document in documents:
+        sidecars.extend(_deployment_metrics_sidecars(document))
+    return sidecars
+
+
+def _resource_value_mismatches(actual: object, required: dict[str, str]) -> list[str]:
+    if not isinstance(actual, dict):
+        return list(required)
+    return [name for name, value in required.items() if actual.get(name) != value]
+
+
+def _sidecar_resource_mismatches(sidecar: dict) -> list[str]:
+    resources = sidecar.get("resources")
+    if not isinstance(resources, dict):
+        return ["resources"]
+    mismatches: list[str] = []
+    for section, values in _METRICS_SIDECAR_REQUIRED_RESOURCES.items():
+        mismatches.extend(
+            f"{section}.{name}"
+            for name in _resource_value_mismatches(resources.get(section), values)
+        )
+    return mismatches
+
+
+def _sidecar_resources_match(sidecar: dict) -> bool:
+    return not _sidecar_resource_mismatches(sidecar)
+
+
+def _sidecar_resource_errors(rendered: str) -> list[str]:
+    """Check that explicit sidecar requests and limits survive Helm rendering."""
+    try:
+        import yaml
+
+        documents = list(yaml.safe_load_all(rendered))
+    except ImportError:
+        return ["PyYAML is required to inspect the rendered sidecar"]
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return [f"rendered Helm YAML could not be parsed: {exc}"]
+
+    sidecars = _rendered_metrics_sidecars(documents)
+    if len(sidecars) != 1:
+        return [
+            "rendered Deployment must contain exactly one metrics-sidecar container"
+        ]
+    mismatches = _sidecar_resource_mismatches(sidecars[0])
+    if not mismatches:
+        return []
+    return [
+        "rendered metrics-sidecar resources differ at required keys: "
+        + ", ".join(mismatches)
+    ]
 
 
 def _metrics_config_errors(rendered: str) -> list[str]:
