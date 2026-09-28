@@ -80,6 +80,9 @@ readonly WARNING_ALLOWLIST=(
     # ── tools/release/gates/gate4_local_k8s_smoke.sh ──
     # die() calls exit 1 — never actually returns; implicit return is unreachable
     "tools/release/gates/gate4_local_k8s_smoke.sh:return:die:function calls exit 1; return is unreachable"
+    # exit_on_signal() must EXIT: a returning INT/TERM handler would resume the
+    # script after the interrupt and a terminated run could report success.
+    "tools/release/gates/gate4_local_k8s_smoke.sh:return:exit_on_signal:function exits with the signal status; return is unreachable"
     # ── tools/perf/run_module_benchmark.sh ──
     # Terminal helpers deliberately exit the entire benchmark process.
     "tools/perf/run_module_benchmark.sh:return:usage:function exits with caller-selected status; return is unreachable"
