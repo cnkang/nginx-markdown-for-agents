@@ -4287,3 +4287,49 @@ def test_backgrounded_prerequisites_do_not_satisfy_the_pip_gate() -> None:
     install_at, docs_at = packaging_gate._pip_first_steps([mixed])
     assert install_at is None
     assert docs_at == (0, 0)
+
+
+def test_compound_backgrounded_list_does_not_satisfy_the_pip_gate() -> None:
+    """An async ``&&`` list is backgrounded as a whole.
+
+    Regression: only the segment adjacent to a trailing ``&`` was marked,
+    so ``pip install ... && printf done &`` left the install counted and a
+    later ``make docs-check`` accepted an install whose completion was
+    never observed.
+    """
+    compound = {
+        "run": (
+            "python3 -m pip install --requirement requirements-release.txt"
+            " && printf 'done' &\nmake docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    foreground = packaging_gate._foreground_live_commands(compound)
+    assert not any("pip install" in segment for segment in foreground)
+    assert any("docs-check" in segment for segment in foreground)
+
+    two_step = [
+        {
+            "run": (
+                "python3 -m pip install --requirement"
+                " requirements-release.txt && printf 'done' &\n"
+            ),
+            "shell": "bash",
+        },
+        {"run": "make docs-check\n", "shell": "bash"},
+    ]
+    install_at, docs_at = packaging_gate._pip_first_steps(two_step)
+    assert install_at is None
+    assert docs_at == (1, 0)
+
+    # Controls: a truly foreground pair still counts both.
+    plain = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([plain])
+    assert install_at == (0, 0)
+    assert docs_at == (0, 1)

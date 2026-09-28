@@ -6904,19 +6904,32 @@ def _backgrounded_command_segments(script: str) -> set[str]:
     """Segment texts the shell runs in the background (``cmd &``).
 
     A backgrounded command's exit status is never observed by the step, so
-    it cannot satisfy a prerequisite in that step.  The pairing is the same
-    one the installer check already uses: the separator after a segment is
-    the next pair's separator, and a trailing ``&`` on the last segment is
-    read from the script text.
+    it cannot satisfy a prerequisite in that step.  The shell backgrounds
+    the WHOLE list the ``&`` terminates: in ``a && b &`` the operator
+    applies to the ``a && b`` list, so both segments run asynchronously.
+    ``&&``/``||``/``|`` continue the current list, ``;`` and newline end it
+    synchronously, and a trailing ``&`` is recovered from the script text
+    (the pair stream drops the final separator).
     """
     pairs = _command_segments_with_separators(script)
+    if not pairs:
+        return set()
+    followings = [
+        pairs[index + 1][1]
+        if index + 1 < len(pairs)
+        else ("&" if _ends_with_background_operator(script) else "")
+        for index in range(len(pairs))
+    ]
     backgrounded: set[str] = set()
-    for index, (segment, _separator) in enumerate(pairs):
-        following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
+    group: list[str] = []
+    for (segment, _separator), following in zip(pairs, followings):
+        group.append(segment.strip())
+        if following in ("&&", "||", "|"):
+            # The list continues; the terminator decides its fate.
+            continue
         if following == "&":
-            backgrounded.add(segment.strip())
-        elif index + 1 == len(pairs) and _ends_with_background_operator(script):
-            backgrounded.add(segment.strip())
+            backgrounded.update(group)
+        group = []
     return backgrounded
 
 
