@@ -4895,10 +4895,13 @@ def _python_function_uses_dynamic_import(
 ) -> bool:
     """Whether a callable expression is rooted in an unresolved import call.
 
-    Only import-shaped roots (`__import__`, `importlib.import_module`, and a
-    literal `getattr` over one) trigger the fail-closed path: those can
-    produce any module, so an unknown module name hides a potential launcher.
-    Any other call root is ordinary code and keeps its previous treatment.
+    Import-shaped roots (``__import__``, ``importlib.import_module``, and a
+    literal ``getattr``) trigger the fail-closed path: those can produce any
+    module, so an unknown module name hides a potential launcher.  A
+    ``getattr`` whose inner expression is not a dynamic import also reaches
+    this branch and fails closed; that is the safe direction (a spurious
+    rejection, never a missed raw install).  Call roots that are neither an
+    import nor a ``getattr`` keep their previous treatment.
     """
     current: ast.expr = function
     while isinstance(current, ast.Attribute):
