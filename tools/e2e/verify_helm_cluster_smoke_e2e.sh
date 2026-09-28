@@ -145,39 +145,23 @@ acquire_cluster_lock() {
     fi
     local waited=0
     while ! mkdir "${LOCK_PATH}.d" 2>/dev/null; do
-        # Break the lock only when its recorded owner is gone: a dead pid,
-        # or no owner record on a lock older than the write window.  The
-        # break is an atomic rename to a unique name, so exactly one waiter
-        # can claim a stale lock: a second waiter's rename fails because the
-        # original path no longer exists, and it simply retries instead of
-        # deleting the winner's fresh lock.
+        # Breaking a stale lock is serialized by a short-lived reaper mutex.
+        # Without it, two waiters can both see a stale lock, the winner
+        # re-acquires the canonical path, and the slower waiter's rename
+        # then displaces that LIVE owner's lock; a third waiter could take
+        # the freed canonical path while the displaced owner still ran.
+        # Under the reaper only one waiter examines and reclaims a stale
+        # lock at a time, so a live owner's lock is never displaced.
+        acquire_lock_reaper
         if ! dir_lock_owner_alive; then
             local stale_claim="${LOCK_PATH}.stale.$$"
             if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
-                # Re-check the owner recorded in the CLAIMED directory: the
-                # stale lock may have been released and re-taken by a live
-                # run between our liveness check and the rename, and
-                # deleting that run's lock would break mutual exclusion.
-                # Restore it (when the path is still free) and keep waiting;
-                # delete the claim only when its owner is genuinely stale.
-                local claimed_owner
-                claimed_owner="$(cat "${stale_claim}/pid" 2>/dev/null || true)"
-                if [[ -n "${claimed_owner}" ]] && kill -0 "${claimed_owner}" 2>/dev/null; then
-                    if [[ ! -e "${LOCK_PATH}.d" ]]; then
-                        # Restore the live owner's lock; when the canonical
-                        # path was re-created meanwhile (another waiter won),
-                        # drop the claim so it cannot leak into TMPDIR.
-                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null \
-                            || rm -rf "${stale_claim}"
-                    else
-                        rm -rf "${stale_claim}"
-                    fi
-                    continue
-                fi
                 rm -rf "${stale_claim}"
+                release_lock_reaper
                 continue
             fi
         fi
+        release_lock_reaper
         waited=$((waited + 2))
         if [[ "${waited}" -ge 600 ]]; then
             echo "ERROR: timed out waiting for the ${CLUSTER} smoke lock" >&2
@@ -187,6 +171,38 @@ acquire_cluster_lock() {
     done
     printf '%s\n' "$$" > "${LOCK_OWNER_FILE}"
     LOCK_MODE="dir"
+    return 0
+}
+
+acquire_lock_reaper() {
+    # Short-lived mutex around stale-lock examination and reclaim.  A
+    # reaper held by a dead pid (a crashed run) is broken by the next
+    # waiter, so the mutex cannot wedge the smoke.
+    local waited=0
+    while ! mkdir "${LOCK_PATH}.reaper" 2>/dev/null; do
+        local reaper_pid
+        reaper_pid="$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)"
+        if [[ -n "${reaper_pid}" ]] && ! kill -0 "${reaper_pid}" 2>/dev/null; then
+            rm -rf "${LOCK_PATH}.reaper"
+            continue
+        fi
+        waited=$((waited + 1))
+        if [[ "${waited}" -ge 600 ]]; then
+            echo "ERROR: timed out waiting for the ${CLUSTER} smoke lock" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    printf '%s\n' "$$" > "${LOCK_PATH}.reaper/pid"
+    return 0
+}
+
+release_lock_reaper() {
+    local reaper_pid
+    reaper_pid="$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)"
+    if [[ "${reaper_pid}" == "$$" ]]; then
+        rm -rf "${LOCK_PATH}.reaper"
+    fi
     return 0
 }
 

@@ -4435,3 +4435,38 @@ def test_dotted_import_resolves_by_import_semantics() -> None:
     assert not packaging_gate._python_inline_raw_install(
         "__import__('os.path').join('a', 'b')", 0, None
     )
+
+
+def test_relative_dynamic_imports_fail_closed() -> None:
+    """A relative dynamic import cannot resolve to a launcher; fail closed.
+
+    Regression: `importlib.import_module('.helper', package='...')` was
+    treated as a resolved module name, so a call through it never matched a
+    launcher and the payload passed unexamined.  A relative name resolves
+    only at runtime against its package, so it fails closed now; absolute
+    dynamic imports keep resolving.
+    """
+    relative = (
+        "import importlib; importlib.import_module("
+        "'.helper', package='tools.release.gates').install()"
+    )
+    assert packaging_gate._python_inline_raw_install(relative, 0, None)
+
+    bare_relative = (
+        "import importlib; importlib.import_module('.helper').install()"
+    )
+    assert packaging_gate._python_inline_raw_install(bare_relative, 0, None)
+
+    # Controls: an absolute dynamic import of a benign module stays accepted,
+    # and a launcher behind one is still flagged.
+    assert not packaging_gate._python_inline_raw_install(
+        "import importlib; importlib.import_module('json').dumps({})",
+        0,
+        None,
+    )
+    assert packaging_gate._python_inline_raw_install(
+        "import importlib; importlib.import_module('os').system("
+        "'rustup toolchain install stable')",
+        0,
+        None,
+    )
