@@ -72,7 +72,8 @@ markdown_limits max_inflight=64;
 - **Directive**: `markdown_limits` (Config V2, multi-key)
 - **Parameter**: `max_inflight=N`
 - **Default**: 64
-- **Scope**: `http`, `server`, `location`
+- **Scope**: `http` only — the module rejects `max_inflight` in `server` and
+  `location` contexts
 - **Value 0**: Rejected at config time — `max_inflight` must be an integer
   from 1 to 65535 (there is no "unlimited" value; see Overload Behavior)
 

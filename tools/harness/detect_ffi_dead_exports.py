@@ -100,11 +100,15 @@ CALLSITE_RE = re.compile(r"\b(markdown_\w+)\s*\(")
 # C declarations/definitions are references, not production callsites. Keep
 # this deliberately line-anchored so a call embedded in an expression is not
 # filtered out. The generated header and project wrapper headers both use
-# these return-type spellings.
+# these return-type spellings; bare ``int``/``ngx_int_t``/``char *``/
+# ``unsigned``/``long``/``size_t``/``ssize_t``/``u_int32_t`` prototypes count
+# too, so ``int markdown_x(void)`` is not misread as a callsite.
 DECLARATION_LINE_RE = re.compile(
     r"^\s*(?:(?:static|inline|extern|const|struct\s+\w+|"
-    r"void|u?int(?:8|16|32|64)_t|uintptr_t|bool)\s+)+"
-    r"(?:\w+\s+\*\s*)?markdown_\w+\s*\("
+    r"void|int|ngx_int_t|ngx_uint_t|ngx_flag_t|ngx_str_t|char|unsigned|"
+    r"long|size_t|ssize_t|u_int(?:8|16|32|64)_t|u?int(?:8|16|32|64)_t|"
+    r"uintptr_t|bool)\s+)+\*?\s*"
+    r"(?:[\w]+\s*\*?\s*)?(markdown_\w+)\s*\("
 )
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z_]\w*")
@@ -517,27 +521,45 @@ def scan_c_callsites(
         "context": surrounding text snippet,
         "ifdef_guard": conditional compilation guard or None,
     }
+
+    Fails closed when a source file cannot be decoded as UTF-8: an
+    unreadable file would otherwise contribute an empty callsite set and
+    misclassify called exports as dead.  This mirrors the Rust declaration
+    scanner, which raises when it cannot read its sources.
     """
     callsites: dict[str, list[dict[str, Any]]] = {}
     validated_directory = _validate_repository_read_path(
         directory, purpose="FFI callsite source directory"
     )
     suffixes = {".c", ".h"} if include_headers else {".c"}
+    skipped: list[str] = []
 
     for path in sorted(validated_directory.rglob("*")):
         if path.suffix in suffixes and path.name != "markdown_converter.h":
-            _scan_c_call_file(path, callsites)
+            if not _scan_c_call_file(path, callsites):
+                skipped.append(str(path))
+
+    if skipped:
+        raise ValueError(
+            "cannot read C callsite source(s) as UTF-8; refusing to "
+            "classify exports from an incomplete scan: "
+            + ", ".join(skipped)
+        )
 
     return callsites
 
 
 def _scan_c_call_file(
     path: Path, callsites: dict[str, list[dict[str, Any]]]
-) -> None:
-    """Scan one C-family source file for calls and function-value references."""
+) -> bool:
+    """Scan one C-family source file for calls and function-value references.
+
+    Returns False when the file cannot be decoded, so the caller can fail
+    closed instead of silently classifying against an empty callsite set.
+    """
     text = _read_text(path)
     if text is None:
-        return
+        return False
 
     active_guards: list[str] = []
     in_block_comment = False
@@ -557,6 +579,8 @@ def _scan_c_call_file(
         )
         for match in sorted(matches, key=lambda item: item.start()):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
+
+    return True
 
 
 def _is_function_value_reference(

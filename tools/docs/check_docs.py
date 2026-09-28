@@ -1011,6 +1011,20 @@ RELEASE_SURFACE_FILES = (
     "docs/project/README.md",
 )
 
+# Boundary-bearing subset of the stale-claim phrases: everything except the
+# two bare words, which only count when a real boundary or another (stronger)
+# phrase is present.  See `_is_conditional_publication_block`.
+_BOUNDARY_STALE_CLAIM_RE = re.compile(
+    r"(?:release|development)[- ]candidate"
+    r"|not (?:yet )?(?:published|released)"
+    r"|尚未发布"
+    r"|开发候选"
+    r"|(?:publication|release) pending"
+    r"|pending (?:publication|release)"
+    r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
+    re.IGNORECASE,
+)
+
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
 _STALE_RELEASE_CLAIM_RE = re.compile(
@@ -1264,6 +1278,13 @@ _PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
     r"\b(?:shipped|published|released|available)\b|已发布|已正式发布",
     re.IGNORECASE,
 )
+# Completion verbs that affirm a release even when the sentence does not name
+# a version token.  ``available`` is deliberately excluded here: in a
+# versionless sentence it over-matches ordinary prose such as "the release
+# artifacts are available from the mirror", so it only counts when the
+# sentence names the pending version (the versioned branch in
+# `_claim_names_pending_version`).
+_VERSIONLESS_CLAIM_VERBS = frozenset({"shipped", "published", "released"})
 _CI_ARTIFACT_AVAILABILITY_RE = re.compile(
     r"\bavailable\s+(?:in|from)\s+(?:the\s+)?(?:ci|workflow|build pipeline)\b",
     re.IGNORECASE,
@@ -1445,10 +1466,19 @@ def _first_dated_changelog_version(changelog: str) -> str | None:
 
 
 def _is_conditional_publication_block(block: str) -> bool:
-    """Return whether a block marks the pending version as not yet published."""
-    if _STALE_RELEASE_CLAIM_RE.search(block) is not None:
+    """Return whether a block marks the pending version as not yet published.
+
+    The explicit pre-publication boundary pattern decides first.  The
+    stale-claim phrases also describe a not-yet-published state, but the two
+    bare single words (``unreleased`` / ``unpublished``) are excluded here:
+    a passing mention of the word itself must not satisfy the boundary
+    requirement, or ordinary prose could suppress the "needs a publication
+    boundary" diagnostic.  Those two words still serve the
+    released-direction stale-claim check.
+    """
+    if _PREPUBLICATION_BOUNDARY_RE.search(block) is not None:
         return True
-    return _PREPUBLICATION_BOUNDARY_RE.search(block) is not None
+    return _BOUNDARY_STALE_CLAIM_RE.search(block) is not None
 
 
 def _split_sentences_protected(text: str) -> list[str]:
@@ -1579,10 +1609,19 @@ def _claim_names_pending_version(
     """Return whether a single completion claim affirms the pending version."""
     nearest = _nearest_version_to_claim(window, claim)
     if nearest is None:
-        # Without a version token, heading context alone is not enough: the
-        # sentence must also name a release subject, and a bare "available"
-        # (no such subject) stays ordinary wording rather than a claim.
-        if not version_context or _RELEASE_SUBJECT_RE.search(window) is None:
+        # Without a version token, heading context alone is not enough.
+        # Two conditions must both hold for the sentence to count as a
+        # claim about the pending release:
+        # 1. a release subject is named (a bare "available" without such a
+        #    subject is ordinary wording, not a release claim), and
+        # 2. the completion verb is explicit (published/released/shipped).
+        #    A bare "available" in the versionless branch over-matches
+        #    ordinary changelog prose ("artifacts are available from the
+        #    mirror"), so it counts only when the sentence names the
+        #    pending version - the versioned branch below.
+        if _RELEASE_SUBJECT_RE.search(window) is None:
+            return False
+        if claim.group(0).lower() not in _VERSIONLESS_CLAIM_VERBS:
             return False
         return not _completion_claim_is_nonaffirmative(window, claim, pending)
     if pending.fullmatch(nearest[2]) is None:

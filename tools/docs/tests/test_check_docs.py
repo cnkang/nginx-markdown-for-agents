@@ -2009,3 +2009,104 @@ def test_main_deduplicates_repeated_checker_diagnostics(tmp_path, monkeypatch, c
 
     assert docs_checker.main() == 1
     assert capsys.readouterr().out.count("- repeated diagnostic") == 1
+
+
+def test_versionless_available_prose_is_not_a_release_claim(tmp_path):
+    """Ordinary 'available' phrasing must not count as a publication claim.
+
+    Regression for the versionless over-match: under an Unreleased heading,
+    plain prose such as "the release artifacts are available from the
+    mirror" used to be reported as a release claim.  Only explicit
+    completion verbs (published/released/shipped) affirm a versionless
+    release; a bare "available" needs the pending version named in the
+    sentence (covered by the versioned-branch tests).
+    """
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The release artifacts are available from the mirror.\n"
+        "The package is available in this repository.\n"
+        "Assets are available.\n"
+        "The new directive is available.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert not [f for f in failures if "available" in f], failures
+
+
+def test_versionless_published_prose_is_still_a_claim(tmp_path):
+    """The explicit completion verbs still affirm a release without a token."""
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The release has been published.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("published" in failure for failure in failures), failures
+
+
+def test_passing_unreleased_word_does_not_satisfy_boundary(tmp_path):
+    """A bare mention of the word 'unreleased' is not a publication boundary.
+
+    Regression for the boundary fail-open: the stale-claim arm used to make
+    any block containing the single word 'unreleased' count as a boundary,
+    so ordinary prose could suppress the "needs one explicit publication
+    boundary" diagnostic.  The boundary requirement is enforced on the
+    non-optional pending surfaces (the changelog is boundary-optional), so
+    this test drives `_pending_document_failures` directly.
+    """
+    doc = tmp_path / "docs" / "project"
+    doc.mkdir(parents=True)
+    surface = doc / "PROJECT_STATUS.md"
+    surface.write_text(
+        "v9.9.9 line: the word unreleased appears in passing here.\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker._pending_document_failures(
+        tmp_path, "docs/project/PROJECT_STATUS.md", "9.9.9"
+    )
+
+    assert any("publication boundary" in failure for failure in failures), failures
+
+
+def test_strong_pending_phrase_still_satisfies_boundary(tmp_path):
+    """A real pending phrase keeps the boundary satisfied (positive control)."""
+    doc = tmp_path / "docs" / "project"
+    doc.mkdir(parents=True)
+    surface = doc / "PROJECT_STATUS.md"
+    surface.write_text(
+        "v9.9.9 line: publication pending; no release date is set.\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker._pending_document_failures(
+        tmp_path, "docs/project/PROJECT_STATUS.md", "9.9.9"
+    )
+
+    assert not failures, failures
+
+
+def test_real_publication_boundary_still_satisfies_contract(tmp_path):
+    """A recognized future-boundary form keeps the contract satisfied.
+
+    The checker treats a completion verb as non-affirmative when a
+    pre-publication qualifier precedes it ("will be published after the
+    publication"); this control proves the tightened boundary logic still
+    accepts a real boundary form.
+    """
+    changelog = (
+        "## [9.9.9] - Unreleased\n\n"
+        "The release will be published after the publication.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert not failures, failures
