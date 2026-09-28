@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -385,16 +386,29 @@ def test_helm_cluster_smoke_scrapes_the_module_metrics_sidecar() -> None:
     assert 'outcome="converted"' in script
 
 
+@dataclass
+class _HelmStub:
+    """Fixture knobs for the stubbed helm binary.
+
+    Grouped so the runner keeps one options parameter per concern: the
+    three helm behaviors plus the reported version would otherwise push
+    the runner past the repository's parameter threshold.
+    """
+
+    version: str | None = None
+    list_stderr: str = ""
+    list_fails: bool = False
+    install_fails: bool = False
+
+
 def _run_stubbed_helm_cluster_smoke(
     tmp_path: Path,
     existing_release: str,
     *,
+    helm: _HelmStub | None = None,
     cluster_exists: bool = True,
     namespace_exists: bool = True,
     namespace_create_fails: bool = False,
-    helm_list_stderr: str = "",
-    helm_list_fails: bool = False,
-    helm_install_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the smoke script against owned command stubs."""
     tools = tmp_path / "bin"
@@ -447,11 +461,15 @@ def _run_stubbed_helm_cluster_smoke(
             "if [[ \"$*\" == *'get pods'* ]]; then printf 'pod\\n'; fi\n"
         ),
     }
+    helm_stub = helm if helm is not None else _HelmStub()
     for name, body in stubs.items():
         stub = tools / name
         stub.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
         stub.chmod(0o755)
     env = os.environ.copy()
+    # Drop an ambient HELM_VERSION so a developer's shell setting cannot
+    # change what the stub reports; the parameter is the only source.
+    env.pop("HELM_VERSION", None)
     env.update({
         "PATH": f"{tools}{os.pathsep}{env['PATH']}",
         "TMPDIR": str(temp_root),
@@ -462,10 +480,12 @@ def _run_stubbed_helm_cluster_smoke(
         "CLUSTER_EXISTS": "1" if cluster_exists else "0",
         "NAMESPACE_EXISTS": "1" if namespace_exists else "0",
         "NAMESPACE_CREATE_FAILS": "1" if namespace_create_fails else "0",
-        "HELM_LIST_STDERR": helm_list_stderr,
-        "HELM_LIST_FAILS": "1" if helm_list_fails else "0",
-        "HELM_INSTALL_FAILS": "1" if helm_install_fails else "0",
+        "HELM_LIST_STDERR": helm_stub.list_stderr,
+        "HELM_LIST_FAILS": "1" if helm_stub.list_fails else "0",
+        "HELM_INSTALL_FAILS": "1" if helm_stub.install_fails else "0",
     })
+    if helm_stub.version is not None:
+        env["HELM_VERSION"] = helm_stub.version
 
     result = subprocess.run(
         ["bash", str(REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh")],
@@ -603,17 +623,20 @@ def test_helm_cluster_smoke_installs_atomically(tmp_path: Path) -> None:
 
 
 def test_helm_cluster_smoke_selects_the_v4_rollback_flag(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """A Helm 4 binary gets its own rollback flag spelling.
 
     Regression for the renamed flag: Helm 4 offers
     ``--rollback-on-failure`` and keeps ``--atomic`` only as a deprecated
     alias, so the smoke must pass the current spelling when it detects a
-    v4 binary (and never emit deprecation noise).
+    v4 binary (and never emit deprecation noise).  The version is supplied
+    through the helper's parameter, which also scrubs any ambient
+    HELM_VERSION so a developer's shell setting cannot skew the fixture.
     """
-    monkeypatch.setenv("HELM_VERSION", "v4.3.0+fixture")
-    _result, command_log = _run_stubbed_helm_cluster_smoke(tmp_path, "")
+    _result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path, "", helm=_HelmStub(version="v4.3.0+fixture")
+    )
 
     install_commands = [
         command for command in command_log.splitlines()
@@ -637,7 +660,7 @@ def test_helm_cluster_smoke_ignores_helm_list_stderr_on_success(
     result, command_log = _run_stubbed_helm_cluster_smoke(
         tmp_path,
         "",
-        helm_list_stderr="WARNING: Kubernetes configuration file is group-readable",
+        helm=_HelmStub(list_stderr="WARNING: Kubernetes configuration file is group-readable"),
     )
 
     assert "helm list" in command_log
@@ -657,7 +680,7 @@ def test_helm_cluster_smoke_reports_helm_list_stderr_on_failure(
     result, _command_log = _run_stubbed_helm_cluster_smoke(
         tmp_path,
         "",
-        helm_list_fails=True,
+        helm=_HelmStub(list_fails=True),
     )
 
     assert result.returncode != 0
@@ -672,7 +695,7 @@ def test_helm_cluster_smoke_uninstalls_after_a_failed_install(
     result, command_log = _run_stubbed_helm_cluster_smoke(
         tmp_path,
         "",
-        helm_install_fails=True,
+        helm=_HelmStub(install_fails=True),
     )
 
     assert result.returncode != 0
