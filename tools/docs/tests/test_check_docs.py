@@ -2110,3 +2110,22 @@ def test_real_publication_boundary_still_satisfies_contract(tmp_path):
     failures = docs_checker.check_release_state_contract(tmp_path)
 
     assert not failures, failures
+
+
+def test_duplicate_unreleased_heading_is_rejected(tmp_path):
+    """A second Unreleased heading would hide claims from the gate.
+
+    Regression: only the first matching section is examined for
+    pending-state prose, so a duplicate Unreleased heading could carry a
+    contradictory published claim that no check ever reads.
+    """
+    changelog = (
+        "## [9.9.9] - Unreleased\n\nFirst section.\n\n"
+        "## [9.9.9] - Unreleased\n\nThe release has been published.\n\n"
+        "## [9.8.8] - 2026-01-01\n\nReleased work.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+
+    failures = docs_checker.check_release_state_contract(tmp_path)
+
+    assert any("duplicate Unreleased heading" in f for f in failures), failures

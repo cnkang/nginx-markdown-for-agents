@@ -5381,6 +5381,43 @@ def _raw_install_from_inline_script(
     return _raw_install_in_script(inline, depth + 1, variables)
 
 
+def _module_flag_operand_is_followable(words: list[str], index: int) -> bool:
+    """Whether a ``-m`` operand names a script this scan should follow.
+
+    ``python3 -m runpy <script>`` runs a script file, so its target is
+    followed like a direct operand.  Any other module name is not a file
+    and stops the scan instead.
+    """
+    return index + 1 < len(words) and words[index + 1] == "runpy"
+
+
+def _single_operand_decision(
+    words: list[str],
+    index: int,
+    operand: str,
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool | None:
+    """Decide one operand: True raw, False keep scanning, None stop.
+
+    ``-c`` hands the next word to the inline-script scan; ``-m`` follows
+    only a runpy target and otherwise stops; any other operand is followed
+    when it can name a script.
+    """
+    if operand == "-c" and index + 1 < len(words):
+        return _raw_install_from_inline_script(
+            words[index + 1], depth, variables
+        )
+    if operand == "-m":
+        if _module_flag_operand_is_followable(words, index):
+            return False
+        return None
+    if not _followable_operand(operand):
+        return False
+    return _followed_script_is_raw(operand, head, depth, variables)
+
+
 def _invocation_operands_are_raw(
     words: list[str],
     head: str,
@@ -5389,18 +5426,13 @@ def _invocation_operands_are_raw(
 ) -> bool:
     """Whether any operand of one followed invocation is a raw install."""
     for index, operand in enumerate(words[1:], start=1):
-        if operand == "-c" and index + 1 < len(words):
-            if _raw_install_from_inline_script(words[index + 1], depth, variables):
-                return True
-            continue
-        if operand == "-m":
-            # A module name is not a script file; the module's own code is not
-            # reachable from this scan, so stop rather than scan the name.
-            break
-        if not _followable_operand(operand):
-            continue
-        if _followed_script_is_raw(operand, head, depth, variables):
+        decision = _single_operand_decision(
+            words, index, operand, head, depth, variables
+        )
+        if decision is True:
             return True
+        if decision is None:
+            break
     return False
 
 
@@ -6868,6 +6900,47 @@ def _step_live_commands(step: str | dict) -> list[str]:
     )
 
 
+def _backgrounded_command_segments(script: str) -> set[str]:
+    """Segment texts the shell runs in the background (``cmd &``).
+
+    A backgrounded command's exit status is never observed by the step, so
+    it cannot satisfy a prerequisite in that step.  The pairing is the same
+    one the installer check already uses: the separator after a segment is
+    the next pair's separator, and a trailing ``&`` on the last segment is
+    read from the script text.
+    """
+    pairs = _command_segments_with_separators(script)
+    backgrounded: set[str] = set()
+    for index, (segment, _separator) in enumerate(pairs):
+        following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
+        if following == "&":
+            backgrounded.add(segment.strip())
+        elif index + 1 == len(pairs) and _ends_with_background_operator(script):
+            backgrounded.add(segment.strip())
+    return backgrounded
+
+
+def _foreground_live_commands(step: str | dict) -> list[str]:
+    """Live command segments that run in the FOREGROUND to completion.
+
+    The prerequisite checks consume this view so a backgrounded ``pip
+    install`` or ``make docs-check`` cannot count as satisfied: the shell
+    never waits for ``cmd &``, so its exit status proves nothing.
+    """
+    script = _step_script(step)
+    if script is None:
+        return []
+    stripped = _strip_heredocs(_strip_shell_comments(script))
+    executable_source = _join_continuations(stripped)
+    executable = _strip_function_bodies(executable_source)
+    backgrounded = _backgrounded_command_segments(executable)
+    return [
+        segment
+        for segment in _step_live_commands(step)
+        if segment.strip() not in backgrounded
+    ]
+
+
 def _normalize_shell_command_words(words: list[str]) -> list[str]:
     """Normalize a path-qualified executable without altering its arguments."""
     return [_shell_word_basename(words[0]), *words[1:]] if words else words
@@ -7179,7 +7252,7 @@ def _pip_first_steps(
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
         retry_trusted = _step_retry_is_trusted(step)
-        for command_index, segment in enumerate(_step_live_commands(step)):
+        for command_index, segment in enumerate(_foreground_live_commands(step)):
             if not retry_trusted and _is_retry_call(segment):
                 continue
             position = (step_index, command_index)
