@@ -267,9 +267,13 @@ run_cleanup_once() {
     if [[ "${CLEANUP_DONE}" -eq 1 ]]; then
         return 0
     fi
-    CLEANUP_DONE=1
+    # Run the helpers BEFORE latching: if a signal re-enters the trap while
+    # cleanup is in progress, the re-entry repeats the helpers (each is
+    # idempotent and clears its own ownership flag) instead of returning
+    # early and leaving the cluster behind.  The latch is set last.
     cleanup_owned_helm_resources
     delete_cluster
+    CLEANUP_DONE=1
     return 0
 }
 

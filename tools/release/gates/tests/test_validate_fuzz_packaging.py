@@ -4211,3 +4211,79 @@ def test_dash_headed_operand_routes_to_the_shell_scan(
     assert packaging_gate._raw_install_from_shell_script_file(
         "hop.sh", 0, None
     )
+
+
+def test_runpy_script_target_is_followed_in_a_marker_less_chain(
+    tmp_path, monkeypatch
+) -> None:
+    """``python3 -m runpy <script>`` runs a file and must be followed.
+
+    Regression: the ``-m`` module-name guard stopped the scan before runpy's
+    script operand, so a marker-less chain could hand the install to a file
+    the scanner never read.  Ordinary module names stay unscanned.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "install.py").write_text(
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'nightly'])\n",
+        encoding="utf-8",
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text(
+        "#!/bin/bash\npython3 -m runpy install.py\n", encoding="utf-8"
+    )
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+    # An ordinary module name is still not followed as a path.
+    module_step = tmp_path / "module.sh"
+    module_step.write_text(
+        "#!/bin/bash\npython3 -m pip install package\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "module.sh", 0, None
+    )
+
+
+def test_backgrounded_prerequisites_do_not_satisfy_the_pip_gate() -> None:
+    """A backgrounded install or docs-check commands nothing.
+
+    Regression: the live-command scan dropped the separator, so
+    ``pip install ... &`` and ``make docs-check &`` counted as satisfied
+    prerequisites even though the shell never waits for their exit status.
+    """
+    backgrounded = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt &\n"
+            "make docs-check &\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([backgrounded])
+    assert install_at is None
+    assert docs_at is None
+
+    foreground = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([foreground])
+    assert install_at == (0, 0)
+    assert docs_at == (0, 1)
+
+    # A backgrounded install followed by a foreground docs-check: the
+    # install must not count, the check must.
+    mixed = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt &\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([mixed])
+    assert install_at is None
+    assert docs_at == (0, 0)

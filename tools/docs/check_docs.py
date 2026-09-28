@@ -333,6 +333,10 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     well-formed line yields its version; a heading that merely starts like
     an unreleased line but carries an unexpected suffix produces an
     explanatory error.
+
+    A second well-formed Unreleased heading for the same version is also an
+    error: the pending-state checks examine one section, so a duplicate
+    could carry a contradictory claim the gate never reads.
     """
     version: str | None = None
     errors: list[str] = []
@@ -341,8 +345,21 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
         line = match.group(0)
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
+            found = valid.group("version")
             if version is None:
-                version = valid.group("version")
+                version = found
+            elif found == version:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: duplicate Unreleased heading for "
+                    f"{found}; keep a single Unreleased section so the "
+                    "pending-state checks cover every pending claim"
+                )
+            else:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: multiple Unreleased headings "
+                    f"({version} and {found}); keep a single Unreleased "
+                    "section"
+                )
             continue
         if "unreleased" in line.lower():
             errors.append(
