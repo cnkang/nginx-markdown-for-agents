@@ -9,22 +9,30 @@ paths:
 
 ## Cognitive Complexity
 
-### 17. Cognitive complexity in C, Rust, and Python functions
+### 17. Complexity in C, Rust, and Python functions
 
-SonarCloud rules: `c:S3776`, `python:S3776`.
+SonarCloud cognitive-complexity rules configured here: `c:S3776` and
+`python:S3776`. This repository does not configure a Rust cognitive-complexity
+rule. Keep these metrics distinct from lizard's cyclomatic complexity (CCN).
 
 Required:
-- Keep function cognitive complexity at or below the configured threshold
-  (currently 25 for C/Rust, 15 for Python).
-- For Python release-gate/tooling validators, keep function cognitive complexity
-  at or below SonarCloud's configured threshold (currently 15) by extracting
-  independent validation steps into small helpers.
+- Keep C and Rust lizard CCN at or below 25.
+- Keep Python lizard CCN at or below 15 and complexipy cognitive complexity at
+  or below 15.
+- For Python release-gate/tooling validators, keep cognitive complexity at or
+  below the configured Python threshold (15) by extracting independent
+  validation steps into small helpers.
 - Run the local Python complexity detector before relying on SonarCloud:
   `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`.
   The detector is dependency-free and approximates SonarCloud's Python
   cognitive-complexity rule for local harness code.
-- When widening the Python scan scope, pass explicit paths:
-  `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py --path tools/release`.
+- `make complexity-check` runs the local detector over both `tools/harness`
+  and `tools/release/gates`; pass both paths explicitly when invoking the same
+  scope directly:
+  ```sh
+  PYTHONPATH=. python3 tools/harness/detect_python_complexity.py \
+    --path tools/harness --path tools/release/gates
+  ```
 - Extract helper functions for self-contained sub-decisions (for example
   content-type exclusion checks, observability logging) to flatten the main
   function's control flow.

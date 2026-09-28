@@ -618,8 +618,35 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
     return errors
 
 
+_SPELLED_FAMILY_COUNTS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+_SPELLED_FAMILY_COUNT_PATTERN = "|".join(
+    sorted(_SPELLED_FAMILY_COUNTS, key=len, reverse=True)
+)
 FAMILY_COUNT_RE = re.compile(
-    r"twelve|eleven|exactly 11|exactly 12|11 famil|12 famil",
+    rf"\b(?P<count>\d{{1,3}}|{_SPELLED_FAMILY_COUNT_PATTERN})"
+    r"[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?famil(?:y|ies)\b",
     re.IGNORECASE,
 )
 HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
@@ -629,19 +656,12 @@ HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
 
 
 def _claimed_family_count(line: str) -> int | None:
-    """Extract the metric-family count claimed by a doc line.
-
-    Spelled-out numbers take precedence: a line may also contain
-    version-like digits (e.g. "eleven v1 metric families") that
-    a numeric extractor would misread as a small count.
-    """
-    if re.search(r"\beleven\b", line, re.IGNORECASE):
-        return 11
-    if re.search(r"\btwelve\b", line, re.IGNORECASE):
-        return 12
-    claimed = (re.search(r"(\d{1,12})\s{0,64}metric\s{1,64}famil", line)
-               or re.search(r"(\d{1,12})\s{0,64}famil", line))
-    return int(claimed.group(1)) if claimed else None
+    """Extract a numeric or spelled-out metric-family count claim."""
+    claimed = FAMILY_COUNT_RE.search(line)
+    if claimed is None:
+        return None
+    token = claimed.group("count").casefold()
+    return int(token) if token.isdecimal() else _SPELLED_FAMILY_COUNTS[token]
 
 
 def _family_count_mismatch(
@@ -1027,8 +1047,8 @@ def _contextual_blocks(
     """Return (block, version_context) pairs from prose.
 
     A block's version context is true when any open ancestor heading (at a
-    shallower level, or its own section heading) names the released version,
-    so a child heading cannot hide a stale claim from its parent section.
+    shallower level, or its own section heading) names the version under
+    review, so a child heading cannot hide a stale claim from its parent section.
     """
     blocks: list[tuple[str, bool]] = []
     stack: list[tuple[int, bool]] = []
@@ -1084,7 +1104,7 @@ def _without_fenced_blocks(text: str) -> str:
 def _stable_claim_failures(rel: str, version: str, text: str) -> list[str]:
     """Flag pre-release wording in blocks that mention the released version."""
     failures: list[str] = []
-    version_pattern = re.compile(rf"\bv?{re.escape(version)}\b")
+    version_pattern = _release_version_pattern(version)
     text = _without_fenced_blocks(text)
     # Document Updates ledger rows record history, not current claims.
     history = set(_document_update_table_lines(text))
@@ -1189,15 +1209,21 @@ PENDING_STATE_SURFACES = (
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
     BREAKING_CHANGES_GUIDE,
+    "docs/guides/MIGRATION-{version}.md",
     "docs/releases/{version}-release-notes.md",
+    "docs/releases/{version}-upgrade-and-rollback.md",
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
+    CHANGELOG_FILENAME,
 )
 
-# Reference-only breaking-change guides are scanned for affirmative release
+# Reference-only and procedure surfaces are scanned for affirmative release
 # claims but do not need to repeat the publication boundary.
 PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
     BREAKING_CHANGES_GUIDE,
+    "docs/guides/MIGRATION-{version}.md",
+    "docs/releases/{version}-upgrade-and-rollback.md",
+    CHANGELOG_FILENAME,
 })
 
 # Wording that ties a mention of the pending version to a later publication.
@@ -1205,7 +1231,8 @@ PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
 # download that works today.
 _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"after (?:the )?(?:publication|release)"
-    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+|version|tag)|it|"
+    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+"
+    r"(?: (?:release|tag))?|version|tag)|it|"
     r"this (?:version|release)|that (?:version|release))"
     r"\s+(?:is|has been|will be|gets)\s+(?:published|released)"
     r"|after (?:the )?merge\b"
@@ -1218,7 +1245,7 @@ _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"|(?:release|development)[- ]candidate"
     r"|before (?:the )?(?:publication|release)"
     r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
-    r"|not (?:yet |currently |presently |now )?(?:published|released)"
+    r"|not (?:yet |currently |presently |now )?(?:been )?(?:published|released)"
     r"|no\b.{0,100}\b(?:published|released)\b"
     r"|将(?:会)?(?:已)?(?:正式)?发布|即将(?:正式)?发布"
     r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
@@ -1231,6 +1258,14 @@ _PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
     r"\b(?:shipped|published|released|available)\b|已发布|已正式发布",
     re.IGNORECASE,
 )
+_CI_ARTIFACT_AVAILABILITY_RE = re.compile(
+    r"\bavailable\s+(?:in|from)\s+(?:the\s+)?(?:ci|workflow|build pipeline)\b",
+    re.IGNORECASE,
+)
+# The broad `no ... has been` alternative is only safe after its input prefix
+# has been cut at clause and unrelated-version boundaries. Keep that scoping in
+# `_completion_claim_is_nonaffirmative`; searching a whole document can let an
+# earlier, unrelated negation hide a later affirmative release claim.
 _NEGATED_COMPLETION_CLAIM_RE = re.compile(
     r"\b(?:not|never|no)\s+(?:(?:yet|still|currently|presently|now|longer|been|be|become|officially|formally)\s+)*$"
     r"|\b(?:isn't|aren't|wasn't|weren't|hasn't|haven't)\s+"
@@ -1238,10 +1273,122 @@ _NEGATED_COMPLETION_CLAIM_RE = re.compile(
     r"|\bno\b.{0,100}\b(?:is|are|was|were|has been|have been)\s*$",
     re.IGNORECASE,
 )
+_COMPLETION_CLAUSE_BREAK_RE = re.compile(
+    r"[,;:!?]|\b(?:and|but|however|although|though|whereas|while|instead)\b",
+    re.IGNORECASE,
+)
 # How far a completion verb may sit from the pending version and still read as
 # a claim about it.  A verb that belongs to another release sits further away
 # or carries a sentence break between the two.
-_ANY_VERSION_RE = re.compile(r"\bv?\d+\.\d+\.\d+(?![\w.-])")
+def _release_version_pattern(version: str) -> re.Pattern[str]:
+    """Match a stable release token with ASCII-only identifier boundaries."""
+    return re.compile(
+        rf"(?<![A-Za-z0-9_.-])v?{re.escape(version)}"
+        r"(?![A-Za-z0-9_-]|\.\d)"
+    )
+
+
+_VERSION_LEFT_BOUNDARY_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"
+)
+_VERSION_IDENTIFIER_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+)
+
+
+def _consume_version_digits(text: str, index: int) -> int:
+    """Return the first index after one ASCII digit run."""
+    while index < len(text) and "0" <= text[index] <= "9":
+        index += 1
+    return index
+
+
+def _consume_version_identifier(text: str, index: int) -> int:
+    """Return the first index after one ASCII prerelease identifier."""
+    while index < len(text) and text[index] in _VERSION_IDENTIFIER_CHARS:
+        index += 1
+    return index
+
+
+def _version_core_end(text: str, start: int) -> tuple[int | None, int]:
+    """Return the end of a three-component numeric version core."""
+    index = start + (text[start] == "v")
+    component_end = _consume_version_digits(text, index)
+    if component_end == index:
+        return None, max(start + 1, component_end)
+    index = component_end
+    for _ in range(2):
+        if index >= len(text) or text[index] != ".":
+            return None, max(start + 1, index)
+        component_start = index + 1
+        component_end = _consume_version_digits(text, component_start)
+        if component_end == component_start:
+            return None, max(start + 1, component_end)
+        index = component_end
+    return index, index
+
+
+def _version_suffix_end(
+    text: str, start: int, index: int
+) -> tuple[int | None, int]:
+    """Return the end of an optional dot-separated prerelease suffix."""
+    if index >= len(text) or text[index] != "-":
+        return index, index
+    part_start = index + 1
+    part_end = _consume_version_identifier(text, part_start)
+    if part_end == part_start:
+        return None, max(start + 1, part_end)
+    index = part_end
+    while index < len(text) and text[index] == ".":
+        part_start = index + 1
+        part_end = _consume_version_identifier(text, part_start)
+        if part_end == part_start:
+            break
+        index = part_end
+    return index, index
+
+
+def _version_end_is_valid(text: str, index: int) -> bool:
+    """Apply the release token's right boundary without regex backtracking."""
+    if index >= len(text):
+        return True
+    if text[index] in _VERSION_IDENTIFIER_CHARS:
+        return False
+    return not (
+        text[index] == "."
+        and index + 1 < len(text)
+        and "0" <= text[index + 1] <= "9"
+    )
+
+
+def _version_token_at(
+    text: str, start: int
+) -> tuple[tuple[int, int, str] | None, int]:
+    """Parse one stable-version token without regex backtracking."""
+    if start and text[start - 1] in _VERSION_LEFT_BOUNDARY_CHARS:
+        return None, start + 1
+    core_end, resume = _version_core_end(text, start)
+    if core_end is None:
+        return None, resume
+    token_end, resume = _version_suffix_end(text, start, core_end)
+    if token_end is None or not _version_end_is_valid(text, token_end):
+        return None, max(start + 1, resume)
+    return (start, token_end, text[start:token_end]), token_end
+
+
+def _version_tokens(text: str) -> list[tuple[int, int, str]]:
+    """Return version tokens using a bounded, deterministic character scan."""
+    tokens: list[tuple[int, int, str]] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "v" and not ("0" <= text[index] <= "9"):
+            index += 1
+            continue
+        token, next_index = _version_token_at(text, index)
+        if token is not None:
+            tokens.append(token)
+        index = max(index + 1, next_index)
+    return tokens
 
 # Abbreviations that must not trigger sentence splits.
 _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "al.", "et al.")
@@ -1251,8 +1398,12 @@ _ABBR_PLACEHOLDER = "\uE000"  # Private use area, won't appear in docs
 
 def _protect_abbreviations(text: str) -> str:
     """Replace known abbreviations with placeholders to prevent false splits."""
-    for abbr in _ABBREVIATIONS:
-        text = text.replace(abbr, abbr.replace(".", _ABBR_PLACEHOLDER))
+    for abbr in sorted(_ABBREVIATIONS, key=len, reverse=True):
+        pattern = re.compile(rf"(?<!\w){re.escape(abbr)}", re.IGNORECASE)
+        text = pattern.sub(
+            lambda match: match.group(0).replace(".", _ABBR_PLACEHOLDER),
+            text,
+        )
     return text
 
 
@@ -1262,11 +1413,10 @@ def _restore_abbreviations(text: str) -> str:
 
 
 # Sentence splitting must handle missing space after period (common in prose).
-# Split on: punctuation + whitespace, OR punctuation + uppercase letter.
-# Known abbreviations are temporarily protected to prevent false splits.
+# Split on punctuation plus whitespace, or punctuation plus an uppercase letter.
+# Known whole-word abbreviations are protected to prevent false splits.
 _SENTENCE_SPLIT_RE = re.compile(
     r"(?<=[.!?])(?:\s+|(?=[A-Z]))",
-    re.IGNORECASE,
 )
 _RELEASE_SUBJECT_RE = re.compile(
     r"\b(?:release|version|tag|build|package|artifact|assets?)\b",
@@ -1302,44 +1452,43 @@ def _split_sentences_protected(text: str) -> list[str]:
 
 
 def _publication_claim_window(block: str, version_pattern: "re.Pattern[str]") -> str:
-    """Return sentence text about the pending version, including its context.
+    """Keep the caller's already-isolated sentence if it names the version.
 
-    Sentence boundaries keep claims about another release out of scope while
-    preserving nearby negation or publication timing that qualifies a verb.
-    Abbreviations are protected to prevent false splits.
+    `_pending_text_failures` performs abbreviation-aware sentence splitting
+    before this helper. Splitting again here risks separating the version from
+    its publication verb or the clause that qualifies that verb.
     """
-    protected = _protect_abbreviations(block)
-    return " ".join(
-        _restore_abbreviations(sentence)
-        for sentence in _SENTENCE_SPLIT_RE.split(protected)
-        if version_pattern.search(sentence) is not None
-    )
+    return block if version_pattern.search(block) is not None else ""
 
 
-def _completion_claim_is_nonaffirmative(
-    sentence: str, claim: re.Match[str]
+def _completion_claim_prefix_is_negated(
+    prefix: str, pending: "re.Pattern[str] | None"
 ) -> bool:
-    """Ignore a negated claim or future availability tied to publication."""
-    prefix = re.sub(r"\s+", " ", sentence[:claim.start()].replace(">", " "))
-    context = re.sub(r"\s+", " ", sentence.replace(">", " ").replace("`", ""))
-    if _NEGATED_COMPLETION_CLAIM_RE.search(prefix) is not None:
-        return True
-    if claim.group(0) in {"已发布", "已正式发布"} and re.search(
-        r"(?:将会|将|即将)\s*$", prefix
-    ):
-        return True
-    claim_word = claim.group(0).lower()
+    negation_start = max(
+        (match.end() for match in _COMPLETION_CLAUSE_BREAK_RE.finditer(prefix)),
+        default=0,
+    )
+    for _start, end, version_text in _version_tokens(prefix):
+        if pending is None or pending.fullmatch(version_text) is None:
+            negation_start = max(negation_start, end)
+    return _NEGATED_COMPLETION_CLAIM_RE.search(prefix[negation_start:]) is not None
+
+
+def _english_future_claim_is_nonaffirmative(
+    claim_word: str,
+    sentence: str,
+    claim: re.Match[str],
+    prefix: str,
+    context: str,
+) -> bool:
     if claim_word in {"published", "released", "shipped"}:
-        future_publication = re.search(
+        future = re.search(
             r"\b(?:once|will\s+be|after\b[^!?]*\b"
             r"(?:is|has been|will be|gets))\s*$",
             prefix,
             re.IGNORECASE,
         )
-        if (
-            future_publication is not None
-            and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None
-        ):
+        if future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context):
             return True
     if claim_word != "available":
         return False
@@ -1348,8 +1497,14 @@ def _completion_claim_is_nonaffirmative(
         prefix,
         re.IGNORECASE,
     )
-    if future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context) is not None:
+    if future is not None and _PREPUBLICATION_BOUNDARY_RE.search(context):
         return True
+    return _claim_followed_by_publication_boundary(sentence, claim)
+
+
+def _claim_followed_by_publication_boundary(
+    sentence: str, claim: re.Match[str]
+) -> bool:
     after_claim = sentence[claim.end() :]
     return re.search(
         r"^\s*(?:only\s+)?(?:after\s+(?:the\s+)?(?:publication|release)\b"
@@ -1362,23 +1517,48 @@ def _completion_claim_is_nonaffirmative(
     ) is not None
 
 
+def _completion_claim_is_nonaffirmative(
+    sentence: str,
+    claim: re.Match[str],
+    pending: "re.Pattern[str] | None" = None,
+) -> bool:
+    """Ignore a negated claim or future availability tied to publication."""
+    prefix = re.sub(r"\s+", " ", sentence[:claim.start()].replace(">", " "))
+    context = re.sub(r"\s+", " ", sentence.replace(">", " ").replace("`", ""))
+    ci_availability = _CI_ARTIFACT_AVAILABILITY_RE.search(sentence)
+    if (
+        claim.group(0).lower() == "available"
+        and ci_availability is not None
+        and ci_availability.start() == claim.start()
+    ):
+        return True
+    if _completion_claim_prefix_is_negated(prefix, pending):
+        return True
+    if claim.group(0) in {"已发布", "已正式发布"}:
+        return re.search(r"(?:将会|将|即将)\s*$", prefix) is not None
+    return _english_future_claim_is_nonaffirmative(
+        claim.group(0).lower(), sentence, claim, prefix, context
+    )
+
+
 def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
-) -> re.Match[str] | None:
+) -> tuple[int, int, str] | None:
     """Return the version token closest to a completion verb."""
-    if versions := list(_ANY_VERSION_RE.finditer(window)):
-        return min(versions, key=lambda span: abs(span.start() - claim.start()))
-    else:
+    versions = _version_tokens(window)
+    if not versions:
         return None
+    return min(versions, key=lambda token: abs(token[0] - claim.start()))
 
 
 def _published_until_tag_exception(
-    window: str, claim: re.Match[str], pending_span: re.Match[str]
+    window: str, claim: re.Match[str], pending_span: tuple[int, int, str]
 ) -> bool:
     """Return whether a "published ... until ... tag" phrasing is exempt."""
-    if claim.start() >= pending_span.start() or claim.group(0).lower() != "published":
+    pending_start = pending_span[0]
+    if claim.start() >= pending_start or claim.group(0).lower() != "published":
         return False
-    between = window[claim.end():pending_span.start()]
+    between = window[claim.end():pending_start]
     return re.search(r"\buntil\b", between, re.IGNORECASE) is not None and re.search(
         r"\btag\b", between, re.IGNORECASE
     ) is not None
@@ -1398,19 +1578,19 @@ def _claim_names_pending_version(
         # (no such subject) stays ordinary wording rather than a claim.
         if not version_context or _RELEASE_SUBJECT_RE.search(window) is None:
             return False
-        return not _completion_claim_is_nonaffirmative(window, claim)
-    if pending.fullmatch(nearest.group(0)) is None:
+        return not _completion_claim_is_nonaffirmative(window, claim, pending)
+    if pending.fullmatch(nearest[2]) is None:
         return False
     if _published_until_tag_exception(window, claim, nearest):
         return False
-    return not _completion_claim_is_nonaffirmative(window, claim)
+    return not _completion_claim_is_nonaffirmative(window, claim, pending)
 
 
 def _pending_completion_claim(
     window: str, pending_version: str, version_context: bool = False
 ) -> re.Match[str] | None:
     """Return the first affirmative completion claim tied to the pending version."""
-    pending = re.compile(rf"\bv?{re.escape(pending_version)}(?![\w.-])")
+    pending = _release_version_pattern(pending_version)
     for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
         if _claim_names_pending_version(window, claim, pending, version_context):
             return claim
@@ -1428,32 +1608,136 @@ def _claim_belongs_to_pending_version(
     return _pending_completion_claim(window, pending_version, version_context) is not None
 
 
+def _latest_tag_prefix_is_negated(prefix: str) -> bool:
+    return re.search(
+        r"\b(?:not|never|no longer|isn't|aren't|wasn't|weren't)\b"
+        r"[^.!?;]{0,40}$",
+        prefix,
+        re.IGNORECASE,
+    ) is not None
+
+
+def _latest_tag_suffix_is_negated(suffix: str) -> bool:
+    return re.match(
+        r"\s*(?:(?:is|are|was|were|has been|have been)\s+)?"
+        r"(?:not|never|no longer|isn't|aren't|wasn't|weren't)\b",
+        suffix,
+        re.IGNORECASE,
+    ) is not None
+
+
+def _latest_tag_claim_is_negated(
+    sentence: str,
+    latest_match: re.Match[str],
+    lower_bound: int = 0,
+    upper_bound: int | None = None,
+) -> bool:
+    """Reject latest-tag language explicitly scoped by a local negation."""
+    upper_bound = len(sentence) if upper_bound is None else upper_bound
+    prefix = sentence[max(lower_bound, latest_match.start() - 80):latest_match.start()]
+    suffix = sentence[latest_match.end():min(upper_bound, latest_match.end() + 80)]
+    prefix_breaks = [
+        match.end() for match in _COMPLETION_CLAUSE_BREAK_RE.finditer(prefix)
+    ]
+    if prefix_breaks:
+        prefix = prefix[max(prefix_breaks):]
+    if suffix_break := _COMPLETION_CLAUSE_BREAK_RE.search(suffix):
+        suffix = suffix[:suffix_break.start()]
+    return _latest_tag_prefix_is_negated(prefix) or _latest_tag_suffix_is_negated(
+        suffix
+    )
+
+
+def _latest_tag_patterns(
+    pending_version: str,
+) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+    latest_tag = re.compile(
+        r"\b(?:latest|most recent)\s+"
+        r"(?:(?:public|published|stable)\s+)*(?:tag|release)\b"
+        r"(?!\s+notes?\b)",
+        re.IGNORECASE,
+    )
+    version = _release_version_pattern(pending_version)
+    forward = re.compile(
+        rf"{latest_tag.pattern}\s*(?:is\s+)?[:=]?\s*{version.pattern}",
+        re.IGNORECASE,
+    )
+    reverse = re.compile(
+        version.pattern + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag.pattern,
+        re.IGNORECASE,
+    )
+    return version, latest_tag, re.compile(
+        rf"(?:{forward.pattern})|(?:{reverse.pattern})", re.IGNORECASE
+    )
+
+
+def _latest_tag_match_overlaps_direct_claim(
+    latest_match: re.Match[str], direct_claims: list[re.Match[str]]
+) -> bool:
+    return any(
+        direct.start() < latest_match.end()
+        and latest_match.start() < direct.end()
+        for direct in direct_claims
+    )
+
+
+def _latest_tag_match_affirms_pending(
+    plain: str,
+    latest_match: re.Match[str],
+    version: re.Pattern[str],
+    direct_claims: list[re.Match[str]],
+    version_context: bool,
+    lower_bound: int,
+    upper_bound: int,
+) -> bool:
+    if _latest_tag_claim_is_negated(
+        plain, latest_match, lower_bound, upper_bound
+    ):
+        return False
+    if _latest_tag_match_overlaps_direct_claim(latest_match, direct_claims):
+        return True
+    if not version_context:
+        return False
+    nearest = _nearest_version_to_claim(plain, latest_match)
+    return nearest is None or version.fullmatch(nearest[2]) is not None
+
+
+def _latest_tag_sentence_claims_pending_version(
+    sentence: str,
+    version: re.Pattern[str],
+    latest_tag: re.Pattern[str],
+    direct_claim_pattern: re.Pattern[str],
+    version_context: bool,
+) -> bool:
+    plain = sentence.replace("**", "").replace("`", "")
+    latest_matches = list(latest_tag.finditer(plain))
+    direct_claims = list(direct_claim_pattern.finditer(plain))
+    for index, latest_match in enumerate(latest_matches):
+        lower_bound = latest_matches[index - 1].end() if index else 0
+        upper_bound = (
+            latest_matches[index + 1].start()
+            if index + 1 < len(latest_matches)
+            else len(plain)
+        )
+        if _latest_tag_match_affirms_pending(
+            plain, latest_match, version, direct_claims,
+            version_context, lower_bound, upper_bound,
+        ):
+            return True
+    return False
+
+
 def _claims_pending_latest_tag(
     block: str, pending_version: str, version_context: bool = False
 ) -> bool:
     """Return whether the pending version is called the latest tag or release."""
-    version = re.compile(rf"\bv?{re.escape(pending_version)}\b")
-    latest_tag = (
-        r"\b(?:latest|most recent)\s+"
-        r"(?:(?:public|published|stable)\s+)*(?:tag|release)\b"
+    version, latest_tag, direct_claim = _latest_tag_patterns(pending_version)
+    return any(
+        _latest_tag_sentence_claims_pending_version(
+            sentence, version, latest_tag, direct_claim, version_context
+        )
+        for sentence in _split_sentences_protected(block)
     )
-    forward = re.compile(
-        rf"{latest_tag}\s*(?:is\s+)?[:=]?\s*{version.pattern}", re.IGNORECASE
-    )
-    reverse = re.compile(
-        version.pattern + r"\s+(?:is\s+)?(?:the\s+)?" + latest_tag,
-        re.IGNORECASE,
-    )
-    for sentence in _SENTENCE_SPLIT_RE.split(block):
-        plain = sentence.replace("**", "").replace("`", "")
-        if forward.search(plain) or reverse.search(plain):
-            return True
-        latest_match = re.search(latest_tag, plain, re.IGNORECASE)
-        if latest_match is not None and version_context:
-            nearest = _nearest_version_to_claim(plain, latest_match)
-            if nearest is None or version.fullmatch(nearest.group(0)) is not None:
-                return True
-    return False
 
 
 def _pending_sentence_failures(
@@ -1499,6 +1783,53 @@ def _pending_document_failures(
     )
 
 
+def _pending_changelog_prologue_failures(
+    root: Path, pending_version: str
+) -> list[str]:
+    """Check only the changelog introduction, not dated history sections."""
+    path = root / CHANGELOG_FILENAME
+    if not path.is_file():
+        return []
+    text = _without_fenced_blocks(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    first_heading = VERSION_HEADING_PREFIX_RE.search(text)
+    prologue = text[:first_heading.start()] if first_heading is not None else text
+    return _pending_text_failures(
+        CHANGELOG_FILENAME,
+        prologue,
+        pending_version,
+        require_boundary=False,
+    )
+
+
+def _pending_block_failures(
+    rel: str,
+    block: str,
+    pending_version: str,
+    version_pattern: "re.Pattern[str]",
+    version_context: bool,
+) -> tuple[list[str], bool]:
+    """Validate one current-state block and retain its publication boundary."""
+    names_version = version_pattern.search(block) is not None
+    if not version_context and not names_version:
+        return [], False
+    boundary = _is_conditional_publication_block(block)
+    failures = []
+    if _claims_pending_latest_tag(block, pending_version, version_context):
+        failures.append(
+            f"{rel}: pending {pending_version} is identified as the latest tag "
+            "or stable release"
+        )
+    for sentence in _split_sentences_protected(block):
+        sentence_failures, sentence_boundary = _pending_sentence_failures(
+            rel, sentence, pending_version, version_pattern, version_context
+        )
+        failures.extend(sentence_failures)
+        boundary = boundary or sentence_boundary
+    return failures, boundary
+
+
 def _pending_text_failures(
     rel: str,
     text: str,
@@ -1512,36 +1843,22 @@ def _pending_text_failures(
     Unreleased section; ordinary documents can contain historical version
     headings whose prose is not a claim about today's pending release.
     """
-    version_pattern = re.compile(
-        rf"\bv?{re.escape(pending_version)}(?![\w.-])"
-    )
+    version_pattern = _release_version_pattern(pending_version)
     text = _without_fenced_blocks(text)
     history = set(_document_update_table_lines(text))
-    failures: list[str] = []
-    boundary_seen = False
     blocks = (
         _contextual_blocks(text, history, version_pattern)
         if include_heading_context
         else [(block, False) for block in _logical_blocks(text, history)]
     )
+    failures: list[str] = []
+    boundary_seen = False
     for block, version_context in blocks:
-        if not version_context and version_pattern.search(block) is None:
-            continue
-        if _claims_pending_latest_tag(block, pending_version, version_context):
-            failures.append(
-                f"{rel}: pending {pending_version} is identified as the latest tag "
-                "or stable release"
-            )
-        for sentence in _split_sentences_protected(block):
-            sentence_failures, boundary = _pending_sentence_failures(
-                rel,
-                sentence,
-                pending_version,
-                version_pattern,
-                version_context,
-            )
-            failures.extend(sentence_failures)
-            boundary_seen = boundary_seen or boundary
+        block_failures, boundary = _pending_block_failures(
+            rel, block, pending_version, version_pattern, version_context
+        )
+        failures.extend(block_failures)
+        boundary_seen = boundary_seen or boundary
     if require_boundary and not boundary_seen:
         failures.append(
             f"{rel}: pending {pending_version} needs one explicit "
@@ -1572,6 +1889,11 @@ def check_pending_release_state(
     """Reject current-state claims that a pending release is published."""
     failures: list[str] = []
     for template in surface_rel_paths:
+        if template == CHANGELOG_FILENAME:
+            failures.extend(
+                _pending_changelog_prologue_failures(root, pending_version)
+            )
+            continue
         rel = template.format(version=pending_version)
         failures.extend(
             _pending_document_failures(
