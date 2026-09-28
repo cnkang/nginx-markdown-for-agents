@@ -308,8 +308,13 @@ def test_gate4_ownership_query_uses_the_version_portable_state_set() -> None:
     assert 'cat "$release_stderr_file" >&2' in script
 
 
-def test_gate4_installs_atomically() -> None:
-    """A failed or timed-out gate4 install must not leak a release."""
+def test_gate4_installs_with_the_version_selected_rollback_flag() -> None:
+    """A failed or timed-out gate4 install must not leak a release.
+
+    The rollback flag is chosen by the installed helm's major version:
+    Helm 3 spells it ``--atomic``, Helm 4 ``--rollback-on-failure``.  The
+    script must call the selector rather than hard-code one spelling.
+    """
     script = (
         Path(__file__).resolve().parents[4]
         / "tools/release/gates/gate4_local_k8s_smoke.sh"
@@ -317,10 +322,19 @@ def test_gate4_installs_atomically() -> None:
     install = script.split('if ! helm install "${HELM_RELEASE_NAME}"', 1)[1]
     install = install.split("; then", 1)[0]
 
-    assert "--atomic" in install, (
-        "gate4 helm install must pass --atomic so a failed or timed-out "
-        "install is removed automatically"
+    assert '"${rollback_flag}"' in install, (
+        "gate4 helm install must pass the selected rollback flag"
     )
+    assert "rollback_flag=\"$(helm_rollback_flag)\"" in script, (
+        "gate4 must obtain the rollback flag from the version selector"
+    )
+    # The selector itself maps the majors correctly.  The body contains
+    # case terminators, so cut at the function's closing line explicitly.
+    selector = script.split("helm_rollback_flag() {", 1)[1]
+    selector = selector.split("\n}\n", 1)[0]
+    assert "--rollback-on-failure" in selector
+    assert "--atomic" in selector
+    assert "v4*|4.*" in selector
 
 
 def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:

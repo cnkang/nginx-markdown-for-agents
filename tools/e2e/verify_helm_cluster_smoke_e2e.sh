@@ -164,7 +164,13 @@ acquire_cluster_lock() {
                 claimed_owner="$(cat "${stale_claim}/pid" 2>/dev/null || true)"
                 if [[ -n "${claimed_owner}" ]] && kill -0 "${claimed_owner}" 2>/dev/null; then
                     if [[ ! -e "${LOCK_PATH}.d" ]]; then
-                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null || true
+                        # Restore the live owner's lock; when the canonical
+                        # path was re-created meanwhile (another waiter won),
+                        # drop the claim so it cannot leak into TMPDIR.
+                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null \
+                            || rm -rf "${stale_claim}"
+                    else
+                        rm -rf "${stale_claim}"
                     fi
                     continue
                 fi
@@ -288,6 +294,24 @@ echo "=== installing ${RELEASE} ===" >&2
 # no other release holds it.  A failed or timed-out install exits non-zero
 # (and under `set -e` jumps straight to the EXIT trap), so the flag has to be
 # set first for cleanup() to remove whatever the attempt left behind.
+# Helm's rollback-on-failure flag was renamed: Helm 3 spells it `--atomic`
+# (which also implies --wait), Helm 4 offers `--rollback-on-failure` and keeps
+# `--atomic` only as a deprecated alias.  Select by major version so the smoke
+# uses each major's own spelling and neither emits deprecation noise.
+helm_rollback_flag() {
+    local version
+    version="$(helm version --short 2>/dev/null || true)"
+    case "${version}" in
+        v4*|4.*)
+            printf '%s' "--rollback-on-failure"
+            ;;
+        *)
+            printf '%s' "--atomic"
+            ;;
+    esac
+    return 0
+}
+
 CREATED_RELEASE=1
 helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
@@ -307,7 +331,7 @@ helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --set-string metrics.sidecar.resources.limits.cpu=250m \
     --set-string metrics.sidecar.resources.limits.memory=128Mi \
     --wait --timeout 180s \
-    --atomic >&2
+    "$(helm_rollback_flag)" >&2
 
 echo "=== rollout status ===" >&2
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \
