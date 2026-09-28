@@ -340,7 +340,12 @@ def test_helm_cluster_smoke_scrapes_the_module_metrics_sidecar() -> None:
 
 
 def _run_stubbed_helm_cluster_smoke(
-    tmp_path: Path, existing_release: str
+    tmp_path: Path,
+    existing_release: str,
+    *,
+    cluster_exists: bool = True,
+    namespace_exists: bool = True,
+    namespace_create_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the smoke script against owned command stubs."""
     tools = tmp_path / "bin"
@@ -354,7 +359,8 @@ def _run_stubbed_helm_cluster_smoke(
         "docker": "printf 'docker %s\\n' \"$*\" >> \"$CALL_LOG\"\n",
         "kind": (
             "printf 'kind %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
-            "if [[ \"$1 $2\" == 'get clusters' ]]; then "
+            "if [[ \"$1 $2\" == 'get clusters' && "
+            "\"$CLUSTER_EXISTS\" == 1 ]]; then "
             "printf '%s\\n' \"$CLUSTER\"; fi\n"
         ),
         "helm": (
@@ -363,6 +369,16 @@ def _run_stubbed_helm_cluster_smoke(
         ),
         "kubectl": (
             "printf 'kubectl %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
+            "if [[ \"$*\" == *'get namespace "
+            "markdown-smoke --ignore-not-found -o name'* ]]; then\n"
+            "  if [[ \"$NAMESPACE_EXISTS\" == 1 ]]; then "
+            "printf 'namespace/markdown-smoke\\n'; fi\n"
+            "fi\n"
+            "if [[ \"$*\" == *'create namespace markdown-smoke'* && "
+            "\"$NAMESPACE_CREATE_FAILS\" == 1 ]]; then\n"
+            "  echo 'simulated namespace creation failure' >&2\n"
+            "  exit 1\n"
+            "fi\n"
             "if [[ \"$*\" == *'rollout status'* ]]; then exit 1; fi\n"
             "if [[ \"$*\" == *'get pods'* ]]; then printf 'pod\\n'; fi\n"
         ),
@@ -379,6 +395,9 @@ def _run_stubbed_helm_cluster_smoke(
         "MODULE_SO": str(module),
         "CLUSTER": "existing-cluster",
         "EXISTING_RELEASES": existing_release,
+        "CLUSTER_EXISTS": "1" if cluster_exists else "0",
+        "NAMESPACE_EXISTS": "1" if namespace_exists else "0",
+        "NAMESPACE_CREATE_FAILS": "1" if namespace_create_fails else "0",
     })
 
     result = subprocess.run(
@@ -407,6 +426,62 @@ def test_helm_cluster_smoke_leaves_a_preexisting_release_untouched(
     assert "helm install" not in command_log
     assert "helm upgrade" not in command_log
     assert "helm uninstall" not in command_log
+    assert "kubectl delete namespace" not in command_log
+    assert "kind delete cluster" not in command_log
+
+
+def test_helm_cluster_smoke_initializes_a_fresh_cluster_namespace_first(
+    tmp_path: Path,
+) -> None:
+    """A fresh cluster gets its namespace before Helm lists releases."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=False,
+        namespace_exists=False,
+    )
+
+    assert result.returncode != 0
+    commands = command_log.splitlines()
+    cluster_create = next(
+        index for index, command in enumerate(commands)
+        if command.startswith("kind create cluster ")
+    )
+    namespace_lookup = next(
+        index for index, command in enumerate(commands)
+        if "get namespace markdown-smoke --ignore-not-found -o name" in command
+    )
+    namespace_create = next(
+        index for index, command in enumerate(commands)
+        if "create namespace markdown-smoke" in command
+    )
+    helm_list = next(
+        index for index, command in enumerate(commands)
+        if command.startswith("helm list ")
+    )
+
+    assert cluster_create < namespace_lookup < namespace_create < helm_list
+    assert "--all" in commands[helm_list]
+    assert "helm install" in command_log
+
+
+def test_helm_cluster_smoke_fails_when_namespace_creation_fails(
+    tmp_path: Path,
+) -> None:
+    """Namespace permission and API errors must not be hidden."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=False,
+        namespace_exists=False,
+        namespace_create_fails=True,
+    )
+
+    assert result.returncode != 0
+    assert "simulated namespace creation failure" in result.stderr
+    assert "ERROR: unable to create namespace markdown-smoke" in result.stderr
+    assert "helm list" not in command_log
+    assert "helm install" not in command_log
 
 
 def test_helm_cluster_smoke_uninstalls_a_release_it_created(
@@ -419,6 +494,8 @@ def test_helm_cluster_smoke_uninstalls_a_release_it_created(
     assert "helm install" in command_log
     assert "helm upgrade" not in command_log
     assert "helm uninstall" in command_log
+    assert "kubectl delete namespace" not in command_log
+    assert "kind delete cluster" not in command_log
 
 
 def test_manual_qualification_is_explicitly_defined() -> None:
