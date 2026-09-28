@@ -962,12 +962,10 @@ def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
 
     Interpreter builds without ``waitid``/``WNOWAIT`` (some macOS Python
     distributions) cannot observe the leader without reaping it.  The
-    fallback polls the leader to completion, then terminates the process
-    group before the final reap, so descendants are still signaled.  The
-    window where the leader has exited but the group signal must land is
-    covered by keeping the leader unreaped until the group signal is sent -
-    the child is stopped with SIGSTOP first, which leaves it unreaped while
-    its signal is dispatched.
+    fallback polls the leader to completion and then signals the process
+    group directly, so descendants that inherited stdout are still
+    terminated; its docstring documents the bounded PGID-reuse window that
+    path accepts.
     """
     if os.name != "posix":
         return process.wait(timeout=timeout)
