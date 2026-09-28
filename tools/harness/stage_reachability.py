@@ -15,9 +15,47 @@ VARIABLE = re.compile(r"\$\((\w+)\)")
 
 # The Make directive that disables error checking for its prerequisites.
 IGNORE_TARGET = ".IGNORE"
+ONESHELL_TARGET = ".ONESHELL"
+MAKE_OPTION_VARIABLES = {"MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS"}
 
 
 CONDITIONAL_START = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)(?:\s|$)")
+
+
+def _shell_operator_step(
+    char: str, quote: str | None, escaped: bool
+) -> tuple[str | None, bool, bool]:
+    """Advance quote state and report an unquoted shell operator."""
+    if escaped:
+        return quote, False, False
+    if char == "\\" and quote != "'":
+        return quote, True, False
+    if quote is not None:
+        return (None if char == quote else quote), False, False
+    if char in {"'", '"'}:
+        return char, False, False
+    return None, False, char in ";&|<>"
+
+
+def _has_unquoted_shell_operator(line: str) -> bool:
+    """Whether a shell control or redirection operator executes outside quotes."""
+    code = line.lstrip("@-+")
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(code):
+        if (
+            quote is None
+            and not escaped
+            and char == "#"
+            and (index == 0 or code[index - 1].isspace())
+        ):
+            break
+        quote, escaped, is_operator = _shell_operator_step(
+            char, quote, escaped
+        )
+        if is_operator:
+            return True
+    return False
 
 
 def command_words(line: str) -> list[str]:
@@ -29,19 +67,10 @@ def command_words(line: str) -> list[str]:
     while words and re.fullmatch(r"\w+=.*", words[0]):
         name = words[0].split("=", 1)[0]
         if name in {"MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS"}:
-            # Those carry options such as -n that decide whether a recipe runs.
             return []
         words.pop(0)
-    if any(word in {";", "&&", "||", "|", "&", ">", ">>", "<"} for word in words):
+    if _has_unquoted_shell_operator(line):
         return []
-    for word in words:
-        if re.fullmatch(r"[;&|<>]+", word):
-            continue
-        if re.search(r"[;&|<>]", word):
-            # An operator glued to an operand (`||true`) never runs alone, so
-            # the line is not a plain command.  Standalone operators are already
-            # refused above.
-            return []
     return words
 
 
@@ -229,6 +258,10 @@ def _apply_assignment(
 ) -> None:
     """Apply one assignment the way Make would, flavor included."""
     name, operator, value = assignment
+    if name in MAKE_OPTION_VARIABLES:
+        raise ValueError(
+            "cannot verify blocking status with Makefile-level make flags"
+        )
     if operator == "?=":
         if name not in variables and name not in unknown:
             variables[name] = value
@@ -282,6 +315,8 @@ def _record_target(
     if target is None:
         return None
     name = target[0]
+    if name == ONESHELL_TARGET:
+        raise ValueError("cannot verify blocking status under .ONESHELL")
     # Every definition contributes prerequisites, while a later recipe replaces
     # an earlier one, so the two are kept apart.
     generation[name] = generation.get(name, 0) + 1
@@ -461,12 +496,18 @@ def _poison_conditional_line(
     """
     poisoned = _assignment(_strip_assignment_prefixes(line.strip()))
     if poisoned is not None:
+        if poisoned[0] in MAKE_OPTION_VARIABLES:
+            raise ValueError(
+                "cannot verify blocking status with Makefile-level make flags"
+            )
         variables.pop(poisoned[0], None)
         simple.discard(poisoned[0])
         unknown.add(poisoned[0])
     redefined = _target(line.strip())
     if redefined is None:
         return
+    if redefined[0] == ONESHELL_TARGET:
+        raise ValueError("cannot verify blocking status under .ONESHELL")
     if redefined[0] == IGNORE_TARGET:
         raise ValueError("cannot verify conditional .IGNORE scope")
     # The branch may or may not run, so both the recipe and the prerequisite

@@ -75,6 +75,76 @@ get_dependency_version() {
         | head -1 || true
 }
 
+check_homebrew_toolchain_version() {
+    local rust_toolchain_file="$1"
+    local formula_file="$2"
+    local rust_version
+    local formula_version
+
+    local pin_values
+    if ! pin_values=$(python3 - "$rust_toolchain_file" "$formula_file" 2>&1 <<'PY'
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+rust_toolchain_path, formula_path = map(Path, sys.argv[1:3])
+try:
+    toolchain_file = tomllib.loads(
+        rust_toolchain_path.read_text(encoding="utf-8")
+    )
+except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+    raise SystemExit(
+        f"rust-toolchain.toml must define exactly one toolchain channel: {exc}"
+    )
+
+toolchain = toolchain_file.get("toolchain")
+rust_version = toolchain.get("channel") if isinstance(toolchain, dict) else None
+if not isinstance(rust_version, str) or not rust_version:
+    raise SystemExit(
+        "rust-toolchain.toml must define exactly one toolchain channel"
+    )
+
+try:
+    formula_text = formula_path.read_text(encoding="utf-8")
+except (OSError, UnicodeError) as exc:
+    raise SystemExit(f"cannot read Homebrew formula: {exc}")
+
+assignments = [
+    line for line in formula_text.splitlines()
+    if re.match(r"^[ \t]*TOOLCHAIN_VERSION[ \t]*=", line)
+]
+if len(assignments) != 1:
+    raise SystemExit(
+        "Homebrew formula must define exactly one TOOLCHAIN_VERSION assignment"
+    )
+match = re.fullmatch(
+    r"[ \t]*TOOLCHAIN_VERSION[ \t]*=[ \t]*"
+    r"(?P<quote>['\"])(?P<version>[^'\"]+)(?P=quote)"
+    r"[ \t]*(?:\.freeze)?[ \t]*(?:#.*)?",
+    assignments[0],
+)
+if match is None:
+    raise SystemExit(
+        "Homebrew TOOLCHAIN_VERSION must be one quoted literal assignment"
+    )
+print(f"{rust_version}\t{match.group('version')}")
+PY
+    ); then
+        log_error "Cannot read Homebrew Rust toolchain pin: ${pin_values}"
+        return 0
+    fi
+    IFS=$'\t' read -r rust_version formula_version <<< "$pin_values"
+    if [[ -z "$rust_version" || -z "$formula_version" ]]; then
+        log_error "Cannot read Homebrew Rust toolchain pin"
+    elif [[ "$formula_version" != "$rust_version" ]]; then
+        log_error "Homebrew toolchain $formula_version does not match $rust_version"
+    else
+        log_pass "Homebrew formula Rust toolchain version: $formula_version"
+    fi
+    return 0
+}
+
 main() {
     log_info "Checking version consistency..."
 
@@ -151,6 +221,9 @@ main() {
             log_info "Homebrew formula: $formula_ver (intentionally previous; updated by publish workflow)"
         fi
     fi
+
+    local rust_toolchain_file="${PROJECT_ROOT}/rust-toolchain.toml"
+    check_homebrew_toolchain_version "$rust_toolchain_file" "$formula_file"
 
     # Summary
     echo "" >&2

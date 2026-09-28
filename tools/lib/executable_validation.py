@@ -226,7 +226,12 @@ def _resolve_rustup_tool_shim(
         return None
 
 
-def _resolve_active_toolchain_tool(rustup_dispatcher, resolved, rustup_toolchains, name):
+def _resolve_active_toolchain_tool(
+    rustup_dispatcher: Path,
+    resolved: Path,
+    rustup_toolchains: Path,
+    name: str,
+) -> Path | None:
     """Return the tool binary under the active Rustup toolchain, or None.
 
     Requires ``resolved`` to be the Rustup dispatcher (either the same

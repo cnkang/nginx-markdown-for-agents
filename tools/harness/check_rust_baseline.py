@@ -24,6 +24,7 @@ BASELINE_ACTION_WORKFLOWS = (
     Path(".github/workflows/macos-smoke.yml"),
     Path(".github/workflows/nightly-perf.yml"),
     Path(".github/workflows/real-nginx-ims.yml"),
+    Path(".github/workflows/rc-release-gates.yml"),
     Path(".github/workflows/sonarcloud.yml"),
 )
 NIGHTLY_ACTION_WORKFLOWS = (Path(".github/workflows/nightly-fuzz.yml"),)

@@ -73,8 +73,20 @@ make_tree() {
     mkdir -p "${base}/tools/harness" \
              "${base}/components/rust-converter/fuzz" \
              "${base}/charts/nginx-markdown" \
-             "${base}/tools/corpus/test-corpus-conversion"
+             "${base}/tools/corpus/test-corpus-conversion" \
+             "${base}/packaging/homebrew"
     cp "${DETECTOR_SRC}" "${base}/tools/harness/detect_version_consistency.sh"
+
+    cat >"${base}/rust-toolchain.toml" <<'TOML'
+[toolchain]
+channel = "1.98.1"
+TOML
+
+    cat >"${base}/packaging/homebrew/nginx-markdown-module.rb" <<'RUBY'
+class NginxMarkdownModule < Formula
+  TOOLCHAIN_VERSION = "1.98.1".freeze
+end
+RUBY
 
     cat >"${base}/tools/harness/check_rust_baseline.py" <<'PYEOF'
 #!/usr/bin/env python3
@@ -159,6 +171,88 @@ if [[ "${rc}" -eq 1 ]] \
     pass "appVersion + fuzz dependency drift is reported (exit 1)"
 else
     fail "appVersion + fuzz dependency drift is reported (exit 1)" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: Homebrew formula toolchain drift -> exit 1 ──
+toolchain_drift_tree="${tmp_dir}/toolchain-drift"
+make_tree "${toolchain_drift_tree}"
+cat >"${toolchain_drift_tree}/packaging/homebrew/nginx-markdown-module.rb" <<'RUBY'
+class NginxMarkdownModule < Formula
+  TOOLCHAIN_VERSION = "1.98.0".freeze
+end
+RUBY
+
+out="${tmp_dir}/toolchain-drift.out"
+rc=0
+run_detector "${toolchain_drift_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 1 ]] \
+    && grep -q "Homebrew toolchain 1.98.0 does not match 1.98.1" "${out}" \
+    && grep -q "Found 1 version inconsistency" "${out}"; then
+    pass "Homebrew formula Rust toolchain drift is reported (exit 1)"
+else
+    fail "Homebrew formula Rust toolchain drift is reported (exit 1)" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: single-quoted Homebrew toolchain pins are valid ──
+single_quote_tree="${tmp_dir}/single-quote-toolchain"
+make_tree "${single_quote_tree}"
+cat >"${single_quote_tree}/rust-toolchain.toml" <<'TOML'
+[toolchain]
+channel = '1.98.1'
+TOML
+cat >"${single_quote_tree}/packaging/homebrew/nginx-markdown-module.rb" <<'RUBY'
+class NginxMarkdownModule < Formula
+  TOOLCHAIN_VERSION = '1.98.1'.freeze
+end
+RUBY
+
+out="${tmp_dir}/single-quote-toolchain.out"
+rc=0
+run_detector "${single_quote_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 0 ]] \
+    && grep -q "Homebrew formula Rust toolchain version: 1.98.1" "${out}" \
+    && grep -q "All version checks passed" "${out}"; then
+    pass "single-quoted Homebrew toolchain pins are parsed"
+else
+    fail "single-quoted Homebrew toolchain pins are parsed" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: duplicate Homebrew toolchain assignments fail closed ──
+duplicate_formula_tree="${tmp_dir}/duplicate-formula-toolchain"
+make_tree "${duplicate_formula_tree}"
+cat >>"${duplicate_formula_tree}/packaging/homebrew/nginx-markdown-module.rb" <<'RUBY'
+TOOLCHAIN_VERSION = '1.98.1'.freeze
+RUBY
+
+out="${tmp_dir}/duplicate-formula-toolchain.out"
+rc=0
+run_detector "${duplicate_formula_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 1 ]] \
+    && grep -q "exactly one TOOLCHAIN_VERSION assignment" "${out}"; then
+    pass "duplicate Homebrew toolchain assignments fail closed"
+else
+    fail "duplicate Homebrew toolchain assignments fail closed" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: duplicate rust-toolchain channel assignments fail closed ──
+duplicate_channel_tree="${tmp_dir}/duplicate-channel-toolchain"
+make_tree "${duplicate_channel_tree}"
+cat >>"${duplicate_channel_tree}/rust-toolchain.toml" <<'TOML'
+channel = '1.98.1'
+TOML
+
+out="${tmp_dir}/duplicate-channel-toolchain.out"
+rc=0
+run_detector "${duplicate_channel_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 1 ]] \
+    && grep -q "exactly one toolchain channel" "${out}"; then
+    pass "duplicate rust-toolchain channels fail closed"
+else
+    fail "duplicate rust-toolchain channels fail closed" \
         "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
 fi
 
