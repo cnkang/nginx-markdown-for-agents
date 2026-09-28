@@ -110,11 +110,29 @@ if ! kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
     CREATED_CLUSTER=1
 fi
 
+# Ensure the namespace exists on the SAME cluster the release targets.  The
+# ignore-not-found query distinguishes an absent namespace from permission or
+# connection failures, which remain fatal.  Creating only when absent also
+# leaves a reused cluster's existing namespace untouched.
+existing_namespace=""
+if ! existing_namespace="$(kubectl --context "kind-${CLUSTER}" \
+    get namespace "${NAMESPACE}" --ignore-not-found -o name)"; then
+    echo "ERROR: unable to determine whether namespace ${NAMESPACE} exists" >&2
+    exit 1
+fi
+if [[ -z "${existing_namespace}" ]]; then
+    if ! kubectl --context "kind-${CLUSTER}" create namespace \
+        "${NAMESPACE}" >/dev/null; then
+        echo "ERROR: unable to create namespace ${NAMESPACE}" >&2
+        exit 1
+    fi
+fi
+
 # Refuse to adopt a release that belongs to the user.  `helm install` below
 # also closes the race between this query and creation; ownership is recorded
 # only after that install succeeds.
 existing_release=""
-if ! existing_release="$(helm list --short \
+if ! existing_release="$(helm list --all --short \
     --filter "^${RELEASE}$" --namespace "${NAMESPACE}" \
     --kube-context "kind-${CLUSTER}" 2>&1)"; then
     echo "ERROR: unable to determine ownership of Helm release ${RELEASE}: ${existing_release}" >&2
@@ -140,11 +158,6 @@ fi
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
-# Create the namespace on the SAME cluster the release targets: this run may
-# reuse an existing cluster (kind create is skipped below), so an unpinned
-# kubectl could create the namespace on an unrelated current context while
-# the following helm install targets kind-${CLUSTER}.
-kubectl --context "kind-${CLUSTER}" create namespace "${NAMESPACE}" >/dev/null 2>&1 || true
 helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
