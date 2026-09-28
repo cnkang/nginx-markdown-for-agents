@@ -39,6 +39,7 @@ RELEASE="markdown-smoke"
 NAMESPACE="markdown-smoke"
 KEEP=0
 CREATED_CLUSTER=0
+CREATED_NAMESPACE=0
 CREATED_RELEASE=0
 
 while [[ $# -gt 0 ]]; do
@@ -80,6 +81,11 @@ cleanup() {
         # is supported, and removing the user's would be destructive.
         if [[ "${CREATED_CLUSTER}" -eq 1 ]]; then
             kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
+        elif [[ "${CREATED_NAMESPACE}" -eq 1 ]]; then
+            # A reused cluster keeps its namespace unless this run created it:
+            # leaving markdown-smoke behind would poison the next run.
+            kubectl --context "kind-${CLUSTER}" \
+                delete namespace "${NAMESPACE}" --wait=false >/dev/null 2>&1 || true
         fi
     fi
     rm -rf "${WORK_DIR}"
@@ -126,16 +132,29 @@ if [[ -z "${existing_namespace}" ]]; then
         echo "ERROR: unable to create namespace ${NAMESPACE}" >&2
         exit 1
     fi
+    # Record ownership only once this run created it, so cleanup never
+    # deletes a namespace that pre-existed on a reused cluster.
+    CREATED_NAMESPACE=1
 fi
 
-# Refuse to adopt a release that belongs to the user.  `helm install` below
-# also closes the race between this query and creation; ownership is recorded
-# only after that install succeeds.
+# Refuse to adopt a release that belongs to the user.  This check runs before
+# the install, so a name that is still free here is ours from this point on:
+# ownership is marked before `helm install`, and a failed or timed-out install
+# then still leaves cleanup able to uninstall what the attempt created.
+# `helm install` also closes the race between this query and creation.
 existing_release=""
-if ! existing_release="$(helm list --all --short \
+release_stderr_file="${WORK_DIR}/helm-list.stderr"
+# The explicit state set is the version-portable spelling of "any release, in
+# any state": helm v3 defaults `list` to deployed+failed only, while helm v4
+# REMOVED `--all` ("unknown flag"), so the explicit flags are the one form
+# both majors accept.
+if ! existing_release="$(helm list --short \
     --filter "^${RELEASE}$" --namespace "${NAMESPACE}" \
-    --kube-context "kind-${CLUSTER}" 2>&1)"; then
-    echo "ERROR: unable to determine ownership of Helm release ${RELEASE}: ${existing_release}" >&2
+    --kube-context "kind-${CLUSTER}" \
+    --deployed --failed --pending --uninstalled --uninstalling --superseded \
+    2>"${release_stderr_file}")"; then
+    echo "ERROR: unable to determine ownership of Helm release ${RELEASE}" >&2
+    cat "${release_stderr_file}" >&2 || true
     exit 1
 fi
 if [[ -n "${existing_release}" ]]; then
@@ -158,6 +177,11 @@ fi
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
+# The name is ours from before the install: the ownership check above proved
+# no other release holds it.  A failed or timed-out install exits non-zero
+# (and under `set -e` jumps straight to the EXIT trap), so the flag has to be
+# set first for cleanup() to remove whatever the attempt left behind.
+CREATED_RELEASE=1
 helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
@@ -175,8 +199,8 @@ helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --set-string metrics.sidecar.resources.requests.memory=64Mi \
     --set-string metrics.sidecar.resources.limits.cpu=250m \
     --set-string metrics.sidecar.resources.limits.memory=128Mi \
-    --wait --timeout 180s >&2
-CREATED_RELEASE=1
+    --wait --timeout 180s \
+    --atomic >&2
 
 echo "=== rollout status ===" >&2
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \

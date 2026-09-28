@@ -13,6 +13,8 @@ from __future__ import annotations
 import shlex
 import subprocess
 
+import pytest
+
 from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
 # Shell fragments shared by the scenarios.  Single-sourced so one literal
@@ -3683,3 +3685,150 @@ def _release_gate_steps_from_yaml(job_yaml_fragment: str) -> list[dict]:
     )
     assert result is not None
     return result
+
+
+def test_raw_install_gate_flags_dynamic_rustup_subcommands() -> None:
+    """A rustup subcommand built at run time must fail closed.
+
+    The gate matches the literal ``toolchain install`` pair, but a
+    subcommand word carrying an unresolved ``$`` or backtick expansion can
+    expand to that pair at run time. Each spelling must be treated as a raw
+    install, while the literal benign subcommands stay accepted.
+    """
+    dynamic = (
+        'rustup "$SUBCOMMAND" install nightly',
+        "rustup toolchain${SUFFIX:-} install nightly",
+        "rustup ${SUBCOMMAND} install nightly",
+        "rustup $SUBCOMMAND install nightly",
+        "rustup `echo toolchain` install nightly",
+        'rustup "`echo toolchain`" install nightly',
+        "rustup '`echo toolchain`' install nightly",
+        "rustup toolchain`echo \"\"` install nightly",
+        "rustup $(printf toolchain) install nightly",
+    )
+    for script in dynamic:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(script)
+        ) is not None, script
+
+    # Control: the literal pair is flagged, and literal non-install
+    # subcommands stay accepted.
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("rustup toolchain install nightly")
+    ) is not None
+    for benign in (
+        "rustup show",
+        "rustup -v show",
+        "rustup toolchain list",
+        "rustup component add --toolchain nightly rustfmt",
+        "rustup --verbose component add rustfmt",
+    ):
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(benign)
+        ) is None, benign
+
+
+def _bash_negation_parity() -> dict[str, int] | None:
+    """Return ``!`` run statuses measured in GNU bash 5.2, or None.
+
+    The host shell may be bash 3.2, which rejects a repeated ``!`` outright,
+    so the measurement runs in a bash:5.2 container.  A host without a
+    usable Docker daemon returns None and the caller skips the
+    corroboration instead of failing on missing infrastructure.
+    """
+    expressions = (
+        "! true",
+        "! ! true",
+        "! ! ! true",
+        "! false",
+        "! ! false",
+        "! ! ! false",
+    )
+    script = "\n".join(
+        f"{expression}; printf '%s\\n' \"$?\"" for expression in expressions
+    )
+    probe = subprocess.run(
+        ["docker", "run", "--rm", "bash:5.2", "bash", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        return None
+    statuses = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
+    if len(statuses) != len(expressions):
+        return None
+    return {
+        expression: int(status)
+        for expression, status in zip(expressions, statuses)
+    }
+
+
+def test_negation_run_toggles_per_bang_word() -> None:
+    """Consecutive ``!`` words toggle: an even count is a no-op.
+
+    Bash 5.2 evaluates each ``!`` as its own inversion, so a doubled
+    negation leaves the command status untouched.  The expected values here
+    are the ones the corroboration test below measures.
+    """
+    cases = (
+        ("! true", False),
+        ("! ! true", True),
+        ("! ! ! true", False),
+        ("! false", True),
+        ("! ! false", False),
+        ("! ! ! false", True),
+    )
+    for expression, expected in cases:
+        assert packaging_gate._segment_literal(expression) is expected, expression
+
+
+def test_negation_parity_matches_reference_bash() -> None:
+    """The modeled parity is the one GNU bash 5.2 reports.
+
+    Corroboration for the toggle semantics above; it needs a Docker daemon
+    and skips when that infrastructure is absent.
+    """
+    parity = _bash_negation_parity()
+    if parity is None:
+        pytest.skip("docker with bash:5.2 unavailable")
+    for expression, status in parity.items():
+        assert packaging_gate._segment_literal(expression) is (status == 0), (
+            expression,
+            status,
+        )
+
+
+def test_negation_run_keeps_chain_reachability_in_step_with_bash() -> None:
+    """Chain reachability after a ``!`` run follows the parity just pinned.
+
+    Under the old collapsed model a doubled negation always read as one
+    negation: ``! ! true`` was modeled false (dropping its ``&&`` operand
+    even though bash runs it) and ``! ! false`` was modeled true (keeping
+    an operand bash never reaches).
+    """
+    assert packaging_gate._live_command_segments(
+        "! ! true && printf reached", errexit=False
+    ) == ["! ! true", "printf reached"]
+    assert packaging_gate._live_command_segments(
+        "! ! true && printf reached", errexit=True
+    ) == ["! ! true", "printf reached"]
+    # An even count of ``!`` on a false command keeps status 1, so the
+    # ``&&`` operand stays unreachable.
+    assert packaging_gate._live_command_segments(
+        "! ! false && printf unreachable", errexit=False
+    ) == ["! ! false"]
+    # A single negation on false succeeds, so its operand runs.
+    assert packaging_gate._live_command_segments(
+        "! false && printf reached", errexit=False
+    ) == ["! false", "printf reached"]
+    # A single negation on true fails, and dies under errexit.
+    assert packaging_gate._live_command_segments(
+        "! true && printf unreachable", errexit=True
+    ) == ["! true"]
+
+
+def test_negation_prefix_stays_transparent_after_time() -> None:
+    """``! time f`` negates once, ``time f`` not at all."""
+    assert packaging_gate._segment_literal("! time false") is True
+    assert packaging_gate._segment_literal("time false") is False

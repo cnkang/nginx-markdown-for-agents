@@ -217,6 +217,9 @@ delete_cluster() {
 
     info "Deleting kind cluster: ${CLUSTER_NAME}"
     kind delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1 || true
+    # Clear ownership after the delete so the EXIT trap's second call is a
+    # no-op instead of a second delete of an already-gone cluster.
+    CREATED_CLUSTER=0
     return 0
 }
 
@@ -238,6 +241,23 @@ cleanup_owned_helm_resources() {
     fi
     return 0
 }
+
+##############################################################################
+# Termination handling
+##############################################################################
+
+# Without a trap, an abnormal termination (SIGINT/SIGTERM) skips main's
+# cleanup path and leaks the Helm release, the namespace, and the kind
+# cluster.  The handlers are idempotent — each clears its own ownership flag
+# after acting and no-ops on a cleared flag — so a second run of the trap
+# after main's normal cleanup is safe.  A concurrent run's resources are
+# still preserved: the helpers only act on state this run recorded as its own.
+terminate() {
+    cleanup_owned_helm_resources
+    delete_cluster
+    return 0
+}
+trap terminate EXIT INT TERM
 
 ##############################################################################
 # Helm validation
@@ -400,16 +420,25 @@ deploy_and_verify() {
         info "Reusing pre-existing namespace ${HELM_NAMESPACE}"
     fi
 
-    # Refuse to adopt a release from another run. Helm install below also
-    # closes the race between this query and creation.
+    # Refuse to adopt a release from another run.  The explicit state set is
+    # the version-portable spelling of "any release, in any state": `--all`
+    # exists on Helm v3 but was removed in v4, these six state flags exist in
+    # both.  Helm install below also closes the race between this query and
+    # creation.
     local existing_release
+    local release_stderr_file
+    release_stderr_file="$(mktemp "${TMPDIR:-/tmp}/gate4-helm-list.XXXXXX")"
     if ! existing_release="$(helm list --short --filter "^${HELM_RELEASE_NAME}$" \
-        --namespace "${HELM_NAMESPACE}" --kube-context "$kube_context" 2>&1)"; then
+        --namespace "${HELM_NAMESPACE}" --kube-context "$kube_context" \
+        --deployed --failed --pending --uninstalled --uninstalling --superseded \
+        2>"$release_stderr_file")"; then
         fail "Unable to determine ownership of Helm release ${HELM_RELEASE_NAME}"
-        printf '%s\n' "$existing_release" >&2
+        cat "$release_stderr_file" >&2 || true
+        rm -f -- "$release_stderr_file"
         CREATED_NAMESPACE=0
         return 1
     fi
+    rm -f -- "$release_stderr_file"
     if [[ -n "$existing_release" ]]; then
         fail "Pre-existing Helm release ${HELM_RELEASE_NAME}; refusing to replace it"
         CREATED_NAMESPACE=0
@@ -419,6 +448,8 @@ deploy_and_verify() {
     # Validate the stock-nginx chart deployment path, security context,
     # writable runtime paths, and Helm installability. This smoke test does
     # not validate a module-enabled image, so markdown directives stay off.
+    # --atomic removes a failed or timed-out install (on Helm v3 it also
+    # implies --wait, which is set explicitly here anyway).
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
@@ -428,6 +459,7 @@ deploy_and_verify() {
         --set markdown.enabled=false \
         --wait \
         --timeout "${POD_WAIT_TIMEOUT}" \
+        --atomic \
         >&2 2>&1; then
         fail "helm install failed"
         info "Pod status:"

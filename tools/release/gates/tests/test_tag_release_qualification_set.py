@@ -244,6 +244,38 @@ def test_the_candidate_gates_run_the_called_commit() -> None:
     assert 'os.environ["GITHUB_SHA"]' in RC_WORKFLOW.read_text(encoding="utf-8")
 
 
+def test_release_dependency_preflight_reports_the_import_cause() -> None:
+    """A swallowed ImportError must not hide which dependency is missing.
+
+    The preflight captures the import check's stderr into a file and echoes
+    it in the failure branch, instead of sending it to /dev/null, so the run
+    log names the module that failed to import.  The exit behavior stays
+    fail-closed.
+    """
+    jobs = _release_jobs()
+    step = next(
+        step
+        for step in jobs["release-gate"]["steps"]
+        if step.get("name") == "Verify release gate dependencies"
+    )
+    run = step["run"]
+
+    assert '2>"${dependency_stderr_file}"' in run, (
+        "the dependency import check must capture stderr for its diagnostics"
+    )
+    assert 'echo "${dependency_stderr}" >&2' in run, (
+        "the failure branch must echo the captured ImportError text"
+    )
+    assert 'dependency_stderr="$(cat "${dependency_stderr_file}")"' in run
+    assert "exit 1" in run, "the preflight must stay fail-closed"
+    assert "unable to import the pinned release Python dependencies" in run
+    # The import check itself must not discard its diagnostics.
+    import_check = next(
+        line for line in run.splitlines() if "importlib.metadata import version" in line
+    )
+    assert "2>/dev/null" not in import_check, import_check
+
+
 def test_encoding_chain_e2e_is_wired_to_ci_and_local_e2e_aggregate() -> None:
     """The existing encoding-chain scenario runs in CI and the local profile."""
     import yaml
@@ -270,7 +302,9 @@ def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
     assert job["runs-on"] == "ubuntu-24.04"
     environment = yaml.safe_load(workflow)["env"]
     assert environment["NGINX_VERSION"] == "1.30.4"
-    assert environment["ALPINE_VERSION"] == "3.24"
+    # The Alpine release is pinned inside the image references below; a
+    # separate variable nobody reads would be dead configuration.
+    assert "ALPINE_VERSION" not in environment
     for key, prefix in (
         ("IMAGE", r"nginx:1\.30\.4-alpine"),
         ("NGINX_BASE_IMAGE", r"nginx:1\.30\.4-alpine3\.24"),
@@ -289,6 +323,16 @@ def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
     )
     assert "verify_real_nginx_ims.sh" in native_build["run"]
     assert "printf 'nginx_bin=%s" in native_build["run"]
+    # The mktemp files must be removed on every exit path, not only when the
+    # build reaches its final line: a failed build already exits earlier.
+    native_run = native_build["run"]
+    assert (
+        "trap 'rm -f -- \"${nginx_bin_file:-}\" \"${buildroot_file:-}\"' EXIT"
+        in native_run
+    ), "the native build must remove its temporary files from an EXIT trap"
+    assert native_run.index("trap 'rm -f") < native_run.index(
+        "verify_real_nginx_ims.sh"
+    ), "the trap must be installed before the build can fail"
     real_checks = next(
         step
         for step in steps
@@ -297,7 +341,9 @@ def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
     assert real_checks["env"]["NGINX_BIN"] == "${{ steps.native_nginx.outputs.nginx_bin }}"
     checks = real_checks["run"]
     assert "encoding_chain|verify-encoding-chain-e2e" in checks
-    assert '"${rows}" -ne 7' in checks
+    assert 'if [[ "${rows}" -ne 7 ]]' in checks, (
+        "the evidence-row count assertion must use [[ ]] per the shell rule"
+    )
 
     evidence = next(
         step for step in steps if step.get("name") == "Write candidate-bound evidence"
@@ -346,6 +392,9 @@ def _run_stubbed_helm_cluster_smoke(
     cluster_exists: bool = True,
     namespace_exists: bool = True,
     namespace_create_fails: bool = False,
+    helm_list_stderr: str = "",
+    helm_list_fails: bool = False,
+    helm_install_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the smoke script against owned command stubs."""
     tools = tmp_path / "bin"
@@ -365,7 +414,18 @@ def _run_stubbed_helm_cluster_smoke(
         ),
         "helm": (
             "printf 'helm %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
-            "if [[ \"$1\" == list ]]; then printf '%s\\n' \"$EXISTING_RELEASES\"; fi\n"
+            "if [[ \"$1\" == list ]]; then\n"
+            "  if [[ -n \"${HELM_LIST_STDERR:-}\" ]]; then "
+            "printf '%s\\n' \"$HELM_LIST_STDERR\" >&2; fi\n"
+            "  if [[ \"${HELM_LIST_FAILS:-}\" == 1 ]]; then "
+            "printf '%s\\n' 'simulated list failure' >&2; exit 1; fi\n"
+            "  printf '%s\\n' \"$EXISTING_RELEASES\"\n"
+            "fi\n"
+            "if [[ \"$1\" == install && \"${HELM_INSTALL_FAILS:-}\" == 1 ]]; "
+            "then\n"
+            "  printf '%s\\n' 'simulated install failure' >&2\n"
+            "  exit 1\n"
+            "fi\n"
         ),
         "kubectl": (
             "printf 'kubectl %s\\n' \"$*\" >> \"$CALL_LOG\"\n"
@@ -398,6 +458,9 @@ def _run_stubbed_helm_cluster_smoke(
         "CLUSTER_EXISTS": "1" if cluster_exists else "0",
         "NAMESPACE_EXISTS": "1" if namespace_exists else "0",
         "NAMESPACE_CREATE_FAILS": "1" if namespace_create_fails else "0",
+        "HELM_LIST_STDERR": helm_list_stderr,
+        "HELM_LIST_FAILS": "1" if helm_list_fails else "0",
+        "HELM_INSTALL_FAILS": "1" if helm_install_fails else "0",
     })
 
     result = subprocess.run(
@@ -461,7 +524,19 @@ def test_helm_cluster_smoke_initializes_a_fresh_cluster_namespace_first(
     )
 
     assert cluster_create < namespace_lookup < namespace_create < helm_list
-    assert "--all" in commands[helm_list]
+    # Explicit state flags are the one spelling both helm majors accept;
+    # `--all` works on v3 but was removed in v4.
+    helm_list_command = commands[helm_list]
+    for flag in (
+        "--deployed",
+        "--failed",
+        "--pending",
+        "--uninstalled",
+        "--uninstalling",
+        "--superseded",
+    ):
+        assert flag in helm_list_command, flag
+    assert "--all" not in helm_list_command
     assert "helm install" in command_log
 
 
@@ -496,6 +571,107 @@ def test_helm_cluster_smoke_uninstalls_a_release_it_created(
     assert "helm uninstall" in command_log
     assert "kubectl delete namespace" not in command_log
     assert "kind delete cluster" not in command_log
+
+
+def test_helm_cluster_smoke_installs_atomically(tmp_path: Path) -> None:
+    """A failed or timed-out install must be removed by helm itself."""
+    _result, command_log = _run_stubbed_helm_cluster_smoke(tmp_path, "")
+
+    install_commands = [
+        command for command in command_log.splitlines()
+        if command.startswith("helm install ")
+    ]
+    assert install_commands, command_log
+    for command in install_commands:
+        assert " --atomic" in command, (
+            f"helm install must pass --atomic so a failed install is "
+            f"removed automatically: {command}"
+        )
+
+
+def test_helm_cluster_smoke_ignores_helm_list_stderr_on_success(
+    tmp_path: Path,
+) -> None:
+    """A warning on helm list's stderr must not read as a release owner."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        helm_list_stderr="WARNING: Kubernetes configuration file is group-readable",
+    )
+
+    assert "helm list" in command_log
+    assert "helm install" in command_log, (
+        "an empty stdout from helm list means the name is free; a stderr "
+        f"warning must not refuse the install: {result.stderr}"
+    )
+    assert "pre-existing Helm release" not in result.stderr
+    # The warning belongs to a successful query, so it is not echoed back.
+    assert "group-readable" not in result.stderr
+
+
+def test_helm_cluster_smoke_reports_helm_list_stderr_on_failure(
+    tmp_path: Path,
+) -> None:
+    """A failing ownership query must surface the captured stderr."""
+    result, _command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        helm_list_fails=True,
+    )
+
+    assert result.returncode != 0
+    assert "unable to determine ownership of Helm release" in result.stderr
+    assert "simulated list failure" in result.stderr
+
+
+def test_helm_cluster_smoke_uninstalls_after_a_failed_install(
+    tmp_path: Path,
+) -> None:
+    """Ownership starts before the install, so a failure still cleans up."""
+    result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        helm_install_fails=True,
+    )
+
+    assert result.returncode != 0
+    assert "helm install" in command_log
+    assert "helm uninstall" in command_log, (
+        "a failed install leaves state behind, so cleanup must still "
+        f"uninstall the release it owned: {result.stderr}"
+    )
+
+
+def test_helm_cluster_smoke_removes_a_namespace_it_created_on_a_reused_cluster(
+    tmp_path: Path,
+) -> None:
+    """Cleanup must not leak markdown-smoke on a reused cluster."""
+    _result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=True,
+        namespace_exists=False,
+    )
+
+    assert "create namespace markdown-smoke" in command_log
+    assert "kubectl --context kind-existing-cluster delete namespace markdown-smoke" \
+        in command_log
+    assert "kind delete cluster" not in command_log
+
+
+def test_helm_cluster_smoke_keeps_a_preexisting_namespace(
+    tmp_path: Path,
+) -> None:
+    """A namespace this run did not create must survive cleanup."""
+    _result, command_log = _run_stubbed_helm_cluster_smoke(
+        tmp_path,
+        "",
+        cluster_exists=True,
+        namespace_exists=True,
+    )
+
+    assert "create namespace markdown-smoke" not in command_log
+    assert "kubectl delete namespace" not in command_log
 
 
 def test_manual_qualification_is_explicitly_defined() -> None:

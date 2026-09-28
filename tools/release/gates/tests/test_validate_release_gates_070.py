@@ -669,6 +669,65 @@ def test_publish_gate_rejects_a_false_conjunct_after_gate_success() -> None:
     assert not _publish_gate_item(mutant)
 
 
+def test_publish_gate_rejects_combined_failure_alternatives() -> None:
+    """The whole condition must match the expected truth table.
+
+    Regression for the per-case-only evaluator: an alternative such as
+    `|| (needs.release-gate.result == 'failure'
+        && needs.musl-build.result == 'failure')` used to pass because each
+    required job's failure was only checked one job at a time.  The
+    exhaustive combination pass must reject every such path (each control
+    below isolates one class), while the untouched workflow stays accepted.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    # The `if: >-` block scalar continues while lines are indented deeper
+    # than the key (six spaces); it ends at the next line indented four
+    # spaces or fewer.  Append inside the condition, right before that end.
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternatives = (
+        # Two blocking jobs failing together must not open publication.
+        " || (needs.release-gate.result == 'failure'"
+        " && needs.musl-build.result == 'failure')",
+        # A lone failure alternative (already rejected before, kept as a
+        # non-regression control for the new combination pass).
+        " || (needs.release-gate.result == 'failure')",
+        # Success on one job cannot be bought with another job's failure.
+        " || (needs.release-gate.result == 'success'"
+        " && needs.musl-build.result == 'cancelled')",
+        # Unconditional publication stays rejected.
+        " || true",
+    )
+    for alternative in alternatives:
+        mutated_condition = condition_end + alternative + "\n"
+        mutant = (
+            prefix
+            + marker
+            + head
+            + condition_marker
+            + mutated_condition
+            + "".join(remainder_lines)
+        )
+        assert not _publish_gate_item(mutant), alternative
+
+
 def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
     """The bounded evaluator covers calls, comparisons, and Boolean ops."""
     context = {"needs.release_gate.result": "success"}

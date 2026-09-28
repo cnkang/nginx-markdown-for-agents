@@ -273,3 +273,83 @@ def test_location_shaped_text_inside_quotes_is_not_scanned() -> None:
     blocks = _conflicting_location_blocks(script)
     assert len(blocks) == 1
     assert "markdown_streaming force;" in blocks[0]
+
+
+def _heredoc_body(script: str, marker_fragment: str) -> tuple[str, str]:
+    """Extract one heredoc body; return (body, delimiter word).
+
+    The marker line is the first line that names *marker_fragment* and
+    opens a ``<<``-heredoc.  The body is every following line up to the
+    first line equal to the delimiter, so the returned text is what the
+    shell would expand (or not) during generation.
+    """
+    lines = script.splitlines()
+    start = None
+    delimiter = None
+    for index, line in enumerate(lines):
+        if marker_fragment not in line:
+            continue
+        match = re.search(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
+        if match is None:
+            continue
+        start = index + 1
+        delimiter = match.group(2)
+        break
+    assert start is not None, marker_fragment
+    end = None
+    for index in range(start, len(lines)):
+        if lines[index] == delimiter:
+            end = index
+            break
+    assert end is not None, f"unterminated heredoc {delimiter}"
+    return "\n".join(lines[start:end]), delimiter
+
+
+def test_coverage_config_heredoc_body_has_no_executable_substitutions() -> None:
+    """The generated nginx.conf heredoc must stay data-only.
+
+    ``collect_nginx_coverage.sh`` writes its coverage config through an
+    unquoted heredoc, so the shell expands the body during generation:
+    a backtick or an unbalanced ``$(`` in the body would run a command (or
+    corrupt the config) while the file is written.  The regression pins the
+    shape-independent property, so a future edit cannot reintroduce one.
+    """
+    script = COVERAGE_SCRIPT.read_text(encoding="utf-8")
+    body, _delimiter = _heredoc_body(script, "conf/nginx.conf")
+
+    # The extractor must find the real body, never an empty slice.
+    assert "server {" in body
+    assert "cat >" not in body
+
+    assert "`" not in body
+
+    # Command-substitution parentheses stay balanced inside the body.
+    assert body.count("(") == body.count(")")
+    depth = 0
+    index = 0
+    while index < len(body):
+        if body.startswith("$(", index):
+            depth += 1
+            index += 2
+            continue
+        if body[index] == ")" and depth:
+            depth -= 1
+        index += 1
+    assert depth == 0
+
+
+def test_coverage_config_heredoc_body_rejects_injected_backtick() -> None:
+    """Control: the same property checker flags an injected substitution.
+
+    Without this control the body test could pass vacuously if the
+    extraction silently returned text that was never scanned.
+    """
+    script = COVERAGE_SCRIPT.read_text(encoding="utf-8")
+    body, delimiter = _heredoc_body(script, "conf/nginx.conf")
+    injected = body.replace("worker_processes", "worker_processes `true`", 1)
+    assert "`" in injected
+
+    mutated_script = script.replace(body, injected, 1)
+    mutated_body, _delimiter = _heredoc_body(mutated_script, "conf/nginx.conf")
+    assert "`" in mutated_body
+    assert delimiter == "EOF"

@@ -271,6 +271,79 @@ def test_gate4_cleanup_removes_only_resources_created_by_the_run() -> None:
     assert "helm upgrade --install" not in script
 
 
+def test_gate4_ownership_query_uses_the_version_portable_state_set() -> None:
+    """The ownership query must work on Helm v3 and v4 alike.
+
+    The all-releases flag exists on Helm v3 but was removed in v4, so the
+    explicit state set is the portable spelling of "any release, in any
+    state".  A missing state flag would let a failed or pending release from
+    an earlier run go unnoticed and the install would adopt it.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    query = script.split('existing_release="$(helm list', 1)[1].split(
+        '2>"$release_stderr_file")', 1
+    )[0]
+
+    for flag in (
+        "--deployed",
+        "--failed",
+        "--pending",
+        "--uninstalled",
+        "--uninstalling",
+        "--superseded",
+    ):
+        assert flag in query, (
+            f"gate4 ownership query is missing {flag}; the explicit state "
+            f"set is required because the all-releases flag is gone in Helm v4"
+        )
+    assert "--all" not in query, (
+        "gate4 must not use --all: it is removed in Helm v4"
+    )
+    # stderr is captured to a file and only shown when the query fails, so a
+    # warning cannot be mistaken for a pre-existing release.
+    assert '2>"$release_stderr_file"' in script
+    assert 'cat "$release_stderr_file" >&2' in script
+
+
+def test_gate4_installs_atomically() -> None:
+    """A failed or timed-out gate4 install must not leak a release."""
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    install = script.split('if ! helm install "${HELM_RELEASE_NAME}"', 1)[1]
+    install = install.split("; then", 1)[0]
+
+    assert "--atomic" in install, (
+        "gate4 helm install must pass --atomic so a failed or timed-out "
+        "install is removed automatically"
+    )
+
+
+def test_gate4_traps_abnormal_termination_into_its_cleanup() -> None:
+    """Without a trap, SIGINT/SIGTERM leaks the release and the cluster."""
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "trap terminate EXIT INT TERM" in script, (
+        "gate4 must trap EXIT/INT/TERM so abnormal termination runs its "
+        "cleanup instead of leaking owned resources"
+    )
+    terminate = script.split("terminate() {", 1)[1].split("\n}", 1)[0]
+    assert "cleanup_owned_helm_resources" in terminate
+    assert "delete_cluster" in terminate
+    # Idempotence: the delete clears its ownership flag so a second run of
+    # the trap (signal handler plus EXIT) is a no-op.
+    delete_cluster = script.split("delete_cluster() {", 1)[1].split("\n}", 1)[0]
+    delete = delete_cluster.index("kind delete cluster")
+    assert delete_cluster.index("CREATED_CLUSTER=0", delete) > delete
+
+
 def test_module_metrics_render_rejects_invalid_directives_with_valid_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

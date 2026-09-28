@@ -183,15 +183,19 @@ def _format_checker():
     """Return the shared jsonschema FormatChecker instance.
 
     The checker is created lazily so the optional jsonschema dependency is
-    only imported when a schema validation actually runs.  Passing it to
-    validate() makes formats such as "date-time" reject malformed values
-    instead of silently ignoring them.
+    only imported when a schema validation actually runs.  The checker comes
+    from ``require_format_checker``, which fails closed when the `[format]`
+    extras are missing: a bare ``jsonschema`` install registers no
+    ``date-time`` checker, and validation would otherwise silently skip
+    every declared format constraint.
     """
     global _FORMAT_CHECKER
     if _FORMAT_CHECKER is None:
-        from jsonschema import FormatChecker
+        from tools.release.gates.format_checker_guard import (
+            require_format_checker,
+        )
 
-        _FORMAT_CHECKER = FormatChecker()
+        _FORMAT_CHECKER = require_format_checker()
     return _FORMAT_CHECKER
 
 
