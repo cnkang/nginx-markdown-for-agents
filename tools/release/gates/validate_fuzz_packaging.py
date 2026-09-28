@@ -3145,14 +3145,22 @@ def _job_run_step_records(
         return None
     records: list[dict] = []
     for step in steps:
-        if not _is_shell_run_step(step):
+        # The shell filter must see the EFFECTIVE shell: a step that omits
+        # `shell` under a job or workflow default of `python {0}` does not
+        # run in bash, and treating it as a shell step would let the
+        # shell-only provisioning checks believe they covered it.
+        shell = _effective_step_shell(step, job_default, workflow_default)
+        effective_step = dict(step)
+        if shell is not None:
+            effective_step["shell"] = shell
+        if not _is_shell_run_step(effective_step):
             continue
         scopes = _step_environment_scopes(
             workflow_env, job.get("env"), step.get("env")
         )
         records.append({
             "run": step["run"],
-            "shell": _effective_step_shell(step, job_default, workflow_default),
+            "shell": shell,
             "env": _merge_environment_scopes(scopes),
             "env_scopes": scopes,
         })
