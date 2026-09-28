@@ -223,7 +223,11 @@ main() {
     fi
 
     local rust_toolchain_file="${PROJECT_ROOT}/rust-toolchain.toml"
-    check_homebrew_toolchain_version "$rust_toolchain_file" "$formula_file"
+    if [[ -f "${formula_file}" ]]; then
+        check_homebrew_toolchain_version "$rust_toolchain_file" "$formula_file"
+    else
+        log_info "Homebrew formula not found (skipping toolchain pin check)"
+    fi
 
     # Summary
     echo "" >&2

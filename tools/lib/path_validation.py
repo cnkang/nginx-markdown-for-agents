@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
@@ -165,3 +165,42 @@ def validate_filename_strict(name: str, *, purpose: str = "filename") -> str:
             f"or underscore character."
         )
     return name
+
+
+def safe_repo_relative_ref(value: object) -> PurePosixPath | None:
+    """Parse one canonical repository-relative POSIX reference, or None.
+
+    This is the single shared parser for manifest-provided path references
+    (corpus directories, seed files, raw log refs).  It accepts only
+    strings that are already in canonical repository-relative POSIX form:
+
+    * non-empty strings without backslashes;
+    * not absolute (no leading slash, no Windows drive prefix - the first
+      component must not contain a colon);
+    * already equal to their own POSIX normalization;
+    * without empty, ``.`` or ``..`` components.
+
+    Every release-gate consumer must use this helper so both validators
+    enforce identical reference semantics: a document accepted by one
+    validator is accepted by the other, and the drive-letter rejection is
+    not dropped from any copy.
+
+    Parameters:
+        value: Raw reference value from a manifest or record.
+
+    Returns:
+        The parsed ``PurePosixPath`` when canonical, otherwise ``None``.
+    """
+    if not isinstance(value, str) or not value or "\\" in value:
+        return None
+    path = PurePosixPath(value)
+    parts = path.parts
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or not parts
+        or ":" in parts[0]
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        return None
+    return path

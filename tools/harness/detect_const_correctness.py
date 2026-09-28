@@ -40,10 +40,12 @@ from lib.path_validation import validate_read_path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # NGINX types commonly passed as non-const pointers that should be const
-# when the function only reads through them.
+# when the function only reads through them. sha256_t is included so the
+# named sha256_final allowlist below is the load-bearing suppressor for the
+# real finalizer parameter (diagnostics_accessors_impl.h).
 NGINX_STRUCT_TYPES = re.compile(
     r"ngx_http_markdown_(?:conf_t|ctx_t|request_ctx_t|"
-    r"effective_conf_t|metrics_t)"
+    r"effective_conf_t|metrics_t|sha256_t)"
 )
 
 # Function parameter pattern: type *name or type *name,
@@ -51,8 +53,10 @@ NGINX_STRUCT_TYPES = re.compile(
 # This catches: ngx_http_markdown_conf_t *conf
 # But not: const ngx_http_markdown_conf_t *conf
 # Also not: ngx_http_markdown_conf_t *const conf (const pointer, mutable data)
+# The negative lookahead keeps "*const <name>" from capturing the qualifier
+# itself as a parameter name (which would emit a misleading warning).
 NON_CONST_PARAM_RE = re.compile(
-    r"(ngx_http_markdown_\w+_t)\s*\*\s*(\w+)"
+    r"(ngx_http_markdown_\w+_t)\s*\*\s*(?!const\b)(\w+)"
 )
 
 # Check if const precedes the type
@@ -170,6 +174,15 @@ def _extract_func_name(context: str) -> str | None:
 
 
 def _should_skip_line(line: str) -> bool:
+    # Multi-line (wrapped) signatures are not joined: this detector checks
+    # one physical line at a time.  Measured on the 0.9.2 tree, a naive
+    # logical-line join (parens-balanced accumulation, cap 40 lines) adds
+    # 133 candidate findings across 11 files, and the majority of those
+    # functions (94 of 133) are definitions whose bodies mutate through the
+    # pointer (for example ctx->decompression.* assignments), so almost all
+    # of them are false positives for a read-only-const rule.  The join was
+    # therefore left out; a future revision needs a per-function mutation
+    # analysis before enabling it.
     if COMMENT_RE.search(line):
         return True
     if re.match(r"^\s*for\s*\(", line):

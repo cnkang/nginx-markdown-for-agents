@@ -530,6 +530,113 @@ def test_scanner_rejects_source_symlink_outside_repository(
         detector.scan_c_callsites(source_dir)
 
 
+def test_unreadable_c_source_fails_the_scan(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An undecodable .c file must fail closed, not silently pass.
+
+    Silently skipping the file would classify exports from an incomplete
+    callsite set (dead instead of called).  The scanner mirrors the Rust
+    declaration scanner and raises instead.
+    """
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "good.c").write_text(
+        "void f(void) { markdown_convert(NULL); }\n", encoding="utf-8"
+    )
+    undecodable = source_dir / "undecodable.c"
+    undecodable.write_bytes(
+        b"void g(void) { \xff\xfe markdown_decompress(NULL); }\n"
+    )
+    monkeypatch.setattr(detector, "ROOT", repository)
+    monkeypatch.setattr(
+        detector,
+        "_validate_repository_read_path",
+        lambda path, *, purpose: Path(path).resolve(),
+    )
+
+    with pytest.raises(ValueError, match="cannot read C callsite source"):
+        detector.scan_c_callsites(source_dir, include_headers=False)
+
+
+def test_readable_sources_still_scan_without_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Sanity control: a fully readable tree scans and returns callsites."""
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "good.c").write_text(
+        "void f(void) { markdown_convert(NULL); }\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(detector, "ROOT", repository)
+    monkeypatch.setattr(
+        detector,
+        "_validate_repository_read_path",
+        lambda path, *, purpose: Path(path).resolve(),
+    )
+
+    callsites = detector.scan_c_callsites(source_dir, include_headers=False)
+
+    assert set(callsites) == {"markdown_convert"}
+
+
+def test_typed_prototypes_are_not_counted_as_callsites(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Bare-int/ngx/char-pointer prototypes are declarations, not callsites."""
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "prototypes.c"
+    source.write_text(
+        "int markdown_bare_int(void);\n"
+        "static ngx_int_t markdown_static_status(void);\n"
+        "char * markdown_char_pointer(void);\n"
+        "unsigned markdown_unsigned_only(void);\n"
+        "size_t markdown_size_only(void);\n"
+        "void real_caller(void) { markdown_convert(NULL); }\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "ROOT", repository)
+    monkeypatch.setattr(
+        detector,
+        "_validate_repository_read_path",
+        lambda path, *, purpose: Path(path).resolve(),
+    )
+
+    callsites = detector.scan_c_callsites(source_dir, include_headers=False)
+
+    assert "markdown_convert" in callsites
+    for name in (
+        "markdown_bare_int",
+        "markdown_static_status",
+        "markdown_char_pointer",
+        "markdown_unsigned_only",
+        "markdown_size_only",
+    ):
+        assert name not in callsites, callsites[name]
+
+
+def test_declaration_pattern_keeps_plain_calls_out_of_declarations() -> None:
+    """A call embedded in an expression must not look like a declaration."""
+    assert detector.DECLARATION_LINE_RE.match("    markdown_call_now(x);") is None
+    assert (
+        detector.DECLARATION_LINE_RE.match("    if (markdown_convert(x)) {}")
+        is None
+    )
+    assert (
+        detector.DECLARATION_LINE_RE.match("    rc = markdown_convert(x);")
+        is None
+    )
+    assert detector.DECLARATION_LINE_RE.match("foo * markdown_p(void)") is None
+    assert detector.DECLARATION_LINE_RE.match("int markdown_x(void)") is not None
+    assert (
+        detector.DECLARATION_LINE_RE.match("char * markdown_y(void)") is not None
+    )
+
+
 def test_mask_keeps_string_literal_callsites() -> None:
     """URLs and strings containing // or /* must not hide real callsites."""
     code, state, _, _ = detector._mask_inline_comments(

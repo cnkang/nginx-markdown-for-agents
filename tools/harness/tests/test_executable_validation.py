@@ -73,12 +73,47 @@ def test_trusted_candidate_symlink_to_untrusted_target_is_rejected(
     assert module.resolve_approved_executable("git") is None
 
 
-def test_homebrew_opt_alias_dirs_are_trusted() -> None:
-    """Homebrew `opt` version-alias dirs join the trusted roots (Rule 33)."""
+def test_homebrew_opt_alias_dirs_are_resolution_gated() -> None:
+    """Homebrew `opt` aliases are trusted only via Cellar resolution.
+
+    The alias directories are group-writable on stock installs, so they must
+    NOT be plain trusted roots (a planted regular file would be accepted);
+    they are accepted through `_is_trusted_opt_alias_candidate`, which
+    requires the resolved target to sit under the matching Cellar root.
+    """
     roots = module._trusted_roots()
 
-    assert Path("/opt/homebrew/opt") in roots
-    assert Path("/usr/local/opt") in roots
+    assert Path("/opt/homebrew/opt") not in roots
+    assert Path("/usr/local/opt") not in roots
+    alias_roots = {alias for alias, _cellar in module._OPT_ALIAS_ROOTS}
+    assert Path("/opt/homebrew/opt") in alias_roots
+    assert Path("/usr/local/opt") in alias_roots
+
+
+def test_planted_regular_file_under_opt_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A regular file under `opt` that does NOT resolve into Cellar is untrusted.
+
+    Reproduces the widened-trust hazard: with `opt` as a plain trusted root, a
+    file at `opt/<anything>/bin/git` is accepted even though no symlink is
+    involved.  The resolution gate must reject it.
+    """
+    opt_root = tmp_path / "opt"
+    cellar_root = tmp_path / "Cellar"
+    planted_dir = opt_root / "attacker" / "bin"
+    planted_dir.mkdir(parents=True)
+    cellar_root.mkdir()
+    planted = planted_dir / "git"
+    planted.write_text("planted", encoding="utf-8")
+    planted.chmod(0o755)
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: str(planted))
+    monkeypatch.setattr(
+        module, "_OPT_ALIAS_ROOTS", ((opt_root, cellar_root),)
+    )
+
+    assert module.resolve_approved_executable("git") is None
 
 
 def test_git_resolved_through_opt_alias_is_accepted(
@@ -89,8 +124,9 @@ def test_git_resolved_through_opt_alias_is_accepted(
     Reproduces the pre-commit failure on Homebrew macOS: `git commit`
     prepends `GIT_EXEC_PATH` (an `opt/.../libexec/git-core` path) to PATH, so
     the hook's `shutil.which("git")` finds the executable at its literal `opt`
-    location while it resolves into the `Cellar` install.  The literal `opt`
-    directory must be trusted or the resolver rejects a legitimate git.
+    location while it resolves into the `Cellar` install.  The resolution gate
+    must accept the real alias shape (candidate under `opt`, resolved target
+    under Cellar).
     """
     opt_root = tmp_path / "opt"
     cellar_root = tmp_path / "Cellar"
@@ -105,7 +141,9 @@ def test_git_resolved_through_opt_alias_is_accepted(
     opt_git.symlink_to(real_git)
 
     monkeypatch.setattr(module.shutil, "which", lambda _name: str(opt_git))
-    monkeypatch.setattr(module, "_trusted_roots", lambda: (opt_root, cellar_root))
+    monkeypatch.setattr(
+        module, "_OPT_ALIAS_ROOTS", ((opt_root, cellar_root),)
+    )
 
     assert module.resolve_approved_executable("git") == str(real_git.resolve())
 

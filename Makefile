@@ -570,8 +570,8 @@ docs-check: docs-check-base
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
 # staged) must have zero warnings. STYLE_BASE defaults to the merge base with
-# the main branch, and the target fails when no base can be resolved, so the
-# gate cannot pass by comparing against an empty diff.
+# the main branch. An unresolvable base fails closed; an empty changed set is
+# a legitimate no-op, backstopped by CI and by the baseline budget gate below.
 # docs-style-check-baseline: total warnings must not exceed the retained
 # budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
 # docs now pass the audit clean, so any warning fails this gate.

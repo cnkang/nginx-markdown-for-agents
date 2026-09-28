@@ -2178,8 +2178,6 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
-| 0.9.2 | 2026-09-22 | Hermes | Updated status: publication pending; no release date is set |
-| 0.9.2 | 2026-09-21 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status wording prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-17 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |
 | 0.9.2 | 2026-09-17 | Hermes | Added an FFI/ABI compatibility section; the active-tree grep/sed migration now covers all seven unregistered names |
