@@ -917,3 +917,60 @@ def test_bare_workflow_dispatch_trigger_is_accepted() -> None:
     assert gates._release_publish_triggers_are_bounded(mapping)
     rejected = bare.replace("  workflow_dispatch:\n", "  workflow_dispatch: enabled\n")
     assert not gates._release_publish_triggers_are_bounded(rejected)
+
+
+def test_publish_comparison_follows_github_case_insensitive_strings() -> None:
+    """String equality matches GitHub's ordinal-ignore-case semantics.
+
+    GitHub's expression engine compares strings with ordinal-ignore-case
+    equality, so `== 'FAILURE'` matches an actual `failure`.  A
+    case-sensitive model would evaluate a mixed-case combined-failure
+    alternative differently from the runner and accept it.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternative = (
+        " || (needs.release-gate.result == 'FAILURE'"
+        " && needs.musl-build.result == 'Failure')"
+    )
+    mutant = (
+        prefix
+        + marker
+        + head
+        + condition_marker
+        + condition_end
+        + alternative
+        + "\n"
+        + "".join(remainder_lines)
+    )
+    assert not _publish_gate_item(mutant), alternative
+
+    # Parity probe: an uppercase comparison matches the lowercase value.
+    import ast as _ast
+
+    context = {
+        "needs.release_gate.result": "failure",
+        "github.event_name": "push",
+        "github.ref_type": "tag",
+    }
+    node = _ast.parse(
+        "needs.release_gate.result == 'FAILURE'", mode="eval"
+    ).body
+    assert gates._evaluate_publish_comparison(node, context) is True
