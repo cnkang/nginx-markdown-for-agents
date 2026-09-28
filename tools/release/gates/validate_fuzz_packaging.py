@@ -5317,7 +5317,24 @@ def _followed_script_is_raw(
     depth: int,
     variables: dict[str, str | None] | None,
 ) -> bool:
-    """Scan one resolved operand of a shell or Python invocation."""
+    """Scan one resolved operand of a shell or Python invocation.
+
+    Only operands that resolve to an existing repository-local file are
+    followed; an absolute, out-of-root, or not-yet-generated operand names
+    something this scan cannot read, and (per this path's contract) an
+    unresolvable operand is not evidence of a raw install.  The
+    marker-present path keeps its own fail-closed treatment; this lighter
+    path deliberately does not fail closed, because the file it examines
+    never mentions the install markers.
+    """
+    root = PROJECT_ROOT.resolve()
+    try:
+        resolved = (root / operand).resolve(strict=True)
+        resolved.relative_to(root)
+        if not resolved.is_file():
+            return False
+    except (OSError, ValueError):
+        return False
     if head in ("bash", "sh", "zsh", "source", "."):
         return _raw_install_from_shell_script_file(
             operand, depth + 1, variables
@@ -5334,6 +5351,38 @@ def _followable_operand(operand: str) -> bool:
     return _SEGMENT_SYNTAX_TOKEN_RE.match(operand) is None
 
 
+def _raw_install_from_inline_script(
+    inline: str, depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Scan a ``-c`` inline payload handed to a shell in a followed file.
+
+    ``bash -c "echo build && make test"`` carries an executable string, not
+    a filename; the marker-present path already routes such payloads to the
+    script scan, and this path must do the same instead of treating the
+    string as a path (which would fail closed on a harmless literal).
+    """
+    return _raw_install_in_script(inline, depth + 1, variables)
+
+
+def _invocation_operands_are_raw(
+    words: list[str],
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Whether any operand of one followed invocation is a raw install."""
+    for index, operand in enumerate(words[1:], start=1):
+        if operand == "-c" and index + 1 < len(words):
+            if _raw_install_from_inline_script(words[index + 1], depth, variables):
+                return True
+            continue
+        if not _followable_operand(operand):
+            continue
+        if _followed_script_is_raw(operand, head, depth, variables):
+            return True
+    return False
+
+
 def _raw_install_from_invoked_scripts(
     content: str,
     depth: int,
@@ -5345,9 +5394,11 @@ def _raw_install_from_invoked_scripts(
     unresolved constructs would fail closed on legitimate code), so only the
     literal script operands of its shell and Python invocations are resolved
     and scanned.  A chain such as ``outer.sh`` -> ``bash inner.sh`` is
-    therefore caught, while a dynamic operand (``python3 "$file"``) is not
+    therefore caught, while an operand this scan cannot resolve (a dynamic
+    expansion, an absolute path, or a not-yet-generated file) is not
     treated as evidence: this file does not mention the install markers, so
-    an operand this scan cannot resolve is not a reason to fail the gate.
+    an unresolvable operand is not a reason to fail the gate.  Inline ``-c``
+    payloads are executable strings and are scanned as scripts.
     """
     for segment, _separator in _followable_command_segments(content):
         words = _parse_segment_words(segment)
@@ -5356,11 +5407,8 @@ def _raw_install_from_invoked_scripts(
         head = _invocation_head(segment)
         if head is None:
             continue
-        for operand in words[1:]:
-            if not _followable_operand(operand):
-                continue
-            if _followed_script_is_raw(operand, head, depth, variables):
-                return True
+        if _invocation_operands_are_raw(words, head, depth, variables):
+            return True
     return False
 
 

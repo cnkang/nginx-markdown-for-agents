@@ -858,3 +858,32 @@ def test_publish_gate_rejects_a_dispatch_tag_combined_failure_alternative() -> N
         + "".join(remainder_lines)
     )
     assert not _publish_gate_item(mutant), alternative
+
+
+def test_publish_condition_requires_an_explicit_always_override() -> None:
+    """A condition without ``always()`` cannot be the publication gate.
+
+    Regression: the validator modeled only the explicit comparisons, so a
+    condition with no status-check function passed even though GitHub wraps
+    such conditions in an implicit ``success()`` over the dependencies.  On
+    the dispatch path, where signing is skipped, that implicit gate would
+    skip publication while the explicit comparisons alone would allow it.
+    """
+    real = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert real
+    assert _publish_gate_item(real)
+
+    without_always = (
+        " needs.musl-build.result == 'success'"
+        " && needs.integrity-checksums.result == 'success'"
+        " && needs.release-gate.result == 'success'"
+        " && needs.fuzz-qualification.result == 'success'"
+        " && needs.official-docker-release-gate.result == 'success'"
+        " && needs.rc-release-gates.result == 'success'"
+        " && (needs.integrity-signature.result == 'success'"
+        "     || (needs.integrity-signature.result == 'skipped'"
+        "         && github.event_name == 'workflow_dispatch'))"
+    )
+    assert not gates._publish_condition_covers_dependency_results(
+        without_always
+    )
