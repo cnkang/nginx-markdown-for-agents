@@ -629,6 +629,12 @@ def _wait_toolchain_identity_process(
             f"unable to collect fuzz toolchain identity for {label}"
         ) from exc
     except BaseException:
+        # Interrupt path: signal the group FIRST.  `process.poll()` would
+        # reap the leader and set `returncode`, after which the guarded group
+        # signal returns early and a descendant that inherited stdout keeps
+        # running.  `_signal_fuzz_process_group` handles the already-reaped
+        # case without touching the group, so this is safe either way.
+        _signal_fuzz_process_group(process, signal.SIGTERM)
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
         raise
