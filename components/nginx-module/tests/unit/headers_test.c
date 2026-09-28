@@ -641,6 +641,139 @@ test_update_headers_etag_existing_vary_accept_trailing_ows(void)
     TEST_PASS("Trailing HTAB in Vary is handled");
 }
 
+/*
+ * RFC 9110 section 12.5.5: a Vary value listing the "*" member already
+ * makes the response non-reusable without revalidation.  The conversion
+ * must leave that value byte-identical instead of appending ", Accept".
+ * Covers the fullcov prepare/commit production pair.
+ */
+static void
+test_update_headers_vary_wildcard_unchanged(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Vary: * is left unchanged by conversion");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+
+    push_header(&r, "Vary", "*");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with Vary: * should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Vary: * must not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == 1
+                && memcmp(vary->value.data, "*", 1) == 0,
+                "Vary: * must stay exactly '*' (no ', Accept' append)");
+
+    free_request(&r);
+    TEST_PASS("Vary wildcard is preserved");
+}
+
+/* A wildcard inside a longer Vary list is equally representation-complete. */
+static void
+test_update_headers_vary_wildcard_in_list_unchanged(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Vary: User-Agent, * is left unchanged by conversion");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+
+    push_header(&r, "Vary", "User-Agent, *");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with a wildcard list member should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "wildcard Vary list must not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent, *") - 1
+                && memcmp(vary->value.data, "User-Agent, *",
+                          vary->value.len) == 0,
+                "Vary list with '*' must stay byte-identical");
+
+    free_request(&r);
+    TEST_PASS("Vary wildcard list member is preserved");
+}
+
+/* Positive control: an ordinary Vary value still gains Accept. */
+static void
+test_update_headers_vary_control_appends_accept(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Vary: User-Agent still appends Accept (control)");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+
+    push_header(&r, "Vary", "User-Agent");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with an ordinary Vary should succeed");
+
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent, Accept") - 1
+                && memcmp(vary->value.data, "User-Agent, Accept",
+                          vary->value.len) == 0,
+                "ordinary Vary must still become 'User-Agent, Accept'");
+
+    free_request(&r);
+    TEST_PASS("Ordinary Vary append behavior is unchanged");
+}
+
+/*
+ * The HEAD representation path calls ngx_http_markdown_add_vary_accept()
+ * directly; the wildcard member must no-op there too.
+ */
+static void
+test_head_representation_headers_vary_wildcard_unchanged(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t   *vary;
+
+    TEST_SUBSECTION("HEAD representation preserves Vary: *");
+
+    push_header(&r, "Vary", "*");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation headers should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "HEAD with Vary: * must not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == 1
+                && memcmp(vary->value.data, "*", 1) == 0,
+                "HEAD Vary: * must stay exactly '*' (add_vary_accept no-op)");
+
+    free_request(&r);
+    TEST_PASS("HEAD wildcard Vary is preserved");
+}
+
 static void
 test_update_headers_token_zero(void)
 {
@@ -1202,6 +1335,9 @@ main(void)
     test_update_headers_etag_no_existing();
     test_update_headers_etag_existing_vary_accept();
     test_update_headers_etag_existing_vary_accept_trailing_ows();
+    test_update_headers_vary_wildcard_unchanged();
+    test_update_headers_vary_wildcard_in_list_unchanged();
+    test_update_headers_vary_control_appends_accept();
     test_update_headers_token_zero();
     test_update_headers_ignores_invalidated_vary();
     test_update_headers_creates_vary_after_invalidated_only();
@@ -1213,6 +1349,7 @@ main(void)
     test_head_representation_headers_strips_html_metadata();
     test_head_representation_headers_null();
     test_head_representation_headers_duplicate_entries();
+    test_head_representation_headers_vary_wildcard_unchanged();
     test_clear_trailers_suppresses_all_entries();
     test_clear_trailers_empty_list();
     test_clear_trailers_null_elts_with_entries();

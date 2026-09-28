@@ -397,6 +397,8 @@ static void test_setup(void)
     test_abort_metric_count = 0;
     test_safe_finish_metric_count = 0;
     test_terminal_abort_metric_count = 0;
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    test_cleanup_payload = NULL;
 }
 
 
@@ -757,6 +759,8 @@ test_safe_finish_releases_inflight_before_terminal_drain(void)
                 && ngx_http_markdown_inflight_current() == 0,
         "conversion completion releases its slot before terminal drain");
 
+    TEST_ASSERT(test_cleanup.handler != NULL,
+        "the request pool retains an idempotent cleanup backstop");
     test_cleanup.handler(test_cleanup.data);
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
         "later pool cleanup must not release the slot twice");

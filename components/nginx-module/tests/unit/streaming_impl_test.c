@@ -7065,6 +7065,109 @@ test_subrequest_precommit_failopen_releases_inflight_immediately(void)
 
 
 /*
+ * Finalize-time inflight release discriminators.
+ *
+ * The guarded release in ngx_http_markdown_streaming_finalize_request()
+ * (commit_state == COMMIT_POST && rc_ffi != ERROR_SUCCESS) must fire on
+ * the post-commit branch and must NOT fire on the pre-commit capability
+ * fallback branch (the buffered path keeps consuming the slot).
+ * These two cases discriminate that condition: dropping the
+ * commit-state equality check leaves the POST slot held, and inverting
+ * it would release the PRE slot early.
+ */
+static void
+test_finalize_inflight_release_postcommit_discriminator(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_int_t               rc;
+
+    TEST_SUBSECTION(
+        "post-commit finalize ffi error releases the inflight slot");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "postcommit discriminator must acquire an active conversion slot");
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x71;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    g_streaming_finalize_rc = ERROR_INTERNAL;
+    g_next_body_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "post-commit finalize ffi error must terminate with NGX_ERROR");
+
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0
+                && ctx.lifecycle.inflight_cleanup == NULL,
+        "post-commit finalize ffi error must release the slot before the "
+        "error handler runs");
+
+    TEST_PASS("post-commit finalize releases the inflight slot");
+}
+
+
+static void
+test_finalize_inflight_retain_precommit_fallback_discriminator(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_int_t               rc;
+
+    TEST_SUBSECTION(
+        "pre-commit finalize fallback retains the inflight slot");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.routing.max_inflight = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    ngx_http_markdown_inflight_reset();
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "precommit discriminator must acquire an active conversion slot");
+
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x72;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    g_streaming_finalize_rc = ERROR_STREAMING_FALLBACK;
+    g_buffer_append_rc = NGX_OK;
+    g_body_filter_rc = NGX_OK;
+
+    rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "pre-commit finalize fallback must hand off to the buffered path");
+
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 1
+                && ctx.lifecycle.inflight_cleanup != NULL,
+        "pre-commit finalize fallback must retain the slot while the "
+        "buffered conversion continues");
+
+    ngx_http_markdown_inflight_release(&ctx);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "completed fallback conversion releases its retained slot");
+
+    TEST_PASS("pre-commit finalize fallback retains the inflight slot");
+}
+
+
+/*
  * Regression: a protocol-safe abort is a request-level outcome only after
  * its terminal chain is delivered.  NGX_AGAIN must retain abort provenance;
  * resume success records terminal_aborted_total exactly once, while resume
@@ -7970,6 +8073,8 @@ main(void)
     test_main_request_terminal_releases_inflight_after_resume();
     test_subrequest_terminal_releases_inflight_after_resume();
     test_subrequest_precommit_failopen_releases_inflight_immediately();
+    test_finalize_inflight_release_postcommit_discriminator();
+    test_finalize_inflight_retain_precommit_fallback_discriminator();
     test_postcommit_abort_outcome_across_backpressure();
     test_postcommit_terminal_immediate_failure_no_handle_no_retry();
     test_postcommit_terminal_immediate_failure_live_handle_no_retry();

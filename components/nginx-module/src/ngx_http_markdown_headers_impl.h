@@ -70,6 +70,7 @@ ngx_http_markdown_auth_cache_control_required(
 
 static u_char ngx_http_markdown_hdr_vary[] = "Vary";
 static u_char ngx_http_markdown_hdr_accept[] = "Accept";
+static u_char ngx_http_markdown_vary_wildcard[] = "*";
 static u_char ngx_http_markdown_hdr_etag[] = "ETag";
 static u_char ngx_http_markdown_hdr_content_encoding[] = "Content-Encoding";
 static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
@@ -399,11 +400,16 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
  * If a Vary header exists but does not already contain the
  * "Accept" token, appends ", Accept" to the existing value.
  * Skips modification if "Accept" is already present.
+ * Skips modification when the value contains the "*" member:
+ * RFC 9110 section 12.5.5 — a Vary list with "*" already states
+ * the response cannot be reused without revalidation, so the
+ * metadata is representation-complete as-is.
  *
  * r - current HTTP request
  *
  * Returns:
- *   NGX_OK    on success (header added, appended, or already present)
+ *   NGX_OK    on success (header added, appended, already present,
+ *             or wildcard present)
  *   NGX_ERROR on allocation failure or overflow
  */
 ngx_int_t
@@ -441,6 +447,21 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
     {
         NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                      "markdown: Vary header already contains Accept: \"%V\"",
+                                     &vary->value);
+        return NGX_OK;
+    }
+
+    /* RFC 9110 section 12.5.5: a Vary list containing "*" already makes
+     * the response non-reusable without revalidation; appending Accept
+     * would change metadata without adding information. No-op exactly
+     * like the Accept-present branch above. */
+    if (ngx_http_markdown_contains_csv_token(&vary->value,
+                                             ngx_http_markdown_vary_wildcard,
+                                             sizeof(ngx_http_markdown_vary_wildcard) - 1))
+    {
+        NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                                     "markdown: Vary header wildcard present, "
+                                     "leaving value unchanged: \"%V\"",
                                      &vary->value);
         return NGX_OK;
     }
@@ -940,6 +961,11 @@ ngx_http_markdown_fullcov_prepare_etag(ngx_http_request_t *r,
  * Prepare Vary: Accept — lookup, dedup, push inert slot or allocate
  * appended value.
  *
+ * A Vary value that already contains the Accept token, or the "*"
+ * member (RFC 9110 section 12.5.5 — the response is already
+ * non-reusable without revalidation), is left unchanged: the
+ * already-has flag makes the commit phase skip the value swap.
+ *
  * Returns NGX_OK on success, NGX_ERROR on allocation/overflow failure.
  */
 static ngx_int_t
@@ -977,6 +1003,17 @@ ngx_http_markdown_fullcov_prepare_vary(ngx_http_request_t *r,
     if (ngx_http_markdown_contains_csv_token(&vary->value,
             ngx_http_markdown_hdr_accept,
             sizeof(ngx_http_markdown_hdr_accept) - 1))
+    {
+        prep->vary_already_has = 1;
+        prep->vary_header = vary;
+        return NGX_OK;
+    }
+
+    /* RFC 9110 section 12.5.5: "*" already makes the response
+     * non-reusable without revalidation; leave the value unchanged. */
+    if (ngx_http_markdown_contains_csv_token(&vary->value,
+            ngx_http_markdown_vary_wildcard,
+            sizeof(ngx_http_markdown_vary_wildcard) - 1))
     {
         prep->vary_already_has = 1;
         prep->vary_header = vary;
