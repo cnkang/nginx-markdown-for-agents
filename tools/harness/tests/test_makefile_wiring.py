@@ -61,6 +61,32 @@ def test_recursively_invoked_targets_are_phony() -> None:
     assert "test-all" in names
 
 
+def test_test_all_exposes_host_skips_instead_of_claiming_all_passed() -> None:
+    """Host-only skips stay visible in the aggregate gate summary."""
+    core = MAKEFILE.partition("TEST_ALL_CORE :=")[2].partition("\n\n")[0]
+    test_all_recipe = _target_recipe(MAKEFILE, "test-all")
+    homebrew_recipe = _target_recipe(MAKEFILE, "homebrew-formula-check")
+
+    assert "homebrew-formula-check" in core
+    assert "homebrew-formula-check" in _phony_names(MAKEFILE)
+    assert "audit_homebrew_formula.sh" in homebrew_recipe
+    assert "SKIP: Homebrew formula audit" in homebrew_recipe
+    assert "HOST-APPLICABLE GATES PASSED" in test_all_recipe
+    assert "ALL GATES PASSED" not in test_all_recipe
+    assert "skipped gates did not run" in test_all_recipe
+
+
+def test_homebrew_gate_tracks_its_script_and_make_target() -> None:
+    """PR and push filters keep the formula audit wired to its target."""
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "homebrew-formula-gate.yml"
+    ).read_text(encoding="utf-8")
+
+    assert workflow.count('"packaging/scripts/audit_homebrew_formula.sh"') == 2
+    assert workflow.count('"Makefile"') == 2
+    assert workflow.count("make homebrew-formula-check") == 1
+
+
 def test_docs_and_sonar_suites_stay_wired_into_test_harness() -> None:
     """The docs and sonar pytest suites are executed by `make test-harness`."""
     recipe = _target_recipe(MAKEFILE, "test-harness")

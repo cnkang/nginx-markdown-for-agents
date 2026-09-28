@@ -29,6 +29,50 @@ def test_literal_bin_entry_is_trusted_when_bin_is_a_symlink() -> None:
     assert module._is_under(literal_bin, roots)
 
 
+def test_untrusted_candidate_symlink_into_trusted_root_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A trusted resolved target cannot legitimize an untrusted PATH entry."""
+    trusted_root = tmp_path / "trusted"
+    outside_root = tmp_path / "outside"
+    trusted_bin = trusted_root / "bin"
+    outside_bin = outside_root / "bin"
+    trusted_bin.mkdir(parents=True)
+    outside_bin.mkdir(parents=True)
+    real_git = trusted_bin / "git"
+    real_git.write_text("trusted git", encoding="utf-8")
+    real_git.chmod(0o755)
+    alias = outside_bin / "git"
+    alias.symlink_to(real_git)
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: str(alias))
+    monkeypatch.setattr(module, "_trusted_roots", lambda: (trusted_root,))
+
+    assert module.resolve_approved_executable("git") is None
+
+
+def test_trusted_candidate_symlink_to_untrusted_target_is_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An approved search-path spelling cannot launder an outside target."""
+    trusted_root = tmp_path / "trusted"
+    outside_root = tmp_path / "outside"
+    trusted_bin = trusted_root / "bin"
+    outside_bin = outside_root / "bin"
+    trusted_bin.mkdir(parents=True)
+    outside_bin.mkdir(parents=True)
+    real_git = outside_bin / "git"
+    real_git.write_text("untrusted git", encoding="utf-8")
+    real_git.chmod(0o755)
+    alias = trusted_bin / "git"
+    alias.symlink_to(real_git)
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: str(alias))
+    monkeypatch.setattr(module, "_trusted_roots", lambda: (trusted_root,))
+
+    assert module.resolve_approved_executable("git") is None
+
+
 def test_homebrew_opt_alias_dirs_are_trusted() -> None:
     """Homebrew `opt` version-alias dirs join the trusted roots (Rule 33)."""
     roots = module._trusted_roots()

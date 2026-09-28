@@ -131,6 +131,42 @@ def test_callsite_names_ignores_multiline_comment_body() -> None:
     assert "markdown_decompress" not in names
 
 
+def test_production_scan_counts_callback_function_references(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Function addresses and callback arguments keep Rust exports live."""
+    repository = tmp_path / "repo"
+    source_dir = repository / "components" / "nginx-module" / "src"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "callbacks.c"
+    source.write_text(
+        "void register_callbacks(void) {\n"
+        "    callback = &markdown_address_callback;\n"
+        "    register_callback(markdown_bare_callback);\n"
+        "    markdown_direct_call(NULL);\n"
+        '    const char *text = "markdown_string_only";\n'
+        "    /* markdown_comment_only */\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "ROOT", repository)
+    monkeypatch.setattr(
+        detector,
+        "_validate_repository_read_path",
+        lambda path, *, purpose: Path(path).resolve(),
+    )
+
+    callsites = detector.scan_c_callsites(source_dir, include_headers=False)
+
+    assert set(callsites) == {
+        "markdown_address_callback",
+        "markdown_bare_callback",
+        "markdown_direct_call",
+    }
+    assert "markdown_string_only" not in callsites
+    assert "markdown_comment_only" not in callsites
+
+
 def test_declared_export_universe_covers_header_and_rust_modules() -> None:
     """The universe is the declared Rust exports plus the generated header."""
     universe = detector.declared_ffi_export_universe()
@@ -144,8 +180,8 @@ def test_declared_export_universe_covers_header_and_rust_modules() -> None:
         "markdown_dynconf_result_init",
         "markdown_dynconf_result_free",
     }.isdisjoint(universe)
-    # Reason-code helpers are generated into the header only, so the universe
-    # is the union of both sides rather than the Rust modules alone.
+    # Reason-code helpers live outside `ffi`; their source is included in the
+    # Rust declarations so the generated header and source remain cross-checked.
     header_exports = detector.parse_header_exports(detector.FFI_HEADER)
     assert universe == set(header_exports) | set(rust_exports)
     assert set(header_exports) <= universe
@@ -165,6 +201,7 @@ def test_declared_rust_exports_discover_added_ffi_modules(
         encoding="utf-8",
     )
     monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(detector, "RUST_ADDITIONAL_FFI_SOURCES", ())
     monkeypatch.setattr(
         detector,
         "_read_text",
@@ -187,6 +224,7 @@ def test_declared_rust_exports_recognizes_old_style_no_mangle(
         encoding="utf-8",
     )
     monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(detector, "RUST_ADDITIONAL_FFI_SOURCES", ())
     monkeypatch.setattr(
         detector,
         "_read_text",
@@ -194,6 +232,42 @@ def test_declared_rust_exports_recognizes_old_style_no_mangle(
     )
 
     assert set(detector.declared_rust_exports()) == {"legacy_export", "mixed_export"}
+
+
+def test_declared_rust_exports_includes_reason_code_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Auxiliary reason-code exports are part of the Rust declaration scan."""
+    ffi_dir = tmp_path / "ffi"
+    ffi_dir.mkdir()
+    (ffi_dir / "base.rs").write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn base_export() {}\n',
+        encoding="utf-8",
+    )
+    reason_source = tmp_path / "decision" / "reason_code.rs"
+    reason_source.parent.mkdir()
+    reason_source.write_text(
+        '#[unsafe(no_mangle)] pub extern "C" fn markdown_reason_code_str() {}\n'
+        '#[unsafe(no_mangle)] pub extern "C" fn markdown_reason_code_metric_key() {}\n'
+        '#[unsafe(no_mangle)] pub extern "C" fn markdown_reason_code_count() {}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(detector, "RUST_FFI_DIR", ffi_dir)
+    monkeypatch.setattr(
+        detector, "RUST_ADDITIONAL_FFI_SOURCES", (reason_source,)
+    )
+    monkeypatch.setattr(
+        detector,
+        "_read_text",
+        lambda path: path.read_text(encoding="utf-8"),
+    )
+
+    assert set(detector.declared_rust_exports()) == {
+        "base_export",
+        "markdown_reason_code_count",
+        "markdown_reason_code_metric_key",
+        "markdown_reason_code_str",
+    }
 
 
 def test_current_lifecycle_pairs_all_belong_to_the_export_universe() -> None:
@@ -279,6 +353,23 @@ def test_lifecycle_pairs_reject_a_rust_removed_export_even_if_header_is_stale(
         detector.run_audit()
 
 
+def test_rust_raw_string_scanner_tracks_exact_hash_delimiters():
+    """Raw byte/string prefixes skip shorter-quoted content and bound EOF."""
+    source = 'r##"inside "# one-hash text, then close"##tail'
+    end = detector._rust_raw_string_end(source, 0)
+    assert end is not None
+    assert source[end:] == "tail"
+
+    byte_source = 'br###"byte raw payload"###after'
+    byte_end = detector._rust_raw_string_end(byte_source, 0)
+    assert byte_end is not None
+    assert byte_source[byte_end:] == "after"
+
+    unterminated = 'r#"no closing delimiter'
+    assert detector._rust_raw_string_end(unterminated, 0) == len(unterminated)
+    assert detector._rust_raw_string_end("bravo", 0) is None
+
+
 def test_declared_rust_exports_ignore_comments_and_string_literals(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -287,7 +378,8 @@ def test_declared_rust_exports_ignore_comments_and_string_literals(
     module.write_text(
         'const DOC: &str = r###"#[unsafe(no_mangle)] pub extern "C" '
         'fn markdown_converter_free() {}"###;\n'
-        'const COOKED: &str = "literal // and /* markers";\n'
+        'const COOKED: &str = "#[unsafe(no_mangle)] pub extern \\"C\\" '
+        'fn markdown_converter_free() {} // literal comment markers";\n'
         '// #[unsafe(no_mangle)] pub extern "C" fn markdown_converter_free() {}\n'
         '/* outer /* nested */ #[unsafe(no_mangle)] pub extern "C" '
         'fn markdown_result_init() {} */\n'
@@ -295,6 +387,7 @@ def test_declared_rust_exports_ignore_comments_and_string_literals(
         encoding="utf-8",
     )
     monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(detector, "RUST_ADDITIONAL_FFI_SOURCES", ())
     monkeypatch.setattr(
         detector,
         "_read_text",
@@ -315,6 +408,55 @@ def test_declared_rust_exports_ignore_comments_and_string_literals(
     assert ("markdown_converter_new", "markdown_converter_free") in dangling
 
 
+def test_masking_many_rust_literals_preserves_only_abi_strings() -> None:
+    """Large literal sets remain correctly masked without repeated prefixes."""
+    literal_count = 600
+    source = "\n".join(
+        line
+        for index in range(literal_count)
+        for line in (
+            f'const DOC_{index}: &str = "C";',
+            f'pub extern "C" fn abi_{index}() {{}}',
+        )
+    )
+
+    masked = detector._mask_rust_non_code(source)
+
+    assert masked.count('extern "C"') == literal_count
+    assert masked.count('const DOC_') == literal_count
+    assert masked.count('"C"') == literal_count
+
+
+def test_abi_string_restoration_scans_the_identifier_stream_once(
+    monkeypatch,
+) -> None:
+    """Large ABI string sets retain the single-pass masking optimization."""
+    source = 'extern "C" fn first() {}\nextern "C" fn second() {}\n'
+    candidates = []
+    for start in (source.index('"C"'), source.rindex('"C"')):
+        candidates.append((start, start + len('"C"')))
+    masked = list(source)
+    for start, end in candidates:
+        masked[start:end] = " " * (end - start)
+
+    class _CountingIdentifierPattern:
+        def __init__(self, pattern) -> None:
+            self.pattern = pattern
+            self.finditer_calls = 0
+
+        def finditer(self, text: str):
+            self.finditer_calls += 1
+            return self.pattern.finditer(text)
+
+    identifiers = _CountingIdentifierPattern(detector._RUST_IDENTIFIER_RE)
+    monkeypatch.setattr(detector, "_RUST_IDENTIFIER_RE", identifiers)
+
+    detector._restore_rust_abi_strings(source, masked, candidates)
+
+    assert identifiers.finditer_calls == 1
+    assert "".join(masked).count('"C"') == 2
+
+
 def test_rust_character_literals_do_not_hide_later_exports(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -332,6 +474,7 @@ pub extern "C" fn markdown_after_character_literals() {}
         encoding="utf-8",
     )
     monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(detector, "RUST_ADDITIONAL_FFI_SOURCES", ())
     monkeypatch.setattr(
         detector,
         "_read_text",
@@ -358,6 +501,7 @@ def test_declared_rust_exports_allow_stacked_attributes(
         encoding="utf-8",
     )
     monkeypatch.setattr(detector, "RUST_FFI_DIR", tmp_path)
+    monkeypatch.setattr(detector, "RUST_ADDITIONAL_FFI_SOURCES", ())
     monkeypatch.setattr(
         detector,
         "_read_text",

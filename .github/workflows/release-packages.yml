@@ -1128,14 +1128,20 @@ jobs:
       - name: Verify release gate dependencies
         run: |
           set -euo pipefail
-          dependency_versions="$(python3 -c 'import brotli, yaml, jsonschema; print(brotli.__version__, yaml.__version__, jsonschema.__version__)')"
+          dependency_versions="$(python3 -c 'from importlib.metadata import version; import brotli, yaml; print(brotli.__version__, yaml.__version__, version("jsonschema"))' 2>/dev/null)" || {
+            echo "ERROR: unable to import the pinned release Python dependencies; install requirements-release.txt" >&2
+            exit 1
+          }
           # jsonschema imports and reports its version without its [format]
           # extras, but registers none of the format checkers the release
           # schemas rely on (date-time), and validation silently skips an
           # unregistered format.  Read the checker registry here so a pin
           # stripped to a bare `jsonschema` fails this preflight instead of
           # quietly dropping those checks.
-          format_checkers="$(python3 -c 'from jsonschema import FormatChecker; print("date-time" in FormatChecker().checkers)')"
+          format_checkers="$(python3 -c 'from jsonschema import FormatChecker; print("date-time" in FormatChecker().checkers)' 2>/dev/null)" || {
+            echo "ERROR: unable to inspect jsonschema format-checker registration" >&2
+            exit 1
+          }
           [[ "${format_checkers}" == "True" ]] || {
             echo "ERROR: jsonschema [format] extras are not installed; the date-time format checker is missing" >&2
             exit 1
@@ -1292,6 +1298,19 @@ jobs:
           GH_TOKEN="${RELEASE_RULESET_TOKEN:-$GH_TOKEN}" \
             python3 tools/release/gates/verify_tag_ref_protection.py \
             --repo "${GITHUB_REPOSITORY}"
+        shell: bash
+
+      - name: Install pinned Helm for manifest validation
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -fsSLo /tmp/helm.tgz \
+            "https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz"
+          echo "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496  /tmp/helm.tgz" \
+            | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
         shell: bash
 
       - name: Download fuzz qualification record
@@ -1517,6 +1536,10 @@ jobs:
         shell: bash
 
       - name: Install pinned Rust toolchain for fuzz qualification
+        env:
+          # The installer, rustup shim, and cargo-fuzz use one toolchain.
+          FUZZ_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
+          RUSTUP_TOOLCHAIN: ${{ env.FUZZ_TOOLCHAIN }}
         run: |
           set -euo pipefail
           # Provision every toolchain serially, up front, with retries.  The
@@ -1544,8 +1567,8 @@ jobs:
           # front so no component download happens mid-qualification.
           retry 5 bash ./packaging/scripts/install-verified-rustup.sh \
             --arch amd64 \
-            --toolchain nightly-2026-09-21
-          retry 5 rustup component add --toolchain nightly-2026-09-21 rust-src
+            --toolchain "${FUZZ_TOOLCHAIN}"
+          retry 5 rustup component add --toolchain "${FUZZ_TOOLCHAIN}" rust-src
           retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
         shell: bash
 
@@ -1926,19 +1949,26 @@ jobs:
           # for each one so signing works for any subkey.
           keygrips="$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
             | awk -F: '$1 == "grp" {print $10}')"
-          preset_passphrase="$(command -v gpg-preset-passphrase || true)"
-          if [[ -z "${preset_passphrase}" ]] \
-              && [[ -x /usr/lib/gnupg/gpg-preset-passphrase ]]; then
-            preset_passphrase=/usr/lib/gnupg/gpg-preset-passphrase
+          if ! command -v gpg-preset-passphrase >/dev/null 2>&1 \
+              && [[ ! -x /usr/lib/gnupg/gpg-preset-passphrase ]]; then
+            echo "ERROR: gpg-preset-passphrase is required for non-interactive package signing" >&2
+            exit 1
           fi
-          if [[ -n "${keygrips}" ]] && [[ -n "${preset_passphrase}" ]]; then
+          preset_passphrase() {
+            if command -v gpg-preset-passphrase >/dev/null 2>&1; then
+              gpg-preset-passphrase --preset "$1"
+            else
+              /usr/lib/gnupg/gpg-preset-passphrase --preset "$1"
+            fi
+          }
+          if [[ -n "${keygrips}" ]]; then
             while IFS= read -r keygrip; do
               [[ -n "${keygrip}" ]] || continue
               printf '%s' "${GPG_PASSPHRASE}" \
-                | "${preset_passphrase}" --preset "${keygrip}"
+                | preset_passphrase "${keygrip}"
             done <<< "${keygrips}"
           else
-            echo "ERROR: gpg-preset-passphrase is required for non-interactive package signing" >&2
+            echo "ERROR: no GPG keygrip was found for non-interactive package signing" >&2
             exit 1
           fi
           GPG_KEY_ID="${GPG_KEY_ID}" \

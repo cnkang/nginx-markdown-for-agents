@@ -7,6 +7,28 @@ from pathlib import Path
 from tools.harness import check_rust_baseline as baseline
 
 
+EXPECTED_BASELINE_ACTION_WORKFLOWS = (
+    Path(".github/workflows/ci.yml"),
+    Path(".github/workflows/codeql.yml"),
+    Path(".github/workflows/macos-smoke.yml"),
+    Path(".github/workflows/nightly-perf.yml"),
+    Path(".github/workflows/real-nginx-ims.yml"),
+    Path(".github/workflows/rc-release-gates.yml"),
+    Path(".github/workflows/sonarcloud.yml"),
+)
+EXPECTED_NIGHTLY_ACTION_WORKFLOWS = (
+    Path(".github/workflows/nightly-fuzz.yml"),
+)
+EXPECTED_OBSERVATION_ACTION_WORKFLOWS = (
+    Path(".github/workflows/nightly-observation.yml"),
+    Path(".github/workflows/weekly-observation.yml"),
+)
+EXPECTED_RELEASE_WORKFLOWS = (
+    Path(".github/workflows/release-packages.yml"),
+    Path(".github/workflows/release-rpm.yml"),
+)
+
+
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -16,19 +38,19 @@ def _write_valid_fixture(root: Path) -> None:
     _write(root / "rust-toolchain.toml", '[toolchain]\nchannel = "1.97.0"\n')
     for path in baseline.MANIFEST_PATHS:
         _write(root / path, '[package]\nname = "fixture"\nrust-version = "1.97"\n')
-    for path in baseline.BASELINE_ACTION_WORKFLOWS:
+    for path in EXPECTED_BASELINE_ACTION_WORKFLOWS:
         _write(
             root / path,
             "steps:\n  - uses: dtolnay/rust-toolchain@sha\n"
             "    with:\n      toolchain: 1.97.0\n",
         )
-    for path in baseline.NIGHTLY_ACTION_WORKFLOWS:
+    for path in EXPECTED_NIGHTLY_ACTION_WORKFLOWS:
         _write(
             root / path,
             "steps:\n  - uses: dtolnay/rust-toolchain@sha\n"
             "    with:\n      toolchain: nightly\n",
         )
-    for path in baseline.OBSERVATION_ACTION_WORKFLOWS:
+    for path in EXPECTED_OBSERVATION_ACTION_WORKFLOWS:
         _write(
             root / path,
             "steps:\n  - uses: dtolnay/rust-toolchain@sha\n"
@@ -36,7 +58,7 @@ def _write_valid_fixture(root: Path) -> None:
             "  - uses: dtolnay/rust-toolchain@sha\n"
             "    with:\n      toolchain: nightly\n",
         )
-    for path in baseline.RELEASE_WORKFLOWS:
+    for path in EXPECTED_RELEASE_WORKFLOWS:
         _write(root / path, "env:\n  RUST_TOOLCHAIN: 1.97.0\n")
     for path in baseline.RELEASE_DOCKERFILES:
         _write(
@@ -58,6 +80,33 @@ def test_valid_repository_contract_passes(tmp_path: Path) -> None:
     assert errors == []
 
 
+def test_workflow_inventory_matches_independent_expected_paths() -> None:
+    """The fixture oracle does not move when the detector inventory drifts."""
+    assert baseline.BASELINE_ACTION_WORKFLOWS == (
+        EXPECTED_BASELINE_ACTION_WORKFLOWS)
+    assert baseline.NIGHTLY_ACTION_WORKFLOWS == (
+        EXPECTED_NIGHTLY_ACTION_WORKFLOWS)
+    assert baseline.OBSERVATION_ACTION_WORKFLOWS == (
+        EXPECTED_OBSERVATION_ACTION_WORKFLOWS)
+    assert baseline.RELEASE_WORKFLOWS == EXPECTED_RELEASE_WORKFLOWS
+
+
+def test_valid_fixture_still_contains_a_release_workflow_if_inventory_drops_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The fixture stays independent enough to expose a missing release scan."""
+    monkeypatch.setattr(baseline, "RELEASE_WORKFLOWS", ())
+    _write_valid_fixture(tmp_path)
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any(
+        ".github/workflows/release-packages.yml: Rust-installing workflow "
+        "is not classified" in error
+        for error in errors
+    ), errors
+
+
 def test_manifest_msrv_drift_fails_with_path(tmp_path: Path) -> None:
     _write_valid_fixture(tmp_path)
     manifest = tmp_path / baseline.MANIFEST_PATHS[1]
@@ -74,12 +123,12 @@ def test_manifest_msrv_drift_fails_with_path(tmp_path: Path) -> None:
 
 def test_release_workflow_compiler_drift_fails(tmp_path: Path) -> None:
     _write_valid_fixture(tmp_path)
-    workflow = tmp_path / baseline.RELEASE_WORKFLOWS[0]
+    workflow = tmp_path / EXPECTED_RELEASE_WORKFLOWS[0]
     workflow.write_text("env:\n  RUST_TOOLCHAIN: stable\n", encoding="utf-8")
 
     _exact, _msrv, errors = baseline.collect_errors(tmp_path)
 
-    assert any(str(baseline.RELEASE_WORKFLOWS[0]) in error for error in errors)
+    assert any(str(EXPECTED_RELEASE_WORKFLOWS[0]) in error for error in errors)
     assert any("expected '1.97.0'" in error for error in errors)
 
 

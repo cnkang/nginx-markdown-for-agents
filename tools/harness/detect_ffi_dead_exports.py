@@ -40,8 +40,15 @@ MODULE_SRC = ROOT / "components" / "nginx-module" / "src"
 MODULE_TESTS = ROOT / "components" / "nginx-module" / "tests"
 FFI_HEADER = MODULE_SRC / "markdown_converter.h"
 RUST_FFI_DIR = ROOT / "components" / "rust-converter" / "src" / "ffi"
-# Rust-owned FFI exports are discovered under this source directory, while the
-# generated header also includes reason-code generator declarations.
+RUST_ADDITIONAL_FFI_SOURCES = (
+    ROOT
+    / "components"
+    / "rust-converter"
+    / "src"
+    / "decision"
+    / "reason_code.rs",
+)
+# The generated header also exposes reason-code helpers declared outside `ffi`.
 RUST_FFI_NO_MANGLE_RE = re.compile(r"#\[(?:unsafe\(no_mangle\)|no_mangle)\]")
 RUST_FFI_C_FUNCTION_RE = re.compile(
     r'pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
@@ -306,18 +313,33 @@ def _mask_rust_span(masked: list[str], start: int, end: int) -> None:
             masked[position] = " "
 
 
-def _is_rust_abi_string(
-    source: str, masked: list[str], start: int, end: int
-) -> bool:
-    """Keep only the ``\"C\"`` literal that follows a Rust ``extern`` token."""
-    return (
-        source[start:end] == '"C"'
-        and re.search(r"\bextern\s*$", "".join(masked[:start])) is not None
-    )
+_RUST_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_]\w*\b")
 
 
-def _mask_rust_non_code_at(source: str, masked: list[str], index: int) -> int | None:
-    """Mask one non-code span at ``index`` and return its end, if present."""
+def _restore_rust_abi_strings(
+    source: str, masked: list[str], candidates: list[tuple[int, int]]
+) -> None:
+    """Restore only C ABI string tokens following an ``extern`` identifier."""
+    masked_source = "".join(masked)
+    matches = iter(_RUST_IDENTIFIER_RE.finditer(masked_source))
+    match = next(matches, None)
+    last_identifier = None
+    for start, end in candidates:
+        while match is not None and match.start() < start:
+            last_identifier = match.group(0)
+            match = next(matches, None)
+        if last_identifier == "extern":
+            masked[start:end] = source[start:end]
+        last_identifier = None
+
+
+def _mask_rust_non_code_at(
+    source: str,
+    masked: list[str],
+    index: int,
+    abi_candidates: list[tuple[int, int]],
+) -> int | None:
+    """Mask one non-code span and collect candidate ABI string tokens."""
     raw_end = (
         _rust_raw_string_end(source, index)
         if source[index] in {"b", "r"}
@@ -335,8 +357,9 @@ def _mask_rust_non_code_at(source: str, masked: list[str], index: int) -> int | 
 
     if source[index] == '"':
         string_end = _rust_quoted_string_end(source, index)
-        if not _is_rust_abi_string(source, masked, index, string_end):
-            _mask_rust_span(masked, index, string_end)
+        if source[index:string_end] == '"C"':
+            abi_candidates.append((index, string_end))
+        _mask_rust_span(masked, index, string_end)
         return string_end
 
     comment_end = _rust_comment_end(source, index)
@@ -347,12 +370,16 @@ def _mask_rust_non_code_at(source: str, masked: list[str], index: int) -> int | 
 
 
 def _mask_rust_non_code(source: str) -> str:
-    """Mask comments and non-ABI string literals before matching exports."""
+    """Mask Rust non-code spans, then restore only ABI string tokens."""
     masked = list(source)
+    abi_candidates: list[tuple[int, int]] = []
     index = 0
     while index < len(source):
-        span_end = _mask_rust_non_code_at(source, masked, index)
+        span_end = _mask_rust_non_code_at(
+            source, masked, index, abi_candidates
+        )
         index = index + 1 if span_end is None else span_end
+    _restore_rust_abi_strings(source, masked, abi_candidates)
     return "".join(masked)
 
 
@@ -396,9 +423,11 @@ def _declared_rust_exports(source: str) -> list[str]:
 
 
 def declared_rust_exports() -> list[str]:
-    """Extract declared C export names from the Rust FFI export modules."""
+    """Extract C export names from FFI modules and auxiliary export sources."""
     names: set[str] = set()
-    for path in sorted(RUST_FFI_DIR.rglob("*.rs")):
+    paths = set(RUST_FFI_DIR.rglob("*.rs"))
+    paths.update(RUST_ADDITIONAL_FFI_SOURCES)
+    for path in sorted(paths):
         text = _read_text(path)
         if text is None:
             raise ValueError(f"cannot read declared Rust FFI exports from {path}")
@@ -505,7 +534,7 @@ def scan_c_callsites(
 def _scan_c_call_file(
     path: Path, callsites: dict[str, list[dict[str, Any]]]
 ) -> None:
-    """Scan one C-family source file and append its callsites."""
+    """Scan one C-family source file for calls and function-value references."""
     text = _read_text(path)
     if text is None:
         return
@@ -521,8 +550,26 @@ def _scan_c_call_file(
         )
         if _is_non_callsite_line(code):
             continue
-        for match in CALLSITE_RE.finditer(code):
+        matches = list(CALLSITE_RE.finditer(code))
+        matches.extend(
+            match for match in FN_POINTER_RE.finditer(code)
+            if _is_function_value_reference(code, match)
+        )
+        for match in sorted(matches, key=lambda item: item.start()):
             _record_callsite(callsites, match, path, lineno, line, active_guards)
+
+
+def _is_function_value_reference(
+    line: str, match: re.Match[str]
+) -> bool:
+    """Recognize a markdown_* function used as a value rather than called."""
+    if re.match(r"\s*\(", line[match.end():]):
+        return False
+    prefix = line[:match.start()].rstrip()
+    return (
+        re.search(r"(?:&|=|,|\(|\{|\?|:)\s*$", prefix) is not None
+        or re.search(r"\breturn\s*$", prefix) is not None
+    )
 
 
 def _mask_block_comment(line: str, chars: list[str], start: int) -> tuple[int, bool]:
