@@ -4737,6 +4737,101 @@ def _python_import_bindings(
     return module_aliases, imported_names
 
 
+def _python_dynamic_call_target(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve a call whose target is built from a dynamic call.
+
+    ``__import__('os').system``, ``getattr(__import__('os'),'system')`` and
+    ``importlib.import_module('os').system`` are attribute chains rooted in a
+    call rather than a name, which ``_python_call_name`` cannot resolve.  The
+    module name is a literal in every such form, so the qualified target is
+    recovered here; an attribute chain rooted in anything else returns None
+    so the caller can fail closed.
+    """
+    attributes: list[str] = []
+    current: ast.expr = function
+    while isinstance(current, ast.Attribute):
+        attributes.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Call):
+        module = _python_dynamic_import_module(
+            current, module_aliases, imported_names
+        )
+        if module is None:
+            return None
+        if not attributes:
+            # A bare call result used as the target: recover the attribute a
+            # literal getattr names, e.g. getattr(mod, 'system')(...) ->
+            # mod.system.
+            named = _python_getattr_literal_name(
+                current, module_aliases, imported_names
+            )
+            if named is not None:
+                return f"{module}.{named}"
+            return module
+        return ".".join((module, *reversed(attributes)))
+    return None
+
+
+def _python_getattr_literal_name(
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Return the literal attribute name a top-level ``getattr`` selects."""
+    target = _python_call_name(call.func, module_aliases, imported_names)
+    if target != "getattr" or len(call.args) != 2:
+        return None
+    name = call.args[1]
+    if isinstance(name, ast.Constant) and isinstance(name.value, str):
+        return name.value
+    return None
+
+
+def _python_dynamic_import_module(
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve the module a dynamic-import call names, or None."""
+    target = _python_call_name(call.func, module_aliases, imported_names)
+    if target not in {"__import__", "importlib.import_module"}:
+        # getattr(<dynamic-import>, '<name>') with a literal name resolves
+        # to the module itself when the inner call is an import.
+        if target == "getattr" and len(call.args) == 2:
+            inner, name = call.args
+            if not (
+                isinstance(name, ast.Constant) and isinstance(name.value, str)
+            ):
+                return None
+            if isinstance(inner, ast.Call):
+                return _python_dynamic_import_module(
+                    inner, module_aliases, imported_names
+                )
+        return None
+    if not call.args:
+        return None
+    argument = call.args[0]
+    if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
+        return None
+    return argument.value
+
+
+def _python_call_name_or_dynamic(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve a callable to its qualified name, following literal imports."""
+    resolved = _python_call_name(function, module_aliases, imported_names)
+    if resolved is not None:
+        return resolved
+    return _python_dynamic_call_target(function, module_aliases, imported_names)
+
+
 def _python_eval_call_is_raw(
     call: ast.Call,
     depth: int,
@@ -4763,6 +4858,20 @@ def _python_call_is_raw(
     caller_name: str | None,
 ) -> bool:
     target = _python_call_name(call.func, module_aliases, imported_names)
+    if target is None and _python_function_uses_dynamic_import(
+        call.func, module_aliases, imported_names
+    ):
+        # The callable is rooted in a dynamic import (`__import__('os')`,
+        # `importlib.import_module('os')`, or a literal `getattr` over one).
+        # A literal module name resolves to its qualified target; when the
+        # name is not statically known the call could be any launcher, so
+        # fail closed rather than skip a potentially raw install.  Ordinary
+        # call roots (`Path(x).read_text()`) are unaffected.
+        target = _python_call_name_or_dynamic(
+            call.func, module_aliases, imported_names
+        )
+        if target is None:
+            return True
     if target in {"exec", "eval"}:
         return _python_eval_call_is_raw(call, depth, variables)
     if target in _PYTHON_SHELL_LAUNCHERS | _PYTHON_ARGV_LAUNCHERS:
@@ -4777,6 +4886,27 @@ def _python_call_is_raw(
             caller_name,
         )
     return target is not None and re.fullmatch(r"os\.(?:exec|spawn).*", target) is not None
+
+
+def _python_function_uses_dynamic_import(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> bool:
+    """Whether a callable expression is rooted in an unresolved import call.
+
+    Only import-shaped roots (`__import__`, `importlib.import_module`, and a
+    literal `getattr` over one) trigger the fail-closed path: those can
+    produce any module, so an unknown module name hides a potential launcher.
+    Any other call root is ordinary code and keeps its previous treatment.
+    """
+    current: ast.expr = function
+    while isinstance(current, ast.Attribute):
+        current = current.value
+    if not isinstance(current, ast.Call):
+        return False
+    target = _python_call_name(current.func, module_aliases, imported_names)
+    return target in {"__import__", "importlib.import_module", "getattr"}
 
 
 def _python_command_wrapper_spec(

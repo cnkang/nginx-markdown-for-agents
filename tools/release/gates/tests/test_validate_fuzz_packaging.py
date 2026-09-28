@@ -4373,3 +4373,38 @@ def test_virtualenv_markers_read_the_foreground_command_view() -> None:
     install_at, docs_at = packaging_gate._pip_first_steps([with_venv])
     assert docs_at == (0, 1)
     assert packaging_gate._virtualenv_markers(with_venv, docs_at[1])
+
+
+def test_dynamic_import_call_targets_are_resolved_or_fail_closed() -> None:
+    """Dynamic-import launchers are resolved, and fail closed when unknown.
+
+    Regression: `__import__('os').system(...)` and the `getattr`/
+    `importlib.import_module` equivalents build their callable from a call
+    rather than a name, so `_python_call_name` returned None and the raw
+    install behind them went unflagged.  A literal module name is now
+    resolved; an unresolved dynamic import fails closed.
+    """
+    payloads = [
+        "__import__('os').system('rustup toolchain install stable')",
+        "import importlib; importlib.import_module('os').system("
+        "'rustup toolchain install stable')",
+        "getattr(__import__('os'), 'system')('rustup toolchain install stable')",
+    ]
+    for payload in payloads:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), payload
+
+    # A non-literal module name cannot be resolved and must fail closed.
+    variable_module = (
+        "m = 'os'; __import__(m).system('rustup toolchain install stable')"
+    )
+    assert packaging_gate._python_inline_raw_install(
+        variable_module, 0, None
+    )
+
+    # Controls: ordinary calls and benign payloads are unaffected.
+    assert not packaging_gate._python_inline_raw_install(
+        "subprocess.run(['cargo', 'build'])", 0, None
+    )
+    assert not packaging_gate._python_inline_raw_install(
+        "print('hello')", 0, None
+    )
