@@ -45,7 +45,7 @@ import time
 import tomllib
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -74,7 +74,7 @@ _EXPECTED_FUZZ_TOOLCHAIN_IDENTITY = {
     "rustc_release": "1.100.0-nightly",
     "llvm_version": "23.1.1",
     "cargo_version": "cargo 1.100.0-nightly (495c385d0 2026-09-16)",
-    "cargo_fuzz_version": "cargo-fuzz 0.13.1",
+    "cargo_fuzz_version": f"cargo-fuzz {FUZZ_CARGO_FUZZ_PACKAGE_VERSION}",
 }
 
 
@@ -109,7 +109,7 @@ def _cargo_package_version(cargo_toml: Path | None = None) -> str:
 
 def _release_artifact_paths(version: str) -> dict[str, str]:
     """Build release artifact defaults for any valid Cargo package version."""
-    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
         raise ValueError(f"invalid Cargo package version: {version!r}")
     root = Path("artifacts") / "release" / version
     return {
@@ -200,8 +200,23 @@ FUZZ_TARGET_LABEL = "fuzz target"
 RECORD_OUTPUT_LABEL = "fuzz qualification record"
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
-STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
-STAT_ELAPSED_PATTERN = re.compile(r"stat::elapsed_seconds:\s*([\d.]+)")
+STAT_EXECS_PATTERN = re.compile(
+    r"stat::number_of_executed_units:[ \t]*([0-9]+)[ \t]*")
+STAT_ELAPSED_PATTERN = re.compile(
+    r"stat::elapsed_seconds:[ \t]*"
+    r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)[ \t]*")
+MALFORMED_EXECUTIONS_FINDING = (
+    "fuzz run produced malformed execution-count statistics")
+MALFORMED_ELAPSED_FINDING = (
+    "fuzz run produced malformed elapsed-time statistics")
+OVERSIZED_EXECUTIONS_FINDING = (
+    "fuzz run reported oversized execution-count statistics")
+CONFLICTING_STATS_FINDING = "fuzz run produced conflicting statistics"
+MAX_LIBFUZZER_EXECUTIONS = (1 << 64) - 1
+# One target can report at most one uint64 counter per bounded invocation.
+MAX_FUZZ_TARGET_EXECUTIONS = (
+    MAX_LIBFUZZER_EXECUTIONS * MAX_FUZZ_INVOCATIONS
+)
 DONE_RUNS_PATTERN = re.compile(r"Done\s+(\d+)\s+runs?\s+in\s+([\d.]+)\s+second")
 _FAILURE_MARKER_TEXTS = (
     "ERROR: libFuzzer",
@@ -287,7 +302,8 @@ def _git_head_sha() -> str:
 
 def _run_id_from(started_at: str) -> str:
     """Derive a timestamp-based run id from the ISO-8601 start time."""
-    return "fuzz-qualification-" + started_at.replace(":", "").replace("+00:00", "Z")
+    canonical = started_at.replace("+00:00", "Z")
+    return "fuzz-qualification-" + canonical.replace("-", "").replace(":", "")
 
 
 def load_json(path: str | Path, label: str) -> dict:
@@ -320,6 +336,8 @@ def _validate_scalar(value, kind, positive: bool, non_empty: bool) -> bool:
         return False
     if isinstance(value, bool) and kind is not bool:
         return False
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
     return False if non_empty and not value else not positive or value > 0
 
 
@@ -337,6 +355,12 @@ def _validate_target_entry(entry, index: int) -> str | None:
             continue
         return (f"malformed: targets[{index}].{field} must be "
                 f"{description}")
+    if entry["required_minutes"] > FUZZ_JOB_BUDGET / 60:
+        return (f"malformed: targets[{index}].required_minutes exceeds "
+                "fuzz job budget")
+    if entry["required_executions"] > MAX_FUZZ_TARGET_EXECUTIONS:
+        return (f"malformed: targets[{index}].required_executions exceeds "
+                "supported per-target maximum")
     try:
         validate_filename_strict(entry["name"], purpose=FUZZ_TARGET_LABEL)
     except ValueError as exc:
@@ -414,8 +438,13 @@ def _validate_seed_digest(entry: dict, target: str) -> str | None:
             purpose=f"seed corpus for {target}",
         )
         validated_seed_path.relative_to(CORPUS_ROOT.resolve())
+    except ValueError as exc:
+        return f"malformed: seed path for {target} escapes the corpus root: {exc}"
+    except OSError as exc:
+        return f"seed corpus for {target} is unreadable: {exc}"
+    try:
         raw = validated_seed_path.read_bytes()
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
         return f"seed corpus for {target} is unreadable: {exc}"
     actual = f"sha256:{hashlib.sha256(raw).hexdigest()}"
     if actual != manifest_digest:
@@ -521,19 +550,87 @@ def validate_toolchain_identity(identity: object) -> list[str]:
     return reasons
 
 
-def _run_toolchain_version_command(command: list[str], label: str) -> str:
-    """Return bounded stdout from a toolchain identity command."""
+def _start_toolchain_identity_process(
+    command: list[str], label: str
+) -> tuple[subprocess.Popen, _BoundedStream, threading.Thread]:
+    """Start a version command with capped output and an isolated group."""
     try:
-        result = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=30)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(
-            f"unable to collect fuzz toolchain identity for {label}") from exc
-    if result.returncode != 0:
+            f"unable to collect fuzz toolchain identity for {label}"
+        ) from exc
+    if process.stdout is None:
+        _terminate_fuzz_process_group(process)
+        raise ValueError(f"unable to capture fuzz toolchain identity for {label}")
+    _register_fuzz_process(process)
+    stream = _BoundedStream(
+        max_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
+        max_pending_line_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
+    )
+    reader = threading.Thread(
+        target=_drain_stream, args=(process.stdout, stream), daemon=True
+    )
+    try:
+        reader.start()
+    except BaseException:
+        _terminate_fuzz_process_group(process)
+        _unregister_fuzz_process(process)
+        raise
+    return process, stream, reader
+
+
+def _wait_toolchain_identity_process(
+    process: subprocess.Popen, label: str
+) -> int:
+    """Bound toolchain command runtime and terminate on every exceptional exit."""
+    try:
+        return process.wait(timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_fuzz_process_group(process)
+        raise ValueError(
+            f"unable to collect fuzz toolchain identity for {label}"
+        ) from exc
+    except BaseException:
+        if process.poll() is None:
+            _terminate_fuzz_process_group(process)
+        raise
+
+
+def _finish_toolchain_identity_process(
+    process: subprocess.Popen, reader: threading.Thread
+) -> None:
+    """Bound pipe cleanup and kill descendants that keep stdout open."""
+    try:
+        reader.join(_STREAM_JOIN_GRACE_SECONDS)
+        if reader.is_alive():
+            _terminate_fuzz_process_group(process)
+            reader.join(_PROCESS_KILL_REAP_SECONDS)
+    finally:
+        _close_fuzz_process_pipes(process)
+        _unregister_fuzz_process(process)
+
+
+def _run_toolchain_version_command(command: list[str], label: str) -> str:
+    """Collect a toolchain version through a bounded subprocess stream."""
+    process, stream, reader = _start_toolchain_identity_process(command, label)
+    try:
+        returncode = _wait_toolchain_identity_process(process, label)
+    finally:
+        _finish_toolchain_identity_process(process, reader)
+    if returncode != 0:
         raise ValueError(
             f"unable to collect fuzz toolchain identity for {label}")
-    output = result.stdout.strip()
-    if not output or len(output) > 4096:
+    if stream.total_chars() > _MAX_TOOLCHAIN_IDENTITY_CHARS:
+        raise ValueError(
+            f"invalid fuzz toolchain identity output for {label}")
+    output = stream.text().strip()
+    if not output or len(output) > _MAX_TOOLCHAIN_IDENTITY_CHARS:
         raise ValueError(
             f"invalid fuzz toolchain identity output for {label}")
     return output
@@ -590,6 +687,7 @@ def _collect_fuzz_toolchain_identity() -> dict:
 # keeps bounded marker evidence), so a crash past the cap still fails the
 # target instead of classifying as a pass.
 _MAX_CAPTURE_CHARS = 4_000_000
+_MAX_TOOLCHAIN_IDENTITY_CHARS = 4096
 _ELISION_TEMPLATE = "\n[... {dropped} chars elided by the capture cap ...]\n"
 # Upper bound on the retained marker evidence; a bounded slice keeps a
 # pathological marker line from growing the evidence buffer.
@@ -604,6 +702,7 @@ _MAX_PENDING_LINE_CHARS = 1 << 20
 _STREAM_JOIN_GRACE_SECONDS = 30
 _PROCESS_TERMINATION_GRACE_SECONDS = 1.0
 _PROCESS_KILL_REAP_SECONDS = 1.0
+_PROCESS_WAIT_POLL_SECONDS = 0.05
 _ACTIVE_FUZZ_PROCESSES: set[subprocess.Popen] = set()
 _ACTIVE_FUZZ_PROCESSES_LOCK = threading.Lock()
 _FUZZ_CANCEL_REQUESTED = threading.Event()
@@ -662,9 +761,14 @@ class _BoundedStream:
     the retained result while that reader is still appending to it.
     """
 
-    def __init__(self) -> None:
-        self._head_limit = _MAX_CAPTURE_CHARS // 2
-        self._tail_limit = _MAX_CAPTURE_CHARS - self._head_limit
+    def __init__(
+        self,
+        max_chars: int = _MAX_CAPTURE_CHARS,
+        max_pending_line_chars: int = _MAX_PENDING_LINE_CHARS,
+    ) -> None:
+        self._max_pending_line_chars = max_pending_line_chars
+        self._head_limit = max_chars // 2
+        self._tail_limit = max_chars - self._head_limit
         self._head: list[str] = []
         self._tail: deque[str] = deque()
         self._head_size = 0
@@ -679,7 +783,7 @@ class _BoundedStream:
         """Consume one decoded chunk, retaining head, tail and markers."""
         with self._lock:
             lines, partial = _split_lines(self._pending + chunk)
-            if len(partial) > _MAX_PENDING_LINE_CHARS:
+            if len(partial) > self._max_pending_line_chars:
                 # A line that never ends must not grow the carry-over
                 # buffer without bound; flush it through the retention
                 # instead and restart the carry-over.
@@ -744,6 +848,16 @@ class _BoundedStream:
             return "".join(self._head) + _ELISION_TEMPLATE.format(
                 dropped=dropped) + "".join(self._tail)
 
+    def total_chars(self) -> int:
+        """Return the total stream length observed so far."""
+        with self._lock:
+            return self._total
+
+    def retained_chars(self) -> int:
+        """Return stored head/tail characters, excluding the pending line."""
+        with self._lock:
+            return self._head_size + self._tail_size
+
     def marker_finding(self) -> str | None:
         """Return the failure marker seen anywhere in the stream, if any."""
         with self._lock:
@@ -785,6 +899,8 @@ def _signal_fuzz_process_group(
     process: subprocess.Popen, signal_number: int
 ) -> None:
     """Signal the isolated fuzz invocation and any descendants it spawned."""
+    if getattr(process, "returncode", None) is not None:
+        return
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal_number)
@@ -798,6 +914,36 @@ def _signal_fuzz_process_group(
             process.terminate()
         else:
             process.kill()
+
+
+def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
+    """Kill descendants before reaping the group leader, avoiding PGID reuse."""
+    if os.name != "posix":
+        return process.wait(timeout=timeout)
+    required_waitid = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    if any(not hasattr(os, name) for name in required_waitid):
+        raise RuntimeError("POSIX fuzz cleanup requires waitid with WNOWAIT")
+    deadline = time.monotonic() + timeout
+    while True:
+        if process.returncode is not None:
+            return process.returncode
+        try:
+            status = os.waitid(
+                os.P_PID,
+                process.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except InterruptedError:
+            continue
+        if status is not None and status.si_pid == process.pid:
+            _signal_fuzz_process_group(
+                process, getattr(signal, "SIGKILL", signal.SIGTERM)
+            )
+            return process.wait()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
 
 
 def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
@@ -893,7 +1039,7 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
             reader.start()
             started_readers.append(reader)
         try:
-            returncode = process.wait(timeout=timeout)
+            returncode = _wait_fuzz_process(process, timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             _terminate_fuzz_process_group(process)
@@ -905,10 +1051,11 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         _terminate_fuzz_process_group(process)
         raise
     finally:
-        with contextlib.suppress(OSError):
-            _signal_fuzz_process_group(
-                process, getattr(signal, "SIGKILL", signal.SIGTERM)
-            )
+        if process.returncode is None:
+            with contextlib.suppress(OSError):
+                _signal_fuzz_process_group(
+                    process, getattr(signal, "SIGKILL", signal.SIGTERM)
+                )
         try:
             _join_readers(started_readers)
         finally:
@@ -931,6 +1078,71 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
     return result
 
 
+def _parse_elapsed_value(value: str) -> tuple[float, str | None]:
+    """Parse a finite elapsed duration or return a fail-closed reason."""
+    try:
+        elapsed = float(value)
+    except (OverflowError, ValueError):
+        return 0.0, MALFORMED_ELAPSED_FINDING
+    if (
+        not math.isfinite(elapsed)
+        or elapsed < 0.0
+        or elapsed > RELEASE_JOB_LIMIT_SECONDS
+    ):
+        return 0.0, MALFORMED_ELAPSED_FINDING
+    return elapsed, None
+
+
+def _stat_tokens(
+    combined: str, key: str, pattern: re.Pattern[str]
+) -> list[str] | None:
+    """Return every complete value token for one libFuzzer statistics key."""
+    values: list[str] = []
+    for line in combined.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(key):
+            continue
+        match = pattern.fullmatch(stripped)
+        if match is None:
+            return None
+        values.append(match.group(1))
+    return values
+
+
+def _parse_execution_statistics(combined: str) -> tuple[int, str | None]:
+    """Parse the execution counter, rejecting malformed or conflicting lines."""
+    tokens = _stat_tokens(
+        combined, "stat::number_of_executed_units:", STAT_EXECS_PATTERN)
+    if tokens is None:
+        return 0, MALFORMED_EXECUTIONS_FINDING
+    try:
+        values = [int(token, 10) for token in tokens]
+    except (OverflowError, ValueError):
+        return 0, OVERSIZED_EXECUTIONS_FINDING
+    if any(value > MAX_LIBFUZZER_EXECUTIONS for value in values):
+        return 0, OVERSIZED_EXECUTIONS_FINDING
+    if values and any(value != values[0] for value in values[1:]):
+        return 0, CONFLICTING_STATS_FINDING
+    return (values[0] if values else 0), None
+
+
+def _parse_elapsed_statistics(combined: str) -> tuple[float, str | None]:
+    """Parse elapsed counters, rejecting malformed or conflicting lines."""
+    tokens = _stat_tokens(
+        combined, "stat::elapsed_seconds:", STAT_ELAPSED_PATTERN)
+    if tokens is None:
+        return 0.0, MALFORMED_ELAPSED_FINDING
+    values: list[float] = []
+    for token in tokens:
+        elapsed, error = _parse_elapsed_value(token)
+        if error is not None:
+            return 0.0, error
+        values.append(elapsed)
+    if values and any(value != values[0] for value in values[1:]):
+        return 0.0, CONFLICTING_STATS_FINDING
+    return (values[0] if values else 0.0), None
+
+
 def _parse_fuzz_output(stdout: str, stderr: str,
                        marker_finding: str | None = None
                        ) -> tuple[int, float, str | None]:
@@ -946,14 +1158,12 @@ def _parse_fuzz_output(stdout: str, stderr: str,
     direct callers keep working.
     """
     combined = stdout + "\n" + stderr
-    match = STAT_EXECS_PATTERN.search(combined)
-    executions = int(match.group(1)) if match else 0
-    match = STAT_ELAPSED_PATTERN.search(combined)
-    elapsed = float(match.group(1)) if match else 0.0
-    if elapsed <= 0.0:
-        if match := DONE_RUNS_PATTERN.search(combined):
-            elapsed = float(match.group(2))
-    finding = marker_finding
+    executions, execution_error = _parse_execution_statistics(combined)
+    elapsed, elapsed_error = _parse_elapsed_statistics(combined)
+    if elapsed_error is None and elapsed <= 0.0:
+        if done_match := DONE_RUNS_PATTERN.search(combined):
+            elapsed, elapsed_error = _parse_elapsed_value(done_match.group(2))
+    finding = marker_finding or execution_error or elapsed_error
     if finding is None:
         if marker := FAILURE_MARKER_PATTERN.search(combined):
             finding = f"{marker.group(0)}: {_marker_line(combined, marker.start())}"
@@ -976,6 +1186,10 @@ def _classify_finding(finding: str) -> tuple[int, int]:
     if finding.startswith((
         "fuzz run failed with exit code",
         "fuzz run produced no statistics",
+        MALFORMED_EXECUTIONS_FINDING,
+        MALFORMED_ELAPSED_FINDING,
+        OVERSIZED_EXECUTIONS_FINDING,
+        CONFLICTING_STATS_FINDING,
         "spawn failed:",
         "timed out:",
         "threshold not reached within",
@@ -1195,7 +1409,9 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         "executions_total": total_executions,
         "crashes": crashes,
         "sanitizer_findings": sanitizer_findings,
-        "corpus_dir": str(CORPUS_ROOT / validated_target),
+        "corpus_dir": (
+            CORPUS_ROOT / validated_target
+        ).relative_to(REPO_ROOT).as_posix(),
         "seed_path": "",
         "raw_log_ref": str(validated_log_path.relative_to(REPO_ROOT)),
         "status": status,
@@ -1212,7 +1428,9 @@ def _skipped_record(entry: dict, reason: str) -> dict:
         "executions_total": 0,
         "crashes": 0,
         "sanitizer_findings": 0,
-        "corpus_dir": str(CORPUS_ROOT / entry["name"]),
+        "corpus_dir": (
+            CORPUS_ROOT / entry["name"]
+        ).relative_to(REPO_ROOT).as_posix(),
         "seed_path": "",
         "raw_log_ref": "",
         "status": "skipped",
@@ -1535,8 +1753,8 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
     return records
 
 
-def run_real_gate(args) -> int:
-    """Run every blocking fuzz target and persist the qualification record."""
+def _load_real_gate_inputs(args):
+    """Load and validate candidate, blocking-target, and corpus inputs."""
     manifest = load_json(args.manifest, BLOCKING_FUZZ_TARGET_MANIFEST_LABEL)
     targets = validate_target_manifest(manifest)
     blocking_names = {entry["name"] for entry in targets if entry["blocking"]}
@@ -1544,8 +1762,9 @@ def run_real_gate(args) -> int:
         raise ValueError(f"{BLOCKING_FUZZ_TARGET_MANIFEST_LABEL} contains no "
                          "blocking targets")
     corpus_data = load_json(args.corpus_manifest, "corpus-seed manifest")
-    seeds = validate_corpus_seeds(corpus_data, manifest["candidate_sha"],
-                                  blocking_names)
+    seeds = validate_corpus_seeds(
+        corpus_data, manifest["candidate_sha"], blocking_names
+    )
     if getattr(args, "git_head", False):
         actual_head = _git_head_sha()
         if manifest["candidate_sha"] != actual_head:
@@ -1553,6 +1772,12 @@ def run_real_gate(args) -> int:
                 "stale-digest: blocking fuzz manifest candidate_sha "
                 f"{manifest['candidate_sha']} != git HEAD {actual_head}"
             )
+    return manifest, targets, blocking_names, seeds
+
+
+def run_real_gate(args) -> int:
+    """Run every blocking fuzz target and persist the qualification record."""
+    manifest, targets, blocking_names, seeds = _load_real_gate_inputs(args)
     if not _cargo_fuzz_available():
         return _handle_cargo_missing(args, manifest["candidate_sha"], targets)
 
@@ -1606,29 +1831,132 @@ def _per_target_reasons(entry, index: int) -> list[str]:
     return reasons
 
 
-def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
-    """Return status and threshold reasons for one blocking manifest entry."""
-    name = spec["name"]
+def _safe_record_path(value: object) -> PurePosixPath | None:
+    """Parse one normalized repository-relative POSIX record path."""
+    if not isinstance(value, str) or not value or "\\" in value:
+        return None
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or ":" in path.parts[0]
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        return None
+    return path
+
+
+def _per_target_reference_reasons(
+    entry: dict, index: int, log_dir: PurePosixPath
+) -> list[str]:
+    """Require candidate references to be canonical and target-specific."""
+    if entry.get("status") == "skipped":
+        return []
+    target = entry.get("target")
+    if not isinstance(target, str):
+        return [f"malformed: per_target[{index}] target is invalid"]
+    try:
+        validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
+    except ValueError:
+        return [f"malformed: per_target[{index}] target is invalid"]
+    expected_corpus = (
+        PurePosixPath("components/rust-converter/fuzz/corpus") / target
+    )
+    errors = []
+    if _safe_record_path(entry.get("corpus_dir")) != expected_corpus:
+        errors.append(
+            f"malformed: per_target[{index}] corpus_dir is not target-bound")
+    seed_path = _safe_record_path(entry.get("seed_path"))
+    if (
+        seed_path is None
+        or seed_path.parent != expected_corpus
+        or not seed_path.name.startswith("basic.")
+    ):
+        errors.append(
+            f"malformed: per_target[{index}] seed_path is not target-bound")
+    expected_log = log_dir / f"{target}.log"
+    if _safe_record_path(entry.get("raw_log_ref")) != expected_log:
+        errors.append(
+            f"malformed: per_target[{index}] raw_log_ref is not target-bound")
+    return errors
+
+
+def _blocking_status_reason(name: str, entry: dict | None) -> str | None:
+    """Return the first missing, non-pass, or non-zero outcome reason."""
     if entry is None:
-        return [f"blocking-pending: no record for blocking target {name}"]
+        return f"blocking-pending: no record for blocking target {name}"
     if entry.get("status") != "pass":
-        return [f"blocking-pending: blocking target {name} status is "
-                f"{entry.get('status')!r}"]
+        return (f"blocking-pending: blocking target {name} status is "
+                f"{entry.get('status')!r}")
     for field in ("crashes", "sanitizer_findings"):
         value = entry.get(field)
         if type(value) is not int:
-            return [f"malformed: {name} {field} must be an integer"]
+            return f"malformed: {name} {field} must be an integer"
         if value != 0:
-            return [f"blocking-pending: blocking target {name} reports "
-                    f"{field}={value}"]
+            return (f"blocking-pending: blocking target {name} reports "
+                    f"{field}={value}")
+    return None
+
+
+def _blocking_elapsed_reason(name: str, elapsed: object) -> str | None:
+    """Return a validation reason for one reported elapsed-time value."""
+    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
+        return (f"missing-observation: {name} elapsed_seconds_total "
+                "must be finite numeric")
+    if elapsed > FUZZ_JOB_BUDGET:
+        return (f"malformed: {name} elapsed_seconds_total exceeds "
+                "fuzz job budget")
+    if elapsed < 0:
+        return (f"malformed: {name} elapsed_seconds_total must be "
+                "non-negative")
+    if not math.isfinite(elapsed):
+        return (f"missing-observation: {name} elapsed_seconds_total "
+                "must be finite numeric")
+    return None
+
+
+def _blocking_execution_reason(name: str, executions: object) -> str | None:
+    """Return a validation reason for one reported execution counter."""
+    if type(executions) is not int:
+        return f"missing-observation: {name} executions_total not an integer"
+    if executions > MAX_FUZZ_TARGET_EXECUTIONS:
+        return (f"malformed: {name} executions_total exceeds "
+                "supported per-target maximum")
+    return None
+
+
+def _blocking_seed_reason(
+    name: str, expected_seed: object, entry: dict
+) -> str | None:
+    """Require the record seed to match the manifest's deterministic seed."""
+    seed = entry.get("seed")
+    if type(seed) is not int:
+        return f"malformed: {name} seed must be an integer"
+    if type(expected_seed) is not int or seed != expected_seed:
+        return f"stale-seed: {name} seed does not match target manifest"
+    return None
+
+
+def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
+    """Return status and threshold reasons for one blocking manifest entry."""
+    name = spec["name"]
+    status_reason = _blocking_status_reason(name, entry)
+    if status_reason is not None:
+        return [status_reason]
+    assert entry is not None
+    seed_reason = _blocking_seed_reason(name, spec.get("seed"), entry)
+    if seed_reason is not None:
+        return [seed_reason]
     elapsed = entry.get("elapsed_seconds_total")
     executions = entry.get("executions_total")
-    if type(elapsed) not in (int, float) or not math.isfinite(elapsed):
-        return [f"missing-observation: {name} elapsed_seconds_total "
-                f"must be finite numeric"]
-    if type(executions) is not int:
-        return [f"missing-observation: {name} executions_total "
-                f"not an integer"]
+    elapsed_reason = _blocking_elapsed_reason(name, elapsed)
+    if elapsed_reason is not None:
+        return [elapsed_reason]
+    assert isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+    execution_reason = _blocking_execution_reason(name, executions)
+    if execution_reason is not None:
+        return [execution_reason]
+    assert type(executions) is int
     reasons = []
     required_seconds = int(spec["required_minutes"] * 60)
     required_executions = int(spec["required_executions"])
@@ -1670,7 +1998,7 @@ def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
     by_name = {
         entry.get("target"): entry
         for entry in per_target
-        if isinstance(entry, dict)
+        if isinstance(entry, dict) and isinstance(entry.get("target"), str)
     }
     for spec in manifest["targets"]:
         if spec["blocking"]:
@@ -1682,6 +2010,8 @@ def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
 def validate_record(record: dict, manifest: dict) -> list[str]:
     """Validate a qualification record against manifest threshold semantics."""
     reasons = []
+    if record.get("blocking_pass") is not True:
+        reasons.append("blocking-pending: record blocking_pass must be true")
     if record.get("schema_version") != SCHEMA_VERSION:
         reasons.append(f"malformed: record schema_version "
                        f"{record.get('schema_version')!r} != {SCHEMA_VERSION!r}")
@@ -1696,8 +2026,12 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     if not isinstance(per_target, list):
         reasons.append("malformed: record per_target must be an array")
         return reasons
+    log_dir = PurePosixPath(_default_artifact_paths()["log_dir"])
     for index, entry in enumerate(per_target):
         reasons.extend(_per_target_reasons(entry, index))
+        if isinstance(entry, dict):
+            reasons.extend(_per_target_reference_reasons(
+                entry, index, log_dir))
     reasons.extend(_blocking_set_reasons(record, manifest))
     return reasons
 

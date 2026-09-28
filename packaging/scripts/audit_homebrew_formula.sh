@@ -4,18 +4,22 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 TAP_NAME="codex/homebrew-formula-check-$$"
 TAP_CREATED=0
-AUDIT_CONFIG="${TMPDIR:-/tmp}/homebrew-formula-check-$$"
+AUDIT_CONFIG=""
+AUDIT_TMP_ROOT="${TMPDIR:-/tmp}"
 
 cleanup() {
     local exit_code="$?"
+
+    if [[ -z "${AUDIT_CONFIG}" ]]; then
+        return "${exit_code}"
+    fi
 
     if [[ "${TAP_CREATED}" == "1" ]]; then
         HOMEBREW_NO_AUTO_UPDATE=1 XDG_CONFIG_HOME="${AUDIT_CONFIG}" \
             brew untap "${TAP_NAME}" >/dev/null || true
     fi
-    if [[ -f "${AUDIT_CONFIG}/homebrew/trust.json" ]]; then
-        rm "${AUDIT_CONFIG}/homebrew/trust.json" || true
-    fi
+    rm -f "${AUDIT_CONFIG}/homebrew/trust.json" \
+        "${AUDIT_CONFIG}/homebrew/trust.json.lock" || true
     rmdir "${AUDIT_CONFIG}/homebrew" 2>/dev/null || true
     rmdir "${AUDIT_CONFIG}" 2>/dev/null || true
     return "${exit_code}"
@@ -27,7 +31,7 @@ if ! command -v brew >/dev/null 2>&1; then
     exit 1
 fi
 
-mkdir -p "${AUDIT_CONFIG}"
+AUDIT_CONFIG="$(mktemp -d "${AUDIT_TMP_ROOT%/}/homebrew-formula-check.XXXXXX")"
 HOMEBREW_NO_AUTO_UPDATE=1 XDG_CONFIG_HOME="${AUDIT_CONFIG}" \
     brew tap-new --no-git "${TAP_NAME}" >/dev/null
 TAP_CREATED=1

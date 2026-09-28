@@ -10,6 +10,7 @@ with paired acceptance/rejection shapes wherever both directions matter.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 
 from tools.release.gates import validate_fuzz_packaging as packaging_gate
@@ -1289,6 +1290,7 @@ def test_eval_expands_static_variable_before_raw_install_check() -> None:
     scripts = (
         ("cmd='rustup toolchain install nightly'\neval \"$cmd\"\n", True),
         ("cmd='echo rustup toolchain install nightly'\neval \"$cmd\"\n", False),
+        ('eval "echo $PAYLOAD"\n', True),
         ("eval \"$unknown_command\"\n", True),
     )
     for eval_script, has_raw_install in scripts:
@@ -1568,6 +1570,7 @@ def test_step_shell_model_rejects_nonexecuting_bash_templates() -> None:
         "bash -c ':' {0}",
         "bash -c : {0}",
         "bash -n {0}",
+        "zsh -n {0}",
     )
     for shell in invalid_shells:
         step = {"shell": shell, "run": script}
@@ -1587,6 +1590,11 @@ def test_step_shell_model_rejects_nonexecuting_bash_templates() -> None:
         "bash {0}",
         "bash -e {0}",
         "bash --noprofile --norc -e -o pipefail {0}",
+        "bash -euo pipefail {0}",
+        "bash -euxo pipefail {0}",
+        "zsh {0}",
+        "/usr/bin/zsh -e {0}",
+        "zsh -o pipefail {0}",
     ):
         assert packaging_gate._step_runs_shell({"shell": shell, "run": script})
 
@@ -2118,6 +2126,126 @@ def test_toolchain_gate_rejects_shadowing_definitions() -> None:
     assert packaging_gate._release_gate_toolchain_issue(named_retry) is None
 
 
+def test_toolchain_gate_rejects_active_command_aliases() -> None:
+    """Enabled shell aliases cannot replace checked provisioning commands."""
+    provisioning = (
+        "bash ./packaging/scripts/install-verified-rustup.sh "
+        '--toolchain "${RUST_TOOLCHAIN}"\n'
+        'rustup component add --toolchain "${RUST_TOOLCHAIN}" rustfmt\n'
+        + DRIFT
+    )
+    shadowed = (
+        "shopt -s expand_aliases\n"
+        "alias rustup='echo ignored'\n"
+        + provisioning
+    )
+    assert packaging_gate._release_gate_toolchain_issue(shadowed) is not None
+
+    inactive = "alias rustup='echo ignored'\n" + provisioning
+    assert packaging_gate._release_gate_toolchain_issue(inactive) is None
+
+
+def _provisioning_workflow(
+    run: str, env_scope: str | None = None, shell: str | None = None
+) -> str:
+    """Build one provisioning job with BASH_ENV at the requested scope."""
+    workflow_env = (
+        "env:\n  BASH_ENV: ./shadow.sh\n"
+        if env_scope == "workflow"
+        else ""
+    )
+    job_env = (
+        "    env:\n      BASH_ENV: ./shadow.sh\n"
+        if env_scope == "job"
+        else ""
+    )
+    step_env = (
+        "      - env:\n          BASH_ENV: ./shadow.sh\n"
+        "        run: |\n"
+        if env_scope == "step"
+        else ""
+    )
+    run_block = "".join(f"          {line}\n" for line in run.splitlines())
+    run_step = (
+        f"      - shell: {shell}\n        run: |\n"
+        if shell
+        else "      - run: |\n"
+    )
+    return (
+        workflow_env
+        + "jobs:\n"
+        "  release-gate:\n"
+        + job_env
+        + "    steps:\n"
+        + (step_env or run_step)
+        + run_block
+    )
+
+
+def test_provisioning_shadow_guard_rejects_external_shell_inputs() -> None:
+    """Sourced files, eval and inherited startup files are not modeled."""
+    for source in (
+        "source ./shadow.sh\n",
+        ". ./shadow.sh\n",
+        "bash -c 'source ./shadow.sh; rustup component add rustfmt'\n",
+        "setup() { source ./shadow.sh; }\nsetup\n",
+        "eval 'rustup() { :; }'\n",
+    ):
+        issue = packaging_gate._provisioning_shadow_issue(
+            _provisioning_workflow(source)
+        )
+        assert issue is not None, source
+
+    for env_scope in ("workflow", "job", "step"):
+        workflow = _provisioning_workflow(INSTALLER, env_scope)
+        assert packaging_gate._provisioning_shadow_issue(workflow) is not None
+
+    inline_assignment = _provisioning_workflow(
+        "export BASH_ENV=./shadow.sh\n" + INSTALLER
+    )
+    assert packaging_gate._provisioning_shadow_issue(inline_assignment) is not None
+
+
+def test_provisioning_shadow_guard_rejects_function_defined_aliases() -> None:
+    """Indirect alias setup cannot replace provisioning commands."""
+    script = (
+        "shopt -s expand_aliases\n"
+        "define_shadow() { alias rustup='echo ignored'; }\n"
+        "define_shadow\n"
+        + COMPONENT
+    )
+    issue = packaging_gate._provisioning_shadow_issue(
+        _provisioning_workflow(script)
+    )
+    assert issue is not None
+
+
+def test_provisioning_shadow_guard_models_default_alias_shells() -> None:
+    """sh/zsh expand active aliases by default; bash requires shopt."""
+    alias_script = "alias rustup='echo ignored'\n" + COMPONENT
+    for shell in ("sh {0}", "zsh {0}"):
+        workflow = _provisioning_workflow(alias_script, shell=shell)
+        assert packaging_gate._provisioning_shadow_issue(workflow) is not None
+
+    bash_workflow = _provisioning_workflow(alias_script, shell="bash {0}")
+    assert packaging_gate._provisioning_shadow_issue(bash_workflow) is None
+
+
+def test_shadow_guard_keeps_quoted_alias_tokens_for_shell_parsing() -> None:
+    """Quoted option and alias words remain visible to quote-aware parsing."""
+    script = (
+        'shopt -s "expand_aliases"; '
+        'alias "rustup=echo ignored"; '
+        "rustup component add --toolchain stable rustfmt"
+    )
+    assert packaging_gate._defined_alias_names(script) == {"rustup"}
+    assert packaging_gate._shadowing_issue(script) is not None
+
+    inert = 'echo "alias rustup=echo ignored; shopt -s expand_aliases"'
+    assert packaging_gate._defined_alias_names(inert) == set()
+    assert packaging_gate._shadowing_issue(inert) is None
+
+
 def test_shadow_guard_covers_every_stripped_wrapper() -> None:
     """Every wrapper the gate strips must also be shadow-guarded.
 
@@ -2577,6 +2705,31 @@ def test_toolchain_gate_fails_closed_on_unclosed_structure() -> None:
     assert packaging_gate._release_gate_toolchain_issue(closed) is None
 
 
+def test_raw_install_detector_scans_shell_and_python_here_strings() -> None:
+    """Here-strings are executable stdin source, not inert heredocs."""
+    raw_python = (
+        "import subprocess; "
+        "subprocess.run(['rustup', 'toolchain', 'install', 'nightly'])"
+    )
+    raw_scripts = (
+        "bash <<< 'rustup toolchain install nightly'",
+        "bash -s <<< 'rustup toolchain install nightly'",
+        f"python3 <<< {shlex.quote(raw_python)}",
+    )
+    for script in raw_scripts:
+        assert packaging_gate._raw_install_in_script(script), script
+
+    safe_python = "print(1)"
+    safe_scripts = (
+        "bash <<< 'echo safe'",
+        "bash -s <<< 'echo safe'",
+        f"python3 <<< {shlex.quote(safe_python)}",
+        "bash --rcfile -c 'rustup toolchain install 1.2.3'",
+    )
+    for script in safe_scripts:
+        assert not packaging_gate._raw_install_in_script(script), script
+
+
 def test_raw_install_detector_models_shell_invocation_options() -> None:
     """A `-c` payload behind any modeled shell option is still a command.
 
@@ -2648,10 +2801,242 @@ def test_toolchain_gate_requires_unquoted_or_resolvable_wrapper_names() -> None:
     assert packaging_gate._raw_install_in_segment(smuggled)
 
 
-def _raw_install_workflow(script: str) -> str:
+def _raw_install_workflow(script: str, shell: str | None = None) -> str:
     """Put one literal script in a parseable workflow run step."""
     body = "".join(f"          {line}" + "\n" for line in script.splitlines())
-    return "jobs:\n  probe:\n    steps:\n      - run: |\n" + body
+    step = (
+        "      - run: |\n"
+        if shell is None
+        else f"      - shell: {shell}\n        run: |\n"
+    )
+    return "jobs:\n  probe:\n    steps:\n" + step + body
+
+
+def test_raw_install_detector_scans_python_shell_steps() -> None:
+    """Workflow Python shells are parsed as Python, including wrapped forms."""
+    source = (
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'stable'])\n"
+    )
+    for shell in ("python", "python3 {0}", "uv run python {0}"):
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(source, shell=shell)
+        ) is not None, shell
+
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("print('safe')\n", shell="python")
+    ) is None
+
+
+def test_raw_install_detector_follows_local_reusable_workflows(
+    tmp_path, monkeypatch
+) -> None:
+    """Local reusable jobs are scanned; unreadable or remote uses fail closed."""
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    reusable = workflows / "reusable.yml"
+    reference = (
+        "jobs:\n"
+        "  forwarded:\n"
+        "    uses: ./.github/workflows/reusable.yml\n"
+    )
+    reusable.write_text(
+        _raw_install_workflow("rustup toolchain install stable\n"),
+        encoding="utf-8",
+    )
+    assert packaging_gate._raw_toolchain_install_issue(reference) is not None
+
+    reusable.write_text(_raw_install_workflow("echo safe\n"), encoding="utf-8")
+    assert packaging_gate._raw_toolchain_install_issue(reference) is None
+
+    remote_reference = (
+        "jobs:\n"
+        "  forwarded:\n"
+        "    uses: vendor/repo/.github/workflows/reusable.yml@v1\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(remote_reference) is not None
+
+
+def test_raw_install_detector_inspects_python_script_launchers(
+    tmp_path, monkeypatch
+) -> None:
+    """Python script paths are inspected; opaque and missing paths fail closed."""
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(DRIFT_NO_NL)
+    ) is None
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    script_dir = tmp_path / "tools"
+    script_dir.mkdir()
+    raw_script = script_dir / "raw_install.py"
+    raw_script.write_text(
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'stable'])\n",
+        encoding="utf-8",
+    )
+    safe_script = script_dir / "safe.py"
+    safe_script.write_text("print('ordinary helper')\n", encoding="utf-8")
+    local_helper = tmp_path / "helper.py"
+    local_helper.write_text(
+        "import subprocess\n"
+        "def install():\n"
+        "    subprocess.run(['rustup', 'toolchain', 'install', 'stable'])\n",
+        encoding="utf-8",
+    )
+    imported_script = tmp_path / "imported.py"
+    imported_script.write_text(
+        "from helper import install\ninstall()\n", encoding="utf-8"
+    )
+    safe_helper = tmp_path / "safe_helper.py"
+    safe_helper.write_text("def run():\n    return None\n", encoding="utf-8")
+    safe_import_script = tmp_path / "safe_import.py"
+    safe_import_script.write_text(
+        "from safe_helper import run\nrun()\n", encoding="utf-8"
+    )
+    opaque_script = script_dir / "opaque.py"
+    opaque_script.write_text(
+        "import subprocess\nsubprocess.run(command)\n", encoding="utf-8"
+    )
+    module_dir = tmp_path / "raw_module"
+    module_dir.mkdir()
+    (module_dir / "__init__.py").write_text("", encoding="utf-8")
+    (module_dir / "__main__.py").write_text(
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'stable'])\n",
+        encoding="utf-8",
+    )
+    runpy_module = tmp_path / "runpy_target.py"
+    runpy_module.write_text(
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'stable'])\n",
+        encoding="utf-8",
+    )
+
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 tools/raw_install.py")
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 tools/safe.py")
+    ) is None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 tools/opaque.py")
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 imported.py")
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(
+            "python3 -c 'from helper import install; install()'"
+        )
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 safe_import.py")
+    ) is None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 -m raw_module")
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 -m runpy runpy_target")
+    ) is not None
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("python3 tools/missing.py")
+    ) is not None
+
+
+def test_release_validator_script_scans_through_the_static_project_root():
+    """The known repository-root variable still resolves a Python script."""
+    rooted = (
+        'python3 "${PROJECT_ROOT}/tools/release/gates/'
+        'validate_fuzz_qualification.py"'
+    )
+    assert packaging_gate._raw_install_in_script(rooted) is False
+    unknown = rooted.replace("PROJECT_ROOT", "UNTRUSTED_ROOT")
+    assert packaging_gate._raw_install_in_script(unknown) is True
+
+
+def test_popen_version_probe_wrapper_is_safe_only_for_forwarded_argv():
+    """A version probe can use Popen, but a raw install mutation is caught."""
+    source = (
+        packaging_gate.PROJECT_ROOT
+        / "tools/release/gates/validate_fuzz_qualification.py"
+    ).read_text(encoding="utf-8")
+    assert not packaging_gate._python_inline_raw_install(source, 0, None)
+    before = "subprocess.Popen(\n            command,"
+    after = (
+        "subprocess.Popen(\n"
+        "            [\"rustup\", \"toolchain\", \"install\", \"stable\"],"
+    )
+    assert before in source
+    mutated = source.replace(before, after, 1)
+    assert mutated != source
+    assert packaging_gate._python_inline_raw_install(mutated, 0, None)
+
+
+def test_python_wrapper_allowlist_uses_static_executable_value() -> None:
+    """Wrapper allowlists validate a variable's value, not its identifier."""
+    prefix = (
+        "import subprocess\n"
+        "def _run_toolchain_version_command(command):\n"
+        "    return subprocess.run(command)\n"
+    )
+    cases = (
+        (
+            'cargo = "rustup"\n'
+            '_run_toolchain_version_command(\n'
+            '    [cargo, "toolchain", "install", "nightly"]\n'
+            ')\n',
+            True,
+        ),
+        (
+            'rustup = "cargo"\n'
+            '_run_toolchain_version_command([rustup, "--version"])\n',
+            False,
+        ),
+        (
+            '_run_toolchain_version_command([unknown_binary, "--version"])\n',
+            True,
+        ),
+    )
+    for body, is_raw_install in cases:
+        assert packaging_gate._python_inline_raw_install(
+            prefix + "\n" + body, 0, None
+        ) is is_raw_install
+
+
+def test_python_subprocess_dispatchers_fail_closed_on_dynamic_argv() -> None:
+    """Known process wrappers cannot hide a dynamic toolchain command."""
+    wrappers = {
+        "sudo": '["sudo", choose_command(), "toolchain", "install", "stable"]',
+        "command": '["command", choose_command(), "toolchain", "install", "stable"]',
+        "exec": '["exec", choose_command(), "toolchain", "install", "stable"]',
+        "retry": '["retry", "5", choose_command(), "toolchain", "install", "stable"]',
+        "time": '["time", choose_command(), "toolchain", "install", "stable"]',
+        "setsid": '["setsid", choose_command(), "toolchain", "install", "stable"]',
+    }
+    for wrapper, argv in wrappers.items():
+        source = (
+            "import subprocess\n"
+            "def choose_command():\n"
+            "    return input()\n"
+            f"subprocess.run({argv})\n"
+        )
+        assert packaging_gate._python_inline_raw_install(
+            source, 0, None
+        ), wrapper
+
+    static_argvs = {
+        "sudo": ["sudo", "rustup", "toolchain", "install", "stable"],
+        "command": ["command", "rustup", "toolchain", "install", "stable"],
+        "exec": ["exec", "rustup", "toolchain", "install", "stable"],
+        "retry": ["retry", "5", "rustup", "toolchain", "install", "stable"],
+        "time": ["time", "rustup", "toolchain", "install", "stable"],
+        "setsid": ["setsid", "rustup", "toolchain", "install", "stable"],
+    }
+    for wrapper, argv in static_argvs.items():
+        source = f"import subprocess\nsubprocess.run({argv!r})\n"
+        assert packaging_gate._python_inline_raw_install(
+            source, 0, None
+        ), wrapper
 
 
 def test_raw_install_detector_follows_indirect_command_positions() -> None:
@@ -2806,6 +3191,30 @@ def test_python_dependency_gate_requires_a_real_docs_check_command() -> None:
         assert packaging_gate._python_deps_issue([install, decoy]) is not None, decoy
     assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
     assert packaging_gate._python_deps_issue([install, "make -- docs-check"]) is None
+    for docs_command in (
+        "gmake docs-check",
+        "timeout 60 make docs-check",
+        "/usr/bin/timeout 60 gmake docs-check",
+    ):
+        assert packaging_gate._python_deps_issue(
+            [install, docs_command]
+        ) is None, docs_command
+
+
+def test_python_dependency_gate_rejects_shadowed_install_and_consumer() -> None:
+    """Shell functions and aliases cannot spoof pip or the docs consumer."""
+    install = "python3 -m pip install -r requirements-release.txt"
+    scripts = (
+        "pip() { :; }; pip install -r requirements-release.txt; "
+        "make docs-check",
+        "shopt -s expand_aliases; alias pip='echo ignored'; "
+        "pip install -r requirements-release.txt; make docs-check",
+        f"{install}; make() {{ :; }}; make docs-check",
+        f"{install}; shopt -s expand_aliases; "
+        "alias make='echo ignored'; make docs-check",
+    )
+    for script in scripts:
+        assert packaging_gate._python_deps_issue([script]) is not None, script
 
 
 def test_python_dependency_gate_accepts_only_supported_pip_command_forms() -> None:
@@ -2815,8 +3224,20 @@ def test_python_dependency_gate_accepts_only_supported_pip_command_forms() -> No
         "python3 -m pip install -r requirements-release.txt",
         "pip install -r requirements-release.txt",
         "pip3 install -r requirements-release.txt",
+        "python3.12 -m pip install -r requirements-release.txt",
+        "pip3.12 install -r requirements-release.txt",
+        "nohup python3 -m pip install -r requirements-release.txt",
+        "timeout 60 /usr/local/bin/python3.12 -m pip install -r requirements-release.txt",
     )
     for command in valid:
+        assert packaging_gate._python_deps_issue(
+            [command, "make docs-check"]
+        ) is None, command
+
+    for command in (
+        "/usr/bin/sudo ./python3 -m pip install -r requirements-release.txt",
+        "/usr/bin/sudo /usr/local/bin/pip3.12 install -r requirements-release.txt",
+    ):
         assert packaging_gate._python_deps_issue(
             [command, "make docs-check"]
         ) is None, command
@@ -2975,6 +3396,109 @@ def test_live_command_segments_models_negated_false_chain_operand() -> None:
     ) == ["! false", "printf reached"]
 
 
+def _assert_malformed_workflow_is_rejected(workflow_content: str) -> None:
+    issue = packaging_gate._raw_toolchain_install_issue(workflow_content)
+    assert issue is not None, workflow_content
+
+
+def test_job_run_step_records_parses_workflow_once(monkeypatch) -> None:
+    """Workflow YAML is parsed once while collecting scoped run-step data."""
+    original_load = packaging_gate.yaml.safe_load
+    parse_count = 0
+
+    def counted_load(content: str) -> object:
+        nonlocal parse_count
+        parse_count += 1
+        return original_load(content)
+
+    monkeypatch.setattr(packaging_gate.yaml, "safe_load", counted_load)
+    workflow = "jobs:\n  build:\n    steps:\n      - run: echo safe\n"
+
+    records = packaging_gate._job_run_step_records(workflow, "build")
+
+    assert records == [
+        {
+            "run": "echo safe",
+            "shell": None,
+            "env": {},
+            "env_scopes": {"workflow": {}, "job": {}, "step": {}},
+        }
+    ]
+    assert parse_count == 1
+
+
+def test_raw_install_detector_rejects_non_mapping_job() -> None:
+    """A scalar job entry cannot hide raw toolchain installation text."""
+    _assert_malformed_workflow_is_rejected(
+        "jobs:\n  malformed: 'rustup toolchain install nightly'\n"
+    )
+
+
+def test_raw_install_detector_rejects_non_list_steps() -> None:
+    """A scalar steps field cannot silently remove a job from scanning."""
+    _assert_malformed_workflow_is_rejected(
+        "jobs:\n  build:\n    steps: 'rustup toolchain install nightly'\n"
+    )
+
+
+def test_raw_install_detector_rejects_non_mapping_step() -> None:
+    """A scalar step cannot silently remove a run command from scanning."""
+    _assert_malformed_workflow_is_rejected(
+        "jobs:\n  build:\n    steps:\n      - 'rustup toolchain install nightly'\n"
+    )
+
+
+def test_raw_install_detector_rejects_non_string_run_command() -> None:
+    """A non-string run field cannot bypass step command analysis."""
+    _assert_malformed_workflow_is_rejected(
+        "jobs:\n  build:\n    steps:\n      - run: ['rustup', 'toolchain', 'install']\n"
+    )
+
+
+def test_raw_install_detector_expands_command_position_variables() -> None:
+    """Unquoted static command variables are checked after shell expansion."""
+    raw = (
+        "installer='rustup toolchain install nightly'\n"
+        "$installer\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(raw)
+    ) is not None
+
+    safe = "installer='echo safe'\n$installer\n"
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(safe)
+    ) is None
+
+    quoted = 'installer="rustup toolchain install nightly"\n"$installer"\n'
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow(quoted)
+    ) is None
+
+
+def test_raw_install_detector_scans_substitutions_without_scanning_value_suffixes():
+    """Executable substitution bodies are scanned; their quoted suffix is data."""
+    assert packaging_gate._raw_install_in_script(
+        'VERSION="$(printf safe)"'
+    ) is False
+    assert packaging_gate._raw_install_in_script(
+        'VERSION="$(rustup toolchain install nightly)"'
+    ) is True
+    assert packaging_gate._raw_install_in_script(
+        'VALUE="$(printf "%s" "$(rustup toolchain install nightly)")"'
+    ) is True
+    assert packaging_gate._raw_install_in_script(
+        'MESSAGE="\\$(rustup toolchain install nightly)"'
+    ) is False
+    assert packaging_gate._raw_install_in_script(
+        'VALUE="$(<"${INPUT_FILE}")"'
+    ) is False
+    assert packaging_gate._raw_install_in_script(
+        'VALUE="$(<"${INPUT_FILE}"; rustup toolchain install nightly)"'
+    ) is True
+    assert packaging_gate._raw_install_in_script('VALUE="$(echo') is True
+
+
 def test_raw_install_detector_handles_timeout_separator_and_xargs_short_i() -> None:
     """Both wrappers leave their command operand visible to the detector."""
     commands = (
@@ -3006,15 +3530,90 @@ def test_raw_install_detector_follows_for_while_until_loops() -> None:
             _raw_install_workflow(loop)
         ) is not None, loop
 
+    multi_command_loops = (
+        "for i in a b; do echo safe; rustup toolchain install stable; done",
+        "while true; do\n  echo safe\n  rustup toolchain install stable\ndone",
+        "until false; do echo safe; echo safe; "
+        "rustup toolchain install stable; done",
+    )
+    for loop in multi_command_loops:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(loop)
+        ) is not None, loop
+
     # Safe loop bodies
     for loop in (
         "for i in a b; do echo safe; done",
         "while true; do echo safe; done",
         "until false; do echo safe; done",
+        "for i in a b; do echo safe; echo safe; done",
+        "while true; do\n  echo safe\n  echo safe\ndone",
     ):
         assert packaging_gate._raw_toolchain_install_issue(
             _raw_install_workflow(loop)
         ) is None, loop
+
+
+def test_raw_install_detector_resumes_after_bracket_tests() -> None:
+    """Bracket-test delimiters cannot hide later commands across boundaries."""
+    scripts = (
+        '[[ -n "$X" ]] 2>/dev/null\nrustup toolchain install nightly',
+        '[ -n "$X" ] 2>/dev/null; rustup toolchain install nightly',
+        '[[ -n "$X" &&\n   -n "$Y" ]] 2>/dev/null\n'
+        'rustup toolchain install nightly',
+    )
+    for script in scripts:
+        parsed = subprocess.run(
+            ["bash", "-n", "-c", script], check=False, capture_output=True
+        )
+        assert parsed.returncode == 0, parsed.stderr
+        assert packaging_gate._raw_install_in_script(script), script
+
+    unterminated = '[[ -n "$X" &&\n rustup toolchain install nightly'
+    assert packaging_gate._raw_install_in_script(unterminated)
+
+    safe = '[[ -n "$X" &&\n   -n "$Y" ]] 2>/dev/null\necho safe'
+    assert not packaging_gate._raw_install_in_script(safe)
+
+
+def test_raw_install_detector_treats_array_assignments_as_data() -> None:
+    """Array values are data, but command substitutions inside them run."""
+    safe = (
+        "MISSING=()",
+        'MISSING+=("${symbol}")',
+        'MISSING+=("rustup toolchain install nightly")',
+    )
+    for script in safe:
+        assert not packaging_gate._raw_install_in_script(script), script
+
+    assert packaging_gate._raw_install_in_script(
+        'MISSING+=("$(rustup toolchain install nightly)")'
+    )
+
+
+def test_raw_install_detector_follows_verified_retry_call_sites() -> None:
+    """A forwarding retry loop is safe only with a scanned call site."""
+    retry = '''retry() {
+  attempts="$1"
+  shift
+  count=1
+  while :; do
+    "$@" && return 0
+    if [ "$count" -ge "$attempts" ]; then
+      return 1
+    fi
+    count=$((count + 1))
+  done
+}
+'''
+    safe = (
+        retry
+        + "retry 5 bash ./packaging/scripts/install-verified-rustup.sh "
+        '--arch amd64 --toolchain "${RUST_TOOLCHAIN}"\n'
+    )
+    raw = retry + "retry 5 rustup toolchain install nightly\n"
+    assert not packaging_gate._raw_install_in_script(safe)
+    assert packaging_gate._raw_install_in_script(raw)
 
 
 def test_raw_install_detector_follows_case_statement() -> None:

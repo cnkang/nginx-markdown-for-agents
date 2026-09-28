@@ -94,6 +94,21 @@ def _fence_token(line: str) -> tuple[str, int, str] | None:
     return char, run, candidate[run:]
 
 
+def _advance_fence_state(
+    token: tuple[str, int, str],
+    open_fence: tuple[str, int] | None,
+) -> tuple[bool, tuple[str, int] | None]:
+    """Return whether a fence token is prose and the next open fence."""
+    char, run, rest = token
+    if open_fence is None:
+        if char == "`" and "`" in rest:
+            return True, None
+        return False, (char, run)
+    if open_fence[0] == char and run >= open_fence[1] and rest.strip() == "":
+        return False, None
+    return False, open_fence
+
+
 def _unfenced_lines(text: str) -> list[str]:
     """Return prose lines only; fenced examples cannot satisfy metadata checks.
 
@@ -108,15 +123,9 @@ def _unfenced_lines(text: str) -> list[str]:
             if open_fence is None:
                 lines.append(line)
             continue
-        char, run, rest = token
-        if open_fence is None:
-            # A backtick info string cannot contain a backtick.
-            if char == "`" and "`" in rest:
-                lines.append(line)
-            else:
-                open_fence = (char, run)
-        elif open_fence[0] == char and run >= open_fence[1] and rest.strip() == "":
-            open_fence = None
+        is_prose, open_fence = _advance_fence_state(token, open_fence)
+        if is_prose:
+            lines.append(line)
     return lines
 
 

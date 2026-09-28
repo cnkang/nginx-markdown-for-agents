@@ -1874,7 +1874,7 @@ def _workflow_stages_into_tarball(workflow: str, source: str) -> bool:
     Only an unguarded command proves staging, and within one step a ``cd``
     invalidates the relative repository paths that follow it.
     """
-    source_path = source.lstrip("./")
+    source_path = source[2:] if source.startswith("./") else source
     return any(
         _step_stages_into_tarball(step, source_path)
         for step in _split_workflow_steps(workflow)
@@ -2069,27 +2069,33 @@ def _iter_quote_aware(text: str):
         yield index, char
 
 
+def _advance_comment_quote_state(
+    char: str, quote: str | None, escaped: bool
+) -> tuple[str | None, bool, bool]:
+    """Return the quote state and whether a character is quoted syntax."""
+    if escaped:
+        return quote, False, True
+    if quote:
+        if quote == '"' and char == "\\":
+            return quote, True, True
+        if char == quote:
+            return None, False, True
+        return quote, False, True
+    if char in {"'", '"'}:
+        return char, False, True
+    return None, False, False
+
+
 def _strip_unquoted_comment(line: str) -> str:
     """Strip inline comments while preserving # inside quoted strings."""
     quote: str | None = None
     escaped = False
 
     for index, char in enumerate(line):
-        if escaped:
-            escaped = False
+        quote, escaped, quoted = _advance_comment_quote_state(
+            char, quote, escaped)
+        if quoted:
             continue
-
-        if quote:
-            if quote == '"' and char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-            continue
-
-        if char in {"'", '"'}:
-            quote = char
-            continue
-
         if char == "#":
             return line[:index]
 

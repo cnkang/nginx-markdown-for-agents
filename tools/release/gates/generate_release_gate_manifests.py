@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -19,7 +20,7 @@ import sys
 import tomllib
 from datetime import datetime, timezone
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Sibling module import: this script is invoked as
 # `python3 tools/release/gates/...py` from the repo root, so its own
@@ -35,6 +36,8 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "tools"), str(_GATES_DIR)):
 from generate_soak_scenario_manifest import build_manifest  # noqa: E402
 from tools.release.gates.validate_fuzz_qualification import (  # noqa: E402
     SCHEMA_VERSION as FUZZ_QUALIFICATION_SCHEMA_VERSION,
+    FUZZ_JOB_BUDGET,
+    MAX_FUZZ_TARGET_EXECUTIONS,
     validate_toolchain_identity,
 )
 from tools.lib.executable_validation import (  # noqa: E402
@@ -42,6 +45,8 @@ from tools.lib.executable_validation import (  # noqa: E402
 )
 
 _CARGO_MANIFEST = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
+FUZZ_CORPUS_RELATIVE_ROOT = PurePosixPath(
+    "components/rust-converter/fuzz/corpus")
 
 
 def _release_version() -> str:
@@ -324,7 +329,7 @@ def build_fuzz_manifests(candidate_sha: str, created_at: str) -> tuple[dict, dic
             ),
         },
         {
-            "schema_version": "release.corpus-seed-manifest.v1",
+            "schema_version": "release.corpus-seed.v1",
             "candidate_sha": candidate_sha,
             "created_at": created_at,
             "seeds": seed_entries,
@@ -419,21 +424,175 @@ def _record_value(path: Path, field: str = "status"):
     return value.get(field) if isinstance(value, dict) else None
 
 
+def _safe_fuzz_reference(value: object) -> PurePosixPath | None:
+    """Accept only canonical repository-relative POSIX references."""
+    if not isinstance(value, str) or not value or "\\" in value:
+        return None
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        return None
+    return path
+
+
+def _resolve_fuzz_reference(
+    value: PurePosixPath, expected_kind: str
+) -> Path | None:
+    """Resolve a fuzz reference while rejecting symlinks and root escapes."""
+    repo_root = REPO_ROOT.resolve()
+    candidate = repo_root.joinpath(*value.parts)
+    current = repo_root
+    try:
+        for part in value.parts:
+            current = current / part
+            if current.is_symlink():
+                return None
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(repo_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if expected_kind == "directory" and not resolved.is_dir():
+        return None
+    if expected_kind == "file" and not resolved.is_file():
+        return None
+    return resolved
+
+
+def _repo_relative_fuzz_reference(path: Path) -> PurePosixPath | None:
+    """Accept an existing non-symlink path beneath the checked-out tree."""
+    try:
+        value = path.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return None
+    relative = _safe_fuzz_reference(value)
+    if relative is None or _resolve_fuzz_reference(relative, "file") is None:
+        return None
+    return relative
+
+
+def _load_candidate_fuzz_seed_manifest(
+    path: Path, candidate_sha: str
+) -> dict | None:
+    """Load a seed manifest only when its path and candidate binding hold."""
+    if _repo_relative_fuzz_reference(path) is None:
+        return None
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if (
+        isinstance(manifest, dict)
+        and manifest.get("schema_version") == "release.corpus-seed.v1"
+        and manifest.get("candidate_sha") == candidate_sha
+        and isinstance(manifest.get("seeds"), list)
+    ):
+        return manifest
+    return None
+
+
+def _candidate_seed_entry(
+    entry: object, target_specs: dict[str, dict]
+) -> tuple[str, PurePosixPath, str] | None:
+    """Validate one target name, seed path and digest declaration."""
+    if not isinstance(entry, dict):
+        return None
+    target = entry.get("target")
+    seed_path = _safe_fuzz_reference(entry.get("seed_path"))
+    digest = entry.get("digest")
+    if (
+        not isinstance(target, str)
+        or target not in target_specs
+        or seed_path is None
+        or seed_path.parent != FUZZ_CORPUS_RELATIVE_ROOT / target
+        or not seed_path.name.startswith("basic.")
+        or not isinstance(digest, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+    ):
+        return None
+    return target, seed_path, digest
+
+
+def _candidate_seed_file_matches(path: PurePosixPath, digest: str) -> bool:
+    """Check that the candidate seed is a contained file with its digest."""
+    resolved_seed = _resolve_fuzz_reference(path, "file")
+    if resolved_seed is None:
+        return False
+    try:
+        return _sha256_file(resolved_seed) == digest
+    except OSError:
+        return False
+
+
+def _candidate_fuzz_seed_paths(
+    manifest_path: Path,
+    candidate_sha: str,
+    target_contract: tuple[dict[str, dict], set[str]],
+) -> dict[str, PurePosixPath] | None:
+    """Validate the candidate-bound seed manifest and each seed file digest."""
+    manifest = _load_candidate_fuzz_seed_manifest(
+        manifest_path, candidate_sha)
+    if manifest is None:
+        return None
+    target_specs, _blocking_names = target_contract
+    seed_paths: dict[str, PurePosixPath] = {}
+    for entry in manifest["seeds"]:
+        parsed = _candidate_seed_entry(entry, target_specs)
+        if parsed is None:
+            return None
+        target, seed_path, digest = parsed
+        if target in seed_paths or not _candidate_seed_file_matches(
+                seed_path, digest):
+            return None
+        seed_paths[target] = seed_path
+    return seed_paths if set(seed_paths) == set(target_specs) else None
+
+
+def _fuzz_record_paths_match(
+    entry: dict, target: str, seed_path: PurePosixPath
+) -> bool:
+    """Bind record references to this target's candidate corpus and log."""
+    corpus_path = _safe_fuzz_reference(entry.get("corpus_dir"))
+    expected_corpus = FUZZ_CORPUS_RELATIVE_ROOT / target
+    if corpus_path is None or corpus_path != expected_corpus:
+        return False
+    if _resolve_fuzz_reference(corpus_path, "directory") is None:
+        return False
+    record_seed = _safe_fuzz_reference(entry.get("seed_path"))
+    if record_seed != seed_path:
+        return False
+    if _resolve_fuzz_reference(seed_path, "file") is None:
+        return False
+    log_path = _safe_fuzz_reference(entry.get("raw_log_ref"))
+    expected_log = (
+        _release_state()[1] / "fuzz-logs" / f"{target}.log"
+    )
+    if log_path is None or log_path.as_posix() != expected_log.as_posix():
+        return False
+    return _resolve_fuzz_reference(log_path, "file") is not None
+
+
 def _fuzz_record_passes(path: Path, candidate_sha: str) -> bool:
     """Accept only a passing, candidate-bound record with pinned provenance."""
-    if not path.is_file():
+    if _repo_relative_fuzz_reference(path) is None:
         return False
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    # Also load the candidate-bound manifest to validate per_target.
-    manifest_path = path.parent / "blocking-fuzz-target-manifest.json"
-    if not manifest_path.is_file():
-        return False
-    try:
+        manifest_path = path.parent / "blocking-fuzz-target-manifest.json"
+        if _repo_relative_fuzz_reference(manifest_path) is None:
+            return False
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    target_contract = _manifest_fuzz_target_names(manifest, candidate_sha)
+    if target_contract is None:
+        return False
+    seed_paths = _candidate_fuzz_seed_paths(
+        path.parent / "corpus-seed-manifest.json", candidate_sha,
+        target_contract)
+    if seed_paths is None:
         return False
     return (
         isinstance(record, dict)
@@ -441,38 +600,156 @@ def _fuzz_record_passes(path: Path, candidate_sha: str) -> bool:
         and record.get("candidate_sha") == candidate_sha
         and record.get("blocking_pass") is True
         and not validate_toolchain_identity(record.get("toolchain_identity"))
-        # Validate per_target against manifest: every blocking target must have
-        # a passing entry, no duplicates, no extra failures.
-        and _validate_fuzz_record_per_target(record, manifest)
+        and _validate_fuzz_record_per_target(
+            record, target_contract, seed_paths)
     )
 
 
-def _validate_fuzz_record_per_target(record: dict, manifest: dict) -> bool:
-    """Validate that per_target covers all blocking targets with pass status."""
-    per_target = record.get("per_target")
-    if not isinstance(per_target, list):
+def _manifest_target_spec_valid(spec: object, seen_names: set[str]) -> bool:
+    if not isinstance(spec, dict):
         return False
-    # Build lookup from per_target; reject duplicates and non-string targets.
-    by_name = {}
+    name = spec.get("name")
+    minutes = spec.get("required_minutes")
+    executions = spec.get("required_executions")
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and name == name.strip()
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is not None
+        and type(spec.get("seed")) is int
+        and type(spec.get("blocking")) is bool
+        and name not in seen_names
+        and not isinstance(minutes, bool)
+        and isinstance(minutes, (int, float))
+        and (not isinstance(minutes, float) or math.isfinite(minutes))
+        and 0 < minutes <= FUZZ_JOB_BUDGET / 60
+        and type(executions) is int
+        and executions > 0
+        and executions <= MAX_FUZZ_TARGET_EXECUTIONS
+    )
+
+
+def _manifest_fuzz_target_names(
+    manifest: object, candidate_sha: str
+) -> tuple[dict[str, dict], set[str]] | None:
+    """Validate target identities and preserve each blocking threshold."""
+    if not isinstance(manifest, dict):
+        return None
+    if (
+        manifest.get("schema_version")
+        != "release.blocking-fuzz-target-manifest.v1"
+        or manifest.get("candidate_sha") != candidate_sha
+    ):
+        return None
+    targets = manifest.get("targets")
+    if not isinstance(targets, list) or not targets:
+        return None
+    specs: dict[str, dict] = {}
+    blocking_names: set[str] = set()
+    for spec in targets:
+        if not _manifest_target_spec_valid(spec, set(specs)):
+            return None
+        name = spec["name"]
+        specs[name] = spec
+        if spec["blocking"]:
+            blocking_names.add(name)
+    return (specs, blocking_names) if blocking_names else None
+
+
+def _fuzz_observations_meet_threshold(entry: dict, spec: dict) -> bool:
+    """Require observed work, duration and zero sanitizer/crash findings."""
+    elapsed = entry.get("elapsed_seconds_total")
+    executions = entry.get("executions_total")
+    if (
+        isinstance(elapsed, bool)
+        or not isinstance(elapsed, (int, float))
+        or (isinstance(elapsed, float) and not math.isfinite(elapsed))
+        or elapsed < 0
+        or elapsed > FUZZ_JOB_BUDGET
+        or type(executions) is not int
+        or executions > MAX_FUZZ_TARGET_EXECUTIONS
+    ):
+        return False
+    return (
+        elapsed >= int(spec["required_minutes"] * 60)
+        and executions >= spec["required_executions"]
+        and type(entry.get("crashes")) is int
+        and entry["crashes"] == 0
+        and type(entry.get("sanitizer_findings")) is int
+        and entry["sanitizer_findings"] == 0
+    )
+
+
+def _fuzz_target_record_identity_matches(entry: dict, spec: dict) -> bool:
+    if type(entry.get("seed")) is not int or entry["seed"] != spec["seed"]:
+        return False
+    return all(
+        isinstance(entry.get(field), str) and bool(entry[field])
+        for field in ("corpus_dir", "seed_path", "raw_log_ref")
+    )
+
+
+def _index_fuzz_target_entries(
+    per_target: object, target_specs: dict[str, dict]
+) -> dict[str, dict] | None:
+    if not isinstance(per_target, list):
+        return None
+    by_name: dict[str, dict] = {}
     for entry in per_target:
         if not isinstance(entry, dict):
-            return False
+            return None
         name = entry.get("target")
-        if not isinstance(name, str):
-            return False
-        if name in by_name:
-            return False
+        if not isinstance(name, str) or name not in target_specs or name in by_name:
+            return None
         by_name[name] = entry
-    # Every blocking target in manifest must have a passing entry.
-    for spec in manifest.get("targets", []):
-        if not spec.get("blocking"):
-            continue
-        entry = by_name.get(spec["name"])
-        if entry is None:
-            return False
-        if entry.get("status") != "pass":
-            return False
-    return True
+    return by_name
+
+
+def _blocking_fuzz_target_passes(
+    entry: dict | None,
+    name: str,
+    spec: dict,
+    seed_path: PurePosixPath | None,
+) -> bool:
+    return (
+        entry is not None
+        and seed_path is not None
+        and entry.get("status") == "pass"
+        and _fuzz_target_record_identity_matches(entry, spec)
+        and _fuzz_observations_meet_threshold(entry, spec)
+        and _fuzz_record_paths_match(entry, name, seed_path)
+    )
+
+
+def _validate_fuzz_record_per_target(
+    record: dict,
+    target_contract: tuple[dict[str, dict], set[str]],
+    seed_paths: dict[str, PurePosixPath],
+) -> bool:
+    """Require unique target observations and thresholds for blocking runs."""
+    target_specs, blocking_names = target_contract
+    by_name = _index_fuzz_target_entries(record.get("per_target"), target_specs)
+    if by_name is None:
+        return False
+    return all(
+        _blocking_fuzz_target_passes(
+            by_name.get(name), name, target_specs[name], seed_paths.get(name))
+        for name in blocking_names
+    )
+
+
+def _soak_record_passes(path: Path, candidate_sha: str) -> bool:
+    """Accept only a passing soak artifact bound to the candidate SHA."""
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return (
+        isinstance(record, dict)
+        and record.get("schema_version") == "release.soak-qualification.v1"
+        and record.get("candidate_sha") == candidate_sha
+        and record.get("status") == "pass"
+    )
 
 
 def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, dict]:
@@ -480,7 +757,9 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
     root = _release_state()[2]
     fuzz_pass = _fuzz_record_passes(
         root / FUZZ_QUALIFICATION_RECORD_NAME, candidate_sha)
-    soak_status = _record_value(root / SOAK_QUALIFICATION_RECORD_NAME)
+    soak_pass = _soak_record_passes(
+        root / SOAK_QUALIFICATION_RECORD_NAME, candidate_sha
+    )
     # The blocking performance evidence is produced by the release-gate job's
     # `make release-perf-evidence-blocking BASELINE_VERSION=092` step, which
     # writes perf/reports/evidence-092.json. This is the sole performance
@@ -525,7 +804,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
         {
             "domain": "soak",
             "blocking": True,
-            "status": "pass" if soak_status == "pass" else "fail",
+            "status": "pass" if soak_pass else "fail",
             "artifact_ref": _release_artifact_ref(SOAK_QUALIFICATION_RECORD_NAME),
         },
         {

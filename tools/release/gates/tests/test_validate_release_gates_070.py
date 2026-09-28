@@ -47,6 +47,11 @@ def _publish_gate_item(release_packages: str) -> bool:
     return dict(checks)["publish waits for release gate"]
 
 
+def _publish_trigger_matrix_item(release_packages: str) -> bool:
+    checks = gates._gate_3_items(release_packages)
+    return dict(checks)["release package trigger matrix"]
+
+
 def _reason_code_check(contract: str) -> bool:
     checks = _gate_2_items("", contract, "", "", "", "", "", "")
     return dict(checks)["reason code source"]
@@ -286,6 +291,64 @@ def test_publish_gate_allows_a_skipped_signature_only_on_dispatch() -> None:
     assert not _publish_gate_item(mutant)
 
 
+def test_publish_gate_requires_tag_push_and_manual_dispatch_triggers() -> None:
+    """The actual trigger map cannot add branch or pull-request release paths."""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert gates._release_publish_triggers_are_bounded(workflow)
+    assert _publish_trigger_matrix_item(workflow)
+
+    tag_trigger = "on:\n  push:\n    tags:\n      - 'v*'\n"
+    assert workflow.count(tag_trigger) == 1
+    with_pull_request = workflow.replace(
+        tag_trigger,
+        "on:\n  pull_request:\n    branches: [main]\n" + tag_trigger[3:],
+        1,
+    )
+    assert not _publish_trigger_matrix_item(with_pull_request)
+
+    tag_filters = "    tags:\n      - 'v*'\n  workflow_dispatch:"
+    assert workflow.count(tag_filters) == 1
+    with_branch_push = workflow.replace(
+        tag_filters,
+        "    tags:\n      - 'v*'\n    branches: [main]\n"
+        "  workflow_dispatch:",
+        1,
+    )
+    assert not _publish_trigger_matrix_item(with_branch_push)
+
+
+def test_publish_trigger_guard_rejects_added_pull_request_publish_path() -> None:
+    """Adding both a PR trigger and condition must fail the release gate."""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    tag_trigger = "on:\n  push:\n    tags:\n      - 'v*'\n"
+    dispatch_guard = "&& github.event_name == 'workflow_dispatch'))"
+    pull_request_trigger = workflow.replace(
+        tag_trigger,
+        "on:\n  pull_request:\n    branches: [main]\n" + tag_trigger[3:],
+        1,
+    )
+    _, publish_marker, publish_block = pull_request_trigger.partition(
+        "  publish:\n"
+    )
+    assert publish_marker
+    assert publish_block.count(dispatch_guard) == 1
+    publish_block = publish_block.replace(
+        dispatch_guard,
+        dispatch_guard + " || github.event_name == 'pull_request'",
+        1,
+    )
+    mutant = (
+        pull_request_trigger.split("  publish:\n", 1)[0]
+        + publish_marker
+        + publish_block
+    )
+    checks = dict(gates._gate_3_items(mutant))
+    assert not checks["release package trigger matrix"]
+    assert not all(checks.values())
+
+
 def test_gate_three_items_reads_the_job_if_structurally() -> None:
     """Only the release-gate job's own `if` may carry the tag predicate."""
     # The job condition is a quoted scalar: the parser resolves it, so the
@@ -327,6 +390,10 @@ def test_gate_three_items_rejects_false_or_negated_tag_conditions() -> None:
         "github.ref_type != 'tag'",
         "github.ref_type == 'tag' || true",
         "github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'",
+        "github.event_name == 'pull_request' && github.ref_type == 'tag'",
+        "github.event_name == 'schedule' && github.ref_type == 'tag'",
+        "(github.event_name == 'push' && github.ref_type == 'tag') "
+        "|| github.event_name != 'push'",
         "!github.ref_type == 'tag'",
     )
     needs = "    needs: [prepare, smoke-test, fuzz-qualification]" + chr(10)
@@ -360,6 +427,19 @@ def test_github_negation_binds_tighter_than_comparison() -> None:
     assert gates._evaluate_tag_condition(
         parenthesized, {"github.ref_type": "branch"}
     ) is True
+
+
+def test_tag_condition_event_guards_reject_unbounded_complements() -> None:
+    """Release conditions use positive equalities, not event complements."""
+    valid = gates._github_condition_ast(TAG_CONDITION)
+    unbounded = gates._github_condition_ast(
+        "(github.event_name == 'push' && github.ref_type == 'tag') "
+        "|| github.event_name != 'push'"
+    )
+    assert valid is not None
+    assert unbounded is not None
+    assert gates._tag_condition_event_guards_are_bounded(valid)
+    assert not gates._tag_condition_event_guards_are_bounded(unbounded)
 
 
 def test_gate_three_items_requires_the_manual_dispatch_path() -> None:
@@ -514,11 +594,15 @@ jobs:
       needs.release-gate.result == 'success' &&
       needs.musl-build.result == 'success' &&
       needs.integrity-checksums.result == 'success' &&
-      needs.integrity-signature.result == 'success' &&
       needs.official-docker-release-gate.result == 'success' &&
       needs.rc-release-gates.result == 'success' &&
-      needs.fuzz-qualification.result == 'success' # && false
+      needs.fuzz-qualification.result == 'success' &&
+      (needs.integrity-signature.result == 'success' ||
+       (needs.integrity-signature.result == 'skipped' &&
+        github.event_name == 'workflow_dispatch')) # && false
 """
+    valid_workflow = workflow.replace(" # && false", "")
+    assert _publish_gate_item(valid_workflow)
     assert not _publish_gate_item(workflow)
 
 
@@ -546,39 +630,41 @@ def test_github_publish_condition_rejects_unmodeled_order_comparisons() -> None:
 
 def test_publish_gate_rejects_comment_decoys_and_nested_or_success() -> None:
     """Comments and a success test nested in OR cannot establish the gate."""
-    comment_decoy = """
-# needs: [release-gate]
-# if: always() && needs.release-gate.result == 'success'
-jobs:
-  publish:
-    needs: [other-job]
-    if: always()
-"""
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow and _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    guard = "needs.release-gate.result == 'success'"
+    assert publish_block.count(guard) == 1
+    invalid_publish = publish_block.replace(
+        guard, f"({guard} && false)", 1
+    )
+    commented_workflow = "\n".join(
+        "# " + line for line in workflow.splitlines()
+    )
+    comment_decoy = (
+        commented_workflow + "\n" + prefix + marker + invalid_publish
+    )
     assert not _publish_gate_item(comment_decoy)
 
-    nested_or = """
-jobs:
-  publish:
-    needs: [release-gate]
-    if: always() && (needs.release-gate.result == 'success' || true)
-"""
+    nested_or = prefix + marker + publish_block.replace(
+        guard, f"({guard} || true)", 1
+    )
     assert not _publish_gate_item(nested_or)
 
 
 def test_publish_gate_rejects_a_false_conjunct_after_gate_success() -> None:
     """A positive gate-success comparison cannot outweigh a false term."""
-    conditions = (
-        "always() && needs.release-gate.result == 'success' && false",
-        "always() && (needs.release-gate.result == 'success' && false)",
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow and _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    guard = "needs.release-gate.result == 'success'"
+    assert publish_block.count(guard) == 1
+    mutant = prefix + marker + publish_block.replace(
+        guard, f"({guard} && false)", 1
     )
-    for condition in conditions:
-        workflow = f"""
-jobs:
-  publish:
-    needs: [release-gate]
-    if: {condition}
-"""
-        assert not _publish_gate_item(workflow), condition
+    assert not _publish_gate_item(mutant)
 
 
 def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
@@ -613,7 +699,7 @@ def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
 
 
 def test_release_workflow_dependency_diagnostic_names_missing_pyyaml(
-    monkeypatch, capsys
+    monkeypatch
 ) -> None:
     """A blocked PyYAML import must surface one named, actionable FAIL row."""
     result = gates.ValidationResult()
