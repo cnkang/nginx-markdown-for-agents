@@ -1042,7 +1042,11 @@ def _publish_condition_covers_dependency_results(condition: str) -> bool:
     }
     if _condition_needs_result_attributes(node) != expected_attributes:
         return False
-    events = (("push", "tag"), ("workflow_dispatch", "branch"))
+    events = (
+        ("push", "tag"),
+        ("workflow_dispatch", "branch"),
+        ("workflow_dispatch", "tag"),
+    )
     return all(
         _publish_event_cases_are_valid(node, expected_attributes, event, ref)
         and _publish_condition_matches_truth_table(node, event, ref)

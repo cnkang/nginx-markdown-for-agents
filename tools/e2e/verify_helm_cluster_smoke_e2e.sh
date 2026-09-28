@@ -41,6 +41,7 @@ KEEP=0
 CREATED_CLUSTER=0
 CREATED_NAMESPACE=0
 CREATED_RELEASE=0
+LOCK_MODE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -89,9 +90,56 @@ cleanup() {
         fi
     fi
     rm -rf "${WORK_DIR}"
+    release_cluster_lock
     return 0
 }
 trap cleanup EXIT
+
+# Serialize concurrent runs against the same cluster.  Two runs can both
+# observe the fixed release name as free and the loser's cleanup would then
+# uninstall the winner's release (its ownership flag is set before its own
+# install attempt).  The lock spans the ownership check, the install, and
+# cleanup, so a second run waits until the first has released everything it
+# owns.  flock is used when available (Linux); the directory fallback works
+# everywhere else, and a stale directory lock ages out after ten minutes so
+# a crashed run cannot wedge the smoke.
+LOCK_PATH="${TMPDIR:-/tmp}/helm-cluster-smoke-${CLUSTER}"
+
+acquire_cluster_lock() {
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"${LOCK_PATH}.flock"
+        if flock -w 600 9; then
+            LOCK_MODE="flock"
+            return 0
+        fi
+        echo "ERROR: timed out waiting for the ${CLUSTER} smoke lock" >&2
+        exit 1
+    fi
+    local waited=0
+    while ! mkdir "${LOCK_PATH}.d" 2>/dev/null; do
+        if [[ -n "$(find "${LOCK_PATH}.d" -maxdepth 0 -mmin +10 2>/dev/null)" ]]; then
+            rm -rf "${LOCK_PATH}.d"
+            continue
+        fi
+        waited=$((waited + 2))
+        if [[ "${waited}" -ge 600 ]]; then
+            echo "ERROR: timed out waiting for the ${CLUSTER} smoke lock" >&2
+            exit 1
+        fi
+        sleep 2
+    done
+    LOCK_MODE="dir"
+    return 0
+}
+
+release_cluster_lock() {
+    if [[ "${LOCK_MODE}" == "dir" ]]; then
+        rm -rf "${LOCK_PATH}.d"
+    fi
+    return 0
+}
+
+acquire_cluster_lock
 
 if ! [[ "${NGINX_BASE_IMAGE}" =~ ^nginx:1[.]30[.]4-alpine3[.]24@sha256:[0-9a-f]{64}$ ]]; then
     echo "ERROR: NGINX_BASE_IMAGE must be nginx:1.30.4-alpine3.24 pinned by sha256 digest" >&2
