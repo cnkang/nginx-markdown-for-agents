@@ -567,7 +567,7 @@ def _is_function_value_reference(
         return False
     prefix = line[:match.start()].rstrip()
     return (
-        re.search(r"(?:&|=|,|\(|\{|\?|:)\s*$", prefix) is not None
+        re.search(r"[&=,({?:]\s*$", prefix) is not None
         or re.search(r"\breturn\s*$", prefix) is not None
     )
 

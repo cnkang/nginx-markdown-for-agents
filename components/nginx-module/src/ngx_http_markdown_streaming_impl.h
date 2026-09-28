@@ -2394,7 +2394,7 @@ static ngx_inline void
 ngx_http_markdown_streaming_track_budget_exceeded(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     uint32_t error_code)
 {
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.budget_exceeded_total);
@@ -2408,6 +2408,9 @@ ngx_http_markdown_streaming_track_budget_exceeded(
                    "markdown: budget exceeded "
                    "(auxiliary classification, code=%ui)",
                    (ngx_uint_t) error_code);
+    /* error_code feeds only the debug log above, which compiles out when
+     * NGX_DEBUG is disabled; keep it referenced in release builds. */
+    (void) error_code;
 }
 
 

@@ -1958,7 +1958,7 @@ def _array_assignment_group_starts(line: str, index: int) -> bool:
     return (
         line[index] == "("
         and re.fullmatch(
-            r"\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]\s]+\])?\+?=",
+            r"\s*[A-Za-z_]\w*(?:\[[^\]\s]+\])?\+?=",
             line[:index],
         ) is not None
     )
@@ -3751,7 +3751,7 @@ def _shell_test_opener(segment: str) -> str | None:
     condition = re.sub(r"^(?:if|elif|while|until)\s+", "", segment)
     if condition.startswith("[["):
         return "]]"
-    if condition.startswith("[ ") or condition.startswith("[\t"):
+    if condition.startswith(("[ ", "[\t")):
         return "]"
     return None
 
@@ -5128,7 +5128,7 @@ def _raw_install_from_shell_script_file(
         if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
             return True
         content = resolved.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError, ValueError):
+    except (OSError, ValueError):
         return True
     if not _shell_script_mentions_toolchain_install(content):
         return False
@@ -5152,7 +5152,7 @@ def _python_script_file_is_raw(
         if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
             return True
         content = resolved.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError, ValueError):
+    except (OSError, ValueError):
         return True
     seen = visited if visited is not None else set()
     if resolved in seen:
@@ -5632,7 +5632,7 @@ def _shell_command_is_double_quoted_variable(segment: str) -> bool:
     return bool(
         words
         and re.fullmatch(
-            r'"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"',
+            r'"\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*)"',
             words[0],
         )
     )
@@ -5641,7 +5641,7 @@ def _shell_command_is_double_quoted_variable(segment: str) -> bool:
 def _shell_array_assignment_is_data(segment: str) -> bool:
     """Whether a complete shell array assignment is non-executable data."""
     return re.fullmatch(
-        r"\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]\s]+\])?\+?=\(.*\)\s*",
+        r"\s*[A-Za-z_]\w*(?:\[[^\]\s]+\])?\+?=\(.*\)\s*",
         segment,
         re.S,
     ) is not None
@@ -6161,7 +6161,7 @@ def _provisioning_shell_indirection_issue(
     code = _join_continuations(
         _strip_heredocs(_strip_shell_comments(script))
     )
-    if re.search(r"(?<![A-Za-z0-9_])BASH_ENV(?![A-Za-z0-9_])", code):
+    if re.search(r"(?<!\w)BASH_ENV(?!\w)", code):
         return "BASH_ENV is unsupported in provisioning jobs; remove it"
     for segment in _command_segments(code):
         if issue := _provisioning_shell_segment_issue(segment, depth):

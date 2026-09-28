@@ -682,7 +682,8 @@ def test_seed_digest_rejects_escape_when_called_directly(
     )
 
     assert error is not None
-    assert "seed path" in error and "escapes the corpus root" in error
+    assert "seed path" in error
+    assert "escapes the corpus root" in error
     assert "unreadable" not in error
 
 

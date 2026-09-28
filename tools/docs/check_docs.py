@@ -32,6 +32,8 @@ README_FILENAME = "README.md"
 CHANGELOG_FILENAME = "CHANGELOG.md"
 CHINESE_README = "README_zh-CN.md"
 BREAKING_CHANGES_GUIDE = "docs/guides/{version}-breaking-changes.md"
+MIGRATION_GUIDE = "docs/guides/MIGRATION-{version}.md"
+UPGRADE_AND_ROLLBACK_NOTE = "docs/releases/{version}-upgrade-and-rollback.md"
 MAINTAINED_ROOT_DOCS = {"AGENTS.md", README_FILENAME, CHINESE_README}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
@@ -645,7 +647,11 @@ _SPELLED_FAMILY_COUNT_PATTERN = "|".join(
     sorted(_SPELLED_FAMILY_COUNTS, key=len, reverse=True)
 )
 FAMILY_COUNT_RE = re.compile(
-    rf"\b(?P<count>\d{{1,3}}|{_SPELLED_FAMILY_COUNT_PATTERN})"
+    # The count must not be the trailing digit of a dotted version number
+    # (for example the "2" in "0.9.2 family names" or the "4" in
+    # "Prometheus text 0.0.4 family catalog"); such tokens are not
+    # metric-family count claims.
+    rf"(?<![.\d])\b(?P<count>\d{{1,3}}|{_SPELLED_FAMILY_COUNT_PATTERN})"
     r"[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?famil(?:y|ies)\b",
     re.IGNORECASE,
 )
@@ -995,10 +1001,10 @@ RELEASE_SURFACE_FILES = (
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
     BREAKING_CHANGES_GUIDE,
-    "docs/guides/MIGRATION-{version}.md",
+    MIGRATION_GUIDE,
     "docs/development/{version}-implementation-plan.md",
     "docs/releases/{version}-release-notes.md",
-    "docs/releases/{version}-upgrade-and-rollback.md",
+    UPGRADE_AND_ROLLBACK_NOTE,
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
     CHANGELOG_FILENAME,
@@ -1209,9 +1215,9 @@ PENDING_STATE_SURFACES = (
     "docs/guides/UPGRADE-TO-{version}.md",
     "docs/guides/VERSION_ROLLBACK-{version}.md",
     BREAKING_CHANGES_GUIDE,
-    "docs/guides/MIGRATION-{version}.md",
+    MIGRATION_GUIDE,
     "docs/releases/{version}-release-notes.md",
-    "docs/releases/{version}-upgrade-and-rollback.md",
+    UPGRADE_AND_ROLLBACK_NOTE,
     "docs/releases/{version}-deployment-recommendation.md",
     "packaging/repo/apt/README.md",
     CHANGELOG_FILENAME,
@@ -1221,8 +1227,8 @@ PENDING_STATE_SURFACES = (
 # claims but do not need to repeat the publication boundary.
 PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
     BREAKING_CHANGES_GUIDE,
-    "docs/guides/MIGRATION-{version}.md",
-    "docs/releases/{version}-upgrade-and-rollback.md",
+    MIGRATION_GUIDE,
+    UPGRADE_AND_ROLLBACK_NOTE,
     CHANGELOG_FILENAME,
 })
 
