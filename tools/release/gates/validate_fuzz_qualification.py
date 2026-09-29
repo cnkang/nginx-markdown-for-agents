@@ -610,7 +610,9 @@ def _start_toolchain_identity_process(
 
 
 def _wait_toolchain_identity_process(
-    process: subprocess.Popen, label: str, reader: threading.Thread | None = None
+    process: subprocess.Popen,
+    label: str,
+    stream: _BoundedStream | None = None,
 ) -> int:
     """Bound toolchain command runtime and terminate on every exceptional exit.
 
@@ -621,8 +623,9 @@ def _wait_toolchain_identity_process(
     ordering (``waitid(WNOWAIT)`` where available, a stop-then-signal poll
     elsewhere), so reuse it instead of a plain ``wait``.
 
-    ``reader`` is the pipe-draining thread; the interrupt path uses its
-    liveness as the ownership proof for any post-reap group signal.
+    ``stream`` is the bounded pipe drain; the interrupt path uses its EOF
+    state (all writers closed) as the ownership proof for any post-reap
+    group signal.
     """
     try:
         returncode = _wait_fuzz_process(process, 30.0)
@@ -644,7 +647,7 @@ def _wait_toolchain_identity_process(
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
         else:
-            _signal_reaped_fuzz_process_group_when_live(process, reader)
+            _signal_reaped_fuzz_process_group_when_open(process, stream)
         raise
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -670,7 +673,7 @@ def _run_toolchain_version_command(command: list[str], label: str) -> str:
     """Collect a toolchain version through a bounded subprocess stream."""
     process, stream, reader = _start_toolchain_identity_process(command, label)
     try:
-        returncode = _wait_toolchain_identity_process(process, label, reader)
+        returncode = _wait_toolchain_identity_process(process, label, stream)
     finally:
         _finish_toolchain_identity_process(process, reader)
     if returncode != 0:
@@ -827,7 +830,16 @@ class _BoundedStream:
         self._pending = ""
         self._marker_evidence: str | None = None
         self._marker_scan_overlap = ""
+        self._eof_seen = threading.Event()
         self._lock = threading.Lock()
+
+    def mark_eof(self) -> None:
+        """Record that the pipe's read end observed EOF (all writers closed)."""
+        self._eof_seen.set()
+
+    def eof_reached(self) -> bool:
+        """Whether every pipe writer has closed (no descendant holds stdout)."""
+        return self._eof_seen.is_set()
 
     def feed(self, chunk: str) -> None:
         """Consume one decoded chunk, retaining head, tail and markers."""
@@ -925,6 +937,10 @@ def _drain_stream(pipe, stream: _BoundedStream) -> None:
     try:
         for chunk in iter(lambda: pipe.read(_STREAM_READ_BYTES), b""):
             stream.feed(decoder.decode(chunk))
+        # EOF proves every write end closed: no process still holds the
+        # pipe.  Mark it before the final feed so the interrupt path can
+        # use it as the ownership proof for a post-reap group signal.
+        stream.mark_eof()
         stream.feed(decoder.decode(b"", final=True))
     finally:
         stream.finish()
@@ -966,30 +982,33 @@ def _signal_fuzz_process_group(
             process.kill()
 
 
-def _signal_reaped_fuzz_process_group_when_live(
-    process: subprocess.Popen, reader: threading.Thread | None
+def _signal_reaped_fuzz_process_group_when_open(
+    process: subprocess.Popen, stream: _BoundedStream | None
 ) -> None:
-    """Signal a reaped leader's group only when a live pipe holder proves it.
+    """Signal a reaped leader's group only while a pipe writer is open.
 
     ``_signal_fuzz_process_group`` skips a reaped leader to keep the PGID
     reuse guard, but the interrupt path can unwind after the wait loop
     reaped the leader while descendants still hold the group.  Signalling
-    by number alone would risk a reused group id, so the direct signal is
-    gated on the reader thread: while the pipe's write end has not closed,
-    the reader is draining output, which proves a live process still holds
-    it, that process is this invocation's descendant, and the group id
-    therefore still belongs to this run.  A short settle lets a reader
-    that is merely draining the reaped leader's last output observe EOF
-    first, so an empty group is never signalled.
+    by number alone would risk a reused group id, so the signal is gated
+    on pipe EOF: the write end closing is the one event that proves every
+    descendant released the pipe.  While EOF has NOT been observed, some
+    process still holds the write end; that process inherited it from this
+    invocation's leader, so it is a live group member: the PGID is still
+    allocated and the signal reaches exactly this run's descendants.  Once
+    EOF is observed the group may be empty, so no signal is sent (the id
+    could already name another process group, and no descendant needs it).
+    A short settle lets a reader that is finishing the reaped leader's
+    last output mark EOF first, so that common case never signals.
     """
     if os.name != "posix":
         return
-    if reader is None:
+    if stream is None:
         # No ownership proof available: never signal a group by number
         # alone, because the id may already belong to another process.
         return
-    reader.join(_PROCESS_WAIT_POLL_SECONDS)
-    if not reader.is_alive():
+    time.sleep(_PROCESS_WAIT_POLL_SECONDS)
+    if stream.eof_reached():
         return
     try:
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))

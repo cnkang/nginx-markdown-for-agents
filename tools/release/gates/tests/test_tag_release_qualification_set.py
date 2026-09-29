@@ -891,12 +891,19 @@ def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
     # and a phantom mutex must not admit its holder into the critical
     # section.
     verify_line = (
-        'if [[ "$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)" == "$$" ]]'
+        '[[ "$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)" == "$$" ]]'
     )
     assert verify_line in reaper, (
         "the acquirer must re-read its ownership before returning"
     )
-    printf_line = 'printf \'%s\\n\' "$$" > "${LOCK_PATH}.reaper/pid"'
+    # The PID write is EXCLUSIVE (noclobber): a directory a recovery
+    # swapped in already carries its owner's record, and overwriting it
+    # through the canonical path would let two waiters believe they hold
+    # the mutex.  The readback confirms this wait's own publication.
+    printf_line = "set -o noclobber; printf"
+    assert printf_line in reaper, (
+        "the PID publication must refuse to overwrite an existing record"
+    )
     assert reaper.index(printf_line) < reaper.index(verify_line)
     # A claimed directory whose owner is alive is restored or parked, and
     # the claim name carries the loop counter so a parked claim from an

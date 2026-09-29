@@ -3343,26 +3343,25 @@ def test_interrupt_signals_the_group_before_reaping_the_leader(
     assert not marker.exists(), "a descendant survived the interrupt"
 
 
-def test_post_reap_signal_requires_a_live_pipe_holder(monkeypatch) -> None:
-    """The post-reap group signal is gated on the reader's liveness.
+def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
+    """The post-reap group signal is gated on EOF, not on reader liveness.
 
-    Regression: the signal ran by group number alone after the leader was
-    reaped, risking a reused group id.  A finished reader means no process
-    holds the pipe (and therefore no member remains in the group), so no
-    signal may be sent; a live reader proves a live holder and the signal
-    must fire.
+    Regression: reader-thread liveness was the ownership proof, but a
+    reader can stay alive while draining buffered bytes after every
+    writer closed, so it does not prove a live descendant owns the pipe
+    (or that the group id is still this run's).  EOF is the conclusive
+    event: write-end closure means no writer remains.  While EOF has not
+    been observed a live pipe writer proves the group is still allocated
+    and the signal must fire; once EOF is observed no signal may be sent.
     """
     killpg_pids: list[int] = []
 
-    class _Reader:
-        def __init__(self, alive: bool) -> None:
-            self._alive = alive
+    class _Stream:
+        def __init__(self, eof: bool) -> None:
+            self._eof = eof
 
-        def join(self, timeout=None) -> None:
-            return None
-
-        def is_alive(self) -> bool:
-            return self._alive
+        def eof_reached(self) -> bool:
+            return self._eof
 
     class _Process:
         pid = os.getpid()
@@ -3372,14 +3371,22 @@ def test_post_reap_signal_requires_a_live_pipe_holder(monkeypatch) -> None:
         "killpg",
         lambda pid, signum: killpg_pids.append(pid),
     )
-    validator._signal_reaped_fuzz_process_group_when_live(
-        _Process(), _Reader(False)
+    # EOF observed: every writer closed, so the group may be empty.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(True)
     )
-    assert killpg_pids == [], "an empty group must not be signaled"
-    validator._signal_reaped_fuzz_process_group_when_live(
-        _Process(), _Reader(True)
+    assert killpg_pids == [], "a closed pipe must not be signaled"
+    # EOF not observed: a writer still holds the pipe, so a descendant
+    # is alive and the group id still belongs to this run.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(False)
     )
-    assert killpg_pids == [os.getpid()], "a live holder must be signaled"
+    assert killpg_pids == [os.getpid()], "an open writer must be signaled"
+    # No proof available at all: never signal by number alone.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), None
+    )
+    assert killpg_pids == [os.getpid()]
 
 
 def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
@@ -3408,10 +3415,27 @@ def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatc
         [sys.executable, str(leader), str(marker)], "probe"
     )
     try:
-        validator._wait_toolchain_identity_process(process, "probe", reader)
+        validator._wait_toolchain_identity_process(process, "probe", stream)
     except KeyboardInterrupt:
         pass
     finally:
         validator._finish_toolchain_identity_process(process, reader)
     time.sleep(1.9)
     assert not marker.exists(), "a post-reap descendant survived the interrupt"
+
+
+def test_eof_marks_after_the_read_loop_closes(tmp_path) -> None:
+    """EOF is recorded the moment the pipe read loop ends.
+
+    The interrupt path uses EOF-not-observed as proof that a writer still
+    holds the pipe, so the marker must be set by the read loop itself (an
+    empty byte string from read()), not deferred to later processing.
+    """
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, "-c", "print('v1')"], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe", stream)
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    assert stream.eof_reached(), "EOF must be recorded once the pipe closes"
