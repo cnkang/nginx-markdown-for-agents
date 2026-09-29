@@ -564,6 +564,28 @@ def test_gate4_bounds_the_cluster_name_like_its_sibling() -> None:
     assert "^[a-z][a-z0-9-]{0,62}$" in script
 
 
+def test_gate4_preserves_the_cluster_on_a_preexisting_release() -> None:
+    """A pre-existing release lives in this cluster; keep it.
+
+    Two gate4 runs share the fixed cluster and release names and gate4
+    holds no lock, so a concurrent run's release can appear at the
+    preflight after this run created the cluster.  Deleting the cluster on
+    exit would take that release down, so the branch clears the cluster
+    claim with the namespace claim.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    branch = script.split(
+        "fail \"Pre-existing Helm release", 1
+    )[1].split("return 1", 1)[0]
+    assert "CREATED_NAMESPACE=0" in branch
+    assert "CREATED_CLUSTER=0" in branch, (
+        "a pre-existing release must keep its cluster"
+    )
+
+
 def test_gate4_keeps_namespace_ownership_after_list_failure() -> None:
     """A list failure must not release a namespace this run created.
 

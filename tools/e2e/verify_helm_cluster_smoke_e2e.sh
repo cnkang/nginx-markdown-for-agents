@@ -242,7 +242,21 @@ acquire_cluster_lock() {
             if ! dir_lock_owner_alive; then
                 local stale_claim="${LOCK_PATH}.stale.$$"
                 if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
-                    rm -rf "${stale_claim}"
+                    # Re-read the claimed owner: a creator that paused
+                    # past the age grace can publish its pid between the
+                    # stale check and the rename.  A live owner's claim is
+                    # restored (or left parked when the canonical path is
+                    # taken) - never deleted, because deleting it would
+                    # let a second run enter the critical section while
+                    # the owner still runs.
+                    local claimed_owner
+                    claimed_owner="$(cat "${stale_claim}/pid" 2>/dev/null || true)"
+                    if [[ -n "${claimed_owner}" ]] \
+                        && kill -0 "${claimed_owner}" 2>/dev/null; then
+                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null || true
+                    else
+                        rm -rf "${stale_claim}"
+                    fi
                     release_lock_reaper
                     continue
                 fi
@@ -398,7 +412,13 @@ fi
 if [[ -z "${existing_namespace}" ]]; then
     if ! kubectl --context "kind-${CLUSTER}" create namespace \
         "${NAMESPACE}" >/dev/null; then
+        # A create can lose a race with a concurrent creator (this run's
+        # lock serializes only its own scenario runs).  Whatever holds the
+        # namespace now lives in this cluster, so the cluster claim clears
+        # with the others before exiting: cleanup must not delete a
+        # cluster that holds another actor's namespace and workloads.
         echo "ERROR: unable to create namespace ${NAMESPACE}" >&2
+        CREATED_CLUSTER=0
         exit 1
     fi
     # Record ownership only once this run created it, so cleanup never
