@@ -22,6 +22,28 @@ def test_audit_uses_an_exclusive_temporary_config_directory() -> None:
     assert audit_script.stat().st_mode & 0o111
 
 
+def test_homebrew_target_skips_when_brew_is_unavailable() -> None:
+    """The target skips with its documented message, never a hard error.
+
+    A macOS host without Homebrew is possible (minimal images, CI mac
+    containers).  The audit script exits 1 in that case, so the target
+    gate itself checks `brew` and keeps the documented skip message.
+    """
+    repo_root = Path(__file__).resolve().parents[4]
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    recipe = next(
+        line for line in makefile.splitlines()
+        if "Homebrew formula audit runs on macOS" in line
+    )
+    condition = makefile.split("homebrew-formula-check:", 1)[1].split(
+        recipe, 1
+    )[0]
+    assert 'command -v brew' in condition, (
+        "the target must check for brew itself, not only the OS"
+    )
+    assert "SKIP: Homebrew formula audit runs on macOS with Homebrew" in recipe
+
+
 def test_homebrew_gate_path_filters_cover_script_and_makefile() -> None:
     """PR and push filters both run when the audit gate changes."""
     repo_root = Path(__file__).resolve().parents[4]
