@@ -7570,7 +7570,7 @@ _MAKE_ATTACHED_VALUE_OPTIONS = frozenset(
 # They are modeled so an exact name certifies; an argument-taking one
 # consumes its operand like make does.
 _MAKE_HARMLESS_LONG_OPTIONS = frozenset({
-    "--always-make", "--environment-overrides", "--ignore-errors",
+    "--always-make", "--environment-overrides",
     "--keep-going", "--no-keep-going", "--stop", "--no-builtin-rules",
     "--no-builtin-variables", "--silent", "--quiet", "--no-silent",
     "--print-directory", "--no-print-directory", "--warn-undefined-variables",
@@ -7596,19 +7596,28 @@ _MAKE_ROOT_DIRECTORY_VALUES = frozenset({".", "./"})
 # ``--eval`` text (``make -f /dev/null --eval='docs-check: ;' docs-check``
 # succeeds while the repository chain never executes).
 _MAKE_UNCERTIFIABLE_OPTIONS = frozenset(
-    {"-f", "--file", "--makefile", "-E", "--eval"}
+    {"-f", "--file", "--makefile", "-E", "--eval",
+     "-o", "--old-file", "-W", "--what-if", "--assume-new"}
 )
-_MAKE_UNCERTIFIABLE_LONG_PREFIXES = ("--file=", "--makefile=", "--eval=")
+_MAKE_UNCERTIFIABLE_LONG_PREFIXES = (
+    "--file=", "--makefile=", "--eval=",
+    "--old-file=", "--what-if=", "--assume-new=",
+)
+# Short letters of the uncertifiable options: f/E supply a makefile or an
+# evaled statement; o/W mark the following file old or what-if, which skips
+# the named target's recipe when it is the checked one.
+_MAKE_UNCERTIFIABLE_SHORT_LETTERS = frozenset({"f", "E", "o", "W"})
 
 
-def _make_option_replaces_makefile(word: str) -> bool:
-    """Whether one option word supplies its own makefile or definitions.
+def _make_option_uncertifiable(word: str) -> bool:
+    """Whether one option word defeats a docs-check certification.
 
-    Long forms match exactly or with an ``=`` operand.  In a short cluster
-    the letters are scanned as make parses them: ``f``/``E`` supply a
-    makefile or an evaled statement, and reaching any other
-    argument-taking letter first means a later ``f``/``E`` is that
-    option's argument, not an option.
+    A supplied makefile or ``--eval`` text replaces what is read; an
+    old-file/what-if operand can name the checked target and skip its
+    recipe (``make -o docs-check docs-check`` prints "Nothing to be done").
+    Long forms match exactly or with an ``=`` operand, and a short cluster
+    is scanned as make parses it: an argument-taking letter before the
+    decisive one means it is that option's argument, not an option.
     """
     if word in _MAKE_UNCERTIFIABLE_OPTIONS:
         return True
@@ -7617,7 +7626,28 @@ def _make_option_replaces_makefile(word: str) -> bool:
     if not word.startswith("-") or word.startswith("--"):
         return False
     for letter in word[1:]:
-        if letter in ("f", "E"):
+        if letter in _MAKE_UNCERTIFIABLE_SHORT_LETTERS:
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            return False
+    return False
+
+
+def _make_option_masks_failures(word: str) -> bool:
+    """Whether one option word makes make ignore a failing recipe.
+
+    ``-i``/``--ignore-errors`` makes the recipe's failure invisible: the
+    step succeeds although the docs check failed (verified: ``make -i f``
+    exits 0 with the failure "ignored").  A cluster carries it too: the
+    short spelling ``-silent`` is read by make as ``-s -i -l ent``, so the
+    scan looks for ``i`` up to the first argument-taking letter.
+    """
+    if word in ("-i", "--ignore-errors"):
+        return True
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    for letter in word[1:]:
+        if letter == "i":
             return True
         if letter in _MAKE_ARGUMENT_TAKING_SHORT:
             return False
@@ -7760,9 +7790,11 @@ def _make_long_option_unknown(word: str) -> bool:
     return "--" + word[2:].split("=", 1)[0] not in _MAKE_KNOWN_LONG_OPTIONS
 
 
+_MAKE_FAILURE_MASKING_LONG_OPTIONS = frozenset({"--ignore-errors"})
 _MAKE_KNOWN_LONG_OPTIONS = (
     _MAKE_HARMLESS_LONG_OPTIONS
     | _MAKE_HARMLESS_LONG_VALUE_OPTIONS
+    | _MAKE_FAILURE_MASKING_LONG_OPTIONS
     | _MAKE_ATTACHED_VALUE_OPTIONS
     | _MAKE_OPTIONAL_INT_OPTIONS
     | _MAKE_OPTIONAL_FLOAT_OPTIONS
@@ -7823,9 +7855,14 @@ def _make_option_step(words: list[str], index: int) -> int | None:
     operand = words[index + 1] if index + 1 < len(words) else None
     if _make_option_prevents_execution(word):
         return None
-    if _make_option_replaces_makefile(word):
-        # A supplied makefile or --eval text means the resolved target may
-        # not be the repository's docs-check chain.
+    if _make_option_uncertifiable(word):
+        # A supplied makefile, --eval text, or old-file/what-if operand
+        # means the resolved target may not be (or may not be remade as)
+        # the repository's docs-check chain.
+        return None
+    if _make_option_masks_failures(word):
+        # A masked failure would let the step succeed although the check
+        # failed, so the invocation cannot certify it.
         return None
     if word.startswith("--"):
         return _make_long_option_step(word, operand, index)
@@ -7938,28 +7975,45 @@ def _make_flags_value_prevents_execution(value: str) -> bool:
     return False
 
 
-def _make_flags_value_replaces_makefile(value: str) -> bool:
-    """Whether one MAKEFLAGS/GNUMAKEFLAGS value supplies its own makefile.
+def _make_flags_value_uncertifiable(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value defeats certification.
 
     ``--eval`` text and ``-f``/``--makefile`` selections read from the
-    environment take effect before the repository Makefile is read, so an
-    invocation carrying one cannot prove the repository docs-check ran
-    (``MAKEFLAGS='--eval=SHELL=/bin/true'`` makes every recipe a no-op,
-    and ``MAKEFLAGS='-f /dev/null'`` resolves no repository target at
-    all).  The first word gets the implied dash, exactly as make applies
-    it before parsing.
+    environment take effect before the repository Makefile is read
+    (``MAKEFLAGS='--eval=SHELL=/bin/true'`` makes every recipe a no-op),
+    and old-file/what-if operands can skip the checked target.  The first
+    word gets the implied dash, exactly as make applies it before parsing.
     """
     for index, word in enumerate(value.split()):
         if index == 0 and not word.startswith("-") and "=" not in word:
             word = "-" + word
         if not word.startswith("-"):
             continue
-        if _make_option_replaces_makefile(word):
+        if _make_option_uncertifiable(word):
             return True
     return False
 
 
-def _make_environment_prevents_execution(env: object) -> bool:
+def _make_flags_value_masks_failures(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value hides a failing recipe.
+
+    The environment forms of ``-i``/``--ignore-errors`` (including the
+    dash-less ``i`` and clusters such as ``silent``, which make reads as
+    ``-s -i -l ent``) let a failing docs check exit 0, so a step carrying
+    one cannot prove the check succeeded.  The first word gets the implied
+    dash, exactly as make applies it before parsing.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            continue
+        if _make_option_masks_failures(word):
+            return True
+    return False
+
+
+def _make_environment_defeats_certification(env: object) -> bool:
     """Whether make's environment defeats a docs-check certification.
 
     GNU Make reads ``MAKEFLAGS`` (and ``GNUMAKEFLAGS``) from the
@@ -7980,7 +8034,9 @@ def _make_environment_prevents_execution(env: object) -> bool:
             continue
         if _make_flags_value_prevents_execution(value):
             return True
-        if _make_flags_value_replaces_makefile(value):
+        if _make_flags_value_uncertifiable(value):
+            return True
+        if _make_flags_value_masks_failures(value):
             return True
     return False
 
@@ -7992,7 +8048,7 @@ def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
     non-executing mode in the effective environment (``MAKEFLAGS``), in a
     command-local assignment, or in the option list itself disqualifies it.
     """
-    if _make_environment_prevents_execution(env):
+    if _make_environment_defeats_certification(env):
         return False
     command_index = _make_docs_check_index(words)
     if command_index is None:
@@ -8004,7 +8060,9 @@ def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
             continue
         if _make_flags_value_prevents_execution(value):
             return False
-        if _make_flags_value_replaces_makefile(value):
+        if _make_flags_value_uncertifiable(value):
+            return False
+        if _make_flags_value_masks_failures(value):
             return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets

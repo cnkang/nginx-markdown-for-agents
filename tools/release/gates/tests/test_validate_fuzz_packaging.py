@@ -3779,7 +3779,7 @@ def test_make_long_option_abbreviations_fail_closed() -> None:
         assert packaging_gate._make_targets_after_options(words, 0) is None, words
     for value in ("--eva=SHELL=/bin/true", "--dry", "--fil /dev/null"):
         assert packaging_gate._make_flags_value_prevents_execution(value) or (
-            packaging_gate._make_flags_value_replaces_makefile(value)
+            packaging_gate._make_flags_value_uncertifiable(value)
         ), value
     # Exact harmless names still certify.
     assert packaging_gate._make_targets_after_options(
@@ -3810,10 +3810,14 @@ def test_make_flags_values_that_replace_the_makefile_fail_certification() -> Non
         "--file=/dev/null",
         "--makefile other.mk",
         "n --eval=x",
+        "-o docs-check",
+        "-W docs-check",
+        "--what-if=docs-check",
+        "--assume-new docs-check",
     ):
-        assert packaging_gate._make_flags_value_replaces_makefile(value), value
+        assert packaging_gate._make_flags_value_uncertifiable(value), value
     for value in ("", "n", "kn", "-j4", "w --jobserver-auth=3,4"):
-        assert not packaging_gate._make_flags_value_replaces_makefile(value), value
+        assert not packaging_gate._make_flags_value_uncertifiable(value), value
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
     for value in ("--eval=SHELL=/bin/true", "-f /dev/null"):
         assert (
@@ -3854,10 +3858,11 @@ def test_make_docs_check_rejects_supplied_makefiles_and_eval() -> None:
     assert packaging_gate._make_targets_after_options(
         ["-j2", "docs-check"], 0
     ) == ["docs-check"]
-    # `-Wn`'s n is W's argument; it must not be read as a cluster carrying f.
+    # `-Wn`'s n is W's argument, and W is uncertifiable: an old-file/
+    # what-if operand can name the checked target and skip its recipe.
     assert packaging_gate._make_targets_after_options(
         ["-Wn", "docs-check"], 0
-    ) == ["docs-check"]
+    ) is None
 
 
 def test_dynamic_eval_parser_fails_closed_on_unterminated_quote() -> None:
@@ -5230,6 +5235,35 @@ def test_masked_and_backgrounded_sets_use_the_live_view_text() -> None:
     ), backgrounded
 
 
+def test_make_environment_and_cli_masking_modes_disqualify_docs_check() -> None:
+    """-i/-silent hide a failing docs check on both surfaces.
+
+    `make -i f` exits 0 with the failure "ignored" (verified), and the
+    short spelling `-silent` is read by make as `-s -i -l ent`, so a
+    cluster can carry the masking flag.  A step whose environment or
+    command line carries one cannot prove the check succeeded.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for value in ("-i", "i", "silent", "-si", "-is", "--ignore-errors"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {"MAKEFLAGS": value}}]
+            )
+            is not None
+        ), value
+    for command in (
+        "make -i docs-check",
+        "make --ignore-errors docs-check",
+        "make -silent docs-check",
+        "MAKEFLAGS=-i make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, command]) is not None
+        ), command
+    # A plain check still certifies.
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+
+
 def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
     """A non-executing make mode in the environment stops the docs check.
 
@@ -5265,6 +5299,8 @@ def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
             install,
             {"run": "make docs-check", "env": {"MAKEFLAGS": "--touch"}},
         ],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "silent"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-i"}}],
     ]
     for steps in rejected:
         assert packaging_gate._python_deps_issue(steps) is not None, steps
@@ -5273,7 +5309,6 @@ def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
         [install, {"run": "make docs-check"}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": ""}}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "s"}}],
-        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "silent"}}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "k"}}],
         [
             install,
