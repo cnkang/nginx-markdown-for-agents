@@ -3333,15 +3333,20 @@ def _python_interpreter_before_placeholder(
     )
 
 
+_TEMPLATE_PLACEHOLDER_SENTINEL = "__workflow_step_script_placeholder__"
+
+
 def _shell_template_executable_payloads(shell: object) -> list[str]:
-    """Return the ``-c`` payloads a custom shell template executes directly.
+    """Return the command-string payloads a custom shell template runs.
 
     The runner substitutes the generated script path into ``{0}``; commands
     the template spells out itself (``bash -c 'rustup ...' {0}``) execute
-    in addition to the run block, and the run block's scan cannot see them.
-    Only quoted ``-c`` payloads are returned: they are the executable text
-    the template itself carries, while the placeholder and bare stdin
-    forms add nothing to examine here.
+    in addition to the run block, and the run-block scan cannot see them.
+    The command option is recognized in every short-option cluster bash
+    accepts (``-c``, ``-ec``, ``-lc``), and the ``{0}`` placeholder is
+    replaced with an inert sentinel token: the generated script is the
+    step's run block, which the caller scans separately, so the
+    placeholder must not make the rest of the payload unresolvable.
     """
     if not isinstance(shell, str):
         return []
@@ -3350,12 +3355,24 @@ def _shell_template_executable_payloads(shell: object) -> list[str]:
     except ValueError:
         return []
     payloads: list[str] = []
-    for index, word in enumerate(words):
-        if word in ("-c", "--command") and index + 1 < len(words):
-            candidate = words[index + 1]
-            if "{0}" not in candidate:
-                payloads.append(candidate)
+    for index, word in enumerate(words[:-1]):
+        if not _shell_option_selects_command(word):
+            continue
+        payloads.append(
+            words[index + 1].replace("{0}", _TEMPLATE_PLACEHOLDER_SENTINEL)
+        )
     return payloads
+
+
+def _shell_option_selects_command(word: str) -> bool:
+    """Whether one shell token selects the command-string option (``-c``).
+
+    Bash accepts ``-c`` standalone and inside short-option clusters
+    (``-ec``, ``-lc``); long options never carry it.
+    """
+    if word == "--command":
+        return True
+    return _shell_option_has_flag(word, "c")
 
 
 def _shell_template_conflicting_placeholder_consumers(shell: object) -> bool:
@@ -5751,6 +5768,20 @@ def _raw_install_from_invoked_scripts(
     return False
 
 
+def _is_template_placeholder_operand(script_path: str, root: Path) -> bool:
+    """Whether an operand is the workflow template's placeholder token.
+
+    The generated script is the step's run block, which the caller scans
+    separately, so the placeholder adds nothing here.  A real file or
+    command of that exact name keeps the ordinary fail-closed treatment.
+    """
+    return (
+        script_path == _TEMPLATE_PLACEHOLDER_SENTINEL
+        and not (root / script_path).exists()
+        and shutil.which(script_path) is None
+    )
+
+
 def _raw_install_from_shell_script_file(
     script_path: str,
     depth: int,
@@ -5760,6 +5791,8 @@ def _raw_install_from_shell_script_file(
     if depth > 12 or script_path.startswith("-"):
         return True
     root = PROJECT_ROOT.resolve()
+    if _is_template_placeholder_operand(script_path, root):
+        return False
     unresolved_command_shaped_name = (
         not Path(script_path).is_absolute()
         and len(Path(script_path).parts) == 1
@@ -5800,6 +5833,8 @@ def _python_script_file_is_raw(
     script_path = _repo_rooted_script_operand(script_path) or script_path
     try:
         root = PROJECT_ROOT.resolve()
+        if _is_template_placeholder_operand(script_path, root):
+            return False
         resolved = (root / script_path).resolve(strict=True)
         resolved.relative_to(root)
         if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
