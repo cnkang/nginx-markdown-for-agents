@@ -548,6 +548,22 @@ def test_helm_legacy_values_survive_null_streaming_properties() -> None:
     assert not result.has_failures
 
 
+def test_gate4_bounds_the_cluster_name_like_its_sibling() -> None:
+    """An invalid --cluster-name fails with one clear error.
+
+    The sibling helm smoke enforces kind's grammar on the same value; the
+    bound here turns an invalid name into a direct message instead of a
+    later kind/kubectl refusal.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    assert '--cluster-name)' in script
+    assert "invalid cluster name" in script
+    assert "^[a-z][a-z0-9-]{0,62}$" in script
+
+
 def test_gate4_keeps_namespace_ownership_after_list_failure() -> None:
     """A list failure must not release a namespace this run created.
 
