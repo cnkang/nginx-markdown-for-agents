@@ -520,6 +520,12 @@ deploy_and_verify() {
     # each major's own spelling.
     local rollback_flag
     rollback_flag="$(helm_rollback_flag)"
+    # Claim the release BEFORE the install: bash defers a TERM trap until the
+    # foreground install returns, so a signal that lands after a successful
+    # install would otherwise leave the release behind (the flag would still
+    # be unset).  A failed install is rolled back by the rollback flag or
+    # lost a name race, so its branch below clears the claim again.
+    CREATED_RELEASE=1
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
@@ -540,11 +546,13 @@ deploy_and_verify() {
             >&2 || true
         # A failed install may leave partial state or race with another
         # release creator. Preserve the namespace rather than deleting data
-        # whose ownership is no longer certain.
+        # whose ownership is no longer certain.  The release claim is
+        # cleared: the rollback flag already removed a failed install, or
+        # the name was taken by another creator.
         CREATED_NAMESPACE=0
+        CREATED_RELEASE=0
         return 1
     fi
-    CREATED_RELEASE=1
 
     pass "Helm chart deployed successfully"
 

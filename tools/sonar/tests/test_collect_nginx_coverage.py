@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COVERAGE_SCRIPT = REPO_ROOT / "tools" / "sonar" / "collect_nginx_coverage.sh"
@@ -46,9 +48,12 @@ def _mask_step(
     if quote:
         if char == "\\" and index + 1 < len(script):
             return index + 2, quote, False, False
-        if char == quote:
-            return index + 1, "", False, False
-        return index + 1, quote, False, False
+        else:
+            return (
+                (index + 1, "", False, False)
+                if char == quote
+                else (index + 1, quote, False, False)
+            )
     if char == "#":
         return index + 1, "", True, True
     if char in "\"'":
@@ -248,9 +253,9 @@ def test_commented_location_block_is_not_scanned() -> None:
 def test_escaped_single_quote_inside_location_argument_is_skipped() -> None:
     """A backslash escapes the following character inside single quotes too,
     so an escaped quote cannot terminate the scanner's quote state."""
-    escaped = chr(92) + "'"
+    escaped = f"{chr(92)}'"
     script = (
-        "location ~ 'a" + escaped + "b{' {\n"
+        f"location ~ 'a{escaped}" + "b{' {\n"
         "    markdown_streaming force;\n"
         "    markdown_cache_validation full;\n"
         "}\n"
@@ -293,14 +298,17 @@ def _heredoc_body(script: str, marker_fragment: str) -> tuple[str, str]:
         if match is None:
             continue
         start = index + 1
-        delimiter = match.group(2)
+        delimiter = match[2]
         break
     assert start is not None, marker_fragment
-    end = None
-    for index in range(start, len(lines)):
-        if lines[index] == delimiter:
-            end = index
-            break
+    end = next(
+        (
+            index
+            for index in range(start, len(lines))
+            if lines[index] == delimiter
+        ),
+        None,
+    )
     assert end is not None, f"unterminated heredoc {delimiter}"
     return "\n".join(lines[start:end]), delimiter
 
@@ -323,19 +331,10 @@ def test_coverage_config_heredoc_body_has_no_executable_substitutions() -> None:
 
     assert "`" not in body
 
-    # Command-substitution parentheses stay balanced inside the body.
-    assert body.count("(") == body.count(")")
-    depth = 0
-    index = 0
-    while index < len(body):
-        if body.startswith("$(", index):
-            depth += 1
-            index += 2
-            continue
-        if body[index] == ")" and depth:
-            depth -= 1
-        index += 1
-    assert depth == 0
+    # No command substitution at all, balanced or not: the shell expands
+    # the unquoted heredoc while writing the config, so even a balanced
+    # substitution would execute.
+    assert "$(" not in body
 
 
 def test_coverage_config_heredoc_body_rejects_injected_backtick() -> None:
@@ -353,3 +352,7 @@ def test_coverage_config_heredoc_body_rejects_injected_backtick() -> None:
     mutated_body, _delimiter = _heredoc_body(mutated_script, "conf/nginx.conf")
     assert "`" in mutated_body
     assert delimiter == "EOF"
+    # The property checker itself rejects the injected body, so the
+    # assertion in the preceding test cannot pass vacuously.
+    with pytest.raises(AssertionError):
+        assert "`" not in mutated_body

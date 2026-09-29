@@ -98,9 +98,10 @@ def test_pre_lts_validator_fails_closed_without_format_checker(
     monkeypatch.setattr(
         "jsonschema.FormatChecker", lambda *args, **kwargs: empty
     )
+    report = _valid_report()
 
     with pytest.raises(ValueError) as excinfo:
-        pre_lts.validate_report(_valid_report(), schema)
+        pre_lts.validate_report(report, schema)
 
     assert "date-time" in str(excinfo.value)
 

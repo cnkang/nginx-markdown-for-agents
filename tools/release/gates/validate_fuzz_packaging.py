@@ -825,9 +825,7 @@ def _shopt_alias_expansion_state(
         return expansion_enabled
     if "-s" in options or "--set" in options:
         return True
-    if "-u" in options or "--unset" in options:
-        return False
-    return expansion_enabled
+    return False if "-u" in options or "--unset" in options else expansion_enabled
 
 
 def _alias_definitions_can_shadow(
@@ -1130,7 +1128,7 @@ def _live_commands_with_function_markers(
     markers: dict[str, tuple[str, int, int]] = {}
     marker_prefix = "__release_gate_definition_"
     while marker_prefix in script:
-        marker_prefix = "_" + marker_prefix
+        marker_prefix = f"_{marker_prefix}"
     for index, span in reversed(list(enumerate(direct))):
         head = heads.get(span)
         if head is None:
@@ -1138,7 +1136,7 @@ def _live_commands_with_function_markers(
         marker = f"{marker_prefix}{index}"
         local_start = head[0] - start
         local_end = span[2] - start
-        masked = masked[:local_start] + f"true {marker}" + masked[local_end:]
+        masked = f"{masked[:local_start]}true {marker}{masked[local_end:]}"
         markers[marker] = span
     return _live_command_segments(_strip_shell_comments(masked)), markers
 
@@ -2487,9 +2485,7 @@ def _return_kind(segment: str) -> str | None:
         # succeeds (0); classifying by the raw literal would call both
         # unknown and let commands after a failing return look reachable.
         value = int(arg) % 256
-        if value == 0:
-            return "zero"
-        return "nonzero"
+        return "zero" if value == 0 else "nonzero"
     return "unknown"
 
 
@@ -3094,9 +3090,7 @@ def _workflow_run_defaults(workflow: dict | None) -> str | list | None:
         return None
     defaults = workflow.get("defaults")
     run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
-    if not isinstance(run_defaults, dict):
-        return None
-    return run_defaults.get("shell")
+    return run_defaults.get("shell") if isinstance(run_defaults, dict) else None
 
 
 def _job_run_defaults(job: object) -> str | list | None:
@@ -3105,9 +3099,7 @@ def _job_run_defaults(job: object) -> str | list | None:
         return None
     defaults = job.get("defaults")
     run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
-    if not isinstance(run_defaults, dict):
-        return None
-    return run_defaults.get("shell")
+    return run_defaults.get("shell") if isinstance(run_defaults, dict) else None
 
 
 def _effective_step_shell(
@@ -3354,13 +3346,11 @@ def _shell_template_executable_payloads(shell: object) -> list[str]:
         words = shlex.split(shell, posix=True)
     except ValueError:
         return []
-    payloads: list[str] = []
-    for index, word in enumerate(words[:-1]):
-        if not _shell_option_selects_command(word):
-            continue
-        payloads.append(
-            words[index + 1].replace("{0}", _TEMPLATE_PLACEHOLDER_SENTINEL)
-        )
+    payloads: list[str] = [
+        words[index + 1].replace("{0}", _TEMPLATE_PLACEHOLDER_SENTINEL)
+        for index, word in enumerate(words[:-1])
+        if _shell_option_selects_command(word)
+    ]
     return payloads
 
 
@@ -3370,9 +3360,7 @@ def _shell_option_selects_command(word: str) -> bool:
     Bash accepts ``-c`` standalone and inside short-option clusters
     (``-ec``, ``-lc``); long options never carry it.
     """
-    if word == "--command":
-        return True
-    return _shell_option_has_flag(word, "c")
+    return True if word == "--command" else _shell_option_has_flag(word, "c")
 
 
 def _shell_template_conflicting_placeholder_consumers(shell: object) -> bool:
@@ -3443,9 +3431,7 @@ def _workflow_shell_name(shell: object) -> str:
         return "bash"
     if not words:
         return "bash"
-    index = 0
-    if Path(words[0]).name == "env":
-        index = _skip_env_prefix(words, 1)
+    index = _skip_env_prefix(words, 1) if Path(words[0]).name == "env" else 0
     return Path(words[index]).name if index < len(words) else "bash"
 
 
@@ -3479,9 +3465,7 @@ def _xargs_option_advance(word: str, index: int) -> int | None:
         return index + 1
     if len(word) > 2 and word[:2] in _XARGS_ATTACHED_VALUE_OPTIONS:
         return index + 1
-    if word in _XARGS_FLAGS:
-        return index + 1
-    return None
+    return index + 1 if word in _XARGS_FLAGS else None
 
 
 def _xargs_command_index(words: list[str]) -> int | None:
@@ -3508,9 +3492,7 @@ def _timeout_option_next_index(words: list[str], index: int) -> int | None:
         return index + 1
     if word in value_options:
         return index + 2 if index + 1 < len(words) else None
-    if word.startswith("--") and "=" in word:
-        return index + 1
-    return None
+    return index + 1 if word.startswith("--") and "=" in word else None
 
 
 def _timeout_command_index(words: list[str]) -> int | None:
@@ -3819,7 +3801,7 @@ def _raw_install_in_loop_segments(
         return found, len(segments)
     if index + 1 >= len(segments) or not _is_do_segment(segments[index + 1]):
         return None
-    combined = segments[index] + " " + segments[index + 1]
+    combined = f"{segments[index]} {segments[index + 1]}"
     if _raw_install_in_segment(combined, depth + 1, variables):
         return True, index
     do_segment = re.sub(r"^\s*do\b", "", segments[index + 1], count=1).strip()
@@ -3876,9 +3858,7 @@ def _shell_test_segment_step(
     closer_index = _shell_test_closer_index(
         segments, index, separators, opener
     )
-    if closer_index is None:
-        return False, index + 1
-    return True, closer_index + 1
+    return (False, index + 1) if closer_index is None else (True, closer_index + 1)
 
 
 def _shell_test_closer_index(
@@ -3939,9 +3919,7 @@ def _shell_test_opener(segment: str) -> str | None:
     condition = re.sub(r"^(?:if|elif|while|until)\s+", "", segment)
     if condition.startswith("[["):
         return "]]"
-    if condition.startswith(("[ ", "[\t")):
-        return "]"
-    return None
+    return "]" if condition.startswith(("[ ", "[\t")) else None
 
 
 def _is_loop_header(segment: str) -> bool:
@@ -3992,7 +3970,7 @@ def _command_substitution_unquoted_step(
     if script.startswith("$(", index):
         quote_stack.append(None)
         return index + 2, None, depth + 1, False
-    if char == "'" or char == '"':
+    if char in ["'", '"']:
         return index + 1, char, depth, False
     if char == "(":
         quote_stack.append(None)
@@ -4690,8 +4668,7 @@ def _python_launcher_payload_is_raw(
     payload = _python_static_expression_value(
         call.args[0], static_values, module_aliases, imported_names
     )
-    shell_mode = _python_shell_mode(target, call)
-    if shell_mode:
+    if _python_shell_mode(target, call):
         return _python_payload_is_raw(payload, True, depth, variables)
     if payload is None:
         return True
@@ -4762,10 +4739,10 @@ def _python_from_import_bindings(
         return
     for alias in node.names:
         if alias.name == "*":
-            imported_names.update({
+            imported_names |= {
                 name: f"{node.module}.{name}"
                 for name in _PYTHON_STAR_IMPORTS.get(node.module, ())
-            })
+            }
             continue
         bound_name = alias.asname or alias.name
         imported_names[bound_name] = f"{node.module}.{alias.name}"
@@ -4819,9 +4796,7 @@ def _python_dynamic_call_target(
             named = _python_getattr_literal_name(
                 current, module_aliases, imported_names
             )
-            if named is not None:
-                return f"{module}.{named}"
-            return module
+            return f"{module}.{named}" if named is not None else module
         return ".".join((module, *reversed(attributes)))
     return None
 
@@ -4878,7 +4853,7 @@ def _python_dynamic_import_module(
     the callable really is ``os.system``.
     """
     target = _python_call_name(call.func, module_aliases, imported_names)
-    if target not in {"__import__", "importlib.import_module"}:
+    if target not in {"__import__", _IMPORTLIB_MODULE_FUNCTION}:
         return _python_getattr_import_module(
             target, call, module_aliases, imported_names
         )
@@ -4899,7 +4874,7 @@ def _python_dynamic_import_module(
         # name against the calling package, so the real module is a runtime
         # concern again: a locally imported helper could hide a launcher.
         return None
-    if target == "importlib.import_module":
+    if target == _IMPORTLIB_MODULE_FUNCTION:
         return module_name
     if _python_import_fromlist_is_nonempty(call):
         return module_name
@@ -4929,9 +4904,7 @@ def _python_import_positional_level(
         positions.append(node)
         if len(positions) > 5:
             break
-    if len(positions) >= 5:
-        return False, positions[4]
-    return False, None
+    return (False, positions[4]) if len(positions) >= 5 else (False, None)
 
 
 def _python_import_level_is_relative(call: ast.Call) -> bool:
@@ -5071,7 +5044,9 @@ def _python_function_uses_dynamic_import(
     if not isinstance(current, ast.Call):
         return False
     target = _python_call_name(current.func, module_aliases, imported_names)
-    return target in {"__import__", "importlib.import_module", "getattr"}
+    return target in {
+        "__import__", _IMPORTLIB_MODULE_FUNCTION, "getattr"
+    }
 
 
 def _python_command_wrapper_spec(
@@ -5124,25 +5099,27 @@ def _python_command_wrapper_callers_are_safe(
     if spec is None:
         return False
     argument_index, allowed = spec
-    call_sites = [
-        node for node in ast.walk(tree)
+    if call_sites := [
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and _python_call_name(node.func, module_aliases, imported_names) == wrapper
-    ]
-    if not call_sites:
+        and _python_call_name(node.func, module_aliases, imported_names)
+        == wrapper
+    ]:
+        return all(
+            (executable := _python_wrapper_call_executable(
+                call,
+                argument_index,
+                node_scopes.get(id(call)),
+                values_by_scope,
+                module_aliases,
+                imported_names,
+            )) is not None
+            and Path(executable).name in allowed
+            for call in call_sites
+        )
+    else:
         return False
-    return all(
-        (executable := _python_wrapper_call_executable(
-            call,
-            argument_index,
-            node_scopes.get(id(call)),
-            values_by_scope,
-            module_aliases,
-            imported_names,
-        )) is not None
-        and Path(executable).name in allowed
-        for call in call_sites
-    )
 
 
 def _python_forwarded_argv_name(node: ast.expr) -> str | None:
@@ -5448,8 +5425,7 @@ def _python_short_flag_step(
     if flag in {"h", "V"}:
         return "terminal", None, 1
     if flag == "c":
-        attached_source = short_options[offset + 1:]
-        if attached_source:
+        if attached_source := short_options[offset + 1 :]:
             return "inline", attached_source, 1
         source_index = index + 1 if index + 1 < len(words) else None
         return "inline", source_index, 1
@@ -5485,8 +5461,6 @@ def _python_long_option_step(
         return mode, None, 0
     if option == "--check-hash-based-pycs":
         return None, None, 2
-    if option.startswith("--check-hash-based-pycs="):
-        return None, None, 1
     return None, None, 1
 
 
@@ -5535,10 +5509,10 @@ def _python_script_path(words: list[str], source_index: str | int) -> str | None
     """Return the selected Python script path from parsed argv."""
     if isinstance(source_index, str):
         return source_index
-    if source_index < len(words):
-        return words[source_index]
-    return None
+    return words[source_index] if source_index < len(words) else None
 
+
+_IMPORTLIB_MODULE_FUNCTION = "importlib.import_module"
 
 _RAW_TOOLCHAIN_INSTALL_MARKER_RE = re.compile(
     r"\brustup(?:-init)?\b|\btoolchain\s+install\b", re.IGNORECASE
@@ -5547,7 +5521,7 @@ _RAW_TOOLCHAIN_INSTALL_MARKER_RE = re.compile(
 # Redirection and heredoc syntax tokens that appear as words of a command
 # segment but name no script operand (for example `2>&1`, `>file`, `<<PY`).
 _SEGMENT_SYNTAX_TOKEN_RE = re.compile(
-    r"(?:\d*>>?|<&?\d*|<<-?|&>>?|>)"
+    r"(?:\d*>>?|<&?\d*|<<-?|&>>?)"
 )
 
 
@@ -5626,9 +5600,7 @@ def _invocation_head(segment: str) -> str | None:
     head = Path(_resolve_heredoc_word(words[index])[0]).name
     if head in ("bash", "sh", "zsh", "dash", "source", "."):
         return head
-    if head == "python" or _PYTHON_COMMAND.fullmatch(head):
-        return head
-    return None
+    return head if head == "python" or _PYTHON_COMMAND.fullmatch(head) else None
 
 
 def _followed_script_is_raw(
@@ -5655,7 +5627,7 @@ def _followed_script_is_raw(
             return False
     except (OSError, ValueError):
         return False
-    if head in ("bash", "sh", "zsh", "dash", "source", "."):
+    if head in {"bash", "sh", "zsh", "dash", "source", "."}:
         return _raw_install_from_shell_script_file(
             operand, depth + 1, variables
         ) or _python_script_file_is_raw(operand, depth + 1, variables)
@@ -5713,9 +5685,7 @@ def _single_operand_decision(
             words[index + 1], depth, variables
         )
     if operand == "-m":
-        if _module_flag_operand_is_followable(words, index):
-            return False
-        return None
+        return False if _module_flag_operand_is_followable(words, index) else None
     if not _followable_operand(operand):
         return False
     return _followed_script_is_raw(operand, head, depth, variables)
@@ -5793,14 +5763,13 @@ def _raw_install_from_shell_script_file(
     root = PROJECT_ROOT.resolve()
     if _is_template_placeholder_operand(script_path, root):
         return False
-    unresolved_command_shaped_name = (
+    if (
         not Path(script_path).is_absolute()
         and len(Path(script_path).parts) == 1
         and _mentions_raw_install(script_path)
         and not (root / script_path).exists()
         and shutil.which(script_path) is None
-    )
-    if unresolved_command_shaped_name:
+    ):
         return False
     try:
         resolved = (root / script_path).resolve(strict=True)
@@ -5868,12 +5837,12 @@ def _python_module_file_is_raw(
     if invalid:
         return True
     visited: set[Path] = set()
-    for source in sources:
-        if _python_script_file_is_raw(
+    return any(
+        _python_script_file_is_raw(
             str(source.relative_to(root)), depth, variables, visited
-        ):
-            return True
-    return False
+        )
+        for source in sources
+    )
 
 
 def _python_command_here_string(
@@ -6230,10 +6199,18 @@ def _raw_rustup_command_installs_toolchain(words: list[str]) -> bool:
     if Path(words[0]).name != "rustup":
         return False
     index = 1
-    while index < len(words) and words[index].startswith("-"):
-        if words[index] not in _RUSTUP_GLOBAL_FLAGS:
-            break
-        index += 1
+    while index < len(words):
+        word = words[index]
+        if word.startswith("+") and len(word) > 1:
+            # ``+toolchain`` selects a toolchain and shifts the subcommand
+            # to the next word; skipping it keeps ``+stable toolchain
+            # install`` recognized.
+            index += 1
+            continue
+        if word.startswith("-") and word in _RUSTUP_GLOBAL_FLAGS:
+            index += 1
+            continue
+        break
     subcommand = words[index : index + 2]
     if subcommand == ["toolchain", "install"]:
         return True
@@ -6266,11 +6243,15 @@ def _rustup_segment_opens_dynamic_subcommand(
     if not words or Path(words[0]).name != "rustup":
         return False
     operand = words[1:]
-    while operand and operand[0].startswith("-"):
-        if operand[0] not in _RUSTUP_GLOBAL_FLAGS:
-            break
-        operand = operand[1:]
-    return operand == [] or operand == ["toolchain"]
+    while operand:
+        if operand[0].startswith("+") and len(operand[0]) > 1:
+            operand = operand[1:]
+            continue
+        if operand[0].startswith("-") and operand[0] in _RUSTUP_GLOBAL_FLAGS:
+            operand = operand[1:]
+            continue
+        break
+    return operand in [[], ["toolchain"]]
 
 
 def _raw_install_from_command(
@@ -6508,8 +6489,7 @@ def _shell_here_string_parts(
         match = re.match(r"^(?:0)?<<<(.*)$", token)
         if match is None:
             continue
-        inline = match.group(1)
-        if inline:
+        if inline := match[1]:
             return index, inline, 1
         if index + 1 < len(arguments):
             return index, _resolve_heredoc_word(arguments[index + 1])[0], 2
@@ -6553,9 +6533,7 @@ def _shell_bash_option_step(
         if position + 1 >= len(arguments):
             return (False, position)
         return (None, position + 2)
-    if argument in _SHELL_FLAG_OPTIONS:
-        return (None, position + 1)
-    return None
+    return (None, position + 1) if argument in _SHELL_FLAG_OPTIONS else None
 
 
 def _shell_short_option_step(
@@ -6710,8 +6688,6 @@ def _unquoted_heredoc_bodies(script: str) -> list[str]:
         quote, markers = _scan_line_for_heredocs(line, quote)
         for delimiter, tab_stripped, dynamic in markers:
             if dynamic:
-                if index < len(lines):
-                    return bodies
                 return bodies
             body, index = _read_heredoc_body(
                 lines, index, delimiter, tab_stripped
@@ -6813,14 +6789,16 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "release workflow YAML or a referenced workflow cannot be "
             "inspected, so raw Rust toolchain installs cannot be ruled out"
         )
-    for step in steps:
-        if _step_runs_raw_toolchain_install(step):
-            return (
-                "release workflows must provision Rust toolchains "
-                "through the verified installer; found a raw or unresolved "
-                "toolchain-install command"
-            )
-    return None
+    return next(
+        (
+            "release workflows must provision Rust toolchains "
+            "through the verified installer; found a raw or unresolved "
+            "toolchain-install command"
+            for step in steps
+            if _step_runs_raw_toolchain_install(step)
+        ),
+        None,
+    )
 
 
 def _step_runs_raw_toolchain_install(step: dict) -> bool:
@@ -6952,12 +6930,18 @@ def _provisioning_nested_shell_issue(
     words: list[str], index: int, depth: int
 ) -> str | None:
     """Inspect explicit ``shell -c`` payloads recursively."""
-    for option_index, option in enumerate(words[index + 1:], index + 1):
-        if option == "-c" and option_index + 1 < len(words):
-            return _provisioning_shell_indirection_issue(
+    return next(
+        (
+            _provisioning_shell_indirection_issue(
                 words[option_index + 1], depth + 1
             )
-    return None
+            for option_index, option in enumerate(
+                words[index + 1 :], index + 1
+            )
+            if option == "-c" and option_index + 1 < len(words)
+        ),
+        None,
+    )
 
 
 def _provisioning_shell_words_issue(
@@ -7306,6 +7290,24 @@ def _step_live_commands(step: str | dict) -> list[str]:
     )
 
 
+_CARRIED_BODY_MARKER_KEYWORDS = frozenset({"then", "do", "else"})
+
+
+def _prerequisite_view_text(segment: str) -> str:
+    """Segment text as the live-command view carries it.
+
+    A ``then``/``do``/``else`` marker segment is presented to the
+    prerequisite checks as the command it carries (``then pip install ...``
+    appears as ``pip install ...``), so the masked and backgrounded sets
+    must normalize the same way or a comparison against that view misses.
+    """
+    stripped = segment.strip()
+    words = stripped.split(maxsplit=1)
+    if words and words[0] in _CARRIED_BODY_MARKER_KEYWORDS and len(words) > 1:
+        return words[1]
+    return stripped
+
+
 def _backgrounded_command_segments(script: str) -> set[str]:
     """Segment texts the shell runs in the background (``cmd &``).
 
@@ -7334,12 +7336,9 @@ def _backgrounded_command_segments(script: str) -> set[str]:
             # The list continues; the terminator decides its fate.
             continue
         if following == "&":
-            backgrounded.update(group)
+            backgrounded.update(_prerequisite_view_text(s) for s in group)
         group = []
     return backgrounded
-
-
-_ALWAYS_SUCCESS_COMMANDS = frozenset({"true", ":"})
 
 
 def _shell_rhs_discards_failure(segment: str) -> bool:
@@ -7412,7 +7411,7 @@ def _failure_masked_command_segments(
             continue
         for position in range(list_start, index + 1):
             if _member_failure_is_swallowed(pairs, position, index, errexit):
-                masked.add(pairs[position][0].strip())
+                masked.add(_prerequisite_view_text(pairs[position][0]))
         list_start = index + 1
     return masked
 
@@ -7448,9 +7447,7 @@ def _member_failure_is_swallowed(
             status_failed = not _shell_rhs_discards_failure(
                 pairs[next_position][0]
             )
-    if not status_failed:
-        return True
-    return not errexit and end + 1 < len(pairs)
+    return not errexit and end + 1 < len(pairs) if status_failed else True
 
 
 def _masked_command_segments_for_step(step: str | dict) -> set[str]:
@@ -7500,14 +7497,10 @@ def _shell_command_after_prefix(words: list[str]) -> list[str] | None:
     command = _shell_word_basename(words[0])
     if command == "timeout":
         index = _timeout_command_index(words)
-        if index is None:
-            return None
-        return _normalize_shell_command_words(words[index:])
+        return None if index is None else _normalize_shell_command_words(words[index:])
     if command in _PROCESS_PREFIX_FLAGS:
         index = _process_prefix_command_index(words)
-        if index is None:
-            return None
-        return _normalize_shell_command_words(words[index:])
+        return None if index is None else _normalize_shell_command_words(words[index:])
     wrappers = {
         "bash", "sh", "dash", "zsh", "sudo", "env", "command",
         "retry", "nohup", "nice", "stdbuf", "time",
@@ -7535,9 +7528,7 @@ def _shell_words(segment: str) -> list[str]:
         return words
     prefix = words[:command_index]
     command = _shell_command_after_prefix(words[command_index:])
-    if command is None:
-        return []
-    return [*prefix, *command]
+    return [] if command is None else [*prefix, *command]
 
 
 _MAKE_VALUE_OPTIONS = frozenset({

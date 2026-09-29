@@ -328,7 +328,7 @@ def _run_id_from(started_at: str) -> str:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     canonical = moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return "fuzz-qualification-" + canonical
+    return f"fuzz-qualification-{canonical}"
 
 
 def load_json(path: str | Path, label: str) -> dict:
@@ -1055,8 +1055,6 @@ def _signal_reaped_fuzz_process_group_when_open(
         return
     try:
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-    except ProcessLookupError:
-        return
     except OSError:
         return
 
@@ -1134,12 +1132,8 @@ def _wait_fuzz_process_without_waitid(
             raise subprocess.TimeoutExpired(process.args, timeout)
         time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
         returncode = process.poll()
-    try:
+    with contextlib.suppress(OSError):
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-    except ProcessLookupError:
-        pass
-    except OSError:
-        pass
     return returncode
 
 
@@ -1152,24 +1146,28 @@ def _terminate_fuzz_process_group(
     ``streams`` are the invocation's pipe drains: when the no-waitid wait
     path reaped the leader before an interrupt, the guarded signal skips
     (its PGID-reuse guard keys on ``returncode``) and descendants holding
-    the captured pipes would survive.  A stream whose EOF has not been
-    observed proves such a descendant still holds the group, so the same
-    ownership-checked post-reap signal is applied to each open group.
+    the captured pipes would survive.  A stream whose writer is still open
+    proves such a descendant holds the group, so the ownership-checked
+    post-reap signal is applied to each open group on those builds only.
     """
     _signal_fuzz_process_group(process, signal.SIGTERM)
     time.sleep(_PROCESS_TERMINATION_GRACE_SECONDS)
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
     )
-    if streams and getattr(process, "returncode", None) is not None:
+    if (
+        streams
+        and getattr(process, "returncode", None) is not None
+        and not _waitid_supported()
+    ):
+        # Only the no-waitid wait path can reap the leader before unwinding.
+        # On waitid builds the leader stays unreaped until the group has
+        # been signaled, so a reaped leader here means an unrelated reap,
+        # and the numeric id may already belong to another process group.
         for stream in streams:
             _signal_reaped_fuzz_process_group_when_open(process, stream)
-    try:
+    with contextlib.suppress(subprocess.TimeoutExpired):
         process.wait(timeout=_PROCESS_KILL_REAP_SECONDS)
-    except subprocess.TimeoutExpired:
-        # SIGKILL has been sent. Do not let a stuck kernel task hold the
-        # release gate indefinitely while its asynchronous exit completes.
-        pass
 
 
 def _register_fuzz_process(process: subprocess.Popen) -> None:
@@ -1713,10 +1711,8 @@ def _atomic_write_record(path: Path, record: dict) -> None:
         temporary_path = None
     finally:
         if temporary_path is not None:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 temporary_path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def _write_record(record: dict, args) -> Path:
@@ -2248,7 +2244,7 @@ def _observed_release_dirs(record: dict) -> set[str]:
     return observed
 
 
-def _expected_log_dir(record: dict, manifest: dict) -> PurePosixPath:
+def _expected_log_dir(record: dict) -> PurePosixPath:
     """Return the release-relative log directory the record's refs must use.
 
     The expected directory is the record's own release directory when its
@@ -2291,7 +2287,7 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     if not isinstance(per_target, list):
         reasons.append("malformed: record per_target must be an array")
         return reasons
-    log_dir = _expected_log_dir(record, manifest)
+    log_dir = _expected_log_dir(record)
     for index, entry in enumerate(per_target):
         reasons.extend(_per_target_reasons(entry, index))
         if isinstance(entry, dict):

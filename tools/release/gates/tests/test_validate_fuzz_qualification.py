@@ -3336,6 +3336,7 @@ def test_interrupt_signals_the_group_before_reaping_the_leader(
     try:
         validator._wait_toolchain_identity_process(process, "probe")
     except KeyboardInterrupt:
+        # The interrupt under test: cleanup assertions follow.
         pass
     finally:
         validator._finish_toolchain_identity_process(process, reader)
@@ -3380,7 +3381,7 @@ def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), _Stream(True, eof=False)
     )
-    assert killpg_pids == [], "a closed pipe must not be signaled"
+    assert not killpg_pids, "a closed pipe must not be signaled"
     # A writer is still open: the group id still belongs to this run.
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), _Stream(False)
@@ -3438,6 +3439,7 @@ def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatc
     try:
         validator._wait_toolchain_identity_process(process, "probe", stream)
     except KeyboardInterrupt:
+        # The interrupt under test: cleanup assertions follow.
         pass
     finally:
         validator._finish_toolchain_identity_process(process, reader)
@@ -3491,10 +3493,8 @@ def test_waitid_builds_never_signal_a_reaped_group(monkeypatch) -> None:
         "_signal_reaped_fuzz_process_group_when_open",
         lambda _process, _stream: signals.append("reaped"),
     )
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         validator._wait_toolchain_identity_process(_Process(), "probe", _Stream())
-    except KeyboardInterrupt:
-        pass
     assert signals == ["group"], (
         "waitid builds must not signal a reaped group by number"
     )
@@ -3547,6 +3547,8 @@ def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
             return self._eof
 
     monkeypatch.setattr(validator.time, "sleep", lambda _seconds: None)
+    # The post-reap signal exists only for the no-waitid wait path.
+    monkeypatch.setattr(validator, "_waitid_supported", lambda: False)
     monkeypatch.setattr(
         validator,
         "_signal_fuzz_process_group",
@@ -3569,7 +3571,9 @@ def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
     assert signals == ["group", "group", "reaped"], signals
 
 
-def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data() -> None:
+def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data(
+    monkeypatch,
+) -> None:
     """The kernel probe proves writer closure even with unread data.
 
     Regression: the post-reap proof used only the drain thread's EOF
@@ -3585,23 +3589,9 @@ def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data() -> None:
     os.close(write_fd)
     pipe = os.fdopen(read_fd, "rb")
     try:
-        stream = validator._BoundedStream(pipe=pipe)
-        # Writers closed with data unread: the drain flag still says no,
-        # the kernel probe says closed.
-        assert stream.eof_reached() is False
-        assert stream.writer_hangup() is True
-
-        # The gate must not signal a group whose writers have all closed.
-        signals: list[int] = []
-        original = validator.os.killpg
-        validator.os.killpg = lambda pid, signum: signals.append(pid)
-        try:
-            validator._signal_reaped_fuzz_process_group_when_open(
-                type("P", (), {"pid": os.getpid()})(), stream
-            )
-        finally:
-            validator.os.killpg = original
-        assert signals == [], "a closed writer must not be signaled"
+        _extracted_from_test_writer_hangup_probe_reports_closed_pipes_with_buffered_data_19(
+            pipe, monkeypatch
+        )
     finally:
         pipe.close()
 
@@ -3614,3 +3604,24 @@ def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data() -> None:
     finally:
         os.close(write_fd)
         pipe.close()
+
+
+# TODO Rename this here and in `test_writer_hangup_probe_reports_closed_pipes_with_buffered_data`
+def _extracted_from_test_writer_hangup_probe_reports_closed_pipes_with_buffered_data_19(pipe, monkeypatch):
+    stream = validator._BoundedStream(pipe=pipe)
+    # Writers closed with data unread: the drain flag still says no,
+    # the kernel probe says closed.
+    assert stream.eof_reached() is False
+    assert stream.writer_hangup() is True
+
+    # The gate must not signal a group whose writers have all closed.
+    signals: list[int] = []
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: signals.append(pid),
+    )
+    validator._signal_reaped_fuzz_process_group_when_open(
+        type("P", (), {"pid": os.getpid()})(), stream
+    )
+    assert not signals, "a closed writer must not be signaled"

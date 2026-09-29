@@ -1226,24 +1226,28 @@ def test_implementation_plan_distinguishes_prepared_notes_from_publication():
     assert (pending_phrase in wi11_row) is pending
 
 
-def test_release_document_history_does_not_claim_a_planned_publish_date():
-    """Document-update dates must not be presented as release metadata."""
-    paths = (
+@pytest.mark.parametrize(
+    "relative_path",
+    (
         "docs/guides/UPGRADE-TO-0.9.2.md",
         "docs/development/0.9.2-implementation-plan.md",
         "docs/releases/0.9.2-release-notes.md",
         "docs/project/VERSION_PLANNING.md",
         "docs/project/PROJECT_STATUS.md",
-    )
+    ),
+)
+def test_release_document_history_does_not_claim_a_planned_publish_date(
+    relative_path,
+):
+    """Document-update dates must not be presented as release metadata."""
     unsupported_claims = (
         "Planned publication date recorded in the release metadata",
         "Planned publication date adjusted in the release metadata",
         "Planned publication date corrected in the release metadata",
     )
 
-    for relative_path in paths:
-        text = (docs_checker.ROOT / relative_path).read_text(encoding="utf-8")
-        assert not any(claim in text for claim in unsupported_claims), relative_path
+    text = (docs_checker.ROOT / relative_path).read_text(encoding="utf-8")
+    assert all(claim not in text for claim in unsupported_claims), relative_path
 
 
 def test_version_planning_scopes_the_candidate_release_description():
@@ -1292,8 +1296,10 @@ def test_implementation_plan_scopes_historical_pending_labels():
         "checksums."
     )
     assert (pending_phrase in intro) is pending
-    if not pending:
-        assert any(word in intro.lower() for word in ("published", "released"))
+    published_word_present = any(
+        word in intro.lower() for word in ("published", "released")
+    )
+    assert pending or published_word_present
     assert "plan-era `pending` wording below is historical" not in intro
 
 
@@ -1334,8 +1340,7 @@ def test_upgrade_guide_does_not_substitute_an_older_release_tag():
         "${release_base}/sha256sums",
         "${release_base}/sha256sums.asc",
     )
-    for asset in assets:
-        assert asset in guide
+    assert all(asset in guide for asset in assets)
     assert docs_checker.check_release_state_contract(docs_checker.ROOT) == []
 
 
@@ -1474,18 +1479,23 @@ def test_release_boundary_carries_from_a_neighbor_sentence_without_version() -> 
                for issue in without_boundary)
 
 
-def test_pending_release_state_checks_migration_and_rollback_surfaces(tmp_path):
-    """Current migration and rollback guidance cannot announce a pending release."""
-    for rel in (
+@pytest.mark.parametrize(
+    "rel",
+    (
         "docs/guides/MIGRATION-9.9.9.md",
         "docs/releases/9.9.9-upgrade-and-rollback.md",
-    ):
-        _write_pending_state(
-            tmp_path,
-            **{rel: "The v9.9.9 release has been published.\n"},
-        )
-        failures = docs_checker.check_release_state_contract(tmp_path)
-        assert any(rel in failure and "is described as" in failure for failure in failures), failures
+    ),
+)
+def test_pending_release_state_checks_migration_and_rollback_surfaces(tmp_path, rel):
+    """Current migration and rollback guidance cannot announce a pending release."""
+    _write_pending_state(
+        tmp_path,
+        **{rel: "The v9.9.9 release has been published.\n"},
+    )
+    failures = docs_checker.check_release_state_contract(tmp_path)
+    assert any(
+        rel in failure and "is described as" in failure for failure in failures
+    ), failures
 
 
 def test_pending_changelog_prologue_is_a_current_state_surface(tmp_path):
@@ -1580,12 +1590,10 @@ def test_pending_context_does_not_promote_ci_artifact_availability() -> None:
     assert not docs_checker._claim_belongs_to_pending_version(
         "The new benchmark build is available in CI.",
         "9.9.9",
-        version_context=True,
     )
     assert docs_checker._claim_belongs_to_pending_version(
         "The v9.9.9 release is available for download.",
         "9.9.9",
-        version_context=True,
     )
 
 
@@ -1594,12 +1602,10 @@ def test_ci_artifact_exemption_does_not_hide_a_separate_release_claim() -> None:
     assert docs_checker._claim_belongs_to_pending_version(
         "The benchmark is available in CI, but v9.9.9 was published.",
         "9.9.9",
-        version_context=True,
     )
     assert docs_checker._claim_belongs_to_pending_version(
         "v9.9.9 was published, and the benchmark is available in CI.",
         "9.9.9",
-        version_context=True,
     )
 
 
@@ -1654,9 +1660,7 @@ def test_latest_tag_context_rejects_prereleases_and_release_notes():
     """A draft release-note label or prerelease does not prove stable release."""
     pending_context = "## [9.9.9] - Unreleased\n"
     assert not docs_checker._claims_pending_latest_tag(
-        pending_context + "Latest release notes are available.",
-        "9.9.9",
-        True,
+        f"{pending_context}Latest release notes are available.", "9.9.9", True
     )
     assert not docs_checker._claims_pending_latest_tag(
         "v9.9.9-rc5 is the latest release.", "9.9.9", True
@@ -1807,7 +1811,7 @@ def test_release_version_boundaries_are_ascii_after_cjk_text():
     adjacent = "v9.9.9发布"
 
     stable = docs_checker._stable_claim_failures(
-        "README.md", "9.9.9", adjacent + " release candidate"
+        "README.md", "9.9.9", f"{adjacent} release candidate"
     )
     pending = docs_checker._claim_belongs_to_pending_version(
         "v9.9.9已正式发布", "9.9.9"
@@ -1926,13 +1930,18 @@ def test_family_count_gate_ignores_dotted_version_trailing_digits(
     doc_path.parent.mkdir()
     monkeypatch.setattr(docs_checker, "ROOT", root)
 
-    for benign in (
+    benign_lines = (
         "0.9.2 family names and label sets do not exist under 0.9.1.",
         "Prometheus text 0.0.4 family catalog, content type.",
         "| 0.8.x Metric Key | 0.9.0 Metric Family | Label |",
-    ):
-        doc_path.write_text(benign + "\n", encoding="utf-8")
-        assert docs_checker.check_metric_family_count([doc_path]) == [], benign
+    )
+
+    def _benign_failures(line: str) -> list[str]:
+        doc_path.write_text(line + "\n", encoding="utf-8")
+        return docs_checker.check_metric_family_count([doc_path])
+
+    benign_results = {line: _benign_failures(line) for line in benign_lines}
+    assert all(failures == [] for failures in benign_results.values()), benign_results
 
     # A genuine wrong claim on a line that also carries a dotted version is
     # still caught: the count token here is space-delimited, not a version tail.
@@ -2160,3 +2169,24 @@ def test_prepublication_boundary_needs_a_left_word_boundary():
     assert docs_checker._is_conditional_publication_block(
         "There are no artifacts published for this version."
     )
+
+
+def test_versionless_availability_claims_distinguish_the_release() -> None:
+    """`available` counts when asserted of the release, not of artifacts.
+
+    An availability claim naming the release itself ("the release is
+    available") affirms a shipped artifact and must be caught; the same
+    verb asserted of generic artifacts ("artifacts are available from the
+    mirror") is ordinary prose and must not be.
+    """
+    def claim(text):
+        match = docs_checker._PREPUBLICATION_COMPLETION_CLAIM_RE.search(text)
+        assert match is not None, text
+        return docs_checker._claim_names_pending_version(
+            text, match, docs_checker._release_version_pattern("9.9.9")
+        )
+
+    assert claim("The release is available.")
+    assert claim("The new version is available.")
+    assert not claim("The release artifacts are available from the mirror.")
+    assert not claim("The binaries are available.")
