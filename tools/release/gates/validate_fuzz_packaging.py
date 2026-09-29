@@ -8068,6 +8068,25 @@ def _make_flags_value_masks_failures(value: str) -> bool:
     return False
 
 
+def _make_environment_overrides_the_run(env: object) -> bool:
+    """Whether make's environment re-points its toolchain or its inputs.
+
+    ``MAKE`` replaces the program every ``$(MAKE)`` recursion runs and
+    ``MAKEFILES`` preloads a file whose definitions precede the repository
+    Makefile, so either leaves the checked target's recipes unverifiable
+    (verified on GNU Make 4.3 and 4.4.1: ``MAKE=/usr/bin/true make
+    docs-check`` and a preloaded file assigning ``SHELL`` both exit 0
+    without running the check).
+    """
+    if not isinstance(env, dict):
+        return False
+    for name in ("MAKE", "MAKEFILES"):
+        value = env.get(name)
+        if isinstance(value, str) and value:
+            return True
+    return False
+
+
 def _make_environment_defeats_certification(env: object) -> bool:
     """Whether make's environment defeats a docs-check certification.
 
@@ -8078,9 +8097,12 @@ def _make_environment_defeats_certification(env: object) -> bool:
     value that supplies its own makefile or ``--eval`` text also defeats
     the certification: the repository Makefile is never read (or its
     recipes are replaced), so ``docs-check`` cannot have run.  A
-    workflow, job, or step scope can carry it, and a command-local
+    ``MAKE``/``MAKEFILES`` override defeats it outright.  A workflow,
+    job, or step scope can carry any of these, and a command-local
     assignment is inspected by the caller.
     """
+    if _make_environment_overrides_the_run(env):
+        return True
     if not isinstance(env, dict):
         return False
     for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
@@ -8096,29 +8118,54 @@ def _make_environment_defeats_certification(env: object) -> bool:
     return False
 
 
-def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
+def _make_command_local_values_defeat(
+    words: list[str], command_index: int
+) -> bool:
+    """Whether the invocation's own prefix overrides defeat certification.
+
+    A command-scoped ``MAKE``/``MAKEFILES`` assignment re-points the run
+    exactly as its environment form does, and a ``MAKEFLAGS``/
+    ``GNUMAKEFLAGS`` prefix carrying a non-executing mode,
+    makefile-supplying option, failure mask, or variable assignment
+    disqualifies the invocation.
+    """
+    command_local = _pip_prefix_env_values(words, command_index)
+    for name in ("MAKE", "MAKEFILES"):
+        if command_local.get(name):
+            return True
+    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        value = command_local.get(name)
+        if value is None:
+            continue
+        if (
+            _make_flags_value_prevents_execution(value)
+            or _make_flags_value_uncertifiable(value)
+            or _make_flags_value_masks_failures(value)
+        ):
+            return True
+    return False
+
+
+def _runs_make_docs_check(
+    words: list[str], env: object = None, *, cwd_at_root: bool = True
+) -> bool:
     """Whether make's command and target positions invoke docs-check.
 
-    The check also requires the invocation to actually execute: a
-    non-executing mode in the effective environment (``MAKEFLAGS``), in a
-    command-local assignment, or in the option list itself disqualifies it.
+    The check also requires the invocation to actually execute in the
+    repository: a non-executing mode in the effective environment
+    (``MAKEFLAGS``), in a command-local assignment, or in the option list
+    itself disqualifies it, and so does a step whose directory left the
+    repository root (the make invocation then reads another Makefile).
     """
+    if not cwd_at_root:
+        return False
     if _make_environment_defeats_certification(env):
         return False
     command_index = _make_docs_check_index(words)
     if command_index is None:
         return False
-    command_local = _pip_prefix_env_values(words, command_index)
-    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
-        value = command_local.get(name)
-        if value is None:
-            continue
-        if _make_flags_value_prevents_execution(value):
-            return False
-        if _make_flags_value_uncertifiable(value):
-            return False
-        if _make_flags_value_masks_failures(value):
-            return False
+    if _make_command_local_values_defeat(words, command_index):
+        return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets
 
@@ -8324,13 +8371,15 @@ def _step_retry_is_trusted(step: str | dict) -> bool:
 
 
 def _pip_step_commands(
-    segment: str, env: object = None
+    segment: str, env: object = None, cwd_at_root: bool = True
 ) -> tuple[bool, bool]:
     """Whether one executable segment installs pinned deps or runs docs-check.
 
     ``env`` is the step's effective environment mapping (workflow → job →
     step precedence), so ``PIP_DRY_RUN`` set at any scope disqualifies the
-    install the same way the ``--dry-run`` flag does.
+    install the same way the ``--dry-run`` flag does.  ``cwd_at_root`` is
+    the step's directory state at this segment: a make invocation in a
+    foreign directory cannot certify the repository check.
     """
     words = _shell_words(segment)
     command_index = _skip_env_assignments(words, 0)
@@ -8338,7 +8387,9 @@ def _pip_step_commands(
     install = bool(_PIP_REQUIREMENT_RE.search(command)) and not (
         _pip_dry_run_active(words, command_index, env)
     )
-    return install, _runs_make_docs_check(words, env)
+    return install, _runs_make_docs_check(
+        words, env, cwd_at_root=cwd_at_root
+    )
 
 
 def _pip_prerequisite_position(
@@ -8358,22 +8409,57 @@ def _pip_prerequisite_position(
     return segment.strip() not in masked
 
 
+def _segment_abandons_repo_root(segment: str) -> bool:
+    """Whether one command segment changes away from the repository root.
+
+    ``cd <operand>`` with an operand other than ``.``/``./`` moves the
+    shell, so a later ``make`` in the same step reads a different
+    Makefile (``cd "$RUNNER_TEMP/noop" && make -C . docs-check`` runs the
+    planted chain - verified).  A bare ``cd`` goes home and an operand the
+    scan cannot resolve may name any directory, so both count as leaving.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return False
+    index = _skip_env_assignments(words, 0)
+    if index >= len(words) or _shell_word_basename(words[index]) != "cd":
+        return False
+    if index + 1 >= len(words):
+        return True
+    return words[index + 1] not in (".", "./")
+
+
+def _step_working_directory_keeps_root(step: str | dict) -> bool:
+    """Whether a step's declared working directory stays at the repo root."""
+    if not isinstance(step, dict):
+        return True
+    return step.get("working-directory") in (None, "", ".", "./")
+
+
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     """Classify each live, unmasked segment of one step.
 
     Returns ``(segment_index, installs, checks_docs)`` for every command in
     the step's foreground view that may satisfy a prerequisite; masked and
     untrusted-retry segments are filtered out here so both consumers share
-    one liveness model.
+    one liveness model.  A command that leaves the repository root (a
+    ``cd`` away, or a foreign ``working-directory``) disqualifies a later
+    docs-check segment: the make invocation then reads another directory's
+    Makefile.
     """
     retry_trusted = _step_retry_is_trusted(step)
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
+    cwd_at_root = _step_working_directory_keeps_root(step)
     scanned: list[tuple[int, bool, bool]] = []
     for command_index, segment in enumerate(_foreground_live_commands(step)):
+        if _segment_abandons_repo_root(segment):
+            cwd_at_root = False
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
-        installs, checks_docs = _pip_step_commands(segment, step_env)
+        installs, checks_docs = _pip_step_commands(
+            segment, step_env, cwd_at_root
+        )
         scanned.append((command_index, installs, checks_docs))
     return scanned
 
