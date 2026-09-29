@@ -302,11 +302,15 @@ settle_failed_install_ownership() {
         return 0
     fi
     if [[ -n "$live" ]]; then
-        # A live release (another creator's) holds the name: preserve it
-        # and the namespace content with it.
+        # A live release (another creator's) holds the name: preserve it,
+        # the namespace content, and the cluster that holds them.  Deleting
+        # the cluster would take the other creator's release down with it,
+        # so the cluster claim clears alongside the others (the same
+        # contract the collision branch applies).
         info "Install failed; a live release holds the name, cleanup preserves it"
         CREATED_RELEASE=0
         CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
         return 0
     fi
     local surviving

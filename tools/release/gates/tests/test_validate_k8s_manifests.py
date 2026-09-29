@@ -687,6 +687,16 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
     assert "--deployed" in live
     assert "--pending" not in live
 
+    # The live-release branch preserves everything that holds the other
+    # creator's release, including the cluster that contains it.
+    live_branch = fn.split('if [[ -n "$live" ]]', 1)[1].split(
+        "return 0", 1
+    )[0]
+    assert "CREATED_CLUSTER=0" in live_branch, (
+        "a live release (another creator's) must keep its cluster: "
+        "deleting the cluster would take the release down with it"
+    )
+
     # The collision classification runs BEFORE any state query: a transient
     # query failure must not turn a settled collision back into "this run's
     # release" and let cleanup uninstall the concurrent winner.
