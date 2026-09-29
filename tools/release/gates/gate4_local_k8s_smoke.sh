@@ -273,9 +273,13 @@ settle_failed_install_ownership() {
     # "release: already exists" when both racers passed that check.
     if [[ "$install_error" == *"name that is still in use"* ]] \
         || [[ "$install_error" == *"release: already exists"* ]]; then
+        # The other creator's release lives in this cluster: deleting the
+        # cluster would take it down with the release, so the cluster is
+        # preserved along with the release and its namespace.
         info "Install failed; another creator holds the release name, cleanup preserves it"
         CREATED_RELEASE=0
         CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
         return 0
     fi
     # A failed install is followed by one of three states.  The pre-install
@@ -623,16 +627,14 @@ deploy_and_verify() {
         --timeout "${POD_WAIT_TIMEOUT}" \
         "${rollback_flag}" \
         2>&1)"; then
+        # Settle ownership FIRST: bash runs a deferred TERM trap between
+        # foreground commands, so a signal landing on any later command
+        # would clean up while a collision's ownership flags were still
+        # set (and uninstall the other creator's release).  The settlement
+        # classifies the captured error before any output.
+        settle_failed_install_ownership "$install_output"
         printf '%s\n' "$install_output" >&2
         fail "helm install failed"
-        # Settle ownership BEFORE the diagnostics: bash runs a deferred
-        # TERM trap between foreground commands, so a signal landing during
-        # the kubectl queries below would clean up while a collision's
-        # ownership flags were still set (and uninstall the other
-        # creator's release).  Settling first classifies the captured
-        # error and clears the flags; the diagnostics then run with the
-        # final ownership state.
-        settle_failed_install_ownership "$install_output"
         info "Pod status:"
         kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
             >&2 || true

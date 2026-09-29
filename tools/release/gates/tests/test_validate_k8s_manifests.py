@@ -673,6 +673,12 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
     )
     assert "CREATED_RELEASE=0" in collision
     assert "CREATED_NAMESPACE=0" in collision
+    # The collider's release lives in this cluster: deleting the cluster
+    # would take it down too, so the cluster claim clears with the others.
+    assert "CREATED_CLUSTER=0" in collision, (
+        "a collision must preserve the cluster that holds the other "
+        "creator's release"
+    )
 
     # The live query reads deployed state only: a pending release may be
     # this run's own failed install, and treating that as another
@@ -690,17 +696,19 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
         "the collision check must precede the deployed-state query"
     )
 
-    # The caller reaches the settlement BEFORE its diagnostics: a TERM
-    # landing during the kubectl queries would otherwise clean up with the
+    # The caller reaches the settlement before ANY output: bash runs a
+    # deferred TERM trap between foreground commands, so a signal landing
+    # on the print or the kubectl queries below would clean up with the
     # collision's ownership flags still set.
-    caller = script.split('fail "helm install failed"', 1)[1].split(
+    caller = script.split("if ! install_output=", 1)[1].split(
         "return 1", 1
     )[0]
     assert caller.index("settle_failed_install_ownership") < caller.index(
+        'fail "helm install failed"'
+    ), "the settlement must run before the failure output"
+    assert caller.index("settle_failed_install_ownership") < caller.index(
         "get pods"
-    ), (
-        "the settlement must run before the failure diagnostics"
-    )
+    ), "the settlement must run before the failure diagnostics"
 
     # The surviving query includes pending so this run's own pending
     # release is uninstalled by cleanup.
