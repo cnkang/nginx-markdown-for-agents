@@ -7149,22 +7149,33 @@ _ALWAYS_SUCCESS_COMMANDS = frozenset({"true", ":"})
 
 
 def _shell_rhs_discards_failure(segment: str) -> bool:
-    """Whether a ``||`` right-hand segment always succeeds.
+    """Whether a ``||`` right-hand segment turns failure into success.
 
-    ``|| true``, ``|| :``, ``|| exit 0`` and ``|| return 0`` turn any
-    left-hand failure into a successful chain, so the command's exit
-    status no longer proves the command succeeded.
+    Only a provably unsuccessful right-hand side keeps the left-hand
+    failure visible: ``false``, and ``exit``/``return`` with no argument
+    (the failure status is reused) or a literal nonzero status.  Every
+    other form - ``true``, ``:``, ``exit 0``, ``echo``, ``printf``, an
+    empty or unrecognized segment - masks the failure, so the chain
+    succeeds even when the command fails and its exit status proves
+    nothing.
     """
     words = _shell_words(segment)
     command_index = _skip_env_assignments(words, 0)
     command = words[command_index:]
     if not command:
-        return False
-    if command[0] in _ALWAYS_SUCCESS_COMMANDS:
         return True
+    if command[0] == "false":
+        return False
     if command[0] in {"exit", "return"}:
-        return len(command) == 2 and command[1] == "0"
-    return False
+        if len(command) == 1:
+            # Without an argument the status is reused, so a failed left
+            # side keeps failing the chain.
+            return False
+        if len(command) == 2 and command[1].isdigit():
+            return int(command[1]) == 0
+        # Non-literal statuses stay unrecognized and fail closed.
+        return True
+    return True
 
 
 def _failure_masked_command_segments(script: str) -> set[str]:

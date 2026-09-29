@@ -4522,13 +4522,29 @@ def test_dependency_gate_rejects_failure_masked_prerequisites() -> None:
         {"run": "python3 -m pip install -r requirements-release.txt"},
         {"run": "make docs-check || true"},
     ]
+    masked_echo = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " || echo failed"
+            )
+        },
+        {"run": "make docs-check || echo failed"},
+    ]
     for steps, needle in (
         (masked_install, "failure-masking"),
         (masked_docs, "failure-masking"),
+        (masked_echo, "failure-masking"),
     ):
         issue = packaging_gate._python_deps_issue(steps)
         assert issue is not None, steps
         assert needle in issue, issue
+
+    # A ``||`` right-hand that is not provably unsuccessful masks failure,
+    # so an unknown form fails closed too.
+    assert packaging_gate._shell_rhs_discards_failure("echo failed")
+    assert packaging_gate._shell_rhs_discards_failure("cd /tmp")
+    assert packaging_gate._shell_rhs_discards_failure("")
 
     # Controls: propagating and plain forms satisfy the gate.
     propagated = [
@@ -4536,6 +4552,13 @@ def test_dependency_gate_rejects_failure_masked_prerequisites() -> None:
         {"run": "make docs-check || exit 1"},
     ]
     assert packaging_gate._python_deps_issue(propagated) is None
+    propagating_forms = [
+        {"run": "python3 -m pip install -r requirements-release.txt || false"},
+        {"run": "make docs-check || exit"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating_forms) is None
+    for rhs in ("false", "exit 1", "exit", "return 2", "return"):
+        assert not packaging_gate._shell_rhs_discards_failure(rhs), rhs
     plain = [
         {"run": "python3 -m pip install -r requirements-release.txt"},
         {"run": "make docs-check"},

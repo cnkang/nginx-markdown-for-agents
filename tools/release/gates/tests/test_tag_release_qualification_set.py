@@ -885,6 +885,29 @@ def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
     # write) is reclaimed only after a grace period so a merely slow
     # publisher is never displaced.
     assert "-mmin +1" in reaper
+    # After taking the mutex the waiter re-reads the recorded pid and
+    # proceeds only while it names this wait: a recovery by another
+    # waiter can displace the directory between the mkdir and the write,
+    # and a phantom mutex must not admit its holder into the critical
+    # section.
+    verify_line = (
+        'if [[ "$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)" == "$$" ]]'
+    )
+    assert verify_line in reaper, (
+        "the acquirer must re-read its ownership before returning"
+    )
+    printf_line = 'printf \'%s\\n\' "$$" > "${LOCK_PATH}.reaper/pid"'
+    assert reaper.index(printf_line) < reaper.index(verify_line)
+    # A claimed directory whose owner is alive is restored or parked, and
+    # the claim name carries the loop counter so a parked claim from an
+    # earlier iteration is never a rename target again.
+    assert "${LOCK_PATH}.reaper.stale.$$.${waited}" in reaper
+    live_claim = reaper.split("claimed_pid", 1)[1].split("else", 1)[0]
+    assert "kill -0 \"${claimed_pid}\"" in live_claim
+    assert "mv \"${reaper_claim}\" \"${LOCK_PATH}.reaper\"" in live_claim
+    assert "rm -rf \"${reaper_claim}\"" not in live_claim, (
+        "a live owner's claimed mutex must never be deleted"
+    )
 
 
 def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:
