@@ -750,6 +750,25 @@ def test_helm_cluster_smoke_preserves_a_release_won_by_a_concurrent_creator(
         )
 
 
+def test_helm_cluster_smoke_keeps_the_cluster_when_namespace_create_loses() -> None:
+    """A lost namespace-create race must not delete the shared cluster.
+
+    This run's lock serializes only its own scenario runs, so a concurrent
+    actor can create the namespace first.  Whatever holds it lives in this
+    cluster, so the cluster claim clears before the failure exit; deleting
+    the cluster would destroy the other actor's namespace and workloads.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    branch = script.split(
+        "unable to create namespace", 1
+    )[1].split("fi", 1)[0]
+    assert "CREATED_CLUSTER=0" in branch, (
+        "a namespace-create race must preserve the cluster"
+    )
+
+
 def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> None:
     """An overlong name is rejected before any lock path is built.
 
@@ -773,6 +792,30 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
         )
         assert result.returncode == 1, (bad, result.stderr)
         assert "invalid cluster name" in result.stderr, (bad, result.stderr)
+
+
+def test_helm_cluster_smoke_rechecks_the_claimed_lock_owner() -> None:
+    """The stale check re-reads the owner after the claim rename.
+
+    A creator that paused past the age grace can publish its pid between
+    the stale check and the rename; deleting that claim would admit a
+    second run while the owner still holds the critical section.  The
+    branch restores (or parks) a claim whose recorded owner is alive.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    claim = script.split('stale_claim="${LOCK_PATH}.stale.$$"', 1)[1]
+    claim = claim.split("release_lock_reaper", 1)[0]
+    assert 'cat "${stale_claim}/pid"' in claim, (
+        "the claimed owner must be re-read after the rename"
+    )
+    assert 'kill -0 "${claimed_owner}"' in claim, (
+        "a live claimed owner must be detected"
+    )
+    assert 'mv "${stale_claim}" "${LOCK_PATH}.d"' in claim, (
+        "a live owner's claim must be restored, never deleted"
+    )
 
 
 def test_helm_cluster_smoke_publishes_owner_record_exclusively() -> None:

@@ -596,8 +596,14 @@ deploy_and_verify() {
     fi
     rm -f -- "$release_stderr_file"
     if [[ -n "$existing_release" ]]; then
+        # The pre-existing release lives in this cluster, so the cluster
+        # claim clears with the others: deleting the cluster would take
+        # that release down.  (Two gate4 runs share the fixed cluster and
+        # release names, and gate4 holds no lock, so a concurrent run's
+        # release can appear here after this run created the cluster.)
         fail "Pre-existing Helm release ${HELM_RELEASE_NAME}; refusing to replace it"
         CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
         return 1
     fi
 
