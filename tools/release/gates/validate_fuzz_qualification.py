@@ -36,6 +36,7 @@ import json
 import math
 import os
 import re
+import select
 import signal
 import subprocess
 import sys
@@ -596,6 +597,7 @@ def _start_toolchain_identity_process(
     stream = _BoundedStream(
         max_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
         max_pending_line_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
+        pipe=process.stdout,
     )
     reader = threading.Thread(
         target=_drain_stream, args=(process.stdout, stream), daemon=True
@@ -823,8 +825,10 @@ class _BoundedStream:
         self,
         max_chars: int = _MAX_CAPTURE_CHARS,
         max_pending_line_chars: int = _MAX_PENDING_LINE_CHARS,
+        pipe: object = None,
     ) -> None:
         self._max_pending_line_chars = max_pending_line_chars
+        self._pipe = pipe
         self._head_limit = max_chars // 2
         self._tail_limit = max_chars - self._head_limit
         self._head: list[str] = []
@@ -845,6 +849,32 @@ class _BoundedStream:
     def eof_reached(self) -> bool:
         """Whether every pipe writer has closed (no descendant holds stdout)."""
         return self._eof_seen.is_set()
+
+    def writer_hangup(self) -> bool | None:
+        """Whether the OS reports every writer of the pipe has closed.
+
+        A kernel-visible complement to ``eof_reached``: the drain thread
+        marks EOF only after it has consumed the buffered bytes, so a pipe
+        whose writers all closed but whose data is still buffered reports
+        "not EOF".  ``poll`` reports the write end's state directly
+        (POLLHUP), so it proves the writers are gone even with unread
+        data.  Returns True when every writer has closed, False when a
+        writer still holds the write end, and None when no probe is
+        available (no pipe, or no ``poll`` on this platform).
+        """
+        if self._pipe is None or not hasattr(select, "poll"):
+            return None
+        if self._pipe.closed:
+            # The drain thread closes the read end only after its read
+            # loop observed EOF.
+            return True
+        try:
+            poller = select.poll()
+            poller.register(self._pipe.fileno(), select.POLLHUP)
+            events = poller.poll(0)
+        except (OSError, ValueError):
+            return None
+        return any(flags & select.POLLHUP for _fd, flags in events)
 
     def feed(self, chunk: str) -> None:
         """Consume one decoded chunk, retaining head, tail and markers."""
@@ -996,15 +1026,20 @@ def _signal_reaped_fuzz_process_group_when_open(
     reuse guard, but the interrupt path can unwind after the wait loop
     reaped the leader while descendants still hold the group.  Signalling
     by number alone would risk a reused group id, so the signal is gated
-    on pipe EOF: the write end closing is the one event that proves every
-    descendant released the pipe.  While EOF has NOT been observed, some
-    process still holds the write end; that process inherited it from this
-    invocation's leader, so it is a live group member: the PGID is still
-    allocated and the signal reaches exactly this run's descendants.  Once
-    EOF is observed the group may be empty, so no signal is sent (the id
-    could already name another process group, and no descendant needs it).
-    A short settle lets a reader that is finishing the reaped leader's
-    last output mark EOF first, so that common case never signals.
+    on pipe closure: the write end closing is the one event that proves
+    every descendant released the pipe.  The kernel's POLLHUP probe
+    reports the write end's state directly, so it stays conclusive even
+    when a closed pipe still has buffered data the drain thread has not
+    consumed (a drained-then-marked flag would misread that case, where a
+    reused group id could receive the signal).  While a writer is open,
+    some process still holds the write end; that process inherited it
+    from this invocation's leader, so it is a live group member: the
+    PGID is still allocated and the signal reaches exactly this run's
+    descendants.  Once every writer has closed the group may be empty, so
+    no signal is sent.  A short settle lets a reader that is finishing
+    the reaped leader's last output observe closure first.  When the
+    platform offers no poll probe, the drain thread's EOF flag is the
+    fallback proof.
     """
     if os.name != "posix":
         return
@@ -1013,7 +1048,10 @@ def _signal_reaped_fuzz_process_group_when_open(
         # alone, because the id may already belong to another process.
         return
     time.sleep(_PROCESS_WAIT_POLL_SECONDS)
-    if stream.eof_reached():
+    hangup = stream.writer_hangup()
+    if hangup is True:
+        return
+    if hangup is None and stream.eof_reached():
         return
     try:
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
@@ -1199,7 +1237,8 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
                 "wall_elapsed": time.monotonic() - started,
                 "marker_finding": None}
     _register_fuzz_process(process)
-    stdout_stream, stderr_stream = _BoundedStream(), _BoundedStream()
+    stdout_stream = _BoundedStream(pipe=process.stdout)
+    stderr_stream = _BoundedStream(pipe=process.stderr)
     readers = [
         threading.Thread(target=_drain_stream, args=(pipe, stream), daemon=True)
         for pipe, stream in ((process.stdout, stdout_stream),

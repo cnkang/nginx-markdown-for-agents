@@ -3357,8 +3357,12 @@ def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
     killpg_pids: list[int] = []
 
     class _Stream:
-        def __init__(self, eof: bool) -> None:
+        def __init__(self, hangup, eof: bool = False) -> None:
+            self._hangup = hangup
             self._eof = eof
+
+        def writer_hangup(self):
+            return self._hangup
 
         def eof_reached(self) -> bool:
             return self._eof
@@ -3371,22 +3375,33 @@ def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
         "killpg",
         lambda pid, signum: killpg_pids.append(pid),
     )
-    # EOF observed: every writer closed, so the group may be empty.
+    # The kernel reports every writer closed: no signal, even though a
+    # drain thread could still be consuming buffered data (eof False).
     validator._signal_reaped_fuzz_process_group_when_open(
-        _Process(), _Stream(True)
+        _Process(), _Stream(True, eof=False)
     )
     assert killpg_pids == [], "a closed pipe must not be signaled"
-    # EOF not observed: a writer still holds the pipe, so a descendant
-    # is alive and the group id still belongs to this run.
+    # A writer is still open: the group id still belongs to this run.
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), _Stream(False)
     )
     assert killpg_pids == [os.getpid()], "an open writer must be signaled"
+    # No probe available: the drain-thread EOF flag is the fallback proof.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=True)
+    )
+    assert killpg_pids == [os.getpid()], "a closed stream must not be signaled"
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=False)
+    )
+    assert killpg_pids == [os.getpid(), os.getpid()], (
+        "an open writer must be signaled without a kernel probe"
+    )
     # No proof available at all: never signal by number alone.
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), None
     )
-    assert killpg_pids == [os.getpid()]
+    assert killpg_pids == [os.getpid(), os.getpid()]
 
 
 def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
@@ -3455,8 +3470,11 @@ def test_waitid_builds_never_signal_a_reaped_group(monkeypatch) -> None:
             return 1
 
     class _Stream:
-        def eof_reached(self):
+        def writer_hangup(self):
             return False  # a writer is still open
+
+        def eof_reached(self):
+            return False
 
     def raising_wait(process, timeout):
         process.wait()
@@ -3522,6 +3540,9 @@ def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
         def __init__(self, eof: bool) -> None:
             self._eof = eof
 
+        def writer_hangup(self):
+            return None
+
         def eof_reached(self) -> bool:
             return self._eof
 
@@ -3546,3 +3567,50 @@ def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
     )
     # Both streams are consulted; the open one signals, the closed one not.
     assert signals == ["group", "group", "reaped"], signals
+
+
+def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data() -> None:
+    """The kernel probe proves writer closure even with unread data.
+
+    Regression: the post-reap proof used only the drain thread's EOF
+    flag, which is set after the buffered bytes are consumed.  A pipe
+    whose writers all closed but whose data is still buffered reported
+    "not EOF", so the signal could target a reused group id.  ``poll``
+    reports POLLHUP from the kernel directly and stays conclusive.
+    """
+    if os.name != "posix" or not hasattr(validator.select, "poll"):
+        pytest.skip("a kernel poll probe requires POSIX poll()")
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"buffered\n")
+    os.close(write_fd)
+    pipe = os.fdopen(read_fd, "rb")
+    try:
+        stream = validator._BoundedStream(pipe=pipe)
+        # Writers closed with data unread: the drain flag still says no,
+        # the kernel probe says closed.
+        assert stream.eof_reached() is False
+        assert stream.writer_hangup() is True
+
+        # The gate must not signal a group whose writers have all closed.
+        signals: list[int] = []
+        original = validator.os.killpg
+        validator.os.killpg = lambda pid, signum: signals.append(pid)
+        try:
+            validator._signal_reaped_fuzz_process_group_when_open(
+                type("P", (), {"pid": os.getpid()})(), stream
+            )
+        finally:
+            validator.os.killpg = original
+        assert signals == [], "a closed writer must not be signaled"
+    finally:
+        pipe.close()
+
+    # A live writer is reported open, so the signal proceeds.
+    read_fd, write_fd = os.pipe()
+    pipe = os.fdopen(read_fd, "rb")
+    try:
+        stream = validator._BoundedStream(pipe=pipe)
+        assert stream.writer_hangup() is False
+    finally:
+        os.close(write_fd)
+        pipe.close()

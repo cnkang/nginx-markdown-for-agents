@@ -4919,3 +4919,58 @@ def test_masking_does_not_overmask_commands_after_a_masking_branch() -> None:
     assert not any(
         segment.startswith("python3 -m pip") for segment in masked
     )
+
+
+def test_shell_template_option_clusters_and_placeholders_are_scanned() -> None:
+    """Option clusters and ``{0}``-carrying payloads must not hide installs.
+
+    Regression: the template scanner recognized only a standalone ``-c``
+    token, so ``bash -ec '...' 0 {0}`` was skipped whole; and a payload
+    containing ``{0}`` was skipped, so ``bash -c 'bash {0}; rustup ...'``
+    hid an install behind the placeholder.  Clusters are parsed, and the
+    placeholder is substituted with an inert sentinel (the generated
+    script is the run block, which the caller scans separately).
+    """
+    cluster = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -ec 'rustup toolchain install nightly' 0 {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(cluster) is not None
+
+    placeholder_payload = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'bash {0}; rustup toolchain install nightly' 0"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        placeholder_payload
+    ) is not None
+
+    # Controls: benign clusters, placeholder-only payloads, and bare
+    # interpreter forms stay accepted.
+    benign_cluster = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -ec 'echo hi' 0 {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(benign_cluster) is None
+    benign_placeholder = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'bash {0}; echo ok' 0"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        benign_placeholder
+    ) is None
+    python_template = """jobs:
+  release-gate:
+    steps:
+      - shell: 'bash -c "python3 {0}"'
+        run: 'print("hello")'
+"""
+    assert packaging_gate._raw_toolchain_install_issue(python_template) is None
