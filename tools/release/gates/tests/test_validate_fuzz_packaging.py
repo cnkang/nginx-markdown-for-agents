@@ -2206,6 +2206,38 @@ def _provisioning_workflow(
     )
 
 
+def test_dot_source_invocations_are_recognized_and_followed(
+    tmp_path, monkeypatch
+) -> None:
+    """A dot-sourced script runs in-shell, so its operand is followed.
+
+    Regression: ``Path(".").name`` is empty, so the ``. ./script`` spelling
+    was not recognized as a followed invocation at all (the ``source``
+    keyword was).  Both spellings now resolve to the interpreter head, the
+    wrapper dispatcher follows a dot-sourced operand like any other invoked
+    script, and a dot-source with no operand fails closed.
+    """
+    assert packaging_gate._invocation_head(". ./x.sh") == "."
+    assert packaging_gate._invocation_head("source ./x.sh") == "source"
+    assert packaging_gate._raw_install_from_wrapper(["."], 0) is True, (
+        "a dot-source without an operand cannot be inspected: fail closed"
+    )
+
+    # With a resolvable repository-local script, the dot-sourced body is
+    # actually scanned: a raw install inside it is found through both
+    # spellings.
+    helper = tmp_path / "helper.sh"
+    helper.write_text(
+        "rustup toolchain install 1.2.3 --profile minimal\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    for operand in (".", "source"):
+        assert packaging_gate._raw_install_from_invoked_scripts(
+            f"{operand} ./helper.sh\n", 0, None
+        ) is True, operand
+
+
 def test_provisioning_shadow_guard_rejects_external_shell_inputs() -> None:
     """Sourced files, eval and inherited startup files are not modeled."""
     for source in (
