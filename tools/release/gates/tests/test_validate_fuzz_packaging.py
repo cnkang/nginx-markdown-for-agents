@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pathlib
 import shlex
+import textwrap
 import subprocess
 
 import pytest
@@ -4836,4 +4837,85 @@ def test_return_status_is_normalized_to_eight_bits() -> None:
     issue = packaging_gate._python_deps_issue([{"run": script}])
     assert issue is not None, (
         "commands after a failing return must not count as reachable"
+    )
+
+
+def _heredoc_body_workflow(body: str) -> str:
+    return f"""jobs:
+  release-gate:
+    steps:
+      - run: |
+{textwrap.indent(body, '          ')}
+"""
+
+
+def test_unquoted_heredoc_substitutions_are_scanned() -> None:
+    """An unquoted heredoc expands its body, so substitutions execute.
+
+    Regression: ``cat <<EOF`` with a ``$(rustup toolchain install ...)``
+    line hid the installer -- the body was data for command scanning and
+    the substitution scan ran only on the stripped script.  Unquoted
+    heredoc bodies now have their command substitutions scanned; a quoted
+    delimiter suppresses expansion and its body stays literal.
+    """
+    unquoted = _heredoc_body_workflow(
+        "cat <<EOF\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(unquoted) is not None
+
+    quoted = _heredoc_body_workflow(
+        "cat <<'EOF'\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(quoted) is None
+
+    benign = _heredoc_body_workflow(
+        "cat <<EOF\ntext $(date) only\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+
+
+def test_shell_template_commands_are_scanned() -> None:
+    """A custom shell template can execute its own commands.
+
+    Regression: ``shell: "bash -c 'rustup toolchain install nightly' {0}"``
+    runs the installer from the template while the scanned run block
+    stays harmless.  The template's ``-c`` payloads are scanned now; a
+    benign template (and the bare ``bash {0}`` form) stays accepted.
+    """
+    yaml = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'rustup toolchain install nightly' {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(yaml) is not None
+    benign = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'echo hi' {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+
+
+def test_masking_does_not_overmask_commands_after_a_masking_branch() -> None:
+    """A command after ``false || true &&`` still runs and reports itself.
+
+    Regression: the list-level walk masked EVERY member once any ``||``
+    discarded failure, so ``false || true && pip install ...`` excluded
+    the install even though it runs and its failure is the list's final
+    status.  Each member is simulated individually now.
+    """
+    script = (
+        "false || true && "
+        "python3 -m pip install -r requirements-release.txt"
+    )
+    steps = [{"run": script, "shell": "bash"}, {"run": "make docs-check"}]
+    assert packaging_gate._python_deps_issue(steps) is None
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=True
+    )
+    assert "false" in masked
+    assert not any(
+        segment.startswith("python3 -m pip") for segment in masked
     )

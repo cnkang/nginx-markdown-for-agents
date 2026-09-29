@@ -1105,13 +1105,27 @@ def _wait_fuzz_process_without_waitid(
     return returncode
 
 
-def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
-    """Bound TERM grace, then KILL every remaining process in the group."""
+def _terminate_fuzz_process_group(
+    process: subprocess.Popen,
+    streams: tuple[_BoundedStream, ...] | None = None,
+) -> None:
+    """Bound TERM grace, then KILL every remaining process in the group.
+
+    ``streams`` are the invocation's pipe drains: when the no-waitid wait
+    path reaped the leader before an interrupt, the guarded signal skips
+    (its PGID-reuse guard keys on ``returncode``) and descendants holding
+    the captured pipes would survive.  A stream whose EOF has not been
+    observed proves such a descendant still holds the group, so the same
+    ownership-checked post-reap signal is applied to each open group.
+    """
     _signal_fuzz_process_group(process, signal.SIGTERM)
     time.sleep(_PROCESS_TERMINATION_GRACE_SECONDS)
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
     )
+    if streams and getattr(process, "returncode", None) is not None:
+        for stream in streams:
+            _signal_reaped_fuzz_process_group_when_open(process, stream)
     try:
         process.wait(timeout=_PROCESS_KILL_REAP_SECONDS)
     except subprocess.TimeoutExpired:
@@ -1204,10 +1218,10 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
             _terminate_fuzz_process_group(process)
     except KeyboardInterrupt:
         _FUZZ_CANCEL_REQUESTED.set()
-        _terminate_fuzz_process_group(process)
+        _terminate_fuzz_process_group(process, (stdout_stream, stderr_stream))
         raise
     except BaseException:
-        _terminate_fuzz_process_group(process)
+        _terminate_fuzz_process_group(process, (stdout_stream, stderr_stream))
         raise
     finally:
         if process.returncode is None:
