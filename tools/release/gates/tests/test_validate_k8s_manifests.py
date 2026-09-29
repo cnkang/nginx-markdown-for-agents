@@ -648,6 +648,13 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
         "the collision check must match the shared suffix of both Helm "
         "spellings"
     )
+    # The storage-layer race (both racers pass the availability check, one
+    # loses the stored-release create) reports a different error, so the
+    # settlement must recognize that shape too.
+    assert 'install_error" == *"release: already exists' in fn, (
+        "the collision check must also match the storage-layer create "
+        "error both Helm majors report"
+    )
     assert "CREATED_RELEASE=0" in collision
     assert "CREATED_NAMESPACE=0" in collision
 
