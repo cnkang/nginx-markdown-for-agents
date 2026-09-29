@@ -169,6 +169,12 @@ parse_args() {
             --cluster-name)
                 [[ $# -ge 2 ]] || die "--cluster-name requires a value"
                 CLUSTER_NAME="$2"
+                # The sibling helm smoke enforces kind's grammar on this
+                # value; the same bound here turns an invalid name into one
+                # clear error instead of a later kind/kubectl refusal.
+                if [[ ! "${CLUSTER_NAME}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+                    die "invalid cluster name: ${CLUSTER_NAME}"
+                fi
                 shift 2
                 ;;
             -h|--help)
