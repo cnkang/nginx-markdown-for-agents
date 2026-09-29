@@ -840,7 +840,7 @@ def test_helm_cluster_smoke_rechecks_the_claimed_lock_owner() -> None:
     script = (
         REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
     ).read_text(encoding="utf-8")
-    claim = script.split('stale_claim="${LOCK_PATH}.stale.$$"', 1)[1]
+    claim = script.split('stale_claim="${LOCK_PATH}.stale.$$.${waited}"', 1)[1]
     claim = claim.split("release_lock_reaper", 1)[0]
     assert 'cat "${stale_claim}/pid"' in claim, (
         "the claimed owner must be re-read after the rename"
@@ -850,6 +850,12 @@ def test_helm_cluster_smoke_rechecks_the_claimed_lock_owner() -> None:
     )
     assert 'mv "${stale_claim}" "${LOCK_PATH}.d"' in claim, (
         "a live owner's claim must be restored, never deleted"
+    )
+    # The restore only targets a free canonical path: mv onto an existing
+    # directory nests the claim inside it (rc=0) and would bury the live
+    # owner's record under the new acquisition.
+    assert 'if [[ ! -e "${LOCK_PATH}.d" ]]' in claim, (
+        "the restore must not move onto an occupied canonical path"
     )
 
 
@@ -1149,11 +1155,18 @@ def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:
 
     block = script.split("acquire_cluster_lock() {", 1)[1]
     block = block.split("\n}\n", 1)[0]
-    claim = block.split("stale_claim=\"${LOCK_PATH}.stale.$$\"", 1)[1]
+    # The claim name carries the loop counter so a parked claim is never a
+    # rename target again.
+    claim = block.split('stale_claim="${LOCK_PATH}.stale.$$.${waited}"', 1)[1]
     claim = claim.split("continue", 1)[0]
-    assert 'rm -rf "${stale_claim}"' in claim, (
-        "a claimed stale directory must be deleted"
-    )
+    # The owner is re-read after the rename: a dead owner's claim is
+    # deleted, a live owner's claim is restored only into a free
+    # canonical path (mv onto an existing directory nests instead of
+    # failing) and parked otherwise - never deleted.
+    assert 'cat "${stale_claim}/pid"' in claim
+    assert 'kill -0 "${claimed_owner}"' in claim
+    assert 'if [[ ! -e "${LOCK_PATH}.d" ]]' in claim
+    assert 'rm -rf "${stale_claim}"' in claim
 
 
 def test_helm_cluster_smoke_uses_a_run_unique_release_name() -> None:
