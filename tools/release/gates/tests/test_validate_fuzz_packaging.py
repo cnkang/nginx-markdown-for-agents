@@ -3485,6 +3485,7 @@ def test_job_run_step_records_parses_workflow_once(monkeypatch) -> None:
         {
             "run": "echo safe",
             "shell": None,
+            "working-directory": None,
             "env": {},
             "env_scopes": {"workflow": {}, "job": {}, "step": {}},
         }
@@ -3823,6 +3824,55 @@ def test_make_long_option_abbreviations_fail_closed() -> None:
     assert not packaging_gate._make_flags_value_prevents_execution(
         "--jobserver-auth=3,4"
     )
+
+
+def test_run_step_records_resolve_the_effective_working_directory() -> None:
+    """The record carries the working directory GitHub would use.
+
+    Regression: `_job_run_step_records` carried only run/shell/env, so a
+    step-level or `defaults.run.working-directory` away from the root was
+    invisible to the certification scan.  The record now resolves step >
+    job defaults > workflow defaults.
+    """
+    body = (
+        "          python3 -m pip install -r requirements-release.txt\n"
+        "          make docs-check\n"
+    )
+
+    def workflow(step_wd=None, job_wd=None, wf_wd=None) -> str:
+        lines = ["jobs:", "  release-gate:"]
+        if wf_wd:
+            lines += ["    defaults:", "      run:",
+                      f"        working-directory: {wf_wd}"]
+        if job_wd:
+            lines += ["    defaults:", "      run:",
+                      f"        working-directory: {job_wd}"]
+        lines += ["    steps:", "      - run: |", body.rstrip("\n")]
+        if step_wd:
+            lines.append(f"        working-directory: {step_wd}")
+        return "\n".join(lines) + "\n"
+
+    def records(content):
+        return packaging_gate._job_run_step_records(content, "release-gate")
+
+    assert records(workflow())[0]["working-directory"] is None
+    assert records(workflow(step_wd="/tmp/noop"))[0][
+        "working-directory"
+    ] == "/tmp/noop"
+    assert records(workflow(wf_wd="/tmp/noop"))[0][
+        "working-directory"
+    ] == "/tmp/noop"
+    assert records(workflow(job_wd="/tmp/a"))[0][
+        "working-directory"
+    ] == "/tmp/a"
+    # Step wins over job wins over workflow.
+    assert records(workflow(step_wd=".", job_wd="/tmp/a", wf_wd="/tmp/b"))[0][
+        "working-directory"
+    ] == "."
+    # And the resolved value disqualifies a docs-check run.
+    content = workflow(step_wd="/tmp/noop")
+    assert packaging_gate._python_deps_issue(records(content)) is not None
+    assert packaging_gate._python_deps_issue(records(workflow())) is None
 
 
 def test_make_toolchain_overrides_and_foreign_directories_fail() -> None:

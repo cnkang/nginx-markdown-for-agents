@@ -3084,22 +3084,45 @@ def _workflow_job_steps(job: object) -> list[dict] | None:
     return steps
 
 
+def _run_default_field(container: object, field: str) -> str | None:
+    """Return one ``defaults.run.<field>`` value from a workflow or job."""
+    if not isinstance(container, dict):
+        return None
+    defaults = container.get("defaults")
+    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
+    if not isinstance(run_defaults, dict):
+        return None
+    return run_defaults.get(field)
+
+
 def _workflow_run_defaults(workflow: dict | None) -> str | list | None:
     """Return the workflow-level ``defaults.run.shell``, if declared."""
-    if not isinstance(workflow, dict):
-        return None
-    defaults = workflow.get("defaults")
-    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
-    return run_defaults.get("shell") if isinstance(run_defaults, dict) else None
+    return _run_default_field(workflow, "shell")
 
 
 def _job_run_defaults(job: object) -> str | list | None:
     """Return the job-level ``defaults.run.shell``, if declared."""
-    if not isinstance(job, dict):
-        return None
-    defaults = job.get("defaults")
-    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
-    return run_defaults.get("shell") if isinstance(run_defaults, dict) else None
+    return _run_default_field(job, "shell")
+
+
+def _effective_step_working_directory(
+    step: dict,
+    job_default: str | None,
+    workflow_default: str | None,
+) -> str | None:
+    """Resolve a run step's working directory by GitHub's precedence.
+
+    Step ``working-directory`` wins over job ``defaults.run.working-directory``,
+    which wins over the workflow-level default.  A step that declares none
+    inherits them, and an inherited value away from the repository root
+    redirects the make invocation exactly as a step-level one does.
+    """
+    directory = step.get("working-directory")
+    if directory is None:
+        directory = job_default
+    if directory is None:
+        directory = workflow_default
+    return directory
 
 
 def _effective_step_shell(
@@ -3131,10 +3154,12 @@ def _job_run_step_records(
         return None
     workflow_env = workflow.get("env") if workflow is not None else None
     workflow_default = _workflow_run_defaults(workflow)
+    workflow_directory = _run_default_field(workflow, "working-directory")
     job = jobs[job_name]
     if not isinstance(job, dict):
         return None
     job_default = _job_run_defaults(job)
+    job_directory = _run_default_field(job, "working-directory")
     steps = _workflow_job_steps(job)
     if steps is None:
         return None
@@ -3156,6 +3181,9 @@ def _job_run_step_records(
         records.append({
             "run": step["run"],
             "shell": shell,
+            "working-directory": _effective_step_working_directory(
+                step, job_directory, workflow_directory
+            ),
             "env": _merge_environment_scopes(scopes),
             "env_scopes": scopes,
         })
