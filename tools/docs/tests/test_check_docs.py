@@ -2129,3 +2129,34 @@ def test_duplicate_unreleased_heading_is_rejected(tmp_path):
     failures = docs_checker.check_release_state_contract(tmp_path)
 
     assert any("duplicate Unreleased heading" in f for f in failures), failures
+
+
+def test_prepublication_boundary_needs_a_left_word_boundary():
+    """A 'no ... published/released' boundary must not start mid-word.
+
+    Regression: the alternative ``no\\b.{0,100}\\b(?:published|released)``
+    lacked a left word boundary, so ordinary prose matched inside words:
+    'The pia**no** concerto was published' and 'the tech**no** album was
+    released' looked like conditional-publication boundaries.  That
+    mis-classification would mask a genuine premature-publication claim
+    in the same sentence.  The boundary is anchored now; real negations
+    keep matching.
+    """
+    regex = docs_checker._PREPUBLICATION_BOUNDARY_RE
+
+    # Word-internal matches are gone.
+    assert regex.search("The piano concerto was published yesterday.") is None
+    assert regex.search("The techno album was released last week.") is None
+    assert regex.search("The kimono was released to the store.") is None
+
+    # Real negations still count as boundaries.
+    assert regex.search("no artifacts published") is not None
+    assert regex.search("No v9.8.8 release was published.") is not None
+
+    # End to end: the boundary classification itself.
+    assert not docs_checker._is_conditional_publication_block(
+        "The piano concerto was published yesterday."
+    )
+    assert docs_checker._is_conditional_publication_block(
+        "There are no artifacts published for this version."
+    )

@@ -35,7 +35,13 @@ NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-nginx:1.30.4-alpine3.24@sha256:dc5069ad14f
 NGINX_BASE_DIGEST="${NGINX_BASE_IMAGE##*@}"
 MODULE_SO="${MODULE_SO:-${REPO_ROOT}/build/ngx_http_markdown_filter_module.so}"
 MODULE_PATH_IN_IMAGE="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
-RELEASE="markdown-smoke"
+# The release name is run-unique: the lock serializes runs of THIS script,
+# but an external actor can still create a fixed name between the ownership
+# check and the install, and cleanup would then uninstall a release it does
+# not own.  A unique name makes the ownership check race-free by
+# construction (the name cannot pre-exist), and the namespace stays fixed
+# so the reuse/cleanup contract for it is unchanged.
+RELEASE="markdown-smoke-$$"
 NAMESPACE="markdown-smoke"
 KEEP=0
 CREATED_CLUSTER=0

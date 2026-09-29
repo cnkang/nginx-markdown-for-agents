@@ -646,7 +646,12 @@ def _wait_toolchain_identity_process(
         _signal_fuzz_process_group(process, signal.SIGTERM)
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
-        else:
+        elif not _waitid_supported():
+            # Only builds without waitid/WNOWAIT can reap the leader before
+            # unwinding, so only they need the post-reap group signal.  On
+            # waitid builds the leader stays a zombie until the group has
+            # been signaled, so no post-reap signal is sent: after the reap
+            # the numeric id may already belong to another process group.
             _signal_reaped_fuzz_process_group_when_open(process, stream)
         raise
     _signal_fuzz_process_group(
@@ -1018,6 +1023,14 @@ def _signal_reaped_fuzz_process_group_when_open(
         return
 
 
+def _waitid_supported() -> bool:
+    """Whether this build can observe exit without reaping (``WNOWAIT``)."""
+    required = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    return os.name == "posix" and all(
+        hasattr(os, name) for name in required
+    )
+
+
 def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
     """Kill descendants before reaping the group leader, avoiding PGID reuse.
 
@@ -1035,8 +1048,7 @@ def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
     """
     if os.name != "posix":
         return process.wait(timeout=timeout)
-    required_waitid = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
-    if any(not hasattr(os, name) for name in required_waitid):
+    if not _waitid_supported():
         return _wait_fuzz_process_without_waitid(process, timeout)
     deadline = time.monotonic() + timeout
     while True:

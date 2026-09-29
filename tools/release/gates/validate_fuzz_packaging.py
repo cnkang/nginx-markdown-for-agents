@@ -7186,11 +7186,12 @@ def _shell_rhs_discards_failure(segment: str) -> bool:
 
     Only a provably unsuccessful right-hand side keeps the left-hand
     failure visible: ``false``, and ``exit``/``return`` with no argument
-    (the failure status is reused) or a literal nonzero status.  Every
-    other form - ``true``, ``:``, ``exit 0``, ``echo``, ``printf``, an
-    empty or unrecognized segment - masks the failure, so the chain
-    succeeds even when the command fails and its exit status proves
-    nothing.
+    (the failure status is reused) or a literal nonzero status AFTER the
+    shell's 8-bit truncation (``exit 256`` exits successfully, so it
+    masks).  Every other form - ``true``, ``:``, ``exit 0``, ``echo``,
+    ``printf``, an empty or unrecognized segment - masks the failure, so
+    the chain succeeds even when the command fails and its exit status
+    proves nothing.
     """
     words = _shell_words(segment)
     command_index = _skip_env_assignments(words, 0)
@@ -7204,14 +7205,24 @@ def _shell_rhs_discards_failure(segment: str) -> bool:
             # Without an argument the status is reused, so a failed left
             # side keeps failing the chain.
             return False
-        if len(command) == 2 and command[1].isdigit():
-            return int(command[1]) == 0
-        # Non-literal statuses stay unrecognized and fail closed.
+        if len(command) == 2:
+            try:
+                status = int(command[1])
+            except ValueError:
+                # Non-literal statuses stay unrecognized and fail closed.
+                return True
+            # The shell truncates an exit status to its low 8 bits, so
+            # `exit 256` exits successfully (256 % 256 == 0) and the
+            # chain succeeds: that masks the failure.
+            return status % 256 == 0
+        # More than one argument (a syntax error at runtime) fails closed.
         return True
     return True
 
 
-def _failure_masked_command_segments(script: str) -> set[str]:
+def _failure_masked_command_segments(
+    script: str, errexit: bool = True
+) -> set[str]:
     """Segment texts whose failure a following ``||`` chain swallows.
 
     A prerequisite written as ``cmd || true`` can certify a step while its
@@ -7221,6 +7232,14 @@ def _failure_masked_command_segments(script: str) -> set[str]:
     reaches ``true``, while ``cmd || false`` propagates it.  A chain
     member whose outcome cannot be proven stays conservative (it may
     succeed, so the failure may be swallowed).
+
+    ``errexit`` models the step's shell: with errexit (GitHub's default
+    bash adds ``-e``) a propagating chain fails the shell immediately, so
+    a later command cannot replace its status.  Without errexit the shell
+    continues past the failed chain and the step's final status comes
+    from the last command, so a followed chain still swallows the
+    failure; the conservative reading masks it whenever any later
+    segment exists.
     """
     pairs = _command_segments_with_separators(script)
     masked: set[str] = set()
@@ -7233,6 +7252,12 @@ def _failure_masked_command_segments(script: str) -> set[str]:
                 masked.add(segment.strip())
                 break
             cursor += 1
+        else:
+            # The chain propagates the failure.  Without errexit the
+            # shell still runs what follows and that command's status
+            # replaces this one, so a later segment swallows it too.
+            if not errexit and cursor < len(pairs):
+                masked.add(segment.strip())
     return masked
 
 
@@ -7244,7 +7269,10 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
-    return _failure_masked_command_segments(executable)
+    shell = step.get("shell") if isinstance(step, dict) else None
+    return _failure_masked_command_segments(
+        executable, errexit=_shell_initial_errexit(shell)
+    )
 
 
 def _foreground_live_commands(step: str | dict) -> list[str]:
@@ -7556,7 +7584,9 @@ def _pip_install_is_dry_run(words: list[str], command_index: int) -> bool:
     )
 
 
-_PIP_DRY_RUN_FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
+_PIP_DRY_RUN_FALSE_VALUES = frozenset(
+    {"", "0", "false", "no", "off", "n", "f"}
+)
 
 
 def _pip_dry_run_value_active(value: object) -> bool:

@@ -936,3 +936,26 @@ def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:
     assert 'rm -rf "${stale_claim}"' in claim, (
         "a claimed stale directory must be deleted"
     )
+
+
+def test_helm_cluster_smoke_uses_a_run_unique_release_name() -> None:
+    """The release name is run-unique, so cleanup cannot hit another run's.
+
+    Regression: with a fixed release name the ownership check, the install,
+    and cleanup form a TOCTOU window for external cluster users (the lock
+    only serializes runs of this script): an external actor could create
+    the name after the check, the install would fail, and cleanup would
+    uninstall THEIR release.  A pid-unique name makes the window vanish by
+    construction while the namespace stays fixed for the reuse contract.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'RELEASE="markdown-smoke-$$"' in script
+    # The namespace stays fixed: reuse and cleanup logic depend on it.
+    assert 'NAMESPACE="markdown-smoke"' in script
+    # Cleanup uninstalls exactly the derived name.
+    cleanup = script.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert 'helm uninstall "${RELEASE}"' in cleanup
