@@ -7542,6 +7542,38 @@ _MAKE_VALUE_OPTIONS = frozenset({
     "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
     "--old-file", "-W", "--what-if", "--assume-new", "--eval",
 })
+# Options that supply their own makefile or definitions.  An invocation
+# carrying one of these cannot prove that the REPOSITORY's docs-check ran:
+# the target it resolves may come from the supplied makefile or from the
+# ``--eval`` text (``make -f /dev/null --eval='docs-check: ;' docs-check``
+# succeeds while the repository chain never executes).
+_MAKE_UNCERTIFIABLE_OPTIONS = frozenset(
+    {"-f", "--file", "--makefile", "-E", "--eval"}
+)
+_MAKE_UNCERTIFIABLE_LONG_PREFIXES = ("--file=", "--makefile=", "--eval=")
+
+
+def _make_option_replaces_makefile(word: str) -> bool:
+    """Whether one option word supplies its own makefile or definitions.
+
+    Long forms match exactly or with an ``=`` operand.  In a short cluster
+    the letters are scanned as make parses them: ``f``/``E`` supply a
+    makefile or an evaled statement, and reaching any other
+    argument-taking letter first means a later ``f``/``E`` is that
+    option's argument, not an option.
+    """
+    if word in _MAKE_UNCERTIFIABLE_OPTIONS:
+        return True
+    if word.startswith(_MAKE_UNCERTIFIABLE_LONG_PREFIXES):
+        return True
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    for letter in word[1:]:
+        if letter in ("f", "E"):
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            return False
+    return False
 _MAKE_NONEXECUTING_OPTIONS = frozenset({
     "-n", "--dry-run", "--just-print", "--recon",
     "-q", "--question", "-t", "--touch",
@@ -7593,6 +7625,28 @@ def _make_option_prevents_execution(word: str) -> bool:
     )
 
 
+def _make_option_step(words: list[str], index: int) -> int | None:
+    """Advance past one make option word, or reject the invocation.
+
+    Returns the next index, or None when the word cannot be certified: a
+    non-executing option, a supplied makefile/--eval, or an option whose
+    operand is missing.  A word that is not an option is left for the
+    caller to record as a target.
+    """
+    word = words[index]
+    if _make_option_prevents_execution(word):
+        return None
+    if _make_option_replaces_makefile(word):
+        # A supplied makefile or --eval text means the resolved target may
+        # not be the repository's docs-check chain.
+        return None
+    if word in _MAKE_VALUE_OPTIONS:
+        return index + 2 if index + 1 < len(words) else None
+    if word.startswith("-"):
+        return index + 1
+    return None
+
+
 def _make_targets_after_options(words: list[str], index: int) -> list[str] | None:
     """Collect make target words, or reject a command that cannot execute them."""
     targets: list[str] = []
@@ -7600,19 +7654,14 @@ def _make_targets_after_options(words: list[str], index: int) -> list[str] | Non
         word = words[index]
         if word == "--":
             return targets + words[index + 1:]
-        if _make_option_prevents_execution(word):
-            return None
-        if word in _MAKE_VALUE_OPTIONS:
-            if index + 1 >= len(words):
+        if word.startswith("-"):
+            next_index = _make_option_step(words, index)
+            if next_index is None:
                 return None
-            index += 2
-        elif word.startswith("--") and "=" in word:
-            index += 1
-        elif word.startswith("-"):
-            index += 1
-        else:
-            targets.append(word)
-            index += 1
+            index = next_index
+            continue
+        targets.append(word)
+        index += 1
     return targets
 
 
