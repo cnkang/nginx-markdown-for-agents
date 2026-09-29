@@ -24,33 +24,50 @@ E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
 E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
 
 # Cleanup ownership boundary:
-# Normal exits are handled by the Rust harness process lifecycle (Drop).
-# This trap provides best-effort cleanup for hard kills or signals that
-# prevent the Rust harness from running its own cleanup.  It removes
-# stale e2e-harness temp directories matching this scenario that are
-# older than 10 minutes (a running harness will hold files open and
-# thus be immune to removal).
+# The Rust harness owns the lifecycle of the working directory it creates:
+# it removes the tree on normal completion and retains it on failure so
+# diagnostics survive (see `cleanup_artifacts` in tools/e2e-harness).
+# The trap below only recovers directories left behind by an invocation
+# that died before it could clean up, and it proves ownership before
+# removing anything: the directory name embeds the process id of the
+# harness that created it, and the directory is removed only when that
+# process is provably gone.  Age is never used as evidence - a run that
+# outlives any threshold must keep its working directory.
 _wrapper_cleanup() {
   if [[ "${KEEP_ARTIFACTS:-0}" -eq 1 ]]; then
     return
   fi
-  local tmpdir
-  tmpdir="$(mktemp -u -q)" 2>/dev/null || tmpdir="${TMPDIR:-/tmp}"
-  local base="${tmpdir%/*}"
-  local stale_sec=600
-  local now
-  now="$(date +%s)" 2>/dev/null || return
+  # The Rust harness creates its tree under std::env::temp_dir(), which is
+  # TMPDIR when the caller sets one; a probe like `mktemp -u` can resolve a
+  # different directory, so the base is taken from TMPDIR directly.
+  local base="${TMPDIR:-/tmp}"
+  local d name pid inv candidate
   for d in "${base}"/e2e-harness-${SCENARIO_NAME}-*; do
     [[ -d "$d" ]] || continue
-    local mtime
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      mtime="$(stat -f %m "$d" 2>/dev/null)" || continue
-    else
-      mtime="$(stat -c %Y "$d" 2>/dev/null)" || continue
+    name="${d##*/}"
+    if [[ ! "$name" =~ ^e2e-harness-${SCENARIO_NAME}-([0-9]+)-[0-9]+$ ]]; then
+      continue
     fi
-    if [[ $(( now - mtime )) -gt stale_sec ]]; then
-      rm -rf "$d" 2>/dev/null || true
+    pid="${BASH_REMATCH[1]}"
+    if kill -0 "$pid" 2>/dev/null; then
+      # The creating invocation is still running; its directory is not ours.
+      continue
     fi
+    # Corroborate ownership with the harness's own metadata: the first
+    # invocation record found in the tree must name this scenario.  The
+    # check can only block a removal, never cause one.
+    inv=""
+    for candidate in "${d}"/artifacts/scenarios/*/invocation.json; do
+      if [[ -f "$candidate" ]]; then
+        inv="$candidate"
+        break
+      fi
+    done
+    if [[ -n "$inv" ]] \
+        && ! grep -q "\"scenario\"[[:space:]]*:[[:space:]]*\"${SCENARIO_NAME}\"" "$inv" 2>/dev/null; then
+      continue
+    fi
+    rm -rf "$d" 2>/dev/null || true
   done
   return 0
 }
