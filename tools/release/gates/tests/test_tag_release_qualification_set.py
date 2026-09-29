@@ -739,6 +739,52 @@ def test_helm_cluster_smoke_preserves_a_release_won_by_a_concurrent_creator(
         )
 
 
+def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> None:
+    """An overlong name is rejected before any lock path is built.
+
+    The lock path appends the cluster name to a fixed prefix; a name near
+    the filesystem's 255-byte filename limit makes the fallback lock's
+    mkdir fail silently and retry until its timeout instead of reaching
+    kind.
+    """
+    for bad in ("a" * 64, "cluster-" + "b" * 60):
+        tools = tmp_path / bad[:20] / "bin"
+        tools.mkdir(parents=True)
+        env = os.environ.copy()
+        env |= {"PATH": f"{tools}{os.pathsep}{env['PATH']}", "CLUSTER": bad}
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh")],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 1, (bad, result.stderr)
+        assert "invalid cluster name" in result.stderr, (bad, result.stderr)
+
+
+def test_helm_cluster_smoke_lock_open_does_not_truncate(tmp_path: Path) -> None:
+    """The lock open is O_TRUNC-free and proves the inode after opening.
+
+    `exec 9>` would follow a symlink swapped in after the pre-checks and
+    truncate its target; the script opens read-write without truncation
+    and then compares the descriptor's inode with the path.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    assert 'exec 9<>"${LOCK_PATH}.flock"' in script, (
+        "the lock must be opened without truncation"
+    )
+    assert "lock_descriptor_matches_path" in script, (
+        "the post-open identity check must exist"
+    )
+    assert 'exec 9>"${LOCK_PATH}.flock"' not in script, (
+        "the truncating open form must be gone"
+    )
+
+
 def test_helm_cluster_smoke_rejects_an_invalid_cluster_name(tmp_path: Path) -> None:
     """The cluster name reaches kind, contexts, and the lock path.
 
