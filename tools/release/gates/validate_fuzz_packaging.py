@@ -7623,7 +7623,57 @@ def _make_docs_check_index(words: list[str]) -> int | None:
     return None
 
 
-_MAKE_ENV_NONEXECUTING_RE = re.compile(r"(?<![A-Za-z])-[A-Za-z]*[nqt][A-Za-z]*")
+# Short options whose recipes would run: the letters that select a
+# non-executing mode in a short-option cluster (just-print, question,
+# touch).
+_MAKE_NONEXECUTING_SHORT = frozenset("nqt")
+
+# Short options that consume the rest of their cluster as an argument
+# (make's switches table: C f I j l o O W E).  A cluster scan stops here
+# because the letters that follow are that option's argument, not more
+# options (``-Wn`` says "what-if file n", it is not -W plus -n).
+_MAKE_ARGUMENT_TAKING_SHORT = frozenset("CfIjloOWE")
+
+# Long spellings of the same non-executing modes.
+_MAKE_NONEXECUTING_LONG = frozenset(
+    ("dry-run", "just-print", "recon", "question", "touch")
+)
+
+
+def _make_option_word_prevents_execution(word: str) -> bool:
+    """Whether one make option word selects a non-executing mode.
+
+    A word starting with ``--`` is a long option (the name up to ``=`` is
+    matched against the non-executing spellings).  Otherwise the word is a
+    short-option cluster: every letter is scanned until a letter that
+    takes an argument consumes the remainder.
+    """
+    if word.startswith("--"):
+        return word[2:].split("=", 1)[0] in _MAKE_NONEXECUTING_LONG
+    for letter in word[1:]:
+        if letter in _MAKE_NONEXECUTING_SHORT:
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            break
+    return False
+
+
+def _make_flags_value_prevents_execution(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value stops recipe execution.
+
+    GNU Make prepends a dash to the first word unless it already starts
+    with a dash or contains ``=``, so both ``n`` and ``-n`` select
+    just-print.  Later words are parsed as written: a word that is not an
+    option is a goal or variable definition and selects no mode.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            continue
+        if _make_option_word_prevents_execution(word):
+            return True
+    return False
 
 
 def _make_environment_prevents_execution(env: object) -> bool:
@@ -7631,14 +7681,16 @@ def _make_environment_prevents_execution(env: object) -> bool:
 
     GNU Make reads ``MAKEFLAGS`` (and ``GNUMAKEFLAGS``) from the
     environment, so ``-n``/``-q``/``-t`` set there stop recipe execution
-    for every invocation in the step.  A workflow, job, or step scope can
-    carry it, and a command-local assignment is inspected by the caller.
+    for every invocation in the step.  The same is true of the dash-less
+    spellings (``n``, ``kn``) and the long forms (``--dry-run``).  A
+    workflow, job, or step scope can carry it, and a command-local
+    assignment is inspected by the caller.
     """
     if not isinstance(env, dict):
         return False
     for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
         value = env.get(name)
-        if isinstance(value, str) and _MAKE_ENV_NONEXECUTING_RE.search(value):
+        if isinstance(value, str) and _make_flags_value_prevents_execution(value):
             return True
     return False
 
@@ -7658,7 +7710,7 @@ def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
     command_local = _pip_prefix_env_values(words, command_index)
     for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
         value = command_local.get(name)
-        if value is not None and _MAKE_ENV_NONEXECUTING_RE.search(value):
+        if value is not None and _make_flags_value_prevents_execution(value):
             return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets

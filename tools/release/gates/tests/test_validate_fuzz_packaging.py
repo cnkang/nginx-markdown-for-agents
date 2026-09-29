@@ -5058,8 +5058,10 @@ def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
 
     Regression: the docs-check detector read only the command words, so a
     step (or job/workflow) environment of ``MAKEFLAGS=-n`` still counted
-    as a live docs check although GNU Make merely prints recipes.  A
-    command-local assignment is covered too.
+    as a live docs check although GNU Make merely prints recipes.  GNU Make
+    also accepts the dash-less first-word spellings (``n``, ``kn``) and
+    the long forms (``--dry-run``), so those disqualify the step too.  A
+    command-local assignment is covered as well.
     """
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
     rejected = [
@@ -5067,6 +5069,25 @@ def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
         [install, {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "-q"}}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-t"}}],
         [install, {"run": "MAKEFLAGS=-n make docs-check"}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "n"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "kn"}}],
+        [install, {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "n"}}],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--dry-run"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "--dry-run"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--question"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--touch"}},
+        ],
     ]
     for steps in rejected:
         assert packaging_gate._python_deps_issue(steps) is not None, steps
@@ -5075,9 +5096,49 @@ def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
         [install, {"run": "make docs-check"}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": ""}}],
         [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "s"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "silent"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "k"}}],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--trace"}},
+        ],
+        [
+            install,
+            {
+                "run": "make docs-check",
+                "env": {"MAKEFLAGS": "w --jobserver-auth=3,4"},
+            },
+        ],
     ]
     for steps in accepted:
         assert packaging_gate._python_deps_issue(steps) is None, steps
+
+
+def test_make_flags_cluster_scan_stops_at_argument_options() -> None:
+    """Letters after an argument-taking option are that argument.
+
+    GNU Make's switch table gives ``W``/``f``/``C`` (and friends) an
+    argument, so ``-Wn`` asks for file ``n`` and does not select
+    just-print.  A model that scanned past the argument would reject a
+    step whose make invocation actually runs.
+    """
+    assert packaging_gate._make_flags_value_prevents_execution("n") is True
+    assert packaging_gate._make_flags_value_prevents_execution("kn") is True
+    assert packaging_gate._make_flags_value_prevents_execution("silent") is False
+    assert packaging_gate._make_flags_value_prevents_execution("trace") is True
+    assert packaging_gate._make_flags_value_prevents_execution("-Wn") is False
+    assert packaging_gate._make_flags_value_prevents_execution("-fn") is False
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("--dry-run") is True
+    )
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("--dry-run=x")
+        is True
+    )
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("VAR=n") is False
+    )
+    assert packaging_gate._make_flags_value_prevents_execution("n=1") is False
 
 
 def _heredoc_workflow(body: str) -> str:
