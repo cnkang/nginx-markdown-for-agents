@@ -75,11 +75,14 @@ _wrapper_cleanup() {
       continue
     fi
     # A finished run can carry diagnostics without a settle marker when the
-    # marker write itself failed; the crashed run this recovery targets has
-    # left nothing but its invocation record.  Content beside that record
-    # therefore means retained evidence: leave it.  The failure direction
-    # stays a leak.
-    if [[ -n "$(find "${inv%/*}" -mindepth 1 ! -name invocation.json -print -quit 2>/dev/null)" ]]; then
+    # marker write itself failed.  Those diagnostics live under runtime/
+    # (nginx logs and pid file, written only once a run got far enough to
+    # matter); the crashed run this recovery targets never produced them.
+    # `runtime/` itself always exists, so presence alone is not evidence -
+    # an actual diagnostic file is.  Evidence means: leave the tree.
+    if [[ -n "$(find "${d}/runtime" -maxdepth 2 \
+        \( -name 'nginx-*.log' -o -name 'nginx.pid' \) \
+        -print -quit 2>/dev/null)" ]]; then
       continue
     fi
     rm -rf "$d" 2>/dev/null || true

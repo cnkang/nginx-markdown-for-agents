@@ -124,19 +124,27 @@ run_cases_for_wrapper() {
   printf '{\n  "scenario": "other-scenario",\n  "port": 8080\n}\n' \
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-666/artifacts/scenarios/other-scenario/invocation.json"
   # --- an orphan from a dead creator with no metadata at all --------------
-  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-888"
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-555"
   # --- a settled tree: a finished run retained its artifacts --------------
   mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/artifacts/scenarios/${scenario}"
   printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/artifacts/scenarios/${scenario}/invocation.json"
   printf 'failed\n' > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/.harness-completed"
-  # --- a finished failed run whose marker write failed: diagnostics ------
-  # --- exist beside the record, so the tree must be preserved. -----------
+  # --- a finished failed run whose marker write failed: the harness ------
+  # --- writes its diagnostics under runtime/, so that is where the ------
+  # --- fixture must place them (a fresh runtime/ alone is not enough). ---
   mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}"
   printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}/invocation.json"
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/runtime"
   printf 'assertion output\n' \
-    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}/report.log"
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/runtime/nginx-error.log"
+  # --- a crashed run: runtime/ exists (prepare created it) but carries ----
+  # --- no diagnostic file, so the tree IS reclaimable. -------------------
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-888/artifacts/scenarios/${scenario}"
+  printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-888/artifacts/scenarios/${scenario}/invocation.json"
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-888/runtime"
   # --- a directory of a different scenario is never ours ------------------
   mkdir -p "${fixture}/e2e-harness-other-scenario-${dead_pid}-444"
 
@@ -159,8 +167,8 @@ run_cases_for_wrapper() {
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-666" \
     "${scenario}: orphan whose metadata names another scenario is preserved"
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-777" \
-    "${scenario}: diagnostics beside the record are preserved without a marker"
-  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-888" \
+    "${scenario}: runtime diagnostics are preserved without a marker"
+  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-555" \
     "${scenario}: orphan with no metadata is preserved (ownership unproven)"
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-999" \
     "${scenario}: a settled run's retained tree is never reclaimed"
