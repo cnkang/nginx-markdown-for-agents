@@ -1050,9 +1050,17 @@ def _signal_reaped_fuzz_process_group_when_open(
     time.sleep(_PROCESS_WAIT_POLL_SECONDS)
     hangup = stream.writer_hangup()
     if hangup is True:
+        # Every writer closed: no live descendant owns the pipe.
         return
-    if hangup is None and stream.eof_reached():
+    if hangup is None:
+        # The probe is unavailable or failed on this platform.  The drain
+        # thread's EOF flag only observes closure after consuming buffered
+        # data, so it cannot prove a writer remains; without proof a
+        # numeric group signal could reach a recycled group, so none is
+        # sent.
         return
+    # A writer is still open: a live descendant holds the pipe, which
+    # proves the group id still belongs to this run.
     try:
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except OSError:

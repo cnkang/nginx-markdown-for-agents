@@ -3387,22 +3387,22 @@ def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
         _Process(), _Stream(False)
     )
     assert killpg_pids == [os.getpid()], "an open writer must be signaled"
-    # No probe available: the drain-thread EOF flag is the fallback proof.
+    # No probe available: the drain-thread EOF flag cannot prove a writer
+    # remains (it lags buffered data), so no signal may be sent.
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), _Stream(None, eof=True)
     )
-    assert killpg_pids == [os.getpid()], "a closed stream must not be signaled"
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), _Stream(None, eof=False)
     )
-    assert killpg_pids == [os.getpid(), os.getpid()], (
-        "an open writer must be signaled without a kernel probe"
+    assert killpg_pids == [os.getpid()], (
+        "without a kernel probe no group may be signaled by number"
     )
     # No proof available at all: never signal by number alone.
     validator._signal_reaped_fuzz_process_group_when_open(
         _Process(), None
     )
-    assert killpg_pids == [os.getpid(), os.getpid()]
+    assert killpg_pids == [os.getpid()]
 
 
 def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
@@ -3623,3 +3623,50 @@ def _assert_closed_pipe_yields_no_signal(pipe, monkeypatch) -> None:
         type("P", (), {"pid": os.getpid()})(), stream
     )
     assert not signals, "a closed writer must not be signaled"
+
+
+def test_post_reap_signal_falls_through_never_without_a_probe(monkeypatch) -> None:
+    """Without a kernel probe the group is never signaled by number.
+
+    Regression: on the fallback path (probe unavailable) the drain
+    thread's EOF flag decided whether a numeric ``killpg`` ran; the flag
+    lags buffered data, so a closed pipe could still report "not EOF" and
+    a recycled group id could receive the signal.  No probe means no
+    proof, and no proof means no signal.
+    """
+    signals: list[int] = []
+
+    class _Stream:
+        def __init__(self, hangup, eof: bool) -> None:
+            self._hangup = hangup
+            self._eof = eof
+
+        def writer_hangup(self):
+            return self._hangup
+
+        def eof_reached(self) -> bool:
+            return self._eof
+
+    class _Process:
+        pid = os.getpid()
+
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: signals.append(pid),
+    )
+    # Probe unavailable, EOF unresolved (buffered data): no signal.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=False)
+    )
+    assert signals == [], "an inconclusive probe must not signal a group"
+    # Probe unavailable, EOF resolved: also no signal.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=True)
+    )
+    assert signals == [], "a closed stream must not be signaled"
+    # An open writer remains the conclusive positive proof.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(False, eof=False)
+    )
+    assert signals == [os.getpid()], "an open writer must be signaled"

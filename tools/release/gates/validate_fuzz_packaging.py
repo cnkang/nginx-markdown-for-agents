@@ -6736,7 +6736,13 @@ def _heredoc_delimiter_was_quoted(line: str, delimiter: str) -> bool:
         if word == delimiter:
             raw = line[index:end]
             head = raw.split("<<", 1)[1].lstrip("-").lstrip(" \t")
-            return head.startswith(("'", '"'))
+            # Quoting or escaping ANY part of the delimiter word
+            # suppresses body expansion (E'OF', "E"OF, E\OF), so the
+            # literal check covers every quoted/escaped character, not
+            # only a leading quote.
+            return any(
+                char in head for char in ("'", '"', chr(92))
+            )
         index = end
     return False
 
@@ -7617,11 +7623,43 @@ def _make_docs_check_index(words: list[str]) -> int | None:
     return None
 
 
-def _runs_make_docs_check(words: list[str]) -> bool:
-    """Whether make's command and target positions invoke docs-check."""
+_MAKE_ENV_NONEXECUTING_RE = re.compile(r"(?<![A-Za-z])-[A-Za-z]*[nqt][A-Za-z]*")
+
+
+def _make_environment_prevents_execution(env: object) -> bool:
+    """Whether make's environment selects a non-executing mode.
+
+    GNU Make reads ``MAKEFLAGS`` (and ``GNUMAKEFLAGS``) from the
+    environment, so ``-n``/``-q``/``-t`` set there stop recipe execution
+    for every invocation in the step.  A workflow, job, or step scope can
+    carry it, and a command-local assignment is inspected by the caller.
+    """
+    if not isinstance(env, dict):
+        return False
+    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        value = env.get(name)
+        if isinstance(value, str) and _MAKE_ENV_NONEXECUTING_RE.search(value):
+            return True
+    return False
+
+
+def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
+    """Whether make's command and target positions invoke docs-check.
+
+    The check also requires the invocation to actually execute: a
+    non-executing mode in the effective environment (``MAKEFLAGS``), in a
+    command-local assignment, or in the option list itself disqualifies it.
+    """
+    if _make_environment_prevents_execution(env):
+        return False
     command_index = _make_docs_check_index(words)
     if command_index is None:
         return False
+    command_local = _pip_prefix_env_values(words, command_index)
+    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        value = command_local.get(name)
+        if value is not None and _MAKE_ENV_NONEXECUTING_RE.search(value):
+            return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets
 
@@ -7841,7 +7879,7 @@ def _pip_step_commands(
     install = bool(_PIP_REQUIREMENT_RE.search(command)) and not (
         _pip_dry_run_active(words, command_index, env)
     )
-    return install, _runs_make_docs_check(words)
+    return install, _runs_make_docs_check(words, env)
 
 
 def _pip_prerequisite_position(
