@@ -233,14 +233,10 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
     tokio_rt.block_on(async {
         fixture.stop().await;
     });
-    let _ = crate::artifacts::cleanup_artifacts(
-        &runtime.artifact_dir,
-        cli.keep_artifacts,
-        report.passed,
-    );
-    if report.passed && !cli.keep_artifacts {
-        let _ = std::fs::remove_dir_all(&runtime.runtime_dir);
-    }
+    // Settle the whole tree: a passing run without --keep-artifacts leaves
+    // nothing behind, every other outcome retains the tree with a settle
+    // marker so wrapper orphan recovery never reclaims final artifacts.
+    crate::artifacts::settle_run_tree(&runtime_base, cli.keep_artifacts, report.passed);
 
     if let Some(report_path) = &cli.json_report {
         crate::artifacts::append_report(report_path, &report)?;
