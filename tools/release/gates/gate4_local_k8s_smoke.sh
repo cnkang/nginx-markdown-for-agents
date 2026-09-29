@@ -249,21 +249,27 @@ cleanup_owned_helm_resources() {
 
 # After a failed install, settle what this run still owns.  The rollback
 # flag removes a failed release during the install; when the rollback
-# itself fails, the release survives in a failed state and cleanup must
-# uninstall it before deleting the namespace.  The pre-install ownership
-# check proved the name free, so a surviving release is this run's.
+# itself fails, the release survives in a failed or pending state and
+# cleanup must uninstall it before deleting the namespace.  The pre-install
+# ownership check proved the name free, so a surviving release was created
+# during this run's install window.
+#
+# $1 - the captured install output, used to recognize a name collision
 settle_failed_install_ownership() {
+    local install_error="${1:-}"
     # A failed install is followed by one of three states.  The pre-install
     # ownership check proved the name free, so a surviving release was
     # created during this run's install window: it is this run's attempt,
-    # unless a concurrent creator now holds the name with a LIVE release,
-    # whose resources must be preserved.
+    # unless a concurrent creator now holds the name with a DEPLOYED
+    # release, whose resources must be preserved.  A pending release cannot
+    # be another creator's: this run held the name while its install ran,
+    # so a concurrent creator would have been refused instead.
     local live
     if ! live="$(helm list --short \
         --filter "^${HELM_RELEASE_NAME}$" \
         --namespace "${HELM_NAMESPACE}" \
         --kube-context "kind-${CLUSTER_NAME}" \
-        --deployed --pending \
+        --deployed \
         2>/dev/null)"; then
         # The state cannot be checked: keep every claim so cleanup removes
         # only what this run may have created.
@@ -278,12 +284,22 @@ settle_failed_install_ownership() {
         CREATED_NAMESPACE=0
         return 0
     fi
+    # A name collision means a concurrent creator won the name between the
+    # ownership check and the install: their release is preserved.  Helm 3
+    # spells the refusal "cannot re-use a name that is still in use" and
+    # Helm 4 "cannot reuse"; matching the shared suffix covers both.
+    if [[ "$install_error" == *"name that is still in use"* ]]; then
+        info "Install failed; another creator holds the release name, cleanup preserves it"
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        return 0
+    fi
     local surviving
     if ! surviving="$(helm list --short \
         --filter "^${HELM_RELEASE_NAME}$" \
         --namespace "${HELM_NAMESPACE}" \
         --kube-context "kind-${CLUSTER_NAME}" \
-        --failed --uninstalled --uninstalling --superseded \
+        --pending --failed --uninstalled --uninstalling --superseded \
         2>/dev/null)"; then
         info "Install failed; the release state could not be checked, cleanup keeps both claims"
         return 0
@@ -295,8 +311,9 @@ settle_failed_install_ownership() {
         CREATED_RELEASE=0
         return 0
     fi
-    # The release survives in a non-live state (failed or mid-teardown):
-    # cleanup must uninstall it before deleting the owned namespace.
+    # The release survives in a non-deployed state (pending, failed, or
+    # mid-teardown): cleanup must uninstall it before deleting the owned
+    # namespace.
     info "Install failed; the release survives, cleanup removes it and the owned namespace"
     return 0
 }
@@ -580,7 +597,11 @@ deploy_and_verify() {
     # be unset).  The failure branch settles the claim against the actual
     # release state instead of clearing it blindly.
     CREATED_RELEASE=1
-    if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
+    # The install output is captured so the failure branch can classify the
+    # error (a name collision belongs to a concurrent creator); it is
+    # reprinted on both paths so the diagnostics stay identical.
+    local install_output
+    if ! install_output="$(helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
         --set image.repository=nginx \
@@ -590,7 +611,8 @@ deploy_and_verify() {
         --wait \
         --timeout "${POD_WAIT_TIMEOUT}" \
         "${rollback_flag}" \
-        >&2 2>&1; then
+        2>&1)"; then
+        printf '%s\n' "$install_output" >&2
         fail "helm install failed"
         info "Pod status:"
         kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
@@ -601,9 +623,10 @@ deploy_and_verify() {
         # Settle ownership: a rolled-back install leaves nothing to clean
         # up beyond an owned namespace, while a surviving failed release
         # must be uninstalled by cleanup before its namespace goes away.
-        settle_failed_install_ownership
+        settle_failed_install_ownership "$install_output"
         return 1
     fi
+    printf '%s\n' "$install_output" >&2
 
     pass "Helm chart deployed successfully"
 

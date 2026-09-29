@@ -319,8 +319,10 @@ def test_gate4_installs_with_the_version_selected_rollback_flag() -> None:
         Path(__file__).resolve().parents[4]
         / "tools/release/gates/gate4_local_k8s_smoke.sh"
     ).read_text(encoding="utf-8")
-    install = script.split('if ! helm install "${HELM_RELEASE_NAME}"', 1)[1]
-    install = install.split("; then", 1)[0]
+    install = script.split(
+        'if ! install_output="$(helm install "${HELM_RELEASE_NAME}"', 1
+    )[1]
+    install = install.split("2>&1)\"; then", 1)[0]
 
     assert '"${rollback_flag}"' in install, (
         "gate4 helm install must pass the selected rollback flag"
@@ -610,3 +612,62 @@ def test_gate4_settles_ownership_after_a_failed_install() -> None:
     assert "CREATED_NAMESPACE=0" not in rolled
     # A surviving release keeps both claims for cleanup.
     assert "the release survives, cleanup removes it" in resolver
+
+
+def test_gate4_settle_helper_classifies_a_name_collision() -> None:
+    """A name collision belongs to a concurrent creator, not this run.
+
+    The install error is captured and inspected: Helm 3 reports "cannot
+    re-use a name that is still in use" and Helm 4 "cannot reuse", so the
+    shared suffix is matched.  A collision clears both claims (the name is
+    the other creator's), while an ordinary failure keeps the release claim
+    so cleanup uninstalls this run's own pending/failed release.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+
+    fn = script.split("settle_failed_install_ownership() {", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert 'local install_error="${1:-}"' in fn, (
+        "the settle helper needs the install output to classify the failure"
+    )
+    assert 'settle_failed_install_ownership "$install_output"' in script, (
+        "the failure branch must pass the captured install output"
+    )
+    assert 'install_output="$(helm install' in script, (
+        "the install output must be captured for classification"
+    )
+
+    collision = fn.split("name that is still in use", 1)[1].split(
+        "return 0", 1
+    )[0]
+    assert 'install_error" == *"name that is still in use' in fn, (
+        "the collision check must match the shared suffix of both Helm "
+        "spellings"
+    )
+    assert "CREATED_RELEASE=0" in collision
+    assert "CREATED_NAMESPACE=0" in collision
+
+    # The live query reads deployed state only: a pending release may be
+    # this run's own failed install, and treating that as another
+    # creator's would preserve our own leak.
+    live = fn.split('live="$(helm list', 1)[1].split('2>/dev/null)', 1)[0]
+    assert "--deployed" in live
+    assert "--pending" not in live
+
+    # The surviving query includes pending so this run's own pending
+    # release is uninstalled by cleanup.
+    surviving = fn.split('surviving="$(helm list', 1)[1].split(
+        '2>/dev/null)', 1
+    )[0]
+    for flag in (
+        "--pending",
+        "--failed",
+        "--uninstalled",
+        "--uninstalling",
+        "--superseded",
+    ):
+        assert flag in surviving, flag
