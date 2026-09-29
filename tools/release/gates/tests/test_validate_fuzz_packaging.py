@@ -3683,6 +3683,36 @@ def test_make_docs_check_rejects_missing_option_operand() -> None:
     ) == ["docs-check"]
 
 
+def test_make_docs_check_rejects_supplied_makefiles_and_eval() -> None:
+    """A self-supplied makefile cannot certify the repository docs-check.
+
+    `make -f /dev/null --eval='docs-check: ;' docs-check` exits 0 while the
+    repository chain never runs, so any invocation that supplies its own
+    makefile or evaled text must not count as the live docs check.
+    """
+    for words in (
+        ["-f", "/dev/null", "docs-check"],
+        ["--file", "/dev/null", "docs-check"],
+        ["--file=/dev/null", "docs-check"],
+        ["--makefile", "other.mk", "docs-check"],
+        ["-E", "docs-check: ;", "docs-check"],
+        ["--eval", "docs-check: ;", "docs-check"],
+        ["--eval=x", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    # Plain invocations still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["-C", "tools", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["-j2", "docs-check"], 0
+    ) == ["docs-check"]
+    # `-Wn`'s n is W's argument; it must not be read as a cluster carrying f.
+    assert packaging_gate._make_targets_after_options(
+        ["-Wn", "docs-check"], 0
+    ) == ["docs-check"]
+
+
 def test_dynamic_eval_parser_fails_closed_on_unterminated_quote() -> None:
     """Malformed shell quoting cannot hide whether eval receives dynamic text."""
     assert packaging_gate._eval_has_dynamic_substitution("eval 'unterminated")
