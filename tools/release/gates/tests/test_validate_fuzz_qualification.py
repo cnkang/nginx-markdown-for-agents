@@ -3589,9 +3589,7 @@ def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data(
     os.close(write_fd)
     pipe = os.fdopen(read_fd, "rb")
     try:
-        _extracted_from_test_writer_hangup_probe_reports_closed_pipes_with_buffered_data_19(
-            pipe, monkeypatch
-        )
+        _assert_closed_pipe_yields_no_signal(pipe, monkeypatch)
     finally:
         pipe.close()
 
@@ -3606,8 +3604,8 @@ def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data(
         pipe.close()
 
 
-# TODO Rename this here and in `test_writer_hangup_probe_reports_closed_pipes_with_buffered_data`
-def _extracted_from_test_writer_hangup_probe_reports_closed_pipes_with_buffered_data_19(pipe, monkeypatch):
+def _assert_closed_pipe_yields_no_signal(pipe, monkeypatch) -> None:
+    """The probe reads a closed pipe as hung up, and the gate stays silent."""
     stream = validator._BoundedStream(pipe=pipe)
     # Writers closed with data unread: the drain flag still says no,
     # the kernel probe says closed.
