@@ -1875,6 +1875,26 @@ def test_toolchain_gate_rejects_line_separated_shell_payloads() -> None:
     assert packaging_gate._release_gate_toolchain_issue(single) is None
 
 
+def test_shell_errexit_scan_stops_at_the_script_operand() -> None:
+    """Words after `{0}` are positional parameters, not shell options.
+
+    Regression: the errexit model scanned every word after the shell name,
+    so `bash {0} -e` (which passes the literal `-e` as the script's `$1`
+    and runs the body without errexit - verified against bash) was misread
+    as errexit-enabled, and the masking analysis then dropped commands the
+    script would actually run.
+    """
+    assert packaging_gate._shell_initial_errexit("bash {0} -e") is False
+    assert packaging_gate._shell_initial_errexit("bash {0} -n") is False
+    assert packaging_gate._shell_initial_errexit("bash {0} --errexit") is False
+    # Options before the operand still count.
+    assert packaging_gate._shell_initial_errexit("bash -e {0}") is True
+    assert packaging_gate._shell_initial_errexit("bash -o errexit {0}") is True
+    assert packaging_gate._shell_initial_errexit("bash -euo pipefail {0}") is True
+    # A shell without the operand keeps the default (built-in forms add -e).
+    assert packaging_gate._shell_initial_errexit("bash -e") is True
+
+
 def test_toolchain_gate_models_set_plus_o_errexit() -> None:
     """`set +o errexit` disables errexit: a later `false` is harmless."""
     drift = DRIFT
