@@ -297,7 +297,13 @@ fn resolve_cli_nginx_bin(cli: &Cli) -> Result<Cli> {
     ));
     std::fs::create_dir_all(&bootstrap_dir)
         .with_context(|| format!("failed to create bootstrap dir {}", bootstrap_dir.display()))?;
-    let prepared = crate::bootstrap::prepare(&bootstrap_dir).with_context(
+    let prepared = crate::bootstrap::prepare(&bootstrap_dir);
+    // The pointer directory is scratch: prepare read its outputs, so it is
+    // removed on every outcome.  A retained copy would accumulate one
+    // directory per bootstrap run in the temporary directory, and wrapper
+    // recovery never touches it (its name does not match a scenario).
+    let _ = std::fs::remove_dir_all(&bootstrap_dir);
+    let prepared = prepared.with_context(
         || "Bootstrap_Mode could not prepare a runnable module-enabled NGINX runtime",
     )?;
     if !prepared.nginx_bin.exists() {

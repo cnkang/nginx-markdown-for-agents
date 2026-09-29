@@ -169,7 +169,18 @@ pub fn settle_run_tree(runtime_base: &Path, keep_artifacts: bool, passed: bool) 
         return;
     }
     let marker = runtime_base.join(COMPLETION_MARKER_FILE);
-    let _ = std::fs::write(marker, if passed { "passed" } else { "failed" });
+    if let Err(err) = std::fs::write(&marker, if passed { "passed" } else { "failed" }) {
+        // A missing marker is the discriminator wrapper recovery uses to
+        // find crashed runs, so a failed write here makes this finished
+        // run look reclaimable (or leaves it unclassified when no recovery
+        // runs).  The failure is reported and the tree is left in place:
+        // destroying retained diagnostics would lose them for certain,
+        // while leaving them keeps the chance of inspection.
+        eprintln!(
+            "[WARN] could not settle run tree {}: {err}",
+            runtime_base.display()
+        );
+    }
 }
 
 /// Return the current time as epoch seconds (UTC) encoded as a string.
@@ -250,6 +261,21 @@ mod tests {
         assert!(base.exists(), "a failing run retains its diagnostics");
         let marker = std::fs::read_to_string(base.join(COMPLETION_MARKER_FILE)).unwrap();
         assert_eq!(marker, "failed");
+    }
+
+    #[test]
+    fn test_settle_run_tree_marker_write_failure_preserves_the_tree() {
+        // A directory where the marker file belongs makes the write fail
+        // deterministically (even for a privileged test runner), standing
+        // in for a filesystem or quota error.
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join(COMPLETION_MARKER_FILE)).unwrap();
+        settle_run_tree(&base, false, false);
+        assert!(
+            base.exists(),
+            "a failed marker write must preserve the tree, never delete it"
+        );
     }
 
     #[test]
