@@ -493,7 +493,10 @@ deploy_and_verify() {
         fail "Unable to determine ownership of Helm release ${HELM_RELEASE_NAME}"
         cat "$release_stderr_file" >&2 || true
         rm -f -- "$release_stderr_file"
-        CREATED_NAMESPACE=0
+        # The ownership flag stays set: no install has been attempted yet, so
+        # the namespace this run created holds nothing of ours to preserve,
+        # and cleanup must not leave it behind on a reused cluster (the
+        # sibling helm smoke cleans up the same way).
         return 1
     fi
     rm -f -- "$release_stderr_file"

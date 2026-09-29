@@ -544,3 +544,25 @@ def test_helm_legacy_values_survive_null_streaming_properties() -> None:
         result, values_yaml, markdown_properties, configmap=""
     )
     assert not result.has_failures
+
+
+def test_gate4_keeps_namespace_ownership_after_list_failure() -> None:
+    """A list failure must not release a namespace this run created.
+
+    Regression: the helm-list failure branch reset CREATED_NAMESPACE, so a
+    namespace created moments earlier was left behind on a reused cluster -
+    the sibling helm smoke treats list failure the same way (its cleanup
+    still owns its namespace).  Nothing of ours is installed yet at that
+    point, so cleanup must remove what this run made.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+
+    branch = script.split(
+        'fail "Unable to determine ownership of Helm release', 1
+    )[1].split("fi\n", 1)[0]
+    assert "CREATED_NAMESPACE=0" not in branch, (
+        "the list-failure branch must keep the namespace ownership flag"
+    )
