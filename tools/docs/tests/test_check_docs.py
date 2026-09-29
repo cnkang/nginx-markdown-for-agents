@@ -2190,3 +2190,25 @@ def test_versionless_availability_claims_distinguish_the_release() -> None:
     assert claim("The new version is available.")
     assert not claim("The release artifacts are available from the mirror.")
     assert not claim("The binaries are available.")
+
+
+def test_artifact_subject_in_an_earlier_clause_does_not_suppress_a_claim() -> None:
+    """Availability subjects bind to their own clause.
+
+    Regression: the generic-artifact exemption looked back over a fixed
+    window, so an artifact subject in an earlier clause ("artifacts are
+    checked, the release is available") suppressed the release claim in
+    the clause that actually carries it.  The lookback stops at the last
+    clause break now.
+    """
+    def claim(text):
+        match = docs_checker._PREPUBLICATION_COMPLETION_CLAIM_RE.search(text)
+        assert match is not None, text
+        return docs_checker._claim_names_pending_version(
+            text, match, docs_checker._release_version_pattern("9.9.9")
+        )
+
+    assert claim("Artifacts are checked, the release is available.")
+    assert claim("Packages are built but the release is available.")
+    assert not claim("The release artifacts are available from the mirror.")
+    assert not claim("The binaries are available.")

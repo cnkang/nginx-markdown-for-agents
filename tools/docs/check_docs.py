@@ -1677,6 +1677,12 @@ def _generic_artifact_availability(
     if claim.group(0).lower() != "available":
         return False
     before = window[max(0, claim.start() - 80):claim.start()]
+    # Only the clause that carries the verb counts: an artifact subject in
+    # an earlier clause ("artifacts are checked, the release is available")
+    # says nothing about what is available.
+    clause_breaks = list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before))
+    if clause_breaks:
+        before = before[clause_breaks[-1].end():]
     return _GENERIC_AVAILABILITY_OBJECT_RE.search(before) is not None
 
 
