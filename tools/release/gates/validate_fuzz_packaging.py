@@ -7609,7 +7609,8 @@ _MAKE_ROOT_DIRECTORY_VALUES = frozenset({".", "./"})
 # succeeds while the repository chain never executes).
 _MAKE_UNCERTIFIABLE_OPTIONS = frozenset(
     {"-f", "--file", "--makefile", "-E", "--eval",
-     "-o", "--old-file", "-W", "--what-if", "--assume-new"}
+     "-o", "--old-file", "-W", "--what-if", "--assume-new",
+     "-p", "--print-data-base"}
 )
 _MAKE_UNCERTIFIABLE_LONG_PREFIXES = (
     "--file=", "--makefile=", "--eval=",
@@ -7618,7 +7619,7 @@ _MAKE_UNCERTIFIABLE_LONG_PREFIXES = (
 # Short letters of the uncertifiable options: f/E supply a makefile or an
 # evaled statement; o/W mark the following file old or what-if, which skips
 # the named target's recipe when it is the checked one.
-_MAKE_UNCERTIFIABLE_SHORT_LETTERS = frozenset({"f", "E", "o", "W"})
+_MAKE_UNCERTIFIABLE_SHORT_LETTERS = frozenset({"f", "E", "o", "W", "p"})
 
 
 def _make_option_uncertifiable(word: str) -> bool:
@@ -7883,19 +7884,52 @@ def _make_option_step(words: list[str], index: int) -> int | None:
     return _make_short_option_step(word, operand, index)
 
 
+def _make_target_word_is_assignment(word: str) -> bool:
+    """Whether a non-option word is a make variable assignment.
+
+    GNU Make classifies any non-option argument containing ``=`` as a
+    variable definition (``handle_non_switch_argument``), and assignments
+    applied for the whole run: ``make SHELL=/usr/bin/true docs-check``
+    executes every recipe through ``true`` and succeeds without doing the
+    work (verified on 3.81 and 4.4.1), so the invocation cannot certify
+    anything about the checked target.  The spelling covers any variable
+    name make accepts (dots included, such as ``.SHELLFLAGS``).
+    """
+    return "=" in word
+
+
+def _make_targets_after_terminator(
+    targets: list[str], words: list[str], index: int
+) -> list[str] | None:
+    """Resolve the words after a ``--`` terminator.
+
+    Every word after ``--`` is a non-option argument, and an assignment
+    there still shapes the run (verified), so one disqualifies the
+    invocation.
+    """
+    rest = words[index + 1:]
+    if any(_make_target_word_is_assignment(word) for word in rest):
+        return None
+    return targets + rest
+
+
 def _make_targets_after_options(words: list[str], index: int) -> list[str] | None:
     """Collect make target words, or reject a command that cannot execute them."""
     targets: list[str] = []
     while index < len(words):
         word = words[index]
         if word == "--":
-            return targets + words[index + 1:]
+            return _make_targets_after_terminator(targets, words, index)
         if word.startswith("-"):
             next_index = _make_option_step(words, index)
             if next_index is None:
                 return None
             index = next_index
             continue
+        if _make_target_word_is_assignment(word):
+            # An assignment shapes the whole run's environment; the caller
+            # cannot assume the checked target runs its recipes.
+            return None
         targets.append(word)
         index += 1
     return targets
@@ -7993,13 +8027,22 @@ def _make_flags_value_uncertifiable(value: str) -> bool:
     ``--eval`` text and ``-f``/``--makefile`` selections read from the
     environment take effect before the repository Makefile is read
     (``MAKEFLAGS='--eval=SHELL=/bin/true'`` makes every recipe a no-op),
-    and old-file/what-if operands can skip the checked target.  The first
-    word gets the implied dash, exactly as make applies it before parsing.
+    old-file/what-if operands can skip the checked target, and a variable
+    assignment in the value changes the run's environment
+    (``MAKEFLAGS='SHELL=/usr/bin/true'`` runs every recipe through
+    ``true`` and succeeds without doing the work - verified).  The first
+    word gets the implied dash, exactly as make applies it before parsing;
+    an assignment keeps no dash, so it is rejected as written.
     """
     for index, word in enumerate(value.split()):
         if index == 0 and not word.startswith("-") and "=" not in word:
             word = "-" + word
         if not word.startswith("-"):
+            if _make_target_word_is_assignment(word):
+                # A variable assignment in the flags changes the run's
+                # environment for every recipe; the checked target cannot
+                # be certified.
+                return True
             continue
         if _make_option_uncertifiable(word):
             return True
