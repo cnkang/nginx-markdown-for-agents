@@ -285,10 +285,13 @@ settle_failed_install_ownership() {
         return 0
     fi
     # A name collision means a concurrent creator won the name between the
-    # ownership check and the install: their release is preserved.  Helm 3
-    # spells the refusal "cannot re-use a name that is still in use" and
-    # Helm 4 "cannot reuse"; matching the shared suffix covers both.
-    if [[ "$install_error" == *"name that is still in use"* ]]; then
+    # ownership check and the install: their release is preserved.  Two
+    # error shapes report it: the name check refuses with "cannot re-use a
+    # name that is still in use" (Helm 3) or "cannot reuse ..." (Helm 4),
+    # and the storage-layer create that follows its own availability check
+    # reports "release: already exists" when both racers passed that check.
+    if [[ "$install_error" == *"name that is still in use"* ]] \
+        || [[ "$install_error" == *"release: already exists"* ]]; then
         info "Install failed; another creator holds the release name, cleanup preserves it"
         CREATED_RELEASE=0
         CREATED_NAMESPACE=0
