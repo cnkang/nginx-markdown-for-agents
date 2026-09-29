@@ -566,3 +566,47 @@ def test_gate4_keeps_namespace_ownership_after_list_failure() -> None:
     assert "CREATED_NAMESPACE=0" not in branch, (
         "the list-failure branch must keep the namespace ownership flag"
     )
+
+
+def test_gate4_settles_ownership_after_a_failed_install() -> None:
+    """A failed install resolves ownership instead of clearing both claims.
+
+    Regression: the failure branch cleared CREATED_NAMESPACE and
+    CREATED_RELEASE unconditionally, so a release that survived a failed
+    rollback was never uninstalled (and a namespace this run created was
+    never deleted).  The branch now consults the release state: a live
+    release (another creator) clears both claims, a rolled-back install
+    clears only the release claim, and a surviving release keeps both so
+    cleanup removes them.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "settle_failed_install_ownership" in script
+    branch = script.split('fail "helm install failed"', 1)[1].split(
+        "return 1", 1
+    )[0]
+    assert "CREATED_NAMESPACE=0" not in branch, (
+        "the failure branch must not clear the namespace claim unconditionally"
+    )
+    assert "CREATED_RELEASE=0" not in branch, (
+        "the failure branch must not clear the release claim unconditionally"
+    )
+
+    resolver = script.split("settle_failed_install_ownership() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    # Live release: preserve another creator's resources (both claims clear).
+    live = resolver.split("if [[ -n \"$live\" ]]", 1)[1].split("\n    fi", 1)[0]
+    assert "CREATED_RELEASE=0" in live
+    assert "CREATED_NAMESPACE=0" in live
+    # Rolled back: the release claim clears, the namespace claim stays.
+    rolled = resolver.split(
+        'if [[ -z "$surviving" ]]', 1
+    )[1].split("\n    fi", 1)[0]
+    assert "CREATED_RELEASE=0" in rolled
+    assert "CREATED_NAMESPACE=0" not in rolled
+    # A surviving release keeps both claims for cleanup.
+    assert "the release survives, cleanup removes it" in resolver

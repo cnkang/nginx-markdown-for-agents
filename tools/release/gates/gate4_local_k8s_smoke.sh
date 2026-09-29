@@ -247,6 +247,60 @@ cleanup_owned_helm_resources() {
     return 0
 }
 
+# After a failed install, settle what this run still owns.  The rollback
+# flag removes a failed release during the install; when the rollback
+# itself fails, the release survives in a failed state and cleanup must
+# uninstall it before deleting the namespace.  The pre-install ownership
+# check proved the name free, so a surviving release is this run's.
+settle_failed_install_ownership() {
+    # A failed install is followed by one of three states.  The pre-install
+    # ownership check proved the name free, so a surviving release was
+    # created during this run's install window: it is this run's attempt,
+    # unless a concurrent creator now holds the name with a LIVE release,
+    # whose resources must be preserved.
+    local live
+    if ! live="$(helm list --short \
+        --filter "^${HELM_RELEASE_NAME}$" \
+        --namespace "${HELM_NAMESPACE}" \
+        --kube-context "kind-${CLUSTER_NAME}" \
+        --deployed --pending \
+        2>/dev/null)"; then
+        # The state cannot be checked: keep every claim so cleanup removes
+        # only what this run may have created.
+        info "Install failed; the release state could not be checked, cleanup keeps both claims"
+        return 0
+    fi
+    if [[ -n "$live" ]]; then
+        # A live release (another creator's) holds the name: preserve it
+        # and the namespace content with it.
+        info "Install failed; a live release holds the name, cleanup preserves it"
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        return 0
+    fi
+    local surviving
+    if ! surviving="$(helm list --short \
+        --filter "^${HELM_RELEASE_NAME}$" \
+        --namespace "${HELM_NAMESPACE}" \
+        --kube-context "kind-${CLUSTER_NAME}" \
+        --failed --uninstalled --uninstalling --superseded \
+        2>/dev/null)"; then
+        info "Install failed; the release state could not be checked, cleanup keeps both claims"
+        return 0
+    fi
+    if [[ -z "$surviving" ]]; then
+        # The rollback removed the release: nothing of this run survives,
+        # and the owned namespace is still deleted by cleanup.
+        info "Install failed and rolled back; cleanup removes the owned namespace"
+        CREATED_RELEASE=0
+        return 0
+    fi
+    # The release survives in a non-live state (failed or mid-teardown):
+    # cleanup must uninstall it before deleting the owned namespace.
+    info "Install failed; the release survives, cleanup removes it and the owned namespace"
+    return 0
+}
+
 ##############################################################################
 # Termination handling
 ##############################################################################
@@ -523,8 +577,8 @@ deploy_and_verify() {
     # Claim the release BEFORE the install: bash defers a TERM trap until the
     # foreground install returns, so a signal that lands after a successful
     # install would otherwise leave the release behind (the flag would still
-    # be unset).  A failed install is rolled back by the rollback flag or
-    # lost a name race, so its branch below clears the claim again.
+    # be unset).  The failure branch settles the claim against the actual
+    # release state instead of clearing it blindly.
     CREATED_RELEASE=1
     if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
@@ -544,13 +598,10 @@ deploy_and_verify() {
         info "Pod events:"
         kubectl --context "$kube_context" describe pods -n "${HELM_NAMESPACE}" \
             >&2 || true
-        # A failed install may leave partial state or race with another
-        # release creator. Preserve the namespace rather than deleting data
-        # whose ownership is no longer certain.  The release claim is
-        # cleared: the rollback flag already removed a failed install, or
-        # the name was taken by another creator.
-        CREATED_NAMESPACE=0
-        CREATED_RELEASE=0
+        # Settle ownership: a rolled-back install leaves nothing to clean
+        # up beyond an owned namespace, while a surviving failed release
+        # must be uninstalled by cleanup before its namespace goes away.
+        settle_failed_install_ownership
         return 1
     fi
 
