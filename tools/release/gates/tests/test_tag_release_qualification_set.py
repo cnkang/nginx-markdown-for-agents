@@ -876,7 +876,15 @@ def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
     reaper = reaper.split("\n}\n", 1)[0]
     # A reaper held by a dead pid is broken so it cannot wedge the smoke.
     assert "kill -0" in reaper
-    assert "rm -rf \"${LOCK_PATH}.reaper\"" in reaper
+    # Breaking is atomic: the stale directory is CLAIMED with a rename
+    # before deletion, so two waiters cannot both reclaim it and one
+    # cannot remove a replacement mutex the other just created.
+    assert "mv \"${LOCK_PATH}.reaper\" \"${reaper_claim}\"" in reaper
+    assert "rm -rf \"${reaper_claim}\"" in reaper
+    # An ownerless directory (a waiter died between mkdir and its pid
+    # write) is reclaimed only after a grace period so a merely slow
+    # publisher is never displaced.
+    assert "-mmin +1" in reaper
 
 
 def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:

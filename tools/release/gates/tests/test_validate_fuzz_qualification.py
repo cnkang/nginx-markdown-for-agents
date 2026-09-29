@@ -3341,3 +3341,77 @@ def test_interrupt_signals_the_group_before_reaping_the_leader(
         validator._finish_toolchain_identity_process(process, reader)
     time.sleep(1.6)
     assert not marker.exists(), "a descendant survived the interrupt"
+
+
+def test_post_reap_signal_requires_a_live_pipe_holder(monkeypatch) -> None:
+    """The post-reap group signal is gated on the reader's liveness.
+
+    Regression: the signal ran by group number alone after the leader was
+    reaped, risking a reused group id.  A finished reader means no process
+    holds the pipe (and therefore no member remains in the group), so no
+    signal may be sent; a live reader proves a live holder and the signal
+    must fire.
+    """
+    killpg_pids: list[int] = []
+
+    class _Reader:
+        def __init__(self, alive: bool) -> None:
+            self._alive = alive
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+    class _Process:
+        pid = os.getpid()
+
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: killpg_pids.append(pid),
+    )
+    validator._signal_reaped_fuzz_process_group_when_live(
+        _Process(), _Reader(False)
+    )
+    assert killpg_pids == [], "an empty group must not be signaled"
+    validator._signal_reaped_fuzz_process_group_when_live(
+        _Process(), _Reader(True)
+    )
+    assert killpg_pids == [os.getpid()], "a live holder must be signaled"
+
+
+def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
+    """An interrupt that lands after the reap still stops a pipe-holding child.
+
+    Regression: when the wait path reaped the leader before unwinding, the
+    gated post-reap signal must still fire while a descendant holds stdout;
+    a gate that never fires would let the descendant survive the interrupt.
+    """
+    marker = tmp_path / "post-reap-descendant-survived"
+    leader = tmp_path / "leader.py"
+    leader.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c',\n"
+        "    \"import time; time.sleep(1.5); open(%r, 'w')\" % sys.argv[1]])\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+
+    def reaping_wait(process, timeout):
+        process.wait()  # the leader is reaped before the interrupt lands
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", reaping_wait)
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader), str(marker)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe", reader)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.9)
+    assert not marker.exists(), "a post-reap descendant survived the interrupt"

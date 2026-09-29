@@ -4470,3 +4470,74 @@ def test_relative_dynamic_imports_fail_closed() -> None:
         0,
         None,
     )
+
+
+def test_relative_import_levels_fail_closed() -> None:
+    """``__import__`` with a nonzero/unknown ``level`` resolves relatively.
+
+    Regression: the resolver rejected dotted-lead names but ignored the
+    ``level`` argument, so ``__import__("helper", ..., level=1).install()``
+    resolved as the absolute ``helper.install`` and a locally imported
+    helper could hide a raw toolchain installation.  A literal 0 stays
+    absolute; every other level fails closed.
+    """
+    keyword_level = (
+        "__import__('helper', globals(), locals(), ['install'], "
+        "level=1).install()"
+    )
+    positional_level = (
+        "__import__('helper', globals(), locals(), ['install'], 1).install()"
+    )
+    variable_level = (
+        "level = 1\n__import__('helper', level=level).install()"
+    )
+    for payload in (keyword_level, positional_level, variable_level):
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), (
+            payload
+        )
+
+    # Controls: an explicit literal-zero level keeps the absolute model.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os', level=0).getcwd()", 0, None
+    )
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os.path').join('a', 'b')", 0, None
+    )
+
+
+def test_dependency_gate_rejects_failure_masked_prerequisites() -> None:
+    """A prerequisite whose failure ``||`` swallows must not satisfy the gate.
+
+    Regression: ``pip install ... || true`` and ``make docs-check || true``
+    counted as present, so the gate could certify a job in which the
+    dependency install or the docs-check chain fails without notice.  The
+    masked command no longer counts; chains that propagate failure (``||
+    exit 1``) still satisfy it.
+    """
+    masked_install = [
+        {"run": "python3 -m pip install -r requirements-release.txt || true"},
+        {"run": "make docs-check"},
+    ]
+    masked_docs = [
+        {"run": "python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check || true"},
+    ]
+    for steps, needle in (
+        (masked_install, "failure-masking"),
+        (masked_docs, "failure-masking"),
+    ):
+        issue = packaging_gate._python_deps_issue(steps)
+        assert issue is not None, steps
+        assert needle in issue, issue
+
+    # Controls: propagating and plain forms satisfy the gate.
+    propagated = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 1"},
+        {"run": "make docs-check || exit 1"},
+    ]
+    assert packaging_gate._python_deps_issue(propagated) is None
+    plain = [
+        {"run": "python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(plain) is None
