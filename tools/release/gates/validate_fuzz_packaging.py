@@ -7561,8 +7561,30 @@ _MAKE_OPTIONAL_FLOAT_OPTIONS = frozenset(
 )
 # -O/--output-sync take an optional operand that GNU Make accepts only in
 # the same word (``-Oline``, ``--output-sync=line``); a separate next word
-# is never consumed.
-_MAKE_ATTACHED_VALUE_OPTIONS = frozenset({"-O", "--output-sync"})
+# is never consumed.  ``--debug``/``--shuffle``/``--random`` take optional
+# operands with the same attached-only rule.
+_MAKE_ATTACHED_VALUE_OPTIONS = frozenset(
+    {"-O", "--output-sync", "--debug", "--shuffle", "--random"}
+)
+# Long options that neither select another makefile nor stop execution.
+# They are modeled so an exact name certifies; an argument-taking one
+# consumes its operand like make does.
+_MAKE_HARMLESS_LONG_OPTIONS = frozenset({
+    "--always-make", "--environment-overrides", "--ignore-errors",
+    "--keep-going", "--no-keep-going", "--stop", "--no-builtin-rules",
+    "--no-builtin-variables", "--silent", "--quiet", "--no-silent",
+    "--print-directory", "--no-print-directory", "--warn-undefined-variables",
+    "--trace", "--check-symlink-times",
+})
+_MAKE_HARMLESS_LONG_VALUE_OPTIONS = frozenset({
+    "--jobserver-auth", "--jobserver-fds", "--sync-mutex",
+    "--jobserver-style", "--temp-stdin",
+})
+# Every long option this model knows by exact name.  GNU Make's getopt_long
+# also accepts unique abbreviations (``--dry`` == ``--dry-run``), and the
+# abbreviation must resolve against the RUNNING make's catalog, which
+# varies by version; an abbreviated or unknown word therefore cannot be
+# certified and is rejected.
 
 # A -C/--directory operand that still names the repository root.  Any other
 # operand selects another directory's Makefile, so the resolved docs-check
@@ -7726,29 +7748,63 @@ def _make_short_option_step(
     return index + 1
 
 
+def _make_long_option_unknown(word: str) -> bool:
+    """Whether a ``--`` word names an option this model does not know.
+
+    GNU Make's getopt_long accepts unique abbreviations resolved against
+    the running version's catalog, so ``--dry`` means ``--dry-run``,
+    ``--eva`` means ``--eval``, and ``--fil`` means ``--file``.  An
+    unknown or abbreviated name therefore cannot be proven harmless and
+    fails closed.
+    """
+    return "--" + word[2:].split("=", 1)[0] not in _MAKE_KNOWN_LONG_OPTIONS
+
+
+_MAKE_KNOWN_LONG_OPTIONS = (
+    _MAKE_HARMLESS_LONG_OPTIONS
+    | _MAKE_HARMLESS_LONG_VALUE_OPTIONS
+    | _MAKE_ATTACHED_VALUE_OPTIONS
+    | _MAKE_OPTIONAL_INT_OPTIONS
+    | _MAKE_OPTIONAL_FLOAT_OPTIONS
+    | _MAKE_REQUIRED_VALUE_OPTIONS
+    | _MAKE_UNCERTIFIABLE_OPTIONS
+    | frozenset({"--directory"})
+    | _MAKE_NONEXECUTING_LONG_OPTIONS
+)
+
+
 def _make_long_option_step(
     word: str, operand: str | None, index: int
 ) -> int | None:
-    """Advance past one ``--``-prefixed option word, or reject it."""
+    """Advance past one ``--``-prefixed option word, or reject it.
+
+    The dispatch order mirrors make's own parse: an unknown or abbreviated
+    name fails closed; a harmless flag advances one word; a harmless value
+    option consumes its operand (attached or next word); ``--directory``
+    checks its operand; the optional-operand forms consume a next word
+    only when the typed operand matches; attached-only forms never do; and
+    a required operand must be present.
+    """
     name, _, attached = word.partition("=")
+    if name not in _MAKE_KNOWN_LONG_OPTIONS:
+        # Unknown or abbreviated (``--dry``, ``--eva``): make resolves the
+        # latter against the running version's catalog, so the word cannot
+        # be certified.  Fail closed.
+        return None
+    if name in _MAKE_HARMLESS_LONG_OPTIONS:
+        return index + 1
     if name == "--directory":
         return _make_directory_step(attached, operand, index)
-    if name in _MAKE_OPTIONAL_INT_OPTIONS | _MAKE_OPTIONAL_FLOAT_OPTIONS:
-        if attached:
-            return index + 1
-        letter = "j" if name in _MAKE_OPTIONAL_INT_OPTIONS else "l"
-        return (
-            index + 2
-            if _make_operand_consumption(letter, operand)
-            else index + 1
-        )
+    if attached:
+        # The operand is inside this word: whatever the option kind, the
+        # next word is not its operand.
+        return index + 1
+    if name in _MAKE_HARMLESS_LONG_VALUE_OPTIONS | _MAKE_REQUIRED_VALUE_OPTIONS:
+        return index + 2 if operand is not None else None
     if name in _MAKE_ATTACHED_VALUE_OPTIONS:
         return index + 1
-    if name in _MAKE_REQUIRED_VALUE_OPTIONS:
-        if attached:
-            return index + 1
-        return index + 2 if operand is not None else None
-    return index + 1
+    letter = "j" if name in _MAKE_OPTIONAL_INT_OPTIONS else "l"
+    return index + 2 if _make_operand_consumption(letter, operand) else index + 1
 
 
 def _make_option_step(words: list[str], index: int) -> int | None:
@@ -7873,6 +7929,11 @@ def _make_flags_value_prevents_execution(value: str) -> bool:
         if not word.startswith("-"):
             continue
         if _make_option_word_prevents_execution(word):
+            return True
+        if word.startswith("--") and _make_long_option_unknown(word):
+            # An abbreviation can mean any non-executing mode (--dry is
+            # --dry-run) or a makefile supplier (--eva is --eval); the
+            # word cannot be proven harmless, so the value disqualifies.
             return True
     return False
 

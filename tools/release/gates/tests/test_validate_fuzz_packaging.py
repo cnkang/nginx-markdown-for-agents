@@ -3760,6 +3760,39 @@ def test_make_docs_check_models_optional_and_attached_operands() -> None:
     ) == ["extra", "docs-check"]
 
 
+def test_make_long_option_abbreviations_fail_closed() -> None:
+    """Abbreviations resolve against the running make's catalog.
+
+    GNU Make's getopt_long accepts unique abbreviations, so ``--dry`` is
+    ``--dry-run`` (recipes skipped) and ``--eva`` is ``--eval`` (the
+    repository makefile never read).  An abbreviation or unknown name
+    cannot be proven harmless, so it stops certification on the
+    command-line path and disqualifies a MAKEFLAGS value.
+    """
+    for words in (
+        ["--dry", "docs-check"],
+        ["--eva=SHELL=/bin/true", "docs-check"],
+        ["--ver", "docs-check"],
+        ["--fil", "/dev/null", "docs-check"],
+        ["--d", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    for value in ("--eva=SHELL=/bin/true", "--dry", "--fil /dev/null"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) or (
+            packaging_gate._make_flags_value_replaces_makefile(value)
+        ), value
+    # Exact harmless names still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["--no-print-directory", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--jobserver-auth=3,4", "docs-check"], 0
+    ) == ["docs-check"]
+    assert not packaging_gate._make_flags_value_prevents_execution(
+        "--jobserver-auth=3,4"
+    )
+
+
 def test_make_flags_values_that_replace_the_makefile_fail_certification() -> None:
     """MAKEFLAGS --eval/-f values defeat a docs-check certification.
 
