@@ -794,6 +794,41 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
         assert "invalid cluster name" in result.stderr, (bad, result.stderr)
 
 
+def test_helm_cluster_smoke_keeps_the_cluster_for_a_reused_namespace() -> None:
+    """A pre-existing namespace belongs to another actor in this cluster.
+
+    A cluster this run created has no namespace, so reuse means a
+    concurrent actor's namespace is present; deleting the cluster would
+    destroy their workloads.  The reuse branch clears the cluster claim.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    reuse = script.split("CREATED_NAMESPACE=1", 1)[1].split("fi", 1)[0]
+    assert "CREATED_CLUSTER=0" in reuse, (
+        "a reused namespace must preserve its cluster"
+    )
+
+
+def test_helm_cluster_smoke_lock_publish_reads_the_record_back() -> None:
+    """Only the run the canonical record names returns as owner.
+
+    A publisher paused across the reclaim grace can have its directory
+    moved by the reaper; without a readback the write lands where the
+    canonical path no longer holds it and two runs own the lock.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    acquire = script.split("if mkdir \"${LOCK_PATH}.d\"", 1)[1].split(
+        "else", 1
+    )[0]
+    assert 'cat "${LOCK_OWNER_FILE}"' in acquire, (
+        "the publish must read the record back"
+    )
+    assert '== "$$"' in acquire
+
+
 def test_helm_cluster_smoke_rechecks_the_claimed_lock_owner() -> None:
     """The stale check re-reads the owner after the claim rename.
 

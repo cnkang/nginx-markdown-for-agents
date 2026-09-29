@@ -219,13 +219,16 @@ acquire_cluster_lock() {
     local waited=0
     while :; do
         if mkdir "${LOCK_PATH}.d" 2>/dev/null; then
-            # Publish the owner with an EXCLUSIVE create.  A plain
-            # redirect could overwrite the record of a run that reclaimed
-            # this path during a pause (the reclaim grace treats an
-            # ownerless directory as stale), and both runs would then
-            # enter the critical section.  A failed publish means the
-            # path is no longer this wait's: wait again.
-            if ( set -o noclobber; printf '%s\n' "$$" > "${LOCK_OWNER_FILE}" ) 2>/dev/null; then
+            # Publish the owner with an EXCLUSIVE create, then read it
+            # back: a plain redirect could overwrite the record of a run
+            # that reclaimed this path during a pause (the reclaim grace
+            # treats an ownerless directory as stale), and a writer
+            # paused across the reclaim can have its write land where the
+            # canonical path no longer holds it.  Only the run whose pid
+            # the canonical record actually carries returns as owner; any
+            # other outcome waits again.
+            if ( set -o noclobber; printf '%s\n' "$$" > "${LOCK_OWNER_FILE}" ) 2>/dev/null \
+                && [[ "$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)" == "$$" ]]; then
                 LOCK_MODE="dir"
                 return 0
             fi
@@ -424,6 +427,13 @@ if [[ -z "${existing_namespace}" ]]; then
     # Record ownership only once this run created it, so cleanup never
     # deletes a namespace that pre-existed on a reused cluster.
     CREATED_NAMESPACE=1
+else
+    # The namespace pre-existed: another actor holds it in this cluster,
+    # so the cluster claim clears and cleanup leaves both alone.  (A
+    # cluster this run just created has no namespace, so reaching this
+    # branch with CREATED_CLUSTER=1 means a concurrent actor's namespace;
+    # deleting the cluster would destroy their workloads.)
+    CREATED_CLUSTER=0
 fi
 
 # Refuse to adopt a release that belongs to the user.  This check runs before
