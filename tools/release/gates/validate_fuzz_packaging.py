@@ -7091,13 +7091,32 @@ def _shell_option_enables_errexit(words: list[str], index: int) -> bool:
     )
 
 
+def _shell_option_word_consumes_operand(word: str) -> bool:
+    """Whether one shell option word consumes the NEXT word as its operand.
+
+    ``--rcfile FILE``/``--init-file FILE`` take a file operand, and
+    ``-o``/``-O`` take a shell-option name; the word after any of them is
+    that operand, not another option.  ``bash --rcfile -e {0}`` therefore
+    runs the body without errexit (verified: the whole body executes), so
+    the scan must step over the operand before reading option words.
+
+    ``-o``/``-O`` are handled by the caller, which reads the operand as the
+    ``-o errexit`` form before stepping over it.
+    """
+    if word == "--rcfile" or word == "--init-file":
+        return True
+    return word in _SHELL_VALUE_OPTIONS and word not in ("-o", "-O")
+
+
 def _shell_initial_errexit(shell: object) -> bool:
     """Model whether a workflow shell starts with errexit enabled.
 
     Every word after the ``{0}`` operand is a positional parameter of the
     script, not a shell option: ``bash {0} -e`` passes the literal ``-e``
     as ``$1`` and runs the body without errexit (verified against bash),
-    so the scan stops at the operand.
+    so the scan stops at the operand.  A word that is another option's
+    operand is skipped for the same reason the positional parameters are:
+    ``bash --rcfile -e {0}`` hands ``-e`` to ``--rcfile``.
     """
     if shell is None or not isinstance(shell, str):
         return True
@@ -7106,10 +7125,18 @@ def _shell_initial_errexit(shell: object) -> bool:
         # GitHub's built-in `bash`/`sh` forms add errexit by default.
         return True
     operand = words.index("{0}")
-    return any(
-        _shell_option_enables_errexit(words, index)
-        for index in range(1, operand)
-    )
+    index = 1
+    while index < operand:
+        word = words[index]
+        if _shell_option_enables_errexit(words, index):
+            return True
+        if _shell_option_word_consumes_operand(word):
+            # The next word is this option's operand, not an option word
+            # (``--rcfile -e`` hands ``-e`` to ``--rcfile``).
+            index += 2
+            continue
+        index += 1
+    return False
 
 
 def _ends_with_background_operator(script: str) -> bool:
@@ -8096,6 +8123,13 @@ def _make_flags_value_masks_failures(value: str) -> bool:
     return False
 
 
+# Every environment name the make gate reads: an export of any of these
+# changes what a later invocation in the same shell does.
+_MAKE_ENV_NAMES = frozenset(
+    {"MAKE", "MAKEFILES", "MAKEFLAGS", "GNUMAKEFLAGS"}
+)
+
+
 def _make_environment_overrides_the_run(env: object) -> bool:
     """Whether make's environment re-points its toolchain or its inputs.
 
@@ -8175,7 +8209,11 @@ def _make_command_local_values_defeat(
 
 
 def _runs_make_docs_check(
-    words: list[str], env: object = None, *, cwd_at_root: bool = True
+    words: list[str],
+    env: object = None,
+    *,
+    cwd_at_root: bool = True,
+    inherited: dict[str, str] | None = None,
 ) -> bool:
     """Whether make's command and target positions invoke docs-check.
 
@@ -8188,6 +8226,8 @@ def _runs_make_docs_check(
     if not cwd_at_root:
         return False
     if _make_environment_defeats_certification(env):
+        return False
+    if _make_environment_defeats_certification(inherited):
         return False
     command_index = _make_docs_check_index(words)
     if command_index is None:
@@ -8399,7 +8439,10 @@ def _step_retry_is_trusted(step: str | dict) -> bool:
 
 
 def _pip_step_commands(
-    segment: str, env: object = None, cwd_at_root: bool = True
+    segment: str,
+    env: object = None,
+    cwd_at_root: bool = True,
+    inherited: dict[str, str] | None = None,
 ) -> tuple[bool, bool]:
     """Whether one executable segment installs pinned deps or runs docs-check.
 
@@ -8416,7 +8459,7 @@ def _pip_step_commands(
         _pip_dry_run_active(words, command_index, env)
     )
     return install, _runs_make_docs_check(
-        words, env, cwd_at_root=cwd_at_root
+        words, env, cwd_at_root=cwd_at_root, inherited=inherited
     )
 
 
@@ -8435,6 +8478,34 @@ def _pip_prerequisite_position(
     if not retry_trusted and _is_retry_call(segment):
         return False
     return segment.strip() not in masked
+
+
+def _make_relevant_export_values(segment: str) -> dict[str, str] | None:
+    """The make-relevant variables a segment exports, when it exports any.
+
+    ``export MAKEFLAGS=-n`` (and ``export MAKEFLAGS; MAKEFLAGS=-n``-style
+    pairs are out of scope) changes every later invocation in the same
+    shell: GNU Make inherits the value and only prints recipes (verified).
+    The returned mapping holds the exported ``NAME=VALUE`` pairs whose
+    names the make gate inspects; None means the segment is not an export
+    the scan can attribute.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return None
+    index = _skip_env_assignments(words, 0)
+    if index >= len(words) or words[index] != "export":
+        return None
+    exported: dict[str, str] = {}
+    for word in words[index + 1:]:
+        if "=" not in word:
+            # `export NAME` re-exports an existing value this scan does
+            # not track; treat the segment as unattributable.
+            return None
+        name, _, value = word.partition("=")
+        if name in _MAKE_ENV_NAMES:
+            exported[name] = value
+    return exported or None
 
 
 def _segment_abandons_repo_root(segment: str) -> bool:
@@ -8479,14 +8550,20 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
+    # The shell's own `export` assignments accumulate as its segments run,
+    # so a later make inherits them.
+    exported: dict[str, str] = {}
     scanned: list[tuple[int, bool, bool]] = []
     for command_index, segment in enumerate(_foreground_live_commands(step)):
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
+        segment_exports = _make_relevant_export_values(segment)
+        if segment_exports is not None:
+            exported.update(segment_exports)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
         installs, checks_docs = _pip_step_commands(
-            segment, step_env, cwd_at_root
+            segment, step_env, cwd_at_root, exported
         )
         scanned.append((command_index, installs, checks_docs))
     return scanned

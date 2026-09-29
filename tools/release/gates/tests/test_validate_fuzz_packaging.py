@@ -1875,6 +1875,55 @@ def test_toolchain_gate_rejects_line_separated_shell_payloads() -> None:
     assert packaging_gate._release_gate_toolchain_issue(single) is None
 
 
+def test_shell_errexit_scan_skips_value_option_operands() -> None:
+    """An option's operand is not an option word.
+
+    `bash --rcfile -e {0}` hands `-e` to `--rcfile` as its file operand, so
+    the body runs WITHOUT errexit (verified: the whole body executes even
+    with a failing command).  Reading `-e` as the errexit switch would
+    certify a masked docs check.
+    """
+    assert packaging_gate._shell_initial_errexit("bash --rcfile -e {0}") is False
+    assert (
+        packaging_gate._shell_initial_errexit("bash --init-file -e {0}") is False
+    )
+    assert packaging_gate._shell_initial_errexit("bash --rcfile X {0}") is False
+    # A real errexit switch (before or after the operand form) still counts.
+    assert packaging_gate._shell_initial_errexit("bash -e --rcfile X {0}") is True
+    assert (
+        packaging_gate._shell_initial_errexit("bash --init-file X -e {0}") is True
+    )
+    assert packaging_gate._shell_initial_errexit("bash -o errexit {0}") is True
+
+
+def test_exported_make_flags_disqualify_a_later_check() -> None:
+    """An export earlier in the same run block reaches the later make.
+
+    `export MAKEFLAGS=-n` changes every later invocation in that shell
+    (verified: make only prints the recipe), so the step scan must carry
+    the exported value forward; a static-environment-only read missed it.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=-n\nmake docs-check",
+        "export MAKEFLAGS=n\nmake docs-check",
+        "export GNUMAKEFLAGS=-q\nmake docs-check",
+        "export MAKE=/usr/bin/true\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # An unrelated export and a plain invocation still certify.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export FOO=1\nmake docs-check"}]
+        )
+        is None
+    )
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+
+
 def test_shell_errexit_scan_stops_at_the_script_operand() -> None:
     """Words after `{0}` are positional parameters, not shell options.
 
