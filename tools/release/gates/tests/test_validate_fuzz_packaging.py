@@ -5141,6 +5141,43 @@ def test_make_flags_cluster_scan_stops_at_argument_options() -> None:
     assert packaging_gate._make_flags_value_prevents_execution("n=1") is False
 
 
+def test_command_line_cluster_scan_matches_make_switch_semantics() -> None:
+    """Both paths scan short-option clusters with one shared model.
+
+    Regression: the command-line path used a plain substring search, so
+    ``-Wn``/``-fn`` (where the argument-taking ``W``/``f`` consumes the
+    letter ``n``) were classified as non-executing although make actually
+    runs the recipe (``-Wn``) or fails before it (``-fn``).  The shared
+    scanner stops at argument-taking letters, so both paths agree.
+    """
+    for word in ("-Wn", "-fn", "-In", "-Cn", "-En"):
+        assert packaging_gate._make_option_prevents_execution(word) is False, word
+        # And the MAKEFLAGS path reads the same word the same way.
+        assert (
+            packaging_gate._make_flags_value_prevents_execution(word) is False
+        ), word
+    for word in ("-kn", "-nv", "-vh", "-n", "-q", "-t", "-v", "-h"):
+        assert packaging_gate._make_option_prevents_execution(word) is True, word
+    # A dash-less word is not an option on the command line.
+    assert packaging_gate._make_option_prevents_execution("trace") is False
+
+
+def test_environment_cluster_letters_stay_within_verified_make_behavior() -> None:
+    """The MAKEFLAGS letter set excludes version-dependent spellings.
+
+    ``h``/``--help`` are ignored by make 3.81 and 4.3 when they arrive
+    through MAKEFLAGS (the recipe runs), so treating them as
+    non-executing would wrongly disqualify a live docs check on those
+    versions.  ``v``/``--version`` stop every verified version and stay.
+    """
+    for value in ("v", "-v", "--version"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) is True, value
+    for value in ("h", "-h", "--help"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) is False, value
+    assert packaging_gate._make_flags_value_prevents_execution("n") is True
+    assert packaging_gate._make_flags_value_prevents_execution("kn") is True
+
+
 def _heredoc_workflow(body: str) -> str:
     return (
         "jobs:\n  release-gate:\n    steps:\n      - run: |\n"

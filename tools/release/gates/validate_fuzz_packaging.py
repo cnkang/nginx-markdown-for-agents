@@ -7552,16 +7552,44 @@ _MAKE_NONEXECUTING_LONG_OPTIONS = frozenset(
 )
 _MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqtvh")
 
+# Short options that consume the rest of their cluster as an argument
+# (make's switch table: C f I j l o O W E).  The cluster scan stops here:
+# the letters after one of these are its argument, not options.  ``-Wn``
+# therefore asks make to treat file ``n`` as new and the recipe still
+# runs, while ``-fn`` reads makefile ``n`` and fails before any recipe -
+# neither is a silent non-execution, so neither disqualifies the step.
+_MAKE_ARGUMENT_TAKING_SHORT = frozenset("CfIjloOWE")
+
+
+def _make_short_cluster_prevents_execution(
+    word: str, non_executing: frozenset[str]
+) -> bool:
+    """Whether one short-option cluster selects a non-executing mode.
+
+    Every letter is scanned until a letter in ``non_executing`` matches
+    or an argument-taking letter consumes the remainder of the word.
+    The command-line path and the MAKEFLAGS path both scan clusters with
+    this helper so the two agree.
+    """
+    for letter in word[1:]:
+        if letter in non_executing:
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            break
+    return False
+
 
 def _make_option_prevents_execution(word: str) -> bool:
-    """Recognize dry-run/question/touch options, including short clusters."""
+    """Recognize options that stop make before docs-check can run."""
     option = word.split("=", 1)[0]
     if word in _MAKE_NONEXECUTING_OPTIONS or option in _MAKE_NONEXECUTING_LONG_OPTIONS:
         return True
     return (
         word.startswith("-")
         and not word.startswith("--")
-        and any(flag in word[1:] for flag in _MAKE_NONEXECUTING_SHORT_FLAGS)
+        and _make_short_cluster_prevents_execution(
+            word, _MAKE_NONEXECUTING_SHORT_FLAGS
+        )
     )
 
 
@@ -7623,20 +7651,16 @@ def _make_docs_check_index(words: list[str]) -> int | None:
     return None
 
 
-# Short options whose recipes would run: the letters that select a
-# non-executing mode in a short-option cluster (just-print, question,
-# touch).
-_MAKE_NONEXECUTING_SHORT = frozenset("nqt")
+# Letters that stop recipe execution via MAKEFLAGS: just-print (n),
+# question (q), touch (t), version (v).  ``h``/``--help`` are excluded
+# deliberately: make 3.81 and 4.3 ignore them in the environment and the
+# recipe runs, so disqualifying the step would be wrong on those versions.
+_MAKE_NONEXECUTING_SHORT = frozenset("nqtv")
 
-# Short options that consume the rest of their cluster as an argument
-# (make's switches table: C f I j l o O W E).  A cluster scan stops here
-# because the letters that follow are that option's argument, not more
-# options (``-Wn`` says "what-if file n", it is not -W plus -n).
-_MAKE_ARGUMENT_TAKING_SHORT = frozenset("CfIjloOWE")
-
-# Long spellings of the same non-executing modes.
+# Long spellings of the same non-executing modes (help excluded for the
+# same version-dependent reason).
 _MAKE_NONEXECUTING_LONG = frozenset(
-    ("dry-run", "just-print", "recon", "question", "touch")
+    ("dry-run", "just-print", "recon", "question", "touch", "version")
 )
 
 
@@ -7645,17 +7669,14 @@ def _make_option_word_prevents_execution(word: str) -> bool:
 
     A word starting with ``--`` is a long option (the name up to ``=`` is
     matched against the non-executing spellings).  Otherwise the word is a
-    short-option cluster: every letter is scanned until a letter that
-    takes an argument consumes the remainder.
+    short-option cluster, scanned by the same helper the command-line path
+    uses so the two cannot drift apart.
     """
     if word.startswith("--"):
         return word[2:].split("=", 1)[0] in _MAKE_NONEXECUTING_LONG
-    for letter in word[1:]:
-        if letter in _MAKE_NONEXECUTING_SHORT:
-            return True
-        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
-            break
-    return False
+    return _make_short_cluster_prevents_execution(
+        word, _MAKE_NONEXECUTING_SHORT
+    )
 
 
 def _make_flags_value_prevents_execution(value: str) -> bool:
