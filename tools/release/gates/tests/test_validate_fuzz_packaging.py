@@ -3825,6 +3825,41 @@ def test_make_long_option_abbreviations_fail_closed() -> None:
     )
 
 
+def test_make_variable_assignments_fail_certification() -> None:
+    """An assignment shapes the whole run, so it cannot certify a check.
+
+    `make SHELL=/usr/bin/true docs-check` executes every recipe through
+    ``true`` and exits 0 without doing the work (verified on 3.81 and
+    4.4.1), and the same value reaches MAKEFLAGS; ``--`` does not turn an
+    assignment into a target.  -p/--print-data-base also stops the recipe
+    on 3.81.  All of these must fail certification.
+    """
+    for words in (
+        ["SHELL=/usr/bin/true", "docs-check"],
+        [".SHELLFLAGS=q", "docs-check"],
+        ["--", "SHELL=/usr/bin/true", "docs-check"],
+        ["-p", "docs-check"],
+        ["--print-data-base", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    for value in ("SHELL=/usr/bin/true", ".SHELLFLAGS=q", "n=1"):
+        assert packaging_gate._make_flags_value_uncertifiable(value), value
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "SHELL=/usr/bin/true"}}]
+        )
+        is not None
+    )
+    # Plain invocations still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--", "docs-check"], 0
+    ) == ["docs-check"]
+
+
 def test_make_flags_values_that_replace_the_makefile_fail_certification() -> None:
     """MAKEFLAGS --eval/-f values defeat a docs-check certification.
 
