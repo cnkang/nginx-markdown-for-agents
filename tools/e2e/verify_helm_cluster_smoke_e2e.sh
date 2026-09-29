@@ -490,19 +490,30 @@ if ! install_output="$(helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-mark
     --set-string metrics.sidecar.resources.limits.memory=128Mi \
     --wait --timeout 180s \
     "$(helm_rollback_flag)" 2>&1)"; then
-    printf '%s\n' "${install_output}" >&2
     # A name collision means another actor created this run's release name
     # between the preflight and the install: the name is theirs, so cleanup
-    # preserves it (and the namespace content with it).  Two error shapes
-    # report it: the name check refuses with "cannot re-use a name that is
-    # still in use" (Helm 3) or "cannot reuse ..." (Helm 4), and the
-    # storage-layer create that follows its own availability check reports
-    # "release: already exists" when both racers passed that check.
+    # preserves it (and everything that holds it).  Two error shapes report
+    # it: the name check refuses with "cannot re-use a name that is still in
+    # use" (Helm 3) or "cannot reuse ..." (Helm 4), and the storage-layer
+    # create that follows its own availability check reports "release:
+    # already exists" when both racers passed that check.
+    #
+    # The classification clears the claims BEFORE any output: bash runs a
+    # deferred TERM trap between foreground commands, so printing first
+    # would leave a window where cleanup still uninstalls the collider's
+    # release.  Their release lives in this cluster, so the cluster claim
+    # clears with the others - deleting the cluster would take it down.
+    collision=0
     if [[ "${install_output}" == *"name that is still in use"* ]] \
         || [[ "${install_output}" == *"release: already exists"* ]]; then
-        echo "ERROR: another creator holds release ${RELEASE}; cleanup preserves it" >&2
+        collision=1
         CREATED_RELEASE=0
         CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
+    fi
+    printf '%s\n' "${install_output}" >&2
+    if [[ "${collision}" -eq 1 ]]; then
+        echo "ERROR: another creator holds release ${RELEASE}; cleanup preserves it" >&2
     fi
     exit 1
 fi

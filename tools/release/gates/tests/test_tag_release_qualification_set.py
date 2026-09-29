@@ -730,12 +730,23 @@ def test_helm_cluster_smoke_preserves_a_release_won_by_a_concurrent_creator(
             tmp_path / str(index),
             "",
             helm=_HelmStub(install_fails=True, install_failure_message=message),
+            # This run creates the cluster, so a collision must keep it:
+            # the collider's release lives there and would be destroyed
+            # with the cluster.
+            cluster_exists=False,
+            namespace_exists=False,
         )
         assert result.returncode != 0
         assert "helm install" in command_log
         assert "helm uninstall" not in command_log, (
             f"a collision ({message!r}) is another creator's release; "
             f"cleanup must preserve it: {result.stderr}"
+        )
+        # The collider's release lives in this cluster: deleting the
+        # cluster would take it down, so the cluster claim clears too.
+        assert "kind delete cluster" not in command_log, (
+            f"a collision ({message!r}) must preserve the cluster that "
+            f"holds the other creator's release: {result.stderr}"
         )
 
 
