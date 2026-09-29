@@ -774,6 +774,62 @@ test_head_representation_headers_vary_wildcard_unchanged(void)
     TEST_PASS("HEAD wildcard Vary is preserved");
 }
 
+
+/*
+ * The HEAD representation path calls ngx_http_markdown_add_vary_accept()
+ * directly.  A wildcard in a later Vary field must no-op there too, and an
+ * Accept token in a later field must not cause a redundant append.
+ */
+static void
+test_head_representation_headers_vary_wildcard_in_later_field(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t   *first;
+    ngx_table_elt_t   *second;
+
+    TEST_SUBSECTION("HEAD representation honours a wildcard in a later Vary field");
+
+    first = push_header(&r, "Vary", "User-Agent");
+    second = push_header(&r, "Vary", "*");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation headers should succeed");
+
+    TEST_ASSERT(first->value.len == sizeof("User-Agent") - 1 &&
+                memcmp(first->value.data, "User-Agent", first->value.len) == 0,
+                "HEAD: first Vary must stay unchanged when a later field is wildcard");
+    TEST_ASSERT(second->value.len == 1 && second->value.data[0] == '*',
+                "HEAD: wildcard Vary field must stay unchanged");
+
+    free_request(&r);
+    TEST_PASS("HEAD honours a later-field wildcard");
+}
+
+
+static void
+test_head_representation_headers_vary_accept_in_later_field(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t   *first;
+
+    TEST_SUBSECTION("HEAD representation sees Accept in a later Vary field");
+
+    first = push_header(&r, "Vary", "User-Agent");
+    push_header(&r, "Vary", "Accept");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation headers should succeed");
+
+    TEST_ASSERT(first->value.len == sizeof("User-Agent") - 1 &&
+                memcmp(first->value.data, "User-Agent", first->value.len) == 0,
+                "HEAD: first Vary must not gain Accept when a later field has it");
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 2,
+                "HEAD: both Vary fields must stay active");
+
+    free_request(&r);
+    TEST_PASS("HEAD sees a later-field Accept");
+}
+
 static void
 test_update_headers_token_zero(void)
 {
@@ -1322,6 +1378,118 @@ test_clear_trailers_null_elts_with_entries(void)
     TEST_PASS("clear_trailers guards NULL elts with entries");
 }
 
+
+static void
+test_update_headers_vary_wildcard_in_later_field_unchanged(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *first;
+    ngx_table_elt_t *second;
+
+    TEST_SUBSECTION("A wildcard in a later Vary field leaves it unchanged");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    first = push_header(&r, "Vary", "User-Agent");
+    second = push_header(&r, "Vary", "*");
+
+    /* Vary: User-Agent + Vary: * - the second field's wildcard already
+     * makes the response non-reusable without revalidation, so the first
+     * field must not gain ", Accept". */
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with a later wildcard Vary should succeed");
+    TEST_ASSERT(first->value.len == sizeof("User-Agent") - 1 &&
+                memcmp(first->value.data, "User-Agent", first->value.len) == 0,
+                "First Vary must stay unchanged when a later field is wildcard");
+    TEST_ASSERT(second->value.len == 1 && second->value.data[0] == '*',
+                "Wildcard Vary field must stay unchanged");
+
+    free_request(&r);
+    TEST_PASS("Later-field wildcard suppresses the append");
+}
+
+
+static void
+test_update_headers_vary_accept_in_later_field_no_duplicate(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *first;
+    ngx_table_elt_t *second;
+
+    TEST_SUBSECTION("Accept in a later Vary field avoids a redundant append");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    first = push_header(&r, "Vary", "User-Agent");
+    second = push_header(&r, "Vary", "Accept");
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers with a later Accept Vary should succeed");
+    TEST_ASSERT(first->value.len == sizeof("User-Agent") - 1 &&
+                memcmp(first->value.data, "User-Agent", first->value.len) == 0,
+                "First Vary must stay unchanged when a later field carries Accept");
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 2,
+                "Both Vary fields must stay active");
+
+    free_request(&r);
+    TEST_PASS("Later-field Accept avoids the redundant append");
+}
+
+
+static void
+test_update_headers_vary_invalidated_wildcard_does_not_suppress(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *inactive_wildcard;
+    ngx_table_elt_t *active;
+
+    TEST_SUBSECTION("An invalidated wildcard Vary does not suppress the append");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    inactive_wildcard = push_header(&r, "Vary", "*");
+    inactive_wildcard->hash = 0;
+    active = push_header(&r, "Vary", "User-Agent");
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should ignore an invalidated wildcard");
+    TEST_ASSERT(find_substr(active->value.data, active->value.len,
+                "Accept", 6),
+                "Active Vary should still gain Accept");
+    TEST_ASSERT(inactive_wildcard->hash == 0,
+                "Invalidated wildcard must stay inactive");
+
+    free_request(&r);
+    TEST_PASS("Invalidated wildcard entries do not count");
+}
+
 int
 main(void)
 {
@@ -1336,6 +1504,9 @@ main(void)
     test_update_headers_etag_existing_vary_accept();
     test_update_headers_etag_existing_vary_accept_trailing_ows();
     test_update_headers_vary_wildcard_unchanged();
+    test_update_headers_vary_wildcard_in_later_field_unchanged();
+    test_update_headers_vary_accept_in_later_field_no_duplicate();
+    test_update_headers_vary_invalidated_wildcard_does_not_suppress();
     test_update_headers_vary_wildcard_in_list_unchanged();
     test_update_headers_vary_control_appends_accept();
     test_update_headers_token_zero();
@@ -1350,6 +1521,8 @@ main(void)
     test_head_representation_headers_null();
     test_head_representation_headers_duplicate_entries();
     test_head_representation_headers_vary_wildcard_unchanged();
+    test_head_representation_headers_vary_wildcard_in_later_field();
+    test_head_representation_headers_vary_accept_in_later_field();
     test_clear_trailers_suppresses_all_entries();
     test_clear_trailers_empty_list();
     test_clear_trailers_null_elts_with_entries();
