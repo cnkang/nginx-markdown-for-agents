@@ -14,7 +14,12 @@
 #   - concurrent same-scenario runs   -> neither removes the other's tree
 #   - long-running invocation         -> age alone never reclaims a live tree
 #   - one exits, the other continues  -> survivor's tree preserved
-#   - abnormal termination            -> dead creator's orphan reclaimed
+#   - abnormal termination            -> unsettled dead-creator orphan
+#                                        with a matching record reclaimed
+#   - settled tree                    -> a finished run's retained tree
+#                                        (marker present) never reclaimed
+#   - unprovable ownership            -> a tree without an invocation
+#                                        record is preserved
 #   - --keep-artifacts                -> nothing is reclaimed
 #   - idempotent cleanup              -> second run changes nothing
 #
@@ -120,6 +125,11 @@ run_cases_for_wrapper() {
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/other-scenario/invocation.json"
   # --- an orphan from a dead creator with no metadata at all --------------
   mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-888"
+  # --- a settled tree: a finished run retained its artifacts --------------
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/artifacts/scenarios/${scenario}"
+  printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/artifacts/scenarios/${scenario}/invocation.json"
+  printf 'failed\n' > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/.harness-completed"
   # --- a directory of a different scenario is never ours ------------------
   mkdir -p "${fixture}/e2e-harness-other-scenario-${dead_pid}-444"
 
@@ -141,8 +151,10 @@ run_cases_for_wrapper() {
     "${scenario}: dead creator's orphan reclaimed (metadata corroborates)"
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-777" \
     "${scenario}: orphan whose metadata names another scenario is preserved"
-  assert_dir missing "${fixture}/e2e-harness-${scenario}-${dead_pid}-888" \
-    "${scenario}: orphan with no metadata is reclaimed"
+  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-888" \
+    "${scenario}: orphan with no metadata is preserved (ownership unproven)"
+  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-999" \
+    "${scenario}: a settled run's retained tree is never reclaimed"
   assert_dir exists "${fixture}/e2e-harness-other-scenario-${dead_pid}-444" \
     "${scenario}: other scenario's tree untouched"
 
