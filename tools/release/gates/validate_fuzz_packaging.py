@@ -7544,11 +7544,30 @@ def _shell_words(segment: str) -> list[str]:
     return [] if command is None else [*prefix, *command]
 
 
-_MAKE_VALUE_OPTIONS = frozenset({
+# Options that always consume the following word as their operand.
+_MAKE_REQUIRED_VALUE_OPTIONS = frozenset({
     "-C", "--directory", "-f", "--file", "--makefile", "-I",
-    "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
-    "--old-file", "-W", "--what-if", "--assume-new", "--eval",
+    "--include-dir", "-o", "--old-file", "-W", "--what-if",
+    "--assume-new", "-E", "--eval",
 })
+# -j/--jobs take an optional operand that GNU Make consumes only when the
+# next word is all digits (positive_int); -l/--load-average/--max-load
+# consume it only when it starts with a digit or a dot (floating).  A word
+# like ``docs-check`` stays a goal, so ``make -j docs-check`` runs the
+# repository chain and must certify.
+_MAKE_OPTIONAL_INT_OPTIONS = frozenset({"-j", "--jobs"})
+_MAKE_OPTIONAL_FLOAT_OPTIONS = frozenset(
+    {"-l", "--load-average", "--max-load"}
+)
+# -O/--output-sync take an optional operand that GNU Make accepts only in
+# the same word (``-Oline``, ``--output-sync=line``); a separate next word
+# is never consumed.
+_MAKE_ATTACHED_VALUE_OPTIONS = frozenset({"-O", "--output-sync"})
+
+# A -C/--directory operand that still names the repository root.  Any other
+# operand selects another directory's Makefile, so the resolved docs-check
+# target is no longer provably the repository chain.
+_MAKE_ROOT_DIRECTORY_VALUES = frozenset({".", "./"})
 # Options that supply their own makefile or definitions.  An invocation
 # carrying one of these cannot prove that the REPOSITORY's docs-check ran:
 # the target it resolves may come from the supplied makefile or from the
@@ -7581,6 +7600,17 @@ def _make_option_replaces_makefile(word: str) -> bool:
         if letter in _MAKE_ARGUMENT_TAKING_SHORT:
             return False
     return False
+
+
+def _make_directory_operand_off_root(operand: str | None) -> bool:
+    """Whether a -C/--directory operand changes away from the repo root.
+
+    GNU Make changes directory before reading makefiles, so only an
+    operand naming the repository root (``.``/``./``) resolves the
+    repository docs-check; any other directory selects a different
+    Makefile.  An unreadable operand fails closed.
+    """
+    return operand not in _MAKE_ROOT_DIRECTORY_VALUES
 _MAKE_NONEXECUTING_OPTIONS = frozenset({
     "-n", "--dry-run", "--just-print", "--recon",
     "-q", "--question", "-t", "--touch",
@@ -7632,26 +7662,120 @@ def _make_option_prevents_execution(word: str) -> bool:
     )
 
 
+def _make_operand_consumption(letter: str, operand: str | None) -> bool:
+    """Whether GNU Make consumes the next word as this option's operand.
+
+    ``j`` (jobs) consumes a separated operand only when it is all digits,
+    ``l`` (load-average) only when it starts with a digit or a dot, and
+    ``O`` (output-sync) never consumes a separated word.  Every other
+    argument-taking letter consumes the next word unconditionally.
+    """
+    if letter == "O":
+        return False
+    if letter == "j":
+        return bool(operand) and operand.isascii() and operand.isdigit()
+    if letter == "l":
+        first = operand[:1] if operand is not None else ""
+        return first.isascii() and (first.isdigit() or first == ".")
+    return operand is not None
+
+
+def _make_directory_step(rest: str, operand: str | None, index: int) -> int | None:
+    """Advance past a ``-C`` with its attached or separated operand."""
+    if rest:
+        return None if _make_directory_operand_off_root(rest) else index + 1
+    if operand is None or _make_directory_operand_off_root(operand):
+        return None
+    return index + 2
+
+
+def _make_cluster_letter_step(
+    letter: str, rest: str, operand: str | None, index: int
+) -> int | None | bool:
+    """Resolve one argument-taking letter of a short cluster.
+
+    Returns the next index, None for a rejection, or False when the letter
+    is not argument-taking (the caller keeps scanning).
+    """
+    if letter not in _MAKE_ARGUMENT_TAKING_SHORT:
+        return False
+    if letter == "C":
+        return _make_directory_step(rest, operand, index)
+    if rest:
+        # An attached operand: the letter consumed the remainder.
+        return index + 1
+    if _make_operand_consumption(letter, operand):
+        return index + 2
+    # A required-operand letter with a missing operand cannot be certified;
+    # an optional-operand letter (j/l/O) simply takes the next word.
+    return index + 1 if letter in ("j", "l", "O") else None
+
+
+def _make_short_option_step(
+    word: str, operand: str | None, index: int
+) -> int | None:
+    """Advance past one short-option cluster, or reject it."""
+    for offset, letter in enumerate(word[1:]):
+        if letter in _MAKE_NONEXECUTING_SHORT_FLAGS:
+            return None
+        step = _make_cluster_letter_step(
+            letter, word[2 + offset:], operand, index
+        )
+        if step is not False:
+            return step
+    return index + 1
+
+
+def _make_long_option_step(
+    word: str, operand: str | None, index: int
+) -> int | None:
+    """Advance past one ``--``-prefixed option word, or reject it."""
+    name, _, attached = word.partition("=")
+    if name == "--directory":
+        return _make_directory_step(attached, operand, index)
+    if name in _MAKE_OPTIONAL_INT_OPTIONS | _MAKE_OPTIONAL_FLOAT_OPTIONS:
+        if attached:
+            return index + 1
+        letter = "j" if name in _MAKE_OPTIONAL_INT_OPTIONS else "l"
+        return (
+            index + 2
+            if _make_operand_consumption(letter, operand)
+            else index + 1
+        )
+    if name in _MAKE_ATTACHED_VALUE_OPTIONS:
+        return index + 1
+    if name in _MAKE_REQUIRED_VALUE_OPTIONS:
+        if attached:
+            return index + 1
+        return index + 2 if operand is not None else None
+    return index + 1
+
+
 def _make_option_step(words: list[str], index: int) -> int | None:
     """Advance past one make option word, or reject the invocation.
 
     Returns the next index, or None when the word cannot be certified: a
-    non-executing option, a supplied makefile/--eval, or an option whose
-    operand is missing.  A word that is not an option is left for the
-    caller to record as a target.
+    non-executing option, a supplied makefile/--eval, a directory redirect
+    away from the repository root, or a missing required operand.  The
+    operand rules mirror GNU Make: ``-j``/``--jobs`` consume the next word
+    only when it is all digits, ``-l``/``--load-average``/``--max-load``
+    only when it starts with a digit or a dot, ``-O``/``--output-sync``
+    never consume a next word, and every other argument-taking option
+    consumes its operand from the remainder of the word or the next word.
     """
     word = words[index]
+    operand = words[index + 1] if index + 1 < len(words) else None
     if _make_option_prevents_execution(word):
         return None
     if _make_option_replaces_makefile(word):
         # A supplied makefile or --eval text means the resolved target may
         # not be the repository's docs-check chain.
         return None
-    if word in _MAKE_VALUE_OPTIONS:
-        return index + 2 if index + 1 < len(words) else None
-    if word.startswith("-"):
-        return index + 1
-    return None
+    if word.startswith("--"):
+        return _make_long_option_step(word, operand, index)
+    if not word.startswith("-"):
+        return None
+    return _make_short_option_step(word, operand, index)
 
 
 def _make_targets_after_options(words: list[str], index: int) -> list[str] | None:
@@ -7753,13 +7877,37 @@ def _make_flags_value_prevents_execution(value: str) -> bool:
     return False
 
 
+def _make_flags_value_replaces_makefile(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value supplies its own makefile.
+
+    ``--eval`` text and ``-f``/``--makefile`` selections read from the
+    environment take effect before the repository Makefile is read, so an
+    invocation carrying one cannot prove the repository docs-check ran
+    (``MAKEFLAGS='--eval=SHELL=/bin/true'`` makes every recipe a no-op,
+    and ``MAKEFLAGS='-f /dev/null'`` resolves no repository target at
+    all).  The first word gets the implied dash, exactly as make applies
+    it before parsing.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            continue
+        if _make_option_replaces_makefile(word):
+            return True
+    return False
+
+
 def _make_environment_prevents_execution(env: object) -> bool:
-    """Whether make's environment selects a non-executing mode.
+    """Whether make's environment defeats a docs-check certification.
 
     GNU Make reads ``MAKEFLAGS`` (and ``GNUMAKEFLAGS``) from the
     environment, so ``-n``/``-q``/``-t`` set there stop recipe execution
     for every invocation in the step.  The same is true of the dash-less
     spellings (``n``, ``kn``) and the long forms (``--dry-run``).  A
+    value that supplies its own makefile or ``--eval`` text also defeats
+    the certification: the repository Makefile is never read (or its
+    recipes are replaced), so ``docs-check`` cannot have run.  A
     workflow, job, or step scope can carry it, and a command-local
     assignment is inspected by the caller.
     """
@@ -7767,7 +7915,11 @@ def _make_environment_prevents_execution(env: object) -> bool:
         return False
     for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
         value = env.get(name)
-        if isinstance(value, str) and _make_flags_value_prevents_execution(value):
+        if not isinstance(value, str):
+            continue
+        if _make_flags_value_prevents_execution(value):
+            return True
+        if _make_flags_value_replaces_makefile(value):
             return True
     return False
 
@@ -7787,7 +7939,11 @@ def _runs_make_docs_check(words: list[str], env: object = None) -> bool:
     command_local = _pip_prefix_env_values(words, command_index)
     for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
         value = command_local.get(name)
-        if value is not None and _make_flags_value_prevents_execution(value):
+        if value is None:
+            continue
+        if _make_flags_value_prevents_execution(value):
+            return False
+        if _make_flags_value_replaces_makefile(value):
             return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets

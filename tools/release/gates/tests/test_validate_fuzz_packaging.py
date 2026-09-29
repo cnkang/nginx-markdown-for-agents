@@ -3699,8 +3699,102 @@ def test_make_docs_check_rejects_missing_option_operand() -> None:
     """A dangling `-C` cannot prove that make ran the required target."""
     assert packaging_gate._make_targets_after_options(["-C"], 0) is None
     assert packaging_gate._make_targets_after_options(
-        ["-C", "tools", "docs-check"], 0
+        ["-C", ".", "docs-check"], 0
     ) == ["docs-check"]
+
+
+def test_make_docs_check_rejects_a_directory_redirect() -> None:
+    """`-C <other>` resolves another directory's Makefile.
+
+    GNU Make changes directory before reading makefiles, so a `-C` operand
+    other than the repository root cannot prove the repository docs-check
+    chain ran (`make -C "$RUNNER_TEMP/noop" docs-check` succeeds against a
+    planted no-op Makefile).  The root spellings still certify.
+    """
+    assert packaging_gate._make_targets_after_options(
+        ["-C", "tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["--directory", "tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["--directory=tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["-C.", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--directory=.", "docs-check"], 0
+    ) == ["docs-check"]
+
+
+def test_make_docs_check_models_optional_and_attached_operands() -> None:
+    """-j/-l operands are optional; -O takes attached arguments only.
+
+    GNU Make consumes a separated -j operand only when it is all digits
+    and a separated -l operand only when it starts with a digit or a dot,
+    so `make -j docs-check` runs the repository target and must certify.
+    -O/--output-sync accept their argument attached only, and a separated
+    word then stays a goal.
+    """
+    for words in (
+        ["-j", "docs-check"],
+        ["-j4", "docs-check"],
+        ["-j", "4", "docs-check"],
+        ["-l", "docs-check"],
+        ["-l", "1.5", "docs-check"],
+        ["-O", "docs-check"],
+        ["-Oline", "docs-check"],
+        ["--output-sync", "docs-check"],
+        ["--output-sync=line", "docs-check"],
+        ["--jobs", "docs-check"],
+        ["--jobs=4", "docs-check"],
+        ["--jobs", "4", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) == [
+            "docs-check"
+        ], words
+    # A separated non-numeric operand stays a goal, not a -j argument.
+    assert packaging_gate._make_targets_after_options(
+        ["-j", "extra", "docs-check"], 0
+    ) == ["extra", "docs-check"]
+
+
+def test_make_flags_values_that_replace_the_makefile_fail_certification() -> None:
+    """MAKEFLAGS --eval/-f values defeat a docs-check certification.
+
+    `MAKEFLAGS='--eval=SHELL=/bin/true'` (or an environment -f pointing at
+    another makefile) takes effect before the repository Makefile is read,
+    so a step carrying it cannot prove the repository chain ran.  The
+    check covers the environment scope and a command-local assignment.
+    """
+    for value in (
+        "--eval=SHELL=/bin/true",
+        "--eval",
+        "-E SHELL=x",
+        "-ESHELL=x",
+        "-f /dev/null",
+        "--file=/dev/null",
+        "--makefile other.mk",
+        "n --eval=x",
+    ):
+        assert packaging_gate._make_flags_value_replaces_makefile(value), value
+    for value in ("", "n", "kn", "-j4", "w --jobserver-auth=3,4"):
+        assert not packaging_gate._make_flags_value_replaces_makefile(value), value
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for value in ("--eval=SHELL=/bin/true", "-f /dev/null"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {"MAKEFLAGS": value}}]
+            )
+            is not None
+        ), value
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, "MAKEFLAGS=--eval=x make docs-check"]
+        )
+        is not None
+    )
 
 
 def test_make_docs_check_rejects_supplied_makefiles_and_eval() -> None:
@@ -3722,7 +3816,7 @@ def test_make_docs_check_rejects_supplied_makefiles_and_eval() -> None:
         assert packaging_gate._make_targets_after_options(words, 0) is None, words
     # Plain invocations still certify.
     assert packaging_gate._make_targets_after_options(
-        ["-C", "tools", "docs-check"], 0
+        ["-C", ".", "docs-check"], 0
     ) == ["docs-check"]
     assert packaging_gate._make_targets_after_options(
         ["-j2", "docs-check"], 0
