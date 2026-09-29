@@ -1004,7 +1004,7 @@ def _publish_combination_is_expected(
     - for manual dispatch only - when every required dependency succeeded
     except the signing job, which is the single documented skip exception.
     """
-    for job_name, result in zip(sorted(RELEASE_PUBLISH_REQUIRED_NEEDS), results):
+    for job_name, result in zip(sorted(RELEASE_PUBLISH_REQUIRED_NEEDS), results, strict=True):
         if result == "success":
             continue
         if (
@@ -1039,7 +1039,7 @@ def _publish_condition_matches_truth_table(
         _PUBLISH_RESULT_STATES, repeat=len(job_names)
     ):
         context = dict(base_context)
-        for job_name, result in zip(job_names, results):
+        for job_name, result in zip(job_names, results, strict=True):
             context[f"needs.{job_name.replace('-', '_')}.result"] = result
         evaluated = _evaluate_publish_condition(node, context)
         if evaluated is not _publish_combination_is_expected(results, event_name):
