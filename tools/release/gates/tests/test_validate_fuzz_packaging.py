@@ -5051,3 +5051,63 @@ def test_masked_and_backgrounded_sets_use_the_live_view_text() -> None:
     assert not any(
         segment.startswith("then ") for segment in backgrounded
     ), backgrounded
+
+
+def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
+    """A non-executing make mode in the environment stops the docs check.
+
+    Regression: the docs-check detector read only the command words, so a
+    step (or job/workflow) environment of ``MAKEFLAGS=-n`` still counted
+    as a live docs check although GNU Make merely prints recipes.  A
+    command-local assignment is covered too.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    rejected = [
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-n"}}],
+        [install, {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "-q"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-t"}}],
+        [install, {"run": "MAKEFLAGS=-n make docs-check"}],
+    ]
+    for steps in rejected:
+        assert packaging_gate._python_deps_issue(steps) is not None, steps
+
+    accepted = [
+        [install, {"run": "make docs-check"}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": ""}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "s"}}],
+    ]
+    for steps in accepted:
+        assert packaging_gate._python_deps_issue(steps) is None, steps
+
+
+def _heredoc_workflow(body: str) -> str:
+    return (
+        "jobs:\n  release-gate:\n    steps:\n      - run: |\n"
+        + "".join(f"          {line}\n" for line in body.splitlines())
+    )
+
+
+def test_partially_quoted_heredoc_delimiters_suppress_expansion() -> None:
+    """Quoting any part of a delimiter makes the body literal.
+
+    Regression: only a leading quote was recognized, so `<<E'OF'` (whose
+    body bash does NOT expand) still had its `$(...)` text scanned and
+    could block a workflow that is actually safe.
+    """
+    expanding = _heredoc_workflow(
+        "cat <<EOF\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(expanding) is not None
+
+    literal = [
+        "cat <<E'OF'\n$(rustup toolchain install nightly)\nEOF",
+        'cat <<"E"OF\n$(rustup toolchain install nightly)\nEOF',
+        "cat <<E\\OF\n$(rustup toolchain install nightly)\nEOF",
+    ]
+    for body in literal:
+        assert (
+            packaging_gate._raw_toolchain_install_issue(
+                _heredoc_workflow(body)
+            )
+            is None
+        ), body
