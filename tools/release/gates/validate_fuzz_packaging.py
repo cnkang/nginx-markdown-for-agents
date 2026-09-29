@@ -7052,16 +7052,23 @@ def _shell_option_enables_errexit(words: list[str], index: int) -> bool:
 
 
 def _shell_initial_errexit(shell: object) -> bool:
-    """Model whether a workflow shell starts with errexit enabled."""
+    """Model whether a workflow shell starts with errexit enabled.
+
+    Every word after the ``{0}`` operand is a positional parameter of the
+    script, not a shell option: ``bash {0} -e`` passes the literal ``-e``
+    as ``$1`` and runs the body without errexit (verified against bash),
+    so the scan stops at the operand.
+    """
     if shell is None or not isinstance(shell, str):
         return True
     words = shell.split()
     if not words or "{0}" not in words:
         # GitHub's built-in `bash`/`sh` forms add errexit by default.
         return True
+    operand = words.index("{0}")
     return any(
         _shell_option_enables_errexit(words, index)
-        for index in range(1, len(words))
+        for index in range(1, operand)
     )
 
 
