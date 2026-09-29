@@ -5597,8 +5597,13 @@ def _invocation_head(segment: str) -> str | None:
     index, refused = _unwrap_stacked_wrappers(words, index)
     if refused or index >= len(words):
         return None
-    head = Path(_resolve_heredoc_word(words[index])[0]).name
-    if head in ("bash", "sh", "zsh", "dash", "source", "."):
+    command = _resolve_heredoc_word(words[index])[0]
+    if command in (".", "source"):
+        # The dot-source spellings name no file of their own; Path(".").name
+        # is empty, so the recognized head comes from the command word.
+        return command
+    head = Path(command).name
+    if head in ("bash", "sh", "zsh", "dash"):
         return head
     return head if head == "python" or _PYTHON_COMMAND.fullmatch(head) else None
 
@@ -6099,6 +6104,13 @@ def _raw_install_from_wrapper(
     handler = wrapper_handlers.get(words[0])
     if handler is not None:
         return handler(words, depth, variables)
+    if words[0] in (".", "source"):
+        # A dot-sourced script's body runs in this shell, so its literal
+        # operand is followed like any other invoked script.  A missing
+        # operand fails closed: the body cannot be inspected.
+        if len(words) < 2:
+            return True
+        return _raw_install_from_shell_script_file(words[1], depth, variables)
     return _raw_install_from_shell_wrapper(words, depth, variables)
 
 
