@@ -59,6 +59,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The cluster name reaches kind, kubectl contexts, and the lock path, so it
+# must satisfy kind's own grammar (lowercase alphanumerics and dashes,
+# starting with a letter) before any of those use it.  The check covers the
+# CLUSTER environment default and the --cluster flag alike.
+if ! [[ "${CLUSTER}" =~ ^[a-z][a-z0-9-]*$ ]]; then
+    echo "ERROR: invalid cluster name: ${CLUSTER}" >&2
+    exit 1
+fi
+
 for tool in kind helm kubectl docker; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "SKIP: ${tool} is unavailable; the cluster smoke did not run" >&2
@@ -145,7 +154,28 @@ dir_lock_owner_alive() {
 }
 
 acquire_cluster_lock() {
+    # Refuse a symlinked or otherwise non-regular lock path before any
+    # open: `exec 9>` follows a symlink and would truncate its target.  The
+    # checks run before the flock branch so the fallback path is covered
+    # too.  First creation below uses noclobber, which never creates
+    # through a link.
+    if [[ -L "${LOCK_PATH}.flock" ]] \
+        || { [[ -e "${LOCK_PATH}.flock" ]] && [[ ! -f "${LOCK_PATH}.flock" ]]; }; then
+        echo "ERROR: refusing non-regular lock path: ${LOCK_PATH}.flock" >&2
+        exit 1
+    fi
     if command -v flock >/dev/null 2>&1; then
+        if [[ ! -f "${LOCK_PATH}.flock" ]]; then
+            # First creation, race-free against a planted link: the
+            # noclobber redirect never creates through one.
+            ( set -o noclobber; : >"${LOCK_PATH}.flock" ) 2>/dev/null || true
+        fi
+        # Re-verify after the creation attempt: a path swapped in between
+        # the check above and here is still refused, never opened.
+        if [[ -L "${LOCK_PATH}.flock" ]] || [[ ! -f "${LOCK_PATH}.flock" ]]; then
+            echo "ERROR: refusing non-regular lock path: ${LOCK_PATH}.flock" >&2
+            exit 1
+        fi
         exec 9>"${LOCK_PATH}.flock"
         if flock -w 600 9; then
             LOCK_MODE="flock"
@@ -396,7 +426,9 @@ helm_rollback_flag() {
 }
 
 CREATED_RELEASE=1
-helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
+# The install output is captured so the failure path can classify the
+# error; it is reprinted on both paths so the diagnostics stay identical.
+if ! install_output="$(helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
     --set image.repository="${IMAGE_REPO}" \
@@ -414,7 +446,24 @@ helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --set-string metrics.sidecar.resources.limits.cpu=250m \
     --set-string metrics.sidecar.resources.limits.memory=128Mi \
     --wait --timeout 180s \
-    "$(helm_rollback_flag)" >&2
+    "$(helm_rollback_flag)" 2>&1)"; then
+    printf '%s\n' "${install_output}" >&2
+    # A name collision means another actor created this run's release name
+    # between the preflight and the install: the name is theirs, so cleanup
+    # preserves it (and the namespace content with it).  Two error shapes
+    # report it: the name check refuses with "cannot re-use a name that is
+    # still in use" (Helm 3) or "cannot reuse ..." (Helm 4), and the
+    # storage-layer create that follows its own availability check reports
+    # "release: already exists" when both racers passed that check.
+    if [[ "${install_output}" == *"name that is still in use"* ]] \
+        || [[ "${install_output}" == *"release: already exists"* ]]; then
+        echo "ERROR: another creator holds release ${RELEASE}; cleanup preserves it" >&2
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+    fi
+    exit 1
+fi
+printf '%s\n' "${install_output}" >&2
 
 echo "=== rollout status ===" >&2
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \

@@ -399,6 +399,7 @@ class _HelmStub:
     list_stderr: str = ""
     list_fails: bool = False
     install_fails: bool = False
+    install_failure_message: str = "simulated install failure"
 
 
 def _run_stubbed_helm_cluster_smoke(
@@ -413,8 +414,10 @@ def _run_stubbed_helm_cluster_smoke(
     """Run the smoke script against owned command stubs."""
     tools = tmp_path / "bin"
     temp_root = tmp_path / "tmp"
-    tools.mkdir()
-    temp_root.mkdir()
+    # parents=True tolerates a caller that scopes one run under a subdir
+    # (the collision cases use one subdir per message).
+    tools.mkdir(parents=True, exist_ok=True)
+    temp_root.mkdir(parents=True, exist_ok=True)
     calls = tmp_path / "calls.log"
     module = tmp_path / "module.so"
     module.write_bytes(b"fixture module")
@@ -441,7 +444,7 @@ def _run_stubbed_helm_cluster_smoke(
             "fi\n"
             "if [[ \"$1\" == install && \"${HELM_INSTALL_FAILS:-}\" == 1 ]]; "
             "then\n"
-            "  printf '%s\\n' 'simulated install failure' >&2\n"
+            "  printf '%s\\n' \"${HELM_INSTALL_FAILURE_MESSAGE:-simulated install failure}\" >&2\n"
             "  exit 1\n"
             "fi\n"
         ),
@@ -483,6 +486,7 @@ def _run_stubbed_helm_cluster_smoke(
         "HELM_LIST_STDERR": helm_stub.list_stderr,
         "HELM_LIST_FAILS": "1" if helm_stub.list_fails else "0",
         "HELM_INSTALL_FAILS": "1" if helm_stub.install_fails else "0",
+        "HELM_INSTALL_FAILURE_MESSAGE": helm_stub.install_failure_message,
     }
     if helm_stub.version is not None:
         env["HELM_VERSION"] = helm_stub.version
@@ -704,6 +708,64 @@ def test_helm_cluster_smoke_uninstalls_after_a_failed_install(
         "a failed install leaves state behind, so cleanup must still "
         f"uninstall the release it owned: {result.stderr}"
     )
+
+
+def test_helm_cluster_smoke_preserves_a_release_won_by_a_concurrent_creator(
+    tmp_path: Path,
+) -> None:
+    """A name collision's release belongs to the other creator.
+
+    The preflight and the install are not atomic, so another actor can
+    create the name first.  Helm then refuses, and cleanup must NOT
+    uninstall that release (nor delete the namespace that holds it).
+    """
+    for index, message in enumerate((
+        # Helm 3 and Helm 4 name-check spellings plus the storage-layer
+        # race both racers can pass.
+        "Error: cannot re-use a name that is still in use",
+        "Error: cannot reuse a name that is still in use",
+        "Error: release: already exists",
+    )):
+        result, command_log = _run_stubbed_helm_cluster_smoke(
+            tmp_path / str(index),
+            "",
+            helm=_HelmStub(install_fails=True, install_failure_message=message),
+        )
+        assert result.returncode != 0
+        assert "helm install" in command_log
+        assert "helm uninstall" not in command_log, (
+            f"a collision ({message!r}) is another creator's release; "
+            f"cleanup must preserve it: {result.stderr}"
+        )
+
+
+def test_helm_cluster_smoke_rejects_an_invalid_cluster_name(tmp_path: Path) -> None:
+    """The cluster name reaches kind, contexts, and the lock path.
+
+    A traversal or otherwise invalid value must be rejected before any of
+    those consume it, so no command runs at all.
+    """
+    for index, bad in enumerate(("../evil", "Bad-Cluster", "under_score", "-leading")):
+        tools = tmp_path / str(index) / "bin"
+        tools.mkdir(parents=True)
+        calls = tmp_path / "calls.log"
+        env = os.environ.copy()
+        env |= {
+            "PATH": f"{tools}{os.pathsep}{env['PATH']}",
+            "CALL_LOG": str(calls),
+            "CLUSTER": bad,
+        }
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh")],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 1, (bad, result.stderr)
+        assert "invalid cluster name" in result.stderr, (bad, result.stderr)
+        assert not calls.exists() or not calls.read_text(encoding="utf-8"), bad
 
 
 def test_helm_cluster_smoke_removes_a_namespace_it_created_on_a_reused_cluster(
