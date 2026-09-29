@@ -4844,11 +4844,38 @@ def _python_dynamic_import_module(
         # caller fails closed instead of matching a launcher on a name that
         # could resolve anywhere.
         return None
+    if target == "__import__" and _python_import_level_is_relative(call):
+        # ``__import__`` with a nonzero ``level`` resolves the (undotted)
+        # name against the calling package, so the real module is a runtime
+        # concern again: a locally imported helper could hide a launcher.
+        return None
     if target == "importlib.import_module":
         return module_name
     if _python_import_fromlist_is_nonempty(call):
         return module_name
     return module_name.split(".", 1)[0]
+
+
+def _python_import_level_is_relative(call: ast.Call) -> bool:
+    """Whether an ``__import__`` call passes a nonzero or unknown ``level``.
+
+    The level parameter (positional index 4 or the ``level`` keyword) makes
+    the module name relative to the calling package, so only a literal 0
+    keeps the absolute-import model this resolver applies.  A non-literal
+    level is treated as relative for the same fail-closed reason.
+    """
+    level_node: ast.expr | None = None
+    if len(call.args) >= 5:
+        level_node = call.args[4]
+    for keyword in call.keywords:
+        if keyword.arg == "level":
+            level_node = keyword.value
+    if level_node is None:
+        return False
+    try:
+        return ast.literal_eval(level_node) != 0
+    except (ValueError, TypeError):
+        return True
 
 
 def _python_import_fromlist_is_nonempty(call: ast.Call) -> bool:
@@ -7118,6 +7145,56 @@ def _backgrounded_command_segments(script: str) -> set[str]:
     return backgrounded
 
 
+_ALWAYS_SUCCESS_COMMANDS = frozenset({"true", ":"})
+
+
+def _shell_rhs_discards_failure(segment: str) -> bool:
+    """Whether a ``||`` right-hand segment always succeeds.
+
+    ``|| true``, ``|| :``, ``|| exit 0`` and ``|| return 0`` turn any
+    left-hand failure into a successful chain, so the command's exit
+    status no longer proves the command succeeded.
+    """
+    words = _shell_words(segment)
+    command_index = _skip_env_assignments(words, 0)
+    command = words[command_index:]
+    if not command:
+        return False
+    if command[0] in _ALWAYS_SUCCESS_COMMANDS:
+        return True
+    if command[0] in {"exit", "return"}:
+        return len(command) == 2 and command[1] == "0"
+    return False
+
+
+def _failure_masked_command_segments(script: str) -> set[str]:
+    """Segment texts whose failure a following ``||`` swallows.
+
+    A prerequisite written as ``cmd || true`` (or any always-success
+    right-hand side) can certify a step while its failure is silently
+    ignored, so such a segment must not count as satisfying it.
+    """
+    pairs = _command_segments_with_separators(script)
+    masked: set[str] = set()
+    for index, (segment, _separator) in enumerate(pairs):
+        if index + 1 >= len(pairs) or pairs[index + 1][1] != "||":
+            continue
+        if _shell_rhs_discards_failure(pairs[index + 1][0]):
+            masked.add(segment.strip())
+    return masked
+
+
+def _masked_command_segments_for_step(step: str | dict) -> set[str]:
+    """Failure-masked segments of one run step's executable script."""
+    script = _step_script(step)
+    if script is None:
+        return set()
+    executable = _strip_function_bodies(
+        _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
+    )
+    return _failure_masked_command_segments(executable)
+
+
 def _foreground_live_commands(step: str | dict) -> list[str]:
     """Live command segments that run in the FOREGROUND to completion.
 
@@ -7448,6 +7525,23 @@ def _pip_step_commands(segment: str) -> tuple[bool, bool]:
     return install, _runs_make_docs_check(words)
 
 
+def _pip_prerequisite_position(
+    segment: str,
+    retry_trusted: bool,
+    masked: set[str],
+) -> bool:
+    """Whether one live segment may satisfy a prerequisite.
+
+    A segment whose failure a following ``||`` swallows (``cmd || true``)
+    does not count: the chain succeeds even when the command fails, so its
+    exit status proves nothing about the prerequisite.  A retry call whose
+    wrapper cannot be trusted is skipped for the same reason.
+    """
+    if not retry_trusted and _is_retry_call(segment):
+        return False
+    return segment.strip() not in masked
+
+
 def _pip_first_steps(
     steps: Sequence[str | dict],
 ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
@@ -7456,8 +7550,9 @@ def _pip_first_steps(
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
         retry_trusted = _step_retry_is_trusted(step)
+        masked = _masked_command_segments_for_step(step)
         for command_index, segment in enumerate(_foreground_live_commands(step)):
-            if not retry_trusted and _is_retry_call(segment):
+            if not _pip_prerequisite_position(segment, retry_trusted, masked):
                 continue
             position = (step_index, command_index)
             installs, checks_docs = _pip_step_commands(segment)
@@ -7466,6 +7561,30 @@ def _pip_first_steps(
             if checks_docs and docs_check_at is None:
                 docs_check_at = position
     return install_at, docs_check_at
+
+
+def _masked_prerequisite_kinds(steps: Sequence[str | dict]) -> set[str]:
+    """Which prerequisites appear with a failure-swallowing operator.
+
+    Used for the diagnostic text: when a prerequisite position comes back
+    None, a masked form explains why (the requirement is present but its
+    failure cannot reach the step), so the message points at the masking
+    instead of asking for a missing command.
+    """
+    kinds: set[str] = set()
+    for step in steps:
+        masked = _masked_command_segments_for_step(step)
+        if not masked:
+            continue
+        for segment in _step_live_commands(step):
+            if segment.strip() not in masked:
+                continue
+            installs, checks_docs = _pip_step_commands(segment)
+            if installs:
+                kinds.add("install")
+            if checks_docs:
+                kinds.add("docs-check")
+    return kinds
 
 
 def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
@@ -7485,12 +7604,25 @@ def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
             return shadow_issue
     install_at, docs_check_at = _pip_first_steps(steps)
     if install_at is None:
+        if "install" in _masked_prerequisite_kinds(steps):
+            return (
+                "the release-gate job must not discard a failed requirements "
+                "install: a failure-masking operator (for example ``|| true``) "
+                "makes the step succeed even when the install fails, so the "
+                "pinned dependencies are never proven present"
+            )
         return (
             "the release-gate job must install the pinned Python release "
             "dependencies (from requirements-release.txt) so the docs-check "
             "chain can import jsonschema and PyYAML"
         )
     if docs_check_at is None:
+        if "docs-check" in _masked_prerequisite_kinds(steps):
+            return (
+                "the release-gate job must not discard a failed docs-check: "
+                "a failure-masking operator (for example ``|| true``) makes "
+                "the step succeed even when the docs-check chain fails"
+            )
         return (
             "the release-gate job must run its docs-check chain once the "
             "pinned Python dependencies are installed"

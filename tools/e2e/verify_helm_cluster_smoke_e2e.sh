@@ -177,14 +177,58 @@ acquire_cluster_lock() {
 acquire_lock_reaper() {
     # Short-lived mutex around stale-lock examination and reclaim.  A
     # reaper held by a dead pid (a crashed run) is broken by the next
-    # waiter, so the mutex cannot wedge the smoke.
+    # waiter, so the mutex cannot wedge the smoke.  Breaking is atomic: a
+    # waiter CLAIMS the stale directory with a rename before deleting it,
+    # so two waiters cannot both reclaim it and one cannot remove a
+    # replacement mutex the other has just created.  An ownerless
+    # directory (a waiter died between mkdir and writing its pid) is
+    # reclaimed only after a grace period, matching the ownerless-lock
+    # window; a live writer that resumes afterwards fails its own pid
+    # write and aborts rather than proceeding unprotected.
     local waited=0
     while ! mkdir "${LOCK_PATH}.reaper" 2>/dev/null; do
         local reaper_pid
         reaper_pid="$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)"
-        if [[ -n "${reaper_pid}" ]] && ! kill -0 "${reaper_pid}" 2>/dev/null; then
-            rm -rf "${LOCK_PATH}.reaper"
-            continue
+        local stale=0
+        if [[ -n "${reaper_pid}" ]]; then
+            if ! kill -0 "${reaper_pid}" 2>/dev/null; then
+                stale=1
+            fi
+        elif [[ -n "$(find "${LOCK_PATH}.reaper" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+            # No readable owner and the directory is not recent: either a
+            # crashed waiter or one paused past the grace.  Re-check after
+            # a short pause so a merely slow publisher is never displaced.
+            sleep 2
+            if [[ -s "${LOCK_PATH}.reaper/pid" ]]; then
+                reaper_pid="$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)"
+                if [[ -n "${reaper_pid}" ]] && ! kill -0 "${reaper_pid}" 2>/dev/null; then
+                    stale=1
+                fi
+            elif [[ -n "$(find "${LOCK_PATH}.reaper" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+                stale=1
+            fi
+        fi
+        if [[ "${stale}" -eq 1 ]]; then
+            local reaper_claim="${LOCK_PATH}.reaper.stale.$$"
+            if mv "${LOCK_PATH}.reaper" "${reaper_claim}" 2>/dev/null; then
+                # Claimed: verify the claimed directory is still stale (a
+                # live owner that published between the read and the rename
+                # is restored when possible), then delete only OUR claim.
+                local claimed_pid
+                claimed_pid="$(cat "${reaper_claim}/pid" 2>/dev/null || true)"
+                if [[ -n "${claimed_pid}" ]] && kill -0 "${claimed_pid}" 2>/dev/null; then
+                    if [[ ! -e "${LOCK_PATH}.reaper" ]]; then
+                        mv "${reaper_claim}" "${LOCK_PATH}.reaper" 2>/dev/null \
+                            || rm -rf "${reaper_claim}"
+                    else
+                        rm -rf "${reaper_claim}"
+                    fi
+                else
+                    rm -rf "${reaper_claim}"
+                fi
+            fi
+            # A lost claim race (another waiter won) or the reclaimed
+            # directory looping back through mkdir is handled by the loop.
         fi
         waited=$((waited + 1))
         if [[ "${waited}" -ge 600 ]]; then

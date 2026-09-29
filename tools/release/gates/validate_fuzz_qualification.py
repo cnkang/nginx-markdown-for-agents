@@ -610,7 +610,7 @@ def _start_toolchain_identity_process(
 
 
 def _wait_toolchain_identity_process(
-    process: subprocess.Popen, label: str
+    process: subprocess.Popen, label: str, reader: threading.Thread | None = None
 ) -> int:
     """Bound toolchain command runtime and terminate on every exceptional exit.
 
@@ -620,6 +620,9 @@ def _wait_toolchain_identity_process(
     descendant keep the reader blocked.  ``_wait_fuzz_process`` applies that
     ordering (``waitid(WNOWAIT)`` where available, a stop-then-signal poll
     elsewhere), so reuse it instead of a plain ``wait``.
+
+    ``reader`` is the pipe-draining thread; the interrupt path uses its
+    liveness as the ownership proof for any post-reap group signal.
     """
     try:
         returncode = _wait_fuzz_process(process, 30.0)
@@ -633,14 +636,15 @@ def _wait_toolchain_identity_process(
         # reap the leader and set `returncode`, after which the guarded group
         # signal returns early and a descendant that inherited stdout keeps
         # running.  `_signal_fuzz_process_group` handles the already-reaped
-        # case without touching the group, so this is safe either way; when
-        # the wait path itself had already reaped the leader before
-        # unwinding, the direct post-reap signal covers the descendants.
+        # case without touching the group; when the wait path itself had
+        # already reaped the leader before unwinding, the direct post-reap
+        # signal covers the descendants, gated on the reader proof below so
+        # an empty group is never signaled by number alone.
         _signal_fuzz_process_group(process, signal.SIGTERM)
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
         else:
-            _signal_reaped_fuzz_process_group(process)
+            _signal_reaped_fuzz_process_group_when_live(process, reader)
         raise
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -666,7 +670,7 @@ def _run_toolchain_version_command(command: list[str], label: str) -> str:
     """Collect a toolchain version through a bounded subprocess stream."""
     process, stream, reader = _start_toolchain_identity_process(command, label)
     try:
-        returncode = _wait_toolchain_identity_process(process, label)
+        returncode = _wait_toolchain_identity_process(process, label, reader)
     finally:
         _finish_toolchain_identity_process(process, reader)
     if returncode != 0:
@@ -962,18 +966,30 @@ def _signal_fuzz_process_group(
             process.kill()
 
 
-def _signal_reaped_fuzz_process_group(process: subprocess.Popen) -> None:
-    """Signal an owned process group whose leader has already been reaped.
+def _signal_reaped_fuzz_process_group_when_live(
+    process: subprocess.Popen, reader: threading.Thread | None
+) -> None:
+    """Signal a reaped leader's group only when a live pipe holder proves it.
 
     ``_signal_fuzz_process_group`` skips a reaped leader to keep the PGID
     reuse guard, but the interrupt path can unwind after the wait loop
-    reaped the leader while descendants still hold the group.  This
-    dedicated call covers exactly that window: the group id stays valid
-    while any member lives, so the kill reaches them.  It is only invoked
-    from the interrupt path, where leaving descendants running means an
-    orphaned process holding the output pipe.
+    reaped the leader while descendants still hold the group.  Signalling
+    by number alone would risk a reused group id, so the direct signal is
+    gated on the reader thread: while the pipe's write end has not closed,
+    the reader is draining output, which proves a live process still holds
+    it, that process is this invocation's descendant, and the group id
+    therefore still belongs to this run.  A short settle lets a reader
+    that is merely draining the reaped leader's last output observe EOF
+    first, so an empty group is never signalled.
     """
     if os.name != "posix":
+        return
+    if reader is None:
+        # No ownership proof available: never signal a group by number
+        # alone, because the id may already belong to another process.
+        return
+    reader.join(_PROCESS_WAIT_POLL_SECONDS)
+    if not reader.is_alive():
         return
     try:
         os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
