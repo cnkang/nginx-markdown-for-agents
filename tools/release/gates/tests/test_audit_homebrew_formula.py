@@ -104,3 +104,49 @@ def test_audit_removes_trust_lock_on_success(tmp_path: Path) -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert not list(tmp_path.glob("homebrew-formula-check.*"))
+
+
+def test_formula_recognizes_tap_qualified_openssl_dependencies() -> None:
+    """A tap-qualified openssl dependency is still recognized.
+
+    Homebrew's ``Dependency#name`` keeps a tap-qualified declaration whole
+    (``Dependency.new("homebrew/core/openssl@3").name`` is that exact
+    string - verified with ``brew ruby``), so a match anchored to the
+    first character refuses it and the build dies with "Unable to detect
+    Homebrew nginx OpenSSL dependency".  The match reads the final
+    slash-separated component instead; the returned spelling stays as
+    declared because the opt-prefix helpers strip the tap themselves
+    (``Utils.name_from_full_name``).
+    """
+    if shutil.which("brew") is None:
+        import pytest
+
+        pytest.skip("Homebrew is not available")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    formula = repo_root / "packaging/homebrew/nginx-markdown-module.rb"
+    source = formula.read_text(encoding="utf-8")
+
+    # The matching line reads the last path component.
+    match_line = next(
+        line for line in source.splitlines()
+        if "dependency.name" in line and "match?" in line
+    )
+    assert '.split("/").last.match?' in match_line, match_line
+    # The old first-anchored form must be gone.
+    assert "dependency.name.match?(/\\Aopenssl" not in source
+
+    # The behavior runs against real Dependency values.
+    probe = (
+        'require "dependency"\n'
+        'm = ->(n) { n.split("/").last.match?(/\\Aopenssl(?:@\\d+)?\\z/) }\n'
+        'puts m.call(Dependency.new("openssl@3").name)\n'
+        'puts m.call(Dependency.new("homebrew/core/openssl@3").name)\n'
+        'puts m.call(Dependency.new("pcre2").name)\n'
+    )
+    result = subprocess.run(
+        ["brew", "ruby", "-e", probe],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["true", "true", "false"], result.stdout

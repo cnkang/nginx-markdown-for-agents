@@ -86,8 +86,13 @@ class NginxMarkdownModule < Formula
   end
 
   def nginx_openssl_formula
+    # A dependency can be declared tap-qualified (for example
+    # "homebrew/core/openssl@3"), and Dependency#name keeps that full form,
+    # so the match reads the final slash-separated component.  The return
+    # value keeps the declared spelling: the opt-prefix helpers strip the
+    # tap component themselves (Utils.name_from_full_name).
     dependencies = Formula["nginx"].deps.select do |dependency|
-      dependency.name.match?(/\Aopenssl(?:@\d+)?\z/)
+      dependency.name.split("/").last.match?(/\Aopenssl(?:@\d+)?\z/)
     end
     odie "Unable to detect Homebrew nginx OpenSSL dependency" \
       unless dependencies.one?
