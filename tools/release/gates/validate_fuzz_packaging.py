@@ -4856,18 +4856,51 @@ def _python_dynamic_import_module(
     return module_name.split(".", 1)[0]
 
 
+def _python_import_positional_level(
+    call: ast.Call,
+) -> tuple[bool, ast.expr | None]:
+    """Resolve ``__import__``'s positional ``level`` slot.
+
+    Returns ``(undetermined, node)``: ``undetermined`` is True when a
+    starred positional could shift or supply the slot without a known
+    value, and ``node`` is the expression in the fifth argument position
+    when the position is statically known.
+    """
+    positions: list[ast.expr] = []
+    for node in call.args:
+        if isinstance(node, ast.Starred):
+            inner = node.value
+            if isinstance(inner, (ast.List, ast.Tuple)):
+                positions.extend(inner.elts)
+                continue
+            # An unexpandable ``*args`` can supply ``level`` from any
+            # position; the slot cannot be determined.
+            return True, None
+        positions.append(node)
+        if len(positions) > 5:
+            break
+    if len(positions) >= 5:
+        return False, positions[4]
+    return False, None
+
+
 def _python_import_level_is_relative(call: ast.Call) -> bool:
     """Whether an ``__import__`` call passes a nonzero or unknown ``level``.
 
-    The level parameter (positional index 4 or the ``level`` keyword) makes
-    the module name relative to the calling package, so only a literal 0
-    keeps the absolute-import model this resolver applies.  A non-literal
-    level is treated as relative for the same fail-closed reason.
+    The level parameter (positional index 4, the ``level`` keyword, a
+    starred positional, or a ``**`` mapping) makes the module name
+    relative to the calling package, so only a literal 0 keeps the
+    absolute-import model this resolver applies.  A non-literal level -
+    and any expansion that could supply one - is treated as relative for
+    the same fail-closed reason.
     """
-    level_node: ast.expr | None = None
-    if len(call.args) >= 5:
-        level_node = call.args[4]
+    undetermined, level_node = _python_import_positional_level(call)
+    if undetermined:
+        return True
     for keyword in call.keywords:
+        if keyword.arg is None:
+            # ``**mapping`` could supply ``level``; fail closed.
+            return True
         if keyword.arg == "level":
             level_node = keyword.value
     if level_node is None:
@@ -7179,19 +7212,27 @@ def _shell_rhs_discards_failure(segment: str) -> bool:
 
 
 def _failure_masked_command_segments(script: str) -> set[str]:
-    """Segment texts whose failure a following ``||`` swallows.
+    """Segment texts whose failure a following ``||`` chain swallows.
 
-    A prerequisite written as ``cmd || true`` (or any always-success
-    right-hand side) can certify a step while its failure is silently
-    ignored, so such a segment must not count as satisfying it.
+    A prerequisite written as ``cmd || true`` can certify a step while its
+    failure is silently ignored, so such a segment must not count as
+    satisfying it.  The walk follows the WHOLE ``||`` chain: ``cmd ||
+    false || true`` still swallows ``cmd``'s failure because the chain
+    reaches ``true``, while ``cmd || false`` propagates it.  A chain
+    member whose outcome cannot be proven stays conservative (it may
+    succeed, so the failure may be swallowed).
     """
     pairs = _command_segments_with_separators(script)
     masked: set[str] = set()
     for index, (segment, _separator) in enumerate(pairs):
         if index + 1 >= len(pairs) or pairs[index + 1][1] != "||":
             continue
-        if _shell_rhs_discards_failure(pairs[index + 1][0]):
-            masked.add(segment.strip())
+        cursor = index + 1
+        while cursor < len(pairs) and pairs[cursor][1] == "||":
+            if _shell_rhs_discards_failure(pairs[cursor][0]):
+                masked.add(segment.strip())
+                break
+            cursor += 1
     return masked
 
 
@@ -7287,11 +7328,12 @@ _MAKE_VALUE_OPTIONS = frozenset({
 _MAKE_NONEXECUTING_OPTIONS = frozenset({
     "-n", "--dry-run", "--just-print", "--recon",
     "-q", "--question", "-t", "--touch",
+    "-v", "--version", "-h", "--help",
 })
 _MAKE_NONEXECUTING_LONG_OPTIONS = frozenset(
     option for option in _MAKE_NONEXECUTING_OPTIONS if option.startswith("--")
 )
-_MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqt")
+_MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqtvh")
 
 
 def _make_option_prevents_execution(word: str) -> bool:
@@ -7514,6 +7556,52 @@ def _pip_install_is_dry_run(words: list[str], command_index: int) -> bool:
     )
 
 
+_PIP_DRY_RUN_FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
+
+
+def _pip_dry_run_value_active(value: object) -> bool:
+    """Whether one ``PIP_DRY_RUN`` value enables pip's dry run.
+
+    pip accepts the environment variable as the boolean form of
+    ``--dry-run``; every value except a proven-off spelling enables it,
+    and an unrecognized value fails closed (treated as enabled).
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in _PIP_DRY_RUN_FALSE_VALUES
+    return True
+
+
+def _pip_prefix_env_values(
+    words: list[str], command_index: int
+) -> dict[str, str]:
+    """Extract the ``VAR=VALUE`` assignments that prefix one command."""
+    values: dict[str, str] = {}
+    for word in words[:command_index]:
+        if not _ENV_ASSIGN_RE.match(word):
+            continue
+        name, _, value = word.partition("=")
+        values[name] = value
+    return values
+
+
+def _pip_dry_run_active(
+    words: list[str], command_index: int, env: object
+) -> bool:
+    """Whether a pip invocation runs as a dry run (flag, prefix, step env)."""
+    if _pip_install_is_dry_run(words, command_index):
+        return True
+    prefix_values = _pip_prefix_env_values(words, command_index)
+    if "PIP_DRY_RUN" in prefix_values:
+        return _pip_dry_run_value_active(prefix_values["PIP_DRY_RUN"])
+    if isinstance(env, dict) and "PIP_DRY_RUN" in env:
+        return _pip_dry_run_value_active(env.get("PIP_DRY_RUN"))
+    return False
+
+
 def _step_retry_is_trusted(step: str | dict) -> bool:
     """Whether a local retry function in one run step invokes its target."""
     script = _step_script(step)
@@ -7525,13 +7613,20 @@ def _step_retry_is_trusted(step: str | dict) -> bool:
     return _retry_runs_its_target(executable_source)
 
 
-def _pip_step_commands(segment: str) -> tuple[bool, bool]:
-    """Whether one executable segment installs pinned deps or runs docs-check."""
+def _pip_step_commands(
+    segment: str, env: object = None
+) -> tuple[bool, bool]:
+    """Whether one executable segment installs pinned deps or runs docs-check.
+
+    ``env`` is the step's effective environment mapping (workflow → job →
+    step precedence), so ``PIP_DRY_RUN`` set at any scope disqualifies the
+    install the same way the ``--dry-run`` flag does.
+    """
     words = _shell_words(segment)
     command_index = _skip_env_assignments(words, 0)
     command = " ".join(words[command_index:])
     install = bool(_PIP_REQUIREMENT_RE.search(command)) and not (
-        _pip_install_is_dry_run(words, command_index)
+        _pip_dry_run_active(words, command_index, env)
     )
     return install, _runs_make_docs_check(words)
 
@@ -7553,6 +7648,26 @@ def _pip_prerequisite_position(
     return segment.strip() not in masked
 
 
+def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
+    """Classify each live, unmasked segment of one step.
+
+    Returns ``(segment_index, installs, checks_docs)`` for every command in
+    the step's foreground view that may satisfy a prerequisite; masked and
+    untrusted-retry segments are filtered out here so both consumers share
+    one liveness model.
+    """
+    retry_trusted = _step_retry_is_trusted(step)
+    masked = _masked_command_segments_for_step(step)
+    step_env = step.get("env") if isinstance(step, dict) else None
+    scanned: list[tuple[int, bool, bool]] = []
+    for command_index, segment in enumerate(_foreground_live_commands(step)):
+        if not _pip_prerequisite_position(segment, retry_trusted, masked):
+            continue
+        installs, checks_docs = _pip_step_commands(segment, step_env)
+        scanned.append((command_index, installs, checks_docs))
+    return scanned
+
+
 def _pip_first_steps(
     steps: Sequence[str | dict],
 ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
@@ -7560,13 +7675,8 @@ def _pip_first_steps(
     install_at: tuple[int, int] | None = None
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
-        retry_trusted = _step_retry_is_trusted(step)
-        masked = _masked_command_segments_for_step(step)
-        for command_index, segment in enumerate(_foreground_live_commands(step)):
-            if not _pip_prerequisite_position(segment, retry_trusted, masked):
-                continue
+        for command_index, installs, checks_docs in _pip_step_scan(step):
             position = (step_index, command_index)
-            installs, checks_docs = _pip_step_commands(segment)
             if installs and install_at is None:
                 install_at = position
             if checks_docs and docs_check_at is None:
@@ -7587,14 +7697,24 @@ def _masked_prerequisite_kinds(steps: Sequence[str | dict]) -> set[str]:
         masked = _masked_command_segments_for_step(step)
         if not masked:
             continue
+        step_env = step.get("env") if isinstance(step, dict) else None
         for segment in _step_live_commands(step):
             if segment.strip() not in masked:
                 continue
-            installs, checks_docs = _pip_step_commands(segment)
-            if installs:
-                kinds.add("install")
-            if checks_docs:
-                kinds.add("docs-check")
+            installs, checks_docs = _pip_step_commands(segment, step_env)
+            kinds.update(_masked_prerequisite_kind_for(installs, checks_docs))
+    return kinds
+
+
+def _masked_prerequisite_kind_for(
+    installs: bool, checks_docs: bool
+) -> set[str]:
+    """The prerequisite kind names one masked segment represents."""
+    kinds: set[str] = set()
+    if installs:
+        kinds.add("install")
+    if checks_docs:
+        kinds.add("docs-check")
     return kinds
 
 

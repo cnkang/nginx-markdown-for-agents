@@ -190,8 +190,13 @@ acquire_lock_reaper() {
     local waited=0
     while true; do
         if mkdir "${LOCK_PATH}.reaper" 2>/dev/null; then
-            printf '%s\n' "$$" > "${LOCK_PATH}.reaper/pid" 2>/dev/null || true
-            if [[ "$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)" == "$$" ]]; then
+            # Publish the PID with an EXCLUSIVE create (noclobber): a
+            # directory a recovery swapped in already carries its owner's
+            # record, and overwriting it through the canonical path would
+            # let two waiters believe they hold the mutex.  The readback
+            # confirms this wait's publication survived to the return.
+            if ( set -o noclobber; printf '%s\n' "$$" > "${LOCK_PATH}.reaper/pid" ) 2>/dev/null \
+                && [[ "$(cat "${LOCK_PATH}.reaper/pid" 2>/dev/null || true)" == "$$" ]]; then
                 return 0
             fi
         fi

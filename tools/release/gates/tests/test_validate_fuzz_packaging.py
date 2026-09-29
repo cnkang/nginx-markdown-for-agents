@@ -4564,3 +4564,111 @@ def test_dependency_gate_rejects_failure_masked_prerequisites() -> None:
         {"run": "make docs-check"},
     ]
     assert packaging_gate._python_deps_issue(plain) is None
+
+
+def test_expanded_import_arguments_fail_closed() -> None:
+    """Starred positionals and ``**`` mappings can supply ``level``.
+
+    Regression: the level check read only the fifth explicit positional
+    and a named ``level`` keyword, so ``__import__("helper", *[globals(),
+    locals(), ["install"], 1])`` and ``__import__("helper", **{"level":
+    1})`` resolved as absolute and a locally imported helper could hide a
+    raw installation.  Both expansions now fail closed; a starred list
+    whose level slot is literally 0 keeps the absolute model.
+    """
+    expanded = [
+        "__import__('helper', *[globals(), locals(), ['install'], 1]).install()",
+        "__import__('helper', **{'level': 1}).install()",
+        "__import__('helper', *extra).install()",
+    ]
+    for payload in expanded:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), (
+            payload
+        )
+    # A starred list that provably fills level=0 stays absolute.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os', *[globals()], level=0).getcwd()", 0, None
+    )
+
+
+def test_chained_failure_masking_is_detected() -> None:
+    """A ``||`` chain that ends in success still swallows the failure.
+
+    Regression: only the segment immediately before the first ``||`` was
+    examined, so ``pip install ... || false || true`` left the install
+    unmarked even though the chain reaches ``true`` and succeeds.  The
+    full chain is walked now; a chain ending ``|| false`` propagates the
+    failure and still counts.
+    """
+    chained = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " || false || true"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    issue = packaging_gate._python_deps_issue(chained)
+    assert issue is not None
+    assert "failure-masking" in issue
+    propagated = [
+        {"run": "python3 -m pip install -r requirements-release.txt || false"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagated) is None
+
+
+def test_make_version_and_help_options_do_not_run_targets() -> None:
+    """``make -v docs-check`` prints the version and never runs the target.
+
+    Regression: only dry-run/question/touch options were recognized, so
+    ``make -v docs-check`` or ``make -h docs-check`` satisfied the live
+    docs-check requirement although GNU Make exits after printing the
+    version/help.  Both are non-executing now.
+    """
+    for words in (
+        ["make", "-v", "docs-check"],
+        ["make", "--version", "docs-check"],
+        ["make", "-h", "docs-check"],
+        ["make", "--help", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 1) is None, (
+            words
+        )
+    assert packaging_gate._make_targets_after_options(
+        ["make", "docs-check"], 1
+    ) == ["docs-check"]
+
+
+def test_pip_dry_run_environment_is_recognized() -> None:
+    """``PIP_DRY_RUN`` disqualifies an install like the ``--dry-run`` flag.
+
+    Regression: only the literal flag was recognized, so
+    ``PIP_DRY_RUN=1 python3 -m pip install ...`` (prefix) or a step-level
+    ``env: {PIP_DRY_RUN: 1}`` counted as a real install even though pip
+    installs nothing.  Any value except a proven-off spelling enables the
+    dry run.
+    """
+    prefix = [
+        {"run": "PIP_DRY_RUN=1 python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(prefix) is not None
+    env_scoped = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "1"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(env_scoped) is not None
+    # Proven-off spellings keep the install valid.
+    disabled = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "0"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(disabled) is None
