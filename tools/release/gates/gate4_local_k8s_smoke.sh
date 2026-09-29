@@ -625,16 +625,20 @@ deploy_and_verify() {
         2>&1)"; then
         printf '%s\n' "$install_output" >&2
         fail "helm install failed"
+        # Settle ownership BEFORE the diagnostics: bash runs a deferred
+        # TERM trap between foreground commands, so a signal landing during
+        # the kubectl queries below would clean up while a collision's
+        # ownership flags were still set (and uninstall the other
+        # creator's release).  Settling first classifies the captured
+        # error and clears the flags; the diagnostics then run with the
+        # final ownership state.
+        settle_failed_install_ownership "$install_output"
         info "Pod status:"
         kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
             >&2 || true
         info "Pod events:"
         kubectl --context "$kube_context" describe pods -n "${HELM_NAMESPACE}" \
             >&2 || true
-        # Settle ownership: a rolled-back install leaves nothing to clean
-        # up beyond an owned namespace, while a surviving failed release
-        # must be uninstalled by cleanup before its namespace goes away.
-        settle_failed_install_ownership "$install_output"
         return 1
     fi
     printf '%s\n' "$install_output" >&2
