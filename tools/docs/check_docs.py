@@ -668,8 +668,14 @@ FAMILY_COUNT_RE = re.compile(
     # (for example the "2" in "0.9.2 family names" or the "4" in
     # "Prometheus text 0.0.4 family catalog"); such tokens are not
     # metric-family count claims.
+    #
+    # A plural ("sixteen metric families") or a hyphen-bound singular
+    # ("ten-family v1 freeze", "frozen 10-family") states a count.  A
+    # space-separated singular does not: prose like "belongs to exactly
+    # one metric family" names one entry, not the contract's family total.
     rf"(?<![.\d])\b(?P<count>\d{{1,3}}|{_SPELLED_FAMILY_COUNT_PATTERN})"
-    r"[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?famil(?:y|ies)\b",
+    r"(?:[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?families\b"
+    r"|-(?:v1-)?(?:metric-)?family\b)",
     re.IGNORECASE,
 )
 HISTORICAL_FAMILY_CONTEXT_RE = re.compile(

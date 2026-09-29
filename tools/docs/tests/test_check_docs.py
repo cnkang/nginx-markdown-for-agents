@@ -1869,6 +1869,25 @@ def test_current_unreleased_changelog_section_excludes_dated_history():
     assert "published" not in section
 
 
+def test_family_count_gate_ignores_singular_prose() -> None:
+    """A space-separated singular names one entry, not the family total.
+
+    "belongs to exactly one metric family" describes an entry's membership;
+    the gate read it as a claim that the contract defines one family.  A
+    plural or a hyphen-bound singular still states a count.
+    """
+    assert docs_checker._claimed_family_count(
+        "Each reason entry belongs to exactly one metric family."
+    ) is None
+    assert docs_checker._claimed_family_count(
+        "The ten-family v1 freeze replaces it."
+    ) == 10
+    assert docs_checker._claimed_family_count("frozen 10-family") == 10
+    assert docs_checker._claimed_family_count(
+        "The contract defines sixteen metric families."
+    ) == 16
+
+
 def test_claimed_family_count_parses_spelled_count_before_v1() -> None:
     """A schema version in the phrase must not replace the family count."""
     assert docs_checker._claimed_family_count(
