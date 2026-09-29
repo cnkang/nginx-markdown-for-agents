@@ -127,19 +127,23 @@ def test_formula_recognizes_tap_qualified_openssl_dependencies() -> None:
     formula = repo_root / "packaging/homebrew/nginx-markdown-module.rb"
     source = formula.read_text(encoding="utf-8")
 
-    # The matching line reads the last path component.
+    # The matching line resolves the bare name through Homebrew's own
+    # helper, which the formula audit requires over manual splitting.
     match_line = next(
         line for line in source.splitlines()
         if "dependency.name" in line and "match?" in line
     )
-    assert '.split("/").last.match?' in match_line, match_line
-    # The old first-anchored form must be gone.
+    assert "Utils.name_from_full_name(dependency.name).match?" in match_line, (
+        match_line
+    )
+    # Neither the first-anchored form nor a manual split may remain.
     assert "dependency.name.match?(/\\Aopenssl" not in source
+    assert "dependency.name.split" not in source
 
     # The behavior runs against real Dependency values.
     probe = (
         'require "dependency"\n'
-        'm = ->(n) { n.split("/").last.match?(/\\Aopenssl(?:@\\d+)?\\z/) }\n'
+        'm = ->(n) { Utils.name_from_full_name(n).match?(/\\Aopenssl(?:@\\d+)?\\z/) }\n'
         'puts m.call(Dependency.new("openssl@3").name)\n'
         'puts m.call(Dependency.new("homebrew/core/openssl@3").name)\n'
         'puts m.call(Dependency.new("pcre2").name)\n'
