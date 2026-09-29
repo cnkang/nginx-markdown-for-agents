@@ -257,6 +257,21 @@ cleanup_owned_helm_resources() {
 # $1 - the captured install output, used to recognize a name collision
 settle_failed_install_ownership() {
     local install_error="${1:-}"
+    # The captured install error classifies first: a name collision means a
+    # concurrent creator holds the name, so both claims clear regardless of
+    # what any state query can see (a transient query failure must not turn
+    # a settled collision back into "this run's release").  Two error shapes
+    # report it: the name check refuses with "cannot re-use a name that is
+    # still in use" (Helm 3) or "cannot reuse ..." (Helm 4), and the
+    # storage-layer create that follows its own availability check reports
+    # "release: already exists" when both racers passed that check.
+    if [[ "$install_error" == *"name that is still in use"* ]] \
+        || [[ "$install_error" == *"release: already exists"* ]]; then
+        info "Install failed; another creator holds the release name, cleanup preserves it"
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        return 0
+    fi
     # A failed install is followed by one of three states.  The pre-install
     # ownership check proved the name free, so a surviving release was
     # created during this run's install window: it is this run's attempt,
@@ -280,19 +295,6 @@ settle_failed_install_ownership() {
         # A live release (another creator's) holds the name: preserve it
         # and the namespace content with it.
         info "Install failed; a live release holds the name, cleanup preserves it"
-        CREATED_RELEASE=0
-        CREATED_NAMESPACE=0
-        return 0
-    fi
-    # A name collision means a concurrent creator won the name between the
-    # ownership check and the install: their release is preserved.  Two
-    # error shapes report it: the name check refuses with "cannot re-use a
-    # name that is still in use" (Helm 3) or "cannot reuse ..." (Helm 4),
-    # and the storage-layer create that follows its own availability check
-    # reports "release: already exists" when both racers passed that check.
-    if [[ "$install_error" == *"name that is still in use"* ]] \
-        || [[ "$install_error" == *"release: already exists"* ]]; then
-        info "Install failed; another creator holds the release name, cleanup preserves it"
         CREATED_RELEASE=0
         CREATED_NAMESPACE=0
         return 0

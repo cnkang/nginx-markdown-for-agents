@@ -665,6 +665,15 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
     assert "--deployed" in live
     assert "--pending" not in live
 
+    # The collision classification runs BEFORE any state query: a transient
+    # query failure must not turn a settled collision back into "this run's
+    # release" and let cleanup uninstall the concurrent winner.
+    collision_at = fn.index("name that is still in use")
+    live_query_at = fn.index('live="$(helm list')
+    assert collision_at < live_query_at, (
+        "the collision check must precede the deployed-state query"
+    )
+
     # The surviving query includes pending so this run's own pending
     # release is uninstalled by cleanup.
     surviving = fn.split('surviving="$(helm list', 1)[1].split(
