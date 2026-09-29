@@ -243,20 +243,31 @@ acquire_cluster_lock() {
             # live owner's lock is never displaced.
             acquire_lock_reaper
             if ! dir_lock_owner_alive; then
-                local stale_claim="${LOCK_PATH}.stale.$$"
+                # The claim name carries the loop counter so a parked
+                # claim is never a rename target again.
+                local stale_claim="${LOCK_PATH}.stale.$$.${waited}"
                 if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
                     # Re-read the claimed owner: a creator that paused
                     # past the age grace can publish its pid between the
                     # stale check and the rename.  A live owner's claim is
-                    # restored (or left parked when the canonical path is
-                    # taken) - never deleted, because deleting it would
-                    # let a second run enter the critical section while
-                    # the owner still runs.
+                    # restored when the canonical path is still free, or
+                    # parked when another acquisition took it - never
+                    # deleted, because deleting it would let a second run
+                    # enter the critical section while the owner still
+                    # runs.
                     local claimed_owner
                     claimed_owner="$(cat "${stale_claim}/pid" 2>/dev/null || true)"
                     if [[ -n "${claimed_owner}" ]] \
                         && kill -0 "${claimed_owner}" 2>/dev/null; then
-                        mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null || true
+                        # Restore only into a free canonical path: `mv`
+                        # onto an existing directory nests the claim
+                        # inside it (rc=0 on BSD and GNU), which would
+                        # bury the live owner's record under the new
+                        # acquisition and admit two owners.  The reaper
+                        # restore guards the same way.
+                        if [[ ! -e "${LOCK_PATH}.d" ]]; then
+                            mv "${stale_claim}" "${LOCK_PATH}.d" 2>/dev/null || true
+                        fi
                     else
                         rm -rf "${stale_claim}"
                     fi
