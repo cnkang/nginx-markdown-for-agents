@@ -690,6 +690,18 @@ def test_gate4_settle_helper_classifies_a_name_collision() -> None:
         "the collision check must precede the deployed-state query"
     )
 
+    # The caller reaches the settlement BEFORE its diagnostics: a TERM
+    # landing during the kubectl queries would otherwise clean up with the
+    # collision's ownership flags still set.
+    caller = script.split('fail "helm install failed"', 1)[1].split(
+        "return 1", 1
+    )[0]
+    assert caller.index("settle_failed_install_ownership") < caller.index(
+        "get pods"
+    ), (
+        "the settlement must run before the failure diagnostics"
+    )
+
     # The surviving query includes pending so this run's own pending
     # release is uninstalled by cleanup.
     surviving = fn.split('surviving="$(helm list', 1)[1].split(
