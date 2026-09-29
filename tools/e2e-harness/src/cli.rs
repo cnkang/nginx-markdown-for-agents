@@ -216,6 +216,15 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
             .unwrap_or_default()
             .as_millis()
     ));
+    // Arm the guard BEFORE prepare: prepare creates the tree and can fail
+    // partway through, and a partial tree must still be classified (a
+    // settled tree is never reclaimed even when no invocation record was
+    // written yet).
+    let mut settle_guard = RunTreeSettleGuard {
+        runtime_base: &runtime_base,
+        keep_artifacts: cli.keep_artifacts,
+        armed: true,
+    };
     let runtime = ScenarioRuntime::prepare(
         name,
         &runtime_base,
@@ -223,12 +232,6 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
         ctx.port,
         ctx.upstream_port,
     )?;
-    // The tree exists from here on: every exit path below must settle it.
-    let mut settle_guard = RunTreeSettleGuard {
-        runtime_base: &runtime_base,
-        keep_artifacts: cli.keep_artifacts,
-        armed: true,
-    };
     crate::artifacts::write_invocation_json(
         &runtime.scenario_artifact_dir,
         name,
