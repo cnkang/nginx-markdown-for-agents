@@ -1301,7 +1301,19 @@ _PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
 # artifacts are available from the mirror", so it only counts when the
 # sentence names the pending version (the versioned branch in
 # `_claim_names_pending_version`).
-_VERSIONLESS_CLAIM_VERBS = frozenset({"shipped", "published", "released"})
+_VERSIONLESS_CLAIM_VERBS = frozenset(
+    {"shipped", "published", "released", "available"}
+)
+# An availability claim asserted OF THE RELEASE ITSELF ("the release is
+# available", "the new version is available") affirms a shipped artifact,
+# so ``available`` joins the versionless verbs.  Availability asserted of
+# only generic artifacts ("artifacts are available from the mirror") stays
+# excluded: the sentence names an artifact surface, not the release.
+_GENERIC_AVAILABILITY_OBJECT_RE = re.compile(
+    r"\b(?:artifacts?|assets?|packages?|binaries?|checksums?|"
+    r"file|files|downloads?|mirror|repository|feed)\b[^.]{0,40}$",
+    re.IGNORECASE,
+)
 _CI_ARTIFACT_AVAILABILITY_RE = re.compile(
     r"\bavailable\s+(?:in|from)\s+(?:the\s+)?(?:ci|workflow|build pipeline)\b",
     re.IGNORECASE,
@@ -1396,12 +1408,12 @@ def _version_end_is_valid(text: str, index: int) -> bool:
     """Apply the release token's right boundary without regex backtracking."""
     if index >= len(text):
         return True
-    if text[index] in _VERSION_IDENTIFIER_CHARS:
-        return False
-    return not (
-        text[index] == "."
-        and index + 1 < len(text)
-        and "0" <= text[index + 1] <= "9"
+    return (
+        False
+        if text[index] in _VERSION_IDENTIFIER_CHARS
+        else text[index] != "."
+        or index + 1 >= len(text)
+        or not "0" <= text[index + 1] <= "9"
     )
 
 
@@ -1598,10 +1610,10 @@ def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
 ) -> tuple[int, int, str] | None:
     """Return the version token closest to a completion verb."""
-    versions = _version_tokens(window)
-    if not versions:
+    if versions := _version_tokens(window):
+        return min(versions, key=lambda token: abs(token[0] - claim.start()))
+    else:
         return None
-    return min(versions, key=lambda token: abs(token[0] - claim.start()))
 
 
 def _published_until_tag_exception(
@@ -1621,7 +1633,6 @@ def _claim_names_pending_version(
     window: str,
     claim: re.Match[str],
     pending: "re.Pattern[str]",
-    version_context: bool,
 ) -> bool:
     """Return whether a single completion claim affirms the pending version."""
     nearest = _nearest_version_to_claim(window, claim)
@@ -1640,6 +1651,10 @@ def _claim_names_pending_version(
             return False
         if claim.group(0).lower() not in _VERSIONLESS_CLAIM_VERBS:
             return False
+        if _generic_artifact_availability(window, claim):
+            # "artifacts are available from the mirror" is ordinary prose,
+            # not a claim that the release shipped.
+            return False
         return not _completion_claim_is_nonaffirmative(window, claim, pending)
     if pending.fullmatch(nearest[2]) is None:
         return False
@@ -1648,26 +1663,47 @@ def _claim_names_pending_version(
     return not _completion_claim_is_nonaffirmative(window, claim, pending)
 
 
+def _generic_artifact_availability(
+    window: str, claim: "re.Match[str]"
+) -> bool:
+    """Whether an ``available`` claim describes generic artifacts only.
+
+    The subject check above admits the sentence whenever any release-shaped
+    word appears, so "the release artifacts are available from the mirror"
+    would otherwise read as a shipped-release affirmation.  When the words
+    directly before ``available`` name an artifact surface rather than the
+    release itself, the claim stays ordinary prose.
+    """
+    if claim.group(0).lower() != "available":
+        return False
+    before = window[max(0, claim.start() - 80):claim.start()]
+    return _GENERIC_AVAILABILITY_OBJECT_RE.search(before) is not None
+
+
 def _pending_completion_claim(
-    window: str, pending_version: str, version_context: bool = False
+    window: str, pending_version: str
 ) -> re.Match[str] | None:
     """Return the first affirmative completion claim tied to the pending version."""
     pending = _release_version_pattern(pending_version)
-    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
-        if _claim_names_pending_version(window, claim, pending, version_context):
-            return claim
-    return None
+    return next(
+        (
+            claim
+            for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window)
+            if _claim_names_pending_version(window, claim, pending)
+        ),
+        None,
+    )
 
 
 def _claim_belongs_to_pending_version(
-    window: str, pending_version: str, version_context: bool = False
+    window: str, pending_version: str
 ) -> bool:
     """Return whether an affirmative completion verb names the pending version.
 
     The nearest version token decides, so a published baseline is not mistaken
     for a claim about the pending line in a sentence that names both.
     """
-    return _pending_completion_claim(window, pending_version, version_context) is not None
+    return _pending_completion_claim(window, pending_version) is not None
 
 
 def _latest_tag_prefix_is_negated(prefix: str) -> bool:
@@ -1698,10 +1734,9 @@ def _latest_tag_claim_is_negated(
     upper_bound = len(sentence) if upper_bound is None else upper_bound
     prefix = sentence[max(lower_bound, latest_match.start() - 80):latest_match.start()]
     suffix = sentence[latest_match.end():min(upper_bound, latest_match.end() + 80)]
-    prefix_breaks = [
+    if prefix_breaks := [
         match.end() for match in _COMPLETION_CLAUSE_BREAK_RE.finditer(prefix)
-    ]
-    if prefix_breaks:
+    ]:
         prefix = prefix[max(prefix_breaks):]
     if suffix_break := _COMPLETION_CLAUSE_BREAK_RE.search(suffix):
         suffix = suffix[:suffix_break.start()]
@@ -1819,7 +1854,7 @@ def _pending_sentence_failures(
         if sentence_names_version
         else sentence
     )
-    claim = _pending_completion_claim(window, pending_version, version_context)
+    claim = _pending_completion_claim(window, pending_version)
     if claim is not None:
         return [
             f"{rel}: pending {pending_version} is described as "
@@ -2108,9 +2143,7 @@ def main() -> int:
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
     failures.extend(check_release_checklist_is_static(files))
-    failures = list(dict.fromkeys(failures))
-
-    if failures:
+    if failures := list(dict.fromkeys(failures)):
         print("Documentation checks failed:")
         for line in failures:
             print(f"- {line}")

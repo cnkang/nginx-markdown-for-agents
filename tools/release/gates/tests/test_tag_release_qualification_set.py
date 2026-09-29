@@ -470,7 +470,7 @@ def _run_stubbed_helm_cluster_smoke(
     # Drop an ambient HELM_VERSION so a developer's shell setting cannot
     # change what the stub reports; the parameter is the only source.
     env.pop("HELM_VERSION", None)
-    env.update({
+    env |= {
         "PATH": f"{tools}{os.pathsep}{env['PATH']}",
         "TMPDIR": str(temp_root),
         "CALL_LOG": str(calls),
@@ -483,7 +483,7 @@ def _run_stubbed_helm_cluster_smoke(
         "HELM_LIST_STDERR": helm_stub.list_stderr,
         "HELM_LIST_FAILS": "1" if helm_stub.list_fails else "0",
         "HELM_INSTALL_FAILS": "1" if helm_stub.install_fails else "0",
-    })
+    }
     if helm_stub.version is not None:
         env["HELM_VERSION"] = helm_stub.version
 
@@ -839,9 +839,8 @@ def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
     assert "release_cluster_lock" in cleanup, (
         "cleanup must release the cluster lock"
     )
-    assert "flock" in script and "mkdir" in script, (
-        "the lock needs the flock path and a directory fallback"
-    )
+    assert "flock" in script, "the lock needs the flock path"
+    assert "mkdir" in script, "the lock needs a directory fallback"
 
 
 def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:

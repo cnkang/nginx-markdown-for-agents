@@ -2919,32 +2919,41 @@ def test_raw_install_detector_inspects_python_script_launchers(
     assert packaging_gate._raw_toolchain_install_issue(
         _raw_install_workflow("python3 tools/raw_install.py")
     ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/safe.py")
-    ) is None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/opaque.py")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 imported.py")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow(
-            "python3 -c 'from helper import install; install()'"
+    _assert_one_safe_and_three_raw_install_launchers(
+        safe_launcher="python3 tools/safe.py",
+        raw_install_launchers=(
+            "python3 tools/opaque.py",
+            "python3 imported.py",
+            "python3 -c 'from helper import install; install()'",
+        ),
+    )
+    _assert_one_safe_and_three_raw_install_launchers(
+        safe_launcher="python3 safe_import.py",
+        raw_install_launchers=(
+            "python3 -m raw_module",
+            "python3 -m runpy runpy_target",
+            "python3 tools/missing.py",
+        ),
+    )
+
+
+def _assert_one_safe_and_three_raw_install_launchers(
+    safe_launcher, raw_install_launchers
+):
+    """Assert the safe launcher is accepted and each raw-install one is flagged."""
+    assert (
+        packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(safe_launcher)
         )
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 safe_import.py")
-    ) is None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 -m raw_module")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 -m runpy runpy_target")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/missing.py")
-    ) is not None
+        is None
+    )
+    for raw_install_launcher in raw_install_launchers:
+        assert (
+            packaging_gate._raw_toolchain_install_issue(
+                _raw_install_workflow(raw_install_launcher)
+            )
+            is not None
+        )
 
 
 def test_release_validator_script_scans_through_the_static_project_root():
@@ -3979,20 +3988,25 @@ def test_script_chain_cannot_hide_a_raw_install_behind_a_markerless_file(
         "outer.sh", 0, None
     )
 
+    _assert_control_script_file_is_not_flagged(
+        tmp_path, "inert.sh", "#!/bin/bash\necho hello\n"
+    )
+    _assert_control_script_file_is_not_flagged(
+        tmp_path,
+        "dynamic.sh",
+        '#!/bin/bash\npython3 "$toolchain_file" 2>&1 <<PY\nprint(1)\nPY\n',
+    )
+
+
+def _assert_control_script_file_is_not_flagged(
+    tmp_path, script_name, script_contents
+):
     # Controls: an inert file and a dynamic operand are not treated as
     # evidence, so neither fails the gate.
-    inert = tmp_path / "inert.sh"
-    inert.write_text("#!/bin/bash\necho hello\n", encoding="utf-8")
+    control_script = tmp_path / script_name
+    control_script.write_text(script_contents, encoding="utf-8")
     assert not packaging_gate._raw_install_from_shell_script_file(
-        "inert.sh", 0, None
-    )
-    dynamic = tmp_path / "dynamic.sh"
-    dynamic.write_text(
-        '#!/bin/bash\npython3 "$toolchain_file" 2>&1 <<PY\nprint(1)\nPY\n',
-        encoding="utf-8",
-    )
-    assert not packaging_gate._raw_install_from_shell_script_file(
-        "dynamic.sh", 0, None
+        script_name, 0, None
     )
 
 
@@ -4190,29 +4204,32 @@ def test_dash_headed_operand_routes_to_the_shell_scan(
     Python-only branch and a shell script's raw install went unanalyzed.
     """
     monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
-    inner = tmp_path / "inner.sh"
-    inner.write_text(
-        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    _write_raw_install_script_chain(
+        tmp_path, "inner.sh", "outer.sh", "#!/bin/bash\ndash inner.sh\n"
     )
-    outer = tmp_path / "outer.sh"
-    outer.write_text("#!/bin/bash\ndash inner.sh\n", encoding="utf-8")
     assert packaging_gate._raw_install_from_shell_script_file(
         "outer.sh", 0, None
     )
 
-    # The marker-less multi-hop form must also route through the shell scan:
-    # dash -> marker-less middle -> deeper file carrying the marker.
-    deep = tmp_path / "deep.sh"
-    deep.write_text(
-        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    _write_raw_install_script_chain(
+        tmp_path, "deep.sh", "middle.sh", "#!/bin/bash\nbash deep.sh\n"
     )
-    middle = tmp_path / "middle.sh"
-    middle.write_text("#!/bin/bash\nbash deep.sh\n", encoding="utf-8")
     hop = tmp_path / "hop.sh"
     hop.write_text("#!/bin/bash\ndash middle.sh\n", encoding="utf-8")
     assert packaging_gate._raw_install_from_shell_script_file(
         "hop.sh", 0, None
     )
+
+
+def _write_raw_install_script_chain(
+    tmp_path, inner_script_name, outer_script_name, outer_script_contents
+):
+    inner_script = tmp_path / inner_script_name
+    inner_script.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer_script = tmp_path / outer_script_name
+    outer_script.write_text(outer_script_contents, encoding="utf-8")
 
 
 def test_runpy_script_target_is_followed_in_a_marker_less_chain(
@@ -4307,7 +4324,7 @@ def test_compound_backgrounded_list_does_not_satisfy_the_pip_gate() -> None:
         "shell": "bash",
     }
     foreground = packaging_gate._foreground_live_commands(compound)
-    assert not any("pip install" in segment for segment in foreground)
+    assert all("pip install" not in segment for segment in foreground)
     assert any("docs-check" in segment for segment in foreground)
 
     two_step = [
@@ -4388,8 +4405,10 @@ def test_dynamic_import_call_targets_are_resolved_or_fail_closed() -> None:
     """
     payloads = [
         "__import__('os').system('rustup toolchain install stable')",
-        "import importlib; importlib.import_module('os').system("
-        "'rustup toolchain install stable')",
+        (
+            "import importlib; importlib.import_module('os').system("
+            "'rustup toolchain install stable')"
+        ),
         "getattr(__import__('os'), 'system')('rustup toolchain install stable')",
     ]
     for payload in payloads:
@@ -4425,10 +4444,14 @@ def test_dotted_import_resolves_by_import_semantics() -> None:
         "__import__('os.path').system('rustup toolchain install stable')",
         # A non-empty fromlist returns the submodule, whose launcher members
         # still match.
-        "__import__('os', fromlist=['system']).system("
-        "'rustup toolchain install stable')",
-        "__import__('subprocess', fromlist=['run']).run(["
-        "'rustup', 'toolchain', 'install', 'stable'])",
+        (
+            "__import__('os', fromlist=['system']).system("
+            "'rustup toolchain install stable')"
+        ),
+        (
+            "__import__('subprocess', fromlist=['run']).run(["
+            "'rustup', 'toolchain', 'install', 'stable'])"
+        ),
     ]
     for payload in payloads:
         assert packaging_gate._python_inline_raw_install(payload, 0, None), payload
@@ -4974,3 +4997,57 @@ def test_shell_template_option_clusters_and_placeholders_are_scanned() -> None:
         run: 'print("hello")'
 """
     assert packaging_gate._raw_toolchain_install_issue(python_template) is None
+
+
+def test_rustup_toolchain_override_is_skipped_before_the_subcommand() -> None:
+    """`+toolchain` shifts the subcommand; both orders must be flagged.
+
+    Regression: the skip loop only stepped over `-` flags, so
+    `rustup +stable toolchain install nightly` left `+stable` as the
+    subcommand head and neither the literal pair nor the unresolved-word
+    check matched -- a raw install passed the gate.
+    """
+    for command in (
+        "rustup +stable toolchain install nightly",
+        "rustup toolchain install nightly",
+        "rustup +stable +nightly toolchain install nightly",
+        "rustup --verbose +stable toolchain install nightly",
+    ):
+        assert packaging_gate._raw_install_in_segment(command), command
+
+    # A benign subcommand behind the override stays accepted.
+    assert not packaging_gate._raw_install_in_segment("rustup +stable show")
+    assert not packaging_gate._raw_install_in_segment(
+        "rustup +stable toolchain list"
+    )
+
+
+def test_masked_and_backgrounded_sets_use_the_live_view_text() -> None:
+    """A `then`/`do`/`else` carrier must compare as the command it runs.
+
+    Regression: the masked set stored the raw segment text
+    (`then pip install ...`) while the live-command view carries the
+    command alone, so a masked install inside a provably-running branch
+    never matched and satisfied the gate.
+    """
+    script = (
+        "if true; then "
+        "python3 -m pip install -r requirements-release.txt || true; fi\n"
+        "make docs-check"
+    )
+    steps = [{"run": script}]
+    assert packaging_gate._python_deps_issue(steps) is not None
+
+    masked = packaging_gate._failure_masked_command_segments(script)
+    assert (
+        "python3 -m pip install -r requirements-release.txt" in masked
+    ), masked
+    assert not any(segment.startswith("then ") for segment in masked), masked
+
+    backgrounded = packaging_gate._backgrounded_command_segments(
+        "if true; then python3 -m pip install -r requirements-release.txt & fi\n"
+        "make docs-check"
+    )
+    assert not any(
+        segment.startswith("then ") for segment in backgrounded
+    ), backgrounded

@@ -116,8 +116,14 @@ def test_sha256_final_allowlist_is_load_bearing() -> None:
     assert warnings == [], warnings
 
 
-def test_const_qualified_pointer_parameter_is_not_flagged() -> None:
-    """`type *const name` (const pointer) must not yield a 'const' warning."""
+def test_const_qualified_pointer_parameter_is_still_flagged() -> None:
+    """`type *const name` keeps a MUTABLE pointee, so it still warns.
+
+    The qualifier makes the pointer itself constant; the function can
+    still modify the pointed-to struct, so the declaration warrants the
+    same warning as the plain form.  The parameter name is captured after
+    the qualifier, so the report never names `const` as the parameter.
+    """
     _, warnings = detector._check_line_for_const_violations(
         "static void inspect(ngx_http_markdown_ctx_t *const ctx)",
         1,
@@ -125,7 +131,11 @@ def test_const_qualified_pointer_parameter_is_not_flagged() -> None:
         False,
     )
 
-    assert warnings == [], warnings
+    assert len(warnings) == 1, warnings
+    # The rendered parameter must name the parameter, never the qualifier:
+    # a bare "ctx" substring also appears in the type name and would pass
+    # even if the capture were wrong.
+    assert "'ngx_http_markdown_ctx_t *ctx'" in warnings[0], warnings
 
 
 def test_plain_pointer_parameter_is_still_flagged() -> None:
