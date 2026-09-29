@@ -153,6 +153,29 @@ fn run_scenario(cli: &Cli, name: &str, timeout: Duration) -> Result<()> {
     Ok(())
 }
 
+/// Settle the per-invocation tree if this run unwinds before normal settlement.
+///
+/// `ScenarioRuntime::prepare` creates the tree; from that point every
+/// fallible step must leave the tree classified.  Without this guard a
+/// runtime, fixture, nginx, or scenario error returns with an unmarked
+/// tree, and wrapper orphan recovery (dead creator pid + matching
+/// invocation record) would reclaim the diagnostics a crashed run left
+/// behind.  The guard is disarmed at the normal settlement, which records
+/// the run's real status.
+struct RunTreeSettleGuard<'a> {
+    runtime_base: &'a std::path::Path,
+    keep_artifacts: bool,
+    armed: bool,
+}
+
+impl Drop for RunTreeSettleGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            crate::artifacts::settle_run_tree(self.runtime_base, self.keep_artifacts, false);
+        }
+    }
+}
+
 /// Inner helper: run one scenario and return whether it passed.
 ///
 /// Handles JSON report writing and artifact retention.
@@ -200,6 +223,12 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
         ctx.port,
         ctx.upstream_port,
     )?;
+    // The tree exists from here on: every exit path below must settle it.
+    let mut settle_guard = RunTreeSettleGuard {
+        runtime_base: &runtime_base,
+        keep_artifacts: cli.keep_artifacts,
+        armed: true,
+    };
     crate::artifacts::write_invocation_json(
         &runtime.scenario_artifact_dir,
         name,
@@ -236,7 +265,9 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
     // Settle the whole tree: a passing run without --keep-artifacts leaves
     // nothing behind, every other outcome retains the tree with a settle
     // marker so wrapper orphan recovery never reclaims final artifacts.
+    // The guard is disarmed here: this path records the real status.
     crate::artifacts::settle_run_tree(&runtime_base, cli.keep_artifacts, report.passed);
+    settle_guard.armed = false;
 
     if let Some(report_path) = &cli.json_report {
         crate::artifacts::append_report(report_path, &report)?;
@@ -279,4 +310,53 @@ fn resolve_cli_nginx_bin(cli: &Cli) -> Result<Cli> {
     let mut resolved = cli.clone();
     resolved.nginx_bin = Some(prepared.nginx_bin);
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_settle_guard_settles_an_unwound_run_with_failed_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join("artifacts")).unwrap();
+
+        {
+            let _guard = RunTreeSettleGuard {
+                runtime_base: &base,
+                keep_artifacts: false,
+                armed: true,
+            };
+            // The run unwinds without normal settlement: the guard drops.
+        }
+
+        assert!(base.exists(), "a crashed run retains its tree");
+        let marker =
+            std::fs::read_to_string(base.join(crate::artifacts::COMPLETION_MARKER_FILE)).unwrap();
+        assert_eq!(marker, "failed", "the unwound run settles as failed");
+    }
+
+    #[test]
+    fn test_settle_guard_disarmed_leaves_the_normal_settlement_authoritative() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join("artifacts")).unwrap();
+
+        {
+            let mut guard = RunTreeSettleGuard {
+                runtime_base: &base,
+                keep_artifacts: false,
+                armed: true,
+            };
+            // Normal settlement: passing run without --keep-artifacts.
+            crate::artifacts::settle_run_tree(&base, false, true);
+            guard.armed = false;
+        }
+
+        assert!(
+            !base.exists(),
+            "a passing run leaves nothing; the disarmed guard must not re-create the tree"
+        );
+    }
 }
