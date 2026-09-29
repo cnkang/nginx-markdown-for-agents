@@ -3390,12 +3390,18 @@ def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
 
 
 def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
-    """An interrupt that lands after the reap still stops a pipe-holding child.
+    """On no-waitid builds, an interrupt after the reap still kills a child.
 
-    Regression: when the wait path reaped the leader before unwinding, the
-    gated post-reap signal must still fire while a descendant holds stdout;
-    a gate that never fires would let the descendant survive the interrupt.
+    The post-reap group signal exists only for builds without
+    waitid/WNOWAIT, where the wait fallback can reap the leader before
+    unwinding.  On those builds the gated signal must still fire while a
+    descendant holds stdout; a gate that never fires would let the
+    descendant survive the interrupt.  On waitid builds the leader stays
+    unreaped until the group has been signaled, so no post-reap signal is
+    sent (see test_waitid_builds_never_signal_a_reaped_group).
     """
+    if validator._waitid_supported():
+        pytest.skip("waitid builds keep the leader unreaped until cleanup")
     marker = tmp_path / "post-reap-descendant-survived"
     leader = tmp_path / "leader.py"
     leader.write_text(
@@ -3422,6 +3428,58 @@ def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatc
         validator._finish_toolchain_identity_process(process, reader)
     time.sleep(1.9)
     assert not marker.exists(), "a post-reap descendant survived the interrupt"
+
+
+def test_waitid_builds_never_signal_a_reaped_group(monkeypatch) -> None:
+    """The interrupt path sends no post-reap signal where waitid exists.
+
+    Regression: an open pipe writer does not prove the reaped leader's
+    PGID still belongs to this run (a `setsid` descendant keeps the pipe
+    while leaving the group), so the post-reap signal could hit an
+    unrelated group after id reuse.  On waitid builds the leader stays a
+    zombie until the group has been signaled, so the reclaim-free path
+    needs no post-reap signal at all; only no-waitid builds keep it.
+    """
+    if not validator._waitid_supported():
+        pytest.skip("this build has no waitid/WNOWAIT path")
+    signals: list[str] = []
+
+    class _Process:
+        pid = os.getpid()
+        returncode = 1  # already reaped
+
+        def poll(self):
+            return 1
+
+        def wait(self):
+            return 1
+
+    class _Stream:
+        def eof_reached(self):
+            return False  # a writer is still open
+
+    def raising_wait(process, timeout):
+        process.wait()
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", raising_wait)
+    monkeypatch.setattr(
+        validator,
+        "_signal_fuzz_process_group",
+        lambda _process, _signal: signals.append("group"),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_signal_reaped_fuzz_process_group_when_open",
+        lambda _process, _stream: signals.append("reaped"),
+    )
+    try:
+        validator._wait_toolchain_identity_process(_Process(), "probe", _Stream())
+    except KeyboardInterrupt:
+        pass
+    assert signals == ["group"], (
+        "waitid builds must not signal a reaped group by number"
+    )
 
 
 def test_eof_marks_after_the_read_loop_closes(tmp_path) -> None:

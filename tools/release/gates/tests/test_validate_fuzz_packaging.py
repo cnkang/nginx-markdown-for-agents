@@ -4672,3 +4672,73 @@ def test_pip_dry_run_environment_is_recognized() -> None:
         {"run": "make docs-check"},
     ]
     assert packaging_gate._python_deps_issue(disabled) is None
+
+
+def test_exit_status_is_normalized_to_eight_bits() -> None:
+    """``exit 256`` exits successfully, so it masks a prerequisite failure.
+
+    Regression: a literal nonzero status was assumed to propagate failure,
+    but the shell truncates the exit status to its low 8 bits, so
+    ``pip install ... || exit 256`` reaches a successful exit and the
+    install is not proven.  Only statuses that stay nonzero after
+    truncation propagate.
+    """
+    masking = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 256"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(masking) is not None
+    # 511 % 256 == 255: still a failure, so it propagates.
+    propagating = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 511"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating) is None
+
+
+def test_followed_propagating_chain_still_masks_without_errexit() -> None:
+    """Without errexit a later command replaces the chain's failed status.
+
+    Regression: the walk stopped at the chain, so ``pip install ... ||
+    false; true`` left the install unmarked; without ``-e`` the shell
+    continues and the step exits successfully.  With errexit the shell
+    aborts on the failed chain, so the later command cannot swallow it.
+    """
+    script = "python3 -m pip install -r requirements-release.txt || false; true"
+    steps = [
+        {"run": script, "shell": "bash {0}"},  # no implicit -e
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(steps) is not None
+    # The chain propagates the failure, but the shell continues past it and
+    # the trailing `true` decides the step's status: without errexit the
+    # chain is masked.
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=False
+    )
+    assert script.split("||")[0].strip() in masked
+    # Under an errexit shell the failed chain aborts the script, so the
+    # trailing command cannot replace its status: not masked.
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=True
+    )
+    assert script.split("||")[0].strip() not in masked
+
+
+def test_pip_dry_run_accepts_short_false_spellings() -> None:
+    """``PIP_DRY_RUN=n`` and ``=f`` are false spellings pip accepts.
+
+    Regression: the false-value set omitted ``n`` and ``f``, so a real
+    install using either value was treated as a dry run and the workflow
+    validator could reject a valid job.
+    """
+    for value in ("n", "f", "N", "F"):
+        assert not packaging_gate._pip_dry_run_value_active(value), value
+    steps = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "n"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(steps) is None

@@ -1283,7 +1283,7 @@ _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"|before (?:the )?(?:publication|release)"
     r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
     r"|not (?:yet |currently |presently |now )?(?:been )?(?:published|released)"
-    r"|no\b.{0,100}\b(?:published|released)\b"
+    r"|\bno\b.{0,100}\b(?:published|released)\b"
     r"|将(?:会)?(?:已)?(?:正式)?发布|即将(?:正式)?发布"
     r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
     re.IGNORECASE,
