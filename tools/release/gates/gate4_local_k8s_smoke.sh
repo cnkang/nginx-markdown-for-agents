@@ -565,12 +565,21 @@ deploy_and_verify() {
     if [[ -z "$existing_namespace" ]]; then
         if ! kubectl --context "$kube_context" create namespace \
             "${HELM_NAMESPACE}" >/dev/null 2>&1; then
+            # The create can lose a race with a concurrent gate4 run
+            # (gate4 holds no lock): whatever holds the namespace now is
+            # theirs, and deleting the cluster would take it down.  The
+            # cluster claim clears with the namespace claim.
             fail "Unable to create namespace ${HELM_NAMESPACE}"
+            CREATED_CLUSTER=0
             return 1
         fi
         CREATED_NAMESPACE=1
     else
+        # A namespace this run did not create lives in this cluster: it
+        # belongs to another run (a fresh cluster has no namespace), so
+        # the cluster claim clears and cleanup leaves both alone.
         info "Reusing pre-existing namespace ${HELM_NAMESPACE}"
+        CREATED_CLUSTER=0
     fi
 
     # Refuse to adopt a release from another run.  The explicit state set is

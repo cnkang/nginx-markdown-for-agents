@@ -564,6 +564,32 @@ def test_gate4_bounds_the_cluster_name_like_its_sibling() -> None:
     assert "^[a-z][a-z0-9-]{0,62}$" in script
 
 
+def test_gate4_clears_the_cluster_claim_when_the_namespace_is_not_ours() -> None:
+    """A namespace we did not create lives in a cluster we must keep.
+
+    gate4 holds no lock, so a concurrent run can hold the namespace of a
+    cluster this run created (a fresh cluster has none).  Both the failed
+    create and the reuse branch clear the cluster claim with the namespace
+    claim: deleting the shared cluster would destroy their workloads.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    create_fail = script.split(
+        "Unable to create namespace", 1
+    )[1].split("return 1", 1)[0]
+    assert "CREATED_CLUSTER=0" in create_fail, (
+        "a namespace-create race must preserve the cluster"
+    )
+    reuse = script.split(
+        "Reusing pre-existing namespace", 1
+    )[1].split("fi", 1)[0]
+    assert "CREATED_CLUSTER=0" in reuse, (
+        "a pre-existing namespace must preserve its cluster"
+    )
+
+
 def test_gate4_preserves_the_cluster_on_a_preexisting_release() -> None:
     """A pre-existing release lives in this cluster; keep it.
 
