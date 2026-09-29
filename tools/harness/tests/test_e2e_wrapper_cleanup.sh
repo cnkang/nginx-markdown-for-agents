@@ -120,9 +120,9 @@ run_cases_for_wrapper() {
   printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-333/artifacts/scenarios/${scenario}/invocation.json"
   # --- an orphan whose metadata names a DIFFERENT scenario ----------------
-  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/other-scenario"
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-666/artifacts/scenarios/other-scenario"
   printf '{\n  "scenario": "other-scenario",\n  "port": 8080\n}\n' \
-    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/other-scenario/invocation.json"
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-666/artifacts/scenarios/other-scenario/invocation.json"
   # --- an orphan from a dead creator with no metadata at all --------------
   mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-888"
   # --- a settled tree: a finished run retained its artifacts --------------
@@ -130,6 +130,13 @@ run_cases_for_wrapper() {
   printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
     > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/artifacts/scenarios/${scenario}/invocation.json"
   printf 'failed\n' > "${fixture}/e2e-harness-${scenario}-${dead_pid}-999/.harness-completed"
+  # --- a finished failed run whose marker write failed: diagnostics ------
+  # --- exist beside the record, so the tree must be preserved. -----------
+  mkdir -p "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}"
+  printf '{\n  "scenario": "%s",\n  "port": 8080\n}\n' "${scenario}" \
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}/invocation.json"
+  printf 'assertion output\n' \
+    > "${fixture}/e2e-harness-${scenario}-${dead_pid}-777/artifacts/scenarios/${scenario}/report.log"
   # --- a directory of a different scenario is never ours ------------------
   mkdir -p "${fixture}/e2e-harness-other-scenario-${dead_pid}-444"
 
@@ -149,8 +156,10 @@ run_cases_for_wrapper() {
     "${scenario}: concurrent run's tree preserved"
   assert_dir missing "${fixture}/e2e-harness-${scenario}-${dead_pid}-333" \
     "${scenario}: dead creator's orphan reclaimed (metadata corroborates)"
-  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-777" \
+  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-666" \
     "${scenario}: orphan whose metadata names another scenario is preserved"
+  assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-777" \
+    "${scenario}: diagnostics beside the record are preserved without a marker"
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-888" \
     "${scenario}: orphan with no metadata is preserved (ownership unproven)"
   assert_dir exists "${fixture}/e2e-harness-${scenario}-${dead_pid}-999" \

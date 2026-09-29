@@ -72,6 +72,14 @@ _wrapper_cleanup() {
         || ! grep -q "\"scenario\"[[:space:]]*:[[:space:]]*\"${SCENARIO_NAME}\"" "$inv" 2>/dev/null; then
       continue
     fi
+    # A finished run can carry diagnostics without a settle marker when the
+    # marker write itself failed; the crashed run this recovery targets has
+    # left nothing but its invocation record.  Content beside that record
+    # therefore means retained evidence: leave it.  The failure direction
+    # stays a leak.
+    if [[ -n "$(find "${inv%/*}" -mindepth 1 ! -name invocation.json -print -quit 2>/dev/null)" ]]; then
+      continue
+    fi
     rm -rf "$d" 2>/dev/null || true
   done
   return 0
