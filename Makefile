@@ -770,6 +770,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_finalize_return.sh
 	bash tools/harness/tests/test_detect_header_hash_filter.sh
 	bash tools/harness/tests/test_detect_version_consistency.sh
+	bash tools/harness/tests/test_e2e_wrapper_cleanup.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short
 
 workflow-context-check:
