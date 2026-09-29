@@ -672,7 +672,7 @@ def _finish_toolchain_identity_process(
             _terminate_fuzz_process_group(process)
             reader.join(_PROCESS_KILL_REAP_SECONDS)
     finally:
-        _close_fuzz_process_pipes(process)
+        _close_fuzz_process_pipes(process, (reader,))
         _unregister_fuzz_process(process)
 
 
@@ -1206,10 +1206,26 @@ def _cancel_active_fuzz_processes() -> None:
         _signal_fuzz_process_group(process, kill_signal)
 
 
-def _close_fuzz_process_pipes(process: subprocess.Popen) -> None:
-    """Close pipes that have no reader or outlived the bounded reader join."""
-    for pipe in (process.stdout, process.stderr):
+def _close_fuzz_process_pipes(
+    process: subprocess.Popen,
+    readers: tuple[threading.Thread, ...] = (),
+) -> None:
+    """Close pipes whose reader threads have already finished.
+
+    A ``BufferedReader.close()`` waits on the internal read lock, so
+    closing a pipe while its reader thread is still blocked in ``read()``
+    (a child process holding the write end) can hang the gate indefinitely
+    (verified against a live child: ``close()`` did not return while a
+    reader was blocked).  Each pipe is paired with the reader that drains
+    it; a pipe whose reader is still alive after the bounded join grace is
+    left open instead.  The failure direction is a bounded descriptor leak
+    in an already-exceptional path, never a hang.
+    """
+    pipes = (process.stdout, process.stderr)
+    for index, pipe in enumerate(pipes):
         if pipe is None or pipe.closed:
+            continue
+        if index < len(readers) and readers[index].is_alive():
             continue
         with contextlib.suppress(OSError):
             pipe.close()
@@ -1277,7 +1293,7 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         try:
             _join_readers(started_readers)
         finally:
-            _close_fuzz_process_pipes(process)
+            _close_fuzz_process_pipes(process, tuple(started_readers))
             _unregister_fuzz_process(process)
     result = {
         "stdout": stdout_stream.text(),

@@ -2969,6 +2969,51 @@ def test_soak_timeout_marker_must_start_the_stderr_record() -> None:
     assert failure == "fuzz run failed with exit code -1"
 
 
+def test_pipe_close_skips_pipes_with_live_readers() -> None:
+    """Closing a pipe whose reader is blocked can hang, so it is skipped.
+
+    Regression: the helper closed both pipes unconditionally, and
+    ``BufferedReader.close()`` waits on the read lock - verified against a
+    live child holding the write end, where ``close()`` did not return
+    within three seconds.  A blocked gate is worse than a bounded
+    descriptor leak in an already-exceptional path, so a pipe whose reader
+    thread is still alive after the bounded join is left open.
+    """
+    closed: list[str] = []
+
+    class _Pipe:
+        def __init__(self, label):
+            self.label = label
+            self.closed = False
+
+        def close(self):
+            closed.append(self.label)
+
+    class _Reader:
+        def __init__(self, alive):
+            self._alive = alive
+
+        def is_alive(self):
+            return self._alive
+
+    class _Process:
+        stdout = _Pipe("stdout")
+        stderr = _Pipe("stderr")
+
+    validator._close_fuzz_process_pipes(
+        _Process(), (_Reader(True), _Reader(False))
+    )
+    assert closed == ["stderr"], (
+        "only the pipe whose reader finished may be closed"
+    )
+    # With no readers supplied (pipes already drained) both close.
+    process = _Process()
+    process.stdout = _Pipe("stdout2")
+    process.stderr = _Pipe("stderr2")
+    validator._close_fuzz_process_pipes(process)
+    assert closed == ["stderr", "stdout2", "stderr2"]
+
+
 def test_reader_join_uses_one_shared_deadline(monkeypatch) -> None:
     """Each reader receives only the remainder of the common grace window."""
     clock = [100.0]
