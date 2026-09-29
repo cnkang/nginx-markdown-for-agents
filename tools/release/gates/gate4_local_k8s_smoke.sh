@@ -235,8 +235,13 @@ cleanup_owned_helm_resources() {
         CREATED_RELEASE=0
     fi
     if [[ "$CREATED_NAMESPACE" -eq 1 ]]; then
+        # Bounded wait: a namespace this run created is ours to remove, and
+        # returning while it is still terminating would let a subsequent
+        # run reuse a name that is about to disappear (or collide with the
+        # finalizer).  The wait stays best-effort with a bound so cleanup
+        # can never hang a stuck cluster.
         kubectl --context "kind-${CLUSTER_NAME}" delete namespace "${HELM_NAMESPACE}" \
-            --wait=false >/dev/null 2>&1 || true
+            --wait=true --timeout=120s >/dev/null 2>&1 || true
         CREATED_NAMESPACE=0
     fi
     return 0

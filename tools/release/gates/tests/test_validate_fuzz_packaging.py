@@ -10,6 +10,7 @@ with paired acceptance/rejection shapes wherever both directions matter.
 
 from __future__ import annotations
 
+import pathlib
 import shlex
 import subprocess
 
@@ -4742,3 +4743,68 @@ def test_pip_dry_run_accepts_short_false_spellings() -> None:
         {"run": "make docs-check"},
     ]
     assert packaging_gate._python_deps_issue(steps) is None
+
+
+def test_masking_walks_the_connected_and_or_list() -> None:
+    """``&&`` shares the list with ``||``, so the terminator masks members.
+
+    Regression: only segments with a DIRECTLY following ``||`` were
+    examined, so ``pip install ... && echo ok || true`` masked ``echo ok``
+    while the pip command counted.  In one connected list a failing pip
+    short-circuits to ``true`` exactly as in ``pip || true``; every member
+    is masked now, and a purely propagating list still counts.
+    """
+    combined = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " && echo ok || true"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    issue = packaging_gate._python_deps_issue(combined)
+    assert issue is not None
+    assert "failure-masking" in issue
+
+    # A propagating list keeps every member countable.
+    propagating = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " && echo ok || exit 1"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating) is None
+
+
+def test_cleanup_waits_for_the_owned_namespace_deletion() -> None:
+    """Both smokes wait (bounded) for their owned namespace before returning.
+
+    Regression: the cleanup branch used ``--wait=false``, so a subsequent
+    run could acquire the lock while the namespace was still terminating.
+    The deletion is now a bounded wait (``--timeout=120s``), still
+    best-effort, and in the e2e smoke it completes before the lock is
+    released.
+    """
+    root = pathlib.Path(__file__).resolve().parents[4]
+    gate4 = (root / "tools/release/gates/gate4_local_k8s_smoke.sh").read_text(
+        encoding="utf-8"
+    )
+    cleanup = gate4.split("cleanup_owned_helm_resources() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "--wait=true --timeout=120s" in cleanup
+    assert "--wait=false" not in cleanup
+
+    e2e = (root / "tools/e2e/verify_helm_cluster_smoke_e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    e2e_cleanup = e2e.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    delete = e2e_cleanup.split("delete namespace", 1)[1].split("fi", 1)[0]
+    assert "--wait=true --timeout=120s" in delete
+    assert e2e_cleanup.index("delete namespace") < e2e_cleanup.index(
+        "release_cluster_lock"
+    )

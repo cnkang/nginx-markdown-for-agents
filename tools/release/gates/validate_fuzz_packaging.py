@@ -7227,38 +7227,56 @@ def _failure_masked_command_segments(
 
     A prerequisite written as ``cmd || true`` can certify a step while its
     failure is silently ignored, so such a segment must not count as
-    satisfying it.  The walk follows the WHOLE ``||`` chain: ``cmd ||
-    false || true`` still swallows ``cmd``'s failure because the chain
-    reaches ``true``, while ``cmd || false`` propagates it.  A chain
-    member whose outcome cannot be proven stays conservative (it may
-    succeed, so the failure may be swallowed).
+    satisfying it.  ``&&`` and ``||`` share one connected list, so the
+    whole list decides the fate of every member: in ``cmd && echo ok ||
+    true`` a failing ``cmd`` short-circuits to ``true`` and the failure is
+    swallowed exactly as in ``cmd || true``.  When any ``||`` in the list
+    discards failure, every member is masked; when the list only
+    propagates, its members count.
 
     ``errexit`` models the step's shell: with errexit (GitHub's default
-    bash adds ``-e``) a propagating chain fails the shell immediately, so
+    bash adds ``-e``) a propagating list fails the shell immediately, so
     a later command cannot replace its status.  Without errexit the shell
-    continues past the failed chain and the step's final status comes
-    from the last command, so a followed chain still swallows the
-    failure; the conservative reading masks it whenever any later
-    segment exists.
+    continues past the failed list and the step's final status comes from
+    the last command, so a followed list still swallows the failure; the
+    conservative reading masks it whenever any later segment exists.
     """
     pairs = _command_segments_with_separators(script)
     masked: set[str] = set()
-    for index, (segment, _separator) in enumerate(pairs):
-        if index + 1 >= len(pairs) or pairs[index + 1][1] != "||":
+    list_start = 0
+    for index in range(len(pairs)):
+        if _connected_list_continues(pairs, index):
             continue
-        cursor = index + 1
-        while cursor < len(pairs) and pairs[cursor][1] == "||":
-            if _shell_rhs_discards_failure(pairs[cursor][0]):
-                masked.add(segment.strip())
-                break
-            cursor += 1
-        else:
-            # The chain propagates the failure.  Without errexit the
-            # shell still runs what follows and that command's status
-            # replaces this one, so a later segment swallows it too.
-            if not errexit and cursor < len(pairs):
-                masked.add(segment.strip())
+        members = range(list_start, index + 1)
+        if _list_members_are_masked(pairs, list_start, index, errexit):
+            masked.update(pairs[position][0].strip() for position in members)
+        list_start = index + 1
     return masked
+
+
+def _connected_list_continues(pairs: list[tuple[str, str]], index: int) -> bool:
+    """Whether the segment at ``index`` continues a connected ``&&``/``||`` list."""
+    if index + 1 >= len(pairs):
+        return False
+    return pairs[index + 1][1] in ("&&", "||")
+
+
+def _list_members_are_masked(
+    pairs: list[tuple[str, str]], start: int, end: int, errexit: bool
+) -> bool:
+    """Whether every member of one connected list has its failure swallowed.
+
+    A list is masked when any ``||`` inside it discards failure (``cmd &&
+    echo ok || true``), or when it propagates failure but the shell has no
+    errexit and a later command therefore replaces the list's status.
+    """
+    if any(
+        pairs[position + 1][1] == "||"
+        and _shell_rhs_discards_failure(pairs[position + 1][0])
+        for position in range(start, end)
+    ):
+        return True
+    return not errexit and end + 1 < len(pairs)
 
 
 def _masked_command_segments_for_step(step: str | dict) -> set[str]:

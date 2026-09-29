@@ -90,9 +90,14 @@ cleanup() {
             kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
         elif [[ "${CREATED_NAMESPACE}" -eq 1 ]]; then
             # A reused cluster keeps its namespace unless this run created it:
-            # leaving markdown-smoke behind would poison the next run.
+            # leaving markdown-smoke behind would poison the next run.  Wait
+            # for the deletion (bounded, best-effort) BEFORE the lock below
+            # is released: the next waiter would otherwise acquire the lock
+            # while this namespace is still terminating and find the name
+            # neither free nor usable.
             kubectl --context "kind-${CLUSTER}" \
-                delete namespace "${NAMESPACE}" --wait=false >/dev/null 2>&1 || true
+                delete namespace "${NAMESPACE}" --wait=true --timeout=120s \
+                >/dev/null 2>&1 || true
         fi
     fi
     rm -rf "${WORK_DIR}"
