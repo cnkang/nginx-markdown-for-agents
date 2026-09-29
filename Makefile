@@ -418,7 +418,7 @@ perf-gate-check:
 # Runs Homebrew's strict formula lint only; archive digest and rendered-source
 # identity are verified by the Homebrew workflow's separate verification step.
 homebrew-formula-check:
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+	@if [ "$(UNAME_S)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then \
 		bash packaging/scripts/audit_homebrew_formula.sh; \
 	else \
 		echo "SKIP: Homebrew formula audit runs on macOS with Homebrew" >&2; \
