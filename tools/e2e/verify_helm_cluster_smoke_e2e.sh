@@ -61,9 +61,13 @@ done
 
 # The cluster name reaches kind, kubectl contexts, and the lock path, so it
 # must satisfy kind's own grammar (lowercase alphanumerics and dashes,
-# starting with a letter) before any of those use it.  The check covers the
-# CLUSTER environment default and the --cluster flag alike.
-if ! [[ "${CLUSTER}" =~ ^[a-z][a-z0-9-]*$ ]]; then
+# starting with a letter) before any of those use it.  The length bound
+# matches kind's DNS-label limit and keeps every lock path's filename
+# component inside the common 255-byte filesystem limit: an overlong name
+# would make the fallback lock's mkdir fail silently and retry until its
+# timeout instead of reaching kind.  The check covers the CLUSTER
+# environment default and the --cluster flag alike.
+if ! [[ "${CLUSTER}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
     echo "ERROR: invalid cluster name: ${CLUSTER}" >&2
     exit 1
 fi
@@ -153,6 +157,23 @@ dir_lock_owner_alive() {
     return 0
 }
 
+# Compare the opened lock descriptor's file with the path.  macOS exposes
+# the descriptor through the fdescfs device, so only the inode number is
+# comparable there; Linux reports the underlying device too and both are
+# compared.  A failed stat is a refusal (fail closed).
+lock_descriptor_matches_path() {
+    local fd_id path_id
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        fd_id="$(stat -L -f %i /dev/fd/9 2>/dev/null)" || return 1
+        path_id="$(stat -L -f %i "${LOCK_PATH}.flock" 2>/dev/null)" || return 1
+    else
+        fd_id="$(stat -L -c %d:%i /dev/fd/9 2>/dev/null)" || return 1
+        path_id="$(stat -L -c %d:%i "${LOCK_PATH}.flock" 2>/dev/null)" || return 1
+    fi
+    [[ -n "${fd_id}" && "${fd_id}" == "${path_id}" ]]
+}
+
+
 acquire_cluster_lock() {
     # Refuse a symlinked or otherwise non-regular lock path before any
     # open: `exec 9>` follows a symlink and would truncate its target.  The
@@ -176,7 +197,18 @@ acquire_cluster_lock() {
             echo "ERROR: refusing non-regular lock path: ${LOCK_PATH}.flock" >&2
             exit 1
         fi
-        exec 9>"${LOCK_PATH}.flock"
+        # Open read-write WITHOUT truncation (<>): a symlink swapped in
+        # between the check above and this open would otherwise be
+        # followed and its target truncated by the O_TRUNC form.  The
+        # post-open identity check then proves the descriptor's file is
+        # still the same inode as the path: a swap that landed after the
+        # open leaves the opened inode untouched and is refused.
+        exec 9<>"${LOCK_PATH}.flock"
+        if [[ -L "${LOCK_PATH}.flock" ]] || [[ ! -f "${LOCK_PATH}.flock" ]] \
+            || ! lock_descriptor_matches_path; then
+            echo "ERROR: refusing non-regular lock path: ${LOCK_PATH}.flock" >&2
+            exit 1
+        fi
         if flock -w 600 9; then
             LOCK_MODE="flock"
             return 0
