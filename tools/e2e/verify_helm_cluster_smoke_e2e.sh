@@ -217,24 +217,38 @@ acquire_cluster_lock() {
         exit 1
     fi
     local waited=0
-    while ! mkdir "${LOCK_PATH}.d" 2>/dev/null; do
-        # Breaking a stale lock is serialized by a short-lived reaper mutex.
-        # Without it, two waiters can both see a stale lock, the winner
-        # re-acquires the canonical path, and the slower waiter's rename
-        # then displaces that LIVE owner's lock; a third waiter could take
-        # the freed canonical path while the displaced owner still ran.
-        # Under the reaper only one waiter examines and reclaims a stale
-        # lock at a time, so a live owner's lock is never displaced.
-        acquire_lock_reaper
-        if ! dir_lock_owner_alive; then
-            local stale_claim="${LOCK_PATH}.stale.$$"
-            if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
-                rm -rf "${stale_claim}"
-                release_lock_reaper
-                continue
+    while :; do
+        if mkdir "${LOCK_PATH}.d" 2>/dev/null; then
+            # Publish the owner with an EXCLUSIVE create.  A plain
+            # redirect could overwrite the record of a run that reclaimed
+            # this path during a pause (the reclaim grace treats an
+            # ownerless directory as stale), and both runs would then
+            # enter the critical section.  A failed publish means the
+            # path is no longer this wait's: wait again.
+            if ( set -o noclobber; printf '%s\n' "$$" > "${LOCK_OWNER_FILE}" ) 2>/dev/null; then
+                LOCK_MODE="dir"
+                return 0
             fi
+        else
+            # Breaking a stale lock is serialized by a short-lived reaper
+            # mutex.  Without it, two waiters can both see a stale lock,
+            # the winner re-acquires the canonical path, and the slower
+            # waiter's rename then displaces that LIVE owner's lock; a
+            # third waiter could take the freed canonical path while the
+            # displaced owner still ran.  Under the reaper only one
+            # waiter examines and reclaims a stale lock at a time, so a
+            # live owner's lock is never displaced.
+            acquire_lock_reaper
+            if ! dir_lock_owner_alive; then
+                local stale_claim="${LOCK_PATH}.stale.$$"
+                if mv "${LOCK_PATH}.d" "${stale_claim}" 2>/dev/null; then
+                    rm -rf "${stale_claim}"
+                    release_lock_reaper
+                    continue
+                fi
+            fi
+            release_lock_reaper
         fi
-        release_lock_reaper
         waited=$((waited + 2))
         if [[ "${waited}" -ge 600 ]]; then
             echo "ERROR: timed out waiting for the ${CLUSTER} smoke lock" >&2
@@ -242,9 +256,6 @@ acquire_cluster_lock() {
         fi
         sleep 2
     done
-    printf '%s\n' "$$" > "${LOCK_OWNER_FILE}"
-    LOCK_MODE="dir"
-    return 0
 }
 
 acquire_lock_reaper() {

@@ -764,6 +764,28 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
         assert "invalid cluster name" in result.stderr, (bad, result.stderr)
 
 
+def test_helm_cluster_smoke_publishes_owner_record_exclusively() -> None:
+    """The directory lock's owner record is created, never overwritten.
+
+    A plain redirect could overwrite the record of a run that reclaimed
+    the path during a pause (the reclaim grace treats an ownerless
+    directory as stale), and both runs would enter the critical section.
+    The publish therefore uses a noclobber create and retries the whole
+    acquisition when the path is no longer this wait's.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    assert (
+        "set -o noclobber; printf '%s\\n' \"$$\" > \"${LOCK_OWNER_FILE}\""
+        in script
+    ), "the owner record must be published with an exclusive create"
+    plain = "printf '%s\\n' \"$$\" > \"${LOCK_OWNER_FILE}\""
+    assert plain not in script.replace(
+        "set -o noclobber; " + plain, ""
+    ), "no plain overwriting publish may remain"
+
+
 def test_helm_cluster_smoke_lock_open_does_not_truncate(tmp_path: Path) -> None:
     """The lock open is O_TRUNC-free and proves the inode after opening.
 
