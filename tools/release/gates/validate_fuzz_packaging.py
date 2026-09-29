@@ -3333,6 +3333,31 @@ def _python_interpreter_before_placeholder(
     )
 
 
+def _shell_template_executable_payloads(shell: object) -> list[str]:
+    """Return the ``-c`` payloads a custom shell template executes directly.
+
+    The runner substitutes the generated script path into ``{0}``; commands
+    the template spells out itself (``bash -c 'rustup ...' {0}``) execute
+    in addition to the run block, and the run block's scan cannot see them.
+    Only quoted ``-c`` payloads are returned: they are the executable text
+    the template itself carries, while the placeholder and bare stdin
+    forms add nothing to examine here.
+    """
+    if not isinstance(shell, str):
+        return []
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return []
+    payloads: list[str] = []
+    for index, word in enumerate(words):
+        if word in ("-c", "--command") and index + 1 < len(words):
+            candidate = words[index + 1]
+            if "{0}" not in candidate:
+                payloads.append(candidate)
+    return payloads
+
+
 def _shell_template_conflicting_placeholder_consumers(shell: object) -> bool:
     """Whether more than one interpreter consumes the script placeholder.
 
@@ -4076,6 +4101,11 @@ def _raw_install_in_script(
         _raw_install_in_script(body, depth + 1, variables)
         for body in shell_bodies
     ):
+        return True
+    # An unquoted heredoc delimiter lets the shell expand the body, so a
+    # `$(...)` inside a `cat <<EOF` block executes; the body is data for
+    # command scanning but its substitutions are executable.
+    if _raw_install_in_expanded_heredocs(uncommented, depth, variables):
         return True
     return any(
         _python_inline_raw_install(body, depth + 1, variables)
@@ -5338,6 +5368,14 @@ def _python_imports_include_raw_install(
             ):
                 return True
     return False
+
+
+def _shell_template_runs_raw_install(shell: object) -> bool:
+    """Whether a custom shell template's own commands install a raw toolchain."""
+    return any(
+        _raw_install_in_run_script(payload)
+        for payload in _shell_template_executable_payloads(shell)
+    )
 
 
 def _python_inline_raw_install(
@@ -6616,6 +6654,82 @@ def _read_heredoc_body(
     return "\n".join(body), index
 
 
+def _unquoted_heredoc_bodies(script: str) -> list[str]:
+    """Return bodies of heredocs whose delimiter is unquoted.
+
+    An unquoted delimiter lets the shell expand the body, so command
+    substitutions inside it EXECUTE even though the body itself is data
+    (``cat <<EOF`` with ``$(rustup ...)``).  A quoted delimiter
+    (``<<'EOF'``/``<<"EOF"``) suppresses all expansion, so those bodies
+    stay literal.  Bodies are returned for substitution scanning only;
+    they must never be treated as command lines.
+    """
+    bodies: list[str] = []
+    lines = script.splitlines()
+    index = 0
+    quote: str | None = None
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        line, index = _join_command_line(lines, line, index, quote)
+        quote, markers = _scan_line_for_heredocs(line, quote)
+        for delimiter, tab_stripped, dynamic in markers:
+            if dynamic:
+                if index < len(lines):
+                    return bodies
+                return bodies
+            body, index = _read_heredoc_body(
+                lines, index, delimiter, tab_stripped
+            )
+            if not _heredoc_delimiter_was_quoted(line, delimiter):
+                bodies.append(body)
+    return bodies
+
+
+def _raw_install_in_expanded_heredocs(
+    script: str, depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Whether a command substitution in an unquoted heredoc is a raw install.
+
+    Only unquoted delimiters expand; a quoted delimiter keeps the body
+    literal, so its text is never analyzed here.
+    """
+    for body in _unquoted_heredoc_bodies(script):
+        _masked, substitutions, opaque = _mask_command_substitutions(body)
+        if opaque:
+            return True
+        if any(
+            _raw_install_in_script(substitution, depth + 1, variables)
+            for substitution in substitutions
+            if not _shell_substitution_is_file_read(substitution)
+        ):
+            return True
+    return False
+
+
+def _heredoc_delimiter_was_quoted(line: str, delimiter: str) -> bool:
+    """Whether the marker that opens ``delimiter`` quotes it (no expansion).
+
+    Bash suppresses parameter/command substitution in a heredoc body when
+    the delimiter word is quoted in any part; the marker text still shows
+    that quoting, so it is read back from the line for the matching
+    delimiter.
+    """
+    index = 0
+    while index < len(line):
+        marker = _heredoc_marker_at(line, index)
+        if marker is None:
+            index += 1
+            continue
+        word, _tab, _dynamic, end = marker
+        if word == delimiter:
+            raw = line[index:end]
+            head = raw.split("<<", 1)[1].lstrip("-").lstrip(" \t")
+            return head.startswith(("'", '"'))
+        index = end
+    return False
+
+
 def _shell_stdin_heredoc_bodies(script: str) -> list[str]:
     """Return heredoc bodies used as input scripts by a shell command."""
     bodies: list[str] = []
@@ -6665,30 +6779,39 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "inspected, so raw Rust toolchain installs cannot be ruled out"
         )
     for step in steps:
-        run = step["run"]
-        shell = step.get("shell")
-        if _workflow_shell_uses_python(shell):
-            raw_install = _python_inline_raw_install(run, 0, None)
-        else:
-            raw_install = _raw_install_in_run_script(run)
-        # A template whose consumers span both interpreters runs the same
-        # block under each, so neither analysis alone is sufficient: run the
-        # OTHER analysis too (whichever the routing did not pick) and fail
-        # closed on either.
-        if not raw_install and _shell_template_conflicting_placeholder_consumers(
-            shell
-        ):
-            if _workflow_shell_uses_python(shell):
-                raw_install = _raw_install_in_run_script(run)
-            else:
-                raw_install = _python_inline_raw_install(run, 0, None)
-        if raw_install:
+        if _step_runs_raw_toolchain_install(step):
             return (
                 "release workflows must provision Rust toolchains "
                 "through the verified installer; found a raw or unresolved "
                 "toolchain-install command"
             )
     return None
+
+
+def _step_runs_raw_toolchain_install(step: dict) -> bool:
+    """Whether one run step can execute a raw or unresolved toolchain install.
+
+    The run block is analyzed under the interpreter the step's shell
+    selects.  A custom shell template can also carry its own executable
+    commands (``bash -c '...' {0}``), which the run-block scan cannot see,
+    and a template whose consumers span both interpreters runs the block
+    under each, so the OTHER analysis is applied too and either can fail
+    the step closed.
+    """
+    run = step["run"]
+    shell = step.get("shell")
+    if _workflow_shell_uses_python(shell):
+        if _python_inline_raw_install(run, 0, None):
+            return True
+    elif _raw_install_in_run_script(run):
+        return True
+    if _shell_template_runs_raw_install(shell):
+        return True
+    if not _shell_template_conflicting_placeholder_consumers(shell):
+        return False
+    if _workflow_shell_uses_python(shell):
+        return _raw_install_in_run_script(run)
+    return _python_inline_raw_install(run, 0, None)
 
 
 def _is_retry_call(segment: str) -> bool:
@@ -7230,12 +7353,14 @@ def _failure_masked_command_segments(
 
     A prerequisite written as ``cmd || true`` can certify a step while its
     failure is silently ignored, so such a segment must not count as
-    satisfying it.  ``&&`` and ``||`` share one connected list, so the
-    whole list decides the fate of every member: in ``cmd && echo ok ||
-    true`` a failing ``cmd`` short-circuits to ``true`` and the failure is
-    swallowed exactly as in ``cmd || true``.  When any ``||`` in the list
-    discards failure, every member is masked; when the list only
-    propagates, its members count.
+    satisfying it.  Each member of a connected ``&&``/``||`` list is
+    examined separately: its failure flows forward through the connectors
+    and is swallowed exactly when the list's final status can become
+    success anyway.  In ``false || true && pip install ...`` the prefix
+    failure is absorbed but the install is reached regardless and reports
+    its own status, so only the prefix is masked; in ``cmd || false ||
+    true`` the chain reaches ``true``, so ``cmd`` is masked too.  An
+    unknown right-hand side is treated as succeeding (fail closed).
 
     ``errexit`` models the step's shell: with errexit (GitHub's default
     bash adds ``-e``) a propagating list fails the shell immediately, so
@@ -7250,9 +7375,9 @@ def _failure_masked_command_segments(
     for index in range(len(pairs)):
         if _connected_list_continues(pairs, index):
             continue
-        members = range(list_start, index + 1)
-        if _list_members_are_masked(pairs, list_start, index, errexit):
-            masked.update(pairs[position][0].strip() for position in members)
+        for position in range(list_start, index + 1):
+            if _member_failure_is_swallowed(pairs, position, index, errexit):
+                masked.add(pairs[position][0].strip())
         list_start = index + 1
     return masked
 
@@ -7264,20 +7389,31 @@ def _connected_list_continues(pairs: list[tuple[str, str]], index: int) -> bool:
     return pairs[index + 1][1] in ("&&", "||")
 
 
-def _list_members_are_masked(
-    pairs: list[tuple[str, str]], start: int, end: int, errexit: bool
+def _member_failure_is_swallowed(
+    pairs: list[tuple[str, str]], position: int, end: int, errexit: bool
 ) -> bool:
-    """Whether every member of one connected list has its failure swallowed.
+    """Whether one member's failure can be absorbed before the list ends.
 
-    A list is masked when any ``||`` inside it discards failure (``cmd &&
-    echo ok || true``), or when it propagates failure but the shell has no
-    errexit and a later command therefore replaces the list's status.
+    The simulation assumes the member fails, then follows the connectors:
+    an ``||`` runs its right-hand side when the status is failure and an
+    ``&&`` runs it when the status is success.  A right-hand side that
+    discards failure (``true``, ``exit 0``, an unrecognized command) turns
+    the running status into success, so any later member sees a success
+    path; a right-hand side that provably fails (``false``, ``exit 1``)
+    continues the failure.  Success in the final status means the member's
+    failure never reaches the step's exit code and the member must not
+    count.  Without errexit, a following segment replaces the list's
+    status wholesale, so the failure is swallowed there as well.
     """
-    if any(
-        pairs[position + 1][1] == "||"
-        and _shell_rhs_discards_failure(pairs[position + 1][0])
-        for position in range(start, end)
-    ):
+    status_failed = True
+    for next_position in range(position + 1, end + 1):
+        connector = pairs[next_position][1]
+        runs = not status_failed if connector == "&&" else status_failed
+        if runs:
+            status_failed = not _shell_rhs_discards_failure(
+                pairs[next_position][0]
+            )
+    if not status_failed:
         return True
     return not errexit and end + 1 < len(pairs)
 

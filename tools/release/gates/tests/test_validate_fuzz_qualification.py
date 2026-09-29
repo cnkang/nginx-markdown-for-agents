@@ -3497,3 +3497,52 @@ def test_eof_marks_after_the_read_loop_closes(tmp_path) -> None:
     finally:
         validator._finish_toolchain_identity_process(process, reader)
     assert stream.eof_reached(), "EOF must be recorded once the pipe closes"
+
+
+def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
+    """A reaped leader with an open pipe still gets the group signaled.
+
+    Regression: on the no-waitid path the wait fallback can reap the
+    leader before an interrupt; ``_terminate_fuzz_process_group``'s
+    guarded signal then skips (its reuse guard keys on ``returncode``)
+    and a descendant holding the captured pipes survives.  When streams
+    are supplied and show an unread EOF, the ownership-checked post-reap
+    signal must fire for each of them.
+    """
+    signals: list[str] = []
+
+    class _Process:
+        pid = os.getpid()
+        returncode = 1
+
+        def wait(self, timeout=None):
+            return 1
+
+    class _Stream:
+        def __init__(self, eof: bool) -> None:
+            self._eof = eof
+
+        def eof_reached(self) -> bool:
+            return self._eof
+
+    monkeypatch.setattr(validator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        validator,
+        "_signal_fuzz_process_group",
+        lambda _process, _signal: signals.append("group"),
+    )
+    def record_reaped(_process, stream):
+        # The helper itself skips closed streams (EOF observed).
+        if not stream.eof_reached():
+            signals.append("reaped")
+
+    monkeypatch.setattr(
+        validator,
+        "_signal_reaped_fuzz_process_group_when_open",
+        record_reaped,
+    )
+    validator._terminate_fuzz_process_group(
+        _Process(), (_Stream(False), _Stream(True))
+    )
+    # Both streams are consulted; the open one signals, the closed one not.
+    assert signals == ["group", "group", "reaped"], signals
