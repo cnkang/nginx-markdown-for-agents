@@ -4808,3 +4808,32 @@ def test_cleanup_waits_for_the_owned_namespace_deletion() -> None:
     assert e2e_cleanup.index("delete namespace") < e2e_cleanup.index(
         "release_cluster_lock"
     )
+
+
+def test_return_status_is_normalized_to_eight_bits() -> None:
+    """``return 257`` fails (status 1), so later commands are unreachable.
+
+    Regression: function-body return classification treated values above
+    255 as unknown (potentially successful), so a function ending in
+    ``return 257`` looked ambiguous and commands after a call to it
+    counted as reachable provisioning evidence, though bash truncates the
+    status to its low 8 bits and the function fails.  ``return 256``
+    exits 0 and stays in the zero family.
+    """
+    assert packaging_gate._return_kind("return 257") == "nonzero"
+    assert packaging_gate._return_kind("return 511") == "nonzero"
+    assert packaging_gate._return_kind("return 256") == "zero"
+    assert packaging_gate._return_kind("return 0") == "zero"
+    assert packaging_gate._return_kind("return $rc") == "unknown"
+
+    script = (
+        "set -e\n"
+        "fail() { return 257; }\n"
+        "fail\n"
+        "python3 -m pip install -r requirements-release.txt\n"
+        "make docs-check\n"
+    )
+    issue = packaging_gate._python_deps_issue([{"run": script}])
+    assert issue is not None, (
+        "commands after a failing return must not count as reachable"
+    )

@@ -2482,11 +2482,14 @@ def _return_kind(segment: str) -> str | None:
     if not arg:
         return "bare"
     if re.fullmatch(r"(?a:\d)+", arg):
-        value = int(arg)
+        # The shell truncates a return status to its low 8 bits exactly
+        # like an exit status, so `return 257` fails (1) and `return 256`
+        # succeeds (0); classifying by the raw literal would call both
+        # unknown and let commands after a failing return look reachable.
+        value = int(arg) % 256
         if value == 0:
             return "zero"
-        if value < 256:
-            return "nonzero"
+        return "nonzero"
     return "unknown"
 
 
