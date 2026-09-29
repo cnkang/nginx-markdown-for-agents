@@ -2965,13 +2965,33 @@ ngx_http_markdown_streaming_handle_feed_result(
     size_t out_len)
 {
     if (rc_ffi == ERROR_STREAMING_FALLBACK) {
+        ngx_int_t  fallback_rc;
+
         if (out_data != NULL) {
             markdown_streaming_output_free(
                 out_data, out_len);
         }
-        return
+
+        fallback_rc =
             ngx_http_markdown_streaming_fallback_to_fullbuffer(
                 r, ctx, conf);
+
+        /*
+         * Capability fallback: NGX_DECLINED hands the request to the
+         * buffered path, which consumes the prebuffered input and keeps
+         * the active-conversion slot.  A failed fallback (NGX_ERROR: the
+         * main buffer could not be initialized or appended) leaves the
+         * request with no conversion path, so the slot is released here -
+         * the same contract ngx_http_markdown_streaming_precommit_error
+         * applies to its own fallback branch.  Relying on the pool
+         * cleanup alone would hold the slot for the request's lifetime
+         * and could reject later requests under max_inflight.
+         */
+        if (fallback_rc != NGX_DECLINED) {
+            ngx_http_markdown_inflight_release(ctx);
+        }
+
+        return fallback_rc;
     }
 
     if (rc_ffi != ERROR_SUCCESS) {

@@ -3238,12 +3238,48 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x12;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     ctx.streaming.prebuffer.size = 3;
+    conf.routing.max_inflight = 1;
+    ngx_http_markdown_inflight_reset();
+    ctx.eligible = 1;
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "fallback feed-result case must acquire a conversion slot");
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_STREAMING_FALLBACK, out_data, 3);
     TEST_ASSERT(rc == NGX_DECLINED,
         "fallback feed result should switch to full-buffer");
     TEST_ASSERT(ctx.processing_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "fallback feed result should update processing path");
+    TEST_ASSERT(ctx.lifecycle.inflight_cleanup != NULL
+                && ngx_http_markdown_inflight_current() == 1,
+        "a NGX_DECLINED fallback keeps its slot for the buffered path");
+
+    /*
+     * The buffered path cannot take over when its main buffer cannot be
+     * prepared, so the feed-result fallback releases the slot instead of
+     * holding it until the pool cleanup runs (a held slot would reject
+     * later requests under max_inflight).
+     */
+    ngx_http_markdown_inflight_release(&ctx);
+    ngx_http_markdown_inflight_reset();
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x14;
+    ctx.streaming.prebuffer.size = 3;
+    ctx.buffer_initialized = 0;
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.eligible = 1;
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &ctx);
+    TEST_ASSERT(rc == NGX_OK && ngx_http_markdown_inflight_current() == 1,
+        "failed-fallback case must acquire a conversion slot");
+    g_buffer_init_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_STREAMING_FALLBACK, out_data, 3);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "an unpreparable fallback must propagate NGX_ERROR");
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "a failed feed-result fallback releases its conversion slot");
+    g_buffer_init_rc = NGX_OK;
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
