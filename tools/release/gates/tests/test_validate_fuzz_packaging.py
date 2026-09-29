@@ -3825,6 +3825,51 @@ def test_make_long_option_abbreviations_fail_closed() -> None:
     )
 
 
+def test_make_toolchain_overrides_and_foreign_directories_fail() -> None:
+    """MAKE/MAKEFILES overrides and a foreign directory defeat the check.
+
+    ``MAKE=/usr/bin/true`` re-points every ``$(MAKE)`` recursion and a
+    ``MAKEFILES`` preload precedes the repository Makefile; both were
+    verified to exit 0 without running the check on GNU Make 4.3 and
+    4.4.1.  A step that changes directory (or declares a foreign
+    ``working-directory``) runs another Makefile, verified with a planted
+    no-op chain.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for scope in ("MAKE", "MAKEFILES"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {scope: "/usr/bin/true"}}]
+            )
+            is not None
+        ), scope
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, "MAKE=/usr/bin/true make docs-check"]
+        )
+        is not None
+    )
+    # cwd tracking, same-step form (each GitHub run step starts at the
+    # repository root, so only a cd within the SAME step redirects a later
+    # make): 'cd ... && make' and the newline spelling both disqualify.
+    for script in (
+        'cd "$RUNNER_TEMP/noop" && make -C . docs-check',
+        'cd "$RUNNER_TEMP/noop"\nmake docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # A bare check with no cd still certifies.
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+    # working-directory away from the root disqualifies.
+    away_wd = [install, {"run": "make docs-check", "working-directory": "/tmp/noop"}]
+    assert packaging_gate._python_deps_issue(away_wd) is not None
+    # An explicit same-root working directory keeps it.
+    root_wd = [install, {"run": "make docs-check", "working-directory": "."}]
+    assert packaging_gate._python_deps_issue(root_wd) is None
+
+
 def test_make_variable_assignments_fail_certification() -> None:
     """An assignment shapes the whole run, so it cannot certify a check.
 
