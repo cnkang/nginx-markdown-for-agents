@@ -138,6 +138,30 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     assert "auto/update-matrix" in text
 
 
+def test_update_matrix_installs_dependencies_before_projection() -> None:
+    """The matrix job must install its schema-validation dependencies."""
+    steps = _workflow_data("update-matrix.yml")["jobs"]["update-matrix"]["steps"]
+    install = _step_by_name(steps, "Install matrix validation dependencies")
+    projection = _step_by_name(steps, "Generate release-contract matrix projection")
+
+    assert install["run"] == (
+        "python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2"
+    )
+    assert steps.index(install) < steps.index(projection)
+
+
+def test_weekly_observation_provisions_fuzz_and_rust_toolchains() -> None:
+    """Weekly jobs must pin compatible cargo-fuzz and install Rust components."""
+    jobs = _workflow_data("weekly-observation.yml")["jobs"]
+    fuzz_job = jobs["weekly-fuzz"]
+    assert fuzz_job["env"]["CARGO_FUZZ_VERSION"] == "0.13.2"
+    install = _step_by_name(fuzz_job["steps"], "Install cargo-fuzz")
+    assert "--version \"${CARGO_FUZZ_VERSION}\" --locked" in install["run"]
+
+    soak_setup = _step_by_name(jobs["weekly-soak"]["steps"], "Set up Rust toolchain")
+    assert soak_setup["with"]["components"] == "rustfmt,clippy"
+
+
 def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     """Verifier changes must classify as E2E so the blocking job runs."""
     workflow = _workflow_data("ci.yml")
