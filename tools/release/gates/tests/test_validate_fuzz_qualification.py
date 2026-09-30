@@ -2555,6 +2555,46 @@ def test_worker_failure_cancels_active_process_groups(monkeypatch) -> None:
     )
 
 
+def test_worker_interpreter_exit_cancels_active_process_groups(
+    monkeypatch,
+) -> None:
+    """An interpreter-level worker exit also cancels in-flight invocations.
+
+    Regression: the generic ``except Exception`` branch set the cancel flag
+    and terminated active process groups, but the
+    ``except (KeyboardInterrupt, SystemExit)`` branch only set the stop
+    event.  A sibling abandoned by an interpreter-level exit then kept its
+    running invocation consuming the shared envelope while the gate had
+    already failed; the same cancellation now runs on that path too (the
+    per-AGENTS.md consistency rule: a guard added in one branch must apply
+    wherever the same stop happens).
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    cancelled: list[int] = []
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancelled.append(1),
+    )
+    flag = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", flag)
+
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "exit", SystemExit("interrupted"))
+    try:
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the worker exit must re-raise at join")
+
+    assert cancelled, (
+        "an active process group must be cancelled on an interpreter exit"
+    )
+
+
 def _process_tree_script(
     tmp_path: Path,
     marker_delay: float = 4.0,

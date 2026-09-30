@@ -1880,10 +1880,17 @@ def _run_queue(
         # Interpreter-level exits are recorded for the parent's join-time
         # re-raise and signal the siblings to stop; the re-raise here
         # keeps the exit visible to the runtime instead of swallowing it
-        # inside the worker thread.
+        # inside the worker thread.  The stop must also cancel the
+        # siblings' in-flight invocations the same way any other stop
+        # does: a stopped sibling only unwinds at its next queue
+        # boundary, so its running invocation would otherwise keep
+        # consuming the shared envelope while the gate has already
+        # failed.
         with lock:
             errors.append(exc)
         stop.set()
+        _FUZZ_CANCEL_REQUESTED.set()
+        _cancel_active_fuzz_processes()
         raise
     except Exception as exc:
         # A non-interpreter worker failure stops the siblings the same way
