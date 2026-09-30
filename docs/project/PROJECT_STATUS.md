@@ -217,7 +217,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current release
-is 0.9.2 (published 2026-09-30). 0.9.1 is the previous release. It is a
+is 0.9.2 (published 2026-09-30). 0.9.1 is the previous release. 0.9.2 is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1

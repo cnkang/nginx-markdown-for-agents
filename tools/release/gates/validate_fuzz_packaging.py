@@ -8156,11 +8156,16 @@ def _make_flags_value_masks_failures(value: str) -> bool:
 
 
 # A make-flag value left as a shell reference: the shell resolves it at
-# run time, so the scan cannot attribute a concrete flag set to it.  A
-# bare trailing ``$`` counts too: the segment scanner treats ``$(`` as a
-# subshell opener and cuts there, so ``export MAKEFLAGS=$(getflags)``
-# reaches this check as the value ``$`` (verified against the scanner).
-_UNRESOLVED_EXPANSION_RE = re.compile(r"\$(?:\(|\{|[A-Za-z_0-9]|$)|`")
+# run time, so the scan cannot attribute a concrete flag set to it.  The
+# alternation covers every expansion form the scanner can receive after
+# its own cutting: ``$(``/``${`` openers, a name or digit, the quoted
+# ``$'...'``/``$"..."`` openers, the shell's special parameters
+# (``$- $@ $* $# $? $!``, all verified fail-open before this class was
+# added), and a bare trailing ``$`` (the segment scanner treats ``$(`` as
+# a subshell opener and cuts there, so ``export MAKEFLAGS=$(getflags)``
+# reaches this check as the value ``$``).  A backtick substitution has
+# its own detection path.
+_UNRESOLVED_EXPANSION_RE = re.compile(r"\$(?:\(|\{|[A-Za-z_0-9]|'|\"|[-@*#?!]|$)|`")
 
 
 def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
