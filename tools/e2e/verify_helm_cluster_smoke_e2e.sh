@@ -420,7 +420,12 @@ fi
 existing_namespace=""
 if ! existing_namespace="$(kubectl --context "kind-${CLUSTER}" \
     get namespace "${NAMESPACE}" --ignore-not-found -o name)"; then
+    # The namespace's ownership is unknown: whatever holds it (if
+    # anything) shares this cluster, so the cluster claim clears before
+    # the failure exit; deleting the cluster could destroy another
+    # actor's workloads.
     echo "ERROR: unable to determine whether namespace ${NAMESPACE} exists" >&2
+    CREATED_CLUSTER=0
     exit 1
 fi
 if [[ -z "${existing_namespace}" ]]; then
@@ -463,12 +468,23 @@ if ! existing_release="$(helm list --short \
     --kube-context "kind-${CLUSTER}" \
     --deployed --failed --pending --uninstalled --uninstalling --superseded \
     2>"${release_stderr_file}")"; then
+    # Ownership is unknown: the release (if one exists) and everything
+    # around it belong to this shared cluster, so both destructive claims
+    # clear before the failure exit.
     echo "ERROR: unable to determine ownership of Helm release ${RELEASE}" >&2
     cat "${release_stderr_file}" >&2 || true
+    CREATED_CLUSTER=0
+    CREATED_NAMESPACE=0
     exit 1
 fi
 if [[ -n "${existing_release}" ]]; then
+    # A pre-existing release is the user's or another actor's; its
+    # namespace and cluster are theirs too, so nothing this run claimed
+    # may be removed.
     echo "ERROR: pre-existing Helm release ${RELEASE} found in namespace ${NAMESPACE}; refusing to modify or remove it" >&2
+    CREATED_RELEASE=0
+    CREATED_NAMESPACE=0
+    CREATED_CLUSTER=0
     exit 1
 fi
 
