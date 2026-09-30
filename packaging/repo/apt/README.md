@@ -226,7 +226,7 @@ rm -f "$key_file"
 gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 ```
 
-**Canonical release verification**: for the published release, download the
+**Canonical release verification**: for the forthcoming release, download the
 exact versioned GitHub Release artifact first, verify the release signature
 over `SHA256SUMS.asc`, then check the downloaded artifacts against the
 checksums file — all in the same directory. The example below uses the v0.9.2
