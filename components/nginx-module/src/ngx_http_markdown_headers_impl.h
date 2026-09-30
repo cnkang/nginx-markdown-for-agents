@@ -219,8 +219,7 @@ ngx_http_markdown_any_header_value_matches(ngx_http_request_t *r,
     ngx_flag_t (*predicate)(const ngx_str_t *))
 {
     ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
-    ngx_uint_t        i;
+    const ngx_table_elt_t  *headers;
 
     part = &r->headers_out.headers.part;
     while (part != NULL) {
@@ -228,7 +227,7 @@ ngx_http_markdown_any_header_value_matches(ngx_http_request_t *r,
         if (part->nelts != 0 && headers == NULL) {
             return 0;
         }
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
             }

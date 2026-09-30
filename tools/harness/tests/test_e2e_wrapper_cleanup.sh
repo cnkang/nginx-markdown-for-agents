@@ -73,13 +73,15 @@ assert_dir() {
 
 # _scenario_name_of <wrapper> — the SCENARIO_NAME the wrapper pins.
 _scenario_name_of() {
-  sed -n 's/^SCENARIO_NAME="\(.*\)"$/\1/p' "$1" | head -1
+  local wrapper="$1"
+  sed -n 's/^SCENARIO_NAME="\(.*\)"$/\1/p' "${wrapper}" | head -1
   return 0
 }
 
 # _extract_cleanup_fn <wrapper> — the trap function source, verbatim.
 _extract_cleanup_fn() {
-  sed -n '/^_wrapper_cleanup() {/,/^}$/p' "$1"
+  local wrapper="$1"
+  sed -n '/^_wrapper_cleanup() {/,/^}$/p' "${wrapper}"
   return 0
 }
 
