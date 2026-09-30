@@ -7588,21 +7588,10 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     # it, and the failure-propagation analysis must not move a later
     # command out of an earlier command's view (``make docs-check; set -e;
     # true`` swallowed a failing make that way - verified: step exit 0).
-    # Build live_indices: the segment indices that are foreground-live.
-    # _foreground_live_commands returns raw segment texts in execution order.
-    # We match them against pairs by normalized text and position.
-    live_segments = _foreground_live_commands(step)
-    live_indices: set[int] = set()
-    live_iter = iter(live_segments)
-    live_text = _prerequisite_view_text(next(live_iter).strip()) if live_segments else None
-    for index, (segment, _separator) in enumerate(pairs):
-        seg_text = _prerequisite_view_text(segment.strip())
-        if live_text is not None and seg_text == live_text:
-            live_indices.add(index)
-            try:
-                live_text = _prerequisite_view_text(next(live_iter).strip())
-            except StopIteration:
-                live_text = None
+    # The live indices come from the same foreground view the prerequisite
+    # checks consume, so a `set` behind a dead branch or a short-circuit
+    # cannot flip the mode for the commands after it.
+    live_indices = _foreground_live_indices(step, pairs)
     errexit_by_index = _errexit_state_by_segment(pairs, live_indices, initial)
     return _failure_masked_segments_from_pairs(pairs, errexit_by_index)
 
@@ -7626,6 +7615,33 @@ def _foreground_live_commands(step: str | dict) -> list[str]:
         for segment in _step_live_commands(step)
         if segment.strip() not in backgrounded
     ]
+
+
+def _foreground_live_indices(
+    step: str | dict, pairs: list[tuple[str, str]]
+) -> set[int]:
+    """Segment indices (into ``pairs``) that are foreground-live.
+
+    ``_foreground_live_commands`` returns raw segment texts in execution
+    order; matching them back to the pair stream by normalized text in
+    order keeps liveness (dead branches, short-circuits, masked retries,
+    backgrounds, exits) attached to the exact segment positions.
+    """
+    live_segments = _foreground_live_commands(step)
+    live_indices: set[int] = set()
+    live_iter = iter(live_segments)
+    live_text = (
+        _prerequisite_view_text(next(live_iter).strip()) if live_segments else None
+    )
+    for index, (segment, _separator) in enumerate(pairs):
+        seg_text = _prerequisite_view_text(segment.strip())
+        if live_text is not None and seg_text == live_text:
+            live_indices.add(index)
+            try:
+                live_text = _prerequisite_view_text(next(live_iter).strip())
+            except StopIteration:
+                live_text = None
+    return live_indices
 
 
 def _normalize_shell_command_words(words: list[str]) -> list[str]:
@@ -8196,7 +8212,7 @@ def _make_flags_value_masks_failures(value: str) -> bool:
 # a subshell opener and cuts there, so ``export MAKEFLAGS=$(getflags)``
 # reaches this check as the value ``$``).  A backtick substitution has
 # its own detection path.
-_UNRESOLVED_EXPANSION_RE = re.compile(r"\$(?:\(|\{|[A-Za-z_0-9]|'|\"|[-@*#?!]|$)|`")
+_UNRESOLVED_EXPANSION_RE = re.compile(r"\$(?:\(|\{|\w|'|\"|[-@*#?!]|$)|`")
 
 
 def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
@@ -8213,50 +8229,128 @@ def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
     return _UNRESOLVED_EXPANSION_RE.search(value.replace("\\$", "")) is not None
 
 
-# A backtick substitution assigned to a make name.  The segment scanner
-# cuts at the backtick, so the export check sees an empty value; the raw
-# script is the only place the reference is still visible.
-_MAKE_FLAG_BACKTICK_RE = re.compile(
-    r"\b(MAKE|MAKEFILES|MAKEFLAGS|GNUMAKEFLAGS)=`"
-)
+# A make name assigned from a backtick substitution: the segment scanner
+# cuts at the backtick, so the assignment word ends at the cut (``export
+# MAKEFLAGS=``) and the reference is visible only where the cut lands in
+# the executable text.  The taint is derived from the reachable-command
+# walk (see ``_make_flag_backtick_references``) instead of a raw-text
+# regex, so cuts inside dead branches, comments, and heredocs cannot
+# mark a name unresolved.
 
 # Fail-closed marker: the value cannot be attributed, so any make that
 # inherits it is not a certified docs-check.
 _UNRESOLVED_FLAG_SENTINEL = "$"
 
 
-def _make_flag_backtick_references(script: str) -> frozenset[str]:
-    """Make-flag names whose LAST assignment in the script is a substitution.
+def _cut_make_assignment_name(segment: str) -> str | None:
+    """The make name whose assignment word ends at a substitution cut.
 
-    ``MAKEFLAGS=-s`` followed by ``export MAKEFLAGS=\\`getflags\\``` hands
-    the command's output to make (verified: the recipe only prints and the
-    step exits 0), while the reverse order leaves the literal value in
-    force, so the decision follows the LAST assignment of each form.  A
-    substitution on the same statement as its assignment stays tainted
-    (the segment scanner cuts at the backtick, so the value the scan sees
-    is not the value make receives).  Only a later literal standalone
-    assignment clears the name.  A bare assignment without ``export``
-    never reaches make's environment and is handled by the caller's
-    attribute tracking.
+    The cut leaves the shell word unfinished, so ``export MAKEFLAGS=``
+    and the concatenated ``export MAKEFLAGS=-s`` both continue into the
+    substitution and stay unresolved.  Only assignment words in
+    assignment position count: ``echo MAKEFLAGS=`` is not an assignment,
+    and after ``export`` every earlier word must be an assignment too.
     """
-    last_substitution: dict[str, int] = {}
-    for match in _MAKE_FLAG_BACKTICK_RE.finditer(script):
-        last_substitution[match.group(1)] = match.start()
-    if not last_substitution:
-        return frozenset()
-    last_literal: dict[str, int] = {}
+    words = _parse_segment_words(segment)
+    if not words:
+        return None
+    if words[0] == "export":
+        words = words[1:]
+    if not words:
+        return None
+    name, separator, _value = words[-1].partition("=")
+    if not separator or name not in _MAKE_ENV_NAMES:
+        return None
+    if any(not _ENV_ASSIGN_RE.match(word) for word in words[:-1]):
+        return None
+    return name
+
+
+def _literal_make_assignments(segment: str) -> dict[str, str]:
+    """Make-name assignments in one segment whose value is fully literal.
+
+    The standalone form (``MAKEFLAGS=-s``) and the export form (``export
+    MAKEFLAGS=-s``, including the multi-word ``export A=1 MAKEFLAGS=-s``)
+    both leave the name resolved, so both clear an earlier substitution
+    taint; a value still carrying a shell reference is not a literal
+    value and does not count.
+    """
+    assignments = dict(_standalone_make_assignments(segment))
+    words = _parse_segment_words(segment)
+    if words and words[0] == "export":
+        for word in words[1:]:
+            name, separator, value = word.partition("=")
+            if separator and name in _MAKE_ENV_NAMES:
+                assignments[name] = value
+    return {
+        name: value
+        for name, value in assignments.items()
+        if not _make_flags_value_has_unresolved_expansion(value)
+    }
+
+
+def _fold_segment_taint(view: str, cut_at_backtick: bool, state: dict[str, str]) -> None:
+    """Apply one reachable segment's assignment effect to the taint state.
+
+    A literal assignment (standalone or export form) clears the name; a
+    substitution cut at the segment's end marks it unresolved; anything
+    else leaves the state untouched.
+    """
+    for name in _literal_make_assignments(view):
+        state[name] = "literal"
+    if not cut_at_backtick:
+        return
+    name = _cut_make_assignment_name(view)
+    if name is not None:
+        state[name] = "subst"
+
+
+def _taint_state_by_segment(
+    executable: str, pairs: list[tuple[str, str]], live_indices: set[int]
+) -> dict[str, str]:
+    """The last reachable assignment form per make name in the step."""
+    state: dict[str, str] = {}
     cursor = 0
-    for segment, _separator in _command_segments_with_separators(script):
-        position = script.find(segment, cursor)
+    for index, (segment, _separator) in enumerate(pairs):
+        position = executable.find(segment, cursor)
         if position < 0:
             position = cursor
-        for name in _standalone_make_assignments(segment):
-            last_literal[name] = position
-        cursor = position + len(segment)
+        cut = position + len(segment)
+        cursor = cut
+        if index in live_indices:
+            _fold_segment_taint(
+                _prerequisite_view_text(segment.strip()),
+                cut < len(executable) and executable[cut] == "`",
+                state,
+            )
+    return state
+
+
+def _make_flag_backtick_references(step: str | dict) -> frozenset[str]:
+    """Make-flag names whose LAST reachable assignment is a substitution.
+
+    The walk follows the same foreground-live view the export tracking
+    consumes, so a substitution inside a dead branch, a comment, a
+    heredoc body, or an uninvoked function never taints a later make
+    (none of them runs).  A reachable substitution taints a name until a
+    later reachable assignment of a literal value - in either the
+    standalone or the export form - clears it; the reverse order leaves
+    the substitution in force.  The cut is recognized on the executable
+    text: the assignment word ends exactly where a backtick begins
+    (``export MAKEFLAGS=`getflags```), and a substitution concatenated
+    into the value (``export MAKEFLAGS=-s`extra```) stays unresolved too.
+    """
+    script = _step_script(step)
+    if script is None:
+        return frozenset()
+    executable = _strip_function_bodies(
+        _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
+    )
+    pairs = _command_segments_with_separators(executable)
+    live_indices = _foreground_live_indices(step, pairs)
+    state = _taint_state_by_segment(executable, pairs, live_indices)
     return frozenset(
-        name
-        for name, position in last_substitution.items()
-        if position >= last_literal.get(name, -1)
+        name for name, form in state.items() if form == "subst"
     )
 
 
@@ -8792,11 +8886,11 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
-    # A make name assigned from a backtick substitution keeps the reference
-    # only in the raw script (the segment scanner cuts at the backtick), so
-    # it is read here and marks the name unresolved for the whole step.
-    script = _step_script(step) or ""
-    unresolved = set(_make_flag_backtick_references(script))
+    # A make name whose last REACHABLE assignment is a backtick
+    # substitution cannot be attributed, so any make inheriting it in
+    # this step fails closed; dead branches, comments, and heredocs are
+    # already dropped by the live view and the executable text.
+    unresolved = set(_make_flag_backtick_references(step))
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
     # assignment to a name the environment carries keeps the export
