@@ -794,6 +794,37 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
         assert "invalid cluster name" in result.stderr, (bad, result.stderr)
 
 
+def test_helm_cluster_smoke_unknown_ownership_keeps_foreign_resources() -> None:
+    """Query failures and a pre-existing release never delete a cluster.
+
+    When the namespace query, the release-list query, or the pre-existing
+    release check ends the run, the ownership of what the cluster holds is
+    unknown (or explicitly another actor's), so no destructive claim may
+    survive the exit.
+    """
+    script = (
+        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+
+    ns_query = script.split(
+        "unable to determine whether namespace", 1
+    )[1].split("\nfi", 1)[0]
+    assert "CREATED_CLUSTER=0" in ns_query
+
+    list_failure = script.split(
+        "unable to determine ownership of Helm release", 1
+    )[1].split("\nfi", 1)[0]
+    assert "CREATED_CLUSTER=0" in list_failure
+    assert "CREATED_NAMESPACE=0" in list_failure
+
+    preexisting = script.split(
+        "pre-existing Helm release", 1
+    )[1].split("\nfi", 1)[0]
+    assert "CREATED_RELEASE=0" in preexisting
+    assert "CREATED_NAMESPACE=0" in preexisting
+    assert "CREATED_CLUSTER=0" in preexisting
+
+
 def test_helm_cluster_smoke_keeps_the_cluster_for_a_reused_namespace() -> None:
     """A pre-existing namespace belongs to another actor in this cluster.
 
