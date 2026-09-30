@@ -1020,6 +1020,29 @@ def test_stable_claim_failures_flag_pending_claims(tmp_path, phrase):
 
 
 @pytest.mark.parametrize(
+    "phrase",
+    (
+        "v9.9.9 是发布候选阶段。",
+        "v9.9.9 是候选版本。",
+    ),
+)
+def test_stable_claim_failures_flag_chinese_candidate_claims(tmp_path, phrase):
+    """Chinese candidate wording next to a released version must fail too.
+
+    Each phrase carries ONLY one of the newly added forms, so removing
+    either pattern alone fails its case: fixture 1 uses 发布候选 (without
+    the 候选版本 substring) and fixture 2 uses 候选版本.  Neither passes
+    through the pre-existing 尚未发布 match.
+    """
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "README_zh-CN.md").write_text(phrase + "\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README_zh-CN.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
+
+
+@pytest.mark.parametrize(
     "heading", ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate")
 )
 def test_stable_claim_failures_flag_candidate_headings(tmp_path, heading):
@@ -1289,13 +1312,16 @@ def test_implementation_plan_scopes_historical_pending_labels():
         "Completed work-item statuses and dated `Document Updates` entries are "
         "historical snapshots."
     ) in intro
-    assert "WI-8 publication section below show the current state" in intro
     pending = _v092_is_pending()
     pending_phrase = (
         "v0.9.2 remains pending publication, including its tag, assets, and "
         "checksums."
     )
     assert (pending_phrase in intro) is pending
+    if pending:
+        assert "WI-8 publication section below show the current state" in intro
+    else:
+        assert "0.9.2 shipped on 2026-09-30" in intro
     published_word_present = any(
         word in intro.lower() for word in ("published", "released")
     )

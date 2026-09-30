@@ -36,7 +36,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** Run the sequence only after publication of the official v0.9.2 release assets. The command targets the official `v0.9.2` release tag.
+> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any
@@ -1675,6 +1675,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-30 | Kang | Release finalization: publication note flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: publication note and RELEASE_TAG guidance prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-17 | Hermes | Reinstall example blocks define RELEASE_TAG and INSTALLER inline so each block runs on its own |
