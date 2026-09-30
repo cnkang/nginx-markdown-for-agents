@@ -1042,6 +1042,8 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
     r"|not (?:yet )?(?:published|released)"
     r"|尚未发布"
     r"|开发候选"
+    r"|发布候选"
+    r"|候选版本"
     r"|(?:publication|release) pending"
     r"|pending (?:publication|release)"
     r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
@@ -1057,6 +1059,8 @@ _STALE_RELEASE_CLAIM_RE = re.compile(
     r"|\bunreleased\b"
     r"|尚未发布"
     r"|开发候选"
+    r"|发布候选"
+    r"|候选版本"
     r"|(?:publication|release) pending"
     r"|pending (?:publication|release)"
     r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
