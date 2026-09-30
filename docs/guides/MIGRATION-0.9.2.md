@@ -406,7 +406,7 @@ command table.
 
 ---
 
-## Removed 0.9.2 Directives (5 convergence + 2 development-line)
+## Removed 0.9.2 Convergence Directives (5)
 
 These directives were active in 0.9.1. The 0.9.2 pre-LTS convergence
 (LTS-R006/LTS-R009) removes them. Their names are no longer registered, so
