@@ -86,7 +86,10 @@ acquire_cluster_lock() {
         echo "ERROR: LOCK_CLUSTER must be set before acquire_cluster_lock" >&2
         exit 1
     fi
-    LOCK_PATH="${TMPDIR:-/tmp}/cluster-smoke-${LOCK_CLUSTER}"
+    # The lock lives under /tmp unconditionally: it protects a
+    # machine-global resource (the kind cluster), so two runs that happen
+    # to use different temp directories must still contend on one lock.
+    LOCK_PATH="/tmp/cluster-smoke-${LOCK_CLUSTER}"
     LOCK_OWNER_FILE="${LOCK_PATH}.d/pid"
     # Refuse a symlinked or otherwise non-regular lock path before any
     # open: `exec 9>` follows a symlink and would truncate its target.  The
@@ -132,19 +135,23 @@ acquire_cluster_lock() {
     local waited=0
     while :; do
         if mkdir "${LOCK_PATH}.d" 2>/dev/null; then
-            # Publish the owner with an EXCLUSIVE create, then read it
-            # back: a plain redirect could overwrite the record of a run
-            # that reclaimed this path during a pause (the reclaim grace
-            # treats an ownerless directory as stale), and a writer
-            # paused across the reclaim can have its write land where the
-            # canonical path no longer holds it.  Only the run whose pid
-            # the canonical record actually carries returns as owner; any
-            # other outcome waits again.
+            # Publish the owner under the reaper mutex, so the write+readback
+            # cannot interleave with a reaper's examination-and-rename: a
+            # paused creator either publishes before the check (the reaper
+            # then sees a live owner and leaves the lock alone) or the
+            # rename happens first (the publish fails, because the canonical
+            # path no longer holds this directory, and this wait tries
+            # again).  The EXCLUSIVE create plus readback additionally
+            # refuses to overwrite the record of a path that another run
+            # reclaimed in an earlier attempt.
+            acquire_lock_reaper
             if ( set -o noclobber; printf '%s\n' "$$" > "${LOCK_OWNER_FILE}" ) 2>/dev/null \
                 && [[ "$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)" == "$$" ]]; then
+                release_lock_reaper
                 LOCK_MODE="dir"
                 return 0
             fi
+            release_lock_reaper
         else
             # Breaking a stale lock is serialized by a short-lived reaper
             # mutex.  Without it, two waiters can both see a stale lock,

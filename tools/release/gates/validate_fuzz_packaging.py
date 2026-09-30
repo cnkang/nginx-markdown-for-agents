@@ -7530,6 +7530,39 @@ def _member_failure_is_swallowed(
     return not errexit and end + 1 < len(pairs) if status_failed else True
 
 
+def _segments_after_errexit_changes(script: str) -> list[tuple[str, bool]]:
+    """Split a script at its ``set`` errexit changes.
+
+    Returns ``(region_text, errexit_active)`` in order, where each region
+    is a TEXT SLICE of the original script (separators preserved, so a
+    region still parses as the ``&&``/``||`` chain it came from).  A new
+    region starts at a ``set`` word that changes errexit, because GitHub's
+    default bash honors it for the rest of the script: a scan that reads
+    only the shell's INITIAL mode would treat a check after ``set +e`` as
+    errexit-protected when a later command can already swallow its
+    failure.
+    """
+    pairs = _command_segments_with_separators(script)
+    runs: list[tuple[str, bool]] = []
+    errexit = True  # overwritten by the caller's shell model on first use
+    start = 0
+    cursor = 0  # offset of the current region's start in `script`
+    for index, (segment, separator) in enumerate(pairs):
+        position = script.find(segment, cursor)
+        if position < 0:
+            position = cursor
+        state = _set_errexit_state(segment)
+        if state is not None:
+            # Everything before this segment ran under the old mode; the
+            # segment and everything after it run under the new one.
+            runs.append((script[start:position], errexit))
+            errexit = state
+            start = position
+        cursor = position + len(segment) + len(separator)
+    runs.append((script[start:], errexit))
+    return runs
+
+
 def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     """Failure-masked segments of one run step's executable script."""
     script = _step_script(step)
@@ -7539,9 +7572,20 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
     shell = step.get("shell") if isinstance(step, dict) else None
-    return _failure_masked_command_segments(
-        executable, errexit=_shell_initial_errexit(shell)
-    )
+    initial = _shell_initial_errexit(shell)
+    masked: set[str] = set()
+    for index, (region, region_errexit) in enumerate(
+        _segments_after_errexit_changes(executable)
+    ):
+        if not region.strip():
+            continue
+        masked |= _failure_masked_command_segments(
+            region,
+            # The first region runs under the shell's initial model; a
+            # later region carries the mode its `set` established.
+            errexit=initial if index == 0 else region_errexit,
+        )
+    return masked
 
 
 def _foreground_live_commands(step: str | dict) -> list[str]:
@@ -8480,15 +8524,40 @@ def _pip_prerequisite_position(
     return segment.strip() not in masked
 
 
-def _make_relevant_export_values(segment: str) -> dict[str, str] | None:
+def _plain_make_assignments(segment: str) -> dict[str, str]:
+    """Plain ``NAME=VALUE`` assignments of make-relevant names in a segment.
+
+    ``MAKEFLAGS=-n`` as a statement sets the shell variable; a later
+    ``export MAKEFLAGS`` (split across statements - the common idiom)
+    then hands it to every subsequent invocation (verified: make only
+    prints recipes).  The caller carries these forward so the bare export
+    form can be resolved.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return {}
+    index = _skip_env_assignments(words, 0)
+    assignments: dict[str, str] = {}
+    for word in words[:index]:
+        name, _, value = word.partition("=")
+        if name in _MAKE_ENV_NAMES:
+            assignments[name] = value
+    return assignments
+
+
+def _make_relevant_export_values(
+    segment: str, assigned: dict[str, str] | None = None
+) -> dict[str, str] | None:
     """The make-relevant variables a segment exports, when it exports any.
 
-    ``export MAKEFLAGS=-n`` (and ``export MAKEFLAGS; MAKEFLAGS=-n``-style
-    pairs are out of scope) changes every later invocation in the same
-    shell: GNU Make inherits the value and only prints recipes (verified).
-    The returned mapping holds the exported ``NAME=VALUE`` pairs whose
-    names the make gate inspects; None means the segment is not an export
-    the scan can attribute.
+    ``export MAKEFLAGS=-n`` and the split form ``MAKEFLAGS=-n; export
+    MAKEFLAGS`` both change every later invocation in the same shell: GNU
+    Make inherits the value and only prints recipes (verified).  The
+    returned mapping holds the exported pairs whose names the make gate
+    inspects; None means the segment is not an export the scan can
+    attribute.  ``assigned`` carries the plain assignments seen earlier in
+    the script so a bare ``export NAME`` resolves from them; a bare export
+    of a name never assigned in the script stays unattributable.
     """
     words = _parse_segment_words(segment)
     if not words:
@@ -8496,15 +8565,21 @@ def _make_relevant_export_values(segment: str) -> dict[str, str] | None:
     index = _skip_env_assignments(words, 0)
     if index >= len(words) or words[index] != "export":
         return None
+    resolved = dict(assigned or {})
     exported: dict[str, str] = {}
     for word in words[index + 1:]:
-        if "=" not in word:
-            # `export NAME` re-exports an existing value this scan does
-            # not track; treat the segment as unattributable.
-            return None
-        name, _, value = word.partition("=")
-        if name in _MAKE_ENV_NAMES:
+        name, separator, value = word.partition("=")
+        if name not in _MAKE_ENV_NAMES:
+            continue
+        if separator:
             exported[name] = value
+        elif name in resolved:
+            exported[name] = resolved[name]
+        else:
+            # An export of a value only the shell knows cannot be
+            # attributed to a concrete flag set; treat the segment as
+            # unattributable so the caller stays conservative.
+            return None
     return exported or None
 
 
@@ -8521,6 +8596,13 @@ def _segment_abandons_repo_root(segment: str) -> bool:
     if not words:
         return False
     index = _skip_env_assignments(words, 0)
+    while index < len(words) and _shell_word_basename(words[index]) in (
+        "builtin",
+        "command",
+    ):
+        # `builtin cd` and `command cd` bypass a function named cd but move
+        # the shell the same way the bare builtin does.
+        index += 1
     if index >= len(words) or _shell_word_basename(words[index]) != "cd":
         return False
     if index + 1 >= len(words):
@@ -8550,14 +8632,19 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
-    # The shell's own `export` assignments accumulate as its segments run,
-    # so a later make inherits them.
+    # The shell's own `export` assignments (and the plain assignments a
+    # later export can publish) accumulate as its segments run, so a later
+    # make inherits them.
+    assigned: dict[str, str] = {}
     exported: dict[str, str] = {}
     scanned: list[tuple[int, bool, bool]] = []
     for command_index, segment in enumerate(_foreground_live_commands(step)):
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
-        segment_exports = _make_relevant_export_values(segment)
+        # Plain assignments (``MAKEFLAGS=-n``) may be exported by a later
+        # statement, so they are carried forward too.
+        assigned.update(_plain_make_assignments(segment))
+        segment_exports = _make_relevant_export_values(segment, assigned)
         if segment_exports is not None:
             exported.update(segment_exports)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):

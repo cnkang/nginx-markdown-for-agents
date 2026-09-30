@@ -1122,6 +1122,40 @@ def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
     assert "mkdir" in script, "the lock needs a directory fallback"
 
 
+def test_cluster_lock_is_machine_global_and_publishes_under_the_reaper() -> None:
+    """The lock is not temp-dir scoped, and publish is mutually exclusive.
+
+    Regression: the lock path was rooted at ``${TMPDIR:-/tmp}``, so two
+    runs with different temp directories but the same cluster used
+    different locks and overlapped on the shared cluster.  And the
+    publisher's write+readback could interleave with the reaper's
+    examination-and-rename: a paused creator could return as owner just as
+    its directory was renamed away, letting a third waiter enter the
+    critical section too.  The publish now runs under the same reaper
+    mutex as the examination.
+    """
+    lib = (REPO_ROOT / "tools/lib/cluster_lock.sh").read_text(encoding="utf-8")
+
+    # F8: fixed root, keyed by the cluster name alone.
+    assert 'LOCK_PATH="/tmp/cluster-smoke-${LOCK_CLUSTER}"' in lib
+    assert "TMPDIR" not in lib.split("acquire_cluster_lock() {", 1)[1]
+
+    # F9: the publish branch takes the reaper mutex.
+    acquire = lib.split("acquire_cluster_lock() {", 1)[1].split("\n}\n", 1)[0]
+    publish = acquire.split('if mkdir "${LOCK_PATH}.d" 2>/dev/null; then', 1)[1]
+    publish = publish.split("else", 1)[0]
+    assert "acquire_lock_reaper" in publish, (
+        "the publish must run under the reaper mutex"
+    )
+    assert publish.index("acquire_lock_reaper") < publish.index(
+        "LOCK_OWNER_FILE"
+    ), "the mutex must be held before the write and readback"
+    assert "release_lock_reaper" in publish
+    # The write is still exclusive and read back.
+    assert "set -o noclobber" in publish
+    assert '== "$$"' in publish
+
+
 def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
     """Stale-lock examination and reclaim are mutually exclusive.
 
@@ -1136,14 +1170,17 @@ def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
 
     acquire = script.split("acquire_cluster_lock() {", 1)[1]
     acquire = acquire.split("\n}\n", 1)[0]
-    assert "acquire_lock_reaper" in acquire, (
+    # The stale-lock branch runs under the reaper mutex: the liveness check
+    # and the reclaim sit between the acquire and the release of that
+    # branch (the publish branch takes the same mutex separately).
+    stale_branch = acquire.split("else", 1)[1].split("waited=$((waited", 1)[0]
+    assert "acquire_lock_reaper" in stale_branch, (
         "stale-lock examination must run under the reaper mutex"
     )
-    # The reaper wraps the liveness check and the reclaim together.
-    assert acquire.index("acquire_lock_reaper") < acquire.index(
+    assert stale_branch.index("acquire_lock_reaper") < stale_branch.index(
         "dir_lock_owner_alive"
     )
-    assert acquire.index("dir_lock_owner_alive") < acquire.index(
+    assert stale_branch.index("dir_lock_owner_alive") < stale_branch.index(
         "release_lock_reaper"
     )
 
