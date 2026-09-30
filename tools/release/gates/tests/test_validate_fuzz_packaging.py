@@ -10,8 +10,12 @@ with paired acceptance/rejection shapes wherever both directions matter.
 
 from __future__ import annotations
 
+import pathlib
 import shlex
+import textwrap
 import subprocess
+
+import pytest
 
 from tools.release.gates import validate_fuzz_packaging as packaging_gate
 
@@ -1871,6 +1875,108 @@ def test_toolchain_gate_rejects_line_separated_shell_payloads() -> None:
     assert packaging_gate._release_gate_toolchain_issue(single) is None
 
 
+def test_shell_errexit_scan_skips_value_option_operands() -> None:
+    """An option's operand is not an option word.
+
+    `bash --rcfile -e {0}` hands `-e` to `--rcfile` as its file operand, so
+    the body runs WITHOUT errexit (verified: the whole body executes even
+    with a failing command).  Reading `-e` as the errexit switch would
+    certify a masked docs check.
+    """
+    assert packaging_gate._shell_initial_errexit("bash --rcfile -e {0}") is False
+    assert (
+        packaging_gate._shell_initial_errexit("bash --init-file -e {0}") is False
+    )
+    assert packaging_gate._shell_initial_errexit("bash --rcfile X {0}") is False
+    # A real errexit switch (before or after the operand form) still counts.
+    assert packaging_gate._shell_initial_errexit("bash -e --rcfile X {0}") is True
+    assert (
+        packaging_gate._shell_initial_errexit("bash --init-file X -e {0}") is True
+    )
+    assert packaging_gate._shell_initial_errexit("bash -o errexit {0}") is True
+
+
+def test_shell_state_changes_around_the_check_fail_certification() -> None:
+    """`set +e`, a split export, and `builtin cd` all defeat certification.
+
+    Each was verified live before the fix: `set +e` disables errexit for
+    the rest of the script so a later command can swallow the check's
+    failure; `MAKEFLAGS=-n; export MAKEFLAGS` hands make the flag through a
+    split assignment; and `builtin cd DIR` moves the shell away from the
+    repository root exactly as `cd DIR` does.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "set +e\nmake docs-check\necho done",
+        "set +e\nmake docs-check; echo ok",
+        "MAKEFLAGS=-n\nexport MAKEFLAGS\nmake docs-check",
+        'builtin cd "$RUNNER_TEMP/noop"\nmake docs-check',
+        'command cd "$RUNNER_TEMP/noop"\nmake docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # The plain and explicitly-errexit forms still certify.
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "make docs-check"}]
+    ) is None
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "set -e\nmake docs-check"}]
+    ) is None
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "MAKEFLAGS=-n\nexport OTHER\nmake docs-check"}]
+    ) is None
+
+
+def test_exported_make_flags_disqualify_a_later_check() -> None:
+    """An export earlier in the same run block reaches the later make.
+
+    `export MAKEFLAGS=-n` changes every later invocation in that shell
+    (verified: make only prints the recipe), so the step scan must carry
+    the exported value forward; a static-environment-only read missed it.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=-n\nmake docs-check",
+        "export MAKEFLAGS=n\nmake docs-check",
+        "export GNUMAKEFLAGS=-q\nmake docs-check",
+        "export MAKE=/usr/bin/true\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # An unrelated export and a plain invocation still certify.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export FOO=1\nmake docs-check"}]
+        )
+        is None
+    )
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+
+
+def test_shell_errexit_scan_stops_at_the_script_operand() -> None:
+    """Words after `{0}` are positional parameters, not shell options.
+
+    Regression: the errexit model scanned every word after the shell name,
+    so `bash {0} -e` (which passes the literal `-e` as the script's `$1`
+    and runs the body without errexit - verified against bash) was misread
+    as errexit-enabled, and the masking analysis then dropped commands the
+    script would actually run.
+    """
+    assert packaging_gate._shell_initial_errexit("bash {0} -e") is False
+    assert packaging_gate._shell_initial_errexit("bash {0} -n") is False
+    assert packaging_gate._shell_initial_errexit("bash {0} --errexit") is False
+    # Options before the operand still count.
+    assert packaging_gate._shell_initial_errexit("bash -e {0}") is True
+    assert packaging_gate._shell_initial_errexit("bash -o errexit {0}") is True
+    assert packaging_gate._shell_initial_errexit("bash -euo pipefail {0}") is True
+    # A shell without the operand keeps the default (built-in forms add -e).
+    assert packaging_gate._shell_initial_errexit("bash -e") is True
+
+
 def test_toolchain_gate_models_set_plus_o_errexit() -> None:
     """`set +o errexit` disables errexit: a later `false` is harmless."""
     drift = DRIFT
@@ -2180,6 +2286,38 @@ def _provisioning_workflow(
         + (step_env or run_step)
         + run_block
     )
+
+
+def test_dot_source_invocations_are_recognized_and_followed(
+    tmp_path, monkeypatch
+) -> None:
+    """A dot-sourced script runs in-shell, so its operand is followed.
+
+    Regression: ``Path(".").name`` is empty, so the ``. ./script`` spelling
+    was not recognized as a followed invocation at all (the ``source``
+    keyword was).  Both spellings now resolve to the interpreter head, the
+    wrapper dispatcher follows a dot-sourced operand like any other invoked
+    script, and a dot-source with no operand fails closed.
+    """
+    assert packaging_gate._invocation_head(". ./x.sh") == "."
+    assert packaging_gate._invocation_head("source ./x.sh") == "source"
+    assert packaging_gate._raw_install_from_wrapper(["."], 0) is True, (
+        "a dot-source without an operand cannot be inspected: fail closed"
+    )
+
+    # With a resolvable repository-local script, the dot-sourced body is
+    # actually scanned: a raw install inside it is found through both
+    # spellings.
+    helper = tmp_path / "helper.sh"
+    helper.write_text(
+        "rustup toolchain install 1.2.3 --profile minimal\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    for operand in (".", "source"):
+        assert packaging_gate._raw_install_from_invoked_scripts(
+            f"{operand} ./helper.sh\n", 0, None
+        ) is True, operand
 
 
 def test_provisioning_shadow_guard_rejects_external_shell_inputs() -> None:
@@ -2915,32 +3053,41 @@ def test_raw_install_detector_inspects_python_script_launchers(
     assert packaging_gate._raw_toolchain_install_issue(
         _raw_install_workflow("python3 tools/raw_install.py")
     ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/safe.py")
-    ) is None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/opaque.py")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 imported.py")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow(
-            "python3 -c 'from helper import install; install()'"
+    _assert_one_safe_and_three_raw_install_launchers(
+        safe_launcher="python3 tools/safe.py",
+        raw_install_launchers=(
+            "python3 tools/opaque.py",
+            "python3 imported.py",
+            "python3 -c 'from helper import install; install()'",
+        ),
+    )
+    _assert_one_safe_and_three_raw_install_launchers(
+        safe_launcher="python3 safe_import.py",
+        raw_install_launchers=(
+            "python3 -m raw_module",
+            "python3 -m runpy runpy_target",
+            "python3 tools/missing.py",
+        ),
+    )
+
+
+def _assert_one_safe_and_three_raw_install_launchers(
+    safe_launcher, raw_install_launchers
+):
+    """Assert the safe launcher is accepted and each raw-install one is flagged."""
+    assert (
+        packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(safe_launcher)
         )
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 safe_import.py")
-    ) is None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 -m raw_module")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 -m runpy runpy_target")
-    ) is not None
-    assert packaging_gate._raw_toolchain_install_issue(
-        _raw_install_workflow("python3 tools/missing.py")
-    ) is not None
+        is None
+    )
+    for raw_install_launcher in raw_install_launchers:
+        assert (
+            packaging_gate._raw_toolchain_install_issue(
+                _raw_install_workflow(raw_install_launcher)
+            )
+            is not None
+        )
 
 
 def test_release_validator_script_scans_through_the_static_project_root():
@@ -3420,6 +3567,7 @@ def test_job_run_step_records_parses_workflow_once(monkeypatch) -> None:
         {
             "run": "echo safe",
             "shell": None,
+            "working-directory": None,
             "env": {},
             "env_scopes": {"workflow": {}, "job": {}, "step": {}},
         }
@@ -3666,8 +3814,299 @@ def test_make_docs_check_rejects_missing_option_operand() -> None:
     """A dangling `-C` cannot prove that make ran the required target."""
     assert packaging_gate._make_targets_after_options(["-C"], 0) is None
     assert packaging_gate._make_targets_after_options(
-        ["-C", "tools", "docs-check"], 0
+        ["-C", ".", "docs-check"], 0
     ) == ["docs-check"]
+
+
+def test_make_docs_check_rejects_a_directory_redirect() -> None:
+    """`-C <other>` resolves another directory's Makefile.
+
+    GNU Make changes directory before reading makefiles, so a `-C` operand
+    other than the repository root cannot prove the repository docs-check
+    chain ran (`make -C "$RUNNER_TEMP/noop" docs-check` succeeds against a
+    planted no-op Makefile).  The root spellings still certify.
+    """
+    assert packaging_gate._make_targets_after_options(
+        ["-C", "tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["--directory", "tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["--directory=tools", "docs-check"], 0
+    ) is None
+    assert packaging_gate._make_targets_after_options(
+        ["-C.", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--directory=.", "docs-check"], 0
+    ) == ["docs-check"]
+
+
+def test_make_docs_check_models_optional_and_attached_operands() -> None:
+    """-j/-l operands are optional; -O takes attached arguments only.
+
+    GNU Make consumes a separated -j operand only when it is all digits
+    and a separated -l operand only when it starts with a digit or a dot,
+    so `make -j docs-check` runs the repository target and must certify.
+    -O/--output-sync accept their argument attached only, and a separated
+    word then stays a goal.
+    """
+    for words in (
+        ["-j", "docs-check"],
+        ["-j4", "docs-check"],
+        ["-j", "4", "docs-check"],
+        ["-l", "docs-check"],
+        ["-l", "1.5", "docs-check"],
+        ["-O", "docs-check"],
+        ["-Oline", "docs-check"],
+        ["--output-sync", "docs-check"],
+        ["--output-sync=line", "docs-check"],
+        ["--jobs", "docs-check"],
+        ["--jobs=4", "docs-check"],
+        ["--jobs", "4", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) == [
+            "docs-check"
+        ], words
+    # A separated non-numeric operand stays a goal, not a -j argument.
+    assert packaging_gate._make_targets_after_options(
+        ["-j", "extra", "docs-check"], 0
+    ) == ["extra", "docs-check"]
+
+
+def test_make_long_option_abbreviations_fail_closed() -> None:
+    """Abbreviations resolve against the running make's catalog.
+
+    GNU Make's getopt_long accepts unique abbreviations, so ``--dry`` is
+    ``--dry-run`` (recipes skipped) and ``--eva`` is ``--eval`` (the
+    repository makefile never read).  An abbreviation or unknown name
+    cannot be proven harmless, so it stops certification on the
+    command-line path and disqualifies a MAKEFLAGS value.
+    """
+    for words in (
+        ["--dry", "docs-check"],
+        ["--eva=SHELL=/bin/true", "docs-check"],
+        ["--ver", "docs-check"],
+        ["--fil", "/dev/null", "docs-check"],
+        ["--d", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    for value in ("--eva=SHELL=/bin/true", "--dry", "--fil /dev/null"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) or (
+            packaging_gate._make_flags_value_uncertifiable(value)
+        ), value
+    # Exact harmless names still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["--no-print-directory", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--jobserver-auth=3,4", "docs-check"], 0
+    ) == ["docs-check"]
+    assert not packaging_gate._make_flags_value_prevents_execution(
+        "--jobserver-auth=3,4"
+    )
+
+
+def test_run_step_records_resolve_the_effective_working_directory() -> None:
+    """The record carries the working directory GitHub would use.
+
+    Regression: `_job_run_step_records` carried only run/shell/env, so a
+    step-level or `defaults.run.working-directory` away from the root was
+    invisible to the certification scan.  The record now resolves step >
+    job defaults > workflow defaults.
+    """
+    body = (
+        "          python3 -m pip install -r requirements-release.txt\n"
+        "          make docs-check\n"
+    )
+
+    def workflow(step_wd=None, job_wd=None, wf_wd=None) -> str:
+        lines = ["jobs:", "  release-gate:"]
+        if wf_wd:
+            lines += ["    defaults:", "      run:",
+                      f"        working-directory: {wf_wd}"]
+        if job_wd:
+            lines += ["    defaults:", "      run:",
+                      f"        working-directory: {job_wd}"]
+        lines += ["    steps:", "      - run: |", body.rstrip("\n")]
+        if step_wd:
+            lines.append(f"        working-directory: {step_wd}")
+        return "\n".join(lines) + "\n"
+
+    def records(content):
+        return packaging_gate._job_run_step_records(content, "release-gate")
+
+    assert records(workflow())[0]["working-directory"] is None
+    assert records(workflow(step_wd="/tmp/noop"))[0][
+        "working-directory"
+    ] == "/tmp/noop"
+    assert records(workflow(wf_wd="/tmp/noop"))[0][
+        "working-directory"
+    ] == "/tmp/noop"
+    assert records(workflow(job_wd="/tmp/a"))[0][
+        "working-directory"
+    ] == "/tmp/a"
+    # Step wins over job wins over workflow.
+    assert records(workflow(step_wd=".", job_wd="/tmp/a", wf_wd="/tmp/b"))[0][
+        "working-directory"
+    ] == "."
+    # And the resolved value disqualifies a docs-check run.
+    content = workflow(step_wd="/tmp/noop")
+    assert packaging_gate._python_deps_issue(records(content)) is not None
+    assert packaging_gate._python_deps_issue(records(workflow())) is None
+
+
+def test_make_toolchain_overrides_and_foreign_directories_fail() -> None:
+    """MAKE/MAKEFILES overrides and a foreign directory defeat the check.
+
+    ``MAKE=/usr/bin/true`` re-points every ``$(MAKE)`` recursion and a
+    ``MAKEFILES`` preload precedes the repository Makefile; both were
+    verified to exit 0 without running the check on GNU Make 4.3 and
+    4.4.1.  A step that changes directory (or declares a foreign
+    ``working-directory``) runs another Makefile, verified with a planted
+    no-op chain.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for scope in ("MAKE", "MAKEFILES"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {scope: "/usr/bin/true"}}]
+            )
+            is not None
+        ), scope
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, "MAKE=/usr/bin/true make docs-check"]
+        )
+        is not None
+    )
+    # cwd tracking, same-step form (each GitHub run step starts at the
+    # repository root, so only a cd within the SAME step redirects a later
+    # make): 'cd ... && make' and the newline spelling both disqualify.
+    for script in (
+        'cd "$RUNNER_TEMP/noop" && make -C . docs-check',
+        'cd "$RUNNER_TEMP/noop"\nmake docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # A bare check with no cd still certifies.
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+    # working-directory away from the root disqualifies.
+    away_wd = [install, {"run": "make docs-check", "working-directory": "/tmp/noop"}]
+    assert packaging_gate._python_deps_issue(away_wd) is not None
+    # An explicit same-root working directory keeps it.
+    root_wd = [install, {"run": "make docs-check", "working-directory": "."}]
+    assert packaging_gate._python_deps_issue(root_wd) is None
+
+
+def test_make_variable_assignments_fail_certification() -> None:
+    """An assignment shapes the whole run, so it cannot certify a check.
+
+    `make SHELL=/usr/bin/true docs-check` executes every recipe through
+    ``true`` and exits 0 without doing the work (verified on 3.81 and
+    4.4.1), and the same value reaches MAKEFLAGS; ``--`` does not turn an
+    assignment into a target.  -p/--print-data-base also stops the recipe
+    on 3.81.  All of these must fail certification.
+    """
+    for words in (
+        ["SHELL=/usr/bin/true", "docs-check"],
+        [".SHELLFLAGS=q", "docs-check"],
+        ["--", "SHELL=/usr/bin/true", "docs-check"],
+        ["-p", "docs-check"],
+        ["--print-data-base", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    for value in ("SHELL=/usr/bin/true", ".SHELLFLAGS=q", "n=1"):
+        assert packaging_gate._make_flags_value_uncertifiable(value), value
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "SHELL=/usr/bin/true"}}]
+        )
+        is not None
+    )
+    # Plain invocations still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["--", "docs-check"], 0
+    ) == ["docs-check"]
+
+
+def test_make_flags_values_that_replace_the_makefile_fail_certification() -> None:
+    """MAKEFLAGS --eval/-f values defeat a docs-check certification.
+
+    `MAKEFLAGS='--eval=SHELL=/bin/true'` (or an environment -f pointing at
+    another makefile) takes effect before the repository Makefile is read,
+    so a step carrying it cannot prove the repository chain ran.  The
+    check covers the environment scope and a command-local assignment.
+    """
+    for value in (
+        "--eval=SHELL=/bin/true",
+        "--eval",
+        "-E SHELL=x",
+        "-ESHELL=x",
+        "-f /dev/null",
+        "--file=/dev/null",
+        "--makefile other.mk",
+        "n --eval=x",
+        "-o docs-check",
+        "-W docs-check",
+        "--what-if=docs-check",
+        "--assume-new docs-check",
+    ):
+        assert packaging_gate._make_flags_value_uncertifiable(value), value
+    for value in ("", "n", "kn", "-j4", "w --jobserver-auth=3,4"):
+        assert not packaging_gate._make_flags_value_uncertifiable(value), value
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for value in ("--eval=SHELL=/bin/true", "-f /dev/null"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {"MAKEFLAGS": value}}]
+            )
+            is not None
+        ), value
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, "MAKEFLAGS=--eval=x make docs-check"]
+        )
+        is not None
+    )
+
+
+def test_make_docs_check_rejects_supplied_makefiles_and_eval() -> None:
+    """A self-supplied makefile cannot certify the repository docs-check.
+
+    `make -f /dev/null --eval='docs-check: ;' docs-check` exits 0 while the
+    repository chain never runs, so any invocation that supplies its own
+    makefile or evaled text must not count as the live docs check.
+    """
+    for words in (
+        ["-f", "/dev/null", "docs-check"],
+        ["--file", "/dev/null", "docs-check"],
+        ["--file=/dev/null", "docs-check"],
+        ["--makefile", "other.mk", "docs-check"],
+        ["-E", "docs-check: ;", "docs-check"],
+        ["--eval", "docs-check: ;", "docs-check"],
+        ["--eval=x", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 0) is None, words
+    # Plain invocations still certify.
+    assert packaging_gate._make_targets_after_options(
+        ["-C", ".", "docs-check"], 0
+    ) == ["docs-check"]
+    assert packaging_gate._make_targets_after_options(
+        ["-j2", "docs-check"], 0
+    ) == ["docs-check"]
+    # `-Wn`'s n is W's argument, and W is uncertifiable: an old-file/
+    # what-if operand can name the checked target and skip its recipe.
+    assert packaging_gate._make_targets_after_options(
+        ["-Wn", "docs-check"], 0
+    ) is None
 
 
 def test_dynamic_eval_parser_fails_closed_on_unterminated_quote() -> None:
@@ -3683,3 +4122,1546 @@ def _release_gate_steps_from_yaml(job_yaml_fragment: str) -> list[dict]:
     )
     assert result is not None
     return result
+
+
+def test_raw_install_gate_flags_dynamic_rustup_subcommands() -> None:
+    """A rustup subcommand built at run time must fail closed.
+
+    The gate matches the literal ``toolchain install`` pair, but a
+    subcommand word carrying an unresolved ``$`` or backtick expansion can
+    expand to that pair at run time. Each spelling must be treated as a raw
+    install, while the literal benign subcommands stay accepted.
+    """
+    dynamic = (
+        'rustup "$SUBCOMMAND" install nightly',
+        "rustup toolchain${SUFFIX:-} install nightly",
+        "rustup ${SUBCOMMAND} install nightly",
+        "rustup $SUBCOMMAND install nightly",
+        "rustup `echo toolchain` install nightly",
+        'rustup "`echo toolchain`" install nightly',
+        "rustup '`echo toolchain`' install nightly",
+        "rustup toolchain`echo \"\"` install nightly",
+        "rustup $(printf toolchain) install nightly",
+    )
+    for script in dynamic:
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(script)
+        ) is not None, script
+
+    # Control: the literal pair is flagged, and literal non-install
+    # subcommands stay accepted.
+    assert packaging_gate._raw_toolchain_install_issue(
+        _raw_install_workflow("rustup toolchain install nightly")
+    ) is not None
+    for benign in (
+        "rustup show",
+        "rustup -v show",
+        "rustup toolchain list",
+        "rustup component add --toolchain nightly rustfmt",
+        "rustup --verbose component add rustfmt",
+    ):
+        assert packaging_gate._raw_toolchain_install_issue(
+            _raw_install_workflow(benign)
+        ) is None, benign
+
+
+def _bash_negation_parity() -> dict[str, int] | None:
+    """Return ``!`` run statuses measured in GNU bash 5.2, or None.
+
+    The host shell may be bash 3.2, which rejects a repeated ``!`` outright,
+    so the measurement runs in a bash:5.2 container.  A host without a
+    usable Docker daemon returns None and the caller skips the
+    corroboration instead of failing on missing infrastructure.
+    """
+    expressions = (
+        "! true",
+        "! ! true",
+        "! ! ! true",
+        "! false",
+        "! ! false",
+        "! ! ! false",
+    )
+    script = "\n".join(
+        f"{expression}; printf '%s\\n' \"$?\"" for expression in expressions
+    )
+    try:
+        probe = subprocess.run(
+            ["docker", "run", "--rm", "bash:5.2", "bash", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # A host without a docker binary or with a hung daemon must degrade
+        # to the documented skip, not error the suite.
+        return None
+    try:
+        probe.check_returncode()
+    except subprocess.CalledProcessError:
+        return None
+    statuses = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
+    if len(statuses) != len(expressions):
+        return None
+    return {
+        expression: int(status)
+        for expression, status in zip(expressions, statuses)
+    }
+
+
+def test_negation_run_toggles_per_bang_word() -> None:
+    """Consecutive ``!`` words toggle: an even count is a no-op.
+
+    Bash 5.2 evaluates each ``!`` as its own inversion, so a doubled
+    negation leaves the command status untouched.  The expected values here
+    are the ones the corroboration test below measures.
+    """
+    cases = (
+        ("! true", False),
+        ("! ! true", True),
+        ("! ! ! true", False),
+        ("! false", True),
+        ("! ! false", False),
+        ("! ! ! false", True),
+    )
+    for expression, expected in cases:
+        assert packaging_gate._segment_literal(expression) is expected, expression
+
+
+def test_negation_parity_matches_reference_bash() -> None:
+    """The modeled parity is the one GNU bash 5.2 reports.
+
+    Corroboration for the toggle semantics above; it needs a Docker daemon
+    and skips when that infrastructure is absent.
+    """
+    parity = _bash_negation_parity()
+    if parity is None:
+        pytest.skip("docker with bash:5.2 unavailable")
+    for expression, status in parity.items():
+        assert packaging_gate._segment_literal(expression) is (status == 0), (
+            expression,
+            status,
+        )
+
+
+def test_negation_run_keeps_chain_reachability_in_step_with_bash() -> None:
+    """Chain reachability after a ``!`` run follows the parity just pinned.
+
+    Under the old collapsed model a doubled negation always read as one
+    negation: ``! ! true`` was modeled false (dropping its ``&&`` operand
+    even though bash runs it) and ``! ! false`` was modeled true (keeping
+    an operand bash never reaches).
+    """
+    assert packaging_gate._live_command_segments(
+        "! ! true && printf reached", errexit=False
+    ) == ["! ! true", "printf reached"]
+    assert packaging_gate._live_command_segments(
+        "! ! true && printf reached", errexit=True
+    ) == ["! ! true", "printf reached"]
+    # An even count of ``!`` on a false command keeps status 1, so the
+    # ``&&`` operand stays unreachable.
+    assert packaging_gate._live_command_segments(
+        "! ! false && printf unreachable", errexit=False
+    ) == ["! ! false"]
+    # A single negation on false succeeds, so its operand runs.
+    assert packaging_gate._live_command_segments(
+        "! false && printf reached", errexit=False
+    ) == ["! false", "printf reached"]
+    # A single negation on true fails, and dies under errexit.
+    assert packaging_gate._live_command_segments(
+        "! true && printf unreachable", errexit=True
+    ) == ["! true"]
+
+
+def test_negation_prefix_stays_transparent_after_time() -> None:
+    """``! time f`` negates once, ``time f`` not at all."""
+    assert packaging_gate._segment_literal("! time false") is True
+    assert packaging_gate._segment_literal("time false") is False
+
+
+def test_run_step_records_resolve_effective_shell_precedence() -> None:
+    """Run-step records resolve the effective shell and filter by it.
+
+    Regression for the gate-integrity gap: a step that omits ``shell`` was
+    recorded as ``None`` and every consumer then assumed bash, so a job or
+    workflow ``defaults.run.shell`` naming Python would hide a raw install
+    inside that step from the shell-only scan.  Precedence is step, then job
+    default, then workflow default; a step whose EFFECTIVE shell is not a
+    shell is excluded, exactly as an explicit non-shell override is.
+    """
+    workflow = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: bash {0}\n"
+        "jobs:\n"
+        "  gate:\n"
+        "    defaults:\n"
+        "      run:\n"
+        "        shell: python3 {0}\n"
+        "    steps:\n"
+        "      - run: print(1)\n"
+        "      - run: echo hi\n"
+        "        shell: bash {0}\n"
+    )
+    records = packaging_gate._job_run_step_records(workflow, "gate")
+    assert records is not None
+    # The inherited python default excludes the first step; the explicit bash
+    # step stays.
+    assert [record["shell"] for record in records] == ["bash {0}"]
+
+    workflow_level_only = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: python3 {0}\n"
+        "jobs:\n"
+        "  gate:\n"
+        "    steps:\n"
+        "      - run: print(1)\n"
+    )
+    records = packaging_gate._job_run_step_records(workflow_level_only, "gate")
+    assert records is not None
+    assert records == []
+
+    # The all-jobs helper backs the raw-install scan, which analyzes python
+    # payloads itself; it must keep the step AND its resolved shell so the
+    # scan routes it to the python analyzer.
+    records = packaging_gate._all_job_run_step_records(workflow_level_only)
+    assert records is not None
+    assert [record["shell"] for record in records] == ["python3 {0}"]
+
+
+def test_job_default_python_shell_raw_install_is_flagged() -> None:
+    """An inherited Python default makes the raw-install scan see Python.
+
+    The scan routes a step to the Python payload analyzer when the resolved
+    shell names Python; with the precedence recorded, a raw install inside a
+    default-shelled step is caught instead of being read as bash text.
+    """
+    workflow = (
+        "defaults:\n"
+        "  run:\n"
+        "    shell: python3 {0}\n"
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - run: 'import subprocess; "
+        "subprocess.run([\"rustup\", \"toolchain\", \"install\", \"nightly\"])'\n"
+    )
+    records = packaging_gate._all_job_run_step_records(workflow)
+    assert records is not None
+    assert packaging_gate._workflow_shell_uses_python(records[0]["shell"])
+
+
+def test_nested_interpreter_template_routes_python_to_the_python_scan() -> None:
+    """A Python interpreter nested inside a quoted argument is recognized.
+
+    Regression for the evasion: `shell: 'bash -c "python3 {0}"'` keeps
+    `python3 {0}` as a single shlex word, so the placeholder was not a
+    standalone token and the Python interpreter went unrecognized.  The
+    step was then routed to the shell analyzer, where a raw install written
+    as a Python argument list (quoted words separated by commas) matches
+    nothing, and the gate accepted an unverified installer invocation.
+    """
+    shell = 'bash -c "python3 {0}"'
+    assert packaging_gate._workflow_shell_uses_python(shell)
+
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"python3 {0}\"'\n"
+        "        run: |\n"
+        "          import subprocess\n"
+        "          subprocess.run([\"rustup\", \"toolchain\", \"install\","
+        " \"nightly\"])\n"
+    )
+    issue = packaging_gate._raw_toolchain_install_issue(workflow)
+    assert issue is not None
+
+    # Controls: the same template with a benign Python payload stays
+    # accepted, and a non-Python nested command is not misrouted.
+    benign = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"python3 {0}\"'\n"
+        "        run: 'print(\"hello\")'\n"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+    assert not packaging_gate._workflow_shell_uses_python('bash -c "echo {0}"')
+
+
+def test_script_chain_cannot_hide_a_raw_install_behind_a_markerless_file(
+    tmp_path, monkeypatch
+) -> None:
+    """A two-hop script chain is followed through invocation operands.
+
+    Regression: the marker prefilter skipped an outer script whose text did
+    not mention the install markers, so `outer.sh` -> `bash inner.sh` hid an
+    install in a file the gate never scanned.  A marker-less file is now
+    followed through the literal script operands of its shell and Python
+    invocations.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text("#!/bin/bash\nbash inner.sh\n", encoding="utf-8")
+
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+    _assert_control_script_file_is_not_flagged(
+        tmp_path, "inert.sh", "#!/bin/bash\necho hello\n"
+    )
+    _assert_control_script_file_is_not_flagged(
+        tmp_path,
+        "dynamic.sh",
+        '#!/bin/bash\npython3 "$toolchain_file" 2>&1 <<PY\nprint(1)\nPY\n',
+    )
+
+
+def _assert_control_script_file_is_not_flagged(
+    tmp_path, script_name, script_contents
+):
+    # Controls: an inert file and a dynamic operand are not treated as
+    # evidence, so neither fails the gate.
+    control_script = tmp_path / script_name
+    control_script.write_text(script_contents, encoding="utf-8")
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        script_name, 0, None
+    )
+
+
+def test_decoy_python_token_cannot_route_a_shell_template_to_python() -> None:
+    """Only a command-position consumer decides the template's interpreter.
+
+    Regression: any `python3` token before the placeholder routed the step
+    to the Python analyzer, so `bash -c "echo python3 {0}; bash {0}"` sent a
+    shell block to the Python scan.  A shell launcher in an earlier segment
+    was masked and its script went unanalyzed.  Consumers are now read at
+    command position, and templates whose consumers span both interpreters
+    fail closed by applying both analyses.
+    """
+    decoy = 'bash -c "echo python3 {0}; bash {0}"'
+    assert not packaging_gate._workflow_shell_uses_python(decoy)
+    assert not packaging_gate._shell_template_conflicting_placeholder_consumers(
+        decoy
+    )
+
+    # The genuine nested-python shape still routes to Python.
+    assert packaging_gate._workflow_shell_uses_python('bash -c "python3 {0}"')
+
+    # A template consuming the block under both interpreters is flagged.
+    both = 'bash -c "bash {0}; python3 {0}"'
+    assert packaging_gate._shell_template_conflicting_placeholder_consumers(
+        both
+    )
+
+
+def test_decoy_template_step_with_shell_launcher_is_analyzed(
+    tmp_path, monkeypatch
+) -> None:
+    """The decoy template's shell launcher is followed by the scan."""
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "install-toolchain.sh").write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    workflow = (
+        "jobs:\n"
+        "  release-gate:\n"
+        "    steps:\n"
+        "      - shell: 'bash -c \"echo python3 {0}; bash {0}\"'\n"
+        "        run: 'bash install-toolchain.sh'\n"
+    )
+
+    assert packaging_gate._raw_toolchain_install_issue(workflow) is not None
+
+
+def test_chain_follow_ignores_unresolvable_operands_but_scans_inline_c(
+    tmp_path, monkeypatch
+) -> None:
+    """Unresolvable operands are not evidence; ``-c`` strings are scripts.
+
+    Regression for the false-positive class the chain-follow introduced: a
+    marker-less helper that hands ``bash -c`` an inline string, names an
+    absolute/out-of-root operand, or names a not-yet-generated file must not
+    fail the gate, while a true two-hop chain and a raw install inside an
+    inline ``-c`` payload must still be caught.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+
+    inline_benign = tmp_path / "inline.sh"
+    inline_benign.write_text(
+        '#!/bin/bash\nbash -c "echo hello world"\n', encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "inline.sh", 0, None
+    )
+
+    inline_raw = tmp_path / "inline_raw.sh"
+    inline_raw.write_text(
+        '#!/bin/bash\nbash -c "rustup toolchain install nightly"\n',
+        encoding="utf-8",
+    )
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "inline_raw.sh", 0, None
+    )
+
+    absolute = tmp_path / "absolute.sh"
+    absolute.write_text(
+        "#!/bin/bash\nbash /src/packaging/scripts/verify-checksum.sh\n",
+        encoding="utf-8",
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "absolute.sh", 0, None
+    )
+
+    generated = tmp_path / "generated.sh"
+    generated.write_text(
+        "#!/bin/bash\npython3 generated_output.py\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "generated.sh", 0, None
+    )
+
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text("#!/bin/bash\nbash inner.sh\n", encoding="utf-8")
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+
+def test_wrapped_shell_invocations_are_followed(tmp_path, monkeypatch) -> None:
+    """A marker-less file's wrapped shell invocation is still followed.
+
+    Regression: only the first command word was recognized as an
+    interpreter, so `exec bash inner.sh`, `nohup bash inner.sh` and
+    `command bash inner.sh` were skipped and a two-hop raw install went
+    unanalyzed.  The same bounded wrapper unwrapper the marker-present scan
+    uses now resolves the head.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    inner = tmp_path / "inner.sh"
+    inner.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    for wrapper in (
+        "exec bash inner.sh",
+        "nohup bash inner.sh",
+        "command bash inner.sh",
+        "sudo bash inner.sh",
+        "retry 3 bash inner.sh",
+        "env X=1 bash inner.sh",
+    ):
+        outer = tmp_path / "outer.sh"
+        outer.write_text(f"#!/bin/bash\n{wrapper}\n", encoding="utf-8")
+        assert packaging_gate._raw_install_from_shell_script_file(
+            "outer.sh", 0, None
+        ), wrapper
+
+
+def test_conflicting_template_runs_the_other_analyzer(
+    tmp_path, monkeypatch
+) -> None:
+    """A dual-interpreter template fails closed via the un-routed analyzer.
+
+    Regression: when a template consumed GitHub's placeholder under both
+    Bash and Python, only the Python analyzer ran, so a shell script invoked
+    by the run body went unanalyzed and a raw install passed.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "run.sh").write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    for template in (
+        'bash -c "bash {0}; python3 {0}"',
+        'bash -c "python3 {0}; bash {0}"',
+    ):
+        workflow = (
+            "jobs:\n"
+            "  release-gate:\n"
+            "    steps:\n"
+            f"      - shell: '{template}'\n"
+            "        run: 'bash run.sh'\n"
+        )
+        assert packaging_gate._raw_toolchain_install_issue(workflow), template
+
+
+def test_interpreter_module_flag_is_not_a_script_operand(
+    tmp_path, monkeypatch
+) -> None:
+    """A ``-m`` module name is never followed as a script file.
+
+    `python3 -m name` resolves a module through sys.path, so a repository
+    file that happens to share the name is not executed by it.  The scan
+    must therefore stop at `-m` instead of following the following words as
+    paths: with a file named like the module present (and carrying a raw
+    install), the step must still not be flagged.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    collision = tmp_path / "package"
+    collision.write_text(
+        "rustup toolchain install nightly\n", encoding="utf-8"
+    )
+    module_step = tmp_path / "module_step.sh"
+    module_step.write_text(
+        "#!/bin/bash\npython3 -m package\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "module_step.sh", 0, None
+    )
+
+
+def test_dash_headed_operand_routes_to_the_shell_scan(
+    tmp_path, monkeypatch
+) -> None:
+    """A ``dash`` invocation follows its script like the other shells.
+
+    Regression: ``_invocation_head`` accepts dash, but the follow routing
+    tuple omitted it, so a dash-headed operand fell through to the
+    Python-only branch and a shell script's raw install went unanalyzed.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    _write_raw_install_script_chain(
+        tmp_path, "inner.sh", "outer.sh", "#!/bin/bash\ndash inner.sh\n"
+    )
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+    _write_raw_install_script_chain(
+        tmp_path, "deep.sh", "middle.sh", "#!/bin/bash\nbash deep.sh\n"
+    )
+    hop = tmp_path / "hop.sh"
+    hop.write_text("#!/bin/bash\ndash middle.sh\n", encoding="utf-8")
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "hop.sh", 0, None
+    )
+
+
+def _write_raw_install_script_chain(
+    tmp_path, inner_script_name, outer_script_name, outer_script_contents
+):
+    inner_script = tmp_path / inner_script_name
+    inner_script.write_text(
+        "#!/bin/bash\nrustup toolchain install nightly\n", encoding="utf-8"
+    )
+    outer_script = tmp_path / outer_script_name
+    outer_script.write_text(outer_script_contents, encoding="utf-8")
+
+
+def test_runpy_script_target_is_followed_in_a_marker_less_chain(
+    tmp_path, monkeypatch
+) -> None:
+    """``python3 -m runpy <script>`` runs a file and must be followed.
+
+    Regression: the ``-m`` module-name guard stopped the scan before runpy's
+    script operand, so a marker-less chain could hand the install to a file
+    the scanner never read.  Ordinary module names stay unscanned.
+    """
+    monkeypatch.setattr(packaging_gate, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "install.py").write_text(
+        "import subprocess\n"
+        "subprocess.run(['rustup', 'toolchain', 'install', 'nightly'])\n",
+        encoding="utf-8",
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text(
+        "#!/bin/bash\npython3 -m runpy install.py\n", encoding="utf-8"
+    )
+    assert packaging_gate._raw_install_from_shell_script_file(
+        "outer.sh", 0, None
+    )
+
+    # An ordinary module name is still not followed as a path.
+    module_step = tmp_path / "module.sh"
+    module_step.write_text(
+        "#!/bin/bash\npython3 -m pip install package\n", encoding="utf-8"
+    )
+    assert not packaging_gate._raw_install_from_shell_script_file(
+        "module.sh", 0, None
+    )
+
+
+def test_backgrounded_prerequisites_do_not_satisfy_the_pip_gate() -> None:
+    """A backgrounded install or docs-check commands nothing.
+
+    Regression: the live-command scan dropped the separator, so
+    ``pip install ... &`` and ``make docs-check &`` counted as satisfied
+    prerequisites even though the shell never waits for their exit status.
+    """
+    backgrounded = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt &\n"
+            "make docs-check &\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([backgrounded])
+    assert install_at is None
+    assert docs_at is None
+
+    foreground = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([foreground])
+    assert install_at == (0, 0)
+    assert docs_at == (0, 1)
+
+    # A backgrounded install followed by a foreground docs-check: the
+    # install must not count, the check must.
+    mixed = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt &\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([mixed])
+    assert install_at is None
+    assert docs_at == (0, 0)
+
+
+def test_compound_backgrounded_list_does_not_satisfy_the_pip_gate() -> None:
+    """An async ``&&`` list is backgrounded as a whole.
+
+    Regression: only the segment adjacent to a trailing ``&`` was marked,
+    so ``pip install ... && printf done &`` left the install counted and a
+    later ``make docs-check`` accepted an install whose completion was
+    never observed.
+    """
+    compound = {
+        "run": (
+            "python3 -m pip install --requirement requirements-release.txt"
+            " && printf 'done' &\nmake docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    foreground = packaging_gate._foreground_live_commands(compound)
+    assert all("pip install" not in segment for segment in foreground)
+    assert any("docs-check" in segment for segment in foreground)
+
+    two_step = [
+        {
+            "run": (
+                "python3 -m pip install --requirement"
+                " requirements-release.txt && printf 'done' &\n"
+            ),
+            "shell": "bash",
+        },
+        {"run": "make docs-check\n", "shell": "bash"},
+    ]
+    install_at, docs_at = packaging_gate._pip_first_steps(two_step)
+    assert install_at is None
+    assert docs_at == (1, 0)
+
+    # Controls: a truly foreground pair still counts both.
+    plain = {
+        "run": (
+            "python3 -m pip install -r requirements-release.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([plain])
+    assert install_at == (0, 0)
+    assert docs_at == (0, 1)
+
+
+def test_virtualenv_markers_read_the_foreground_command_view() -> None:
+    """Marker lookup indexes the same list as the prerequisite positions.
+
+    Regression: `_pip_first_steps` indexes `_foreground_live_commands`, but
+    the marker walk read `_step_live_commands`.  A backgrounded segment
+    changes the two lists' offsets, so the marker prefix could be read from
+    the wrong command and a virtualenv mismatch accepted or rejected
+    spuriously.
+    """
+    step = {
+        "run": (
+            "export PATH=/venv/bin:$PATH &\n"
+            "python3 -m pip install -r r.txt\n"
+            "make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    foreground = packaging_gate._foreground_live_commands(step)
+    assert foreground == ["python3 -m pip install -r r.txt", "make docs-check"]
+    install_at, docs_at = packaging_gate._pip_first_steps([step])
+    assert docs_at == (0, 1)
+    # The backgrounded export must NOT contribute a marker: it ran in a
+    # different (asynchronous) context.  With the unfiltered list, the
+    # docs-check prefix reached the export and reported its venv marker.
+    markers = packaging_gate._virtualenv_markers(step, docs_at[1])
+    assert markers == set(), markers
+
+    # A foreground virtualenv on the docs-check command is observed.
+    with_venv = {
+        "run": (
+            "python3 -m pip install -r r.txt\n"
+            "PATH=/venv/bin:$PATH make docs-check\n"
+        ),
+        "shell": "bash",
+    }
+    install_at, docs_at = packaging_gate._pip_first_steps([with_venv])
+    assert docs_at == (0, 1)
+    assert packaging_gate._virtualenv_markers(with_venv, docs_at[1])
+
+
+def test_dynamic_import_call_targets_are_resolved_or_fail_closed() -> None:
+    """Dynamic-import launchers are resolved, and fail closed when unknown.
+
+    Regression: `__import__('os').system(...)` and the `getattr`/
+    `importlib.import_module` equivalents build their callable from a call
+    rather than a name, so `_python_call_name` returned None and the raw
+    install behind them went unflagged.  A literal module name is now
+    resolved; an unresolved dynamic import fails closed.
+    """
+    payloads = [
+        "__import__('os').system('rustup toolchain install stable')",
+        (
+            "import importlib; importlib.import_module('os').system("
+            "'rustup toolchain install stable')"
+        ),
+        "getattr(__import__('os'), 'system')('rustup toolchain install stable')",
+    ]
+    for payload in payloads:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), payload
+
+    # A non-literal module name cannot be resolved and must fail closed.
+    variable_module = (
+        "m = 'os'; __import__(m).system('rustup toolchain install stable')"
+    )
+    assert packaging_gate._python_inline_raw_install(
+        variable_module, 0, None
+    )
+
+    # Controls: ordinary calls and benign payloads are unaffected.
+    assert not packaging_gate._python_inline_raw_install(
+        "subprocess.run(['cargo', 'build'])", 0, None
+    )
+    assert not packaging_gate._python_inline_raw_install(
+        "print('hello')", 0, None
+    )
+
+
+def test_dotted_import_resolves_by_import_semantics() -> None:
+    """``__import__``'s dotted-name behavior is modeled, not assumed.
+
+    Regression: `__import__('os.path')` returns the TOP-LEVEL ``os`` module
+    (no fromlist), so `.system` is really ``os.system``; resolving it as
+    ``os.path.system`` matched no launcher and the install went unflagged.
+    A non-empty literal fromlist returns the submodule instead.
+    """
+    payloads = [
+        # Bare dotted name returns the top-level package at runtime.
+        "__import__('os.path').system('rustup toolchain install stable')",
+        # A non-empty fromlist returns the submodule, whose launcher members
+        # still match.
+        (
+            "__import__('os', fromlist=['system']).system("
+            "'rustup toolchain install stable')"
+        ),
+        (
+            "__import__('subprocess', fromlist=['run']).run(["
+            "'rustup', 'toolchain', 'install', 'stable'])"
+        ),
+    ]
+    for payload in payloads:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), payload
+
+    # Control: a benign dotted dynamic import stays accepted.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os.path').join('a', 'b')", 0, None
+    )
+
+
+def test_relative_dynamic_imports_fail_closed() -> None:
+    """A relative dynamic import cannot resolve to a launcher; fail closed.
+
+    Regression: `importlib.import_module('.helper', package='...')` was
+    treated as a resolved module name, so a call through it never matched a
+    launcher and the payload passed unexamined.  A relative name resolves
+    only at runtime against its package, so it fails closed now; absolute
+    dynamic imports keep resolving.
+    """
+    relative = (
+        "import importlib; importlib.import_module("
+        "'.helper', package='tools.release.gates').install()"
+    )
+    assert packaging_gate._python_inline_raw_install(relative, 0, None)
+
+    bare_relative = (
+        "import importlib; importlib.import_module('.helper').install()"
+    )
+    assert packaging_gate._python_inline_raw_install(bare_relative, 0, None)
+
+    # Controls: an absolute dynamic import of a benign module stays accepted,
+    # and a launcher behind one is still flagged.
+    assert not packaging_gate._python_inline_raw_install(
+        "import importlib; importlib.import_module('json').dumps({})",
+        0,
+        None,
+    )
+    assert packaging_gate._python_inline_raw_install(
+        "import importlib; importlib.import_module('os').system("
+        "'rustup toolchain install stable')",
+        0,
+        None,
+    )
+
+
+def test_relative_import_levels_fail_closed() -> None:
+    """``__import__`` with a nonzero/unknown ``level`` resolves relatively.
+
+    Regression: the resolver rejected dotted-lead names but ignored the
+    ``level`` argument, so ``__import__("helper", ..., level=1).install()``
+    resolved as the absolute ``helper.install`` and a locally imported
+    helper could hide a raw toolchain installation.  A literal 0 stays
+    absolute; every other level fails closed.
+    """
+    keyword_level = (
+        "__import__('helper', globals(), locals(), ['install'], "
+        "level=1).install()"
+    )
+    positional_level = (
+        "__import__('helper', globals(), locals(), ['install'], 1).install()"
+    )
+    variable_level = (
+        "level = 1\n__import__('helper', level=level).install()"
+    )
+    for payload in (keyword_level, positional_level, variable_level):
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), (
+            payload
+        )
+
+    # Controls: an explicit literal-zero level keeps the absolute model.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os', level=0).getcwd()", 0, None
+    )
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os.path').join('a', 'b')", 0, None
+    )
+
+
+def test_dependency_gate_rejects_failure_masked_prerequisites() -> None:
+    """A prerequisite whose failure ``||`` swallows must not satisfy the gate.
+
+    Regression: ``pip install ... || true`` and ``make docs-check || true``
+    counted as present, so the gate could certify a job in which the
+    dependency install or the docs-check chain fails without notice.  The
+    masked command no longer counts; chains that propagate failure (``||
+    exit 1``) still satisfy it.
+    """
+    masked_install = [
+        {"run": "python3 -m pip install -r requirements-release.txt || true"},
+        {"run": "make docs-check"},
+    ]
+    masked_docs = [
+        {"run": "python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check || true"},
+    ]
+    masked_echo = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " || echo failed"
+            )
+        },
+        {"run": "make docs-check || echo failed"},
+    ]
+    for steps, needle in (
+        (masked_install, "failure-masking"),
+        (masked_docs, "failure-masking"),
+        (masked_echo, "failure-masking"),
+    ):
+        issue = packaging_gate._python_deps_issue(steps)
+        assert issue is not None, steps
+        assert needle in issue, issue
+
+    # A ``||`` right-hand that is not provably unsuccessful masks failure,
+    # so an unknown form fails closed too.
+    assert packaging_gate._shell_rhs_discards_failure("echo failed")
+    assert packaging_gate._shell_rhs_discards_failure("cd /tmp")
+    assert packaging_gate._shell_rhs_discards_failure("")
+
+    # Controls: propagating and plain forms satisfy the gate.
+    propagated = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 1"},
+        {"run": "make docs-check || exit 1"},
+    ]
+    assert packaging_gate._python_deps_issue(propagated) is None
+    propagating_forms = [
+        {"run": "python3 -m pip install -r requirements-release.txt || false"},
+        {"run": "make docs-check || exit"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating_forms) is None
+    for rhs in ("false", "exit 1", "exit", "return 2", "return"):
+        assert not packaging_gate._shell_rhs_discards_failure(rhs), rhs
+    plain = [
+        {"run": "python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(plain) is None
+
+
+def test_expanded_import_arguments_fail_closed() -> None:
+    """Starred positionals and ``**`` mappings can supply ``level``.
+
+    Regression: the level check read only the fifth explicit positional
+    and a named ``level`` keyword, so ``__import__("helper", *[globals(),
+    locals(), ["install"], 1])`` and ``__import__("helper", **{"level":
+    1})`` resolved as absolute and a locally imported helper could hide a
+    raw installation.  Both expansions now fail closed; a starred list
+    whose level slot is literally 0 keeps the absolute model.
+    """
+    expanded = [
+        "__import__('helper', *[globals(), locals(), ['install'], 1]).install()",
+        "__import__('helper', **{'level': 1}).install()",
+        "__import__('helper', *extra).install()",
+    ]
+    for payload in expanded:
+        assert packaging_gate._python_inline_raw_install(payload, 0, None), (
+            payload
+        )
+    # A starred list that provably fills level=0 stays absolute.
+    assert not packaging_gate._python_inline_raw_install(
+        "__import__('os', *[globals()], level=0).getcwd()", 0, None
+    )
+
+
+def test_chained_failure_masking_is_detected() -> None:
+    """A ``||`` chain that ends in success still swallows the failure.
+
+    Regression: only the segment immediately before the first ``||`` was
+    examined, so ``pip install ... || false || true`` left the install
+    unmarked even though the chain reaches ``true`` and succeeds.  The
+    full chain is walked now; a chain ending ``|| false`` propagates the
+    failure and still counts.
+    """
+    chained = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " || false || true"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    issue = packaging_gate._python_deps_issue(chained)
+    assert issue is not None
+    assert "failure-masking" in issue
+    propagated = [
+        {"run": "python3 -m pip install -r requirements-release.txt || false"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagated) is None
+
+
+def test_make_version_and_help_options_do_not_run_targets() -> None:
+    """``make -v docs-check`` prints the version and never runs the target.
+
+    Regression: only dry-run/question/touch options were recognized, so
+    ``make -v docs-check`` or ``make -h docs-check`` satisfied the live
+    docs-check requirement although GNU Make exits after printing the
+    version/help.  Both are non-executing now.
+    """
+    for words in (
+        ["make", "-v", "docs-check"],
+        ["make", "--version", "docs-check"],
+        ["make", "-h", "docs-check"],
+        ["make", "--help", "docs-check"],
+    ):
+        assert packaging_gate._make_targets_after_options(words, 1) is None, (
+            words
+        )
+    assert packaging_gate._make_targets_after_options(
+        ["make", "docs-check"], 1
+    ) == ["docs-check"]
+
+
+def test_pip_dry_run_environment_is_recognized() -> None:
+    """``PIP_DRY_RUN`` disqualifies an install like the ``--dry-run`` flag.
+
+    Regression: only the literal flag was recognized, so
+    ``PIP_DRY_RUN=1 python3 -m pip install ...`` (prefix) or a step-level
+    ``env: {PIP_DRY_RUN: 1}`` counted as a real install even though pip
+    installs nothing.  Any value except a proven-off spelling enables the
+    dry run.
+    """
+    prefix = [
+        {"run": "PIP_DRY_RUN=1 python3 -m pip install -r requirements-release.txt"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(prefix) is not None
+    env_scoped = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "1"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(env_scoped) is not None
+    # Proven-off spellings keep the install valid.
+    disabled = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "0"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(disabled) is None
+
+
+def test_exit_status_is_normalized_to_eight_bits() -> None:
+    """``exit 256`` exits successfully, so it masks a prerequisite failure.
+
+    Regression: a literal nonzero status was assumed to propagate failure,
+    but the shell truncates the exit status to its low 8 bits, so
+    ``pip install ... || exit 256`` reaches a successful exit and the
+    install is not proven.  Only statuses that stay nonzero after
+    truncation propagate.
+    """
+    masking = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 256"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(masking) is not None
+    # 511 % 256 == 255: still a failure, so it propagates.
+    propagating = [
+        {"run": "python3 -m pip install -r requirements-release.txt || exit 511"},
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating) is None
+
+
+def test_followed_propagating_chain_still_masks_without_errexit() -> None:
+    """Without errexit a later command replaces the chain's failed status.
+
+    Regression: the walk stopped at the chain, so ``pip install ... ||
+    false; true`` left the install unmarked; without ``-e`` the shell
+    continues and the step exits successfully.  With errexit the shell
+    aborts on the failed chain, so the later command cannot swallow it.
+    """
+    script = "python3 -m pip install -r requirements-release.txt || false; true"
+    steps = [
+        {"run": script, "shell": "bash {0}"},  # no implicit -e
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(steps) is not None
+    # The chain propagates the failure, but the shell continues past it and
+    # the trailing `true` decides the step's status: without errexit the
+    # chain is masked.
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=False
+    )
+    assert script.split("||")[0].strip() in masked
+    # Under an errexit shell the failed chain aborts the script, so the
+    # trailing command cannot replace its status: not masked.
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=True
+    )
+    assert script.split("||")[0].strip() not in masked
+
+
+def test_pip_dry_run_accepts_short_false_spellings() -> None:
+    """``PIP_DRY_RUN=n`` and ``=f`` are false spellings pip accepts.
+
+    Regression: the false-value set omitted ``n`` and ``f``, so a real
+    install using either value was treated as a dry run and the workflow
+    validator could reject a valid job.
+    """
+    for value in ("n", "f", "N", "F"):
+        assert not packaging_gate._pip_dry_run_value_active(value), value
+    steps = [
+        {
+            "run": "python3 -m pip install -r requirements-release.txt",
+            "env": {"PIP_DRY_RUN": "n"},
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(steps) is None
+
+
+def test_masking_walks_the_connected_and_or_list() -> None:
+    """``&&`` shares the list with ``||``, so the terminator masks members.
+
+    Regression: only segments with a DIRECTLY following ``||`` were
+    examined, so ``pip install ... && echo ok || true`` masked ``echo ok``
+    while the pip command counted.  In one connected list a failing pip
+    short-circuits to ``true`` exactly as in ``pip || true``; every member
+    is masked now, and a purely propagating list still counts.
+    """
+    combined = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " && echo ok || true"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    issue = packaging_gate._python_deps_issue(combined)
+    assert issue is not None
+    assert "failure-masking" in issue
+
+    # A propagating list keeps every member countable.
+    propagating = [
+        {
+            "run": (
+                "python3 -m pip install -r requirements-release.txt"
+                " && echo ok || exit 1"
+            )
+        },
+        {"run": "make docs-check"},
+    ]
+    assert packaging_gate._python_deps_issue(propagating) is None
+
+
+def test_cleanup_waits_for_the_owned_namespace_deletion() -> None:
+    """Both smokes wait (bounded) for their owned namespace before returning.
+
+    Regression: the cleanup branch used ``--wait=false``, so a subsequent
+    run could acquire the lock while the namespace was still terminating.
+    The deletion is now a bounded wait (``--timeout=120s``), still
+    best-effort, and in the e2e smoke it completes before the lock is
+    released.
+    """
+    root = pathlib.Path(__file__).resolve().parents[4]
+    gate4 = (root / "tools/release/gates/gate4_local_k8s_smoke.sh").read_text(
+        encoding="utf-8"
+    )
+    cleanup = gate4.split("cleanup_owned_helm_resources() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "--wait=true --timeout=120s" in cleanup
+    assert "--wait=false" not in cleanup
+
+    e2e = (root / "tools/e2e/verify_helm_cluster_smoke_e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    e2e_cleanup = e2e.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    delete = e2e_cleanup.split("delete namespace", 1)[1].split("fi", 1)[0]
+    assert "--wait=true --timeout=120s" in delete
+    assert e2e_cleanup.index("delete namespace") < e2e_cleanup.index(
+        "release_cluster_lock"
+    )
+
+
+def test_return_status_is_normalized_to_eight_bits() -> None:
+    """``return 257`` fails (status 1), so later commands are unreachable.
+
+    Regression: function-body return classification treated values above
+    255 as unknown (potentially successful), so a function ending in
+    ``return 257`` looked ambiguous and commands after a call to it
+    counted as reachable provisioning evidence, though bash truncates the
+    status to its low 8 bits and the function fails.  ``return 256``
+    exits 0 and stays in the zero family.
+    """
+    assert packaging_gate._return_kind("return 257") == "nonzero"
+    assert packaging_gate._return_kind("return 511") == "nonzero"
+    assert packaging_gate._return_kind("return 256") == "zero"
+    assert packaging_gate._return_kind("return 0") == "zero"
+    assert packaging_gate._return_kind("return $rc") == "unknown"
+
+    script = (
+        "set -e\n"
+        "fail() { return 257; }\n"
+        "fail\n"
+        "python3 -m pip install -r requirements-release.txt\n"
+        "make docs-check\n"
+    )
+    issue = packaging_gate._python_deps_issue([{"run": script}])
+    assert issue is not None, (
+        "commands after a failing return must not count as reachable"
+    )
+
+
+def _heredoc_body_workflow(body: str) -> str:
+    return f"""jobs:
+  release-gate:
+    steps:
+      - run: |
+{textwrap.indent(body, '          ')}
+"""
+
+
+def test_unquoted_heredoc_substitutions_are_scanned() -> None:
+    """An unquoted heredoc expands its body, so substitutions execute.
+
+    Regression: ``cat <<EOF`` with a ``$(rustup toolchain install ...)``
+    line hid the installer -- the body was data for command scanning and
+    the substitution scan ran only on the stripped script.  Unquoted
+    heredoc bodies now have their command substitutions scanned; a quoted
+    delimiter suppresses expansion and its body stays literal.
+    """
+    unquoted = _heredoc_body_workflow(
+        "cat <<EOF\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(unquoted) is not None
+
+    quoted = _heredoc_body_workflow(
+        "cat <<'EOF'\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(quoted) is None
+
+    benign = _heredoc_body_workflow(
+        "cat <<EOF\ntext $(date) only\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+
+
+def test_shell_template_commands_are_scanned() -> None:
+    """A custom shell template can execute its own commands.
+
+    Regression: ``shell: "bash -c 'rustup toolchain install nightly' {0}"``
+    runs the installer from the template while the scanned run block
+    stays harmless.  The template's ``-c`` payloads are scanned now; a
+    benign template (and the bare ``bash {0}`` form) stays accepted.
+    """
+    yaml = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'rustup toolchain install nightly' {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(yaml) is not None
+    benign = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'echo hi' {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(benign) is None
+
+
+def test_masking_does_not_overmask_commands_after_a_masking_branch() -> None:
+    """A command after ``false || true &&`` still runs and reports itself.
+
+    Regression: the list-level walk masked EVERY member once any ``||``
+    discarded failure, so ``false || true && pip install ...`` excluded
+    the install even though it runs and its failure is the list's final
+    status.  Each member is simulated individually now.
+    """
+    script = (
+        "false || true && "
+        "python3 -m pip install -r requirements-release.txt"
+    )
+    steps = [{"run": script, "shell": "bash"}, {"run": "make docs-check"}]
+    assert packaging_gate._python_deps_issue(steps) is None
+    masked = packaging_gate._failure_masked_command_segments(
+        script, errexit=True
+    )
+    assert "false" in masked
+    assert not any(
+        segment.startswith("python3 -m pip") for segment in masked
+    )
+
+
+def test_shell_template_option_clusters_and_placeholders_are_scanned() -> None:
+    """Option clusters and ``{0}``-carrying payloads must not hide installs.
+
+    Regression: the template scanner recognized only a standalone ``-c``
+    token, so ``bash -ec '...' 0 {0}`` was skipped whole; and a payload
+    containing ``{0}`` was skipped, so ``bash -c 'bash {0}; rustup ...'``
+    hid an install behind the placeholder.  Clusters are parsed, and the
+    placeholder is substituted with an inert sentinel (the generated
+    script is the run block, which the caller scans separately).
+    """
+    cluster = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -ec 'rustup toolchain install nightly' 0 {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(cluster) is not None
+
+    placeholder_payload = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'bash {0}; rustup toolchain install nightly' 0"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        placeholder_payload
+    ) is not None
+
+    # Controls: benign clusters, placeholder-only payloads, and bare
+    # interpreter forms stay accepted.
+    benign_cluster = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -ec 'echo hi' 0 {0}"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(benign_cluster) is None
+    benign_placeholder = """jobs:
+  release-gate:
+    steps:
+      - shell: "bash -c 'bash {0}; echo ok' 0"
+        run: "echo harmless"
+"""
+    assert packaging_gate._raw_toolchain_install_issue(
+        benign_placeholder
+    ) is None
+    python_template = """jobs:
+  release-gate:
+    steps:
+      - shell: 'bash -c "python3 {0}"'
+        run: 'print("hello")'
+"""
+    assert packaging_gate._raw_toolchain_install_issue(python_template) is None
+
+
+def test_rustup_toolchain_override_is_skipped_before_the_subcommand() -> None:
+    """`+toolchain` shifts the subcommand; both orders must be flagged.
+
+    Regression: the skip loop only stepped over `-` flags, so
+    `rustup +stable toolchain install nightly` left `+stable` as the
+    subcommand head and neither the literal pair nor the unresolved-word
+    check matched -- a raw install passed the gate.
+    """
+    for command in (
+        "rustup +stable toolchain install nightly",
+        "rustup toolchain install nightly",
+        "rustup +stable +nightly toolchain install nightly",
+        "rustup --verbose +stable toolchain install nightly",
+    ):
+        assert packaging_gate._raw_install_in_segment(command), command
+
+    # A benign subcommand behind the override stays accepted.
+    assert not packaging_gate._raw_install_in_segment("rustup +stable show")
+    assert not packaging_gate._raw_install_in_segment(
+        "rustup +stable toolchain list"
+    )
+
+
+def test_masked_and_backgrounded_sets_use_the_live_view_text() -> None:
+    """A `then`/`do`/`else` carrier must compare as the command it runs.
+
+    Regression: the masked set stored the raw segment text
+    (`then pip install ...`) while the live-command view carries the
+    command alone, so a masked install inside a provably-running branch
+    never matched and satisfied the gate.
+    """
+    script = (
+        "if true; then "
+        "python3 -m pip install -r requirements-release.txt || true; fi\n"
+        "make docs-check"
+    )
+    steps = [{"run": script}]
+    assert packaging_gate._python_deps_issue(steps) is not None
+
+    masked = packaging_gate._failure_masked_command_segments(script)
+    assert (
+        "python3 -m pip install -r requirements-release.txt" in masked
+    ), masked
+    assert not any(segment.startswith("then ") for segment in masked), masked
+
+    backgrounded = packaging_gate._backgrounded_command_segments(
+        "if true; then python3 -m pip install -r requirements-release.txt & fi\n"
+        "make docs-check"
+    )
+    assert not any(
+        segment.startswith("then ") for segment in backgrounded
+    ), backgrounded
+
+
+def test_make_environment_and_cli_masking_modes_disqualify_docs_check() -> None:
+    """-i/-silent hide a failing docs check on both surfaces.
+
+    `make -i f` exits 0 with the failure "ignored" (verified), and the
+    short spelling `-silent` is read by make as `-s -i -l ent`, so a
+    cluster can carry the masking flag.  A step whose environment or
+    command line carries one cannot prove the check succeeded.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for value in ("-i", "i", "silent", "-si", "-is", "--ignore-errors"):
+        assert (
+            packaging_gate._python_deps_issue(
+                [install, {"run": "make docs-check", "env": {"MAKEFLAGS": value}}]
+            )
+            is not None
+        ), value
+    for command in (
+        "make -i docs-check",
+        "make --ignore-errors docs-check",
+        "make -silent docs-check",
+        "MAKEFLAGS=-i make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, command]) is not None
+        ), command
+    # A plain check still certifies.
+    assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
+
+
+def test_make_environment_nonexecuting_modes_disqualify_docs_check() -> None:
+    """A non-executing make mode in the environment stops the docs check.
+
+    Regression: the docs-check detector read only the command words, so a
+    step (or job/workflow) environment of ``MAKEFLAGS=-n`` still counted
+    as a live docs check although GNU Make merely prints recipes.  GNU Make
+    also accepts the dash-less first-word spellings (``n``, ``kn``) and
+    the long forms (``--dry-run``), so those disqualify the step too.  A
+    command-local assignment is covered as well.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    rejected = [
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-n"}}],
+        [install, {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "-q"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-t"}}],
+        [install, {"run": "MAKEFLAGS=-n make docs-check"}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "n"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "kn"}}],
+        [install, {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "n"}}],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--dry-run"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"GNUMAKEFLAGS": "--dry-run"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--question"}},
+        ],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--touch"}},
+        ],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "silent"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-i"}}],
+    ]
+    for steps in rejected:
+        assert packaging_gate._python_deps_issue(steps) is not None, steps
+
+    accepted = [
+        [install, {"run": "make docs-check"}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": ""}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "s"}}],
+        [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "k"}}],
+        [
+            install,
+            {"run": "make docs-check", "env": {"MAKEFLAGS": "--trace"}},
+        ],
+        [
+            install,
+            {
+                "run": "make docs-check",
+                "env": {"MAKEFLAGS": "w --jobserver-auth=3,4"},
+            },
+        ],
+    ]
+    for steps in accepted:
+        assert packaging_gate._python_deps_issue(steps) is None, steps
+
+
+def test_make_flags_cluster_scan_stops_at_argument_options() -> None:
+    """Letters after an argument-taking option are that argument.
+
+    GNU Make's switch table gives ``W``/``f``/``C`` (and friends) an
+    argument, so ``-Wn`` asks for file ``n`` and does not select
+    just-print.  A model that scanned past the argument would reject a
+    step whose make invocation actually runs.
+    """
+    assert packaging_gate._make_flags_value_prevents_execution("n") is True
+    assert packaging_gate._make_flags_value_prevents_execution("kn") is True
+    assert packaging_gate._make_flags_value_prevents_execution("silent") is False
+    assert packaging_gate._make_flags_value_prevents_execution("trace") is True
+    assert packaging_gate._make_flags_value_prevents_execution("-Wn") is False
+    assert packaging_gate._make_flags_value_prevents_execution("-fn") is False
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("--dry-run") is True
+    )
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("--dry-run=x")
+        is True
+    )
+    assert (
+        packaging_gate._make_flags_value_prevents_execution("VAR=n") is False
+    )
+    assert packaging_gate._make_flags_value_prevents_execution("n=1") is False
+
+
+def test_command_line_cluster_scan_matches_make_switch_semantics() -> None:
+    """Both paths scan short-option clusters with one shared model.
+
+    Regression: the command-line path used a plain substring search, so
+    ``-Wn``/``-fn`` (where the argument-taking ``W``/``f`` consumes the
+    letter ``n``) were classified as non-executing although make actually
+    runs the recipe (``-Wn``) or fails before it (``-fn``).  The shared
+    scanner stops at argument-taking letters, so both paths agree.
+    """
+    for word in ("-Wn", "-fn", "-In", "-Cn", "-En"):
+        assert packaging_gate._make_option_prevents_execution(word) is False, word
+        # And the MAKEFLAGS path reads the same word the same way.
+        assert (
+            packaging_gate._make_flags_value_prevents_execution(word) is False
+        ), word
+    for word in ("-kn", "-nv", "-vh", "-n", "-q", "-t", "-v", "-h"):
+        assert packaging_gate._make_option_prevents_execution(word) is True, word
+    # A dash-less word is not an option on the command line.
+    assert packaging_gate._make_option_prevents_execution("trace") is False
+
+
+def test_environment_cluster_letters_stay_within_verified_make_behavior() -> None:
+    """The MAKEFLAGS letter set excludes version-dependent spellings.
+
+    ``h``/``--help`` are ignored by make 3.81 and 4.3 when they arrive
+    through MAKEFLAGS (the recipe runs), so treating them as
+    non-executing would wrongly disqualify a live docs check on those
+    versions.  ``v``/``--version`` stop every verified version and stay.
+    """
+    for value in ("v", "-v", "--version"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) is True, value
+    for value in ("h", "-h", "--help"):
+        assert packaging_gate._make_flags_value_prevents_execution(value) is False, value
+    assert packaging_gate._make_flags_value_prevents_execution("n") is True
+    assert packaging_gate._make_flags_value_prevents_execution("kn") is True
+
+
+def _heredoc_workflow(body: str) -> str:
+    return (
+        "jobs:\n  release-gate:\n    steps:\n      - run: |\n"
+        + "".join(f"          {line}\n" for line in body.splitlines())
+    )
+
+
+def test_partially_quoted_heredoc_delimiters_suppress_expansion() -> None:
+    """Quoting any part of a delimiter makes the body literal.
+
+    Regression: only a leading quote was recognized, so `<<E'OF'` (whose
+    body bash does NOT expand) still had its `$(...)` text scanned and
+    could block a workflow that is actually safe.
+    """
+    expanding = _heredoc_workflow(
+        "cat <<EOF\n$(rustup toolchain install nightly)\nEOF"
+    )
+    assert packaging_gate._raw_toolchain_install_issue(expanding) is not None
+
+    literal = [
+        "cat <<E'OF'\n$(rustup toolchain install nightly)\nEOF",
+        'cat <<"E"OF\n$(rustup toolchain install nightly)\nEOF',
+        "cat <<E\\OF\n$(rustup toolchain install nightly)\nEOF",
+    ]
+    for body in literal:
+        assert (
+            packaging_gate._raw_toolchain_install_issue(
+                _heredoc_workflow(body)
+            )
+            is None
+        ), body

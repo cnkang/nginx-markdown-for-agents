@@ -36,6 +36,7 @@ import json
 import math
 import os
 import re
+import select
 import signal
 import subprocess
 import sys
@@ -51,6 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import (  # noqa: E402
+    safe_repo_relative_ref,
     validate_filename_strict,
     validate_read_path,
     validate_write_path_within_root,
@@ -195,6 +197,15 @@ MAX_FUZZ_INVOCATIONS = 8
 # this margin plus its replay time; that tolerance is absorbed by the
 # slack between FUZZ_JOB_BUDGET and the release job's 360-minute cap.
 INVOCATION_TIMEOUT_MARGIN = 900
+# Per-record elapsed ceiling.  FUZZ_JOB_BUDGET is the phase-wide wall-clock
+# envelope, and a single record legitimately includes the envelope plus the
+# one in-flight invocation's continuation margin and replay allowance.  The
+# per-record check must therefore use this derived bound, not the envelope
+# itself: a target near the accepted `required_minutes` maximum plus a full
+# executions chase emits elapsed > FUZZ_JOB_BUDGET while still legal.
+MAX_RECORD_ELAPSED_SECONDS = (
+    FUZZ_JOB_BUDGET + INVOCATION_TIMEOUT_MARGIN + REPLAY_ALLOWANCE_SECONDS
+)
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
 RECORD_OUTPUT_LABEL = "fuzz qualification record"
@@ -301,9 +312,23 @@ def _git_head_sha() -> str:
 
 
 def _run_id_from(started_at: str) -> str:
-    """Derive a timestamp-based run id from the ISO-8601 start time."""
-    canonical = started_at.replace("+00:00", "Z")
-    return "fuzz-qualification-" + canonical.replace("-", "").replace(":", "")
+    """Derive a timestamp-based run id from the ISO-8601 start time.
+
+    The id is canonical UTC: a naive timestamp is treated as UTC and any
+    offset is normalized, so non-UTC inputs cannot produce malformed ids
+    (the previous text-replace only handled a literal '+00:00' suffix and
+    let offsets leak their digits into the id).
+    """
+    try:
+        moment = datetime.fromisoformat(started_at)
+    except ValueError as exc:
+        raise ValueError(
+            f"started_at is not a valid ISO-8601 timestamp: {started_at!r}"
+        ) from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    canonical = moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"fuzz-qualification-{canonical}"
 
 
 def load_json(path: str | Path, label: str) -> dict:
@@ -572,6 +597,7 @@ def _start_toolchain_identity_process(
     stream = _BoundedStream(
         max_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
         max_pending_line_chars=_MAX_TOOLCHAIN_IDENTITY_CHARS + 1,
+        pipe=process.stdout,
     )
     reader = threading.Thread(
         target=_drain_stream, args=(process.stdout, stream), daemon=True
@@ -586,20 +612,54 @@ def _start_toolchain_identity_process(
 
 
 def _wait_toolchain_identity_process(
-    process: subprocess.Popen, label: str
+    process: subprocess.Popen,
+    label: str,
+    stream: _BoundedStream | None = None,
 ) -> int:
-    """Bound toolchain command runtime and terminate on every exceptional exit."""
+    """Bound toolchain command runtime and terminate on every exceptional exit.
+
+    The leader is reaped only after its process group has been signaled: if
+    the leader exited while a descendant still held stdout, reaping first
+    would set ``returncode`` and make the group signal a no-op, letting the
+    descendant keep the reader blocked.  ``_wait_fuzz_process`` applies that
+    ordering (``waitid(WNOWAIT)`` where available, a stop-then-signal poll
+    elsewhere), so reuse it instead of a plain ``wait``.
+
+    ``stream`` is the bounded pipe drain; the interrupt path uses its EOF
+    state (all writers closed) as the ownership proof for any post-reap
+    group signal.
+    """
     try:
-        return process.wait(timeout=30)
+        returncode = _wait_fuzz_process(process, 30.0)
     except subprocess.TimeoutExpired as exc:
         _terminate_fuzz_process_group(process)
         raise ValueError(
             f"unable to collect fuzz toolchain identity for {label}"
         ) from exc
     except BaseException:
+        # Interrupt path: signal the group FIRST.  `process.poll()` would
+        # reap the leader and set `returncode`, after which the guarded group
+        # signal returns early and a descendant that inherited stdout keeps
+        # running.  `_signal_fuzz_process_group` handles the already-reaped
+        # case without touching the group; when the wait path itself had
+        # already reaped the leader before unwinding, the direct post-reap
+        # signal covers the descendants, gated on the reader proof below so
+        # an empty group is never signaled by number alone.
+        _signal_fuzz_process_group(process, signal.SIGTERM)
         if process.poll() is None:
             _terminate_fuzz_process_group(process)
+        elif not _waitid_supported():
+            # Only builds without waitid/WNOWAIT can reap the leader before
+            # unwinding, so only they need the post-reap group signal.  On
+            # waitid builds the leader stays a zombie until the group has
+            # been signaled, so no post-reap signal is sent: after the reap
+            # the numeric id may already belong to another process group.
+            _signal_reaped_fuzz_process_group_when_open(process, stream)
         raise
+    _signal_fuzz_process_group(
+        process, getattr(signal, "SIGKILL", signal.SIGTERM)
+    )
+    return returncode
 
 
 def _finish_toolchain_identity_process(
@@ -612,7 +672,7 @@ def _finish_toolchain_identity_process(
             _terminate_fuzz_process_group(process)
             reader.join(_PROCESS_KILL_REAP_SECONDS)
     finally:
-        _close_fuzz_process_pipes(process)
+        _close_fuzz_process_pipes(process, (reader,))
         _unregister_fuzz_process(process)
 
 
@@ -620,7 +680,7 @@ def _run_toolchain_version_command(command: list[str], label: str) -> str:
     """Collect a toolchain version through a bounded subprocess stream."""
     process, stream, reader = _start_toolchain_identity_process(command, label)
     try:
-        returncode = _wait_toolchain_identity_process(process, label)
+        returncode = _wait_toolchain_identity_process(process, label, stream)
     finally:
         _finish_toolchain_identity_process(process, reader)
     if returncode != 0:
@@ -765,8 +825,10 @@ class _BoundedStream:
         self,
         max_chars: int = _MAX_CAPTURE_CHARS,
         max_pending_line_chars: int = _MAX_PENDING_LINE_CHARS,
+        pipe: object = None,
     ) -> None:
         self._max_pending_line_chars = max_pending_line_chars
+        self._pipe = pipe
         self._head_limit = max_chars // 2
         self._tail_limit = max_chars - self._head_limit
         self._head: list[str] = []
@@ -777,7 +839,42 @@ class _BoundedStream:
         self._pending = ""
         self._marker_evidence: str | None = None
         self._marker_scan_overlap = ""
+        self._eof_seen = threading.Event()
         self._lock = threading.Lock()
+
+    def mark_eof(self) -> None:
+        """Record that the pipe's read end observed EOF (all writers closed)."""
+        self._eof_seen.set()
+
+    def eof_reached(self) -> bool:
+        """Whether every pipe writer has closed (no descendant holds stdout)."""
+        return self._eof_seen.is_set()
+
+    def writer_hangup(self) -> bool | None:
+        """Whether the OS reports every writer of the pipe has closed.
+
+        A kernel-visible complement to ``eof_reached``: the drain thread
+        marks EOF only after it has consumed the buffered bytes, so a pipe
+        whose writers all closed but whose data is still buffered reports
+        "not EOF".  ``poll`` reports the write end's state directly
+        (POLLHUP), so it proves the writers are gone even with unread
+        data.  Returns True when every writer has closed, False when a
+        writer still holds the write end, and None when no probe is
+        available (no pipe, or no ``poll`` on this platform).
+        """
+        if self._pipe is None or not hasattr(select, "poll"):
+            return None
+        if self._pipe.closed:
+            # The drain thread closes the read end only after its read
+            # loop observed EOF.
+            return True
+        try:
+            poller = select.poll()
+            poller.register(self._pipe.fileno(), select.POLLHUP)
+            events = poller.poll(0)
+        except (OSError, ValueError):
+            return None
+        return any(flags & select.POLLHUP for _fd, flags in events)
 
     def feed(self, chunk: str) -> None:
         """Consume one decoded chunk, retaining head, tail and markers."""
@@ -875,6 +972,10 @@ def _drain_stream(pipe, stream: _BoundedStream) -> None:
     try:
         for chunk in iter(lambda: pipe.read(_STREAM_READ_BYTES), b""):
             stream.feed(decoder.decode(chunk))
+        # EOF proves every write end closed: no process still holds the
+        # pipe.  Mark it before the final feed so the interrupt path can
+        # use it as the ownership proof for a post-reap group signal.
+        stream.mark_eof()
         stream.feed(decoder.decode(b"", final=True))
     finally:
         stream.finish()
@@ -916,13 +1017,83 @@ def _signal_fuzz_process_group(
             process.kill()
 
 
+def _signal_reaped_fuzz_process_group_when_open(
+    process: subprocess.Popen, stream: _BoundedStream | None
+) -> None:
+    """Signal a reaped leader's group only while a pipe writer is open.
+
+    ``_signal_fuzz_process_group`` skips a reaped leader to keep the PGID
+    reuse guard, but the interrupt path can unwind after the wait loop
+    reaped the leader while descendants still hold the group.  Signalling
+    by number alone would risk a reused group id, so the signal is gated
+    on pipe closure: the write end closing is the one event that proves
+    every descendant released the pipe.  The kernel's POLLHUP probe
+    reports the write end's state directly, so it stays conclusive even
+    when a closed pipe still has buffered data the drain thread has not
+    consumed (a drained-then-marked flag would misread that case, where a
+    reused group id could receive the signal).  While a writer is open,
+    some process still holds the write end; that process inherited it
+    from this invocation's leader, so it is a live group member: the
+    PGID is still allocated and the signal reaches exactly this run's
+    descendants.  Once every writer has closed the group may be empty, so
+    no signal is sent.  A short settle lets a reader that is finishing
+    the reaped leader's last output observe closure first.  When the
+    platform offers no poll probe, the drain thread's EOF flag is the
+    fallback proof.
+    """
+    if os.name != "posix":
+        return
+    if stream is None:
+        # No ownership proof available: never signal a group by number
+        # alone, because the id may already belong to another process.
+        return
+    time.sleep(_PROCESS_WAIT_POLL_SECONDS)
+    hangup = stream.writer_hangup()
+    if hangup is True:
+        # Every writer closed: no live descendant owns the pipe.
+        return
+    if hangup is None:
+        # The probe is unavailable or failed on this platform.  The drain
+        # thread's EOF flag only observes closure after consuming buffered
+        # data, so it cannot prove a writer remains; without proof a
+        # numeric group signal could reach a recycled group, so none is
+        # sent.
+        return
+    # A writer is still open: a live descendant holds the pipe, which
+    # proves the group id still belongs to this run.
+    try:
+        os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except OSError:
+        return
+
+
+def _waitid_supported() -> bool:
+    """Whether this build can observe exit without reaping (``WNOWAIT``)."""
+    required = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    return os.name == "posix" and all(
+        hasattr(os, name) for name in required
+    )
+
+
 def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
-    """Kill descendants before reaping the group leader, avoiding PGID reuse."""
+    """Kill descendants before reaping the group leader, avoiding PGID reuse.
+
+    On POSIX systems with ``waitid`` and ``WNOWAIT`` the leader is observed
+    without being reaped, its group is signaled, and only then is it reaped:
+    the group id stays valid for the descendants that must receive the
+    signal.
+
+    Interpreter builds without ``waitid``/``WNOWAIT`` (some macOS Python
+    distributions) cannot observe the leader without reaping it.  The
+    fallback polls the leader to completion and then signals the process
+    group directly, so descendants that inherited stdout are still
+    terminated; its docstring documents the bounded PGID-reuse window that
+    path accepts.
+    """
     if os.name != "posix":
         return process.wait(timeout=timeout)
-    required_waitid = ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
-    if any(not hasattr(os, name) for name in required_waitid):
-        raise RuntimeError("POSIX fuzz cleanup requires waitid with WNOWAIT")
+    if not _waitid_supported():
+        return _wait_fuzz_process_without_waitid(process, timeout)
     deadline = time.monotonic() + timeout
     while True:
         if process.returncode is not None:
@@ -948,19 +1119,63 @@ def _wait_fuzz_process(process: subprocess.Popen, timeout: float) -> int:
         time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
 
 
-def _terminate_fuzz_process_group(process: subprocess.Popen) -> None:
-    """Bound TERM grace, then KILL every remaining process in the group."""
+def _wait_fuzz_process_without_waitid(
+    process: subprocess.Popen, timeout: float
+) -> int:
+    """Poll the leader, then signal its group, on builds without ``waitid``.
+
+    Used on POSIX builds without ``waitid``/``WNOWAIT``.  ``poll`` reaps the
+    leader, and the guarded group helper would then skip (its PGID-reuse
+    guard keys on ``returncode``), so the group is signaled here directly:
+    the group id stays valid while any descendant lives, which is exactly
+    the case this call must cover.  A reused pid could in principle identify
+    a different group by then; that window is bounded by the poll interval
+    and only exists on interpreters that have no ``waitid`` path at all.
+    """
+    deadline = time.monotonic() + timeout
+    returncode = process.poll()
+    while returncode is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(min(_PROCESS_WAIT_POLL_SECONDS, remaining))
+        returncode = process.poll()
+    with contextlib.suppress(OSError):
+        os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    return returncode
+
+
+def _terminate_fuzz_process_group(
+    process: subprocess.Popen,
+    streams: tuple[_BoundedStream, ...] | None = None,
+) -> None:
+    """Bound TERM grace, then KILL every remaining process in the group.
+
+    ``streams`` are the invocation's pipe drains: when the no-waitid wait
+    path reaped the leader before an interrupt, the guarded signal skips
+    (its PGID-reuse guard keys on ``returncode``) and descendants holding
+    the captured pipes would survive.  A stream whose writer is still open
+    proves such a descendant holds the group, so the ownership-checked
+    post-reap signal is applied to each open group on those builds only.
+    """
     _signal_fuzz_process_group(process, signal.SIGTERM)
     time.sleep(_PROCESS_TERMINATION_GRACE_SECONDS)
     _signal_fuzz_process_group(
         process, getattr(signal, "SIGKILL", signal.SIGTERM)
     )
-    try:
+    if (
+        streams
+        and getattr(process, "returncode", None) is not None
+        and not _waitid_supported()
+    ):
+        # Only the no-waitid wait path can reap the leader before unwinding.
+        # On waitid builds the leader stays unreaped until the group has
+        # been signaled, so a reaped leader here means an unrelated reap,
+        # and the numeric id may already belong to another process group.
+        for stream in streams:
+            _signal_reaped_fuzz_process_group_when_open(process, stream)
+    with contextlib.suppress(subprocess.TimeoutExpired):
         process.wait(timeout=_PROCESS_KILL_REAP_SECONDS)
-    except subprocess.TimeoutExpired:
-        # SIGKILL has been sent. Do not let a stuck kernel task hold the
-        # release gate indefinitely while its asynchronous exit completes.
-        pass
 
 
 def _register_fuzz_process(process: subprocess.Popen) -> None:
@@ -991,10 +1206,26 @@ def _cancel_active_fuzz_processes() -> None:
         _signal_fuzz_process_group(process, kill_signal)
 
 
-def _close_fuzz_process_pipes(process: subprocess.Popen) -> None:
-    """Close pipes that have no reader or outlived the bounded reader join."""
-    for pipe in (process.stdout, process.stderr):
+def _close_fuzz_process_pipes(
+    process: subprocess.Popen,
+    readers: tuple[threading.Thread, ...] = (),
+) -> None:
+    """Close pipes whose reader threads have already finished.
+
+    A ``BufferedReader.close()`` waits on the internal read lock, so
+    closing a pipe while its reader thread is still blocked in ``read()``
+    (a child process holding the write end) can hang the gate indefinitely
+    (verified against a live child: ``close()`` did not return while a
+    reader was blocked).  Each pipe is paired with the reader that drains
+    it; a pipe whose reader is still alive after the bounded join grace is
+    left open instead.  The failure direction is a bounded descriptor leak
+    in an already-exceptional path, never a hang.
+    """
+    pipes = (process.stdout, process.stderr)
+    for index, pipe in enumerate(pipes):
         if pipe is None or pipe.closed:
+            continue
+        if index < len(readers) and readers[index].is_alive():
             continue
         with contextlib.suppress(OSError):
             pipe.close()
@@ -1028,7 +1259,8 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
                 "wall_elapsed": time.monotonic() - started,
                 "marker_finding": None}
     _register_fuzz_process(process)
-    stdout_stream, stderr_stream = _BoundedStream(), _BoundedStream()
+    stdout_stream = _BoundedStream(pipe=process.stdout)
+    stderr_stream = _BoundedStream(pipe=process.stderr)
     readers = [
         threading.Thread(target=_drain_stream, args=(pipe, stream), daemon=True)
         for pipe, stream in ((process.stdout, stdout_stream),
@@ -1047,10 +1279,10 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
             _terminate_fuzz_process_group(process)
     except KeyboardInterrupt:
         _FUZZ_CANCEL_REQUESTED.set()
-        _terminate_fuzz_process_group(process)
+        _terminate_fuzz_process_group(process, (stdout_stream, stderr_stream))
         raise
     except BaseException:
-        _terminate_fuzz_process_group(process)
+        _terminate_fuzz_process_group(process, (stdout_stream, stderr_stream))
         raise
     finally:
         if process.returncode is None:
@@ -1061,7 +1293,7 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: float) -> dict:
         try:
             _join_readers(started_readers)
         finally:
-            _close_fuzz_process_pipes(process)
+            _close_fuzz_process_pipes(process, tuple(started_readers))
             _unregister_fuzz_process(process)
     result = {
         "stdout": stdout_stream.text(),
@@ -1224,6 +1456,9 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     # crashes and zero sanitizer findings, not as a crash.
     if invocation["returncode"] == -1:
         stderr = invocation.get("stderr", "")
+        # The timeout marker is a producer prefix: a later mention of the
+        # phrase in worker output must not classify as a timeout (see
+        # test_soak_timeout_marker_must_start_the_stderr_record).
         if stderr.startswith("timed out:"):
             return executions, elapsed, "timed out: fuzz invocation exceeded its time cap"
         if "spawn failed:" in stderr:
@@ -1500,10 +1735,8 @@ def _atomic_write_record(path: Path, record: dict) -> None:
         temporary_path = None
     finally:
         if temporary_path is not None:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 temporary_path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def _write_record(record: dict, args) -> Path:
@@ -1647,15 +1880,30 @@ def _run_queue(
         # Interpreter-level exits are recorded for the parent's join-time
         # re-raise and signal the siblings to stop; the re-raise here
         # keeps the exit visible to the runtime instead of swallowing it
-        # inside the worker thread.
+        # inside the worker thread.  The stop must also cancel the
+        # siblings' in-flight invocations the same way any other stop
+        # does: a stopped sibling only unwinds at its next queue
+        # boundary, so its running invocation would otherwise keep
+        # consuming the shared envelope while the gate has already
+        # failed.
         with lock:
             errors.append(exc)
         stop.set()
+        _FUZZ_CANCEL_REQUESTED.set()
+        _cancel_active_fuzz_processes()
         raise
     except Exception as exc:
+        # A non-interpreter worker failure stops the siblings the same way
+        # an interpreter-level exit does, and it must also cancel any fuzz
+        # process groups they have in flight: a stopped sibling only
+        # unwinds at its next queue boundary, so its running invocation
+        # would otherwise keep consuming the shared envelope while the
+        # gate has already failed.
         with lock:
             errors.append(exc)
         stop.set()
+        _FUZZ_CANCEL_REQUESTED.set()
+        _cancel_active_fuzz_processes()
 
 
 def _raise_worker_errors(errors: list[BaseException]) -> None:
@@ -1754,8 +2002,15 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
         )
         for index, queue in enumerate(queues)
     ]
-    _start_and_join_workers(threads, stop)
-    _raise_worker_errors(errors)
+    try:
+        _start_and_join_workers(threads, stop)
+        _raise_worker_errors(errors)
+    finally:
+        # The pool is fully joined, so no invocation can start from it any
+        # more: the cancel flag a worker failure set is scoped to this
+        # pool run and clears for the next one (which also clears it at
+        # entry).
+        _FUZZ_CANCEL_REQUESTED.clear()
     return records
 
 
@@ -1837,19 +2092,10 @@ def _per_target_reasons(entry, index: int) -> list[str]:
     return reasons
 
 
-def _safe_record_path(value: object) -> PurePosixPath | None:
-    """Parse one normalized repository-relative POSIX record path."""
-    if not isinstance(value, str) or not value or "\\" in value:
-        return None
-    path = PurePosixPath(value)
-    if (
-        path.is_absolute()
-        or path.as_posix() != value
-        or ":" in path.parts[0]
-        or any(part in {"", ".", ".."} for part in path.parts)
-    ):
-        return None
-    return path
+# The canonical repository-relative reference parser is shared with the
+# gate-manifests generator (tools/lib/path_validation.py); both gates must
+# enforce identical reference semantics (Rule 31: one owner per rule).
+_safe_record_path = safe_repo_relative_ref
 
 
 def _per_target_reference_reasons(
@@ -1909,9 +2155,9 @@ def _blocking_elapsed_reason(name: str, elapsed: object) -> str | None:
     if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
         return (f"missing-observation: {name} elapsed_seconds_total "
                 "must be finite numeric")
-    if elapsed > FUZZ_JOB_BUDGET:
+    if elapsed > MAX_RECORD_ELAPSED_SECONDS:
         return (f"malformed: {name} elapsed_seconds_total exceeds "
-                "fuzz job budget")
+                "the per-record ceiling")
     if elapsed < 0:
         return (f"malformed: {name} elapsed_seconds_total must be "
                 "non-negative")
@@ -1949,7 +2195,11 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
     status_reason = _blocking_status_reason(name, entry)
     if status_reason is not None:
         return [status_reason]
-    assert entry is not None
+    if entry is None:
+        # _blocking_status_reason already returns for a missing entry; this
+        # guard keeps the invariant explicit instead of relying on an assert
+        # that `python -O` strips.
+        return [f"missing-observation: {name} entry is absent"]
     seed_reason = _blocking_seed_reason(name, spec.get("seed"), entry)
     if seed_reason is not None:
         return [seed_reason]
@@ -1958,11 +2208,14 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
     elapsed_reason = _blocking_elapsed_reason(name, elapsed)
     if elapsed_reason is not None:
         return [elapsed_reason]
-    assert isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
+        return [f"missing-observation: {name} elapsed_seconds_total "
+                "must be finite numeric"]
     execution_reason = _blocking_execution_reason(name, executions)
     if execution_reason is not None:
         return [execution_reason]
-    assert type(executions) is int
+    if type(executions) is not int:
+        return [f"missing-observation: {name} executions_total not an integer"]
     reasons = []
     required_seconds = int(spec["required_minutes"] * 60)
     required_executions = int(spec["required_executions"])
@@ -2013,6 +2266,54 @@ def _blocking_set_reasons(record: dict, manifest: dict) -> list[str]:
     return reasons
 
 
+def _observed_release_dirs(record: dict) -> set[str]:
+    """Collect the release directories the record's per-target refs name."""
+    observed: set[str] = set()
+    per_target = record.get("per_target")
+    if not isinstance(per_target, list):
+        return observed
+    for entry in per_target:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("raw_log_ref", "corpus_dir", "seed_path"):
+            candidate = entry.get(key)
+            if not isinstance(candidate, str) or not candidate:
+                continue
+            # artifacts/release/<version>/... -> <version>
+            parts = PurePosixPath(candidate).parts
+            if (
+                len(parts) >= 3
+                and parts[0] == "artifacts"
+                and parts[1] == "release"
+            ):
+                observed.add(parts[2])
+    return observed
+
+
+def _expected_log_dir(record: dict) -> PurePosixPath:
+    """Return the release-relative log directory the record's refs must use.
+
+    The expected directory is the record's own release directory when its
+    per-target refs agree on one (fixture re-validation of captured
+    evidence), and the active release version's default otherwise.  Deriving
+    from the record keeps re-validating a captured artifact possible after
+    the project bumps its Cargo version: the captured refs still point at
+    their own release directory instead of failing against a newer default.
+    """
+    observed = _observed_release_dirs(record)
+    if len(observed) == 1:
+        return (
+            PurePosixPath("artifacts") / "release" / next(iter(observed))
+            / "fuzz-logs"
+        )
+    if len(observed) > 1:
+        # Mixed release directories in one record are malformed; return an
+        # impossible path so the reference check fails closed with its normal
+        # reason instead of accepting a mixed record.
+        return PurePosixPath("artifacts") / "release" / "<mixed>" / "fuzz-logs"
+    return PurePosixPath(_default_artifact_paths()["log_dir"])
+
+
 def validate_record(record: dict, manifest: dict) -> list[str]:
     """Validate a qualification record against manifest threshold semantics."""
     reasons = []
@@ -2032,7 +2333,7 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
     if not isinstance(per_target, list):
         reasons.append("malformed: record per_target must be an array")
         return reasons
-    log_dir = PurePosixPath(_default_artifact_paths()["log_dir"])
+    log_dir = _expected_log_dir(record)
     for index, entry in enumerate(per_target):
         reasons.extend(_per_target_reasons(entry, index))
         if isinstance(entry, dict):

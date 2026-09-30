@@ -2215,6 +2215,26 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 }
 
 
+/*
+ * Track budget exceeded as auxiliary classification.
+ * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
+ * from markdown_streaming_feed/finalize) and C-side size-limit
+ * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
+ * as well as the decompression and parser resource-limit codes:
+ *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
+ *   ERROR_PARSE_TIMEOUT (10),
+ *   ERROR_PARSE_BUDGET_EXCEEDED (11).
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_streaming_is_budget_error(uint32_t error_code)
+{
+    return (error_code == ERROR_MEMORY_LIMIT
+            || error_code == ERROR_BUDGET_EXCEEDED
+            || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+            || error_code == ERROR_PARSE_TIMEOUT
+            || error_code == ERROR_PARSE_BUDGET_EXCEEDED);
+}
+
 static void
 ngx_http_markdown_streaming_record_postcommit_category_metrics(
     ngx_http_request_t *r,
@@ -2224,11 +2244,7 @@ ngx_http_markdown_streaming_record_postcommit_category_metrics(
 {
     /* Track budget exceeded as auxiliary classification. */
     if (!ctx->streaming.completion.failure_recorded
-        && (error_code == ERROR_MEMORY_LIMIT
-        || error_code == ERROR_BUDGET_EXCEEDED
-        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-        || error_code == ERROR_PARSE_TIMEOUT
-        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+        && ngx_http_markdown_streaming_is_budget_error(error_code)
     )
     {
         ctx->streaming.reason =
@@ -2343,52 +2359,7 @@ ngx_http_markdown_streaming_error_reason(uint32_t error_code)
         NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
 }
 
-/*
- * Pre-Commit error handler: apply error_policy for streaming.
- *
- * Single entry point for all pre-commit streaming failures.
- * Routes based on error_code and the markdown_error_policy directive.
- *
- *   error_code == ERROR_STREAMING_FALLBACK:
- *     Capability fallback to full-buffer path, regardless of
- *     error_policy setting.
- *
- *   error_code == 0 (or any non-FALLBACK value):
- *     error_policy == pass      -> fail-open (original HTML)
- *     error_policy == fail_closed -> fail-closed (error)
- *
- * Every non-FALLBACK call unconditionally records the appropriate
- * reason code and increments the corresponding metrics counter so
- * that all pre-commit failures are observable by operators.
- *
- * Returns:
- *   NGX_DECLINED - fallback to full-buffer or fail-open
- *   NGX_ERROR    - fail-closed (reject)
- *
- * The caller must NOT advance the buffer position when NGX_DECLINED
- * is returned so that the body filter can forward the unconsumed
- * chain via ngx_http_next_body_filter.
- */
 
-/*
- * Track budget exceeded as auxiliary classification.
- * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
- * from markdown_streaming_feed/finalize) and C-side size-limit
- * overflow (ERROR_MEMORY_LIMIT = 4, from cumulative input checks),
- * as well as the decompression and parser resource-limit codes:
- *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
- *   ERROR_PARSE_TIMEOUT (10),
- *   ERROR_PARSE_BUDGET_EXCEEDED (11).
- */
-static ngx_inline ngx_flag_t
-ngx_http_markdown_streaming_is_budget_error(uint32_t error_code)
-{
-    return (error_code == ERROR_MEMORY_LIMIT
-            || error_code == ERROR_BUDGET_EXCEEDED
-            || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-            || error_code == ERROR_PARSE_TIMEOUT
-            || error_code == ERROR_PARSE_BUDGET_EXCEEDED);
-}
 
 static ngx_inline void
 ngx_http_markdown_streaming_track_budget_exceeded(
@@ -2465,11 +2436,7 @@ ngx_http_markdown_streaming_precommit_error(
     canonical_reason = ngx_http_markdown_streaming_error_reason(
         error_code);
 
-    if (error_code == ERROR_MEMORY_LIMIT
-        || error_code == ERROR_BUDGET_EXCEEDED
-        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
-        || error_code == ERROR_PARSE_TIMEOUT
-        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+    if (ngx_http_markdown_streaming_is_budget_error(error_code))
     {
         ctx->error.last_category =
             NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
@@ -2998,13 +2965,33 @@ ngx_http_markdown_streaming_handle_feed_result(
     size_t out_len)
 {
     if (rc_ffi == ERROR_STREAMING_FALLBACK) {
+        ngx_int_t  fallback_rc;
+
         if (out_data != NULL) {
             markdown_streaming_output_free(
                 out_data, out_len);
         }
-        return
+
+        fallback_rc =
             ngx_http_markdown_streaming_fallback_to_fullbuffer(
                 r, ctx, conf);
+
+        /*
+         * Capability fallback: NGX_DECLINED hands the request to the
+         * buffered path, which consumes the prebuffered input and keeps
+         * the active-conversion slot.  A failed fallback (NGX_ERROR: the
+         * main buffer could not be initialized or appended) leaves the
+         * request with no conversion path, so the slot is released here -
+         * the same contract ngx_http_markdown_streaming_precommit_error
+         * applies to its own fallback branch.  Relying on the pool
+         * cleanup alone would hold the slot for the request's lifetime
+         * and could reject later requests under max_inflight.
+         */
+        if (fallback_rc != NGX_DECLINED) {
+            ngx_http_markdown_inflight_release(ctx);
+        }
+
+        return fallback_rc;
     }
 
     if (rc_ffi != ERROR_SUCCESS) {

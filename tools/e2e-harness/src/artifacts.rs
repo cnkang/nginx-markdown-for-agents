@@ -143,20 +143,44 @@ pub fn write_invocation_json(
     Ok(())
 }
 
-/// Clean up artifacts on success when `--keep-artifacts` is not set.
+/// Name of the settle marker written when a run finishes.
 ///
-/// Removes the entire artifact directory tree.
+/// The marker exists exactly when the harness finished a run: success with
+/// retained artifacts, failure with retained diagnostics, or any run under
+/// `--keep-artifacts`.  A tree without it belongs to a run that died
+/// mid-flight, so a wrapper's orphan recovery may reclaim that tree.
+pub const COMPLETION_MARKER_FILE: &str = ".harness-completed";
+
+/// Settle this run's directory tree.
+///
+/// A passing run without `--keep-artifacts` leaves nothing behind: the whole
+/// tree is removed.  Every other outcome retains the tree for inspection and
+/// writes a settle marker first, so wrapper orphan recovery can tell a
+/// finished run from a crashed one and never deletes retained diagnostics.
 ///
 /// # Arguments
 ///
-/// * `artifact_dir` - Root artifact directory to remove.
-/// * `keep_artifacts` - Whether to retain artifacts.
+/// * `runtime_base` - The per-invocation base directory.
+/// * `keep_artifacts` - Whether the caller asked to retain artifacts.
 /// * `passed` - Whether the scenario passed.
-pub fn cleanup_artifacts(artifact_dir: &Path, keep_artifacts: bool, passed: bool) -> Result<()> {
-    if !keep_artifacts && passed && artifact_dir.exists() {
-        std::fs::remove_dir_all(artifact_dir)?;
+pub fn settle_run_tree(runtime_base: &Path, keep_artifacts: bool, passed: bool) {
+    if passed && !keep_artifacts {
+        let _ = std::fs::remove_dir_all(runtime_base);
+        return;
     }
-    Ok(())
+    let marker = runtime_base.join(COMPLETION_MARKER_FILE);
+    if let Err(err) = std::fs::write(&marker, if passed { "passed" } else { "failed" }) {
+        // A missing marker is the discriminator wrapper recovery uses to
+        // find crashed runs, so a failed write here makes this finished
+        // run look reclaimable (or leaves it unclassified when no recovery
+        // runs).  The failure is reported and the tree is left in place:
+        // destroying retained diagnostics would lose them for certain,
+        // while leaving them keeps the chance of inspection.
+        eprintln!(
+            "[WARN] could not settle run tree {}: {err}",
+            runtime_base.display()
+        );
+    }
 }
 
 /// Return the current time as epoch seconds (UTC) encoded as a string.
@@ -217,29 +241,51 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_artifacts_on_success_without_keep() {
+    fn test_settle_run_tree_passing_run_removes_everything() {
         let dir = tempfile::tempdir().unwrap();
-        let artifact_dir = dir.path().join("artifacts");
-        std::fs::create_dir_all(&artifact_dir).unwrap();
-        cleanup_artifacts(&artifact_dir, false, true).unwrap();
-        assert!(!artifact_dir.exists());
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join("artifacts")).unwrap();
+        settle_run_tree(&base, false, true);
+        assert!(
+            !base.exists(),
+            "a passing run without --keep leaves nothing"
+        );
     }
 
     #[test]
-    fn test_cleanup_artifacts_on_failure_always_keeps() {
+    fn test_settle_run_tree_failure_retains_with_marker() {
         let dir = tempfile::tempdir().unwrap();
-        let artifact_dir = dir.path().join("artifacts");
-        std::fs::create_dir_all(&artifact_dir).unwrap();
-        cleanup_artifacts(&artifact_dir, false, false).unwrap();
-        assert!(artifact_dir.exists());
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join("artifacts")).unwrap();
+        settle_run_tree(&base, false, false);
+        assert!(base.exists(), "a failing run retains its diagnostics");
+        let marker = std::fs::read_to_string(base.join(COMPLETION_MARKER_FILE)).unwrap();
+        assert_eq!(marker, "failed");
     }
 
     #[test]
-    fn test_cleanup_artifacts_keep_flag() {
+    fn test_settle_run_tree_marker_write_failure_preserves_the_tree() {
+        // A directory where the marker file belongs makes the write fail
+        // deterministically (even for a privileged test runner), standing
+        // in for a filesystem or quota error.
         let dir = tempfile::tempdir().unwrap();
-        let artifact_dir = dir.path().join("artifacts");
-        std::fs::create_dir_all(&artifact_dir).unwrap();
-        cleanup_artifacts(&artifact_dir, true, true).unwrap();
-        assert!(artifact_dir.exists());
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join(COMPLETION_MARKER_FILE)).unwrap();
+        settle_run_tree(&base, false, false);
+        assert!(
+            base.exists(),
+            "a failed marker write must preserve the tree, never delete it"
+        );
+    }
+
+    #[test]
+    fn test_settle_run_tree_keep_flag_retains_with_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("e2e-harness-scenario-1-2");
+        std::fs::create_dir_all(base.join("artifacts")).unwrap();
+        settle_run_tree(&base, true, true);
+        assert!(base.exists(), "--keep-artifacts retains a passing run");
+        let marker = std::fs::read_to_string(base.join(COMPLETION_MARKER_FILE)).unwrap();
+        assert_eq!(marker, "passed");
     }
 }

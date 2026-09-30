@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import itertools
 import os
 import re
 import shutil
@@ -496,7 +497,12 @@ def _workflow_trigger_map(
 def _release_publish_triggers_are_bounded(
     workflow_content: str,
 ) -> bool:
-    """Require tag pushes and manual dispatch, with no other trigger surface."""
+    """Require tag pushes and manual dispatch, with no other trigger surface.
+
+    A bare ``workflow_dispatch:`` line is valid GitHub syntax and parses to
+    ``None``; it enables the same manual trigger as the mapping form, so both
+    shapes are accepted (any other type stays rejected).
+    """
     triggers = _workflow_trigger_map(workflow_content)
     if triggers is None or set(triggers) != {"push", "workflow_dispatch"}:
         return False
@@ -506,7 +512,7 @@ def _release_publish_triggers_are_bounded(
         isinstance(push, dict)
         and set(push) == {"tags"}
         and push.get("tags") == ["v*"]
-        and isinstance(dispatch, dict)
+        and (dispatch is None or isinstance(dispatch, dict))
     )
 
 
@@ -887,13 +893,24 @@ def _evaluate_publish_boolean_operator(
 def _evaluate_publish_comparison(
     node: ast.Compare, context: dict[str, str]
 ) -> bool | None:
-    """Evaluate one equality comparison over a modeled workflow context."""
+    """Evaluate one equality comparison over a modeled workflow context.
+
+    GitHub's expression engine compares strings with ordinal-ignore-case
+    equality (``toUpperSpecial(lhs) === toUpperSpecial(rhs)`` in
+    actions/languageservices), so ``== 'FAILURE'`` matches an actual
+    ``failure``.  A case-sensitive comparison here would model a mutant
+    differently from the runner and could accept a combined-failure
+    alternative the real workflow rejects.
+    """
     if len(node.ops) != 1:
         return None
     actual = _condition_value(node.left, context)
     expected = _condition_value(node.comparators[0], context)
     if actual is None or expected is None:
         return None
+    if isinstance(actual, str) and isinstance(expected, str):
+        actual = actual.casefold()
+        expected = expected.casefold()
     if isinstance(node.ops[0], ast.Eq):
         return actual == expected
     if isinstance(node.ops[0], ast.NotEq):
@@ -968,10 +985,92 @@ def _publish_event_cases_are_valid(
     return _publish_dependency_failure_cases(node, success_context, event_name)
 
 
+# Every combination of dependency outcomes is checked (four outcomes over the
+# seven required dependencies is 4**7 = 16384 evaluations per event context,
+# measured at roughly 0.17 s per context on the review host).  The per-case
+# checks above validate individual outcomes; the exhaustive pass below
+# validates the condition's full Boolean behavior, catching alternatives such
+# as `|| (A == 'failure' && B == 'failure')` that pass the individual checks
+# yet would allow publication after two required jobs failed.
+_PUBLISH_RESULT_STATES = ("success", "failure", "cancelled", "skipped")
+
+
+def _publish_combination_is_expected(
+    results: tuple[str, ...], event_name: str
+) -> bool:
+    """Whether publication is allowed for one dependency-outcome combination.
+
+    Publication is allowed only when every required dependency succeeded, or
+    - for manual dispatch only - when every required dependency succeeded
+    except the signing job, which is the single documented skip exception.
+    """
+    for job_name, result in zip(sorted(RELEASE_PUBLISH_REQUIRED_NEEDS), results, strict=True):
+        if result == "success":
+            continue
+        if (
+            event_name == "workflow_dispatch"
+            and job_name == "integrity-signature"
+            and result == "skipped"
+        ):
+            continue
+        return False
+    return True
+
+
+def _publish_condition_matches_truth_table(
+    node: ast.expr, event_name: str, ref_type: str
+) -> bool:
+    """Require the condition to allow publication exactly when it is expected.
+
+    Enumerates every dependency-outcome combination under one event context
+    and rejects the condition when the evaluator's verdict differs from the
+    expected verdict anywhere in the table, or when any combination fails to
+    evaluate (unmodeled syntax stays fail-closed).
+    """
+    job_names = sorted(RELEASE_PUBLISH_REQUIRED_NEEDS)
+    base_context = {
+        f"needs.{job_name.replace('-', '_')}.result": "success"
+        for job_name in job_names
+    }
+    base_context.update(
+        {_GITHUB_EVENT_NAME: event_name, _GITHUB_REF_TYPE: ref_type}
+    )
+    for results in itertools.product(
+        _PUBLISH_RESULT_STATES, repeat=len(job_names)
+    ):
+        context = dict(base_context)
+        for job_name, result in zip(job_names, results, strict=True):
+            context[f"needs.{job_name.replace('-', '_')}.result"] = result
+        evaluated = _evaluate_publish_condition(node, context)
+        if evaluated is not _publish_combination_is_expected(results, event_name):
+            return False
+    return True
+
+
+def _condition_contains_always_call(node: ast.AST) -> bool:
+    """Whether the condition calls ``always()`` anywhere.
+
+    ``always()`` is what makes the explicit ``needs.*.result`` checks
+    authoritative: without a status-check function, GitHub wraps the whole
+    condition in an implicit ``success()`` over the dependencies, so a
+    skipped job (dispatch-time signing) would skip publication even though
+    the explicit comparisons alone would allow it.  The validator models the
+    condition's own semantics, so it must require the explicit override.
+    """
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call) and _is_always_condition_call(child):
+            return True
+    return False
+
+
 def _publish_condition_covers_dependency_results(condition: str) -> bool:
     """Require every publish dependency to succeed with the signing exception."""
     node = _github_condition_ast(condition)
     if node is None:
+        return False
+    if not _condition_contains_always_call(node):
+        # An implicit success() would neutralize the explicit result checks on
+        # the dispatch path; require the explicit always() override.
         return False
     expected_attributes = {
         f"needs.{job_name.replace('-', '_')}.result"
@@ -979,9 +1078,14 @@ def _publish_condition_covers_dependency_results(condition: str) -> bool:
     }
     if _condition_needs_result_attributes(node) != expected_attributes:
         return False
-    events = (("push", "tag"), ("workflow_dispatch", "branch"))
+    events = (
+        ("push", "tag"),
+        ("workflow_dispatch", "branch"),
+        ("workflow_dispatch", "tag"),
+    )
     return all(
         _publish_event_cases_are_valid(node, expected_attributes, event, ref)
+        and _publish_condition_matches_truth_table(node, event, ref)
         for event, ref in events
     )
 

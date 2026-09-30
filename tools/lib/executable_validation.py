@@ -14,21 +14,31 @@ _APPROVED_EXECUTABLES = frozenset(
 # `/opt/homebrew/opt/git`) that point into the matching `Cellar` install.
 # `git commit` prepends the tool's `GIT_EXEC_PATH` (an `opt/.../libexec`
 # path) to PATH for hooks, so a hook that resolves `git` finds the executable
-# under `opt` first.  The literal `opt` location is as trusted as `Cellar`
-# because Homebrew owns and manages both; the resolved-target check still runs
-# so a symlink whose target sits outside the trusted roots stays rejected.
+# under `opt` first.  Unlike the system roots below, `opt` and `/usr/local/opt`
+# are NOT trusted by literal location alone: the alias directory itself is
+# group-writable on stock Homebrew installs, so a regular file planted under
+# an `opt/<anything>/bin` path would otherwise be accepted with no symlink
+# involved.  An `opt` candidate is trusted only when its RESOLVED target sits
+# under the matching `Cellar` root (see `_opt_alias_root` /
+# `_is_under_trusted_alias`), which keeps the real `git-core` case accepted
+# (every live entry resolves into Cellar) while rejecting a planted regular
+# file.
 _APPROVED_EXECUTABLE_DIRS = (
     Path("/bin"),
     Path("/usr/bin"),
     Path("/usr/sbin"),
     Path("/usr/local/bin"),
-    Path("/usr/local/opt"),
     Path("/opt/homebrew/bin"),
-    Path("/opt/homebrew/opt"),
     Path("/opt/homebrew/Cellar"),
     Path("/opt/local/bin"),
     Path("/opt/local/libexec"),
     Path("/usr/local/Cellar"),
+)
+
+# `opt`-style alias roots and the Cellar root each one must resolve into.
+_OPT_ALIAS_ROOTS = (
+    (Path("/opt/homebrew/opt"), Path("/opt/homebrew/Cellar")),
+    (Path("/usr/local/opt"), Path("/usr/local/Cellar")),
 )
 
 # Executables that may be Rustup tool shims (resolved through ~/.cargo/bin).
@@ -79,6 +89,42 @@ def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
         True if the path is equal to or beneath a trusted root, otherwise false.
     """
     return any(path == root or root in path.parents for root in roots)
+
+
+def _is_trusted_opt_alias_candidate(candidate: Path, resolved: Path) -> bool:
+    """Return whether an `opt`-style alias candidate resolves into its Cellar.
+
+    `opt` alias directories (and their parents) are group-writable on stock
+    Homebrew installs, so the literal location alone cannot confer trust: a
+    regular file planted under ``opt/<anything>/bin`` would pass an
+    unresolved-containment check without any symlink involved.  A candidate
+    below an approved alias root is therefore accepted only when its RESOLVED
+    target sits below the matching Cellar root - the same target check the
+    legitimate symlinked `git-core` case relies on (every live alias entry
+    resolves into Cellar).
+
+    Args:
+        candidate: The discovered PATH entry (unresolved).
+        resolved: The strict-resolved target of the candidate.
+
+    Returns:
+        True when the candidate is below an alias root AND resolves into the
+        matching Cellar root, otherwise false.
+    """
+    for alias_root, cellar_root in _OPT_ALIAS_ROOTS:
+        alias_spellings = (alias_root, alias_root.resolve())
+        if not any(
+            candidate == root or root in candidate.parents
+            for root in alias_spellings
+        ):
+            continue
+        cellar_spellings = (cellar_root, cellar_root.resolve())
+        if any(
+            resolved == root or root in resolved.parents
+            for root in cellar_spellings
+        ):
+            return True
+    return False
 
 
 def _channel_from_toolchain_file(
@@ -343,12 +389,15 @@ def resolve_approved_executable(name: str) -> str | None:
     ):
         return None
 
+    alias_ok = _is_trusted_opt_alias_candidate(candidate, resolved)
     candidate_is_trusted = _is_under(candidate, trusted_roots)
     resolved_is_trusted = _is_under(resolved, trusted_roots)
     rustup_target = None
     if name in _RUSTUP_SHIM_TOOLS:
         rustup_target = _resolve_rustup_tool_shim(candidate, resolved, name)
-    if not (candidate_is_trusted and resolved_is_trusted) and rustup_target is None:
+    if not (
+        (candidate_is_trusted and resolved_is_trusted) or alias_ok
+    ) and rustup_target is None:
         return None
     # Rustup dispatchers are accepted only after the dedicated shim check has
     # bound the request to the active toolchain. Return that canonical target,

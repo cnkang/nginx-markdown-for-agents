@@ -70,6 +70,7 @@ ngx_http_markdown_auth_cache_control_required(
 
 static u_char ngx_http_markdown_hdr_vary[] = "Vary";
 static u_char ngx_http_markdown_hdr_accept[] = "Accept";
+static u_char ngx_http_markdown_vary_wildcard[] = "*";
 static u_char ngx_http_markdown_hdr_etag[] = "ETag";
 static u_char ngx_http_markdown_hdr_content_encoding[] = "Content-Encoding";
 static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
@@ -196,6 +197,51 @@ ngx_http_markdown_find_header(ngx_http_request_t *r, const u_char *name, size_t 
 {
     return ngx_http_markdown_find_header_in_part(&r->headers_out.headers.part,
                                                  name, name_len);
+}
+
+
+/*
+ * Whether any ACTIVE response header with the given name satisfies the
+ * token predicate.  Multiple same-name fields are legal in HTTP, so a
+ * predicate decided from one field alone ignores what the others declare.
+ *
+ * r          - current HTTP request
+ * name       - header name to match (case-insensitive)
+ * name_len   - length of the header name
+ * predicate  - called with each active entry's value; non-zero matches
+ *
+ * Returns:
+ *   1 when any active entry matches, 0 otherwise
+ */
+static ngx_flag_t
+ngx_http_markdown_any_header_value_matches(ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    ngx_flag_t (*predicate)(const ngx_str_t *))
+{
+    ngx_list_part_t  *part;
+    const ngx_table_elt_t  *headers;
+
+    part = &r->headers_out.headers.part;
+    while (part != NULL) {
+        headers = part->elts;
+        if (part->nelts != 0 && headers == NULL) {
+            return 0;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len == name_len
+                && ngx_http_markdown_strncasecmp_const(headers[i].key.data,
+                                                       name, name_len) == 0
+                && predicate(&headers[i].value))
+            {
+                return 1;
+            }
+        }
+        part = part->next;
+    }
+    return 0;
 }
 
 /*
@@ -393,17 +439,49 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
 }
 
 /*
+ * Token predicates for the multi-Vary scan.  Each takes one header value
+ * and reports whether it carries the token the caller is deciding on.
+ *
+ * value - header value to inspect
+ *
+ * Returns:
+ *   1 when the token is present, 0 otherwise
+ */
+static ngx_flag_t
+ngx_http_markdown_value_has_accept_token(const ngx_str_t *value)
+{
+    return ngx_http_markdown_contains_csv_token(value,
+        ngx_http_markdown_hdr_accept,
+        sizeof(ngx_http_markdown_hdr_accept) - 1);
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_value_has_wildcard_token(const ngx_str_t *value)
+{
+    return ngx_http_markdown_contains_csv_token(value,
+        ngx_http_markdown_vary_wildcard,
+        sizeof(ngx_http_markdown_vary_wildcard) - 1);
+}
+
+
+/*
  * Add or append "Accept" to the Vary response header.
  *
  * If no Vary header exists, creates one with value "Accept".
  * If a Vary header exists but does not already contain the
  * "Accept" token, appends ", Accept" to the existing value.
  * Skips modification if "Accept" is already present.
+ * Skips modification when the value contains the "*" member:
+ * RFC 9110 section 12.5.5 — a Vary list with "*" already states
+ * the response cannot be reused without revalidation, so the
+ * metadata is representation-complete as-is.
  *
  * r - current HTTP request
  *
  * Returns:
- *   NGX_OK    on success (header added, appended, or already present)
+ *   NGX_OK    on success (header added, appended, already present,
+ *             or wildcard present)
  *   NGX_ERROR on allocation failure or overflow
  */
 ngx_int_t
@@ -435,12 +513,31 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
         return NGX_OK;
     }
 
-    if (ngx_http_markdown_contains_csv_token(&vary->value,
-                                             ngx_http_markdown_hdr_accept,
-                                             sizeof(ngx_http_markdown_hdr_accept) - 1))
+    /* Multiple active Vary fields are legal (Vary: User-Agent + Vary: *),
+     * so the token checks span every active entry: a later field's Accept
+     * makes the append redundant, and a later field's wildcard makes it
+     * unnecessary. */
+    if (ngx_http_markdown_any_header_value_matches(r,
+            ngx_http_markdown_hdr_vary, sizeof(ngx_http_markdown_hdr_vary) - 1,
+            ngx_http_markdown_value_has_accept_token))
     {
         NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                      "markdown: Vary header already contains Accept: \"%V\"",
+                                     &vary->value);
+        return NGX_OK;
+    }
+
+    /* RFC 9110 section 12.5.5: a Vary list containing "*" already makes
+     * the response non-reusable without revalidation; appending Accept
+     * would change metadata without adding information. No-op exactly
+     * like the Accept-present branch above. */
+    if (ngx_http_markdown_any_header_value_matches(r,
+            ngx_http_markdown_hdr_vary, sizeof(ngx_http_markdown_hdr_vary) - 1,
+            ngx_http_markdown_value_has_wildcard_token))
+    {
+        NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                                     "markdown: Vary header wildcard present, "
+                                     "leaving value unchanged: \"%V\"",
                                      &vary->value);
         return NGX_OK;
     }
@@ -940,6 +1037,11 @@ ngx_http_markdown_fullcov_prepare_etag(ngx_http_request_t *r,
  * Prepare Vary: Accept — lookup, dedup, push inert slot or allocate
  * appended value.
  *
+ * A Vary value that already contains the Accept token, or the "*"
+ * member (RFC 9110 section 12.5.5 — the response is already
+ * non-reusable without revalidation), is left unchanged: the
+ * already-has flag makes the commit phase skip the value swap.
+ *
  * Returns NGX_OK on success, NGX_ERROR on allocation/overflow failure.
  */
 static ngx_int_t
@@ -974,9 +1076,22 @@ ngx_http_markdown_fullcov_prepare_vary(ngx_http_request_t *r,
         return NGX_OK;
     }
 
-    if (ngx_http_markdown_contains_csv_token(&vary->value,
-            ngx_http_markdown_hdr_accept,
-            sizeof(ngx_http_markdown_hdr_accept) - 1))
+    /* Multiple active Vary fields are legal: a later field's Accept or
+     * wildcard decides the same way the first field's does. */
+    if (ngx_http_markdown_any_header_value_matches(r,
+            ngx_http_markdown_hdr_vary, sizeof(ngx_http_markdown_hdr_vary) - 1,
+            ngx_http_markdown_value_has_accept_token))
+    {
+        prep->vary_already_has = 1;
+        prep->vary_header = vary;
+        return NGX_OK;
+    }
+
+    /* RFC 9110 section 12.5.5: "*" already makes the response
+     * non-reusable without revalidation; leave the value unchanged. */
+    if (ngx_http_markdown_any_header_value_matches(r,
+            ngx_http_markdown_hdr_vary, sizeof(ngx_http_markdown_hdr_vary) - 1,
+            ngx_http_markdown_value_has_wildcard_token))
     {
         prep->vary_already_has = 1;
         prep->vary_header = vary;

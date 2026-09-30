@@ -192,7 +192,13 @@ def test_fixture_rejects_per_target_seed_not_bound_to_manifest(
 
     reasons = validator.validate_record(record, manifest)
 
-    assert any("seed" in reason for reason in reasons)
+    # Tightened from a bare `"seed" in reason` match, which also accepted
+    # unrelated seed_path wording: require exactly one reason and both
+    # recognized seed diagnostics.
+    assert len(reasons) == 1, reasons
+    assert reasons[0].startswith(
+        ("stale-seed: parser_html seed", "malformed: parser_html seed")
+    ), reasons
 
 
 @pytest.mark.parametrize("blocking_pass", [False, None, 1])
@@ -216,8 +222,10 @@ def test_fixture_requires_boolean_true_blocking_pass(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("elapsed_seconds_total", validator.FUZZ_JOB_BUDGET + 1,
-         "elapsed_seconds_total exceeds fuzz job budget"),
+        # The per-record ceiling is the phase envelope plus the one
+        # in-flight invocation's continuation margin and replay allowance.
+        ("elapsed_seconds_total", validator.MAX_RECORD_ELAPSED_SECONDS + 1,
+         "elapsed_seconds_total exceeds the per-record ceiling"),
         ("executions_total",
          validator.MAX_LIBFUZZER_EXECUTIONS
          * validator.MAX_FUZZ_INVOCATIONS + 1,
@@ -2510,6 +2518,83 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     assert err.count("additional worker error") == 1, err
 
 
+def test_worker_failure_cancels_active_process_groups(monkeypatch) -> None:
+    """A non-interpreter worker failure also cancels in-flight invocations.
+
+    Regression: only the interrupt path called the cancellation helper, so
+    a sibling worker that failed with an ordinary exception left the other
+    workers' running fuzz invocations consuming the shared envelope after
+    the gate had already failed.  The failure now sets the cancel flag and
+    terminates the active process groups, and the flag is scoped to the
+    pool run (cleared once its workers are joined) so the next run starts
+    clean.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    cancelled: list[int] = []
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancelled.append(1),
+    )
+    flag = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", flag)
+
+    def fail_first(entry, seed_path, deadline=None):
+        raise ValueError(f"failure for {entry['name']}")
+
+    monkeypatch.setattr(validator, "_run_target_record", fail_first)
+    entries = [{"name": "t0", "seed": 1}]
+    seeds = {"t0": {"seed_path": "seed"}}
+    with pytest.raises(ValueError, match="failure for"):
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+
+    assert cancelled, "an active process group must be cancelled on failure"
+    assert not flag.is_set(), (
+        "the cancel flag must be scoped to the pool run, not leaked"
+    )
+
+
+def test_worker_interpreter_exit_cancels_active_process_groups(
+    monkeypatch,
+) -> None:
+    """An interpreter-level worker exit also cancels in-flight invocations.
+
+    Regression: the generic ``except Exception`` branch set the cancel flag
+    and terminated active process groups, but the
+    ``except (KeyboardInterrupt, SystemExit)`` branch only set the stop
+    event.  A sibling abandoned by an interpreter-level exit then kept its
+    running invocation consuming the shared envelope while the gate had
+    already failed; the same cancellation now runs on that path too (the
+    per-AGENTS.md consistency rule: a guard added in one branch must apply
+    wherever the same stop happens).
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    cancelled: list[int] = []
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancelled.append(1),
+    )
+    flag = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", flag)
+
+    state = _run_pool_with_stop_gate(
+        monkeypatch, "exit", SystemExit("interrupted"))
+    try:
+        validator._run_blocking_targets(
+            state["entries"], state["seeds"], deadline=0)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the worker exit must re-raise at join")
+
+    assert cancelled, (
+        "an active process group must be cancelled on an interpreter exit"
+    )
+
+
 def _process_tree_script(
     tmp_path: Path,
     marker_delay: float = 4.0,
@@ -2961,6 +3046,51 @@ def test_soak_timeout_marker_must_start_the_stderr_record() -> None:
     assert failure == "fuzz run failed with exit code -1"
 
 
+def test_pipe_close_skips_pipes_with_live_readers() -> None:
+    """Closing a pipe whose reader is blocked can hang, so it is skipped.
+
+    Regression: the helper closed both pipes unconditionally, and
+    ``BufferedReader.close()`` waits on the read lock - verified against a
+    live child holding the write end, where ``close()`` did not return
+    within three seconds.  A blocked gate is worse than a bounded
+    descriptor leak in an already-exceptional path, so a pipe whose reader
+    thread is still alive after the bounded join is left open.
+    """
+    closed: list[str] = []
+
+    class _Pipe:
+        def __init__(self, label):
+            self.label = label
+            self.closed = False
+
+        def close(self):
+            closed.append(self.label)
+
+    class _Reader:
+        def __init__(self, alive):
+            self._alive = alive
+
+        def is_alive(self):
+            return self._alive
+
+    class _Process:
+        stdout = _Pipe("stdout")
+        stderr = _Pipe("stderr")
+
+    validator._close_fuzz_process_pipes(
+        _Process(), (_Reader(True), _Reader(False))
+    )
+    assert closed == ["stderr"], (
+        "only the pipe whose reader finished may be closed"
+    )
+    # With no readers supplied (pipes already drained) both close.
+    process = _Process()
+    process.stdout = _Pipe("stdout2")
+    process.stderr = _Pipe("stderr2")
+    validator._close_fuzz_process_pipes(process)
+    assert closed == ["stderr", "stdout2", "stderr2"]
+
+
 def test_reader_join_uses_one_shared_deadline(monkeypatch) -> None:
     """Each reader receives only the remainder of the common grace window."""
     clock = [100.0]
@@ -3120,3 +3250,545 @@ def test_invoke_fuzz_registration_cancellation_reaps_process(
         assert not validator._ACTIVE_FUZZ_PROCESSES
     finally:
         _kill_test_processes(tmp_path / "unused-child.pid", processes)
+
+
+def test_record_elapsed_ceiling_allows_a_legal_near_max_run() -> None:
+    """A legal run may exceed the phase envelope and must stay accepted.
+
+    Regression for the reused-envelope ceiling: FUZZ_JOB_BUDGET bounds the
+    phase, not one record, and a record legitimately carries the envelope
+    plus the one in-flight invocation's continuation margin and replay
+    allowance.  A value between the envelope and the derived ceiling used
+    to be rejected as malformed.
+    """
+    assert validator.FUZZ_JOB_BUDGET < validator.MAX_RECORD_ELAPSED_SECONDS
+
+    at_envelope_plus_margin = validator.FUZZ_JOB_BUDGET + 100
+    assert validator._blocking_elapsed_reason(
+        "parser_html", at_envelope_plus_margin
+    ) is None
+    assert validator._blocking_elapsed_reason(
+        "parser_html", validator.MAX_RECORD_ELAPSED_SECONDS
+    ) is None
+    # Above the derived ceiling still fails closed.
+    assert validator._blocking_elapsed_reason(
+        "parser_html", validator.MAX_RECORD_ELAPSED_SECONDS + 1
+    ) is not None
+
+
+def test_record_elapsed_ceiling_arithmetic_matches_job_budget() -> None:
+    """The derived ceiling is exactly envelope + continuation + replay."""
+    assert validator.MAX_RECORD_ELAPSED_SECONDS == (
+        validator.FUZZ_JOB_BUDGET
+        + validator.INVOCATION_TIMEOUT_MARGIN
+        + validator.REPLAY_ALLOWANCE_SECONDS
+    )
+
+
+@pytest.mark.parametrize(
+    ("started_at", "expected"),
+    [
+        ("2026-09-28T10:07:42+00:00", "fuzz-qualification-20260928T100742Z"),
+        ("2026-09-28T10:07:42Z", "fuzz-qualification-20260928T100742Z"),
+        # Same instant expressed with an offset normalizes to UTC.
+        ("2026-09-28T18:07:42+08:00", "fuzz-qualification-20260928T100742Z"),
+        ("2026-09-28T05:07:42-05:00", "fuzz-qualification-20260928T100742Z"),
+        # A naive timestamp is treated as UTC.
+        ("2026-09-28T10:07:42", "fuzz-qualification-20260928T100742Z"),
+    ],
+)
+def test_run_id_normalizes_every_timestamp_form(
+    started_at: str, expected: str
+) -> None:
+    """Run ids are canonical UTC for naive, Z, and offset inputs."""
+    assert validator._run_id_from(started_at) == expected
+
+
+def test_run_id_rejects_a_malformed_timestamp() -> None:
+    """A non-ISO start time fails closed instead of producing a bent id."""
+    with pytest.raises(ValueError):
+        validator._run_id_from("yesterday-ish")
+
+
+def test_fixture_revalidation_survives_a_release_version_bump() -> None:
+    """A uniformly captured record re-validates after the version advances.
+
+    Regression for the fixture-mode version coupling: the expected log
+    directory used to come from the ACTIVE release version (Cargo.toml), so
+    re-validating a record captured under the previous release failed with
+    "raw_log_ref is not target-bound" after a version bump.  The expected
+    directory now follows the record's own uniform release directory; the
+    release identity stays bound by the candidate SHA.
+    """
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    bumped = []
+    for entry in record["per_target"]:
+        for field in ("corpus_dir", "seed_path", "raw_log_ref"):
+            value = entry.get(field)
+            if isinstance(value, str):
+                entry[field] = value.replace(
+                    "artifacts/release/0.9.2/", "artifacts/release/9.9.9/"
+                )
+        bumped.append(entry)
+
+    assert validator.validate_record(record, manifest) == []
+
+
+def test_fixture_rejects_a_mixed_release_directory_record() -> None:
+    """Refs spread across two release directories fail closed."""
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8")
+    )
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    # One target's ref points at another release directory than the rest.
+    record["per_target"][0]["raw_log_ref"] = (
+        "artifacts/release/0.9.1/fuzz-logs/parser_html.log"
+    )
+
+    reasons = validator.validate_record(record, manifest)
+
+    assert any("per_target[0] raw_log_ref" in reason for reason in reasons)
+
+
+def _write_descendant_leader(tmp_path, marker, child_sleep):
+    """Write a leader script that spawns a stdout-inheriting descendant.
+
+    The scripts live in files so no nested quoting can distort them; the
+    leader prints one line and exits while the descendant keeps running.
+    """
+    child_code = (
+        f"import time; time.sleep({child_sleep}); "
+        f"open({str(marker)!r}, 'w').write('survived')"
+    )
+    leader_path = tmp_path / "leader.py"
+    leader_path.write_text(
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        "print('v1.0', flush=True)\n",
+        encoding="utf-8",
+    )
+    return leader_path
+
+
+def test_toolchain_wait_terminates_a_descendant_holding_stdout(tmp_path) -> None:
+    """A toolchain version command must not leave descendants running.
+
+    Regression: the wait reaped the leader with ``process.wait()`` before
+    any group signal, so a descendant that inherited stdout kept the reader
+    open and survived cleanup (then wrote its marker).  The wait now signals
+    the group before the final reap, and the assertion reads the marker only
+    after the descendant's own write time.
+    """
+    marker = tmp_path / "descendant-survived"
+    leader_path = _write_descendant_leader(tmp_path, marker, 1.5)
+
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader_path)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe")
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.9)
+    assert not marker.exists(), "a descendant survived the wait"
+
+
+def test_wait_without_waitid_signals_the_group_after_the_leader_exits(
+    tmp_path,
+) -> None:
+    """The no-waitid fallback still terminates descendants.
+
+    Some macOS Python builds lack ``waitid``/``WNOWAIT``; the fallback polls
+    the leader and signals the group directly afterwards (the guarded helper
+    would skip once the leader has a return code), so a descendant that
+    inherited stdout cannot survive.
+    """
+    marker = tmp_path / "fallback-descendant-survived"
+    leader_path = _write_descendant_leader(tmp_path, marker, 1.5)
+
+    process = subprocess.Popen(
+        [sys.executable, str(leader_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    validator._wait_fuzz_process_without_waitid(process, 5.0)
+    time.sleep(1.9)
+    assert not marker.exists(), "a descendant survived the fallback"
+
+
+def test_interrupt_signals_the_group_before_reaping_the_leader(
+    tmp_path, monkeypatch
+) -> None:
+    """An interrupt must signal the group before the leader is reaped.
+
+    Regression: the exceptional-exit path polled the leader first; when the
+    leader had already exited, that poll set its return code, the guarded
+    group signal returned early, and a descendant that inherited stdout
+    survived the interrupt.  The group is now signaled before any reap.
+    """
+    marker = tmp_path / "interrupt-descendant-survived"
+    leader = tmp_path / "leader.py"
+    leader.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c',\n"
+        "    \"import time; time.sleep(1.2); open(%r, 'w')\"\n"
+        f"    % {str(marker)!r}])\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+
+    def raising_wait(process, timeout):
+        time.sleep(0.6)  # the leader exits during this sleep
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", raising_wait)
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe")
+    except KeyboardInterrupt:
+        # The interrupt under test: cleanup assertions follow.
+        pass
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.6)
+    assert not marker.exists(), "a descendant survived the interrupt"
+
+
+def test_post_reap_signal_requires_an_open_pipe_writer(monkeypatch) -> None:
+    """The post-reap group signal is gated on EOF, not on reader liveness.
+
+    Regression: reader-thread liveness was the ownership proof, but a
+    reader can stay alive while draining buffered bytes after every
+    writer closed, so it does not prove a live descendant owns the pipe
+    (or that the group id is still this run's).  EOF is the conclusive
+    event: write-end closure means no writer remains.  While EOF has not
+    been observed a live pipe writer proves the group is still allocated
+    and the signal must fire; once EOF is observed no signal may be sent.
+    """
+    killpg_pids: list[int] = []
+
+    class _Stream:
+        def __init__(self, hangup, eof: bool = False) -> None:
+            self._hangup = hangup
+            self._eof = eof
+
+        def writer_hangup(self):
+            return self._hangup
+
+        def eof_reached(self) -> bool:
+            return self._eof
+
+    class _Process:
+        pid = os.getpid()
+
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: killpg_pids.append(pid),
+    )
+    # The kernel reports every writer closed: no signal, even though a
+    # drain thread could still be consuming buffered data (eof False).
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(True, eof=False)
+    )
+    assert not killpg_pids, "a closed pipe must not be signaled"
+    # A writer is still open: the group id still belongs to this run.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(False)
+    )
+    assert killpg_pids == [os.getpid()], "an open writer must be signaled"
+    # No probe available: the drain-thread EOF flag cannot prove a writer
+    # remains (it lags buffered data), so no signal may be sent.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=True)
+    )
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=False)
+    )
+    assert killpg_pids == [os.getpid()], (
+        "without a kernel probe no group may be signaled by number"
+    )
+    # No proof available at all: never signal by number alone.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), None
+    )
+    assert killpg_pids == [os.getpid()]
+
+
+def test_interrupt_after_reap_still_kills_a_live_descendant(tmp_path, monkeypatch) -> None:
+    """On no-waitid builds, an interrupt after the reap still kills a child.
+
+    The post-reap group signal exists only for builds without
+    waitid/WNOWAIT, where the wait fallback can reap the leader before
+    unwinding.  On those builds the gated signal must still fire while a
+    descendant holds stdout; a gate that never fires would let the
+    descendant survive the interrupt.  On waitid builds the leader stays
+    unreaped until the group has been signaled, so no post-reap signal is
+    sent (see test_waitid_builds_never_signal_a_reaped_group).
+    """
+    if validator._waitid_supported():
+        pytest.skip("waitid builds keep the leader unreaped until cleanup")
+    marker = tmp_path / "post-reap-descendant-survived"
+    leader = tmp_path / "leader.py"
+    leader.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c',\n"
+        "    \"import time; time.sleep(1.5); open(%r, 'w')\" % sys.argv[1]])\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+
+    def reaping_wait(process, timeout):
+        process.wait()  # the leader is reaped before the interrupt lands
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", reaping_wait)
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, str(leader), str(marker)], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe", stream)
+    except KeyboardInterrupt:
+        # The interrupt under test: cleanup assertions follow.
+        pass
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    time.sleep(1.9)
+    assert not marker.exists(), "a post-reap descendant survived the interrupt"
+
+
+def test_waitid_builds_never_signal_a_reaped_group(monkeypatch) -> None:
+    """The interrupt path sends no post-reap signal where waitid exists.
+
+    Regression: an open pipe writer does not prove the reaped leader's
+    PGID still belongs to this run (a `setsid` descendant keeps the pipe
+    while leaving the group), so the post-reap signal could hit an
+    unrelated group after id reuse.  On waitid builds the leader stays a
+    zombie until the group has been signaled, so the reclaim-free path
+    needs no post-reap signal at all; only no-waitid builds keep it.
+    """
+    if not validator._waitid_supported():
+        pytest.skip("this build has no waitid/WNOWAIT path")
+    signals: list[str] = []
+
+    class _Process:
+        pid = os.getpid()
+        returncode = 1  # already reaped
+
+        def poll(self):
+            return 1
+
+        def wait(self):
+            return 1
+
+    class _Stream:
+        def writer_hangup(self):
+            return False  # a writer is still open
+
+        def eof_reached(self):
+            return False
+
+    def raising_wait(process, timeout):
+        process.wait()
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(validator, "_wait_fuzz_process", raising_wait)
+    monkeypatch.setattr(
+        validator,
+        "_signal_fuzz_process_group",
+        lambda _process, _signal: signals.append("group"),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_signal_reaped_fuzz_process_group_when_open",
+        lambda _process, _stream: signals.append("reaped"),
+    )
+    with contextlib.suppress(KeyboardInterrupt):
+        validator._wait_toolchain_identity_process(_Process(), "probe", _Stream())
+    assert signals == ["group"], (
+        "waitid builds must not signal a reaped group by number"
+    )
+
+
+def test_eof_marks_after_the_read_loop_closes(tmp_path) -> None:
+    """EOF is recorded the moment the pipe read loop ends.
+
+    The interrupt path uses EOF-not-observed as proof that a writer still
+    holds the pipe, so the marker must be set by the read loop itself (an
+    empty byte string from read()), not deferred to later processing.
+    """
+    process, stream, reader = validator._start_toolchain_identity_process(
+        [sys.executable, "-c", "print('v1')"], "probe"
+    )
+    try:
+        validator._wait_toolchain_identity_process(process, "probe", stream)
+    finally:
+        validator._finish_toolchain_identity_process(process, reader)
+    assert stream.eof_reached(), "EOF must be recorded once the pipe closes"
+
+
+def test_terminate_group_uses_open_pipe_proof_after_reap(monkeypatch) -> None:
+    """A reaped leader with an open pipe still gets the group signaled.
+
+    Regression: on the no-waitid path the wait fallback can reap the
+    leader before an interrupt; ``_terminate_fuzz_process_group``'s
+    guarded signal then skips (its reuse guard keys on ``returncode``)
+    and a descendant holding the captured pipes survives.  When streams
+    are supplied and show an unread EOF, the ownership-checked post-reap
+    signal must fire for each of them.
+    """
+    signals: list[str] = []
+
+    class _Process:
+        pid = os.getpid()
+        returncode = 1
+
+        def wait(self, timeout=None):
+            return 1
+
+    class _Stream:
+        def __init__(self, eof: bool) -> None:
+            self._eof = eof
+
+        def writer_hangup(self):
+            return None
+
+        def eof_reached(self) -> bool:
+            return self._eof
+
+    monkeypatch.setattr(validator.time, "sleep", lambda _seconds: None)
+    # The post-reap signal exists only for the no-waitid wait path.
+    monkeypatch.setattr(validator, "_waitid_supported", lambda: False)
+    monkeypatch.setattr(
+        validator,
+        "_signal_fuzz_process_group",
+        lambda _process, _signal: signals.append("group"),
+    )
+    def record_reaped(_process, stream):
+        # The helper itself skips closed streams (EOF observed).
+        if not stream.eof_reached():
+            signals.append("reaped")
+
+    monkeypatch.setattr(
+        validator,
+        "_signal_reaped_fuzz_process_group_when_open",
+        record_reaped,
+    )
+    validator._terminate_fuzz_process_group(
+        _Process(), (_Stream(False), _Stream(True))
+    )
+    # Both streams are consulted; the open one signals, the closed one not.
+    assert signals == ["group", "group", "reaped"], signals
+
+
+def test_writer_hangup_probe_reports_closed_pipes_with_buffered_data(
+    monkeypatch,
+) -> None:
+    """The kernel probe proves writer closure even with unread data.
+
+    Regression: the post-reap proof used only the drain thread's EOF
+    flag, which is set after the buffered bytes are consumed.  A pipe
+    whose writers all closed but whose data is still buffered reported
+    "not EOF", so the signal could target a reused group id.  ``poll``
+    reports POLLHUP from the kernel directly and stays conclusive.
+    """
+    if os.name != "posix" or not hasattr(validator.select, "poll"):
+        pytest.skip("a kernel poll probe requires POSIX poll()")
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"buffered\n")
+    os.close(write_fd)
+    pipe = os.fdopen(read_fd, "rb")
+    try:
+        _assert_closed_pipe_yields_no_signal(pipe, monkeypatch)
+    finally:
+        pipe.close()
+
+    # A live writer is reported open, so the signal proceeds.
+    read_fd, write_fd = os.pipe()
+    pipe = os.fdopen(read_fd, "rb")
+    try:
+        stream = validator._BoundedStream(pipe=pipe)
+        assert stream.writer_hangup() is False
+    finally:
+        os.close(write_fd)
+        pipe.close()
+
+
+def _assert_closed_pipe_yields_no_signal(pipe, monkeypatch) -> None:
+    """The probe reads a closed pipe as hung up, and the gate stays silent."""
+    stream = validator._BoundedStream(pipe=pipe)
+    # Writers closed with data unread: the drain flag still says no,
+    # the kernel probe says closed.
+    assert stream.eof_reached() is False
+    assert stream.writer_hangup() is True
+
+    # The gate must not signal a group whose writers have all closed.
+    signals: list[int] = []
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: signals.append(pid),
+    )
+    validator._signal_reaped_fuzz_process_group_when_open(
+        type("P", (), {"pid": os.getpid()})(), stream
+    )
+    assert not signals, "a closed writer must not be signaled"
+
+
+def test_post_reap_signal_falls_through_never_without_a_probe(monkeypatch) -> None:
+    """Without a kernel probe the group is never signaled by number.
+
+    Regression: on the fallback path (probe unavailable) the drain
+    thread's EOF flag decided whether a numeric ``killpg`` ran; the flag
+    lags buffered data, so a closed pipe could still report "not EOF" and
+    a recycled group id could receive the signal.  No probe means no
+    proof, and no proof means no signal.
+    """
+    signals: list[int] = []
+
+    class _Stream:
+        def __init__(self, hangup, eof: bool) -> None:
+            self._hangup = hangup
+            self._eof = eof
+
+        def writer_hangup(self):
+            return self._hangup
+
+        def eof_reached(self) -> bool:
+            return self._eof
+
+    class _Process:
+        pid = os.getpid()
+
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pid, signum: signals.append(pid),
+    )
+    # Probe unavailable, EOF unresolved (buffered data): no signal.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=False)
+    )
+    assert signals == [], "an inconclusive probe must not signal a group"
+    # Probe unavailable, EOF resolved: also no signal.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(None, eof=True)
+    )
+    assert signals == [], "a closed stream must not be signaled"
+    # An open writer remains the conclusive positive proof.
+    validator._signal_reaped_fuzz_process_group_when_open(
+        _Process(), _Stream(False, eof=False)
+    )
+    assert signals == [os.getpid()], "an open writer must be signaled"

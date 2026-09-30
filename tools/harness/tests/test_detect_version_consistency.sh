@@ -17,6 +17,8 @@
 #   - failing baseline stub                     -> exit 1 (fail-closed)
 #   - missing baseline stub                     -> exit 1 (fail-closed)
 #   - absent Chart.yaml                         -> skipped, still exit 0
+#   - absent Homebrew formula                   -> skipped, still exit 0
+#   - present Homebrew formula                  -> pin is checked (positive control)
 
 set -uo pipefail
 
@@ -324,6 +326,45 @@ if [[ "${rc}" -eq 0 ]] \
     pass "absent Chart.yaml is skipped (exit 0)"
 else
     fail "absent Chart.yaml is skipped (exit 0)" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: absent Homebrew formula is skipped, not failed ──
+noformula_tree="${tmp_dir}/noformula"
+make_tree "${noformula_tree}"
+rm -f "${noformula_tree}/packaging/homebrew/nginx-markdown-module.rb"
+
+out="${tmp_dir}/noformula.out"
+rc=0
+run_detector "${noformula_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 0 ]] \
+    && grep -q "Homebrew formula not found (skipping toolchain pin check)" "${out}" \
+    && grep -q 'PASS.*All version checks passed' "${out}" \
+    && ! grep -q "Cannot read Homebrew Rust toolchain pin" "${out}"; then
+    pass "absent Homebrew formula is skipped (exit 0, no spurious ERROR)"
+else
+    fail "absent Homebrew formula is skipped (exit 0, no spurious ERROR)" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+
+# ── Fixture: present Homebrew formula pin is still checked (positive control) ──
+present_tree="${tmp_dir}/present-formula"
+make_tree "${present_tree}"
+cat >"${present_tree}/packaging/homebrew/nginx-markdown-module.rb" <<'RUBY'
+class NginxMarkdownModule < Formula
+  TOOLCHAIN_VERSION = "1.98.1".freeze
+end
+RUBY
+
+out="${tmp_dir}/present-formula.out"
+rc=0
+run_detector "${present_tree}" "${out}" || rc=$?
+if [[ "${rc}" -eq 0 ]] \
+    && grep -q "Homebrew formula Rust toolchain version: 1.98.1" "${out}" \
+    && grep -q 'PASS.*All version checks passed' "${out}"; then
+    pass "present Homebrew formula pin is checked (positive control)"
+else
+    fail "present Homebrew formula pin is checked (positive control)" \
         "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
 fi
 

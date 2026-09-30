@@ -825,9 +825,7 @@ def _shopt_alias_expansion_state(
         return expansion_enabled
     if "-s" in options or "--set" in options:
         return True
-    if "-u" in options or "--unset" in options:
-        return False
-    return expansion_enabled
+    return False if "-u" in options or "--unset" in options else expansion_enabled
 
 
 def _alias_definitions_can_shadow(
@@ -1130,7 +1128,7 @@ def _live_commands_with_function_markers(
     markers: dict[str, tuple[str, int, int]] = {}
     marker_prefix = "__release_gate_definition_"
     while marker_prefix in script:
-        marker_prefix = "_" + marker_prefix
+        marker_prefix = f"_{marker_prefix}"
     for index, span in reversed(list(enumerate(direct))):
         head = heads.get(span)
         if head is None:
@@ -1138,7 +1136,7 @@ def _live_commands_with_function_markers(
         marker = f"{marker_prefix}{index}"
         local_start = head[0] - start
         local_end = span[2] - start
-        masked = masked[:local_start] + f"true {marker}" + masked[local_end:]
+        masked = f"{masked[:local_start]}true {marker}{masked[local_end:]}"
         markers[marker] = span
     return _live_command_segments(_strip_shell_comments(masked)), markers
 
@@ -2482,25 +2480,27 @@ def _return_kind(segment: str) -> str | None:
     if not arg:
         return "bare"
     if re.fullmatch(r"(?a:\d)+", arg):
-        value = int(arg)
-        if value == 0:
-            return "zero"
-        if value < 256:
-            return "nonzero"
+        # The shell truncates a return status to its low 8 bits exactly
+        # like an exit status, so `return 257` fails (1) and `return 256`
+        # succeeds (0); classifying by the raw literal would call both
+        # unknown and let commands after a failing return look reachable.
+        value = int(arg) % 256
+        return "zero" if value == 0 else "nonzero"
     return "unknown"
 
 
 def _chain_prefix_words(segment: str) -> tuple[list[str], bool]:
-    """Segment words with a leading ``!`` and ``time`` prefix removed.
+    """Segment words with a leading ``!`` run and ``time`` prefix removed.
 
-    Returns the remaining words and whether a ``!`` negation came off: the
-    negation inverts a failure the way a chain operand does, while ``time``
-    is transparent (``time f`` runs ``f`` like a plain call).
+    Returns the remaining words and a negation flag: each ``!`` word
+    toggles it, so the flag carries the parity bash 5.2 computes (an even
+    count is a no-op, an odd count inverts the status), while ``time`` is
+    transparent (``time f`` runs ``f`` like a plain call).
     """
     words = segment.split()
     bang = False
     while words and words[0] == "!":
-        bang = True
+        bang = not bang
         words = words[1:]
     while words and _resolve_heredoc_word(words[0])[0] == "time":
         words = words[1:]
@@ -3026,13 +3026,6 @@ def _load_workflow_object(workflow_content: str) -> dict | None:
     return workflow if isinstance(workflow, dict) else None
 
 
-def _workflow_jobs(workflow_content: str) -> dict | None:
-    """Parse a workflow and return its job mapping; None means unverifiable."""
-    workflow = _load_workflow_object(workflow_content)
-    jobs = workflow.get("jobs") if workflow is not None else None
-    return jobs if isinstance(jobs, dict) else None
-
-
 def _env_mapping(value: object) -> dict[str, object]:
     """Keep named environment values without dropping dynamic overrides."""
     if not isinstance(value, dict):
@@ -3091,6 +3084,66 @@ def _workflow_job_steps(job: object) -> list[dict] | None:
     return steps
 
 
+def _run_default_field(container: object, field: str) -> str | None:
+    """Return one ``defaults.run.<field>`` value from a workflow or job."""
+    if not isinstance(container, dict):
+        return None
+    defaults = container.get("defaults")
+    run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
+    if not isinstance(run_defaults, dict):
+        return None
+    return run_defaults.get(field)
+
+
+def _workflow_run_defaults(workflow: dict | None) -> str | list | None:
+    """Return the workflow-level ``defaults.run.shell``, if declared."""
+    return _run_default_field(workflow, "shell")
+
+
+def _job_run_defaults(job: object) -> str | list | None:
+    """Return the job-level ``defaults.run.shell``, if declared."""
+    return _run_default_field(job, "shell")
+
+
+def _effective_step_working_directory(
+    step: dict,
+    job_default: str | None,
+    workflow_default: str | None,
+) -> str | None:
+    """Resolve a run step's working directory by GitHub's precedence.
+
+    Step ``working-directory`` wins over job ``defaults.run.working-directory``,
+    which wins over the workflow-level default.  A step that declares none
+    inherits them, and an inherited value away from the repository root
+    redirects the make invocation exactly as a step-level one does.
+    """
+    directory = step.get("working-directory")
+    if directory is None:
+        directory = job_default
+    if directory is None:
+        directory = workflow_default
+    return directory
+
+
+def _effective_step_shell(
+    step: dict, job_default: str | list | None, workflow_default: str | list | None
+) -> str | list | None:
+    """Resolve a run step's shell by GitHub's precedence.
+
+    Step ``shell`` wins over job ``defaults.run.shell``, which wins over the
+    workflow-level default.  A step that declares none inherits them, so the
+    effective shell must be recorded: an inherited Python shell would
+    otherwise read as the bash fallback and a raw install inside it could be
+    missed by the shell-only scan.
+    """
+    shell = step.get("shell")
+    if shell is None:
+        shell = job_default
+    if shell is None:
+        shell = workflow_default
+    return shell
+
+
 def _job_run_step_records(
     workflow_content: str, job_name: str
 ) -> list[dict] | None:
@@ -3100,22 +3153,37 @@ def _job_run_step_records(
     if not isinstance(jobs, dict) or job_name not in jobs:
         return None
     workflow_env = workflow.get("env") if workflow is not None else None
+    workflow_default = _workflow_run_defaults(workflow)
+    workflow_directory = _run_default_field(workflow, "working-directory")
     job = jobs[job_name]
     if not isinstance(job, dict):
         return None
+    job_default = _job_run_defaults(job)
+    job_directory = _run_default_field(job, "working-directory")
     steps = _workflow_job_steps(job)
     if steps is None:
         return None
     records: list[dict] = []
     for step in steps:
-        if not _is_shell_run_step(step):
+        # The shell filter must see the EFFECTIVE shell: a step that omits
+        # `shell` under a job or workflow default of `python {0}` does not
+        # run in bash, and treating it as a shell step would let the
+        # shell-only provisioning checks believe they covered it.
+        shell = _effective_step_shell(step, job_default, workflow_default)
+        effective_step = dict(step)
+        if shell is not None:
+            effective_step["shell"] = shell
+        if not _is_shell_run_step(effective_step):
             continue
         scopes = _step_environment_scopes(
             workflow_env, job.get("env"), step.get("env")
         )
         records.append({
             "run": step["run"],
-            "shell": step.get("shell"),
+            "shell": shell,
+            "working-directory": _effective_step_working_directory(
+                step, job_directory, workflow_directory
+            ),
             "env": _merge_environment_scopes(scopes),
             "env_scopes": scopes,
         })
@@ -3151,13 +3219,19 @@ def _local_reusable_workflow_path(uses: object) -> Path | None:
     return resolved
 
 
-def _ordinary_job_run_step_records(job: dict) -> list[dict] | None:
+def _ordinary_job_run_step_records(
+    job: dict, workflow_default: str | list | None = None
+) -> list[dict] | None:
     """Extract every shell run step from one ordinary workflow job."""
     steps = _workflow_job_steps(job)
     if steps is None:
         return None
+    job_default = _job_run_defaults(job)
     return [
-        {"run": step["run"], "shell": step.get("shell")}
+        {
+            "run": step["run"],
+            "shell": _effective_step_shell(step, job_default, workflow_default),
+        }
         for step in steps
         if isinstance(step.get("run"), str)
     ]
@@ -3195,9 +3269,14 @@ def _all_job_run_step_records(
     """
     if depth > 16:
         return None
-    jobs = _workflow_jobs(workflow_content)
-    if jobs is None:
+    workflow = _load_workflow_object(workflow_content)
+    jobs = workflow.get("jobs") if workflow is not None else None
+    if not isinstance(jobs, dict):
         return None
+    # The workflow-level default applies to jobs without their own default;
+    # resolve it once so a step that omits `shell` records the shell it
+    # actually runs under instead of falling back to bash.
+    workflow_default = _workflow_run_defaults(workflow)
     active = active_workflows if active_workflows is not None else set()
     records: list[dict] = []
     for job in jobs.values():
@@ -3206,12 +3285,139 @@ def _all_job_run_step_records(
         job_records = (
             _reusable_workflow_run_step_records(job, depth, active)
             if "uses" in job
-            else _ordinary_job_run_step_records(job)
+            else _ordinary_job_run_step_records(job, workflow_default)
         )
         if job_records is None:
             return None
         records.extend(job_records)
     return records
+
+
+_PLACEHOLDER_SEGMENT_SPLIT_RE = re.compile(r"[;&|]+|\n")
+
+
+def _placeholder_consumer_heads(
+    words: list[str], command_index: int
+) -> set[str]:
+    """Return the command-position heads of every segment consuming ``{0}``.
+
+    GitHub substitutes the script path for each ``{0}`` in the shell
+    template, so a segment that names it as an argument is a consumer of
+    the generated script.  Only a consumer's COMMAND POSITION proves which
+    interpreter runs the block: a Python token sitting in argument position
+    (``echo python3 {0}``) is data, not an interpreter, and a decoy in an
+    earlier segment (``echo python3 {0}; bash {0}``) must not mask the
+    shell launcher that actually executes the script.
+    """
+    heads: set[str] = set()
+    for index in range(command_index + 1, len(words)):
+        if words[index] == "{0}":
+            # A standalone placeholder is consumed by the preceding word.
+            heads.add(Path(words[index - 1]).name)
+            continue
+        if "{0}" in words[index]:
+            heads |= _segment_heads_consuming_placeholder(words[index])
+    return heads
+
+
+def _segment_heads_consuming_placeholder(word: str) -> set[str]:
+    """Return command-position heads of one word's ``{0}`` segments."""
+    heads: set[str] = set()
+    for segment in _PLACEHOLDER_SEGMENT_SPLIT_RE.split(word):
+        if "{0}" not in segment:
+            continue
+        try:
+            segment_words = shlex.split(segment.strip(), posix=True)
+        except ValueError:
+            segment_words = segment.strip().split()
+        if segment_words:
+            heads.add(Path(segment_words[0]).name)
+    return heads
+
+
+def _python_interpreter_before_placeholder(
+    words: list[str], command_index: int
+) -> bool:
+    """Whether a Python interpreter consumes GitHub's script operand.
+
+    Two template shapes reach the run block: the placeholder as its own word
+    (`python3 {0}`), and the placeholder nested inside a quoted argument
+    (`bash -c "python3 {0}"`, which shlex keeps as one word).  The check is
+    command-position based so a Python token that is merely data or a decoy
+    in an earlier segment cannot route a shell template to the Python
+    analyzer, where a shell launcher would go unanalyzed.
+    """
+    return any(
+        _PYTHON_COMMAND.fullmatch(head)
+        for head in _placeholder_consumer_heads(words, command_index)
+    )
+
+
+_TEMPLATE_PLACEHOLDER_SENTINEL = "__workflow_step_script_placeholder__"
+
+
+def _shell_template_executable_payloads(shell: object) -> list[str]:
+    """Return the command-string payloads a custom shell template runs.
+
+    The runner substitutes the generated script path into ``{0}``; commands
+    the template spells out itself (``bash -c 'rustup ...' {0}``) execute
+    in addition to the run block, and the run-block scan cannot see them.
+    The command option is recognized in every short-option cluster bash
+    accepts (``-c``, ``-ec``, ``-lc``), and the ``{0}`` placeholder is
+    replaced with an inert sentinel token: the generated script is the
+    step's run block, which the caller scans separately, so the
+    placeholder must not make the rest of the payload unresolvable.
+    """
+    if not isinstance(shell, str):
+        return []
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return []
+    payloads: list[str] = [
+        words[index + 1].replace("{0}", _TEMPLATE_PLACEHOLDER_SENTINEL)
+        for index, word in enumerate(words[:-1])
+        if _shell_option_selects_command(word)
+    ]
+    return payloads
+
+
+def _shell_option_selects_command(word: str) -> bool:
+    """Whether one shell token selects the command-string option (``-c``).
+
+    Bash accepts ``-c`` standalone and inside short-option clusters
+    (``-ec``, ``-lc``); long options never carry it.
+    """
+    return True if word == "--command" else _shell_option_has_flag(word, "c")
+
+
+def _shell_template_conflicting_placeholder_consumers(shell: object) -> bool:
+    """Whether more than one interpreter consumes the script placeholder.
+
+    A template such as ``bash -c "bash {0}; python3 {0}"`` runs the same
+    block under two interpreters.  Neither analysis alone covers it, so the
+    caller fails closed by applying both.
+    """
+    if not isinstance(shell, str):
+        return False
+    try:
+        words = shlex.split(shell, posix=True)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    command_index = 0
+    command = Path(words[0]).name
+    if command == "env":
+        command_index = _skip_env_prefix(words, 1)
+    elif command in {"uv", "poetry", "pipenv"} and len(words) > 1:
+        if words[1] != "run":
+            return False
+        command_index = 2
+    heads = _placeholder_consumer_heads(words, command_index)
+    has_python = any(_PYTHON_COMMAND.fullmatch(head) for head in heads)
+    has_shell = any(head in ("bash", "sh", "zsh", "dash") for head in heads)
+    return has_python and has_shell
 
 
 def _workflow_shell_uses_python(shell: object) -> bool:
@@ -3237,14 +3443,10 @@ def _workflow_shell_uses_python(shell: object) -> bool:
         Path(words[command_index]).name
     ):
         return True
-
     # Custom runner templates can wrap the interpreter in another launcher;
     # recognizing a Python command before GitHub's script operand is
     # conservative and keeps shell-source from being mistaken for Python.
-    return "{0}" in words and any(
-        _PYTHON_COMMAND.fullmatch(Path(word).name) is not None
-        for word in words[command_index + 1:]
-    )
+    return _python_interpreter_before_placeholder(words, command_index)
 
 
 def _workflow_shell_name(shell: object) -> str:
@@ -3257,9 +3459,7 @@ def _workflow_shell_name(shell: object) -> str:
         return "bash"
     if not words:
         return "bash"
-    index = 0
-    if Path(words[0]).name == "env":
-        index = _skip_env_prefix(words, 1)
+    index = _skip_env_prefix(words, 1) if Path(words[0]).name == "env" else 0
     return Path(words[index]).name if index < len(words) else "bash"
 
 
@@ -3293,9 +3493,7 @@ def _xargs_option_advance(word: str, index: int) -> int | None:
         return index + 1
     if len(word) > 2 and word[:2] in _XARGS_ATTACHED_VALUE_OPTIONS:
         return index + 1
-    if word in _XARGS_FLAGS:
-        return index + 1
-    return None
+    return index + 1 if word in _XARGS_FLAGS else None
 
 
 def _xargs_command_index(words: list[str]) -> int | None:
@@ -3322,9 +3520,7 @@ def _timeout_option_next_index(words: list[str], index: int) -> int | None:
         return index + 1
     if word in value_options:
         return index + 2 if index + 1 < len(words) else None
-    if word.startswith("--") and "=" in word:
-        return index + 1
-    return None
+    return index + 1 if word.startswith("--") and "=" in word else None
 
 
 def _timeout_command_index(words: list[str]) -> int | None:
@@ -3633,7 +3829,7 @@ def _raw_install_in_loop_segments(
         return found, len(segments)
     if index + 1 >= len(segments) or not _is_do_segment(segments[index + 1]):
         return None
-    combined = segments[index] + " " + segments[index + 1]
+    combined = f"{segments[index]} {segments[index + 1]}"
     if _raw_install_in_segment(combined, depth + 1, variables):
         return True, index
     do_segment = re.sub(r"^\s*do\b", "", segments[index + 1], count=1).strip()
@@ -3662,6 +3858,8 @@ def _raw_install_segment_step(
 ) -> tuple[bool, int]:
     """Analyze one shell segment and return whether it found a raw install."""
     segment = segments[index]
+    if _rustup_segment_opens_dynamic_subcommand(segment, separators, index):
+        return True, index
     if _is_loop_header(segment):
         loop_result = _raw_install_in_loop_segments(
             segments, separators, index, depth, variables
@@ -3688,9 +3886,7 @@ def _shell_test_segment_step(
     closer_index = _shell_test_closer_index(
         segments, index, separators, opener
     )
-    if closer_index is None:
-        return False, index + 1
-    return True, closer_index + 1
+    return (False, index + 1) if closer_index is None else (True, closer_index + 1)
 
 
 def _shell_test_closer_index(
@@ -3751,9 +3947,7 @@ def _shell_test_opener(segment: str) -> str | None:
     condition = re.sub(r"^(?:if|elif|while|until)\s+", "", segment)
     if condition.startswith("[["):
         return "]]"
-    if condition.startswith(("[ ", "[\t")):
-        return "]"
-    return None
+    return "]" if condition.startswith(("[ ", "[\t")) else None
 
 
 def _is_loop_header(segment: str) -> bool:
@@ -3804,7 +3998,7 @@ def _command_substitution_unquoted_step(
     if script.startswith("$(", index):
         quote_stack.append(None)
         return index + 2, None, depth + 1, False
-    if char == "'" or char == '"':
+    if char in ["'", '"']:
         return index + 1, char, depth, False
     if char == "(":
         quote_stack.append(None)
@@ -3930,6 +4124,11 @@ def _raw_install_in_script(
         _raw_install_in_script(body, depth + 1, variables)
         for body in shell_bodies
     ):
+        return True
+    # An unquoted heredoc delimiter lets the shell expand the body, so a
+    # `$(...)` inside a `cat <<EOF` block executes; the body is data for
+    # command scanning but its substitutions are executable.
+    if _raw_install_in_expanded_heredocs(uncommented, depth, variables):
         return True
     return any(
         _python_inline_raw_install(body, depth + 1, variables)
@@ -4497,8 +4696,7 @@ def _python_launcher_payload_is_raw(
     payload = _python_static_expression_value(
         call.args[0], static_values, module_aliases, imported_names
     )
-    shell_mode = _python_shell_mode(target, call)
-    if shell_mode:
+    if _python_shell_mode(target, call):
         return _python_payload_is_raw(payload, True, depth, variables)
     if payload is None:
         return True
@@ -4569,10 +4767,10 @@ def _python_from_import_bindings(
         return
     for alias in node.names:
         if alias.name == "*":
-            imported_names.update({
+            imported_names |= {
                 name: f"{node.module}.{name}"
                 for name in _PYTHON_STAR_IMPORTS.get(node.module, ())
-            })
+            }
             continue
         bound_name = alias.asname or alias.name
         imported_names[bound_name] = f"{node.module}.{alias.name}"
@@ -4592,6 +4790,209 @@ def _python_import_bindings(
         elif isinstance(node, ast.ImportFrom):
             _python_from_import_bindings(node, imported_names)
     return module_aliases, imported_names
+
+
+def _python_dynamic_call_target(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve a call whose target is built from a dynamic call.
+
+    ``__import__('os').system``, ``getattr(__import__('os'),'system')`` and
+    ``importlib.import_module('os').system`` are attribute chains rooted in a
+    call rather than a name, which ``_python_call_name`` cannot resolve.  The
+    module name is a literal in every such form, so the qualified target is
+    recovered here; an attribute chain rooted in anything else returns None
+    so the caller can fail closed.
+    """
+    attributes: list[str] = []
+    current: ast.expr = function
+    while isinstance(current, ast.Attribute):
+        attributes.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Call):
+        module = _python_dynamic_import_module(
+            current, module_aliases, imported_names
+        )
+        if module is None:
+            return None
+        if not attributes:
+            # A bare call result used as the target: recover the attribute a
+            # literal getattr names, e.g. getattr(mod, 'system')(...) ->
+            # mod.system.
+            named = _python_getattr_literal_name(
+                current, module_aliases, imported_names
+            )
+            return f"{module}.{named}" if named is not None else module
+        return ".".join((module, *reversed(attributes)))
+    return None
+
+
+def _python_getattr_literal_name(
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Return the literal attribute name a top-level ``getattr`` selects."""
+    target = _python_call_name(call.func, module_aliases, imported_names)
+    if target != "getattr" or len(call.args) != 2:
+        return None
+    name = call.args[1]
+    if isinstance(name, ast.Constant) and isinstance(name.value, str):
+        return name.value
+    return None
+
+
+def _python_getattr_import_module(
+    target: str | None,
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve ``getattr(<dynamic-import>, '<name>')`` to its module.
+
+    Returns None when the call is not a literal two-argument getattr over a
+    dynamic import, so the caller treats it as unresolvable.
+    """
+    if target != "getattr" or len(call.args) != 2:
+        return None
+    inner, name = call.args
+    if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+        return None
+    if not isinstance(inner, ast.Call):
+        return None
+    return _python_dynamic_import_module(inner, module_aliases, imported_names)
+
+
+def _python_dynamic_import_module(
+    call: ast.Call,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve the module a dynamic-import call names, or None.
+
+    ``importlib.import_module`` returns the named module, dotted names
+    included.  ``__import__`` follows the import statement's semantics: a
+    bare dotted name returns the TOP-LEVEL package (``__import__('os.path')``
+    binds ``os``), while a non-empty ``fromlist`` returns the submodule
+    named.  Modeling this matters: a resolver that answered
+    ``os.path.system`` for ``__import__('os.path').system`` would miss that
+    the callable really is ``os.system``.
+    """
+    target = _python_call_name(call.func, module_aliases, imported_names)
+    if target not in {"__import__", _IMPORTLIB_MODULE_FUNCTION}:
+        return _python_getattr_import_module(
+            target, call, module_aliases, imported_names
+        )
+    if not call.args:
+        return None
+    argument = call.args[0]
+    if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
+        return None
+    module_name = argument.value
+    if module_name.startswith("."):
+        # A relative import resolves against its package (a runtime concern);
+        # the module it names cannot be determined from this payload, so the
+        # caller fails closed instead of matching a launcher on a name that
+        # could resolve anywhere.
+        return None
+    if target == "__import__" and _python_import_level_is_relative(call):
+        # ``__import__`` with a nonzero ``level`` resolves the (undotted)
+        # name against the calling package, so the real module is a runtime
+        # concern again: a locally imported helper could hide a launcher.
+        return None
+    if target == _IMPORTLIB_MODULE_FUNCTION:
+        return module_name
+    if _python_import_fromlist_is_nonempty(call):
+        return module_name
+    return module_name.split(".", 1)[0]
+
+
+def _python_import_positional_level(
+    call: ast.Call,
+) -> tuple[bool, ast.expr | None]:
+    """Resolve ``__import__``'s positional ``level`` slot.
+
+    Returns ``(undetermined, node)``: ``undetermined`` is True when a
+    starred positional could shift or supply the slot without a known
+    value, and ``node`` is the expression in the fifth argument position
+    when the position is statically known.
+    """
+    positions: list[ast.expr] = []
+    for node in call.args:
+        if isinstance(node, ast.Starred):
+            inner = node.value
+            if isinstance(inner, (ast.List, ast.Tuple)):
+                positions.extend(inner.elts)
+                continue
+            # An unexpandable ``*args`` can supply ``level`` from any
+            # position; the slot cannot be determined.
+            return True, None
+        positions.append(node)
+        if len(positions) > 5:
+            break
+    return (False, positions[4]) if len(positions) >= 5 else (False, None)
+
+
+def _python_import_level_is_relative(call: ast.Call) -> bool:
+    """Whether an ``__import__`` call passes a nonzero or unknown ``level``.
+
+    The level parameter (positional index 4, the ``level`` keyword, a
+    starred positional, or a ``**`` mapping) makes the module name
+    relative to the calling package, so only a literal 0 keeps the
+    absolute-import model this resolver applies.  A non-literal level -
+    and any expansion that could supply one - is treated as relative for
+    the same fail-closed reason.
+    """
+    undetermined, level_node = _python_import_positional_level(call)
+    if undetermined:
+        return True
+    for keyword in call.keywords:
+        if keyword.arg is None:
+            # ``**mapping`` could supply ``level``; fail closed.
+            return True
+        if keyword.arg == "level":
+            level_node = keyword.value
+    if level_node is None:
+        return False
+    try:
+        return ast.literal_eval(level_node) != 0
+    except (ValueError, TypeError):
+        return True
+
+
+def _python_import_fromlist_is_nonempty(call: ast.Call) -> bool:
+    """Whether an ``__import__`` call passes a non-empty literal fromlist.
+
+    Positional index 3 and the ``fromlist`` keyword both name the parameter;
+    only a literal non-empty list/tuple proves the submodule is returned.
+    Anything else stays conservative for the top-level-package answer, which
+    is what a bare call returns.
+    """
+    fromlist_node: ast.expr | None = None
+    if len(call.args) >= 4:
+        fromlist_node = call.args[3]
+    for keyword in call.keywords:
+        if keyword.arg == "fromlist":
+            fromlist_node = keyword.value
+    if fromlist_node is None:
+        return False
+    if isinstance(fromlist_node, (ast.List, ast.Tuple)):
+        return len(fromlist_node.elts) > 0
+    return False
+
+
+def _python_call_name_or_dynamic(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> str | None:
+    """Resolve a callable to its qualified name, following literal imports."""
+    resolved = _python_call_name(function, module_aliases, imported_names)
+    if resolved is not None:
+        return resolved
+    return _python_dynamic_call_target(function, module_aliases, imported_names)
 
 
 def _python_eval_call_is_raw(
@@ -4620,6 +5021,20 @@ def _python_call_is_raw(
     caller_name: str | None,
 ) -> bool:
     target = _python_call_name(call.func, module_aliases, imported_names)
+    if target is None and _python_function_uses_dynamic_import(
+        call.func, module_aliases, imported_names
+    ):
+        # The callable is rooted in a dynamic import (`__import__('os')`,
+        # `importlib.import_module('os')`, or a literal `getattr` over one).
+        # A literal module name resolves to its qualified target; when the
+        # name is not statically known the call could be any launcher, so
+        # fail closed rather than skip a potentially raw install.  Ordinary
+        # call roots (`Path(x).read_text()`) are unaffected.
+        target = _python_call_name_or_dynamic(
+            call.func, module_aliases, imported_names
+        )
+        if target is None:
+            return True
     if target in {"exec", "eval"}:
         return _python_eval_call_is_raw(call, depth, variables)
     if target in _PYTHON_SHELL_LAUNCHERS | _PYTHON_ARGV_LAUNCHERS:
@@ -4634,6 +5049,32 @@ def _python_call_is_raw(
             caller_name,
         )
     return target is not None and re.fullmatch(r"os\.(?:exec|spawn).*", target) is not None
+
+
+def _python_function_uses_dynamic_import(
+    function: ast.expr,
+    module_aliases: dict[str, str],
+    imported_names: dict[str, str],
+) -> bool:
+    """Whether a callable expression is rooted in an unresolved import call.
+
+    Import-shaped roots (``__import__``, ``importlib.import_module``, and a
+    literal ``getattr``) trigger the fail-closed path: those can produce any
+    module, so an unknown module name hides a potential launcher.  A
+    ``getattr`` whose inner expression is not a dynamic import also reaches
+    this branch and fails closed; that is the safe direction (a spurious
+    rejection, never a missed raw install).  Call roots that are neither an
+    import nor a ``getattr`` keep their previous treatment.
+    """
+    current: ast.expr = function
+    while isinstance(current, ast.Attribute):
+        current = current.value
+    if not isinstance(current, ast.Call):
+        return False
+    target = _python_call_name(current.func, module_aliases, imported_names)
+    return target in {
+        "__import__", _IMPORTLIB_MODULE_FUNCTION, "getattr"
+    }
 
 
 def _python_command_wrapper_spec(
@@ -4686,25 +5127,27 @@ def _python_command_wrapper_callers_are_safe(
     if spec is None:
         return False
     argument_index, allowed = spec
-    call_sites = [
-        node for node in ast.walk(tree)
+    if call_sites := [
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and _python_call_name(node.func, module_aliases, imported_names) == wrapper
-    ]
-    if not call_sites:
+        and _python_call_name(node.func, module_aliases, imported_names)
+        == wrapper
+    ]:
+        return all(
+            (executable := _python_wrapper_call_executable(
+                call,
+                argument_index,
+                node_scopes.get(id(call)),
+                values_by_scope,
+                module_aliases,
+                imported_names,
+            )) is not None
+            and Path(executable).name in allowed
+            for call in call_sites
+        )
+    else:
         return False
-    return all(
-        (executable := _python_wrapper_call_executable(
-            call,
-            argument_index,
-            node_scopes.get(id(call)),
-            values_by_scope,
-            module_aliases,
-            imported_names,
-        )) is not None
-        and Path(executable).name in allowed
-        for call in call_sites
-    )
 
 
 def _python_forwarded_argv_name(node: ast.expr) -> str | None:
@@ -4949,6 +5392,14 @@ def _python_imports_include_raw_install(
     return False
 
 
+def _shell_template_runs_raw_install(shell: object) -> bool:
+    """Whether a custom shell template's own commands install a raw toolchain."""
+    return any(
+        _raw_install_in_run_script(payload)
+        for payload in _shell_template_executable_payloads(shell)
+    )
+
+
 def _python_inline_raw_install(
     payload: str,
     depth: int,
@@ -5002,8 +5453,7 @@ def _python_short_flag_step(
     if flag in {"h", "V"}:
         return "terminal", None, 1
     if flag == "c":
-        attached_source = short_options[offset + 1:]
-        if attached_source:
+        if attached_source := short_options[offset + 1 :]:
             return "inline", attached_source, 1
         source_index = index + 1 if index + 1 < len(words) else None
         return "inline", source_index, 1
@@ -5039,8 +5489,6 @@ def _python_long_option_step(
         return mode, None, 0
     if option == "--check-hash-based-pycs":
         return None, None, 2
-    if option.startswith("--check-hash-based-pycs="):
-        return None, None, 1
     return None, None, 1
 
 
@@ -5089,19 +5537,252 @@ def _python_script_path(words: list[str], source_index: str | int) -> str | None
     """Return the selected Python script path from parsed argv."""
     if isinstance(source_index, str):
         return source_index
-    if source_index < len(words):
-        return words[source_index]
-    return None
+    return words[source_index] if source_index < len(words) else None
 
+
+_IMPORTLIB_MODULE_FUNCTION = "importlib.import_module"
 
 _RAW_TOOLCHAIN_INSTALL_MARKER_RE = re.compile(
     r"\brustup(?:-init)?\b|\btoolchain\s+install\b", re.IGNORECASE
+)
+
+# Redirection and heredoc syntax tokens that appear as words of a command
+# segment but name no script operand (for example `2>&1`, `>file`, `<<PY`).
+_SEGMENT_SYNTAX_TOKEN_RE = re.compile(
+    r"(?:\d*>>?|<&?\d*|<<-?|&>>?)"
 )
 
 
 def _shell_script_mentions_toolchain_install(content: str) -> bool:
     """Select shell files whose contents can affect Rust toolchain install."""
     return _RAW_TOOLCHAIN_INSTALL_MARKER_RE.search(content) is not None
+
+
+def _shell_script_invokes_interpreter(content: str) -> bool:
+    """Whether a script can hand control to another script.
+
+    Used for scripts that do not themselves mention the install markers: the
+    conservative whole-file scan would false-positive on legitimate
+    constructs it cannot resolve (a local array expansion such as
+    ``"${build_cmd[@]}"`` fails closed), so such files are only followed
+    through the scripts they invoke.  A file that neither mentions the
+    markers nor invokes an interpreter cannot install a toolchain itself.
+    """
+    return any(
+        head is not None
+        for head in (
+            _invocation_head(segment)
+            for segment, _separator in _followable_command_segments(content)
+        )
+        if head is not None
+    )
+
+
+def _followable_command_segments(content: str):
+    """Yield parseable command segments of a shell file's own body.
+
+    Command substitutions are masked before segmentation, so fragments of a
+    ``$(...)`` body appear as unparseable remainders; those are skipped here
+    because the substitutions themselves are scanned separately elsewhere.
+    """
+    stripped = _join_continuations(_strip_heredocs(_strip_shell_comments(content)))
+    for segment, separator in _command_segments_with_separators(stripped):
+        if _parse_segment_words(segment) is None:
+            # A masked substitution or an unresolved quote leaves a fragment
+            # that cannot name a command; the substitution scan covers the
+            # body it came from.
+            continue
+        yield segment, separator
+
+
+def _parse_segment_words(segment: str) -> list[str] | None:
+    """Parse one command segment, or None when it is not resolvable."""
+    try:
+        return shlex.split(segment.strip(), posix=True)
+    except ValueError:
+        return None
+
+
+def _invocation_head(segment: str) -> str | None:
+    """Return the interpreter basename a segment invokes, if any.
+
+    Command wrappers are unwrapped first (``exec bash x.sh``, ``nohup
+    bash x.sh``, ``command bash x.sh``), reusing the same bounded unwrapper
+    the marker-present scan uses, so a wrapped shell invocation is followed
+    instead of skipped.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return None
+    index = _skip_env_assignments(words, 0)
+    if (
+        index + 1 < len(words)
+        and _shell_word_basename(words[index]) == "retry"
+        and words[index + 1].isdigit()
+    ):
+        index += 2
+    index = _skip_bare_separators(words, index)
+    index, refused = _unwrap_stacked_wrappers(words, index)
+    if refused or index >= len(words):
+        return None
+    command = _resolve_heredoc_word(words[index])[0]
+    if command in (".", "source"):
+        # The dot-source spellings name no file of their own; Path(".").name
+        # is empty, so the recognized head comes from the command word.
+        return command
+    head = Path(command).name
+    if head in ("bash", "sh", "zsh", "dash"):
+        return head
+    return head if head == "python" or _PYTHON_COMMAND.fullmatch(head) else None
+
+
+def _followed_script_is_raw(
+    operand: str,
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Scan one resolved operand of a shell or Python invocation.
+
+    Only operands that resolve to an existing repository-local file are
+    followed; an absolute, out-of-root, or not-yet-generated operand names
+    something this scan cannot read, and (per this path's contract) an
+    unresolvable operand is not evidence of a raw install.  The
+    marker-present path keeps its own fail-closed treatment; this lighter
+    path deliberately does not fail closed, because the file it examines
+    never mentions the install markers.
+    """
+    root = PROJECT_ROOT.resolve()
+    try:
+        resolved = (root / operand).resolve(strict=True)
+        resolved.relative_to(root)
+        if not resolved.is_file():
+            return False
+    except (OSError, ValueError):
+        return False
+    if head in {"bash", "sh", "zsh", "dash", "source", "."}:
+        return _raw_install_from_shell_script_file(
+            operand, depth + 1, variables
+        ) or _python_script_file_is_raw(operand, depth + 1, variables)
+    return _python_script_file_is_raw(operand, depth + 1, variables)
+
+
+def _followable_operand(operand: str) -> bool:
+    """Whether an operand word can name a script this scan should follow."""
+    if operand.startswith("-") or "$" in operand or "`" in operand:
+        return False
+    # Redirection and heredoc tokens are syntax, not script operands:
+    # `python3 "$file" 2>&1 <<PY` must not scan `2>&1` or `<<PY`.
+    return _SEGMENT_SYNTAX_TOKEN_RE.match(operand) is None
+
+
+def _raw_install_from_inline_script(
+    inline: str, depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Scan a ``-c`` inline payload handed to a shell in a followed file.
+
+    ``bash -c "echo build && make test"`` carries an executable string, not
+    a filename; the marker-present path already routes such payloads to the
+    script scan, and this path must do the same instead of treating the
+    string as a path (which would fail closed on a harmless literal).
+    """
+    return _raw_install_in_script(inline, depth + 1, variables)
+
+
+def _module_flag_operand_is_followable(words: list[str], index: int) -> bool:
+    """Whether a ``-m`` operand names a script this scan should follow.
+
+    ``python3 -m runpy <script>`` runs a script file, so its target is
+    followed like a direct operand.  Any other module name is not a file
+    and stops the scan instead.
+    """
+    return index + 1 < len(words) and words[index + 1] == "runpy"
+
+
+def _single_operand_decision(
+    words: list[str],
+    index: int,
+    operand: str,
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool | None:
+    """Decide one operand: True raw, False keep scanning, None stop.
+
+    ``-c`` hands the next word to the inline-script scan; ``-m`` follows
+    only a runpy target and otherwise stops; any other operand is followed
+    when it can name a script.
+    """
+    if operand == "-c" and index + 1 < len(words):
+        return _raw_install_from_inline_script(
+            words[index + 1], depth, variables
+        )
+    if operand == "-m":
+        return False if _module_flag_operand_is_followable(words, index) else None
+    if not _followable_operand(operand):
+        return False
+    return _followed_script_is_raw(operand, head, depth, variables)
+
+
+def _invocation_operands_are_raw(
+    words: list[str],
+    head: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Whether any operand of one followed invocation is a raw install."""
+    for index, operand in enumerate(words[1:], start=1):
+        decision = _single_operand_decision(
+            words, index, operand, head, depth, variables
+        )
+        if decision is True:
+            return True
+        if decision is None:
+            break
+    return False
+
+
+def _raw_install_from_invoked_scripts(
+    content: str,
+    depth: int,
+    variables: dict[str, str | None] | None,
+) -> bool:
+    """Follow the scripts a marker-less shell file invokes.
+
+    The file's own body is deliberately not scanned as a whole (its
+    unresolved constructs would fail closed on legitimate code), so only the
+    literal script operands of its shell and Python invocations are resolved
+    and scanned.  A chain such as ``outer.sh`` -> ``bash inner.sh`` is
+    therefore caught, while an operand this scan cannot resolve (a dynamic
+    expansion, an absolute path, or a not-yet-generated file) is not
+    treated as evidence: this file does not mention the install markers, so
+    an unresolvable operand is not a reason to fail the gate.  Inline ``-c``
+    payloads are executable strings and are scanned as scripts.
+    """
+    for segment, _separator in _followable_command_segments(content):
+        words = _parse_segment_words(segment)
+        if not words or len(words) < 2:
+            continue
+        head = _invocation_head(segment)
+        if head is None:
+            continue
+        if _invocation_operands_are_raw(words, head, depth, variables):
+            return True
+    return False
+
+
+def _is_template_placeholder_operand(script_path: str, root: Path) -> bool:
+    """Whether an operand is the workflow template's placeholder token.
+
+    The generated script is the step's run block, which the caller scans
+    separately, so the placeholder adds nothing here.  A real file or
+    command of that exact name keeps the ordinary fail-closed treatment.
+    """
+    return (
+        script_path == _TEMPLATE_PLACEHOLDER_SENTINEL
+        and not (root / script_path).exists()
+        and shutil.which(script_path) is None
+    )
 
 
 def _raw_install_from_shell_script_file(
@@ -5113,14 +5794,15 @@ def _raw_install_from_shell_script_file(
     if depth > 12 or script_path.startswith("-"):
         return True
     root = PROJECT_ROOT.resolve()
-    unresolved_command_shaped_name = (
+    if _is_template_placeholder_operand(script_path, root):
+        return False
+    if (
         not Path(script_path).is_absolute()
         and len(Path(script_path).parts) == 1
         and _mentions_raw_install(script_path)
         and not (root / script_path).exists()
         and shutil.which(script_path) is None
-    )
-    if unresolved_command_shaped_name:
+    ):
         return False
     try:
         resolved = (root / script_path).resolve(strict=True)
@@ -5131,7 +5813,13 @@ def _raw_install_from_shell_script_file(
     except (OSError, ValueError):
         return True
     if not _shell_script_mentions_toolchain_install(content):
-        return False
+        # No marker text: this file cannot install a toolchain itself, but it
+        # may invoke one that does.  Follow its interpreter invocations so a
+        # multi-hop chain cannot hide an install; when it invokes nothing,
+        # the file is genuinely inert.
+        if not _shell_script_invokes_interpreter(content):
+            return False
+        return _raw_install_from_invoked_scripts(content, depth, variables)
     return _raw_install_in_script(content, depth + 1, variables)
 
 
@@ -5147,6 +5835,8 @@ def _python_script_file_is_raw(
     script_path = _repo_rooted_script_operand(script_path) or script_path
     try:
         root = PROJECT_ROOT.resolve()
+        if _is_template_placeholder_operand(script_path, root):
+            return False
         resolved = (root / script_path).resolve(strict=True)
         resolved.relative_to(root)
         if not resolved.is_file() or resolved.stat().st_size > 1_048_576:
@@ -5180,12 +5870,12 @@ def _python_module_file_is_raw(
     if invalid:
         return True
     visited: set[Path] = set()
-    for source in sources:
-        if _python_script_file_is_raw(
+    return any(
+        _python_script_file_is_raw(
             str(source.relative_to(root)), depth, variables, visited
-        ):
-            return True
-    return False
+        )
+        for source in sources
+    )
 
 
 def _python_command_here_string(
@@ -5442,6 +6132,13 @@ def _raw_install_from_wrapper(
     handler = wrapper_handlers.get(words[0])
     if handler is not None:
         return handler(words, depth, variables)
+    if words[0] in (".", "source"):
+        # A dot-sourced script's body runs in this shell, so its literal
+        # operand is followed like any other invoked script.  A missing
+        # operand fails closed: the body cannot be inspected.
+        if len(words) < 2:
+            return True
+        return _raw_install_from_shell_script_file(words[1], depth, variables)
     return _raw_install_from_shell_wrapper(words, depth, variables)
 
 
@@ -5510,17 +6207,91 @@ def _raw_install_expand_command_word(
     ), words
 
 
+_RUSTUP_GLOBAL_FLAGS = frozenset(
+    {"-v", "-V", "-q", "--verbose", "--quiet", "--version"}
+)
+_COMMAND_SUBSTITUTION_MASK = "__shell_command_substitution__"
+
+
+def _rustup_subcommand_word_is_unresolved(word: str) -> bool:
+    """Whether a rustup operand word still carries an unresolved expansion.
+
+    Quote removal runs before this check, so a surviving ``$`` or backtick
+    means bash evaluates the word at run time, and the masked placeholder
+    marks a ``$(...)`` the scanner lifted out of the line.
+    """
+    return (
+        "$" in word
+        or "`" in word
+        or word == _COMMAND_SUBSTITUTION_MASK
+    )
+
+
 def _raw_rustup_command_installs_toolchain(words: list[str]) -> bool:
-    """Whether a rustup argv invokes its toolchain install subcommand."""
+    """Whether a rustup argv invokes its toolchain install subcommand.
+
+    A subcommand region that is not the literal ``toolchain install`` pair
+    and still carries an unresolved expansion fails closed: the expansion
+    could produce that pair at run time, so it must not pass as the benign
+    subcommand (``show``, ``component add``, ``toolchain list``) it merely
+    resembles.
+    """
     if Path(words[0]).name != "rustup":
         return False
     index = 1
-    global_flags = {"-v", "-V", "-q", "--verbose", "--quiet", "--version"}
-    while index < len(words) and words[index].startswith("-"):
-        if words[index] not in global_flags:
-            break
-        index += 1
-    return words[index : index + 2] == ["toolchain", "install"]
+    while index < len(words):
+        word = words[index]
+        if word.startswith("+") and len(word) > 1:
+            # ``+toolchain`` selects a toolchain and shifts the subcommand
+            # to the next word; skipping it keeps ``+stable toolchain
+            # install`` recognized.
+            index += 1
+            continue
+        if word.startswith("-") and word in _RUSTUP_GLOBAL_FLAGS:
+            index += 1
+            continue
+        break
+    subcommand = words[index : index + 2]
+    if subcommand == ["toolchain", "install"]:
+        return True
+    return any(_rustup_subcommand_word_is_unresolved(word) for word in subcommand)
+
+
+def _rustup_segment_opens_dynamic_subcommand(
+    segment: str, separators: list[str], index: int
+) -> bool:
+    """Whether a backtick substitution fills a rustup subcommand slot.
+
+    The segment scanner splits a command substitution out of its command
+    line, so ``rustup `echo toolchain` install nightly`` reaches the argv
+    check as the bare word ``rustup`` plus a separate substitution body.
+    When a rustup command stops before its literal subcommand pair and a
+    backtick substitution follows, the subcommand text is runtime text and
+    the scan fails closed. A double-quoted substitution leaves the opening
+    quote stranded on this segment, so one dangling quote is dropped
+    before tokenizing.
+    """
+    if index + 1 >= len(separators) or separators[index + 1] != "`":
+        return False
+    text = segment.rstrip()
+    if text and text[-1] in "\"'":
+        text = text[:-1]
+    try:
+        words = shlex.split(text, posix=True)
+    except ValueError:
+        return False
+    if not words or Path(words[0]).name != "rustup":
+        return False
+    operand = words[1:]
+    while operand:
+        if operand[0].startswith("+") and len(operand[0]) > 1:
+            operand = operand[1:]
+            continue
+        if operand[0].startswith("-") and operand[0] in _RUSTUP_GLOBAL_FLAGS:
+            operand = operand[1:]
+            continue
+        break
+    return operand in [[], ["toolchain"]]
 
 
 def _raw_install_from_command(
@@ -5758,8 +6529,7 @@ def _shell_here_string_parts(
         match = re.match(r"^(?:0)?<<<(.*)$", token)
         if match is None:
             continue
-        inline = match.group(1)
-        if inline:
+        if inline := match[1]:
             return index, inline, 1
         if index + 1 < len(arguments):
             return index, _resolve_heredoc_word(arguments[index + 1])[0], 2
@@ -5803,9 +6573,7 @@ def _shell_bash_option_step(
         if position + 1 >= len(arguments):
             return (False, position)
         return (None, position + 2)
-    if argument in _SHELL_FLAG_OPTIONS:
-        return (None, position + 1)
-    return None
+    return (None, position + 1) if argument in _SHELL_FLAG_OPTIONS else None
 
 
 def _shell_short_option_step(
@@ -5939,6 +6707,86 @@ def _read_heredoc_body(
     return "\n".join(body), index
 
 
+def _unquoted_heredoc_bodies(script: str) -> list[str]:
+    """Return bodies of heredocs whose delimiter is unquoted.
+
+    An unquoted delimiter lets the shell expand the body, so command
+    substitutions inside it EXECUTE even though the body itself is data
+    (``cat <<EOF`` with ``$(rustup ...)``).  A quoted delimiter
+    (``<<'EOF'``/``<<"EOF"``) suppresses all expansion, so those bodies
+    stay literal.  Bodies are returned for substitution scanning only;
+    they must never be treated as command lines.
+    """
+    bodies: list[str] = []
+    lines = script.splitlines()
+    index = 0
+    quote: str | None = None
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        line, index = _join_command_line(lines, line, index, quote)
+        quote, markers = _scan_line_for_heredocs(line, quote)
+        for delimiter, tab_stripped, dynamic in markers:
+            if dynamic:
+                return bodies
+            body, index = _read_heredoc_body(
+                lines, index, delimiter, tab_stripped
+            )
+            if not _heredoc_delimiter_was_quoted(line, delimiter):
+                bodies.append(body)
+    return bodies
+
+
+def _raw_install_in_expanded_heredocs(
+    script: str, depth: int, variables: dict[str, str | None] | None
+) -> bool:
+    """Whether a command substitution in an unquoted heredoc is a raw install.
+
+    Only unquoted delimiters expand; a quoted delimiter keeps the body
+    literal, so its text is never analyzed here.
+    """
+    for body in _unquoted_heredoc_bodies(script):
+        _masked, substitutions, opaque = _mask_command_substitutions(body)
+        if opaque:
+            return True
+        if any(
+            _raw_install_in_script(substitution, depth + 1, variables)
+            for substitution in substitutions
+            if not _shell_substitution_is_file_read(substitution)
+        ):
+            return True
+    return False
+
+
+def _heredoc_delimiter_was_quoted(line: str, delimiter: str) -> bool:
+    """Whether the marker that opens ``delimiter`` quotes it (no expansion).
+
+    Bash suppresses parameter/command substitution in a heredoc body when
+    the delimiter word is quoted in any part; the marker text still shows
+    that quoting, so it is read back from the line for the matching
+    delimiter.
+    """
+    index = 0
+    while index < len(line):
+        marker = _heredoc_marker_at(line, index)
+        if marker is None:
+            index += 1
+            continue
+        word, _tab, _dynamic, end = marker
+        if word == delimiter:
+            raw = line[index:end]
+            head = raw.split("<<", 1)[1].lstrip("-").lstrip(" \t")
+            # Quoting or escaping ANY part of the delimiter word
+            # suppresses body expansion (E'OF', "E"OF, E\OF), so the
+            # literal check covers every quoted/escaped character, not
+            # only a leading quote.
+            return any(
+                char in head for char in ("'", '"', chr(92))
+            )
+        index = end
+    return False
+
+
 def _shell_stdin_heredoc_bodies(script: str) -> list[str]:
     """Return heredoc bodies used as input scripts by a shell command."""
     bodies: list[str] = []
@@ -5987,19 +6835,42 @@ def _raw_toolchain_install_issue(workflow_content: str) -> str | None:
             "release workflow YAML or a referenced workflow cannot be "
             "inspected, so raw Rust toolchain installs cannot be ruled out"
         )
-    for step in steps:
-        run = step["run"]
-        if _workflow_shell_uses_python(step.get("shell")):
-            raw_install = _python_inline_raw_install(run, 0, None)
-        else:
-            raw_install = _raw_install_in_run_script(run)
-        if raw_install:
-            return (
-                "release workflows must provision Rust toolchains "
-                "through the verified installer; found a raw or unresolved "
-                "toolchain-install command"
-            )
-    return None
+    return next(
+        (
+            "release workflows must provision Rust toolchains "
+            "through the verified installer; found a raw or unresolved "
+            "toolchain-install command"
+            for step in steps
+            if _step_runs_raw_toolchain_install(step)
+        ),
+        None,
+    )
+
+
+def _step_runs_raw_toolchain_install(step: dict) -> bool:
+    """Whether one run step can execute a raw or unresolved toolchain install.
+
+    The run block is analyzed under the interpreter the step's shell
+    selects.  A custom shell template can also carry its own executable
+    commands (``bash -c '...' {0}``), which the run-block scan cannot see,
+    and a template whose consumers span both interpreters runs the block
+    under each, so the OTHER analysis is applied too and either can fail
+    the step closed.
+    """
+    run = step["run"]
+    shell = step.get("shell")
+    if _workflow_shell_uses_python(shell):
+        if _python_inline_raw_install(run, 0, None):
+            return True
+    elif _raw_install_in_run_script(run):
+        return True
+    if _shell_template_runs_raw_install(shell):
+        return True
+    if not _shell_template_conflicting_placeholder_consumers(shell):
+        return False
+    if _workflow_shell_uses_python(shell):
+        return _raw_install_in_run_script(run)
+    return _python_inline_raw_install(run, 0, None)
 
 
 def _is_retry_call(segment: str) -> bool:
@@ -6105,12 +6976,18 @@ def _provisioning_nested_shell_issue(
     words: list[str], index: int, depth: int
 ) -> str | None:
     """Inspect explicit ``shell -c`` payloads recursively."""
-    for option_index, option in enumerate(words[index + 1:], index + 1):
-        if option == "-c" and option_index + 1 < len(words):
-            return _provisioning_shell_indirection_issue(
+    return next(
+        (
+            _provisioning_shell_indirection_issue(
                 words[option_index + 1], depth + 1
             )
-    return None
+            for option_index, option in enumerate(
+                words[index + 1 :], index + 1
+            )
+            if option == "-c" and option_index + 1 < len(words)
+        ),
+        None,
+    )
 
 
 def _provisioning_shell_words_issue(
@@ -6214,18 +7091,52 @@ def _shell_option_enables_errexit(words: list[str], index: int) -> bool:
     )
 
 
+def _shell_option_word_consumes_operand(word: str) -> bool:
+    """Whether one shell option word consumes the NEXT word as its operand.
+
+    ``--rcfile FILE``/``--init-file FILE`` take a file operand, and
+    ``-o``/``-O`` take a shell-option name; the word after any of them is
+    that operand, not another option.  ``bash --rcfile -e {0}`` therefore
+    runs the body without errexit (verified: the whole body executes), so
+    the scan must step over the operand before reading option words.
+
+    ``-o``/``-O`` are handled by the caller, which reads the operand as the
+    ``-o errexit`` form before stepping over it.
+    """
+    if word == "--rcfile" or word == "--init-file":
+        return True
+    return word in _SHELL_VALUE_OPTIONS and word not in ("-o", "-O")
+
+
 def _shell_initial_errexit(shell: object) -> bool:
-    """Model whether a workflow shell starts with errexit enabled."""
+    """Model whether a workflow shell starts with errexit enabled.
+
+    Every word after the ``{0}`` operand is a positional parameter of the
+    script, not a shell option: ``bash {0} -e`` passes the literal ``-e``
+    as ``$1`` and runs the body without errexit (verified against bash),
+    so the scan stops at the operand.  A word that is another option's
+    operand is skipped for the same reason the positional parameters are:
+    ``bash --rcfile -e {0}`` hands ``-e`` to ``--rcfile``.
+    """
     if shell is None or not isinstance(shell, str):
         return True
     words = shell.split()
     if not words or "{0}" not in words:
         # GitHub's built-in `bash`/`sh` forms add errexit by default.
         return True
-    return any(
-        _shell_option_enables_errexit(words, index)
-        for index in range(1, len(words))
-    )
+    operand = words.index("{0}")
+    index = 1
+    while index < operand:
+        word = words[index]
+        if _shell_option_enables_errexit(words, index):
+            return True
+        if _shell_option_word_consumes_operand(word):
+            # The next word is this option's operand, not an option word
+            # (``--rcfile -e`` hands ``-e`` to ``--rcfile``).
+            index += 2
+            continue
+        index += 1
+    return False
 
 
 def _ends_with_background_operator(script: str) -> bool:
@@ -6459,6 +7370,245 @@ def _step_live_commands(step: str | dict) -> list[str]:
     )
 
 
+_CARRIED_BODY_MARKER_KEYWORDS = frozenset({"then", "do", "else"})
+
+
+def _prerequisite_view_text(segment: str) -> str:
+    """Segment text as the live-command view carries it.
+
+    A ``then``/``do``/``else`` marker segment is presented to the
+    prerequisite checks as the command it carries (``then pip install ...``
+    appears as ``pip install ...``), so the masked and backgrounded sets
+    must normalize the same way or a comparison against that view misses.
+    """
+    stripped = segment.strip()
+    words = stripped.split(maxsplit=1)
+    if words and words[0] in _CARRIED_BODY_MARKER_KEYWORDS and len(words) > 1:
+        return words[1]
+    return stripped
+
+
+def _backgrounded_command_segments(script: str) -> set[str]:
+    """Segment texts the shell runs in the background (``cmd &``).
+
+    A backgrounded command's exit status is never observed by the step, so
+    it cannot satisfy a prerequisite in that step.  The shell backgrounds
+    the WHOLE list the ``&`` terminates: in ``a && b &`` the operator
+    applies to the ``a && b`` list, so both segments run asynchronously.
+    ``&&``/``||``/``|`` continue the current list, ``;`` and newline end it
+    synchronously, and a trailing ``&`` is recovered from the script text
+    (the pair stream drops the final separator).
+    """
+    pairs = _command_segments_with_separators(script)
+    if not pairs:
+        return set()
+    followings = [
+        pairs[index + 1][1]
+        if index + 1 < len(pairs)
+        else ("&" if _ends_with_background_operator(script) else "")
+        for index in range(len(pairs))
+    ]
+    backgrounded: set[str] = set()
+    group: list[str] = []
+    for (segment, _separator), following in zip(pairs, followings):
+        group.append(segment.strip())
+        if following in ("&&", "||", "|"):
+            # The list continues; the terminator decides its fate.
+            continue
+        if following == "&":
+            backgrounded.update(_prerequisite_view_text(s) for s in group)
+        group = []
+    return backgrounded
+
+
+def _shell_rhs_discards_failure(segment: str) -> bool:
+    """Whether a ``||`` right-hand segment turns failure into success.
+
+    Only a provably unsuccessful right-hand side keeps the left-hand
+    failure visible: ``false``, and ``exit``/``return`` with no argument
+    (the failure status is reused) or a literal nonzero status AFTER the
+    shell's 8-bit truncation (``exit 256`` exits successfully, so it
+    masks).  Every other form - ``true``, ``:``, ``exit 0``, ``echo``,
+    ``printf``, an empty or unrecognized segment - masks the failure, so
+    the chain succeeds even when the command fails and its exit status
+    proves nothing.
+    """
+    words = _shell_words(segment)
+    command_index = _skip_env_assignments(words, 0)
+    command = words[command_index:]
+    if not command:
+        return True
+    if command[0] == "false":
+        return False
+    if command[0] in {"exit", "return"}:
+        if len(command) == 1:
+            # Without an argument the status is reused, so a failed left
+            # side keeps failing the chain.
+            return False
+        if len(command) == 2:
+            try:
+                status = int(command[1])
+            except ValueError:
+                # Non-literal statuses stay unrecognized and fail closed.
+                return True
+            # The shell truncates an exit status to its low 8 bits, so
+            # `exit 256` exits successfully (256 % 256 == 0) and the
+            # chain succeeds: that masks the failure.
+            return status % 256 == 0
+        # More than one argument (a syntax error at runtime) fails closed.
+        return True
+    return True
+
+
+def _failure_masked_command_segments(
+    script: str, errexit: bool = True
+) -> set[str]:
+    """Segment texts whose failure a following ``||`` chain swallows.
+
+    A prerequisite written as ``cmd || true`` can certify a step while its
+    failure is silently ignored, so such a segment must not count as
+    satisfying it.  Each member of a connected ``&&``/``||`` list is
+    examined separately: its failure flows forward through the connectors
+    and is swallowed exactly when the list's final status can become
+    success anyway.  In ``false || true && pip install ...`` the prefix
+    failure is absorbed but the install is reached regardless and reports
+    its own status, so only the prefix is masked; in ``cmd || false ||
+    true`` the chain reaches ``true``, so ``cmd`` is masked too.  An
+    unknown right-hand side is treated as succeeding (fail closed).
+
+    ``errexit`` models the step's shell: with errexit (GitHub's default
+    bash adds ``-e``) a propagating list fails the shell immediately, so
+    a later command cannot replace its status.  Without errexit the shell
+    continues past the failed list and the step's final status comes from
+    the last command, so a followed list still swallows the failure; the
+    conservative reading masks it whenever any later segment exists.
+    """
+    pairs = _command_segments_with_separators(script)
+    masked: set[str] = set()
+    list_start = 0
+    for index in range(len(pairs)):
+        if _connected_list_continues(pairs, index):
+            continue
+        for position in range(list_start, index + 1):
+            if _member_failure_is_swallowed(pairs, position, index, errexit):
+                masked.add(_prerequisite_view_text(pairs[position][0]))
+        list_start = index + 1
+    return masked
+
+
+def _connected_list_continues(pairs: list[tuple[str, str]], index: int) -> bool:
+    """Whether the segment at ``index`` continues a connected ``&&``/``||`` list."""
+    if index + 1 >= len(pairs):
+        return False
+    return pairs[index + 1][1] in ("&&", "||")
+
+
+def _member_failure_is_swallowed(
+    pairs: list[tuple[str, str]], position: int, end: int, errexit: bool
+) -> bool:
+    """Whether one member's failure can be absorbed before the list ends.
+
+    The simulation assumes the member fails, then follows the connectors:
+    an ``||`` runs its right-hand side when the status is failure and an
+    ``&&`` runs it when the status is success.  A right-hand side that
+    discards failure (``true``, ``exit 0``, an unrecognized command) turns
+    the running status into success, so any later member sees a success
+    path; a right-hand side that provably fails (``false``, ``exit 1``)
+    continues the failure.  Success in the final status means the member's
+    failure never reaches the step's exit code and the member must not
+    count.  Without errexit, a following segment replaces the list's
+    status wholesale, so the failure is swallowed there as well.
+    """
+    status_failed = True
+    for next_position in range(position + 1, end + 1):
+        connector = pairs[next_position][1]
+        runs = not status_failed if connector == "&&" else status_failed
+        if runs:
+            status_failed = not _shell_rhs_discards_failure(
+                pairs[next_position][0]
+            )
+    return not errexit and end + 1 < len(pairs) if status_failed else True
+
+
+def _segments_after_errexit_changes(script: str) -> list[tuple[str, bool]]:
+    """Split a script at its ``set`` errexit changes.
+
+    Returns ``(region_text, errexit_active)`` in order, where each region
+    is a TEXT SLICE of the original script (separators preserved, so a
+    region still parses as the ``&&``/``||`` chain it came from).  A new
+    region starts at a ``set`` word that changes errexit, because GitHub's
+    default bash honors it for the rest of the script: a scan that reads
+    only the shell's INITIAL mode would treat a check after ``set +e`` as
+    errexit-protected when a later command can already swallow its
+    failure.
+    """
+    pairs = _command_segments_with_separators(script)
+    runs: list[tuple[str, bool]] = []
+    errexit = True  # overwritten by the caller's shell model on first use
+    start = 0
+    cursor = 0  # offset of the current region's start in `script`
+    for index, (segment, separator) in enumerate(pairs):
+        position = script.find(segment, cursor)
+        if position < 0:
+            position = cursor
+        state = _set_errexit_state(segment)
+        if state is not None:
+            # Everything before this segment ran under the old mode; the
+            # segment and everything after it run under the new one.
+            runs.append((script[start:position], errexit))
+            errexit = state
+            start = position
+        cursor = position + len(segment) + len(separator)
+    runs.append((script[start:], errexit))
+    return runs
+
+
+def _masked_command_segments_for_step(step: str | dict) -> set[str]:
+    """Failure-masked segments of one run step's executable script."""
+    script = _step_script(step)
+    if script is None:
+        return set()
+    executable = _strip_function_bodies(
+        _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
+    )
+    shell = step.get("shell") if isinstance(step, dict) else None
+    initial = _shell_initial_errexit(shell)
+    masked: set[str] = set()
+    for index, (region, region_errexit) in enumerate(
+        _segments_after_errexit_changes(executable)
+    ):
+        if not region.strip():
+            continue
+        masked |= _failure_masked_command_segments(
+            region,
+            # The first region runs under the shell's initial model; a
+            # later region carries the mode its `set` established.
+            errexit=initial if index == 0 else region_errexit,
+        )
+    return masked
+
+
+def _foreground_live_commands(step: str | dict) -> list[str]:
+    """Live command segments that run in the FOREGROUND to completion.
+
+    The prerequisite checks consume this view so a backgrounded ``pip
+    install`` or ``make docs-check`` cannot count as satisfied: the shell
+    never waits for ``cmd &``, so its exit status proves nothing.
+    """
+    script = _step_script(step)
+    if script is None:
+        return []
+    stripped = _strip_heredocs(_strip_shell_comments(script))
+    executable_source = _join_continuations(stripped)
+    executable = _strip_function_bodies(executable_source)
+    backgrounded = _backgrounded_command_segments(executable)
+    return [
+        segment
+        for segment in _step_live_commands(step)
+        if segment.strip() not in backgrounded
+    ]
+
+
 def _normalize_shell_command_words(words: list[str]) -> list[str]:
     """Normalize a path-qualified executable without altering its arguments."""
     return [_shell_word_basename(words[0]), *words[1:]] if words else words
@@ -6471,14 +7621,10 @@ def _shell_command_after_prefix(words: list[str]) -> list[str] | None:
     command = _shell_word_basename(words[0])
     if command == "timeout":
         index = _timeout_command_index(words)
-        if index is None:
-            return None
-        return _normalize_shell_command_words(words[index:])
+        return None if index is None else _normalize_shell_command_words(words[index:])
     if command in _PROCESS_PREFIX_FLAGS:
         index = _process_prefix_command_index(words)
-        if index is None:
-            return None
-        return _normalize_shell_command_words(words[index:])
+        return None if index is None else _normalize_shell_command_words(words[index:])
     wrappers = {
         "bash", "sh", "dash", "zsh", "sudo", "env", "command",
         "retry", "nohup", "nice", "stdbuf", "time",
@@ -6506,36 +7652,364 @@ def _shell_words(segment: str) -> list[str]:
         return words
     prefix = words[:command_index]
     command = _shell_command_after_prefix(words[command_index:])
-    if command is None:
-        return []
-    return [*prefix, *command]
+    return [] if command is None else [*prefix, *command]
 
 
-_MAKE_VALUE_OPTIONS = frozenset({
+# Options that always consume the following word as their operand.
+_MAKE_REQUIRED_VALUE_OPTIONS = frozenset({
     "-C", "--directory", "-f", "--file", "--makefile", "-I",
-    "--include-dir", "-j", "--jobs", "-O", "--output-sync", "-o",
-    "--old-file", "-W", "--what-if", "--assume-new", "--eval",
+    "--include-dir", "-o", "--old-file", "-W", "--what-if",
+    "--assume-new", "-E", "--eval",
 })
+# -j/--jobs take an optional operand that GNU Make consumes only when the
+# next word is all digits (positive_int); -l/--load-average/--max-load
+# consume it only when it starts with a digit or a dot (floating).  A word
+# like ``docs-check`` stays a goal, so ``make -j docs-check`` runs the
+# repository chain and must certify.
+_MAKE_OPTIONAL_INT_OPTIONS = frozenset({"-j", "--jobs"})
+_MAKE_OPTIONAL_FLOAT_OPTIONS = frozenset(
+    {"-l", "--load-average", "--max-load"}
+)
+# -O/--output-sync take an optional operand that GNU Make accepts only in
+# the same word (``-Oline``, ``--output-sync=line``); a separate next word
+# is never consumed.  ``--debug``/``--shuffle``/``--random`` take optional
+# operands with the same attached-only rule.
+_MAKE_ATTACHED_VALUE_OPTIONS = frozenset(
+    {"-O", "--output-sync", "--debug", "--shuffle", "--random"}
+)
+# Long options that neither select another makefile nor stop execution.
+# They are modeled so an exact name certifies; an argument-taking one
+# consumes its operand like make does.
+_MAKE_HARMLESS_LONG_OPTIONS = frozenset({
+    "--always-make", "--environment-overrides",
+    "--keep-going", "--no-keep-going", "--stop", "--no-builtin-rules",
+    "--no-builtin-variables", "--silent", "--quiet", "--no-silent",
+    "--print-directory", "--no-print-directory", "--warn-undefined-variables",
+    "--trace", "--check-symlink-times",
+})
+_MAKE_HARMLESS_LONG_VALUE_OPTIONS = frozenset({
+    "--jobserver-auth", "--jobserver-fds", "--sync-mutex",
+    "--jobserver-style", "--temp-stdin",
+})
+# Every long option this model knows by exact name.  GNU Make's getopt_long
+# also accepts unique abbreviations (``--dry`` == ``--dry-run``), and the
+# abbreviation must resolve against the RUNNING make's catalog, which
+# varies by version; an abbreviated or unknown word therefore cannot be
+# certified and is rejected.
+
+# A -C/--directory operand that still names the repository root.  Any other
+# operand selects another directory's Makefile, so the resolved docs-check
+# target is no longer provably the repository chain.
+_MAKE_ROOT_DIRECTORY_VALUES = frozenset({".", "./"})
+# Options that supply their own makefile or definitions.  An invocation
+# carrying one of these cannot prove that the REPOSITORY's docs-check ran:
+# the target it resolves may come from the supplied makefile or from the
+# ``--eval`` text (``make -f /dev/null --eval='docs-check: ;' docs-check``
+# succeeds while the repository chain never executes).
+_MAKE_UNCERTIFIABLE_OPTIONS = frozenset(
+    {"-f", "--file", "--makefile", "-E", "--eval",
+     "-o", "--old-file", "-W", "--what-if", "--assume-new",
+     "-p", "--print-data-base"}
+)
+_MAKE_UNCERTIFIABLE_LONG_PREFIXES = (
+    "--file=", "--makefile=", "--eval=",
+    "--old-file=", "--what-if=", "--assume-new=",
+)
+# Short letters of the uncertifiable options: f/E supply a makefile or an
+# evaled statement; o/W mark the following file old or what-if, which skips
+# the named target's recipe when it is the checked one.
+_MAKE_UNCERTIFIABLE_SHORT_LETTERS = frozenset({"f", "E", "o", "W", "p"})
+
+
+def _make_option_uncertifiable(word: str) -> bool:
+    """Whether one option word defeats a docs-check certification.
+
+    A supplied makefile or ``--eval`` text replaces what is read; an
+    old-file/what-if operand can name the checked target and skip its
+    recipe (``make -o docs-check docs-check`` prints "Nothing to be done").
+    Long forms match exactly or with an ``=`` operand, and a short cluster
+    is scanned as make parses it: an argument-taking letter before the
+    decisive one means it is that option's argument, not an option.
+    """
+    if word in _MAKE_UNCERTIFIABLE_OPTIONS:
+        return True
+    if word.startswith(_MAKE_UNCERTIFIABLE_LONG_PREFIXES):
+        return True
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    for letter in word[1:]:
+        if letter in _MAKE_UNCERTIFIABLE_SHORT_LETTERS:
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            return False
+    return False
+
+
+def _make_option_masks_failures(word: str) -> bool:
+    """Whether one option word makes make ignore a failing recipe.
+
+    ``-i``/``--ignore-errors`` makes the recipe's failure invisible: the
+    step succeeds although the docs check failed (verified: ``make -i f``
+    exits 0 with the failure "ignored").  A cluster carries it too: the
+    short spelling ``-silent`` is read by make as ``-s -i -l ent``, so the
+    scan looks for ``i`` up to the first argument-taking letter.
+    """
+    if word in ("-i", "--ignore-errors"):
+        return True
+    if not word.startswith("-") or word.startswith("--"):
+        return False
+    for letter in word[1:]:
+        if letter == "i":
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            return False
+    return False
+
+
+def _make_directory_operand_off_root(operand: str | None) -> bool:
+    """Whether a -C/--directory operand changes away from the repo root.
+
+    GNU Make changes directory before reading makefiles, so only an
+    operand naming the repository root (``.``/``./``) resolves the
+    repository docs-check; any other directory selects a different
+    Makefile.  An unreadable operand fails closed.
+    """
+    return operand not in _MAKE_ROOT_DIRECTORY_VALUES
 _MAKE_NONEXECUTING_OPTIONS = frozenset({
     "-n", "--dry-run", "--just-print", "--recon",
     "-q", "--question", "-t", "--touch",
+    "-v", "--version", "-h", "--help",
 })
 _MAKE_NONEXECUTING_LONG_OPTIONS = frozenset(
     option for option in _MAKE_NONEXECUTING_OPTIONS if option.startswith("--")
 )
-_MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqt")
+_MAKE_NONEXECUTING_SHORT_FLAGS = frozenset("nqtvh")
+
+# Short options that consume the rest of their cluster as an argument
+# (make's switch table: C f I j l o O W E).  The cluster scan stops here:
+# the letters after one of these are its argument, not options.  ``-Wn``
+# therefore asks make to treat file ``n`` as new and the recipe still
+# runs, while ``-fn`` reads makefile ``n`` and fails before any recipe -
+# neither is a silent non-execution, so neither disqualifies the step.
+_MAKE_ARGUMENT_TAKING_SHORT = frozenset("CfIjloOWE")
+
+
+def _make_short_cluster_prevents_execution(
+    word: str, non_executing: frozenset[str]
+) -> bool:
+    """Whether one short-option cluster selects a non-executing mode.
+
+    Every letter is scanned until a letter in ``non_executing`` matches
+    or an argument-taking letter consumes the remainder of the word.
+    The command-line path and the MAKEFLAGS path both scan clusters with
+    this helper so the two agree.
+    """
+    for letter in word[1:]:
+        if letter in non_executing:
+            return True
+        if letter in _MAKE_ARGUMENT_TAKING_SHORT:
+            break
+    return False
 
 
 def _make_option_prevents_execution(word: str) -> bool:
-    """Recognize dry-run/question/touch options, including short clusters."""
+    """Recognize options that stop make before docs-check can run."""
     option = word.split("=", 1)[0]
     if word in _MAKE_NONEXECUTING_OPTIONS or option in _MAKE_NONEXECUTING_LONG_OPTIONS:
         return True
     return (
         word.startswith("-")
         and not word.startswith("--")
-        and any(flag in word[1:] for flag in _MAKE_NONEXECUTING_SHORT_FLAGS)
+        and _make_short_cluster_prevents_execution(
+            word, _MAKE_NONEXECUTING_SHORT_FLAGS
+        )
     )
+
+
+def _make_operand_consumption(letter: str, operand: str | None) -> bool:
+    """Whether GNU Make consumes the next word as this option's operand.
+
+    ``j`` (jobs) consumes a separated operand only when it is all digits,
+    ``l`` (load-average) only when it starts with a digit or a dot, and
+    ``O`` (output-sync) never consumes a separated word.  Every other
+    argument-taking letter consumes the next word unconditionally.
+    """
+    if letter == "O":
+        return False
+    if letter == "j":
+        return bool(operand) and operand.isascii() and operand.isdigit()
+    if letter == "l":
+        first = operand[:1] if operand is not None else ""
+        return first.isascii() and (first.isdigit() or first == ".")
+    return operand is not None
+
+
+def _make_directory_step(rest: str, operand: str | None, index: int) -> int | None:
+    """Advance past a ``-C`` with its attached or separated operand."""
+    if rest:
+        return None if _make_directory_operand_off_root(rest) else index + 1
+    if operand is None or _make_directory_operand_off_root(operand):
+        return None
+    return index + 2
+
+
+def _make_cluster_letter_step(
+    letter: str, rest: str, operand: str | None, index: int
+) -> int | None | bool:
+    """Resolve one argument-taking letter of a short cluster.
+
+    Returns the next index, None for a rejection, or False when the letter
+    is not argument-taking (the caller keeps scanning).
+    """
+    if letter not in _MAKE_ARGUMENT_TAKING_SHORT:
+        return False
+    if letter == "C":
+        return _make_directory_step(rest, operand, index)
+    if rest:
+        # An attached operand: the letter consumed the remainder.
+        return index + 1
+    if _make_operand_consumption(letter, operand):
+        return index + 2
+    # A required-operand letter with a missing operand cannot be certified;
+    # an optional-operand letter (j/l/O) simply takes the next word.
+    return index + 1 if letter in ("j", "l", "O") else None
+
+
+def _make_short_option_step(
+    word: str, operand: str | None, index: int
+) -> int | None:
+    """Advance past one short-option cluster, or reject it."""
+    for offset, letter in enumerate(word[1:]):
+        if letter in _MAKE_NONEXECUTING_SHORT_FLAGS:
+            return None
+        step = _make_cluster_letter_step(
+            letter, word[2 + offset:], operand, index
+        )
+        if step is not False:
+            return step
+    return index + 1
+
+
+def _make_long_option_unknown(word: str) -> bool:
+    """Whether a ``--`` word names an option this model does not know.
+
+    GNU Make's getopt_long accepts unique abbreviations resolved against
+    the running version's catalog, so ``--dry`` means ``--dry-run``,
+    ``--eva`` means ``--eval``, and ``--fil`` means ``--file``.  An
+    unknown or abbreviated name therefore cannot be proven harmless and
+    fails closed.
+    """
+    return "--" + word[2:].split("=", 1)[0] not in _MAKE_KNOWN_LONG_OPTIONS
+
+
+_MAKE_FAILURE_MASKING_LONG_OPTIONS = frozenset({"--ignore-errors"})
+_MAKE_KNOWN_LONG_OPTIONS = (
+    _MAKE_HARMLESS_LONG_OPTIONS
+    | _MAKE_HARMLESS_LONG_VALUE_OPTIONS
+    | _MAKE_FAILURE_MASKING_LONG_OPTIONS
+    | _MAKE_ATTACHED_VALUE_OPTIONS
+    | _MAKE_OPTIONAL_INT_OPTIONS
+    | _MAKE_OPTIONAL_FLOAT_OPTIONS
+    | _MAKE_REQUIRED_VALUE_OPTIONS
+    | _MAKE_UNCERTIFIABLE_OPTIONS
+    | frozenset({"--directory"})
+    | _MAKE_NONEXECUTING_LONG_OPTIONS
+)
+
+
+def _make_long_option_step(
+    word: str, operand: str | None, index: int
+) -> int | None:
+    """Advance past one ``--``-prefixed option word, or reject it.
+
+    The dispatch order mirrors make's own parse: an unknown or abbreviated
+    name fails closed; a harmless flag advances one word; a harmless value
+    option consumes its operand (attached or next word); ``--directory``
+    checks its operand; the optional-operand forms consume a next word
+    only when the typed operand matches; attached-only forms never do; and
+    a required operand must be present.
+    """
+    name, _, attached = word.partition("=")
+    if name not in _MAKE_KNOWN_LONG_OPTIONS:
+        # Unknown or abbreviated (``--dry``, ``--eva``): make resolves the
+        # latter against the running version's catalog, so the word cannot
+        # be certified.  Fail closed.
+        return None
+    if name in _MAKE_HARMLESS_LONG_OPTIONS:
+        return index + 1
+    if name == "--directory":
+        return _make_directory_step(attached, operand, index)
+    if attached:
+        # The operand is inside this word: whatever the option kind, the
+        # next word is not its operand.
+        return index + 1
+    if name in _MAKE_HARMLESS_LONG_VALUE_OPTIONS | _MAKE_REQUIRED_VALUE_OPTIONS:
+        return index + 2 if operand is not None else None
+    if name in _MAKE_ATTACHED_VALUE_OPTIONS:
+        return index + 1
+    letter = "j" if name in _MAKE_OPTIONAL_INT_OPTIONS else "l"
+    return index + 2 if _make_operand_consumption(letter, operand) else index + 1
+
+
+def _make_option_step(words: list[str], index: int) -> int | None:
+    """Advance past one make option word, or reject the invocation.
+
+    Returns the next index, or None when the word cannot be certified: a
+    non-executing option, a supplied makefile/--eval, a directory redirect
+    away from the repository root, or a missing required operand.  The
+    operand rules mirror GNU Make: ``-j``/``--jobs`` consume the next word
+    only when it is all digits, ``-l``/``--load-average``/``--max-load``
+    only when it starts with a digit or a dot, ``-O``/``--output-sync``
+    never consume a next word, and every other argument-taking option
+    consumes its operand from the remainder of the word or the next word.
+    """
+    word = words[index]
+    operand = words[index + 1] if index + 1 < len(words) else None
+    if _make_option_prevents_execution(word):
+        return None
+    if _make_option_uncertifiable(word):
+        # A supplied makefile, --eval text, or old-file/what-if operand
+        # means the resolved target may not be (or may not be remade as)
+        # the repository's docs-check chain.
+        return None
+    if _make_option_masks_failures(word):
+        # A masked failure would let the step succeed although the check
+        # failed, so the invocation cannot certify it.
+        return None
+    if word.startswith("--"):
+        return _make_long_option_step(word, operand, index)
+    if not word.startswith("-"):
+        return None
+    return _make_short_option_step(word, operand, index)
+
+
+def _make_target_word_is_assignment(word: str) -> bool:
+    """Whether a non-option word is a make variable assignment.
+
+    GNU Make classifies any non-option argument containing ``=`` as a
+    variable definition (``handle_non_switch_argument``), and assignments
+    applied for the whole run: ``make SHELL=/usr/bin/true docs-check``
+    executes every recipe through ``true`` and succeeds without doing the
+    work (verified on 3.81 and 4.4.1), so the invocation cannot certify
+    anything about the checked target.  The spelling covers any variable
+    name make accepts (dots included, such as ``.SHELLFLAGS``).
+    """
+    return "=" in word
+
+
+def _make_targets_after_terminator(
+    targets: list[str], words: list[str], index: int
+) -> list[str] | None:
+    """Resolve the words after a ``--`` terminator.
+
+    Every word after ``--`` is a non-option argument, and an assignment
+    there still shapes the run (verified), so one disqualifies the
+    invocation.
+    """
+    rest = words[index + 1:]
+    if any(_make_target_word_is_assignment(word) for word in rest):
+        return None
+    return targets + rest
 
 
 def _make_targets_after_options(words: list[str], index: int) -> list[str] | None:
@@ -6544,20 +8018,19 @@ def _make_targets_after_options(words: list[str], index: int) -> list[str] | Non
     while index < len(words):
         word = words[index]
         if word == "--":
-            return targets + words[index + 1:]
-        if _make_option_prevents_execution(word):
-            return None
-        if word in _MAKE_VALUE_OPTIONS:
-            if index + 1 >= len(words):
+            return _make_targets_after_terminator(targets, words, index)
+        if word.startswith("-"):
+            next_index = _make_option_step(words, index)
+            if next_index is None:
                 return None
-            index += 2
-        elif word.startswith("--") and "=" in word:
-            index += 1
-        elif word.startswith("-"):
-            index += 1
-        else:
-            targets.append(word)
-            index += 1
+            index = next_index
+            continue
+        if _make_target_word_is_assignment(word):
+            # An assignment shapes the whole run's environment; the caller
+            # cannot assume the checked target runs its recipes.
+            return None
+        targets.append(word)
+        index += 1
     return targets
 
 
@@ -6596,10 +8069,214 @@ def _make_docs_check_index(words: list[str]) -> int | None:
     return None
 
 
-def _runs_make_docs_check(words: list[str]) -> bool:
-    """Whether make's command and target positions invoke docs-check."""
+# Letters that stop recipe execution via MAKEFLAGS: just-print (n),
+# question (q), touch (t), version (v).  ``h``/``--help`` are excluded
+# deliberately: make 3.81 and 4.3 ignore them in the environment and the
+# recipe runs, so disqualifying the step would be wrong on those versions.
+_MAKE_NONEXECUTING_SHORT = frozenset("nqtv")
+
+# Long spellings of the same non-executing modes (help excluded for the
+# same version-dependent reason).
+_MAKE_NONEXECUTING_LONG = frozenset(
+    ("dry-run", "just-print", "recon", "question", "touch", "version")
+)
+
+
+def _make_option_word_prevents_execution(word: str) -> bool:
+    """Whether one make option word selects a non-executing mode.
+
+    A word starting with ``--`` is a long option (the name up to ``=`` is
+    matched against the non-executing spellings).  Otherwise the word is a
+    short-option cluster, scanned by the same helper the command-line path
+    uses so the two cannot drift apart.
+    """
+    if word.startswith("--"):
+        return word[2:].split("=", 1)[0] in _MAKE_NONEXECUTING_LONG
+    return _make_short_cluster_prevents_execution(
+        word, _MAKE_NONEXECUTING_SHORT
+    )
+
+
+def _make_flags_value_prevents_execution(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value stops recipe execution.
+
+    GNU Make prepends a dash to the first word unless it already starts
+    with a dash or contains ``=``, so both ``n`` and ``-n`` select
+    just-print.  Later words are parsed as written: a word that is not an
+    option is a goal or variable definition and selects no mode.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            continue
+        if _make_option_word_prevents_execution(word):
+            return True
+        if word.startswith("--") and _make_long_option_unknown(word):
+            # An abbreviation can mean any non-executing mode (--dry is
+            # --dry-run) or a makefile supplier (--eva is --eval); the
+            # word cannot be proven harmless, so the value disqualifies.
+            return True
+    return False
+
+
+def _make_flags_value_uncertifiable(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value defeats certification.
+
+    ``--eval`` text and ``-f``/``--makefile`` selections read from the
+    environment take effect before the repository Makefile is read
+    (``MAKEFLAGS='--eval=SHELL=/bin/true'`` makes every recipe a no-op),
+    old-file/what-if operands can skip the checked target, and a variable
+    assignment in the value changes the run's environment
+    (``MAKEFLAGS='SHELL=/usr/bin/true'`` runs every recipe through
+    ``true`` and succeeds without doing the work - verified).  The first
+    word gets the implied dash, exactly as make applies it before parsing;
+    an assignment keeps no dash, so it is rejected as written.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            if _make_target_word_is_assignment(word):
+                # A variable assignment in the flags changes the run's
+                # environment for every recipe; the checked target cannot
+                # be certified.
+                return True
+            continue
+        if _make_option_uncertifiable(word):
+            return True
+    return False
+
+
+def _make_flags_value_masks_failures(value: str) -> bool:
+    """Whether one MAKEFLAGS/GNUMAKEFLAGS value hides a failing recipe.
+
+    The environment forms of ``-i``/``--ignore-errors`` (including the
+    dash-less ``i`` and clusters such as ``silent``, which make reads as
+    ``-s -i -l ent``) let a failing docs check exit 0, so a step carrying
+    one cannot prove the check succeeded.  The first word gets the implied
+    dash, exactly as make applies it before parsing.
+    """
+    for index, word in enumerate(value.split()):
+        if index == 0 and not word.startswith("-") and "=" not in word:
+            word = "-" + word
+        if not word.startswith("-"):
+            continue
+        if _make_option_masks_failures(word):
+            return True
+    return False
+
+
+# Every environment name the make gate reads: an export of any of these
+# changes what a later invocation in the same shell does.
+_MAKE_ENV_NAMES = frozenset(
+    {"MAKE", "MAKEFILES", "MAKEFLAGS", "GNUMAKEFLAGS"}
+)
+
+
+def _make_environment_overrides_the_run(env: object) -> bool:
+    """Whether make's environment re-points its toolchain or its inputs.
+
+    ``MAKE`` replaces the program every ``$(MAKE)`` recursion runs and
+    ``MAKEFILES`` preloads a file whose definitions precede the repository
+    Makefile, so either leaves the checked target's recipes unverifiable
+    (verified on GNU Make 4.3 and 4.4.1: ``MAKE=/usr/bin/true make
+    docs-check`` and a preloaded file assigning ``SHELL`` both exit 0
+    without running the check).
+    """
+    if not isinstance(env, dict):
+        return False
+    for name in ("MAKE", "MAKEFILES"):
+        value = env.get(name)
+        if isinstance(value, str) and value:
+            return True
+    return False
+
+
+def _make_environment_defeats_certification(env: object) -> bool:
+    """Whether make's environment defeats a docs-check certification.
+
+    GNU Make reads ``MAKEFLAGS`` (and ``GNUMAKEFLAGS``) from the
+    environment, so ``-n``/``-q``/``-t`` set there stop recipe execution
+    for every invocation in the step.  The same is true of the dash-less
+    spellings (``n``, ``kn``) and the long forms (``--dry-run``).  A
+    value that supplies its own makefile or ``--eval`` text also defeats
+    the certification: the repository Makefile is never read (or its
+    recipes are replaced), so ``docs-check`` cannot have run.  A
+    ``MAKE``/``MAKEFILES`` override defeats it outright.  A workflow,
+    job, or step scope can carry any of these, and a command-local
+    assignment is inspected by the caller.
+    """
+    if _make_environment_overrides_the_run(env):
+        return True
+    if not isinstance(env, dict):
+        return False
+    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        value = env.get(name)
+        if not isinstance(value, str):
+            continue
+        if _make_flags_value_prevents_execution(value):
+            return True
+        if _make_flags_value_uncertifiable(value):
+            return True
+        if _make_flags_value_masks_failures(value):
+            return True
+    return False
+
+
+def _make_command_local_values_defeat(
+    words: list[str], command_index: int
+) -> bool:
+    """Whether the invocation's own prefix overrides defeat certification.
+
+    A command-scoped ``MAKE``/``MAKEFILES`` assignment re-points the run
+    exactly as its environment form does, and a ``MAKEFLAGS``/
+    ``GNUMAKEFLAGS`` prefix carrying a non-executing mode,
+    makefile-supplying option, failure mask, or variable assignment
+    disqualifies the invocation.
+    """
+    command_local = _pip_prefix_env_values(words, command_index)
+    for name in ("MAKE", "MAKEFILES"):
+        if command_local.get(name):
+            return True
+    for name in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        value = command_local.get(name)
+        if value is None:
+            continue
+        if (
+            _make_flags_value_prevents_execution(value)
+            or _make_flags_value_uncertifiable(value)
+            or _make_flags_value_masks_failures(value)
+        ):
+            return True
+    return False
+
+
+def _runs_make_docs_check(
+    words: list[str],
+    env: object = None,
+    *,
+    cwd_at_root: bool = True,
+    inherited: dict[str, str] | None = None,
+) -> bool:
+    """Whether make's command and target positions invoke docs-check.
+
+    The check also requires the invocation to actually execute in the
+    repository: a non-executing mode in the effective environment
+    (``MAKEFLAGS``), in a command-local assignment, or in the option list
+    itself disqualifies it, and so does a step whose directory left the
+    repository root (the make invocation then reads another Makefile).
+    """
+    if not cwd_at_root:
+        return False
+    if _make_environment_defeats_certification(env):
+        return False
+    if _make_environment_defeats_certification(inherited):
+        return False
     command_index = _make_docs_check_index(words)
     if command_index is None:
+        return False
+    if _make_command_local_values_defeat(words, command_index):
         return False
     targets = _make_targets_after_options(words, command_index + 1)
     return targets is not None and "docs-check" in targets
@@ -6710,8 +8387,14 @@ def _virtualenv_command_scope(
 
 
 def _virtualenv_markers(step: str | dict, through: int | None) -> set[str]:
-    """Python-environment state established by a run-step prefix and its env."""
-    commands = _step_live_commands(step)
+    """Python-environment state established by a run-step prefix and its env.
+
+    The command list must be the same foreground view ``_pip_first_steps``
+    indexes: with the unfiltered list, a backgrounded segment shifts every
+    subsequent index and the marker prefix would be read from the wrong
+    command.
+    """
+    commands = _foreground_live_commands(step)
     visible = commands if through is None else commands[:through + 1]
     environment = step.get("env") if isinstance(step, dict) else None
     markers = _virtualenv_environment_markers(environment)
@@ -6740,6 +8423,54 @@ def _pip_install_is_dry_run(words: list[str], command_index: int) -> bool:
     )
 
 
+_PIP_DRY_RUN_FALSE_VALUES = frozenset(
+    {"", "0", "false", "no", "off", "n", "f"}
+)
+
+
+def _pip_dry_run_value_active(value: object) -> bool:
+    """Whether one ``PIP_DRY_RUN`` value enables pip's dry run.
+
+    pip accepts the environment variable as the boolean form of
+    ``--dry-run``; every value except a proven-off spelling enables it,
+    and an unrecognized value fails closed (treated as enabled).
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in _PIP_DRY_RUN_FALSE_VALUES
+    return True
+
+
+def _pip_prefix_env_values(
+    words: list[str], command_index: int
+) -> dict[str, str]:
+    """Extract the ``VAR=VALUE`` assignments that prefix one command."""
+    values: dict[str, str] = {}
+    for word in words[:command_index]:
+        if not _ENV_ASSIGN_RE.match(word):
+            continue
+        name, _, value = word.partition("=")
+        values[name] = value
+    return values
+
+
+def _pip_dry_run_active(
+    words: list[str], command_index: int, env: object
+) -> bool:
+    """Whether a pip invocation runs as a dry run (flag, prefix, step env)."""
+    if _pip_install_is_dry_run(words, command_index):
+        return True
+    prefix_values = _pip_prefix_env_values(words, command_index)
+    if "PIP_DRY_RUN" in prefix_values:
+        return _pip_dry_run_value_active(prefix_values["PIP_DRY_RUN"])
+    if isinstance(env, dict) and "PIP_DRY_RUN" in env:
+        return _pip_dry_run_value_active(env.get("PIP_DRY_RUN"))
+    return False
+
+
 def _step_retry_is_trusted(step: str | dict) -> bool:
     """Whether a local retry function in one run step invokes its target."""
     script = _step_script(step)
@@ -6751,15 +8482,178 @@ def _step_retry_is_trusted(step: str | dict) -> bool:
     return _retry_runs_its_target(executable_source)
 
 
-def _pip_step_commands(segment: str) -> tuple[bool, bool]:
-    """Whether one executable segment installs pinned deps or runs docs-check."""
+def _pip_step_commands(
+    segment: str,
+    env: object = None,
+    cwd_at_root: bool = True,
+    inherited: dict[str, str] | None = None,
+) -> tuple[bool, bool]:
+    """Whether one executable segment installs pinned deps or runs docs-check.
+
+    ``env`` is the step's effective environment mapping (workflow → job →
+    step precedence), so ``PIP_DRY_RUN`` set at any scope disqualifies the
+    install the same way the ``--dry-run`` flag does.  ``cwd_at_root`` is
+    the step's directory state at this segment: a make invocation in a
+    foreign directory cannot certify the repository check.
+    """
     words = _shell_words(segment)
     command_index = _skip_env_assignments(words, 0)
     command = " ".join(words[command_index:])
     install = bool(_PIP_REQUIREMENT_RE.search(command)) and not (
-        _pip_install_is_dry_run(words, command_index)
+        _pip_dry_run_active(words, command_index, env)
     )
-    return install, _runs_make_docs_check(words)
+    return install, _runs_make_docs_check(
+        words, env, cwd_at_root=cwd_at_root, inherited=inherited
+    )
+
+
+def _pip_prerequisite_position(
+    segment: str,
+    retry_trusted: bool,
+    masked: set[str],
+) -> bool:
+    """Whether one live segment may satisfy a prerequisite.
+
+    A segment whose failure a following ``||`` swallows (``cmd || true``)
+    does not count: the chain succeeds even when the command fails, so its
+    exit status proves nothing about the prerequisite.  A retry call whose
+    wrapper cannot be trusted is skipped for the same reason.
+    """
+    if not retry_trusted and _is_retry_call(segment):
+        return False
+    return segment.strip() not in masked
+
+
+def _plain_make_assignments(segment: str) -> dict[str, str]:
+    """Plain ``NAME=VALUE`` assignments of make-relevant names in a segment.
+
+    ``MAKEFLAGS=-n`` as a statement sets the shell variable; a later
+    ``export MAKEFLAGS`` (split across statements - the common idiom)
+    then hands it to every subsequent invocation (verified: make only
+    prints recipes).  The caller carries these forward so the bare export
+    form can be resolved.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return {}
+    index = _skip_env_assignments(words, 0)
+    assignments: dict[str, str] = {}
+    for word in words[:index]:
+        name, _, value = word.partition("=")
+        if name in _MAKE_ENV_NAMES:
+            assignments[name] = value
+    return assignments
+
+
+def _make_relevant_export_values(
+    segment: str, assigned: dict[str, str] | None = None
+) -> dict[str, str] | None:
+    """The make-relevant variables a segment exports, when it exports any.
+
+    ``export MAKEFLAGS=-n`` and the split form ``MAKEFLAGS=-n; export
+    MAKEFLAGS`` both change every later invocation in the same shell: GNU
+    Make inherits the value and only prints recipes (verified).  The
+    returned mapping holds the exported pairs whose names the make gate
+    inspects; None means the segment is not an export the scan can
+    attribute.  ``assigned`` carries the plain assignments seen earlier in
+    the script so a bare ``export NAME`` resolves from them; a bare export
+    of a name never assigned in the script stays unattributable.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return None
+    index = _skip_env_assignments(words, 0)
+    if index >= len(words) or words[index] != "export":
+        return None
+    resolved = dict(assigned or {})
+    exported: dict[str, str] = {}
+    for word in words[index + 1:]:
+        name, separator, value = word.partition("=")
+        if name not in _MAKE_ENV_NAMES:
+            continue
+        if separator:
+            exported[name] = value
+        elif name in resolved:
+            exported[name] = resolved[name]
+        else:
+            # An export of a value only the shell knows cannot be
+            # attributed to a concrete flag set; treat the segment as
+            # unattributable so the caller stays conservative.
+            return None
+    return exported or None
+
+
+def _segment_abandons_repo_root(segment: str) -> bool:
+    """Whether one command segment changes away from the repository root.
+
+    ``cd <operand>`` with an operand other than ``.``/``./`` moves the
+    shell, so a later ``make`` in the same step reads a different
+    Makefile (``cd "$RUNNER_TEMP/noop" && make -C . docs-check`` runs the
+    planted chain - verified).  A bare ``cd`` goes home and an operand the
+    scan cannot resolve may name any directory, so both count as leaving.
+    """
+    words = _parse_segment_words(segment)
+    if not words:
+        return False
+    index = _skip_env_assignments(words, 0)
+    while index < len(words) and _shell_word_basename(words[index]) in (
+        "builtin",
+        "command",
+    ):
+        # `builtin cd` and `command cd` bypass a function named cd but move
+        # the shell the same way the bare builtin does.
+        index += 1
+    if index >= len(words) or _shell_word_basename(words[index]) != "cd":
+        return False
+    if index + 1 >= len(words):
+        return True
+    return words[index + 1] not in (".", "./")
+
+
+def _step_working_directory_keeps_root(step: str | dict) -> bool:
+    """Whether a step's declared working directory stays at the repo root."""
+    if not isinstance(step, dict):
+        return True
+    return step.get("working-directory") in (None, "", ".", "./")
+
+
+def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
+    """Classify each live, unmasked segment of one step.
+
+    Returns ``(segment_index, installs, checks_docs)`` for every command in
+    the step's foreground view that may satisfy a prerequisite; masked and
+    untrusted-retry segments are filtered out here so both consumers share
+    one liveness model.  A command that leaves the repository root (a
+    ``cd`` away, or a foreign ``working-directory``) disqualifies a later
+    docs-check segment: the make invocation then reads another directory's
+    Makefile.
+    """
+    retry_trusted = _step_retry_is_trusted(step)
+    masked = _masked_command_segments_for_step(step)
+    step_env = step.get("env") if isinstance(step, dict) else None
+    cwd_at_root = _step_working_directory_keeps_root(step)
+    # The shell's own `export` assignments (and the plain assignments a
+    # later export can publish) accumulate as its segments run, so a later
+    # make inherits them.
+    assigned: dict[str, str] = {}
+    exported: dict[str, str] = {}
+    scanned: list[tuple[int, bool, bool]] = []
+    for command_index, segment in enumerate(_foreground_live_commands(step)):
+        if _segment_abandons_repo_root(segment):
+            cwd_at_root = False
+        # Plain assignments (``MAKEFLAGS=-n``) may be exported by a later
+        # statement, so they are carried forward too.
+        assigned.update(_plain_make_assignments(segment))
+        segment_exports = _make_relevant_export_values(segment, assigned)
+        if segment_exports is not None:
+            exported.update(segment_exports)
+        if not _pip_prerequisite_position(segment, retry_trusted, masked):
+            continue
+        installs, checks_docs = _pip_step_commands(
+            segment, step_env, cwd_at_root, exported
+        )
+        scanned.append((command_index, installs, checks_docs))
+    return scanned
 
 
 def _pip_first_steps(
@@ -6769,17 +8663,47 @@ def _pip_first_steps(
     install_at: tuple[int, int] | None = None
     docs_check_at: tuple[int, int] | None = None
     for step_index, step in enumerate(steps):
-        retry_trusted = _step_retry_is_trusted(step)
-        for command_index, segment in enumerate(_step_live_commands(step)):
-            if not retry_trusted and _is_retry_call(segment):
-                continue
+        for command_index, installs, checks_docs in _pip_step_scan(step):
             position = (step_index, command_index)
-            installs, checks_docs = _pip_step_commands(segment)
             if installs and install_at is None:
                 install_at = position
             if checks_docs and docs_check_at is None:
                 docs_check_at = position
     return install_at, docs_check_at
+
+
+def _masked_prerequisite_kinds(steps: Sequence[str | dict]) -> set[str]:
+    """Which prerequisites appear with a failure-swallowing operator.
+
+    Used for the diagnostic text: when a prerequisite position comes back
+    None, a masked form explains why (the requirement is present but its
+    failure cannot reach the step), so the message points at the masking
+    instead of asking for a missing command.
+    """
+    kinds: set[str] = set()
+    for step in steps:
+        masked = _masked_command_segments_for_step(step)
+        if not masked:
+            continue
+        step_env = step.get("env") if isinstance(step, dict) else None
+        for segment in _step_live_commands(step):
+            if segment.strip() not in masked:
+                continue
+            installs, checks_docs = _pip_step_commands(segment, step_env)
+            kinds.update(_masked_prerequisite_kind_for(installs, checks_docs))
+    return kinds
+
+
+def _masked_prerequisite_kind_for(
+    installs: bool, checks_docs: bool
+) -> set[str]:
+    """The prerequisite kind names one masked segment represents."""
+    kinds: set[str] = set()
+    if installs:
+        kinds.add("install")
+    if checks_docs:
+        kinds.add("docs-check")
+    return kinds
 
 
 def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
@@ -6799,12 +8723,25 @@ def _python_deps_issue(run_scripts: str | Sequence[str | dict]) -> str | None:
             return shadow_issue
     install_at, docs_check_at = _pip_first_steps(steps)
     if install_at is None:
+        if "install" in _masked_prerequisite_kinds(steps):
+            return (
+                "the release-gate job must not discard a failed requirements "
+                "install: a failure-masking operator (for example ``|| true``) "
+                "makes the step succeed even when the install fails, so the "
+                "pinned dependencies are never proven present"
+            )
         return (
             "the release-gate job must install the pinned Python release "
             "dependencies (from requirements-release.txt) so the docs-check "
             "chain can import jsonschema and PyYAML"
         )
     if docs_check_at is None:
+        if "docs-check" in _masked_prerequisite_kinds(steps):
+            return (
+                "the release-gate job must not discard a failed docs-check: "
+                "a failure-masking operator (for example ``|| true``) makes "
+                "the step succeed even when the docs-check chain fails"
+            )
         return (
             "the release-gate job must run its docs-check chain once the "
             "pinned Python dependencies are installed"
