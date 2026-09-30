@@ -8155,6 +8155,55 @@ def _make_flags_value_masks_failures(value: str) -> bool:
     return False
 
 
+# A make-flag value left as a shell reference: the shell resolves it at
+# run time, so the scan cannot attribute a concrete flag set to it.  A
+# bare trailing ``$`` counts too: the segment scanner treats ``$(`` as a
+# subshell opener and cuts there, so ``export MAKEFLAGS=$(getflags)``
+# reaches this check as the value ``$`` (verified against the scanner).
+_UNRESOLVED_EXPANSION_RE = re.compile(r"\$(?:\(|\{|[A-Za-z_0-9]|$)|`")
+
+
+def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
+    """Whether a make-flag value still carries an unexpanded shell reference.
+
+    ``FLAGS=-n`` followed by ``export MAKEFLAGS=$FLAGS`` hands ``-n`` to
+    make at run time; the scan reads the literal ``$FLAGS`` token and
+    cannot tell which flags it will become, so the invocation must fail
+    closed instead of certifying (verified: the recipe is only printed and
+    the step exits 0).  The same holds for ``${FLAGS}`` and command
+    substitutions.  A literal value carries no reference and keeps its
+    normal classification.
+    """
+    return _UNRESOLVED_EXPANSION_RE.search(value.replace("\\$", "")) is not None
+
+
+# A backtick substitution assigned to a make name.  The segment scanner
+# cuts at the backtick, so the export check sees an empty value; the raw
+# script is the only place the reference is still visible.
+_MAKE_FLAG_BACKTICK_RE = re.compile(
+    r"\b(MAKE|MAKEFILES|MAKEFLAGS|GNUMAKEFLAGS)=`"
+)
+
+# Fail-closed marker: the value cannot be attributed, so any make that
+# inherits it is not a certified docs-check.
+_UNRESOLVED_FLAG_SENTINEL = "$"
+
+
+def _make_flag_backtick_references(script: str) -> frozenset[str]:
+    """Make-flag names assigned from a backtick substitution in one script.
+
+    ``export MAKEFLAGS=\\`getflags\\``` runs ``getflags`` and hands its
+    output to make, so the flags are whatever that command prints.  The
+    segment scanner splits at the backtick and the export check then sees
+    ``export MAKEFLAGS=`` with an empty value, which is also the
+    legitimate clear-flags idiom; only the raw script distinguishes them.
+    The caller marks these names unresolved so a dependent make cannot
+    certify (fail closed).
+    """
+    return frozenset(match.group(1) for match in _MAKE_FLAG_BACKTICK_RE.finditer(script))
+
+
+
 # Every environment name the make gate reads: an export of any of these
 # changes what a later invocation in the same shell does.
 _MAKE_ENV_NAMES = frozenset(
@@ -8209,6 +8258,8 @@ def _make_environment_defeats_certification(env: object) -> bool:
             return True
         if _make_flags_value_masks_failures(value):
             return True
+        if _make_flags_value_has_unresolved_expansion(value):
+            return True
     return False
 
 
@@ -8235,6 +8286,7 @@ def _make_command_local_values_defeat(
             _make_flags_value_prevents_execution(value)
             or _make_flags_value_uncertifiable(value)
             or _make_flags_value_masks_failures(value)
+            or _make_flags_value_has_unresolved_expansion(value)
         ):
             return True
     return False
@@ -8649,6 +8701,11 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
+    # A make name assigned from a backtick substitution keeps the reference
+    # only in the raw script (the segment scanner cuts at the backtick), so
+    # it is read here and marks the name unresolved for the whole step.
+    script = _step_script(step) or ""
+    unresolved = set(_make_flag_backtick_references(script))
     # The shell's own `export` assignments (and the plain assignments a
     # later export can publish) accumulate as its segments run, so a later
     # make inherits them.
@@ -8671,10 +8728,21 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         # assignment replaces the value, so the inherited view refreshes:
         # ``export MAKEFLAGS=`` followed by ``MAKEFLAGS=-n`` still hands
         # ``-n`` to every later make (verified: the recipe only prints and
-        # the step exits 0).  A command-local prefix does not persist.
+        # the step exits 0).  A command-local prefix does not persist.  A
+        # literal standalone assignment also replaces a backtick
+        # substitution's output, so the name becomes attributable again and
+        # leaves the unresolved set here (before the sentinel pass).
         for name, value in _standalone_make_assignments(segment).items():
             if name in export_names:
                 exported[name] = value
+            if name in unresolved and value:
+                unresolved.discard(name)
+        # A name whose value still comes from a backtick substitution
+        # cannot be attributed; a make inheriting it cannot certify (fail
+        # closed).
+        for name in unresolved:
+            if name in export_names:
+                exported[name] = _UNRESOLVED_FLAG_SENTINEL
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
         installs, checks_docs = _pip_step_commands(
