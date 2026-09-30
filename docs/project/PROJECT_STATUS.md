@@ -10,7 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current development line (0.9.2)**, the project includes a
+As of the **current release 0.9.2 (published 2026-09-30)**, the project includes a
 bounded full-buffer conversion by default (`markdown_streaming off`),
 with explicit streaming opt-in,
 Rust-first
@@ -412,7 +412,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
-development line and 0.9.1 is the latest released version. The project
+release (published 2026-09-30) and 0.9.1 is the previous release. The project
 provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 bounded full-buffer default, explicit streaming opt-in, bounded-memory
