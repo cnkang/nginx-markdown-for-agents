@@ -7550,6 +7550,28 @@ def _member_failure_is_swallowed(
     return not errexit and end + 1 < len(pairs) if status_failed else True
 
 
+def _errexit_state_by_segment(
+    pairs: list[tuple[str, str]], live: set[str], initial: bool
+) -> list[bool]:
+    """The errexit mode in force at each command's position.
+
+    Only a REACHABLE ``set`` changes the mode: ``live`` is the step's
+    foreground live-command view (normalized the same way), so a ``set``
+    that sits behind a short-circuit or a dead branch must not flip the
+    state for the commands after it.  ``false && set -e; make docs-check;
+    true`` keeps errexit off (verified live: the failing make exits the
+    step 0), while ``true && set -e`` turns it on.
+    """
+    states: list[bool] = []
+    errexit = initial
+    for segment, _separator in pairs:
+        state = _set_errexit_state(segment)
+        if state is not None and _prerequisite_view_text(segment.strip()) in live:
+            errexit = state
+        states.append(errexit)
+    return states
+
+
 def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     """Failure-masked segments of one run step's executable script."""
     script = _step_script(step)
@@ -7562,17 +7584,15 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     initial = _shell_initial_errexit(shell)
     pairs = _command_segments_with_separators(executable)
     # Every command carries the errexit mode in force at its own position:
-    # a `set` that changes the mode affects the commands after it, and the
-    # failure-propagation analysis must not move a later command out of an
-    # earlier command's view (``make docs-check; set -e; true`` swallowed a
-    # failing make that way - verified: step exit 0).
-    errexit_by_index: list[bool] = []
-    errexit = initial
-    for segment, _separator in pairs:
-        state = _set_errexit_state(segment)
-        if state is not None:
-            errexit = state
-        errexit_by_index.append(errexit)
+    # a reachable `set` that changes the mode affects the commands after
+    # it, and the failure-propagation analysis must not move a later
+    # command out of an earlier command's view (``make docs-check; set -e;
+    # true`` swallowed a failing make that way - verified: step exit 0).
+    live = {
+        _prerequisite_view_text(segment.strip())
+        for segment in _foreground_live_commands(step)
+    }
+    errexit_by_index = _errexit_state_by_segment(pairs, live, initial)
     return _failure_masked_segments_from_pairs(pairs, errexit_by_index)
 
 
@@ -8195,17 +8215,38 @@ _UNRESOLVED_FLAG_SENTINEL = "$"
 
 
 def _make_flag_backtick_references(script: str) -> frozenset[str]:
-    """Make-flag names assigned from a backtick substitution in one script.
+    """Make-flag names whose LAST assignment in the script is a substitution.
 
-    ``export MAKEFLAGS=\\`getflags\\``` runs ``getflags`` and hands its
-    output to make, so the flags are whatever that command prints.  The
-    segment scanner splits at the backtick and the export check then sees
-    ``export MAKEFLAGS=`` with an empty value, which is also the
-    legitimate clear-flags idiom; only the raw script distinguishes them.
-    The caller marks these names unresolved so a dependent make cannot
-    certify (fail closed).
+    ``MAKEFLAGS=-s`` followed by ``export MAKEFLAGS=\\`getflags\\``` hands
+    the command's output to make (verified: the recipe only prints and the
+    step exits 0), while the reverse order leaves the literal value in
+    force, so the decision follows the LAST assignment of each form.  A
+    substitution on the same statement as its assignment stays tainted
+    (the segment scanner cuts at the backtick, so the value the scan sees
+    is not the value make receives).  Only a later literal standalone
+    assignment clears the name.  A bare assignment without ``export``
+    never reaches make's environment and is handled by the caller's
+    attribute tracking.
     """
-    return frozenset(match.group(1) for match in _MAKE_FLAG_BACKTICK_RE.finditer(script))
+    last_substitution: dict[str, int] = {}
+    for match in _MAKE_FLAG_BACKTICK_RE.finditer(script):
+        last_substitution[match.group(1)] = match.start()
+    if not last_substitution:
+        return frozenset()
+    last_literal: dict[str, int] = {}
+    cursor = 0
+    for segment, _separator in _command_segments_with_separators(script):
+        position = script.find(segment, cursor)
+        if position < 0:
+            position = cursor
+        for name in _standalone_make_assignments(segment):
+            last_literal[name] = position
+        cursor = position + len(segment)
+    return frozenset(
+        name
+        for name, position in last_substitution.items()
+        if position >= last_literal.get(name, -1)
+    )
 
 
 
@@ -8705,10 +8746,11 @@ def _advance_export_tracking(
     inherits them.  Bash also keeps the export ATTRIBUTE when a later
     standalone assignment replaces the value: ``export MAKEFLAGS=``
     followed by ``MAKEFLAGS=-n`` still hands ``-n`` to every later make
-    (verified: the recipe only prints and the step exits 0).  A literal
-    standalone assignment replaces a backtick substitution's output, so
-    the name becomes attributable again; a name still unresolved keeps the
-    sentinel so a make inheriting it cannot certify (fail closed).
+    (verified: the recipe only prints and the step exits 0).  ``unresolved``
+    is the step's taint set (see ``_make_flag_backtick_references``): a
+    name whose LAST assignment is a substitution keeps the sentinel
+    wherever the attribute is set, so a make inheriting it cannot certify
+    (fail closed).
     """
     assigned.update(_plain_make_assignments(segment))
     export_state = _make_relevant_export_state(segment, assigned)
@@ -8719,8 +8761,6 @@ def _advance_export_tracking(
     for name, value in _standalone_make_assignments(segment).items():
         if name in export_names:
             exported[name] = value
-        if name in unresolved and value:
-            unresolved.discard(name)
     for name in unresolved:
         if name in export_names:
             exported[name] = _UNRESOLVED_FLAG_SENTINEL
@@ -8746,9 +8786,22 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     # it is read here and marks the name unresolved for the whole step.
     script = _step_script(step) or ""
     unresolved = set(_make_flag_backtick_references(script))
+    # The step environment already marks every name it sets as exported:
+    # bash hands the environment to each command, so a later plain
+    # assignment to a name the environment carries keeps the export
+    # attribute and refreshes the value a later make receives (verified
+    # live: with a step-level MAKEFLAGS, 'MAKEFLAGS=-n' alone makes the
+    # recipe print only).  A workflow/job/step env value is the initial
+    # view; command-local prefixes still do not persist.
     assigned: dict[str, str] = {}
     export_names: set[str] = set()
     exported: dict[str, str] = {}
+    if isinstance(step_env, dict):
+        for name in _MAKE_ENV_NAMES:
+            value = step_env.get(name)
+            if isinstance(value, str):
+                export_names.add(name)
+                exported[name] = value
     scanned: list[tuple[int, bool, bool]] = []
     for command_index, segment in enumerate(_foreground_live_commands(step)):
         if _segment_abandons_repo_root(segment):

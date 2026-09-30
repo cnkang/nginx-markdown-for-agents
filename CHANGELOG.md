@@ -24,7 +24,7 @@ for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
 before/after examples.
 
-- **Directive removals (38 total).** The
+- **Directive removals (43 total).** The
   release deletes 19 reject-only migration stubs. NGINX now reports the
   standard `unknown directive` error instead of a migration hint. The release
   removes 14 active directives:
@@ -35,6 +35,11 @@ before/after examples.
   `markdown_stream_types`, `markdown_stream_threshold`,
   `markdown_diagnostics_allow`, `markdown_otel`, and
   `markdown_otel_endpoint`.
+
+  The release also removes the five convergence names:
+  `markdown_dynamic_config`, `markdown_dynamic_config_path`,
+  `markdown_dynconf_dry_run`, `markdown_prune_selectors`, and
+  `markdown_prune_protection_selectors`.
 
   The release folds 5 standalone limit directives into `markdown_limits`:
   `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,

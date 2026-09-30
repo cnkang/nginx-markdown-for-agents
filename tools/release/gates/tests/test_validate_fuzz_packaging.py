@@ -2070,6 +2070,87 @@ def test_shell_special_parameters_in_make_flags_are_rejected() -> None:
         ), literal
 
 
+def test_substitution_taint_follows_the_last_assignment() -> None:
+    """Only the LAST assignment decides whether a name stays tainted.
+
+    Regression (round-5 review): a literal assignment before a later
+    backtick substitution cleared the taint, so
+    ``MAKEFLAGS=-s; export MAKEFLAGS=\\`getflags\\``` certified although the
+    command's output reaches make (verified live: the recipe only prints).
+    The reverse order leaves the literal in force and still certifies
+    (verified live: the recipe runs).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-s\nexport MAKEFLAGS=`getflags`\nmake docs-check"}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check"}]
+        )
+        is None
+    )
+
+
+def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
+    """A ``set`` behind a short-circuit must not change the shell's mode.
+
+    Regression (round-5 review): the state scan applied every ``set`` it
+    saw, so ``false && set -e; make docs-check; true`` read the make as
+    errexit-protected and certified, although the ``set`` never ran and
+    the trailing ``true`` swallowed the failure (verified live: step exit
+    0).  A reachable ``set`` still applies.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "false && set -e; make docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "true && set -e; make docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is None
+    )
+
+
+def test_step_environment_presets_the_export_attribute() -> None:
+    """A make name carried by the step environment is already exported.
+
+    Regression (round-5 review): the scan seeded the export attributes
+    only from in-script ``export`` statements, so a step-level
+    ``MAKEFLAGS`` followed by a plain ``MAKEFLAGS=-n`` certified although
+    bash keeps the attribute and hands ``-n`` to make (verified live: the
+    recipe only prints).  Without the environment value the plain
+    assignment does not reach make and still certifies.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n\nmake docs-check", "env": {"MAKEFLAGS": ""}}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n\nmake docs-check"}]
+        )
+        is None
+    )
+    # An executing value in the environment keeps certifying.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-s"}}]
+        )
+        is None
+    )
+
+
 def test_errexit_change_does_not_detach_following_commands() -> None:
     """A ``set`` mid-script must not move later commands out of the scan.
 
