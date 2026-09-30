@@ -2095,6 +2095,103 @@ def test_substitution_taint_follows_the_last_assignment() -> None:
     )
 
 
+def test_substitution_taint_clears_on_a_later_export_assignment() -> None:
+    """An ``export`` literal reassignment clears an earlier substitution.
+
+    Regression: the taint scan harvested literal re-assignments only from
+    the standalone form, so ``export MAKEFLAGS=\\`getflags\\``` followed by
+    ``export MAKEFLAGS=-s`` stayed tainted and rejected a check whose make
+    receives the plain ``-s`` (verified live: the recipe runs).  The
+    reverse order still hands the substitution's output to make, and a
+    concatenated substitution beside a literal prefix stays unresolved
+    (verified live: ``export MAKEFLAGS=-s\\`echo n\\``` yields ``-sn`` and
+    make only prints).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    # A later export literal clears the taint; the make runs the recipe.
+    for script in (
+        "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check",
+        "export MAKEFLAGS=`getflags`\nexport MAKEFLAGS=-s\nmake docs-check",
+        "export MAKEFLAGS=`getflags`\nexport MAKEFLAGS=\nmake docs-check",
+        "if true; then export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; fi; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+    # The reverse order leaves the substitution in force for the make.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=-s; export MAKEFLAGS=`getflags`; make docs-check"}]
+        )
+        is not None
+    )
+    # A substitution concatenated beside a literal prefix resolves at run
+    # time; the scan cannot attribute it and fails closed.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=-s`echo n`; make docs-check"}]
+        )
+        is not None
+    )
+
+
+def test_substitution_taint_ignores_unreachable_regions() -> None:
+    """Only a REACHABLE substitution taints a later make.
+
+    Regression: the taint scan swept the raw script text, so a
+    substitution inside a dead branch, a comment, or a heredoc body - none
+    of which runs - still marked the name unresolved and rejected an
+    otherwise certified check.  A reachable substitution and a call into a
+    function whose body carries one must keep failing closed.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    # Unreachable substitution sources do not taint the step.
+    for script in (
+        "if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
+        "export MAKEFLAGS=-s; if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
+        "if false; then export MAKEFLAGS=`getflags`; fi; export MAKEFLAGS=-s; make docs-check",
+        "export MAKEFLAGS=-s\n# export MAKEFLAGS=`getflags`\nmake docs-check",
+        "export MAKEFLAGS=-s\ncat <<'EOF'\nexport MAKEFLAGS=`getflags`\nEOF\nmake docs-check",
+        "f() { export MAKEFLAGS=`getflags`; }; make docs-check",
+        "true || export MAKEFLAGS=`getflags`; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+    # A step-level value keeps the name exported: an unreachable
+    # substitution must not resurrect the taint over it either.
+    assert (
+        packaging_gate._python_deps_issue(
+            [
+                install,
+                {
+                    "run": "if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
+                    "env": {"MAKEFLAGS": "-s"},
+                },
+            ]
+        )
+        is None
+    )
+    # Reachable substitution sources still fail closed: a live branch, a
+    # short-circuit that runs, and a call into the carrying function.
+    for script in (
+        "if true; then export MAKEFLAGS=`getflags`; fi; make docs-check",
+        "true && export MAKEFLAGS=`getflags`; make docs-check",
+        "false || export MAKEFLAGS=`getflags`; make docs-check",
+        "f() { export MAKEFLAGS=`getflags`; }; f; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # An unreachable literal assignment does not clear the taint either.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`; if false; then export MAKEFLAGS=-s; fi; make docs-check"}]
+        )
+        is not None
+    )
+
+
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     """A ``set`` behind a short-circuit must not change the shell's mode.
 
