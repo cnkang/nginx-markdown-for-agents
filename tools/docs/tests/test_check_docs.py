@@ -1289,13 +1289,16 @@ def test_implementation_plan_scopes_historical_pending_labels():
         "Completed work-item statuses and dated `Document Updates` entries are "
         "historical snapshots."
     ) in intro
-    assert "WI-8 publication section below show the current state" in intro
     pending = _v092_is_pending()
     pending_phrase = (
         "v0.9.2 remains pending publication, including its tag, assets, and "
         "checksums."
     )
     assert (pending_phrase in intro) is pending
+    if pending:
+        assert "WI-8 publication section below show the current state" in intro
+    else:
+        assert "0.9.2 shipped on 2026-09-30" in intro
     published_word_present = any(
         word in intro.lower() for word in ("published", "released")
     )
