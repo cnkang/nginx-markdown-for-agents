@@ -89,8 +89,8 @@ highlighted retired names (a commonly used subset: five convergence names plus
 and fail `nginx -t` with
 NGINX's standard `unknown directive` error. This list is a subset: see
 [CHANGELOG.md](CHANGELOG.md) for the complete removal inventory (14 removed
-active directives, 19 deleted migration stubs, and 5 directives folded into
-`markdown_limits`). Configure the
+active directives, 19 deleted migration stubs, 5 directives folded into
+`markdown_limits`, and 5 convergence removals). Configure the
 behavior explicitly so `nginx -T` shows the settings that operators selected.
 
 ```nginx
