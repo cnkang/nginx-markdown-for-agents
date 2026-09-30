@@ -35,6 +35,9 @@ jobs:
         with:
           python-version: '3.14.6'
 
+      - name: Install matrix validation dependencies
+        run: python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2
+
       - name: Run matrix updater
         run: python3 tools/release/matrix/update_matrix.py
 

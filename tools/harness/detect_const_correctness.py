@@ -40,19 +40,22 @@ from lib.path_validation import validate_read_path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # NGINX types commonly passed as non-const pointers that should be const
-# when the function only reads through them.
+# when the function only reads through them. sha256_t is included so the
+# named sha256_final allowlist below is the load-bearing suppressor for the
+# real finalizer parameter (diagnostics_accessors_impl.h).
 NGINX_STRUCT_TYPES = re.compile(
     r"ngx_http_markdown_(?:conf_t|ctx_t|request_ctx_t|"
-    r"effective_conf_t|metrics_t)"
+    r"effective_conf_t|metrics_t|sha256_t)"
 )
 
-# Function parameter pattern: type *name or type *name,
-# where type matches NGINX struct types and pointer is not const-qualified.
-# This catches: ngx_http_markdown_conf_t *conf
-# But not: const ngx_http_markdown_conf_t *conf
-# Also not: ngx_http_markdown_conf_t *const conf (const pointer, mutable data)
+# Function parameter pattern: type *name, with an optional pointer
+# qualifier before the name.  ``type *const name`` makes the POINTER
+# constant, not the pointee: the function can still mutate ``*name``, so
+# the declaration stays subject to the same warning as the plain form.
+# The optional group consumes the qualifier so the captured name is the
+# parameter, never the word ``const``.
 NON_CONST_PARAM_RE = re.compile(
-    r"(ngx_http_markdown_\w+_t)\s*\*\s*(\w+)"
+    r"(ngx_http_markdown_\w+_t)\s*\*\s*(?:const\s+)?(\w+)"
 )
 
 # Check if const precedes the type
@@ -144,9 +147,7 @@ def _is_in_mutator_function(line: str, match_start: int) -> bool:
     """Check whether the enclosing function name suggests intentional mutation."""
     context = line[:match_start] if match_start > 0 else line
     func_name = _extract_func_name(context)
-    if not func_name:
-        return False
-    return _is_intentional_mutator_function(func_name)
+    return _is_intentional_mutator_function(func_name) if func_name else False
 
 
 def _is_intentional_mutator_function(func_name: str) -> bool:
@@ -170,6 +171,15 @@ def _extract_func_name(context: str) -> str | None:
 
 
 def _should_skip_line(line: str) -> bool:
+    # Multi-line (wrapped) signatures are not joined: this detector checks
+    # one physical line at a time.  Measured on the 0.9.2 tree, a naive
+    # logical-line join (parens-balanced accumulation, cap 40 lines) adds
+    # 133 candidate findings across 11 files, and the majority of those
+    # functions (94 of 133) are definitions whose bodies mutate through the
+    # pointer (for example ctx->decompression.* assignments), so almost all
+    # of them are false positives for a read-only-const rule.  The join was
+    # therefore left out; a future revision needs a per-function mutation
+    # analysis before enabling it.
     if COMMENT_RE.search(line):
         return True
     if re.match(r"^\s*for\s*\(", line):
@@ -180,9 +190,7 @@ def _should_skip_line(line: str) -> bool:
     # Adding const to these parameters causes compilation failures.
     if NGINX_CALLBACK_PATTERNS.search(line):
         return True
-    if CALLBACK_FUNC_RE.search(line):
-        return True
-    return False
+    return bool(CALLBACK_FUNC_RE.search(line))
 
 
 def _build_finding_message(

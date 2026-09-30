@@ -1128,10 +1128,20 @@ jobs:
       - name: Verify release gate dependencies
         run: |
           set -euo pipefail
-          dependency_versions="$(python3 -c 'from importlib.metadata import version; import brotli, yaml; print(brotli.__version__, yaml.__version__, version("jsonschema"))' 2>/dev/null)" || {
+          # stderr is captured, not sent to /dev/null: a failed import must
+          # report the actual ImportError instead of only the message below.
+          dependency_stderr_file="$(mktemp)"
+          dependency_versions=""
+          if ! dependency_versions="$(python3 -c 'from importlib.metadata import version; import brotli, yaml; print(brotli.__version__, yaml.__version__, version("jsonschema"))' 2>"${dependency_stderr_file}")"; then
+            dependency_stderr="$(cat "${dependency_stderr_file}")"
+            rm -f -- "${dependency_stderr_file}"
             echo "ERROR: unable to import the pinned release Python dependencies; install requirements-release.txt" >&2
+            if [[ -n "${dependency_stderr}" ]]; then
+              echo "${dependency_stderr}" >&2
+            fi
             exit 1
-          }
+          fi
+          rm -f -- "${dependency_stderr_file}"
           # jsonschema imports and reports its version without its [format]
           # extras, but registers none of the format checkers the release
           # schemas rely on (date-time), and validation silently skips an

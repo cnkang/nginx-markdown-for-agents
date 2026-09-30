@@ -157,9 +157,7 @@ evidence, not active compatibility rules.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
-| 0.9.2 | 2026-09-22 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
-| 0.9.2 | 2026-09-21 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-19 | Kang | Release-state wording and release evidence prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-15 | Kang | Recorded the cross-release compatibility gate as a required v1.0 deliverable, explicitly deferred from v0.9.2 |
 | 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |

@@ -2109,6 +2109,10 @@ test_buffer_init_fail_open_releases_inflight_slot(void)
                 "init fail-open must stop conversion after forwarding input");
     TEST_ASSERT(g_next_body_calls == 1,
                 "init fail-open must forward the original body once");
+    TEST_ASSERT(g_metrics.conversions_attempted == 1,
+                "init failure must count one attempt, not a second conversion");
+    TEST_ASSERT(g_metrics.results.failopen_count == 1,
+                "init fail-open delivery must be counted once");
     TEST_ASSERT(g_inflight_release_calls == 1
                 && ctx.lifecycle.inflight_cleanup == NULL,
                 "init fail-open must release the completed conversion slot");
@@ -2156,6 +2160,8 @@ test_buffer_append_reject_releases_inflight_slot(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "append reject must preserve finalizer result");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "append reject must not count a fail-open delivery");
     TEST_ASSERT(g_inflight_release_calls == 1
                 && ctx.lifecycle.inflight_cleanup == NULL,
                 "append reject must release the terminal conversion slot");
@@ -2190,6 +2196,8 @@ test_decompression_reject_releases_inflight_slot(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "decompression reject must preserve finalizer result");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "decompression reject must not count a fail-open delivery");
     TEST_ASSERT(g_inflight_release_calls == 1
                 && ctx.lifecycle.inflight_cleanup == NULL,
                 "decompression reject must release the terminal conversion slot");
@@ -2225,6 +2233,8 @@ test_decompression_fail_open_releases_inflight_slot(void)
 
     TEST_ASSERT(rc == NGX_AGAIN,
                 "decompression fail-open must preserve body backpressure");
+    TEST_ASSERT(g_metrics.results.failopen_count == 0,
+                "deferred fail-open delivery must not count before resume");
     TEST_ASSERT(g_inflight_release_calls == 1
                 && ctx.lifecycle.inflight_cleanup == NULL,
                 "decompression fail-open must release the terminal conversion slot");
@@ -2262,6 +2272,8 @@ test_pass_through_releases_inflight_slot(void)
 
     TEST_ASSERT(rc == NGX_OK,
                 "pass-through must preserve downstream success");
+    TEST_ASSERT(g_metrics.conversions_bypassed == 1,
+                "ineligible pass-through must count one bypassed conversion");
     TEST_ASSERT(g_inflight_release_calls == 1
                 && ctx.lifecycle.inflight_cleanup == NULL,
                 "pass-through must release a slot for a completed conversion");
@@ -2328,6 +2340,9 @@ test_content_encoding_collection_failure_uses_production_handler(void)
                 "production body filter must not retry conversion");
     TEST_ASSERT(g_next_header_calls == 1,
                 "body pass-through must not re-enter the header chain");
+    TEST_ASSERT(g_metrics.conversions_bypassed == 0,
+                "pass-through after a recorded conversion failure must not "
+                "count a bypassed conversion (suppression branch)");
     TEST_PASS("Content-Encoding collection failure uses production handler");
 }
 

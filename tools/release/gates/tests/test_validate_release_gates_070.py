@@ -669,6 +669,65 @@ def test_publish_gate_rejects_a_false_conjunct_after_gate_success() -> None:
     assert not _publish_gate_item(mutant)
 
 
+def test_publish_gate_rejects_combined_failure_alternatives() -> None:
+    """The whole condition must match the expected truth table.
+
+    Regression for the per-case-only evaluator: an alternative such as
+    `|| (needs.release-gate.result == 'failure'
+        && needs.musl-build.result == 'failure')` used to pass because each
+    required job's failure was only checked one job at a time.  The
+    exhaustive combination pass must reject every such path (each control
+    below isolates one class), while the untouched workflow stays accepted.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    # The `if: >-` block scalar continues while lines are indented deeper
+    # than the key (six spaces); it ends at the next line indented four
+    # spaces or fewer.  Append inside the condition, right before that end.
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternatives = (
+        # Two blocking jobs failing together must not open publication.
+        " || (needs.release-gate.result == 'failure'"
+        " && needs.musl-build.result == 'failure')",
+        # A lone failure alternative (already rejected before, kept as a
+        # non-regression control for the new combination pass).
+        " || (needs.release-gate.result == 'failure')",
+        # Success on one job cannot be bought with another job's failure.
+        " || (needs.release-gate.result == 'success'"
+        " && needs.musl-build.result == 'cancelled')",
+        # Unconditional publication stays rejected.
+        " || true",
+    )
+    for alternative in alternatives:
+        mutated_condition = condition_end + alternative + "\n"
+        mutant = (
+            prefix
+            + marker
+            + head
+            + condition_marker
+            + mutated_condition
+            + "".join(remainder_lines)
+        )
+        assert not _publish_gate_item(mutant), alternative
+
+
 def test_publish_condition_evaluator_handles_supported_ast_nodes() -> None:
     """The bounded evaluator covers calls, comparisons, and Boolean ops."""
     context = {"needs.release_gate.result": "success"}
@@ -751,3 +810,167 @@ def test_strict_run_parses_the_real_workflow_with_pyyaml() -> None:
     checks = dict(gates._gate_3_items(release_packages))
     assert checks["tag package workflow gate"]
     assert checks["publish waits for release gate"]
+
+
+def test_publish_gate_rejects_a_dispatch_tag_combined_failure_alternative() -> None:
+    """The truth table covers workflow_dispatch from a tag too.
+
+    Regression for the omitted event context: an alternative guarded by
+    `github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'`
+    was unsatisfiable (false) in both contexts the table enumerated, while a
+    tag dispatch with two blocking jobs failed made it true.  The third
+    context closes that hole.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    assert _publish_gate_item(workflow)
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternative = (
+        " || (github.event_name == 'workflow_dispatch'"
+        " && github.ref_type == 'tag'"
+        " && needs.release-gate.result == 'failure'"
+        " && needs.musl-build.result == 'failure')"
+    )
+    mutant = (
+        prefix
+        + marker
+        + head
+        + condition_marker
+        + condition_end
+        + alternative
+        + "\n"
+        + "".join(remainder_lines)
+    )
+    assert not _publish_gate_item(mutant), alternative
+
+
+def test_publish_condition_requires_an_explicit_always_override() -> None:
+    """A condition without ``always()`` cannot be the publication gate.
+
+    Regression: the validator modeled only the explicit comparisons, so a
+    condition with no status-check function passed even though GitHub wraps
+    such conditions in an implicit ``success()`` over the dependencies.  On
+    the dispatch path, where signing is skipped, that implicit gate would
+    skip publication while the explicit comparisons alone would allow it.
+    """
+    real = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert real
+    assert _publish_gate_item(real)
+
+    without_always = (
+        " needs.musl-build.result == 'success'"
+        " && needs.integrity-checksums.result == 'success'"
+        " && needs.release-gate.result == 'success'"
+        " && needs.fuzz-qualification.result == 'success'"
+        " && needs.official-docker-release-gate.result == 'success'"
+        " && needs.rc-release-gates.result == 'success'"
+        " && (needs.integrity-signature.result == 'success'"
+        "     || (needs.integrity-signature.result == 'skipped'"
+        "         && github.event_name == 'workflow_dispatch'))"
+    )
+    assert not gates._publish_condition_covers_dependency_results(
+        without_always
+    )
+
+
+def test_bare_workflow_dispatch_trigger_is_accepted() -> None:
+    """A bare ``workflow_dispatch:`` line is valid and bounded.
+
+    Regression: the trigger guard required a mapping, so the common bare
+    form (used across the repository's other workflows) was rejected even
+    though GitHub treats it as the same manual trigger.
+    """
+    bare = (
+        "on:\n"
+        "  push:\n"
+        '    tags: ["v*"]\n'
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  release-gate:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo\n"
+    )
+    assert gates._release_publish_triggers_are_bounded(bare)
+
+    # A mapping form stays accepted, and an unrelated type stays rejected.
+    mapping = bare.replace(
+        "  workflow_dispatch:\n",
+        "  workflow_dispatch:\n    inputs:\n      version:\n        type: string\n",
+    )
+    assert gates._release_publish_triggers_are_bounded(mapping)
+    rejected = bare.replace("  workflow_dispatch:\n", "  workflow_dispatch: enabled\n")
+    assert not gates._release_publish_triggers_are_bounded(rejected)
+
+
+def test_publish_comparison_follows_github_case_insensitive_strings() -> None:
+    """String equality matches GitHub's ordinal-ignore-case semantics.
+
+    GitHub's expression engine compares strings with ordinal-ignore-case
+    equality, so `== 'FAILURE'` matches an actual `failure`.  A
+    case-sensitive model would evaluate a mixed-case combined-failure
+    alternative differently from the runner and accept it.
+    """
+    workflow = gates.read(gates.RELEASE_PACKAGES_WORKFLOW)
+    assert workflow
+    prefix, marker, publish_block = workflow.partition("  publish:\n")
+    assert marker
+    condition_marker = "    if: >-\n"
+    assert publish_block.count(condition_marker) == 1
+    head, _, condition_tail = publish_block.partition(condition_marker)
+    condition_lines: list[str] = []
+    remainder_lines: list[str] = []
+    in_remainder = False
+    for line in condition_tail.splitlines(keepends=True):
+        if not in_remainder and line.startswith("      "):
+            condition_lines.append(line)
+        else:
+            in_remainder = True
+            remainder_lines.append(line)
+    assert condition_lines, "condition block is empty"
+    condition_end = "".join(condition_lines).rstrip("\n")
+
+    alternative = (
+        " || (needs.release-gate.result == 'FAILURE'"
+        " && needs.musl-build.result == 'Failure')"
+    )
+    mutant = (
+        prefix
+        + marker
+        + head
+        + condition_marker
+        + condition_end
+        + alternative
+        + "\n"
+        + "".join(remainder_lines)
+    )
+    assert not _publish_gate_item(mutant), alternative
+
+    # Parity probe: an uppercase comparison matches the lowercase value.
+    import ast as _ast
+
+    context = {
+        "needs.release_gate.result": "failure",
+        "github.event_name": "push",
+        "github.ref_type": "tag",
+    }
+    node = _ast.parse(
+        "needs.release_gate.result == 'FAILURE'", mode="eval"
+    ).body
+    assert gates._evaluate_publish_comparison(node, context) is True

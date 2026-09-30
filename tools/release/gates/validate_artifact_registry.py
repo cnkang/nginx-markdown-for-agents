@@ -217,7 +217,12 @@ def _check_artifact_id(
     artifact_id = artifact.get("artifact_id")
     if artifact_id is None:
         return
-    if not isinstance(artifact_id, (str, int, float, bool)):
+    # bool subclasses int, so it must be rejected before the scalar test:
+    # a JSON true/false is not an identifier even though it passes
+    # isinstance(artifact_id, int).
+    if isinstance(artifact_id, bool) or not isinstance(
+        artifact_id, (str, int, float)
+    ):
         # Unhashable JSON values (lists/objects) cannot participate in
         # set membership; report them as malformed instead of raising
         # TypeError from the set operations below.

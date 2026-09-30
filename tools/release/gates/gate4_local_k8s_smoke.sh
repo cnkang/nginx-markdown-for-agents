@@ -49,9 +49,24 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 readonly SCRIPT_DIR PROJECT_ROOT
 
+# Per-cluster serialization: a concurrent gate4 or helm-smoke run that
+# targets one cluster would delete resources this run owns (the namespace,
+# the release, or the cluster itself).  The shared library holds one lock
+# per cluster from cluster creation through cleanup, and the helm smoke
+# sources the same file, so both scripts contend on the same lock.
+# shellcheck source=tools/lib/cluster_lock.sh
+source "${PROJECT_ROOT}/tools/lib/cluster_lock.sh"
+
 readonly DEFAULT_CLUSTER_NAME="gate4-smoke"
 readonly CHART_DIR="${PROJECT_ROOT}/charts/nginx-markdown"
-readonly HELM_RELEASE_NAME="gate4-test"
+# The release name is run-unique: even with the per-cluster lock held,
+# an external actor can create a fixed name between the ownership check
+# and the install, and the loser's post-failure settle window could then
+# attribute that release to itself and uninstall it.  A unique name makes
+# the ownership check race-free by construction; the namespace stays fixed
+# so the reuse contract for it is unchanged (the sibling helm smoke
+# applies the same split).
+readonly HELM_RELEASE_NAME="gate4-test-$$"
 readonly HELM_NAMESPACE="gate4-smoke"
 readonly POD_WAIT_TIMEOUT="120s"
 
@@ -154,6 +169,7 @@ check_prerequisites() {
 
 KEEP_CLUSTER=0
 CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
+LOCK_MODE=""
 CREATED_CLUSTER=0
 CREATED_NAMESPACE=0
 CREATED_RELEASE=0
@@ -169,6 +185,12 @@ parse_args() {
             --cluster-name)
                 [[ $# -ge 2 ]] || die "--cluster-name requires a value"
                 CLUSTER_NAME="$2"
+                # The sibling helm smoke enforces kind's grammar on this
+                # value; the same bound here turns an invalid name into one
+                # clear error instead of a later kind/kubectl refusal.
+                if [[ ! "${CLUSTER_NAME}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+                    die "invalid cluster name: ${CLUSTER_NAME}"
+                fi
                 shift 2
                 ;;
             -h|--help)
@@ -217,6 +239,9 @@ delete_cluster() {
 
     info "Deleting kind cluster: ${CLUSTER_NAME}"
     kind delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1 || true
+    # Clear ownership after the delete so the EXIT trap's second call is a
+    # no-op instead of a second delete of an already-gone cluster.
+    CREATED_CLUSTER=0
     return 0
 }
 
@@ -232,12 +257,156 @@ cleanup_owned_helm_resources() {
         CREATED_RELEASE=0
     fi
     if [[ "$CREATED_NAMESPACE" -eq 1 ]]; then
+        # Bounded wait: a namespace this run created is ours to remove, and
+        # returning while it is still terminating would let a subsequent
+        # run reuse a name that is about to disappear (or collide with the
+        # finalizer).  The wait stays best-effort with a bound so cleanup
+        # can never hang a stuck cluster.
         kubectl --context "kind-${CLUSTER_NAME}" delete namespace "${HELM_NAMESPACE}" \
-            --wait=false >/dev/null 2>&1 || true
+            --wait=true --timeout=120s >/dev/null 2>&1 || true
         CREATED_NAMESPACE=0
     fi
     return 0
 }
+
+# After a failed install, settle what this run still owns.  The rollback
+# flag removes a failed release during the install; when the rollback
+# itself fails, the release survives in a failed or pending state and
+# cleanup must uninstall it before deleting the namespace.  The pre-install
+# ownership check proved the name free, so a surviving release was created
+# during this run's install window.
+#
+# $1 - the captured install output, used to recognize a name collision
+settle_failed_install_ownership() {
+    local install_error="${1:-}"
+    # The captured install error classifies first: a name collision means a
+    # concurrent creator holds the name, so both claims clear regardless of
+    # what any state query can see (a transient query failure must not turn
+    # a settled collision back into "this run's release").  Two error shapes
+    # report it: the name check refuses with "cannot re-use a name that is
+    # still in use" (Helm 3) or "cannot reuse ..." (Helm 4), and the
+    # storage-layer create that follows its own availability check reports
+    # "release: already exists" when both racers passed that check.
+    if [[ "$install_error" == *"name that is still in use"* ]] \
+        || [[ "$install_error" == *"release: already exists"* ]]; then
+        # The other creator's release lives in this cluster: deleting the
+        # cluster would take it down with the release, so the cluster is
+        # preserved along with the release and its namespace.
+        info "Install failed; another creator holds the release name, cleanup preserves it"
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
+        return 0
+    fi
+    # A failed install is followed by one of three states.  The pre-install
+    # ownership check proved the name free, so a surviving release was
+    # created during this run's install window: it is this run's attempt,
+    # unless a concurrent creator now holds the name with a DEPLOYED
+    # release, whose resources must be preserved.  A pending release cannot
+    # be another creator's: this run held the name while its install ran,
+    # so a concurrent creator would have been refused instead.
+    local live
+    if ! live="$(helm list --short \
+        --filter "^${HELM_RELEASE_NAME}$" \
+        --namespace "${HELM_NAMESPACE}" \
+        --kube-context "kind-${CLUSTER_NAME}" \
+        --deployed \
+        2>/dev/null)"; then
+        # The state cannot be checked: keep every claim so cleanup removes
+        # only what this run may have created.
+        info "Install failed; the release state could not be checked, cleanup keeps both claims"
+        return 0
+    fi
+    if [[ -n "$live" ]]; then
+        # A live release (another creator's) holds the name: preserve it,
+        # the namespace content, and the cluster that holds them.  Deleting
+        # the cluster would take the other creator's release down with it,
+        # so the cluster claim clears alongside the others (the same
+        # contract the collision branch applies).
+        info "Install failed; a live release holds the name, cleanup preserves it"
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
+        return 0
+    fi
+    local surviving
+    if ! surviving="$(helm list --short \
+        --filter "^${HELM_RELEASE_NAME}$" \
+        --namespace "${HELM_NAMESPACE}" \
+        --kube-context "kind-${CLUSTER_NAME}" \
+        --pending --failed --uninstalled --uninstalling --superseded \
+        2>/dev/null)"; then
+        info "Install failed; the release state could not be checked, cleanup keeps both claims"
+        return 0
+    fi
+    if [[ -z "$surviving" ]]; then
+        # The rollback removed the release: nothing of this run survives,
+        # and the owned namespace is still deleted by cleanup.
+        info "Install failed and rolled back; cleanup removes the owned namespace"
+        CREATED_RELEASE=0
+        return 0
+    fi
+    # The release survives in a non-deployed state (pending, failed, or
+    # mid-teardown): cleanup must uninstall it before deleting the owned
+    # namespace.
+    info "Install failed; the release survives, cleanup removes it and the owned namespace"
+    return 0
+}
+
+##############################################################################
+# Termination handling
+##############################################################################
+
+# Without a trap, an abnormal termination (SIGINT/SIGTERM) skips main's
+# cleanup path and leaks the Helm release, the namespace, and the kind
+# cluster.  The handlers are idempotent — each clears its own ownership flag
+# after acting and no-ops on a cleared flag — so a second run of the trap
+# after main's normal cleanup is safe.  A concurrent run's resources are
+# still preserved: the helpers only act on state this run recorded as its own.
+#
+# EXIT alone runs the cleanup for every exit path; INT and TERM additionally
+# exit with the conventional signal status.  A returning INT/TERM handler
+# would resume the script after the interrupt (bash completes the trap and
+# continues the next command), letting a terminated validation reach its
+# success path and report PASS.
+# CLEANUP_DONE makes cleanup run at most once: main() performs its own
+# ordered cleanup and the EXIT trap is a no-op afterwards, and a signal that
+# arrives after cleanup cannot re-run the helpers.
+CLEANUP_DONE=0
+
+run_cleanup_once() {
+    if [[ "${CLEANUP_DONE}" -eq 1 ]]; then
+        return 0
+    fi
+    # Run the helpers BEFORE latching: if a signal re-enters the trap while
+    # cleanup is in progress, the re-entry repeats the helpers (each is
+    # idempotent and clears its own ownership flag) instead of returning
+    # early and leaving the cluster behind.  The latch is set last.
+    cleanup_owned_helm_resources
+    delete_cluster
+    CLEANUP_DONE=1
+    return 0
+}
+
+cleanup_on_exit() {
+    run_cleanup_once
+    # Every exit path (including a mid-run die) releases the lock; a second
+    # release is a no-op because the directory form re-checks ownership and
+    # the flock form holds the descriptor until the process exits.
+    release_cluster_lock
+    return 0
+}
+
+exit_on_signal() {
+    local signal_status="$1"
+    run_cleanup_once
+    release_cluster_lock
+    exit "$signal_status"
+}
+
+# The traps are installed by main() after argument parsing and prerequisite
+# checks succeed, so a usage error or a missing tool exits without cleanup
+# messages for a cluster this run never touched.
 
 ##############################################################################
 # Helm validation
@@ -376,50 +545,124 @@ validate_helm_template() {
     return 1
 }
 
+helm_rollback_flag() {
+    # Helm's rollback-on-failure flag was renamed in Helm 4: `--atomic`
+    # (which implies --wait on v3) became `--rollback-on-failure`, with
+    # `--atomic` kept only as a deprecated alias.  Select by major version so
+    # each supported major runs with its own spelling.
+    local version
+    version="$(helm version --short 2>/dev/null || true)"
+    case "${version}" in
+        v4*|4.*)
+            printf '%s' "--rollback-on-failure"
+            ;;
+        *)
+            printf '%s' "--atomic"
+            ;;
+    esac
+    return 0
+}
+
+
 deploy_and_verify() {
     info "Deploying Helm chart to kind cluster..."
     local kube_context="kind-${CLUSTER_NAME}"
 
     # Reuse a namespace without claiming ownership; cleanup must not delete
-    # other workloads that already use it.
+    # other workloads that already use it.  kubectl stderr is kept out of the
+    # captured result so a warning cannot read as an existing namespace, and
+    # the temporary file is cleaned on both paths.
     local existing_namespace
+    local namespace_stderr_file
+    namespace_stderr_file="$(mktemp "${TMPDIR:-/tmp}/gate4-ns-list.XXXXXX")"
     if ! existing_namespace="$(kubectl --context "$kube_context" get namespace \
-        "${HELM_NAMESPACE}" --ignore-not-found -o name 2>&1)"; then
+        "${HELM_NAMESPACE}" --ignore-not-found -o name 2>"$namespace_stderr_file")"; then
         fail "Unable to determine ownership of namespace ${HELM_NAMESPACE}"
-        printf '%s\n' "$existing_namespace" >&2
+        cat "$namespace_stderr_file" >&2 || true
+        rm -f -- "$namespace_stderr_file"
+        # The namespace's ownership is unknown: whatever holds it shares
+        # this cluster, so the cluster claim clears before the failure exit
+        # (deleting the cluster could destroy another actor's workloads).
+        CREATED_CLUSTER=0
         return 1
     fi
+    rm -f -- "$namespace_stderr_file"
     if [[ -z "$existing_namespace" ]]; then
         if ! kubectl --context "$kube_context" create namespace \
             "${HELM_NAMESPACE}" >/dev/null 2>&1; then
+            # The per-cluster lock is held, but an external actor can
+            # still create the namespace concurrently: whatever holds it
+            # now is theirs, and deleting the cluster would take it down.
+            # The cluster claim clears with the namespace claim.
             fail "Unable to create namespace ${HELM_NAMESPACE}"
+            CREATED_CLUSTER=0
             return 1
         fi
         CREATED_NAMESPACE=1
     else
+        # A namespace this run did not create lives in this cluster: it
+        # belongs to another run (a fresh cluster has no namespace), so
+        # the cluster claim clears and cleanup leaves both alone.
         info "Reusing pre-existing namespace ${HELM_NAMESPACE}"
+        CREATED_CLUSTER=0
     fi
 
-    # Refuse to adopt a release from another run. Helm install below also
-    # closes the race between this query and creation.
+    # Refuse to adopt a release from another run.  The explicit state set is
+    # the version-portable spelling of "any release, in any state": `--all`
+    # exists on Helm v3 but was removed in v4, these six state flags exist in
+    # both.  Helm install below also closes the race between this query and
+    # creation.
     local existing_release
+    local release_stderr_file
+    release_stderr_file="$(mktemp "${TMPDIR:-/tmp}/gate4-helm-list.XXXXXX")"
     if ! existing_release="$(helm list --short --filter "^${HELM_RELEASE_NAME}$" \
-        --namespace "${HELM_NAMESPACE}" --kube-context "$kube_context" 2>&1)"; then
+        --namespace "${HELM_NAMESPACE}" --kube-context "$kube_context" \
+        --deployed --failed --pending --uninstalled --uninstalling --superseded \
+        2>"$release_stderr_file")"; then
         fail "Unable to determine ownership of Helm release ${HELM_RELEASE_NAME}"
-        printf '%s\n' "$existing_release" >&2
-        CREATED_NAMESPACE=0
+        cat "$release_stderr_file" >&2 || true
+        rm -f -- "$release_stderr_file"
+        # The namespace claim stays set (no install has been attempted, so
+        # the namespace holds nothing of ours to preserve and cleanup must
+        # not leave it behind on a reused cluster), but the cluster claim
+        # clears: the release state is unknown, and another actor may
+        # already be using a cluster this run created.
+        CREATED_CLUSTER=0
         return 1
     fi
+    rm -f -- "$release_stderr_file"
     if [[ -n "$existing_release" ]]; then
+        # The pre-existing release lives in this cluster, so the cluster
+        # claim clears with the others: deleting the cluster would take
+        # that release down.  (An external actor can create a release in
+        # this cluster after this run created it; the per-cluster lock only
+        # serializes gate4 and helm-smoke runs.)
         fail "Pre-existing Helm release ${HELM_RELEASE_NAME}; refusing to replace it"
         CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
         return 1
     fi
 
     # Validate the stock-nginx chart deployment path, security context,
     # writable runtime paths, and Helm installability. This smoke test does
     # not validate a module-enabled image, so markdown directives stay off.
-    if ! helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
+    # Helm's rollback-on-failure flag: Helm 3 spells it --atomic (which also
+    # implies --wait), Helm 4 offers --rollback-on-failure and keeps --atomic
+    # only as a deprecated alias.  Select by major version so the smoke uses
+    # each major's own spelling.
+    local rollback_flag
+    rollback_flag="$(helm_rollback_flag)"
+    # Claim the release BEFORE the install: bash defers a TERM trap until the
+    # foreground install returns, so a signal that lands after a successful
+    # install would otherwise leave the release behind (the flag would still
+    # be unset).  The failure branch settles the claim against the actual
+    # release state instead of clearing it blindly.
+    CREATED_RELEASE=1
+    # The install output is captured so the failure branch can classify the
+    # error (a name collision belongs to a concurrent creator); it is
+    # reprinted on both paths so the diagnostics stay identical.
+    local install_output
+    if ! install_output="$(helm install "${HELM_RELEASE_NAME}" "${CHART_DIR}" \
         --kube-context "$kube_context" \
         --namespace "${HELM_NAMESPACE}" \
         --set image.repository=nginx \
@@ -428,7 +671,15 @@ deploy_and_verify() {
         --set markdown.enabled=false \
         --wait \
         --timeout "${POD_WAIT_TIMEOUT}" \
-        >&2 2>&1; then
+        "${rollback_flag}" \
+        2>&1)"; then
+        # Settle ownership FIRST: bash runs a deferred TERM trap between
+        # foreground commands, so a signal landing on any later command
+        # would clean up while a collision's ownership flags were still
+        # set (and uninstall the other creator's release).  The settlement
+        # classifies the captured error before any output.
+        settle_failed_install_ownership "$install_output"
+        printf '%s\n' "$install_output" >&2
         fail "helm install failed"
         info "Pod status:"
         kubectl --context "$kube_context" get pods -n "${HELM_NAMESPACE}" \
@@ -436,13 +687,9 @@ deploy_and_verify() {
         info "Pod events:"
         kubectl --context "$kube_context" describe pods -n "${HELM_NAMESPACE}" \
             >&2 || true
-        # A failed install may leave partial state or race with another
-        # release creator. Preserve the namespace rather than deleting data
-        # whose ownership is no longer certain.
-        CREATED_NAMESPACE=0
         return 1
     fi
-    CREATED_RELEASE=1
+    printf '%s\n' "$install_output" >&2
 
     pass "Helm chart deployed successfully"
 
@@ -502,9 +749,17 @@ deploy_and_verify() {
 # Main
 ##############################################################################
 
+install_termination_traps() {
+    trap cleanup_on_exit EXIT
+    trap 'exit_on_signal 130' INT
+    trap 'exit_on_signal 143' TERM
+    return 0
+}
+
 main() {
     parse_args "$@"
     check_prerequisites
+    install_termination_traps
 
     local had_failure=0
 
@@ -512,8 +767,14 @@ main() {
     validate_helm_lint || had_failure=1
     validate_helm_template || had_failure=1
 
-    # Stage 2: Deploy to kind cluster
+    # Stage 2: Deploy to kind cluster.  The per-cluster lock is taken here,
+    # after the argument and prerequisite checks (so a usage error creates
+    # no lock file), and released after cleanup below: it spans cluster
+    # creation through cleanup, so a concurrent run on the same cluster
+    # waits instead of deleting resources this run owns.
     if [[ "$had_failure" -eq 0 ]]; then
+        LOCK_CLUSTER="${CLUSTER_NAME}"
+        acquire_cluster_lock
         create_cluster || had_failure=1
     fi
 
@@ -526,8 +787,17 @@ main() {
         cleanup_owned_helm_resources
     fi
 
-    # Cleanup
+    # Cleanup: run the helpers first, then mark the guard.  A signal that
+    # arrives between the two calls makes the handler re-run them, which is
+    # safe (each clears its own ownership flag); marking the guard first
+    # would instead let a signal skip the remaining cleanup entirely and
+    # leave the cluster behind.
+    cleanup_owned_helm_resources
     delete_cluster
+    CLEANUP_DONE=1
+    # The lock is released last: the next waiter must not acquire it while
+    # this run is still deleting the cluster or its namespace.
+    release_cluster_lock
 
     # Summary
     printf '\n' >&2

@@ -35,11 +35,19 @@ NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-nginx:1.30.4-alpine3.24@sha256:dc5069ad14f
 NGINX_BASE_DIGEST="${NGINX_BASE_IMAGE##*@}"
 MODULE_SO="${MODULE_SO:-${REPO_ROOT}/build/ngx_http_markdown_filter_module.so}"
 MODULE_PATH_IN_IMAGE="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
-RELEASE="markdown-smoke"
+# The release name is run-unique: the lock serializes runs of THIS script,
+# but an external actor can still create a fixed name between the ownership
+# check and the install, and cleanup would then uninstall a release it does
+# not own.  A unique name makes the ownership check race-free by
+# construction (the name cannot pre-exist), and the namespace stays fixed
+# so the reuse/cleanup contract for it is unchanged.
+RELEASE="markdown-smoke-$$"
 NAMESPACE="markdown-smoke"
 KEEP=0
 CREATED_CLUSTER=0
+CREATED_NAMESPACE=0
 CREATED_RELEASE=0
+LOCK_MODE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -50,6 +58,19 @@ while [[ $# -gt 0 ]]; do
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# The cluster name reaches kind, kubectl contexts, and the lock path, so it
+# must satisfy kind's own grammar (lowercase alphanumerics and dashes,
+# starting with a letter) before any of those use it.  The length bound
+# matches kind's DNS-label limit and keeps every lock path's filename
+# component inside the common 255-byte filesystem limit: an overlong name
+# would make the fallback lock's mkdir fail silently and retry until its
+# timeout instead of reaching kind.  The check covers the CLUSTER
+# environment default and the --cluster flag alike.
+if ! [[ "${CLUSTER}" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+    echo "ERROR: invalid cluster name: ${CLUSTER}" >&2
+    exit 1
+fi
 
 for tool in kind helm kubectl docker; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
@@ -80,12 +101,32 @@ cleanup() {
         # is supported, and removing the user's would be destructive.
         if [[ "${CREATED_CLUSTER}" -eq 1 ]]; then
             kind delete cluster --name "${CLUSTER}" >/dev/null 2>&1 || true
+        elif [[ "${CREATED_NAMESPACE}" -eq 1 ]]; then
+            # A reused cluster keeps its namespace unless this run created it:
+            # leaving markdown-smoke behind would poison the next run.  Wait
+            # for the deletion (bounded, best-effort) BEFORE the lock below
+            # is released: the next waiter would otherwise acquire the lock
+            # while this namespace is still terminating and find the name
+            # neither free nor usable.
+            kubectl --context "kind-${CLUSTER}" \
+                delete namespace "${NAMESPACE}" --wait=true --timeout=120s \
+                >/dev/null 2>&1 || true
         fi
     fi
     rm -rf "${WORK_DIR}"
+    release_cluster_lock
     return 0
 }
 trap cleanup EXIT
+
+# Serialize concurrent runs against the same cluster through the shared
+# library (tools/lib/cluster_lock.sh): the lock spans cluster creation
+# through cleanup, so a second run waits until the first has released
+# everything it owns.
+LOCK_CLUSTER="${CLUSTER}"
+# shellcheck source=tools/lib/cluster_lock.sh
+source "${REPO_ROOT}/tools/lib/cluster_lock.sh"
+acquire_cluster_lock
 
 if ! [[ "${NGINX_BASE_IMAGE}" =~ ^nginx:1[.]30[.]4-alpine3[.]24@sha256:[0-9a-f]{64}$ ]]; then
     echo "ERROR: NGINX_BASE_IMAGE must be nginx:1.30.4-alpine3.24 pinned by sha256 digest" >&2
@@ -117,29 +158,71 @@ fi
 existing_namespace=""
 if ! existing_namespace="$(kubectl --context "kind-${CLUSTER}" \
     get namespace "${NAMESPACE}" --ignore-not-found -o name)"; then
+    # The namespace's ownership is unknown: whatever holds it (if
+    # anything) shares this cluster, so the cluster claim clears before
+    # the failure exit; deleting the cluster could destroy another
+    # actor's workloads.
     echo "ERROR: unable to determine whether namespace ${NAMESPACE} exists" >&2
+    CREATED_CLUSTER=0
     exit 1
 fi
 if [[ -z "${existing_namespace}" ]]; then
     if ! kubectl --context "kind-${CLUSTER}" create namespace \
         "${NAMESPACE}" >/dev/null; then
+        # A create can lose a race with a concurrent creator (this run's
+        # lock serializes only its own scenario runs).  Whatever holds the
+        # namespace now lives in this cluster, so the cluster claim clears
+        # with the others before exiting: cleanup must not delete a
+        # cluster that holds another actor's namespace and workloads.
         echo "ERROR: unable to create namespace ${NAMESPACE}" >&2
+        CREATED_CLUSTER=0
         exit 1
     fi
+    # Record ownership only once this run created it, so cleanup never
+    # deletes a namespace that pre-existed on a reused cluster.
+    CREATED_NAMESPACE=1
+else
+    # The namespace pre-existed: another actor holds it in this cluster,
+    # so the cluster claim clears and cleanup leaves both alone.  (A
+    # cluster this run just created has no namespace, so reaching this
+    # branch with CREATED_CLUSTER=1 means a concurrent actor's namespace;
+    # deleting the cluster would destroy their workloads.)
+    CREATED_CLUSTER=0
 fi
 
-# Refuse to adopt a release that belongs to the user.  `helm install` below
-# also closes the race between this query and creation; ownership is recorded
-# only after that install succeeds.
+# Refuse to adopt a release that belongs to the user.  This check runs before
+# the install, so a name that is still free here is ours from this point on:
+# ownership is marked before `helm install`, and a failed or timed-out install
+# then still leaves cleanup able to uninstall what the attempt created.
+# `helm install` also closes the race between this query and creation.
 existing_release=""
-if ! existing_release="$(helm list --all --short \
+release_stderr_file="${WORK_DIR}/helm-list.stderr"
+# The explicit state set is the version-portable spelling of "any release, in
+# any state": helm v3 defaults `list` to deployed+failed only, while helm v4
+# REMOVED `--all` ("unknown flag"), so the explicit flags are the one form
+# both majors accept.
+if ! existing_release="$(helm list --short \
     --filter "^${RELEASE}$" --namespace "${NAMESPACE}" \
-    --kube-context "kind-${CLUSTER}" 2>&1)"; then
-    echo "ERROR: unable to determine ownership of Helm release ${RELEASE}: ${existing_release}" >&2
+    --kube-context "kind-${CLUSTER}" \
+    --deployed --failed --pending --uninstalled --uninstalling --superseded \
+    2>"${release_stderr_file}")"; then
+    # Ownership is unknown: the release (if one exists) and everything
+    # around it belong to this shared cluster, so both destructive claims
+    # clear before the failure exit.
+    echo "ERROR: unable to determine ownership of Helm release ${RELEASE}" >&2
+    cat "${release_stderr_file}" >&2 || true
+    CREATED_CLUSTER=0
+    CREATED_NAMESPACE=0
     exit 1
 fi
 if [[ -n "${existing_release}" ]]; then
+    # A pre-existing release is the user's or another actor's; its
+    # namespace and cluster are theirs too, so nothing this run claimed
+    # may be removed.
     echo "ERROR: pre-existing Helm release ${RELEASE} found in namespace ${NAMESPACE}; refusing to modify or remove it" >&2
+    CREATED_RELEASE=0
+    CREATED_NAMESPACE=0
+    CREATED_CLUSTER=0
     exit 1
 fi
 
@@ -158,7 +241,32 @@ fi
 kind load docker-image "${IMAGE_REF}" --name "${CLUSTER}" >&2
 
 echo "=== installing ${RELEASE} ===" >&2
-helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
+# The name is ours from before the install: the ownership check above proved
+# no other release holds it.  A failed or timed-out install exits non-zero
+# (and under `set -e` jumps straight to the EXIT trap), so the flag has to be
+# set first for cleanup() to remove whatever the attempt left behind.
+# Helm's rollback-on-failure flag was renamed: Helm 3 spells it `--atomic`
+# (which also implies --wait), Helm 4 offers `--rollback-on-failure` and keeps
+# `--atomic` only as a deprecated alias.  Select by major version so the smoke
+# uses each major's own spelling and neither emits deprecation noise.
+helm_rollback_flag() {
+    local version
+    version="$(helm version --short 2>/dev/null || true)"
+    case "${version}" in
+        v4*|4.*)
+            printf '%s' "--rollback-on-failure"
+            ;;
+        *)
+            printf '%s' "--atomic"
+            ;;
+    esac
+    return 0
+}
+
+CREATED_RELEASE=1
+# The install output is captured so the failure path can classify the
+# error; it is reprinted on both paths so the diagnostics stay identical.
+if ! install_output="$(helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --kube-context "kind-${CLUSTER}" \
     --namespace "${NAMESPACE}" \
     --set image.repository="${IMAGE_REPO}" \
@@ -175,8 +283,36 @@ helm install "${RELEASE}" "${REPO_ROOT}/charts/nginx-markdown" \
     --set-string metrics.sidecar.resources.requests.memory=64Mi \
     --set-string metrics.sidecar.resources.limits.cpu=250m \
     --set-string metrics.sidecar.resources.limits.memory=128Mi \
-    --wait --timeout 180s >&2
-CREATED_RELEASE=1
+    --wait --timeout 180s \
+    "$(helm_rollback_flag)" 2>&1)"; then
+    # A name collision means another actor created this run's release name
+    # between the preflight and the install: the name is theirs, so cleanup
+    # preserves it (and everything that holds it).  Two error shapes report
+    # it: the name check refuses with "cannot re-use a name that is still in
+    # use" (Helm 3) or "cannot reuse ..." (Helm 4), and the storage-layer
+    # create that follows its own availability check reports "release:
+    # already exists" when both racers passed that check.
+    #
+    # The classification clears the claims BEFORE any output: bash runs a
+    # deferred TERM trap between foreground commands, so printing first
+    # would leave a window where cleanup still uninstalls the collider's
+    # release.  Their release lives in this cluster, so the cluster claim
+    # clears with the others - deleting the cluster would take it down.
+    collision=0
+    if [[ "${install_output}" == *"name that is still in use"* ]] \
+        || [[ "${install_output}" == *"release: already exists"* ]]; then
+        collision=1
+        CREATED_RELEASE=0
+        CREATED_NAMESPACE=0
+        CREATED_CLUSTER=0
+    fi
+    printf '%s\n' "${install_output}" >&2
+    if [[ "${collision}" -eq 1 ]]; then
+        echo "ERROR: another creator holds release ${RELEASE}; cleanup preserves it" >&2
+    fi
+    exit 1
+fi
+printf '%s\n' "${install_output}" >&2
 
 echo "=== rollout status ===" >&2
 kubectl --context "kind-${CLUSTER}" --namespace "${NAMESPACE}" \

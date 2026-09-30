@@ -2,6 +2,21 @@ include make/targets.mk
 
 UNAME_S ?= $(shell uname -s)
 
+# Brotli include/lib discovery for the cases below.  macOS (Homebrew) needs
+# explicit include/lib paths when pkg-config is unavailable; Linux keeps the
+# macOS paths OUT (they do not exist there) but still falls back to the bare
+# library names, which resolve through the default search path when
+# pkg-config is absent (the GCC parity container installs libbrotli-dev but
+# no pkg-config).  An empty fallback there drops -lbrotli* entirely and the
+# link fails, so the bare-name fallback is load-bearing.
+ifeq ($(UNAME_S),Darwin)
+HOMEBREW_BROTLI_CFLAGS ?= $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')
+HOMEBREW_BROTLI_LIBS ?= $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')
+else
+HOMEBREW_BROTLI_CFLAGS ?= $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || true)
+HOMEBREW_BROTLI_LIBS ?= $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-lbrotlidec -lbrotlienc')
+endif
+
 SECTION_GC_LDFLAGS ?=
 ifeq ($(UNAME_S),Darwin)
 SECTION_GC_LDFLAGS := -Wl,-dead_strip
@@ -55,16 +70,16 @@ build/unit/%: unit/%_test.c include/test_common.h | build/unit build/generated
 	  streaming_decomp|streaming_decomp_routing) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED"; extra_ldflags="-lz" ;; \
 	  decomp_routing_property) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  postcommit_terminal_origin) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ; extra_ldflags="-lz" ;; \
-	  streaming_decomp_brotli) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="-lz $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
-	  brotli_trailing_property|brotli_budget_property|brotli_error_prop_property|brotli_noprogress_property) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="-lz $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
-	  streaming_equiv_brotli_property) extra_cflags="$$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')"; extra_ldflags="$$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
+	  streaming_decomp_brotli) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $(HOMEBREW_BROTLI_CFLAGS)"; extra_ldflags="-lz $(HOMEBREW_BROTLI_LIBS)" ;; \
+	  brotli_trailing_property|brotli_budget_property|brotli_error_prop_property|brotli_noprogress_property) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_BROTLI $(HOMEBREW_BROTLI_CFLAGS)"; extra_ldflags="-lz $(HOMEBREW_BROTLI_LIBS)" ;; \
+	  streaming_equiv_brotli_property) extra_cflags="$(HOMEBREW_BROTLI_CFLAGS)"; extra_ldflags="$(HOMEBREW_BROTLI_LIBS)" ;; \
 	  streaming_metrics_increment) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  stream_postcommit|stream_replay|stream_commit|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  failopen_delivery_after_downstream|delivery_decision_failopen) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  copy_reduction) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections $$(pkg-config --cflags libbrotlidec libbrotlienc 2>/dev/null || echo '-I/opt/homebrew/include -I/usr/local/include')" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz $$(pkg-config --libs libbrotlidec libbrotlienc 2>/dev/null || echo '-L/opt/homebrew/lib -L/usr/local/lib -lbrotlidec -lbrotlienc')" ;; \
+	  copy_reduction) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections $(HOMEBREW_BROTLI_CFLAGS)" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz $(HOMEBREW_BROTLI_LIBS)" ;; \
   metrics_access) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl|limits_parsing_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  streaming_config_contract|directive_context_default_inherit_property|context_negative_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \

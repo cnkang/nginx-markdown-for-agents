@@ -333,6 +333,10 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
     well-formed line yields its version; a heading that merely starts like
     an unreleased line but carries an unexpected suffix produces an
     explanatory error.
+
+    A second well-formed Unreleased heading for the same version is also an
+    error: the pending-state checks examine one section, so a duplicate
+    could carry a contradictory claim the gate never reads.
     """
     version: str | None = None
     errors: list[str] = []
@@ -341,8 +345,21 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
         line = match.group(0)
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
+            found = valid.group("version")
             if version is None:
-                version = valid.group("version")
+                version = found
+            elif found == version:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: duplicate Unreleased heading for "
+                    f"{found}; keep a single Unreleased section so the "
+                    "pending-state checks cover every pending claim"
+                )
+            else:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: multiple Unreleased headings "
+                    f"({version} and {found}); keep a single Unreleased "
+                    "section"
+                )
             continue
         if "unreleased" in line.lower():
             errors.append(
@@ -651,8 +668,14 @@ FAMILY_COUNT_RE = re.compile(
     # (for example the "2" in "0.9.2 family names" or the "4" in
     # "Prometheus text 0.0.4 family catalog"); such tokens are not
     # metric-family count claims.
+    #
+    # A plural ("sixteen metric families") or a hyphen-bound singular
+    # ("ten-family v1 freeze", "frozen 10-family") states a count.  A
+    # space-separated singular does not: prose like "belongs to exactly
+    # one metric family" names one entry, not the contract's family total.
     rf"(?<![.\d])\b(?P<count>\d{{1,3}}|{_SPELLED_FAMILY_COUNT_PATTERN})"
-    r"[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?famil(?:y|ies)\b",
+    r"(?:[\s-]+(?:v1[\s-]+)?(?:metric[\s-]+)?families\b"
+    r"|-(?:v1-)?(?:metric-)?family\b)",
     re.IGNORECASE,
 )
 HISTORICAL_FAMILY_CONTEXT_RE = re.compile(
@@ -1011,6 +1034,20 @@ RELEASE_SURFACE_FILES = (
     "docs/project/README.md",
 )
 
+# Boundary-bearing subset of the stale-claim phrases: everything except the
+# two bare words, which only count when a real boundary or another (stronger)
+# phrase is present.  See `_is_conditional_publication_block`.
+_BOUNDARY_STALE_CLAIM_RE = re.compile(
+    r"(?:release|development)[- ]candidate"
+    r"|not (?:yet )?(?:published|released)"
+    r"|尚未发布"
+    r"|开发候选"
+    r"|(?:publication|release) pending"
+    r"|pending (?:publication|release)"
+    r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
+    re.IGNORECASE,
+)
+
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
 _STALE_RELEASE_CLAIM_RE = re.compile(
@@ -1252,7 +1289,7 @@ _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"|before (?:the )?(?:publication|release)"
     r"|until (?:the )?(?:v?\d+\.\d+\.\d+\s+)?(?:assets|release|tag)\b"
     r"|not (?:yet |currently |presently |now )?(?:been )?(?:published|released)"
-    r"|no\b.{0,100}\b(?:published|released)\b"
+    r"|\bno\b.{0,100}\b(?:published|released)\b"
     r"|将(?:会)?(?:已)?(?:正式)?发布|即将(?:正式)?发布"
     r"|尚未发布|等待发布|待发布|未发布|发布后|发布之前",
     re.IGNORECASE,
@@ -1262,6 +1299,25 @@ _PREPUBLICATION_BOUNDARY_RE = re.compile(
 # and no local negation or future-publication qualifier states a completed release.
 _PREPUBLICATION_COMPLETION_CLAIM_RE = re.compile(
     r"\b(?:shipped|published|released|available)\b|已发布|已正式发布",
+    re.IGNORECASE,
+)
+# Completion verbs that affirm a release even when the sentence does not name
+# a version token.  ``available`` is deliberately excluded here: in a
+# versionless sentence it over-matches ordinary prose such as "the release
+# artifacts are available from the mirror", so it only counts when the
+# sentence names the pending version (the versioned branch in
+# `_claim_names_pending_version`).
+_VERSIONLESS_CLAIM_VERBS = frozenset(
+    {"shipped", "published", "released", "available"}
+)
+# An availability claim asserted OF THE RELEASE ITSELF ("the release is
+# available", "the new version is available") affirms a shipped artifact,
+# so ``available`` joins the versionless verbs.  Availability asserted of
+# only generic artifacts ("artifacts are available from the mirror") stays
+# excluded: the sentence names an artifact surface, not the release.
+_GENERIC_AVAILABILITY_OBJECT_RE = re.compile(
+    r"\b(?:artifacts?|assets?|packages?|binaries?|checksums?|"
+    r"file|files|downloads?|mirror|repository|feed)\b[^.]{0,40}$",
     re.IGNORECASE,
 )
 _CI_ARTIFACT_AVAILABILITY_RE = re.compile(
@@ -1358,12 +1414,12 @@ def _version_end_is_valid(text: str, index: int) -> bool:
     """Apply the release token's right boundary without regex backtracking."""
     if index >= len(text):
         return True
-    if text[index] in _VERSION_IDENTIFIER_CHARS:
-        return False
-    return not (
-        text[index] == "."
-        and index + 1 < len(text)
-        and "0" <= text[index + 1] <= "9"
+    return (
+        False
+        if text[index] in _VERSION_IDENTIFIER_CHARS
+        else text[index] != "."
+        or index + 1 >= len(text)
+        or not "0" <= text[index + 1] <= "9"
     )
 
 
@@ -1445,10 +1501,19 @@ def _first_dated_changelog_version(changelog: str) -> str | None:
 
 
 def _is_conditional_publication_block(block: str) -> bool:
-    """Return whether a block marks the pending version as not yet published."""
-    if _STALE_RELEASE_CLAIM_RE.search(block) is not None:
+    """Return whether a block marks the pending version as not yet published.
+
+    The explicit pre-publication boundary pattern decides first.  The
+    stale-claim phrases also describe a not-yet-published state, but the two
+    bare single words (``unreleased`` / ``unpublished``) are excluded here:
+    a passing mention of the word itself must not satisfy the boundary
+    requirement, or ordinary prose could suppress the "needs a publication
+    boundary" diagnostic.  Those two words still serve the
+    released-direction stale-claim check.
+    """
+    if _PREPUBLICATION_BOUNDARY_RE.search(block) is not None:
         return True
-    return _PREPUBLICATION_BOUNDARY_RE.search(block) is not None
+    return _BOUNDARY_STALE_CLAIM_RE.search(block) is not None
 
 
 def _split_sentences_protected(text: str) -> list[str]:
@@ -1551,10 +1616,10 @@ def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
 ) -> tuple[int, int, str] | None:
     """Return the version token closest to a completion verb."""
-    versions = _version_tokens(window)
-    if not versions:
+    if versions := _version_tokens(window):
+        return min(versions, key=lambda token: abs(token[0] - claim.start()))
+    else:
         return None
-    return min(versions, key=lambda token: abs(token[0] - claim.start()))
 
 
 def _published_until_tag_exception(
@@ -1574,15 +1639,27 @@ def _claim_names_pending_version(
     window: str,
     claim: re.Match[str],
     pending: "re.Pattern[str]",
-    version_context: bool,
 ) -> bool:
     """Return whether a single completion claim affirms the pending version."""
     nearest = _nearest_version_to_claim(window, claim)
     if nearest is None:
-        # Without a version token, heading context alone is not enough: the
-        # sentence must also name a release subject, and a bare "available"
-        # (no such subject) stays ordinary wording rather than a claim.
-        if not version_context or _RELEASE_SUBJECT_RE.search(window) is None:
+        # Without a version token, heading context alone is not enough.
+        # Two conditions must both hold for the sentence to count as a
+        # claim about the pending release:
+        # 1. a release subject is named (a bare "available" without such a
+        #    subject is ordinary wording, not a release claim), and
+        # 2. the completion verb is explicit (published/released/shipped).
+        #    A bare "available" in the versionless branch over-matches
+        #    ordinary changelog prose ("artifacts are available from the
+        #    mirror"), so it counts only when the sentence names the
+        #    pending version - the versioned branch below.
+        if _RELEASE_SUBJECT_RE.search(window) is None:
+            return False
+        if claim.group(0).lower() not in _VERSIONLESS_CLAIM_VERBS:
+            return False
+        if _generic_artifact_availability(window, claim):
+            # "artifacts are available from the mirror" is ordinary prose,
+            # not a claim that the release shipped.
             return False
         return not _completion_claim_is_nonaffirmative(window, claim, pending)
     if pending.fullmatch(nearest[2]) is None:
@@ -1592,26 +1669,53 @@ def _claim_names_pending_version(
     return not _completion_claim_is_nonaffirmative(window, claim, pending)
 
 
+def _generic_artifact_availability(
+    window: str, claim: "re.Match[str]"
+) -> bool:
+    """Whether an ``available`` claim describes generic artifacts only.
+
+    The subject check above admits the sentence whenever any release-shaped
+    word appears, so "the release artifacts are available from the mirror"
+    would otherwise read as a shipped-release affirmation.  When the words
+    directly before ``available`` name an artifact surface rather than the
+    release itself, the claim stays ordinary prose.
+    """
+    if claim.group(0).lower() != "available":
+        return False
+    before = window[max(0, claim.start() - 80):claim.start()]
+    # Only the clause that carries the verb counts: an artifact subject in
+    # an earlier clause ("artifacts are checked, the release is available")
+    # says nothing about what is available.
+    clause_breaks = list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before))
+    if clause_breaks:
+        before = before[clause_breaks[-1].end():]
+    return _GENERIC_AVAILABILITY_OBJECT_RE.search(before) is not None
+
+
 def _pending_completion_claim(
-    window: str, pending_version: str, version_context: bool = False
+    window: str, pending_version: str
 ) -> re.Match[str] | None:
     """Return the first affirmative completion claim tied to the pending version."""
     pending = _release_version_pattern(pending_version)
-    for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window):
-        if _claim_names_pending_version(window, claim, pending, version_context):
-            return claim
-    return None
+    return next(
+        (
+            claim
+            for claim in _PREPUBLICATION_COMPLETION_CLAIM_RE.finditer(window)
+            if _claim_names_pending_version(window, claim, pending)
+        ),
+        None,
+    )
 
 
 def _claim_belongs_to_pending_version(
-    window: str, pending_version: str, version_context: bool = False
+    window: str, pending_version: str
 ) -> bool:
     """Return whether an affirmative completion verb names the pending version.
 
     The nearest version token decides, so a published baseline is not mistaken
     for a claim about the pending line in a sentence that names both.
     """
-    return _pending_completion_claim(window, pending_version, version_context) is not None
+    return _pending_completion_claim(window, pending_version) is not None
 
 
 def _latest_tag_prefix_is_negated(prefix: str) -> bool:
@@ -1642,10 +1746,9 @@ def _latest_tag_claim_is_negated(
     upper_bound = len(sentence) if upper_bound is None else upper_bound
     prefix = sentence[max(lower_bound, latest_match.start() - 80):latest_match.start()]
     suffix = sentence[latest_match.end():min(upper_bound, latest_match.end() + 80)]
-    prefix_breaks = [
+    if prefix_breaks := [
         match.end() for match in _COMPLETION_CLAUSE_BREAK_RE.finditer(prefix)
-    ]
-    if prefix_breaks:
+    ]:
         prefix = prefix[max(prefix_breaks):]
     if suffix_break := _COMPLETION_CLAUSE_BREAK_RE.search(suffix):
         suffix = suffix[:suffix_break.start()]
@@ -1763,7 +1866,7 @@ def _pending_sentence_failures(
         if sentence_names_version
         else sentence
     )
-    claim = _pending_completion_claim(window, pending_version, version_context)
+    claim = _pending_completion_claim(window, pending_version)
     if claim is not None:
         return [
             f"{rel}: pending {pending_version} is described as "
@@ -2052,9 +2155,7 @@ def main() -> int:
     failures.extend(check_document_updates_order(files))
     failures.extend(check_metric_family_count(files))
     failures.extend(check_release_checklist_is_static(files))
-    failures = list(dict.fromkeys(failures))
-
-    if failures:
+    if failures := list(dict.fromkeys(failures)):
         print("Documentation checks failed:")
         for line in failures:
             print(f"- {line}")

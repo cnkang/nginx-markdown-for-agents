@@ -418,7 +418,7 @@ perf-gate-check:
 # Runs Homebrew's strict formula lint only; archive digest and rendered-source
 # identity are verified by the Homebrew workflow's separate verification step.
 homebrew-formula-check:
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+	@if [ "$(UNAME_S)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then \
 		bash packaging/scripts/audit_homebrew_formula.sh; \
 	else \
 		echo "SKIP: Homebrew formula audit runs on macOS with Homebrew" >&2; \
@@ -570,8 +570,8 @@ docs-check: docs-check-base
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
 # staged) must have zero warnings. STYLE_BASE defaults to the merge base with
-# the main branch, and the target fails when no base can be resolved, so the
-# gate cannot pass by comparing against an empty diff.
+# the main branch. An unresolvable base fails closed; an empty changed set is
+# a legitimate no-op, backstopped by CI and by the baseline budget gate below.
 # docs-style-check-baseline: total warnings must not exceed the retained
 # budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
 # docs now pass the audit clean, so any warning fails this gate.
@@ -770,6 +770,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_finalize_return.sh
 	bash tools/harness/tests/test_detect_header_hash_filter.sh
 	bash tools/harness/tests/test_detect_version_consistency.sh
+	bash tools/harness/tests/test_e2e_wrapper_cleanup.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short
 
 workflow-context-check:

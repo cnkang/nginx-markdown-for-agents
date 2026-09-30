@@ -42,11 +42,17 @@ def test_loop_cursor_declarations_do_not_look_like_function_parameters() -> None
     assert warnings == []
 
 
-def test_final_substrings_in_parameter_names_do_not_hide_const_warnings() -> None:
-    """A `final` parameter name is not proof that the function mutates state."""
+def test_mutator_token_shaped_parameter_names_do_not_hide_const_warnings() -> None:
+    """A `snapshot_id` parameter must not suppress the enclosing warning.
+
+    The detector matches mutator verbs in the FUNCTION name, never in
+    parameter names.  If parameter-name matching were reintroduced (the
+    regression class this fixture discriminates), `snapshot_id` would
+    match the `snapshot` mutator token and drop the warning.
+    """
     line = (
         "ngx_int_t ngx_http_markdown_inspect("
-        "ngx_http_markdown_conf_t *conf, int final_result)"
+        "ngx_http_markdown_conf_t *conf, int snapshot_id)"
     )
 
     _, warnings = detector._check_line_for_const_violations(
@@ -54,6 +60,19 @@ def test_final_substrings_in_parameter_names_do_not_hide_const_warnings() -> Non
     )
 
     assert len(warnings) == 1, warnings
+
+
+def test_mutator_token_in_the_function_name_still_suppresses() -> None:
+    """Clean guard case: a mutator-named function keeps its suppression."""
+    _, warnings = detector._check_line_for_const_violations(
+        "ngx_int_t ngx_http_markdown_snapshot_conf("
+        "ngx_http_markdown_conf_t *conf)",
+        1,
+        "fixture.c",
+        False,
+    )
+
+    assert warnings == [], warnings
 
 
 def test_mutator_tokens_do_not_match_inside_identifiers() -> None:
@@ -75,3 +94,58 @@ def test_actual_mutator_tokens_still_match() -> None:
     assert detector._is_intentional_mutator_function(
         "ngx_http_markdown_sha256_final"
     )
+
+
+def test_sha256_final_allowlist_is_load_bearing() -> None:
+    """A sha256_final-named function taking a sha256_t pointer is suppressed.
+
+    sha256_t must be part of NGINX_STRUCT_TYPES for the allowlist to matter;
+    without it the type check short-circuits and the allowlist entry is dead
+    data.  Without the allowlist entry this fixture is warned about.
+    """
+    assert "sha256_t" in detector.NGINX_STRUCT_TYPES.pattern
+
+    _, warnings = detector._check_line_for_const_violations(
+        "static void ngx_http_markdown_sha256_final("
+        "ngx_http_markdown_sha256_t *ctx, u_char out[32])",
+        1,
+        "fixture.c",
+        False,
+    )
+
+    assert warnings == [], warnings
+
+
+def test_const_qualified_pointer_parameter_is_still_flagged() -> None:
+    """`type *const name` keeps a MUTABLE pointee, so it still warns.
+
+    The qualifier makes the pointer itself constant; the function can
+    still modify the pointed-to struct, so the declaration warrants the
+    same warning as the plain form.  The parameter name is captured after
+    the qualifier, so the report never names `const` as the parameter.
+    """
+    _, warnings = detector._check_line_for_const_violations(
+        "static void inspect(ngx_http_markdown_ctx_t *const ctx)",
+        1,
+        "fixture.c",
+        False,
+    )
+
+    assert len(warnings) == 1, warnings
+    # The rendered parameter must name the parameter, never the qualifier:
+    # a bare "ctx" substring also appears in the type name and would pass
+    # even if the capture were wrong.
+    assert "'ngx_http_markdown_ctx_t *ctx'" in warnings[0], warnings
+
+
+def test_plain_pointer_parameter_is_still_flagged() -> None:
+    """A plain non-const pointer parameter still produces exactly one warning."""
+    _, warnings = detector._check_line_for_const_violations(
+        "static void inspect(ngx_http_markdown_ctx_t *ctx)",
+        1,
+        "fixture.c",
+        False,
+    )
+
+    assert len(warnings) == 1, warnings
+    assert "ngx_http_markdown_ctx_t *ctx" in warnings[0]

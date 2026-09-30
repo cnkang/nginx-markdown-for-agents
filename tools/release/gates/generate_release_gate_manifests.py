@@ -38,7 +38,11 @@ from tools.release.gates.validate_fuzz_qualification import (  # noqa: E402
     SCHEMA_VERSION as FUZZ_QUALIFICATION_SCHEMA_VERSION,
     FUZZ_JOB_BUDGET,
     MAX_FUZZ_TARGET_EXECUTIONS,
+    MAX_RECORD_ELAPSED_SECONDS,
     validate_toolchain_identity,
+)
+from tools.lib.path_validation import (  # noqa: E402
+    safe_repo_relative_ref,
 )
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
@@ -414,28 +418,11 @@ def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Pat
     }
 
 
-def _record_value(path: Path, field: str = "status"):
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    return value.get(field) if isinstance(value, dict) else None
-
-
-def _safe_fuzz_reference(value: object) -> PurePosixPath | None:
-    """Accept only canonical repository-relative POSIX references."""
-    if not isinstance(value, str) or not value or "\\" in value:
-        return None
-    path = PurePosixPath(value)
-    if (
-        path.is_absolute()
-        or path.as_posix() != value
-        or any(part in {"", ".", ".."} for part in path.parts)
-    ):
-        return None
-    return path
+# The canonical repository-relative reference parser is shared with the
+# fuzz-qualification validator (tools/lib/path_validation.py); both gates
+# must enforce identical reference semantics, including the drive-letter
+# rejection this copy previously lacked.
+_safe_fuzz_reference = safe_repo_relative_ref
 
 
 def _resolve_fuzz_reference(
@@ -686,7 +673,7 @@ def _fuzz_observations_meet_threshold(entry: dict, spec: dict) -> bool:
         or not isinstance(elapsed, (int, float))
         or (isinstance(elapsed, float) and not math.isfinite(elapsed))
         or elapsed < 0
-        or elapsed > FUZZ_JOB_BUDGET
+        or elapsed > MAX_RECORD_ELAPSED_SECONDS
         or type(executions) is not int
         or executions > MAX_FUZZ_TARGET_EXECUTIONS
     ):
@@ -760,7 +747,18 @@ def _validate_fuzz_record_per_target(
 
 
 def _soak_record_passes(path: Path, candidate_sha: str) -> bool:
-    """Accept only a passing soak artifact bound to the candidate SHA."""
+    """Accept only a passing soak artifact bound to the candidate SHA.
+
+    Trust boundary: this check verifies the record's schema version, the
+    candidate binding, and a self-declared ``status: pass``.  Unlike
+    ``_fuzz_record_passes`` (which re-derives thresholds, seeds and the
+    toolchain identity from the manifests), the soak record is produced by
+    the same release-gate job that consumes it, and the artifact directory
+    is gitignored, so the record is not an independently verifiable
+    document.  The soak scenario details are re-derived separately by
+    ``generate_soak_scenario_manifest`` for the published scope; treat this
+    function as a candidate-bound presence check only.
+    """
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
