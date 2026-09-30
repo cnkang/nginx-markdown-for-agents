@@ -2518,6 +2518,43 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     assert err.count("additional worker error") == 1, err
 
 
+def test_worker_failure_cancels_active_process_groups(monkeypatch) -> None:
+    """A non-interpreter worker failure also cancels in-flight invocations.
+
+    Regression: only the interrupt path called the cancellation helper, so
+    a sibling worker that failed with an ordinary exception left the other
+    workers' running fuzz invocations consuming the shared envelope after
+    the gate had already failed.  The failure now sets the cancel flag and
+    terminates the active process groups, and the flag is scoped to the
+    pool run (cleared once its workers are joined) so the next run starts
+    clean.
+    """
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
+    cancelled: list[int] = []
+    monkeypatch.setattr(
+        validator, "_cancel_active_fuzz_processes",
+        lambda: cancelled.append(1),
+    )
+    flag = threading.Event()
+    monkeypatch.setattr(validator, "_FUZZ_CANCEL_REQUESTED", flag)
+
+    def fail_first(entry, seed_path, deadline=None):
+        raise ValueError(f"failure for {entry['name']}")
+
+    monkeypatch.setattr(validator, "_run_target_record", fail_first)
+    entries = [{"name": "t0", "seed": 1}]
+    seeds = {"t0": {"seed_path": "seed"}}
+    with pytest.raises(ValueError, match="failure for"):
+        validator._run_blocking_targets(entries, seeds, deadline=0)
+
+    assert cancelled, "an active process group must be cancelled on failure"
+    assert not flag.is_set(), (
+        "the cancel flag must be scoped to the pool run, not leaked"
+    )
+
+
 def _process_tree_script(
     tmp_path: Path,
     marker_delay: float = 4.0,

@@ -1886,9 +1886,17 @@ def _run_queue(
         stop.set()
         raise
     except Exception as exc:
+        # A non-interpreter worker failure stops the siblings the same way
+        # an interpreter-level exit does, and it must also cancel any fuzz
+        # process groups they have in flight: a stopped sibling only
+        # unwinds at its next queue boundary, so its running invocation
+        # would otherwise keep consuming the shared envelope while the
+        # gate has already failed.
         with lock:
             errors.append(exc)
         stop.set()
+        _FUZZ_CANCEL_REQUESTED.set()
+        _cancel_active_fuzz_processes()
 
 
 def _raise_worker_errors(errors: list[BaseException]) -> None:
@@ -1987,8 +1995,15 @@ def _run_blocking_targets(entries: list[dict], seeds: dict,
         )
         for index, queue in enumerate(queues)
     ]
-    _start_and_join_workers(threads, stop)
-    _raise_worker_errors(errors)
+    try:
+        _start_and_join_workers(threads, stop)
+        _raise_worker_errors(errors)
+    finally:
+        # The pool is fully joined, so no invocation can start from it any
+        # more: the cancel flag a worker failure set is scoped to this
+        # pool run and clears for the next one (which also clears it at
+        # entry).
+        _FUZZ_CANCEL_REQUESTED.clear()
     return records
 
 
