@@ -2041,6 +2041,35 @@ def test_unresolved_expansion_in_make_flags_is_rejected() -> None:
     )
 
 
+def test_shell_special_parameters_in_make_flags_are_rejected() -> None:
+    """Every shell expansion form in a make flag fails closed.
+
+    Regression (round-4 review): the first expansion class covered names,
+    digits, ``$(``/``${`` and a trailing ``$``, but the shell's special
+    parameters and quoted forms still certified - ``export MAKEFLAGS=$-``
+    expands to the shell's option letters and reaches make (verified
+    live), yet the scan read a literal token.  The class now covers
+    ``$- $@ $* $# $? $!``, the ``$'...'``/``$"..."`` openers, and the
+    quoted forms; a literal value keeps its normal classification.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for parameter in (
+        "$-", "$@", "$*", "$#", "$?", "$!", "$0", "$1",
+        "$'x'", '$"x"', "$FLAGS", "${FLAGS}", "$(getflags)",
+    ):
+        script = f"export MAKEFLAGS={parameter}\nmake docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), parameter
+    for literal in ("", "-s", "s"):
+        script = f"export MAKEFLAGS={literal}\nmake docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is None
+        ), literal
+
+
 def test_errexit_change_does_not_detach_following_commands() -> None:
     """A ``set`` mid-script must not move later commands out of the scan.
 
