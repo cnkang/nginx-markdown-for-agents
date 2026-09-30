@@ -51,7 +51,14 @@ readonly SCRIPT_DIR PROJECT_ROOT
 
 readonly DEFAULT_CLUSTER_NAME="gate4-smoke"
 readonly CHART_DIR="${PROJECT_ROOT}/charts/nginx-markdown"
-readonly HELM_RELEASE_NAME="gate4-test"
+# The release name is run-unique: gate4 holds no lock, so two concurrent
+# runs would otherwise race the fixed name (one wins Helm's storage
+# create, and the loser's post-failure settle window could attribute the
+# winner's pending release to itself and uninstall it).  A unique name
+# makes the ownership check race-free by construction; the namespace stays
+# fixed so the reuse contract for it is unchanged (the sibling helm smoke
+# applies the same split).
+readonly HELM_RELEASE_NAME="gate4-test-$$"
 readonly HELM_NAMESPACE="gate4-smoke"
 readonly POD_WAIT_TIMEOUT="120s"
 
@@ -559,6 +566,10 @@ deploy_and_verify() {
         fail "Unable to determine ownership of namespace ${HELM_NAMESPACE}"
         cat "$namespace_stderr_file" >&2 || true
         rm -f -- "$namespace_stderr_file"
+        # The namespace's ownership is unknown: whatever holds it shares
+        # this cluster, so the cluster claim clears before the failure exit
+        # (deleting the cluster could destroy another actor's workloads).
+        CREATED_CLUSTER=0
         return 1
     fi
     rm -f -- "$namespace_stderr_file"
@@ -597,10 +608,12 @@ deploy_and_verify() {
         fail "Unable to determine ownership of Helm release ${HELM_RELEASE_NAME}"
         cat "$release_stderr_file" >&2 || true
         rm -f -- "$release_stderr_file"
-        # The ownership flag stays set: no install has been attempted yet, so
-        # the namespace this run created holds nothing of ours to preserve,
-        # and cleanup must not leave it behind on a reused cluster (the
-        # sibling helm smoke cleans up the same way).
+        # The namespace claim stays set (no install has been attempted, so
+        # the namespace holds nothing of ours to preserve and cleanup must
+        # not leave it behind on a reused cluster), but the cluster claim
+        # clears: the release state is unknown, and another actor may
+        # already be using a cluster this run created.
+        CREATED_CLUSTER=0
         return 1
     fi
     rm -f -- "$release_stderr_file"
