@@ -1020,6 +1020,23 @@ def test_stable_claim_failures_flag_pending_claims(tmp_path, phrase):
 
 
 @pytest.mark.parametrize(
+    "phrase",
+    (
+        "v9.9.9 是发布候选版本。",
+        "v9.9.9 是候选版本，尚未发布。",
+    ),
+)
+def test_stable_claim_failures_flag_chinese_candidate_claims(tmp_path, phrase):
+    """Chinese candidate wording next to a released version must fail too."""
+    _write_stable_notes(tmp_path, "9.9.9")
+    (tmp_path / "README_zh-CN.md").write_text(phrase + "\n", encoding="utf-8")
+    errors = docs_checker.check_stable_release_surfaces(
+        tmp_path, "9.9.9", ("README_zh-CN.md",)
+    )
+    assert any("pre-release wording" in error for error in errors), phrase
+
+
+@pytest.mark.parametrize(
     "heading", ("## 9.9.9 Development Candidate", "## 9.9.9 Release Candidate")
 )
 def test_stable_claim_failures_flag_candidate_headings(tmp_path, heading):

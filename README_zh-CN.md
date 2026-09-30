@@ -151,7 +151,7 @@ curl -sS -D - -o /dev/null \
 
 ## 0.9.2 的变化
 
-0.9.2 是破坏性发布候选版本。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
+0.9.2 是破坏性发布。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
 - 0.9.2 冻结 20 条有效指令。所列七个退役名称——移除清单中的常用子集，即五个收敛名称加上
   `markdown_profile` 与 `markdown_streaming_zero_copy`——已不再注册，`nginx -t` 会以 NGINX
