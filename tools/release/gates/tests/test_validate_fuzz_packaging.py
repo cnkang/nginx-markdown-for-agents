@@ -1957,6 +1957,79 @@ def test_exported_make_flags_disqualify_a_later_check() -> None:
     assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
 
 
+def test_export_attribute_persists_across_a_later_plain_assignment() -> None:
+    """A bare export arm keeps the attribute when a later statement sets it.
+
+    Regression (outside-diff review): the scan refreshed only the plain
+    assignment table, so ``export MAKEFLAGS=`` followed by
+    ``MAKEFLAGS=-n`` lost the flag although bash keeps the export
+    attribute and hands ``-n`` to every later make (verified live: the
+    recipe only prints and the step exits 0).  The attribute and the value
+    are tracked separately now; a command-local prefix still does not
+    persist (verified: a later make runs its recipes).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=\nMAKEFLAGS=-n\nmake docs-check",
+        "export MAKEFLAGS=\nMAKEFLAGS=n\nmake docs-check",
+        "export MAKEFLAGS\nexport MAKEFLAGS=\nMAKEFLAGS=-n\nmake docs-check",
+        "MAKEFLAGS=-n\nexport MAKEFLAGS\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # A command-local prefix does not persist: the later make runs.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n make docs-check\nmake docs-check"}]
+        )
+        is None
+    )
+    # An overwrite back to an executing value certifies again.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=-n\nMAKEFLAGS=\nmake docs-check"}]
+        )
+        is None
+    )
+
+
+def test_errexit_change_does_not_detach_following_commands() -> None:
+    """A ``set`` mid-script must not move later commands out of the scan.
+
+    Regression (outside-diff review): the scan split the script at its
+    errexit changes and analyzed each region separately, so in
+    ``make docs-check; set -e; true`` the make read as its region's last
+    command while the trailing ``true`` actually decided the step's status
+    (verified live: failing make, step exit 0 with ``bash {0}``).  Every
+    command now carries the mode in force at its own position.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for step in (
+        {"run": "make docs-check; set -e; true", "shell": "bash {0}"},
+        {"run": "make docs-check; set -e", "shell": "bash {0}"},
+        {"run": "make docs-check\ntrue", "shell": "bash {0}"},
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, step]) is not None
+        ), step
+    # With errexit already on (or a shell that enables it), the failed
+    # check aborts the script and the trailing command cannot swallow it.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check; true"}]
+        )
+        is None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "set -e\nmake docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is None
+    )
+
+
 def test_shell_errexit_scan_stops_at_the_script_operand() -> None:
     """Words after `{0}` are positional parameters, not shell options.
 
