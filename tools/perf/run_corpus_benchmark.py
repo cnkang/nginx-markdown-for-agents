@@ -427,37 +427,36 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        validated_html_dest = (
-            resolved_examples_dir / f"{base_name}.html"
-        ).resolve()
-        validated_md_dest = (
-            resolved_examples_dir / f"{base_name}.md"
-        ).resolve()
-        try:
-            validate_write_path_within_root(
-                validated_html_dest,
-                resolved_examples_dir,
-                purpose="HTML example output",
-            )
-            validate_write_path_within_root(
-                validated_md_dest,
-                resolved_examples_dir,
-                purpose="Markdown example output",
-            )
-            validated_html_dest.relative_to(resolved_examples_dir)
-            validated_md_dest.relative_to(resolved_examples_dir)
-        except ValueError:
+        # Containment validator at the write sinks: resolve the examples
+        # root and each destination to absolute form, then require the
+        # destination to stay inside the root before any content reaches
+        # it.  The destination file names are generated (never derived
+        # from metadata), so only the root and the join are re-checked
+        # here; the absolute forms are what the writes consume.
+        safe_examples_root = os.path.abspath(str(resolved_examples_dir))
+        html_dest_abs = os.path.abspath(
+            str((resolved_examples_dir / f"{base_name}.html").resolve())
+        )
+        md_dest_abs = os.path.abspath(
+            str((resolved_examples_dir / f"{base_name}.md").resolve())
+        )
+        if not html_dest_abs.startswith(safe_examples_root + os.sep):
             raise ValueError(
                 "Example output path escapes examples directory root; "
                 "refusing to write outside the intended directory tree"
-            ) from None
+            )
+        if not md_dest_abs.startswith(safe_examples_root + os.sep):
+            raise ValueError(
+                "Example output path escapes examples directory root; "
+                "refusing to write outside the intended directory tree"
+            )
 
         # Copy HTML input after explicit root-bound checks on both paths.
-        validated_html_dest.write_bytes(validated_html.read_bytes())
+        Path(html_dest_abs).write_bytes(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
-        validated_md_dest.write_text(output, encoding="utf-8")
+        Path(md_dest_abs).write_text(output, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
