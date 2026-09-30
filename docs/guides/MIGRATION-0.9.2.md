@@ -130,8 +130,12 @@ lowercase implementation events in the structured `event=` field, such as
 | Category | Count | Action |
 |----------|-------|--------|
 | Historical 0.9.0/0.9.1 reject-only removals | 19 | Already removed before 0.9.2; see the historical table below |
+| Removed active directives | 14 | Remove them; this guide carries the before/after mapping below |
+| Directives folded into `markdown_limits` | 5 | Four map to `markdown_limits` keys; `markdown_stream_flush_min` has no replacement |
 | 0.9.2 convergence removals | 5 | Remove or replace them. `nginx -t` reports NGINX's standard `unknown directive` error |
 | Active directives retained | 20 | No change needed after migration |
+
+The four removal categories total 43 removals.
 
 ---
 
@@ -544,6 +548,7 @@ curl --fail-with-body -sS http://localhost/nginx-markdown/diagnostics \
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9.2 | 2026-09-30 | Kang | Release finalization: breaking-changes summary aligned to the 43-removal inventory (19 stubs + 14 active + 5 folded + 5 convergence) |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-17 | Hermes | Preset mappings now set markdown_auth_policy allow (profiles used allow, 0.9.2 defaults to deny) and note markdown_flavor commonmark is unchanged |
 | 0.9.2 | 2026-09-08 | Codex | Align the migration contract with the static 20-directive surface and the five convergence names, which are no longer registered. |
