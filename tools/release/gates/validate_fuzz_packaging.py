@@ -8686,6 +8686,41 @@ def _step_working_directory_keeps_root(step: str | dict) -> bool:
     return step.get("working-directory") in (None, "", ".", "./")
 
 
+def _advance_export_tracking(
+    segment: str,
+    assigned: dict[str, str],
+    export_names: set[str],
+    exported: dict[str, str],
+    unresolved: set[str],
+) -> None:
+    """Fold one command's assignments into the running export view.
+
+    The shell's ``export`` statements (and the plain assignments a later
+    export publishes) accumulate as its segments run, so a later make
+    inherits them.  Bash also keeps the export ATTRIBUTE when a later
+    standalone assignment replaces the value: ``export MAKEFLAGS=``
+    followed by ``MAKEFLAGS=-n`` still hands ``-n`` to every later make
+    (verified: the recipe only prints and the step exits 0).  A literal
+    standalone assignment replaces a backtick substitution's output, so
+    the name becomes attributable again; a name still unresolved keeps the
+    sentinel so a make inheriting it cannot certify (fail closed).
+    """
+    assigned.update(_plain_make_assignments(segment))
+    export_state = _make_relevant_export_state(segment, assigned)
+    if export_state is not None:
+        names, values = export_state
+        export_names |= names
+        exported.update(values)
+    for name, value in _standalone_make_assignments(segment).items():
+        if name in export_names:
+            exported[name] = value
+        if name in unresolved and value:
+            unresolved.discard(name)
+    for name in unresolved:
+        if name in export_names:
+            exported[name] = _UNRESOLVED_FLAG_SENTINEL
+
+
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     """Classify each live, unmasked segment of one step.
 
@@ -8706,9 +8741,6 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     # it is read here and marks the name unresolved for the whole step.
     script = _step_script(step) or ""
     unresolved = set(_make_flag_backtick_references(script))
-    # The shell's own `export` assignments (and the plain assignments a
-    # later export can publish) accumulate as its segments run, so a later
-    # make inherits them.
     assigned: dict[str, str] = {}
     export_names: set[str] = set()
     exported: dict[str, str] = {}
@@ -8716,33 +8748,9 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     for command_index, segment in enumerate(_foreground_live_commands(step)):
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
-        # Plain assignments (``MAKEFLAGS=-n``) may be exported by a later
-        # statement, so they are carried forward too.
-        assigned.update(_plain_make_assignments(segment))
-        export_state = _make_relevant_export_state(segment, assigned)
-        if export_state is not None:
-            names, values = export_state
-            export_names |= names
-            exported.update(values)
-        # Bash keeps the export ATTRIBUTE when a later standalone
-        # assignment replaces the value, so the inherited view refreshes:
-        # ``export MAKEFLAGS=`` followed by ``MAKEFLAGS=-n`` still hands
-        # ``-n`` to every later make (verified: the recipe only prints and
-        # the step exits 0).  A command-local prefix does not persist.  A
-        # literal standalone assignment also replaces a backtick
-        # substitution's output, so the name becomes attributable again and
-        # leaves the unresolved set here (before the sentinel pass).
-        for name, value in _standalone_make_assignments(segment).items():
-            if name in export_names:
-                exported[name] = value
-            if name in unresolved and value:
-                unresolved.discard(name)
-        # A name whose value still comes from a backtick substitution
-        # cannot be attributed; a make inheriting it cannot certify (fail
-        # closed).
-        for name in unresolved:
-            if name in export_names:
-                exported[name] = _UNRESOLVED_FLAG_SENTINEL
+        _advance_export_tracking(
+            segment, assigned, export_names, exported, unresolved
+        )
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
         installs, checks_docs = _pip_step_commands(
