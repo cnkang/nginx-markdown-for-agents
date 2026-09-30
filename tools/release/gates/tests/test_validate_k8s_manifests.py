@@ -564,6 +564,45 @@ def test_gate4_bounds_the_cluster_name_like_its_sibling() -> None:
     assert "^[a-z][a-z0-9-]{0,62}$" in script
 
 
+def test_gate4_shares_the_cluster_lock_with_the_helm_smoke() -> None:
+    """Both cluster smokes contend on one per-cluster lock.
+
+    gate4 and the helm smoke create, use, and delete resources in the same
+    kind cluster; without a shared lock, concurrent runs delete each
+    other's namespace, release, or the cluster itself.  Both scripts source
+    the shared library and key the lock by the cluster name alone, so they
+    wait for each other.
+    """
+    gate4 = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    helm = (
+        Path(__file__).resolve().parents[4]
+        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
+    ).read_text(encoding="utf-8")
+    lib = (
+        Path(__file__).resolve().parents[4]
+        / "tools/lib/cluster_lock.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'source "${PROJECT_ROOT}/tools/lib/cluster_lock.sh"' in gate4
+    assert 'source "${REPO_ROOT}/tools/lib/cluster_lock.sh"' in helm
+    # Both derive the lock key from their cluster name.
+    assert 'LOCK_CLUSTER="${CLUSTER_NAME}"' in gate4
+    assert 'LOCK_CLUSTER="${CLUSTER}"' in helm
+    # One lock path for one cluster: the key carries no per-script label.
+    assert 'LOCK_PATH="${TMPDIR:-/tmp}/cluster-smoke-${LOCK_CLUSTER}"' in lib
+    assert "LOCK_LABEL" not in lib
+    # gate4 acquires before the cluster stage and releases after cleanup.
+    main = gate4.split("main() {", 1)[1]
+    assert main.index("acquire_cluster_lock") < main.index("create_cluster")
+    assert main.index("release_cluster_lock") > main.index("delete_cluster")
+    # The signal path releases the lock too.
+    handler = gate4.split("exit_on_signal() {", 1)[1].split("\n}", 1)[0]
+    assert "release_cluster_lock" in handler
+
+
 def test_gate4_uses_a_run_unique_release_name() -> None:
     """A fixed release name lets concurrent runs race the settle window.
 

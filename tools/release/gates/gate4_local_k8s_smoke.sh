@@ -49,14 +49,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 readonly SCRIPT_DIR PROJECT_ROOT
 
+# Per-cluster serialization: a concurrent gate4 or helm-smoke run that
+# targets one cluster would delete resources this run owns (the namespace,
+# the release, or the cluster itself).  The shared library holds one lock
+# per cluster from cluster creation through cleanup, and the helm smoke
+# sources the same file, so both scripts contend on the same lock.
+# shellcheck source=tools/lib/cluster_lock.sh
+source "${PROJECT_ROOT}/tools/lib/cluster_lock.sh"
+
 readonly DEFAULT_CLUSTER_NAME="gate4-smoke"
 readonly CHART_DIR="${PROJECT_ROOT}/charts/nginx-markdown"
-# The release name is run-unique: gate4 holds no lock, so two concurrent
-# runs would otherwise race the fixed name (one wins Helm's storage
-# create, and the loser's post-failure settle window could attribute the
-# winner's pending release to itself and uninstall it).  A unique name
-# makes the ownership check race-free by construction; the namespace stays
-# fixed so the reuse contract for it is unchanged (the sibling helm smoke
+# The release name is run-unique: even with the per-cluster lock held,
+# an external actor can create a fixed name between the ownership check
+# and the install, and the loser's post-failure settle window could then
+# attribute that release to itself and uninstall it.  A unique name makes
+# the ownership check race-free by construction; the namespace stays fixed
+# so the reuse contract for it is unchanged (the sibling helm smoke
 # applies the same split).
 readonly HELM_RELEASE_NAME="gate4-test-$$"
 readonly HELM_NAMESPACE="gate4-smoke"
@@ -161,6 +169,7 @@ check_prerequisites() {
 
 KEEP_CLUSTER=0
 CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
+LOCK_MODE=""
 CREATED_CLUSTER=0
 CREATED_NAMESPACE=0
 CREATED_RELEASE=0
@@ -381,12 +390,17 @@ run_cleanup_once() {
 
 cleanup_on_exit() {
     run_cleanup_once
+    # Every exit path (including a mid-run die) releases the lock; a second
+    # release is a no-op because the directory form re-checks ownership and
+    # the flock form holds the descriptor until the process exits.
+    release_cluster_lock
     return 0
 }
 
 exit_on_signal() {
     local signal_status="$1"
     run_cleanup_once
+    release_cluster_lock
     exit "$signal_status"
 }
 
@@ -576,10 +590,10 @@ deploy_and_verify() {
     if [[ -z "$existing_namespace" ]]; then
         if ! kubectl --context "$kube_context" create namespace \
             "${HELM_NAMESPACE}" >/dev/null 2>&1; then
-            # The create can lose a race with a concurrent gate4 run
-            # (gate4 holds no lock): whatever holds the namespace now is
-            # theirs, and deleting the cluster would take it down.  The
-            # cluster claim clears with the namespace claim.
+            # The per-cluster lock is held, but an external actor can
+            # still create the namespace concurrently: whatever holds it
+            # now is theirs, and deleting the cluster would take it down.
+            # The cluster claim clears with the namespace claim.
             fail "Unable to create namespace ${HELM_NAMESPACE}"
             CREATED_CLUSTER=0
             return 1
@@ -620,9 +634,9 @@ deploy_and_verify() {
     if [[ -n "$existing_release" ]]; then
         # The pre-existing release lives in this cluster, so the cluster
         # claim clears with the others: deleting the cluster would take
-        # that release down.  (Two gate4 runs share the fixed cluster and
-        # release names, and gate4 holds no lock, so a concurrent run's
-        # release can appear here after this run created the cluster.)
+        # that release down.  (An external actor can create a release in
+        # this cluster after this run created it; the per-cluster lock only
+        # serializes gate4 and helm-smoke runs.)
         fail "Pre-existing Helm release ${HELM_RELEASE_NAME}; refusing to replace it"
         CREATED_NAMESPACE=0
         CREATED_CLUSTER=0
@@ -753,8 +767,14 @@ main() {
     validate_helm_lint || had_failure=1
     validate_helm_template || had_failure=1
 
-    # Stage 2: Deploy to kind cluster
+    # Stage 2: Deploy to kind cluster.  The per-cluster lock is taken here,
+    # after the argument and prerequisite checks (so a usage error creates
+    # no lock file), and released after cleanup below: it spans cluster
+    # creation through cleanup, so a concurrent run on the same cluster
+    # waits instead of deleting resources this run owns.
     if [[ "$had_failure" -eq 0 ]]; then
+        LOCK_CLUSTER="${CLUSTER_NAME}"
+        acquire_cluster_lock
         create_cluster || had_failure=1
     fi
 
@@ -775,6 +795,9 @@ main() {
     cleanup_owned_helm_resources
     delete_cluster
     CLEANUP_DONE=1
+    # The lock is released last: the next waiter must not acquire it while
+    # this run is still deleting the cluster or its namespace.
+    release_cluster_lock
 
     # Summary
     printf '\n' >&2
