@@ -7,10 +7,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current line: v0.9.2 is a release candidate and the project has not
-> published it yet. It is the final breaking release before v1.0.
-> The latest public stable release is v0.9.1. The v0.9.2 assets become
-> available after publication. Until then, use the v0.9.1 tag for installation.
+> Current line: v0.9.2 shipped on 2026-09-30 as the latest public stable
+> release. It is the final breaking release before v1.0. The v0.9.2 tag,
+> package assets, and checksums are on the project's GitHub Releases page.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
 HTML pages that you already serve. Clients that send `Accept: text/markdown`
@@ -167,7 +166,7 @@ eligibility checks still apply.
 
 ## What changed in 0.9.2
 
-0.9.2 is a breaking release candidate. Read the
+0.9.2 is a breaking release. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
 - 0.9.2 freezes 20 active directives. The seven highlighted retired names —
@@ -331,6 +330,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 0.9.2 | 2026-09-30 | Finalized the entry point for the v0.9.2 stable release (publication date and status). |
 | 0.9.2 | 2026-09-01 | Reorganized the entry point around the 0.9.2 contract and linked canonical guides. |
 
 Older README changes are available in the Git history.
