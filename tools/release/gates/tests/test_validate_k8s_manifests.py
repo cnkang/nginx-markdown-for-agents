@@ -606,12 +606,14 @@ def test_gate4_shares_the_cluster_lock_with_the_helm_smoke() -> None:
 
 
 def test_gate4_uses_a_run_unique_release_name() -> None:
-    """A fixed release name lets concurrent runs race the settle window.
+    """A fixed release name lets an external actor race the settle window.
 
-    gate4 holds no lock, so two runs would share the name: one wins Helm's
-    storage create while the loser's post-failure settle window can
-    attribute the winner's pending release to itself and uninstall it.
-    The run-unique name removes the collision by construction.
+    The per-cluster lock serializes gate4 and helm-smoke runs, but an
+    external actor can still create a fixed name between the ownership
+    check and the install: one wins Helm's storage create while the loser's
+    post-failure settle window can attribute the winner's pending release
+    to itself and uninstall it.  The run-unique name removes the collision
+    by construction.
     """
     script = (
         Path(__file__).resolve().parents[4]
@@ -652,10 +654,11 @@ def test_gate4_query_failures_keep_the_cluster() -> None:
 def test_gate4_clears_the_cluster_claim_when_the_namespace_is_not_ours() -> None:
     """A namespace we did not create lives in a cluster we must keep.
 
-    gate4 holds no lock, so a concurrent run can hold the namespace of a
-    cluster this run created (a fresh cluster has none).  Both the failed
-    create and the reuse branch clear the cluster claim with the namespace
-    claim: deleting the shared cluster would destroy their workloads.
+    The per-cluster lock serializes gate4 and helm-smoke runs, but an
+    external actor can still create the namespace of a cluster this run
+    created (a fresh cluster has none).  Both the failed create and the
+    reuse branch clear the cluster claim with the namespace claim:
+    deleting the shared cluster would destroy their workloads.
     """
     script = (
         Path(__file__).resolve().parents[4]
@@ -678,11 +681,11 @@ def test_gate4_clears_the_cluster_claim_when_the_namespace_is_not_ours() -> None
 def test_gate4_preserves_the_cluster_on_a_preexisting_release() -> None:
     """A pre-existing release lives in this cluster; keep it.
 
-    Two gate4 runs share the fixed cluster and release names and gate4
-    holds no lock, so a concurrent run's release can appear at the
-    preflight after this run created the cluster.  Deleting the cluster on
-    exit would take that release down, so the branch clears the cluster
-    claim with the namespace claim.
+    An external actor can create a release in a cluster this run created
+    (the per-cluster lock only serializes gate4 and helm-smoke runs), so
+    one can appear at the preflight.  Deleting the cluster on exit would
+    take that release down, so the branch clears the cluster claim with
+    the namespace claim.
     """
     script = (
         Path(__file__).resolve().parents[4]
