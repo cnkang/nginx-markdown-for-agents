@@ -7,13 +7,13 @@ or narrowly scopes conversion **without replacing the binary**, see
 
 ## Overview
 
-This guide covers rolling back the 0.9.2 release candidate to a prior
+This guide covers rolling back the 0.9.2 release to a prior
 release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
 on-disk data migration. Rolling back the module binary restores the 0.9.1
 directive surface only after the configuration is also restored. The 0.9.2
 20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
-Publication and artifact availability are separate release gates.
+The v0.9.2 tag carries the release artifacts. The project ships them with the GitHub Release.
 
 | Target | Section |
 |--------|---------|
@@ -664,6 +664,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-30 | Kang | Release finalization: rollback overview and artifact-availability wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release preparation: clarified the rollback overview for the v0.9.2 release candidate |
 | 0.9.2 | 2026-09-17 | Hermes | Shutdown branches on SYSTEMD_OWNS_NGINX (systemctl stop nginx or nginx -s quit); rollback guard also refuses existing .restore-0.9.0 and .pre-0.9.0 paths; module staging failures restore the pre-rollback configuration |

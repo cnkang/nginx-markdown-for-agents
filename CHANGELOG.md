@@ -5,7 +5,7 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - Unreleased
+## [0.9.2] - 2026-09-30
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, records the removal and historical disposition of the experimental OTel
@@ -24,7 +24,7 @@ for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
 before/after examples.
 
-- **Directive removals (38 total).** The
+- **Directive removals (43 total).** The
   release deletes 19 reject-only migration stubs. NGINX now reports the
   standard `unknown directive` error instead of a migration hint. The release
   removes 14 active directives:
@@ -35,6 +35,11 @@ before/after examples.
   `markdown_stream_types`, `markdown_stream_threshold`,
   `markdown_diagnostics_allow`, `markdown_otel`, and
   `markdown_otel_endpoint`.
+
+  The release also removes the five convergence names:
+  `markdown_dynamic_config`, `markdown_dynamic_config_path`,
+  `markdown_dynconf_dry_run`, `markdown_prune_selectors`, and
+  `markdown_prune_protection_selectors`.
 
   The release folds 5 standalone limit directives into `markdown_limits`:
   `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,

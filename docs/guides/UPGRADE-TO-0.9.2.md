@@ -22,12 +22,11 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: 0.9.2 is a release candidate and the project has not
-> published it yet. The `v0.9.2` tag, GitHub Release, package checksums,
-> and signed artifacts become available after the merge and the
-> candidate-bound release gates pass. Verify checksums and signatures as
-> described below before you install prebuilt packages. Helm repository
-> publication, where offered, stays separate from this release.
+> Publication status: the project published 0.9.2. The `v0.9.2` tag, GitHub
+> Release, package checksums, and signed artifacts are available now. Verify
+> checksums and signatures as described below before you install prebuilt
+> packages. Helm repository publication, where offered, stays separate from
+> this release.
 
 Choose the upgrade method matching your deployment:
 
@@ -49,7 +48,6 @@ set -euo pipefail
 # 1.26.3, glibc, and x86_64). The archive contains the module .so.
 MODULE_ARCHIVE="ngx_http_markdown_filter_module-<nginx-version>-<os>-<arch>.tar.gz"
 # Use the exact release tag for the version you want to install.
-# If v0.9.2 is not published yet, wait for its assets; do not substitute v0.9.1.
 RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2"
 curl --fail --location --remote-name "${RELEASE_BASE}/${MODULE_ARCHIVE}"
 curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS"
@@ -1114,7 +1112,7 @@ commit. External FFI consumers must regenerate bindings from
 
 ```bash
 cd nginx-markdown-for-agents
-# Publication-dependent: the v0.9.2 tag becomes available after publication.
+# The v0.9.2 release tag is published; fetch it here.
 RELEASE_TAG=v0.9.2
 git fetch --tags origin "${RELEASE_TAG}"
 # Copy EXPECTED_COMMIT from the independently authenticated release evidence.
@@ -2177,6 +2175,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-30 | Kang | Release finalization: publication status and tag-guidance wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-19 | Kang | Release finalization: publication status wording prepared for the v0.9.2 candidate |
 | 0.9.2 | 2026-09-17 | Hermes | Seven removed names stated consistently; snapshot replacement refuses a symlinked tree and uses mv -T; top-level return branches replaced with conditional flow; start commands go through the paired module-and-config rollback |

@@ -1957,6 +1957,235 @@ def test_exported_make_flags_disqualify_a_later_check() -> None:
     assert packaging_gate._python_deps_issue([install, "make docs-check"]) is None
 
 
+def test_export_attribute_persists_across_a_later_plain_assignment() -> None:
+    """A bare export arm keeps the attribute when a later statement sets it.
+
+    Regression: the scan refreshed only the plain
+    assignment table, so ``export MAKEFLAGS=`` followed by
+    ``MAKEFLAGS=-n`` lost the flag although bash keeps the export
+    attribute and hands ``-n`` to every later make (verified live: the
+    recipe only prints and the step exits 0).  The attribute and the value
+    are tracked separately now; a command-local prefix still does not
+    persist (verified: a later make runs its recipes).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=\nMAKEFLAGS=-n\nmake docs-check",
+        "export MAKEFLAGS=\nMAKEFLAGS=n\nmake docs-check",
+        "export MAKEFLAGS\nexport MAKEFLAGS=\nMAKEFLAGS=-n\nmake docs-check",
+        "MAKEFLAGS=-n\nexport MAKEFLAGS\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # A command-local prefix does not persist: the later make runs.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n make docs-check\nmake docs-check"}]
+        )
+        is None
+    )
+    # An overwrite back to an executing value certifies again.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=-n\nMAKEFLAGS=\nmake docs-check"}]
+        )
+        is None
+    )
+
+
+def test_unresolved_expansion_in_make_flags_is_rejected() -> None:
+    """A make flag left as a shell reference cannot certify the check.
+
+    Regression: ``FLAGS=-n`` followed by
+    ``export MAKEFLAGS=$FLAGS`` reads as a literal ``$FLAGS`` token in the
+    scan while the shell hands ``-n`` to make at run time (verified live:
+    the recipe is only printed and the step exits 0).  The scan cannot
+    attribute the resolved flags, so it fails closed; a literal value
+    keeps its normal classification, and a literal re-assignment restores
+    certification after a substitution.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "FLAGS=-n\nexport MAKEFLAGS=$FLAGS\nmake docs-check",
+        "FLAGS=-n\nexport MAKEFLAGS=${FLAGS}\nmake docs-check",
+        "export MAKEFLAGS=$UNKNOWN_FLAGS\nmake docs-check",
+        "FLAGS=-n\nMAKEFLAGS=$FLAGS make docs-check",
+        "export MAKEFLAGS=$(getflags)\nmake docs-check",
+        "export MAKEFLAGS=`getflags`\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # The environment scope carries the same failure mode.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "$FLAGS"}}]
+        )
+        is not None
+    )
+    # A literal value and a literal re-assignment still certify.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "FLAGS=s\nexport MAKEFLAGS=s\nmake docs-check"}]
+        )
+        is None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check"}]
+        )
+        is None
+    )
+
+
+def test_shell_special_parameters_in_make_flags_are_rejected() -> None:
+    """Every shell expansion form in a make flag fails closed.
+
+    Regression: the first expansion class covered names,
+    digits, ``$(``/``${`` and a trailing ``$``, but the shell's special
+    parameters and quoted forms still certified - ``export MAKEFLAGS=$-``
+    expands to the shell's option letters and reaches make (verified
+    live), yet the scan read a literal token.  The class now covers
+    ``$- $@ $* $# $? $!``, the ``$'...'``/``$"..."`` openers, and the
+    quoted forms; a literal value keeps its normal classification.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for parameter in (
+        "$-", "$@", "$*", "$#", "$?", "$!", "$0", "$1",
+        "$'x'", '$"x"', "$FLAGS", "${FLAGS}", "$(getflags)",
+    ):
+        script = f"export MAKEFLAGS={parameter}\nmake docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), parameter
+    for literal in ("", "-s", "s"):
+        script = f"export MAKEFLAGS={literal}\nmake docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is None
+        ), literal
+
+
+def test_substitution_taint_follows_the_last_assignment() -> None:
+    """Only the LAST assignment decides whether a name stays tainted.
+
+    Regression: a literal assignment before a later
+    backtick substitution cleared the taint, so
+    ``MAKEFLAGS=-s; export MAKEFLAGS=\\`getflags\\``` certified although the
+    command's output reaches make (verified live: the recipe only prints).
+    The reverse order leaves the literal in force and still certifies
+    (verified live: the recipe runs).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-s\nexport MAKEFLAGS=`getflags`\nmake docs-check"}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check"}]
+        )
+        is None
+    )
+
+
+def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
+    """A ``set`` behind a short-circuit must not change the shell's mode.
+
+    Regression: the state scan applied every ``set`` it
+    saw, so ``false && set -e; make docs-check; true`` read the make as
+    errexit-protected and certified, although the ``set`` never ran and
+    the trailing ``true`` swallowed the failure (verified live: step exit
+    0).  A reachable ``set`` still applies.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "false && set -e; make docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "true && set -e; make docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is None
+    )
+
+
+def test_step_environment_presets_the_export_attribute() -> None:
+    """A make name carried by the step environment is already exported.
+
+    Regression: the scan seeded the export attributes
+    only from in-script ``export`` statements, so a step-level
+    ``MAKEFLAGS`` followed by a plain ``MAKEFLAGS=-n`` certified although
+    bash keeps the attribute and hands ``-n`` to make (verified live: the
+    recipe only prints).  Without the environment value the plain
+    assignment does not reach make and still certifies.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n\nmake docs-check", "env": {"MAKEFLAGS": ""}}]
+        )
+        is not None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "MAKEFLAGS=-n\nmake docs-check"}]
+        )
+        is None
+    )
+    # An executing value in the environment keeps certifying.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "-s"}}]
+        )
+        is None
+    )
+
+
+def test_errexit_change_does_not_detach_following_commands() -> None:
+    """A ``set`` mid-script must not move later commands out of the scan.
+
+    Regression: the scan split the script at its
+    errexit changes and analyzed each region separately, so in
+    ``make docs-check; set -e; true`` the make read as its region's last
+    command while the trailing ``true`` actually decided the step's status
+    (verified live: failing make, step exit 0 with ``bash {0}``).  Every
+    command now carries the mode in force at its own position.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for step in (
+        {"run": "make docs-check; set -e; true", "shell": "bash {0}"},
+        {"run": "make docs-check; set -e", "shell": "bash {0}"},
+        {"run": "make docs-check\ntrue", "shell": "bash {0}"},
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, step]) is not None
+        ), step
+    # With errexit already on (or a shell that enables it), the failed
+    # check aborts the script and the trailing command cannot swallow it.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check; true"}]
+        )
+        is None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "set -e\nmake docs-check\ntrue", "shell": "bash {0}"}]
+        )
+        is None
+    )
+
+
 def test_shell_errexit_scan_stops_at_the_script_operand() -> None:
     """Words after `{0}` are positional parameters, not shell options.
 
