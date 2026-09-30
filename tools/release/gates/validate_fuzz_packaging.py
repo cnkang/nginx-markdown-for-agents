@@ -7551,22 +7551,22 @@ def _member_failure_is_swallowed(
 
 
 def _errexit_state_by_segment(
-    pairs: list[tuple[str, str]], live: set[str], initial: bool
+    pairs: list[tuple[str, str]], live_indices: set[int], initial: bool
 ) -> list[bool]:
     """The errexit mode in force at each command's position.
 
-    Only a REACHABLE ``set`` changes the mode: ``live`` is the step's
-    foreground live-command view (normalized the same way), so a ``set``
-    that sits behind a short-circuit or a dead branch must not flip the
-    state for the commands after it.  ``false && set -e; make docs-check;
-    true`` keeps errexit off (verified live: the failing make exits the
-    step 0), while ``true && set -e`` turns it on.
+    Only a REACHABLE ``set`` changes the mode: ``live_indices`` is the set
+    of segment indices that are foreground-live (normalized the same way),
+    so a ``set`` that sits behind a short-circuit or a dead branch must not
+    flip the state for the commands after it.  ``false && set -e;
+    make docs-check; true`` keeps errexit off (verified live: the failing
+    make exits the step 0), while ``true && set -e`` turns it on.
     """
     states: list[bool] = []
     errexit = initial
-    for segment, _separator in pairs:
+    for index, (segment, _separator) in enumerate(pairs):
         state = _set_errexit_state(segment)
-        if state is not None and _prerequisite_view_text(segment.strip()) in live:
+        if state is not None and index in live_indices:
             errexit = state
         states.append(errexit)
     return states
@@ -7588,11 +7588,22 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     # it, and the failure-propagation analysis must not move a later
     # command out of an earlier command's view (``make docs-check; set -e;
     # true`` swallowed a failing make that way - verified: step exit 0).
-    live = {
-        _prerequisite_view_text(segment.strip())
-        for segment in _foreground_live_commands(step)
-    }
-    errexit_by_index = _errexit_state_by_segment(pairs, live, initial)
+    # Build live_indices: the segment indices that are foreground-live.
+    # _foreground_live_commands returns raw segment texts in execution order.
+    # We match them against pairs by normalized text and position.
+    live_segments = _foreground_live_commands(step)
+    live_indices: set[int] = set()
+    live_iter = iter(live_segments)
+    live_text = _prerequisite_view_text(next(live_iter).strip()) if live_segments else None
+    for index, (segment, _separator) in enumerate(pairs):
+        seg_text = _prerequisite_view_text(segment.strip())
+        if live_text is not None and seg_text == live_text:
+            live_indices.add(index)
+            try:
+                live_text = _prerequisite_view_text(next(live_iter).strip())
+            except StopIteration:
+                live_text = None
+    errexit_by_index = _errexit_state_by_segment(pairs, live_indices, initial)
     return _failure_masked_segments_from_pairs(pairs, errexit_by_index)
 
 

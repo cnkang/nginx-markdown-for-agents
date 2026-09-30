@@ -13,7 +13,7 @@ release. 0.9.2 is a breaking release (see
 on-disk data migration. Rolling back the module binary restores the 0.9.1
 directive surface only after the configuration is also restored. The 0.9.2
 20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
-The v0.9.2 tag carries the release artifacts. The project ships them with the GitHub Release.
+The v0.9.2 tag will carry the release artifacts. The project will ship them with the GitHub Release upon publication.
 
 | Target | Section |
 |--------|---------|

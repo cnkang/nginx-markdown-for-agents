@@ -2119,6 +2119,43 @@ def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     )
 
 
+def test_errexit_text_collision_short_circuit_vs_reachable() -> None:
+    """Two ``set -e`` with identical text: first unreachable, second reachable.
+
+    Regression: the errexit scan used normalized-text membership in the
+    live-command set, so the first ``set -e`` (behind ``false &&``) matched
+    the live text of the later reachable ``set -e`` and incorrectly flipped
+    the mode early.  The script ``false && set -e; make docs-check; true;
+    set -e`` must be REJECTED (make runs without errexit, failure swallowed
+    by ``true``), while ``true && set -e; make docs-check; true; set -e``
+    must be ACCEPTED (errexit on before make, make failure exits step).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    # Collision case: first set -e unreachable, second reachable
+    # The make must run without errexit protection and be masked by trailing true
+    assert (
+        packaging_gate._python_deps_issue(
+            [
+                install,
+                {"run": "false && set -e; make docs-check; true; set -e", "shell": "bash {0}"},
+            ]
+        )
+        is not None
+    )
+
+    # Control: first set -e reachable, errexit on before make
+    assert (
+        packaging_gate._python_deps_issue(
+            [
+                install,
+                {"run": "true && set -e; make docs-check; true; set -e", "shell": "bash {0}"},
+            ]
+        )
+        is None
+    )
+
+
 def test_step_environment_presets_the_export_attribute() -> None:
     """A make name carried by the step environment is already exported.
 
