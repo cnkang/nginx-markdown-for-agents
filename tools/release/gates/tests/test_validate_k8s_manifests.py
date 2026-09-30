@@ -564,6 +564,50 @@ def test_gate4_bounds_the_cluster_name_like_its_sibling() -> None:
     assert "^[a-z][a-z0-9-]{0,62}$" in script
 
 
+def test_gate4_uses_a_run_unique_release_name() -> None:
+    """A fixed release name lets concurrent runs race the settle window.
+
+    gate4 holds no lock, so two runs would share the name: one wins Helm's
+    storage create while the loser's post-failure settle window can
+    attribute the winner's pending release to itself and uninstall it.
+    The run-unique name removes the collision by construction.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    assert 'readonly HELM_RELEASE_NAME="gate4-test-$$"' in script, (
+        "the release name must be run-unique"
+    )
+    # The namespace stays fixed: the reuse contract for it is unchanged.
+    assert 'readonly HELM_NAMESPACE="gate4-smoke"' in script
+
+
+def test_gate4_query_failures_keep_the_cluster() -> None:
+    """A transient query error must not delete a cluster in use.
+
+    Both ownership queries can fail after this run created the cluster,
+    and another actor can already be using it; the cluster claim therefore
+    clears on either failure while the namespace claim keeps its existing
+    contract (kept on the release-query failure).
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "tools/release/gates/gate4_local_k8s_smoke.sh"
+    ).read_text(encoding="utf-8")
+    ns_branch = script.split(
+        "Unable to determine ownership of namespace", 1
+    )[1].split("\n    fi", 1)[0]
+    assert "CREATED_CLUSTER=0" in ns_branch
+    rel_branch = script.split(
+        "Unable to determine ownership of Helm release", 1
+    )[1].split("\n    fi", 1)[0]
+    assert "CREATED_CLUSTER=0" in rel_branch
+    assert "CREATED_NAMESPACE=0" not in rel_branch, (
+        "the release-query failure keeps the namespace claim"
+    )
+
+
 def test_gate4_clears_the_cluster_claim_when_the_namespace_is_not_ours() -> None:
     """A namespace we did not create lives in a cluster we must keep.
 
