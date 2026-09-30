@@ -1995,6 +1995,52 @@ def test_export_attribute_persists_across_a_later_plain_assignment() -> None:
     )
 
 
+def test_unresolved_expansion_in_make_flags_is_rejected() -> None:
+    """A make flag left as a shell reference cannot certify the check.
+
+    Regression (outside-diff review): ``FLAGS=-n`` followed by
+    ``export MAKEFLAGS=$FLAGS`` reads as a literal ``$FLAGS`` token in the
+    scan while the shell hands ``-n`` to make at run time (verified live:
+    the recipe is only printed and the step exits 0).  The scan cannot
+    attribute the resolved flags, so it fails closed; a literal value
+    keeps its normal classification, and a literal re-assignment restores
+    certification after a substitution.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "FLAGS=-n\nexport MAKEFLAGS=$FLAGS\nmake docs-check",
+        "FLAGS=-n\nexport MAKEFLAGS=${FLAGS}\nmake docs-check",
+        "export MAKEFLAGS=$UNKNOWN_FLAGS\nmake docs-check",
+        "FLAGS=-n\nMAKEFLAGS=$FLAGS make docs-check",
+        "export MAKEFLAGS=$(getflags)\nmake docs-check",
+        "export MAKEFLAGS=`getflags`\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # The environment scope carries the same failure mode.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "make docs-check", "env": {"MAKEFLAGS": "$FLAGS"}}]
+        )
+        is not None
+    )
+    # A literal value and a literal re-assignment still certify.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "FLAGS=s\nexport MAKEFLAGS=s\nmake docs-check"}]
+        )
+        is None
+    )
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check"}]
+        )
+        is None
+    )
+
+
 def test_errexit_change_does_not_detach_following_commands() -> None:
     """A ``set`` mid-script must not move later commands out of the scan.
 
