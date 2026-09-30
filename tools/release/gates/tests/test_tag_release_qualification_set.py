@@ -15,6 +15,39 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _write_logging_stubs(bin_dir: Path, log: Path) -> None:
+    """Create command stubs that record any invocation and fail.
+
+    The cluster-name tests must prove that NO command runs: the name check
+    precedes every tool use, so with all four tools stubbed and their log
+    still empty, no stage can have started.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = (
+        "#!/bin/bash\n"
+        f'printf \'%s\\n\' "$0 $*" >> "{log}"\n'
+        "exit 1\n"
+    )
+    for name in ("docker", "kind", "helm", "kubectl"):
+        path = bin_dir / name
+        path.write_text(stub, encoding="utf-8")
+        path.chmod(0o755)
+
+
+def _cluster_smoke_and_lock() -> str:
+    """Return the helm smoke script plus the shared lock library.
+
+    The per-cluster lock protocol lives in tools/lib/cluster_lock.sh, which
+    the script sources; the contract spans both files, so the lock tests
+    read the union and keep asserting the same behavior.
+    """
+    script = (REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    lock_lib = (REPO_ROOT / "tools/lib/cluster_lock.sh").read_text(encoding="utf-8")
+    return script + "\n" + lock_lib
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 MAKEFILE = REPO_ROOT / "Makefile"
 
@@ -758,9 +791,7 @@ def test_helm_cluster_smoke_keeps_the_cluster_when_namespace_create_loses() -> N
     cluster, so the cluster claim clears before the failure exit; deleting
     the cluster would destroy the other actor's namespace and workloads.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     branch = script.split(
         "unable to create namespace", 1
     )[1].split("fi", 1)[0]
@@ -778,8 +809,10 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
     kind.
     """
     for bad in ("a" * 64, "cluster-" + "b" * 60):
-        tools = tmp_path / bad[:20] / "bin"
-        tools.mkdir(parents=True)
+        case_root = tmp_path / bad[:20]
+        tools = case_root / "bin"
+        calls = case_root / "calls.log"
+        _write_logging_stubs(tools, calls)
         env = os.environ.copy()
         env |= {"PATH": f"{tools}{os.pathsep}{env['PATH']}", "CLUSTER": bad}
         result = subprocess.run(
@@ -792,6 +825,9 @@ def test_helm_cluster_smoke_bounds_the_cluster_name_length(tmp_path: Path) -> No
         )
         assert result.returncode == 1, (bad, result.stderr)
         assert "invalid cluster name" in result.stderr, (bad, result.stderr)
+        assert not calls.exists(), (
+            f"no command may run for an invalid name: {bad}"
+        )
 
 
 def test_helm_cluster_smoke_unknown_ownership_keeps_foreign_resources() -> None:
@@ -832,9 +868,7 @@ def test_helm_cluster_smoke_keeps_the_cluster_for_a_reused_namespace() -> None:
     concurrent actor's namespace is present; deleting the cluster would
     destroy their workloads.  The reuse branch clears the cluster claim.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     reuse = script.split("CREATED_NAMESPACE=1", 1)[1].split("fi", 1)[0]
     assert "CREATED_CLUSTER=0" in reuse, (
         "a reused namespace must preserve its cluster"
@@ -848,9 +882,7 @@ def test_helm_cluster_smoke_lock_publish_reads_the_record_back() -> None:
     moved by the reaper; without a readback the write lands where the
     canonical path no longer holds it and two runs own the lock.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     acquire = script.split("if mkdir \"${LOCK_PATH}.d\"", 1)[1].split(
         "else", 1
     )[0]
@@ -868,9 +900,7 @@ def test_helm_cluster_smoke_rechecks_the_claimed_lock_owner() -> None:
     second run while the owner still holds the critical section.  The
     branch restores (or parks) a claim whose recorded owner is alive.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     claim = script.split('stale_claim="${LOCK_PATH}.stale.$$.${waited}"', 1)[1]
     claim = claim.split("release_lock_reaper", 1)[0]
     assert 'cat "${stale_claim}/pid"' in claim, (
@@ -899,9 +929,7 @@ def test_helm_cluster_smoke_publishes_owner_record_exclusively() -> None:
     The publish therefore uses a noclobber create and retries the whole
     acquisition when the path is no longer this wait's.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     assert (
         "set -o noclobber; printf '%s\\n' \"$$\" > \"${LOCK_OWNER_FILE}\""
         in script
@@ -919,9 +947,7 @@ def test_helm_cluster_smoke_lock_open_does_not_truncate(tmp_path: Path) -> None:
     truncate its target; the script opens read-write without truncation
     and then compares the descriptor's inode with the path.
     """
-    script = (
-        REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
     assert 'exec 9<>"${LOCK_PATH}.flock"' in script, (
         "the lock must be opened without truncation"
     )
@@ -940,13 +966,13 @@ def test_helm_cluster_smoke_rejects_an_invalid_cluster_name(tmp_path: Path) -> N
     those consume it, so no command runs at all.
     """
     for index, bad in enumerate(("../evil", "Bad-Cluster", "under_score", "-leading")):
-        tools = tmp_path / str(index) / "bin"
-        tools.mkdir(parents=True)
-        calls = tmp_path / "calls.log"
+        case_root = tmp_path / str(index)
+        tools = case_root / "bin"
+        calls = case_root / "calls.log"
+        _write_logging_stubs(tools, calls)
         env = os.environ.copy()
         env |= {
             "PATH": f"{tools}{os.pathsep}{env['PATH']}",
-            "CALL_LOG": str(calls),
             "CLUSTER": bad,
         }
         result = subprocess.run(
@@ -1079,10 +1105,7 @@ def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
     then uninstall the winner's release.  A per-cluster lock must span the
     ownership check through cleanup, and cleanup must release it.
     """
-    script = (
-        Path(__file__).resolve().parents[4]
-        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
 
     assert "acquire_cluster_lock" in script
     acquire_call = script.index("\nacquire_cluster_lock\n")
@@ -1109,10 +1132,7 @@ def test_helm_cluster_smoke_serializes_stale_lock_reclaim() -> None:
     reclaim, so a live owner's lock is never displaced, and a reaper held by
     a dead pid is broken by the next waiter.
     """
-    script = (
-        Path(__file__).resolve().parents[4]
-        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
 
     acquire = script.split("acquire_cluster_lock() {", 1)[1]
     acquire = acquire.split("\n}\n", 1)[0]
@@ -1179,10 +1199,7 @@ def test_helm_cluster_smoke_deletes_the_claimed_stale_directory() -> None:
     owner is dead, so the claim can be deleted immediately; the canonical
     path is then free for this waiter's own acquisition attempt.
     """
-    script = (
-        Path(__file__).resolve().parents[4]
-        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
 
     block = script.split("acquire_cluster_lock() {", 1)[1]
     block = block.split("\n}\n", 1)[0]
@@ -1210,10 +1227,7 @@ def test_helm_cluster_smoke_uses_a_run_unique_release_name() -> None:
     uninstall THEIR release.  A pid-unique name makes the window vanish by
     construction while the namespace stays fixed for the reuse contract.
     """
-    script = (
-        Path(__file__).resolve().parents[4]
-        / "tools/e2e/verify_helm_cluster_smoke_e2e.sh"
-    ).read_text(encoding="utf-8")
+    script = _cluster_smoke_and_lock()
 
     assert 'RELEASE="markdown-smoke-$$"' in script
     # The namespace stays fixed: reuse and cleanup logic depend on it.
