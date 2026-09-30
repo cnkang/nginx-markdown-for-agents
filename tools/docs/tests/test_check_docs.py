@@ -1022,16 +1022,17 @@ def test_stable_claim_failures_flag_pending_claims(tmp_path, phrase):
 @pytest.mark.parametrize(
     "phrase",
     (
-        "v9.9.9 是发布候选版本。",
+        "v9.9.9 是发布候选阶段。",
         "v9.9.9 是候选版本。",
     ),
 )
 def test_stable_claim_failures_flag_chinese_candidate_claims(tmp_path, phrase):
     """Chinese candidate wording next to a released version must fail too.
 
-    Each phrase carries ONLY the newly added forms (发布候选 / 候选版本),
-    so the fixture discriminates those patterns instead of passing through
-    the pre-existing 尚未发布 match.
+    Each phrase carries ONLY one of the newly added forms, so removing
+    either pattern alone fails its case: fixture 1 uses 发布候选 (without
+    the 候选版本 substring) and fixture 2 uses 候选版本.  Neither passes
+    through the pre-existing 尚未发布 match.
     """
     _write_stable_notes(tmp_path, "9.9.9")
     (tmp_path / "README_zh-CN.md").write_text(phrase + "\n", encoding="utf-8")
