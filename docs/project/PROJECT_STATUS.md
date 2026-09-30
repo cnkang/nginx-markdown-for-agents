@@ -28,17 +28,16 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.2
 
-**Status:** Release candidate. 0.9.1 is the latest released version
-(2026-07-29). 0.9.2 is the final pre-1.0 breaking release: the public
+**Status:** Stable release, published 2026-09-30. 0.9.1 was the previous
+release (2026-07-29). 0.9.2 is the final pre-1.0 breaking release: the public
 configuration surface shrank to 20 active directives with the seven
 highlighted retired names (a subset of the removal inventory) dropped from
 the command table, the retired profile/conflict FFI snapshots are gone, and
 the bundled FFI ABI sits at version 3. See the removal inventory in the
-[0.9.2 release notes](../releases/0.9.2-release-notes.md). The project
-publishes the tag, GitHub Release, package assets, and checksums after the
-merge and the candidate-bound release gates pass.
+[0.9.2 release notes](../releases/0.9.2-release-notes.md). The release
+shipped with its tag, GitHub Release, package assets, and checksums.
 
-#### 0.9.2 (current development)
+#### 0.9.2 (current release)
 
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
@@ -217,16 +216,14 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ### Current Release Line (0.9.x)
 
-The 0.9.x release line is the current maintained line. The current
-development version is 0.9.2. 0.9.1 remains the latest released version
-until the 0.9.2 release tag and its release gates complete. It is a
+The 0.9.x release line is the current maintained line. The current release
+is 0.9.2 (published 2026-09-30). 0.9.1 is the previous release. It is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
 metric families, reason registry, diagnostics JSON v3), advances the bundled
-FFI boundary to ABI 3, and moves
-the musl dynamic-module build before publication, on top of the 0.9.1
-streaming-decompression and zero-copy foundation.
+FFI boundary to ABI 3, and ships the musl dynamic-module build, on top of
+the 0.9.1 streaming-decompression and zero-copy foundation.
 
 #### 0.9.1 (previous release)
 
@@ -432,10 +429,10 @@ the active release documentation.
 - Multi-platform support (macOS, Linux, Docker)
 
 ### Current State
-The team has implemented and tested the core feature set. Production and
-release readiness remain pending publication. After the merge, the release
-process must pass the performance-baseline, final-SHA SonarCloud, and full
-release-gate checks before publishing assets. The focus is on operational validation,
+The team has implemented and tested the core feature set. The release
+shipped on 2026-09-30: the merge landed, the performance-baseline check, the
+final-SHA SonarCloud scan, and the full release-gate checks passed, and the
+project published the assets. The focus is on operational validation,
 performance optimization, and community feedback integration.
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
@@ -450,6 +447,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-09-30 | Kang | Release finalization: status line, release-line headings, and current-state wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release-state wording prepared across the status page for the v0.9.2 candidate |
