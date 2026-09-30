@@ -65,7 +65,7 @@ for the current plan, not an active release objective.
 
 ## v1.0 Contract Freeze
 
-After the project publishes v0.9.2, v1.0 preparation is a stabilization
+With v0.9.2 published, v1.0 preparation is a stabilization
 phase rather
 than another baseline reset.
 
