@@ -592,7 +592,9 @@ def test_gate4_shares_the_cluster_lock_with_the_helm_smoke() -> None:
     assert 'LOCK_CLUSTER="${CLUSTER_NAME}"' in gate4
     assert 'LOCK_CLUSTER="${CLUSTER}"' in helm
     # One lock path for one cluster: the key carries no per-script label.
-    assert 'LOCK_PATH="${TMPDIR:-/tmp}/cluster-smoke-${LOCK_CLUSTER}"' in lib
+    # Machine-global: the lock protects the kind cluster, so it is not
+    # rooted at the caller's temp directory.
+    assert 'LOCK_PATH="/tmp/cluster-smoke-${LOCK_CLUSTER}"' in lib
     assert "LOCK_LABEL" not in lib
     # gate4 acquires before the cluster stage and releases after cleanup.
     main = gate4.split("main() {", 1)[1]

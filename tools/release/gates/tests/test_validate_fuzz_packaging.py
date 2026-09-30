@@ -1896,6 +1896,39 @@ def test_shell_errexit_scan_skips_value_option_operands() -> None:
     assert packaging_gate._shell_initial_errexit("bash -o errexit {0}") is True
 
 
+def test_shell_state_changes_around_the_check_fail_certification() -> None:
+    """`set +e`, a split export, and `builtin cd` all defeat certification.
+
+    Each was verified live before the fix: `set +e` disables errexit for
+    the rest of the script so a later command can swallow the check's
+    failure; `MAKEFLAGS=-n; export MAKEFLAGS` hands make the flag through a
+    split assignment; and `builtin cd DIR` moves the shell away from the
+    repository root exactly as `cd DIR` does.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "set +e\nmake docs-check\necho done",
+        "set +e\nmake docs-check; echo ok",
+        "MAKEFLAGS=-n\nexport MAKEFLAGS\nmake docs-check",
+        'builtin cd "$RUNNER_TEMP/noop"\nmake docs-check',
+        'command cd "$RUNNER_TEMP/noop"\nmake docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}])
+            is not None
+        ), script
+    # The plain and explicitly-errexit forms still certify.
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "make docs-check"}]
+    ) is None
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "set -e\nmake docs-check"}]
+    ) is None
+    assert packaging_gate._python_deps_issue(
+        [install, {"run": "MAKEFLAGS=-n\nexport OTHER\nmake docs-check"}]
+    ) is None
+
+
 def test_exported_make_flags_disqualify_a_later_check() -> None:
     """An export earlier in the same run block reaches the later make.
 
