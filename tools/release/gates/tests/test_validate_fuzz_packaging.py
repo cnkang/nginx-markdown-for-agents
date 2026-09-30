@@ -1960,7 +1960,7 @@ def test_exported_make_flags_disqualify_a_later_check() -> None:
 def test_export_attribute_persists_across_a_later_plain_assignment() -> None:
     """A bare export arm keeps the attribute when a later statement sets it.
 
-    Regression (outside-diff review): the scan refreshed only the plain
+    Regression: the scan refreshed only the plain
     assignment table, so ``export MAKEFLAGS=`` followed by
     ``MAKEFLAGS=-n`` lost the flag although bash keeps the export
     attribute and hands ``-n`` to every later make (verified live: the
@@ -1998,7 +1998,7 @@ def test_export_attribute_persists_across_a_later_plain_assignment() -> None:
 def test_unresolved_expansion_in_make_flags_is_rejected() -> None:
     """A make flag left as a shell reference cannot certify the check.
 
-    Regression (outside-diff review): ``FLAGS=-n`` followed by
+    Regression: ``FLAGS=-n`` followed by
     ``export MAKEFLAGS=$FLAGS`` reads as a literal ``$FLAGS`` token in the
     scan while the shell hands ``-n`` to make at run time (verified live:
     the recipe is only printed and the step exits 0).  The scan cannot
@@ -2044,7 +2044,7 @@ def test_unresolved_expansion_in_make_flags_is_rejected() -> None:
 def test_shell_special_parameters_in_make_flags_are_rejected() -> None:
     """Every shell expansion form in a make flag fails closed.
 
-    Regression (round-4 review): the first expansion class covered names,
+    Regression: the first expansion class covered names,
     digits, ``$(``/``${`` and a trailing ``$``, but the shell's special
     parameters and quoted forms still certified - ``export MAKEFLAGS=$-``
     expands to the shell's option letters and reaches make (verified
@@ -2073,7 +2073,7 @@ def test_shell_special_parameters_in_make_flags_are_rejected() -> None:
 def test_substitution_taint_follows_the_last_assignment() -> None:
     """Only the LAST assignment decides whether a name stays tainted.
 
-    Regression (round-5 review): a literal assignment before a later
+    Regression: a literal assignment before a later
     backtick substitution cleared the taint, so
     ``MAKEFLAGS=-s; export MAKEFLAGS=\\`getflags\\``` certified although the
     command's output reaches make (verified live: the recipe only prints).
@@ -2098,7 +2098,7 @@ def test_substitution_taint_follows_the_last_assignment() -> None:
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     """A ``set`` behind a short-circuit must not change the shell's mode.
 
-    Regression (round-5 review): the state scan applied every ``set`` it
+    Regression: the state scan applied every ``set`` it
     saw, so ``false && set -e; make docs-check; true`` read the make as
     errexit-protected and certified, although the ``set`` never ran and
     the trailing ``true`` swallowed the failure (verified live: step exit
@@ -2122,7 +2122,7 @@ def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
 def test_step_environment_presets_the_export_attribute() -> None:
     """A make name carried by the step environment is already exported.
 
-    Regression (round-5 review): the scan seeded the export attributes
+    Regression: the scan seeded the export attributes
     only from in-script ``export`` statements, so a step-level
     ``MAKEFLAGS`` followed by a plain ``MAKEFLAGS=-n`` certified although
     bash keeps the attribute and hands ``-n`` to make (verified live: the
@@ -2154,7 +2154,7 @@ def test_step_environment_presets_the_export_attribute() -> None:
 def test_errexit_change_does_not_detach_following_commands() -> None:
     """A ``set`` mid-script must not move later commands out of the scan.
 
-    Regression (outside-diff review): the scan split the script at its
+    Regression: the scan split the script at its
     errexit changes and analyzed each region separately, so in
     ``make docs-check; set -e; true`` the make read as its region's last
     command while the trailing ``true`` actually decided the step's status
