@@ -8439,6 +8439,20 @@ def _substitution_taint_events(
             continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if names:
+            # Recorded at the BODY's index.  A body-derived clear becomes real
+            # only at the CALL, so a make BETWEEN the definition and the call
+            # should still see the taint -- probed in bash, the make sees [-s]
+            # when the call precedes it and [SUB] when it follows.
+            #
+            # Moving the clear onto the call's index is NOT the fix:
+            # `_TaintTracker.advance` walks events in segment order and
+            # `_pip_step_scan` reads the same stream, so a clear placed there
+            # made the scanner stop recognising the following
+            # `make docs-check`, and the step was rejected for a missing
+            # prerequisite rather than a real taint.  Carrying "applies from
+            # here on" needs a separate channel, which is a bigger change than
+            # this fix should make; the case is recorded in the ledger and
+            # pinned by a test.
             clears.setdefault(index, set()).update(names)
     return taints, clears, exports
 
@@ -8464,22 +8478,46 @@ def _body_clear_call_pairs(
     existing never-called behaviour.
     """
     mapping: dict[int, int] = {}
-    # Body statements are the pairs whose separator opens a body.
-    body_indices = [
-        index
-        for index, (_segment, separator) in enumerate(pairs)
-        if separator == "{"
-    ]
-    if not body_indices:
-        return mapping
-    for body_index in body_indices:
+    # A body is the run of pairs from the opening `{` to the matching `}`.
+    # Every pair in that run must map to the call, not just the opener: with
+    # `f() { a; export MAKEFLAGS=-s; b; }` the literal is the SECOND
+    # statement, and mapping only the opener left it judged as the body and
+    # credited to the parent even when the call was a pipeline stage.
+    for body_index in _function_body_openers(pairs):
         name = _defined_function_name_at(executable, pairs, body_index)
         if not name:
             continue
         call_index = _first_call_after(pairs, executable, body_index, name)
-        if call_index is not None:
-            mapping[body_index] = call_index
+        if call_index is None:
+            continue
+        for statement in _body_statement_indices(pairs, body_index, call_index):
+            mapping[statement] = call_index
     return mapping
+
+
+def _function_body_openers(pairs: list[tuple[str, str]]) -> list[int]:
+    """Pair indices whose separator opens a function body."""
+    return [
+        index
+        for index, (_segment, separator) in enumerate(pairs)
+        if separator == "{"
+    ]
+
+
+def _body_statement_indices(
+    pairs: list[tuple[str, str]], opener: int, call_index: int | None
+) -> list[int]:
+    """Every pair index from a body's ``{`` through its matching ``}``.
+
+    The closing `}` is NOT a pair separator -- the body-stripping view leaves
+    it out of the stream -- so a brace-depth walk cannot find the end and
+    would run on into the top-level commands after the body.  The call bounds
+    the run instead: a body holds exactly the statements between its
+    definition and the call, and everything from the call onwards belongs to
+    the caller.
+    """
+    stop = call_index if call_index is not None else len(pairs)
+    return list(range(opener, stop))
 
 
 def _is_command_name(word: str) -> bool:
@@ -8525,21 +8563,34 @@ def _first_call_after(
 ) -> int | None:
     """Index of the first pair after *body_index* that calls *name*.
 
-    A call is the name standing as the LAST command word, so ``FOO=bar f``
-    matches because ``f`` is last rather than because the assignments were
-    stripped -- and ``echo f``, ``f --flag`` and a mention inside quotes or a
-    definition are not calls.
+    The name is the FIRST command word: ``f`` and ``f --flag`` and
+    ``f x=1`` are all calls, while ``echo f`` is not.  Leading environment
+    assignments are skipped, so ``FOO=1 f`` is a call too.
 
-    Only the last word is compared.  An earlier version stripped leading
-    ``NAME=value`` words first, but that can never change which word is last,
-    so the loop was dead code and its predicate had no test that could fail.
+    Matching the LAST word instead missed every call that carries an
+    argument, which left the body's literal credited to the parent whenever
+    the argument-bearing call ran as a pipeline stage.
     """
     for index in range(body_index + 1, len(pairs)):
         segment, _separator = pairs[index]
-        words = _masked_quotes(segment).split()
-        if words and words[-1] == name:
+        words = _command_words(_masked_quotes(segment))
+        if name in words[:1]:
             return index
     return None
+
+
+def _command_words(segment: str) -> list[str]:
+    """The segment's words with leading ``NAME=value`` assignments dropped."""
+    words = segment.split()
+    while len(words) > 1 and _is_env_assignment(words[0]):
+        words = words[1:]
+    return words
+
+
+def _is_env_assignment(word: str) -> bool:
+    """True when *word* is a ``NAME=value`` prefix, not a command name."""
+    name, separator, _value = word.partition("=")
+    return bool(separator) and _is_command_name(name)
 
 
 def _group_is_pipeline_stage_after(executable: str, close_at: int) -> bool:
