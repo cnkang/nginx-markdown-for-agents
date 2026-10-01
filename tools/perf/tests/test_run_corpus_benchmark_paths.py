@@ -288,6 +288,6 @@ def test_write_examples_rejects_a_symlinked_destination(tmp_path, monkeypatch):
         outside_target = tmp_path / ("outside-target-" + planted_name)
         (out_dir / planted_name).symlink_to(outside_target)
 
-        with pytest.raises(ValueError, match="escapes examples directory root"):
+        with pytest.raises(ValueError, match="escapes root"):
             write_examples(examples, fixtures_meta, "/bin/echo", out_dir)
         assert not outside_target.exists()
