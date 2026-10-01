@@ -2450,6 +2450,12 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true",
         "{ export MAKEFLAGS=-s; } &>/dev/null | true",
         "{ export MAKEFLAGS=-s; } > a > b | true",
+        # A brace group on the far side of the pipe takes the separator slot,
+        # so the `|` is dropped from the pair stream entirely; the text
+        # between the two segments is the only place it survives.
+        "{ export MAKEFLAGS=-s; } | { true; }",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; }",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; } | cat",
     ):
         assert verdict(tail) is not None, tail
 

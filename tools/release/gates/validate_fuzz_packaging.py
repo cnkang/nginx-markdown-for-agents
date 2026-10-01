@@ -8467,7 +8467,7 @@ def _runs_in_parent_shell(
     """
     if not 0 <= index < len(pairs):
         return False
-    if _is_pipeline_stage(pairs, index):
+    if _is_pipeline_stage(pairs, executable, index):
         # A bare pipeline stage: the shell forks before this segment runs.
         return False
     start = _segment_start(pairs, executable, index)
@@ -8482,20 +8482,26 @@ def _runs_in_parent_shell(
     return not _brace_group_is_pipeline_stage(prefix, brace_at)
 
 
-def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
+def _is_pipeline_stage(
+    pairs: list[tuple[str, str]], executable: str, index: int
+) -> bool:
     """True when the segment at *index* is a stage of a pipeline.
 
     A pipeline stage forks a child shell, so an assignment there never
-    reaches the parent.  The pipe can bound the stage on either side: the
-    pair stream records the separator BEFORE a segment, so the trailing
-    side lives in a LATER pair's separator (``export MAKEFLAGS=-s | true``
-    puts ``|`` in front of ``true``, not in front of the assignment).
+    reaches the parent.  The pipe can bound the stage on either side, and it
+    does not always survive into a pair's separator:
 
-    The forward probe therefore skips the pairs that cannot end a stage: a
-    pair that only carries a group closer or a redirection still belongs to
-    this stage, so ``{ ...; } 2>&1 | true`` and ``{ ...; }|true`` fork even
-    though the pipe is two or three pairs away (verified in bash: the parent
-    keeps the substitution's output in every form).
+    * a bare stage puts it in the NEXT pair's separator (``export
+      MAKEFLAGS=-s | true`` puts ``|`` in front of ``true``);
+    * when the stage after the pipe is itself a brace group, the ``{`` takes
+      that separator slot and the pipe is dropped entirely, so
+      ``{ ...; } | { true; }`` shows no ``|`` at all.
+
+    The forward probe therefore skips the pairs that cannot end a stage — a
+    group closer or a redirection still belongs to this stage — and, once
+    they are exhausted, reads the executable text for the pipe the pair
+    stream lost.  Verified in bash: the parent keeps the substitution's
+    output in every one of these forms.
     """
     if index < len(pairs) and pairs[index][1] == "|":
         return True
@@ -8504,9 +8510,32 @@ def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
         if pairs[probe][1] == "|":
             return True
         if not _is_group_closer_or_redirection(pairs[probe][0]):
+            # The next statement may be the first of a group on the far side
+            # of the pipe, in which case the `{` took the separator slot and
+            # the pipe survives only in the text between the two segments.
+            if _pipe_between(pairs, executable, probe - 1, probe):
+                return True
             return False
         probe += 1
     return False
+
+
+def _pipe_between(
+    pairs: list[tuple[str, str]], executable: str, left: int, right: int
+) -> bool:
+    """True when a ``|`` sits between the segments at *left* and *right*.
+
+    The pair stream keeps one separator per boundary, so a pipe followed by a
+    brace group's opener is lost: ``{ ...; } | { true; }`` records ``{`` and
+    drops ``|`` entirely.  The text between the two segments still has it.
+    """
+    if not (0 <= left < right < len(pairs)):
+        return False
+    end = _segment_start(pairs, executable, left) + len(pairs[left][0])
+    start = _segment_start(pairs, executable, right)
+    if start < end:
+        return False
+    return "|" in executable[end:start]
 
 
 # One redirection word: an optional file-descriptor prefix, a redirect
