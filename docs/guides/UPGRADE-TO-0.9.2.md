@@ -22,11 +22,11 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> **Publication status:** the v0.9.2 release is forthcoming. The `v0.9.2` tag, GitHub
-> Release, package checksums, and signed artifacts will be available after
-> the release workflow completes. Verify checksums and signatures as
-> described below before you install prebuilt packages. Helm repository
-> publication, where offered, stays separate from this release.
+> Publication status: the project published 0.9.2. The `v0.9.2` tag, GitHub
+> Release, package checksums, and signed artifacts are available now. Verify
+> checksums and signatures as described below before you install prebuilt
+> packages. Helm repository publication, where offered, stays separate from
+> this release.
 
 Choose the upgrade method matching your deployment:
 
