@@ -8425,13 +8425,125 @@ def _substitution_taint_events(
         words = command.split()
         if words and words[0] == "export":
             exports.setdefault(index, set()).add(name)
+    call_pairs = _body_clear_call_pairs(pairs, executable)
+    backgrounded = _backgrounded_command_segments(executable)
     for index, command in live_entries:
-        if not _runs_in_parent_shell(pairs, executable, index):
+        judged = call_pairs.get(index, index)
+        if index in call_pairs and pairs[judged][0].strip() in backgrounded:
+            # The call is backgrounded: its environment changes stay in the
+            # background shell, so the body never reaches the parent.  The
+            # call is not a live entry either, so this cannot be answered by
+            # the call's own position being classified as a child.
+            continue
+        if not _runs_in_parent_shell(pairs, executable, judged):
             continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if names:
             clears.setdefault(index, set()).update(names)
     return taints, clears, exports
+
+
+def _body_clear_call_pairs(
+    pairs: list[tuple[str, str]], executable: str
+) -> dict[int, int]:
+    """Map a FUNCTION-BODY statement's pair index to the pair that CALLS it.
+
+    A function body is the one construct whose execution shell is not the
+    shell its text sits in: ``f() { export MAKEFLAGS=-s; }`` is written in the
+    parent but runs wherever the call runs.  Judging the body statement's own
+    position always answered "parent", so ``f | cat``, ``( f )``, ``x=$(f)``
+    and ``f & wait`` all credited the child's literal to the parent and a
+    ``make`` inheriting the substitution certified (verified in bash: the
+    parent keeps the substitution's output in every one of them).
+
+    The mapping is to the FIRST live call of that function's name after the
+    definition.  Only the first is used because a name may be called from
+    several places; a later call that runs in the parent cannot retroactively
+    credit a child's clear, so the conservative first call is the right
+    choice.  A body with no call keeps its own index, which preserves the
+    existing never-called behaviour.
+    """
+    mapping: dict[int, int] = {}
+    # Body statements are the pairs whose separator opens a body.
+    body_indices = [
+        index
+        for index, (_segment, separator) in enumerate(pairs)
+        if separator == "{"
+    ]
+    if not body_indices:
+        return mapping
+    for body_index in body_indices:
+        name = _defined_function_name_at(executable, pairs, body_index)
+        if not name:
+            continue
+        call_index = _first_call_after(pairs, executable, body_index, name)
+        if call_index is not None:
+            mapping[body_index] = call_index
+    return mapping
+
+
+def _is_command_name(word: str) -> bool:
+    """True when *word* is a shell command name rather than an argument."""
+    return bool(word) and all(
+        char.isascii() and (char.isalnum() or char == "_") for char in word
+    )
+
+
+def _defined_function_name_at(
+    executable: str, pairs: list[tuple[str, str]], body_index: int
+) -> str | None:
+    """Name of the function whose body opens at *body_index*, if any.
+
+    The definition is the pair immediately before the body, so the text is
+    read backwards from the body's own ``{``.  A pair that opens a body
+    without a preceding ``name()`` is a plain brace group and yields None.
+
+    The words are walked rather than matched with a regex: a nested
+    unbounded quantifier inside another one is a blocking finding for the
+    harness security gate.
+    """
+    start = _segment_start(pairs, executable, body_index)
+    if start < 0:
+        return None
+    masked = _masked_quotes(executable)
+    # The text before the body's first statement ends with the opening `{`,
+    # so the name is the last word that is not that brace.
+    words = [word for word in masked[:start].split() if word != "{"]
+    if not words:
+        return None
+    last = words[-1]
+    if not last.endswith("()") or len(last) == 2:
+        return None
+    name = last[:-2]
+    if not _is_command_name(name):
+        return None
+    return name
+
+
+def _first_call_after(
+    pairs: list[tuple[str, str]], executable: str, body_index: int, name: str
+) -> int | None:
+    """Index of the first pair after *body_index* that calls *name*.
+
+    A call is the name standing as the last command word, with any run of
+    environment assignments in front of it (``FOO=bar f`` is still a call).
+    A name that only appears as an argument, in a definition, or inside
+    quotes is not a call.
+    """
+    for index in range(body_index + 1, len(pairs)):
+        segment, _separator = pairs[index]
+        words = _masked_quotes(segment).split()
+        while len(words) > 1 and _is_env_assignment(words[0]):
+            words = words[1:]
+        if words and words[-1] == name:
+            return index
+    return None
+
+
+def _is_env_assignment(word: str) -> bool:
+    """True when *word* is a ``NAME=value`` prefix, not a command name."""
+    name, separator, _value = word.partition("=")
+    return bool(separator) and _is_command_name(name)
 
 
 def _group_is_pipeline_stage_after(executable: str, close_at: int) -> bool:
@@ -8521,7 +8633,8 @@ def _runs_in_parent_shell(
     start = _segment_start(pairs, executable, index)
     if start < 0:
         return False
-    prefix = _masked_quotes(executable[:start])
+    masked = _masked_quotes(executable)
+    prefix = masked[:start]
     if _inside_command_substitution(prefix):
         return False
     brace_at = _innermost_open_brace(prefix)
@@ -8537,10 +8650,10 @@ def _runs_in_parent_shell(
     # group's whole extent decides.
     if _GROUP_PIPELINE_LEAD_RE.search(prefix[:brace_at]):
         return False
-    close_at = _matching_close_brace(executable, brace_at)
+    close_at = _matching_close_brace(masked, brace_at)
     if close_at < 0:
         return True
-    return not _group_is_pipeline_stage_after(executable, close_at)
+    return not _group_is_pipeline_stage_after(masked, close_at)
 
 
 def _is_pipeline_stage(
@@ -8669,15 +8782,55 @@ def _inside_command_substitution(prefix: str) -> bool:
     the parent keeps the substitution's output).  Clamping keeps every
     unclosed opener visible, which is the fail-closed direction.
     """
+    if _unclosed_paren_depth(prefix) > 0:
+        return True
+    return prefix.count("`") % 2 == 1
+
+
+# What terminates a `case` item.  A pattern's `)` may be followed by the
+# case body before the `;;`, so the lookahead spans to the item terminator
+# rather than the next few characters; a `)` that closes a real subshell has
+# no such terminator before the next command.
+_CASE_ITEM_END_RE = re.compile(r"(?:;;|;&|;&&|\besac\b)")
+
+
+def _ends_case_item(prefix: str, start: int) -> bool:
+    """True when a `case` item terminator follows, so a `)` ended a pattern.
+
+    The scan is bounded so a later terminator belonging to a DIFFERENT case
+    cannot retroactively excuse this `)`.
+    """
+    for match in _CASE_ITEM_END_RE.finditer(prefix, start):
+        if ";" in prefix[start : match.start()] or "(" in prefix[start : match.start()]:
+            return False
+        return True
+    return False
+
+
+def _unclosed_paren_depth(prefix: str) -> int:
+    """Paren depth, ignoring a `)` that ends a `case` PATTERN.
+
+    `case x in y)` contributes a `)` that never opened a paren, and a plain
+    count let it cancel a real subshell opener that encloses the case:
+    `( case x in y) ;; esac; export MAKEFLAGS=-s )` then read as depth 0 and
+    the child's literal cleared the parent's taint (verified in bash: the
+    parent keeps the substitution's output).  A pattern's `)` is always
+    followed by something that can only continue or end a case item, which
+    is a local test rather than `case` state tracking, so it composes with
+    subshells, nested cases and alternation patterns.
+
+    A pattern written as `(b | c)` is read one level too deep here, which
+    keeps the scan fail-closed in that rare shape.
+    """
     depth = 0
-    for char in prefix:
+    for index, char in enumerate(prefix):
         if char == "(":
             depth += 1
         elif char == ")":
+            if _ends_case_item(prefix, index + 1):
+                continue
             depth = max(0, depth - 1)
-    if depth > 0:
-        return True
-    return prefix.count("`") % 2 == 1
+    return depth
 
 
 def _innermost_open_brace(prefix: str) -> int:
@@ -8694,8 +8847,11 @@ def _innermost_open_brace(prefix: str) -> int:
 def _matching_close_brace(text: str, open_at: int) -> int:
     """Index of the ``}`` matching the ``{`` at *open_at*, or -1.
 
-    The text is expected to have its quoted spans masked, so a brace inside a
-    string does not close a group.
+    The text MUST already have its quoted spans masked.  Scanning raw text
+    let a ``}`` inside a string close the group early, so a piped group
+    containing ``echo "}"`` looked like an unclosed brace group in the
+    parent and its literal cleared a taint the parent still carried
+    (verified in bash: the parent keeps the substitution's output).
     """
     depth = 0
     for position in range(open_at, len(text)):
