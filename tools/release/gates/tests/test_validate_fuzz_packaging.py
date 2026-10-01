@@ -48,6 +48,11 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
     ("multi-name export", "export FOO MAKEFLAGS=-s", True),
     ("export -n with literal", "export -n MAKEFLAGS=-s", True),
     ("standalone brace group", "{ export MAKEFLAGS=-s; }", True),
+    (
+        "case pattern then a parent literal",
+        "case x in y) ;; esac; export MAKEFLAGS=-s",
+        True,
+    ),
     ("brace group led by &&", "true && { export MAKEFLAGS=-s; }", True),
     ("brace group with a later statement", "{ export MAKEFLAGS=-s; echo x; }", True),
     ("brace group with a nested group", "{ export MAKEFLAGS=-s; { true; }; }", True),
@@ -56,6 +61,20 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
     ("quoted brace pair is data", "echo '{ }'; export MAKEFLAGS=-s", True),
     # -- a child shell does not clear -------------------------------------
     ("subshell, literal first", "( export MAKEFLAGS=-s )", False),
+    # A `case` pattern contributes a `)` that opened nothing.  If it were
+    # allowed to cancel a LATER real subshell, that subshell would vanish
+    # from the scan and the parent's clear would be credited.
+    ("case pattern then a subshell", "case x in y) ;; esac; ( true; export MAKEFLAGS=-s )", False),
+    (
+        "function with a case, subshell after",
+        "f() { case x in y) ;; esac; }; f; ( true; export MAKEFLAGS=-s )",
+        False,
+    ),
+    (
+        "case branch holding a subshell",
+        "case x in x) ( true; export MAKEFLAGS=-s ) ;; esac",
+        False,
+    ),
     ("subshell, literal second", "( true; export MAKEFLAGS=-s )", False),
     ("subshell, three statements", "( true; export MAKEFLAGS=-s; true )", False),
     ("command substitution", "x=$(export MAKEFLAGS=-s; true)", False),
@@ -116,6 +135,67 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
 
 
 
+
+
+def test_unverified_taint_mechanisms_are_pinned() -> None:
+    """Pin the three taint mechanisms no end-to-end shape reaches.
+
+    Each of these was load-bearing in review but no shape in the table
+    could see it, so stubbing any one away left the suite green.  They are
+    asserted at the level they act on rather than through the gate verdict:
+
+    * a segment ending at a substitution cut is not a literal assignment,
+      so it must not clear; the tracker applies a taint before a clear at
+      the same index, which makes this the only brake on a same-index
+      self-clear (``_TaintTracker.advance`` orders taints first);
+    * the name recovery must also work for a standalone assignment, not
+      only for one inside an ``export`` list;
+    * a backslash continuation must be joined before the segments are cut,
+      otherwise a split statement reads as two.
+    """
+    bt = chr(96)
+    script = f"export MAKEFLAGS={bt}printf X{bt}; export MAKEFLAGS=-s; make docs-check"
+    executable = packaging_gate._strip_function_bodies(
+        packaging_gate._join_continuations(
+            packaging_gate._strip_heredocs(packaging_gate._strip_shell_comments(script))
+        )
+    )
+    pairs = packaging_gate._command_segments_with_separators(executable)
+    cut_at = packaging_gate._segment_cut_positions(executable, pairs)[0]
+
+    # A cut is not a literal: no clear event may be produced for it.
+    taints, clears, _exports = packaging_gate._substitution_taint_events(
+        {"run": script}
+    )
+    assert taints[0] == {"MAKEFLAGS"}
+    assert 0 not in clears, clears
+    assert executable[cut_at] == bt
+    assert packaging_gate._cleared_names(
+        "export MAKEFLAGS=", executable, cut_at
+    ) == set()
+
+    # The name is recovered from a standalone assignment too: the recovery
+    # must not depend on the statement starting with `export`, which is
+    # what keeps `MAKEFLAGS=-s` followed by a substitution tainting.
+    standalone = packaging_gate._cut_make_assignment_name("MAKEFLAGS=")
+    assert standalone == "MAKEFLAGS"
+    assert (
+        packaging_gate._cut_make_assignment_name("export MAKEFLAGS=") == "MAKEFLAGS"
+    )
+    # A name that is not a make-flag variable is still not recovered, and a
+    # non-assignment word carries no name at all.
+    assert packaging_gate._cut_make_assignment_name("OTHER=") is None
+    assert packaging_gate._cut_make_assignment_name("echo") is None
+
+    # A continuation is joined: the joined and plain forms agree.
+    continued = f"export MAKEFLAGS={bt}printf X{bt} \\\n; export MAKEFLAGS=-s; make docs-check"
+    joined = packaging_gate._join_continuations(continued)
+    assert "\\" not in joined
+    continued_events = packaging_gate._substitution_taint_events(
+        {"run": continued}
+    )
+    plain_events = packaging_gate._substitution_taint_events({"run": script})
+    assert continued_events == plain_events
 
 def test_parent_versus_child_shapes_match_bash() -> None:
     """Every parent/child shape the clear depends on, in one table.
