@@ -2271,6 +2271,11 @@ def test_multi_name_export_keeps_the_make_taint() -> None:
     The verdict depends on the export attribute, so the bare (non-``export``)
     form stays certifiable: an unexported assignment never reaches make.
     """
+    # The name recovery itself: a bare name in the export list must not make
+    # the parser drop the tracked make name.  This asserts the new code path
+    # directly, since the previous implementation was a raw-text regex that
+    # happened to match the same name and so does not differ here.
+    assert packaging_gate._cut_make_assignment_name("export FOO MAKEFLAGS=") == "MAKEFLAGS"
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
     for script in (
         "export FOO MAKEFLAGS=`getflags`; make docs-check",
