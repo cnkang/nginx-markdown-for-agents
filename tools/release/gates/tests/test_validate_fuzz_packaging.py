@@ -61,6 +61,16 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
     ("quoted brace pair is data", "echo '{ }'; export MAKEFLAGS=-s", True),
     # -- a child shell does not clear -------------------------------------
     ("subshell, literal first", "( export MAKEFLAGS=-s )", False),
+    # Any amount of whitespace may sit between a pipe and a brace group, so
+    # the operator is matched as a word and not inside a fixed character
+    # window: `true |          { ...; }` is the same stage as `true | { ...; }`.
+    ("right of a widely spaced pipe", "true |          { export MAKEFLAGS=-s; }", False),
+    ("right of a tab-separated pipe", "true |\t{ export MAKEFLAGS=-s; }", False),
+    (
+        "left of a widely spaced pipe",
+        "{ export MAKEFLAGS=-s; }          | true",
+        False,
+    ),
     # A `case` pattern contributes a `)` that opened nothing.  If it were
     # allowed to cancel a LATER real subshell, that subshell would vanish
     # from the scan and the parent's clear would be credited.
@@ -136,6 +146,48 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
 
 
 
+
+
+def test_unverified_prerequisite_guarantees_are_pinned() -> None:
+    """Pin the two gate guarantees no end-to-end shape could reach.
+
+    Both were load-bearing in review while every suite stayed green when
+    they were stubbed out:
+
+    * the CLEAR stream must come from the LIVE view.  A literal only
+      clears when the analyzer can prove it runs, so a clear drawn from the
+      may-execute view would credit `if [ -f M ]; then export MAKEFLAGS=-s; fi`
+      and certify a make whose parent still carries the substitution.
+    * the requirements pin is what makes "the pinned dependencies are
+      installed" checkable, so a missing file or an unpinned entry has to
+      produce an issue.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for tail in (
+        "if [ -f M ]; then export MAKEFLAGS=-s; fi",
+        "[ -f M ] && export MAKEFLAGS=-s",
+        "for i in 1 2; do export MAKEFLAGS=-s; done",
+        "while false; do export MAKEFLAGS=-s; done",
+        "until true; do export MAKEFLAGS=-s; done",
+        "case x in y) export MAKEFLAGS=-s ;; esac",
+    ):
+        script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), tail
+
+    # A well-formed pin passes; a missing file or a bare name does not.
+    assert packaging_gate._requirements_pin_issue(
+        "jsonschema[format]==4.23.0\nPyYAML==6.0.2\n"
+    ) is None
+    assert packaging_gate._requirements_pin_issue("") is not None
+    assert packaging_gate._requirements_pin_issue("PyYAML==6.0.2\n") is not None
+    assert packaging_gate._requirements_pin_issue(
+        "jsonschema[format]\nPyYAML==6.0.2\n"
+    ) is not None
+    assert packaging_gate._requirements_pin_issue(
+        "jsonschema[format]==4.23.0\nPyYAML\n"
+    ) is not None
 
 def test_unverified_taint_mechanisms_are_pinned() -> None:
     """Pin the three taint mechanisms no end-to-end shape reaches.
@@ -2642,17 +2694,7 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true",
         "{ export MAKEFLAGS=-s; } &>/dev/null | true",
         "{ export MAKEFLAGS=-s; } > a > b | true",
-        # Any amount of whitespace may sit between the pipe and the brace, so the
-    # operator is matched as a word and not inside a fixed character window:
-    # `true |          { ...; }` is the same stage as `true | { ...; }`.
-    ("right of a widely spaced pipe", "true |          { export MAKEFLAGS=-s; }", False),
-    ("right of a tab-separated pipe", "true |\t{ export MAKEFLAGS=-s; }", False),
-    (
-        "left of a widely spaced pipe",
-        "{ export MAKEFLAGS=-s; }          | true",
-        False,
-    ),
-    # A brace group on the far side of the pipe takes the separator slot,
+        # A brace group on the far side of the pipe takes the separator slot,
         # so the `|` is dropped from the pair stream entirely; the text
         # between the two segments is the only place it survives.
         "{ export MAKEFLAGS=-s; } | { true; }",
