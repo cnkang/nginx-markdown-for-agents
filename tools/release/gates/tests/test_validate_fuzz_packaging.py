@@ -359,7 +359,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     body, must leave the name marked.
     """
     # Body statements 3..4: a clear at 3, then a cut at 4 inside the body.
-    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS"})}
+    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS": "-s"})}
     tracker = packaging_gate._TaintTracker(
         {0: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}}, {}, {}
     )
@@ -373,7 +373,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     )
 
     # Same body, but the cut precedes the clear: the clear wins.
-    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS"})}
+    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS": "-s"})}
     superseded = packaging_gate._TaintTracker(
         {0: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}}, {}, {}
     )
@@ -384,8 +384,8 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     assert "MAKEFLAGS" not in superseded._tainted, (
         "a cut before the body's clear is superseded by it"
     )
-    assert view["MAKEFLAGS"] == packaging_gate._BODY_CLEARED_VALUE, (
-        "a superseded clear must still refresh the export view"
+    assert view["MAKEFLAGS"] == "-s", (
+        "a superseded clear must still deliver the body's own literal"
     )
 
 def test_the_body_span_covers_every_statement_the_call_runs() -> None:
@@ -416,6 +416,93 @@ def test_the_body_span_covers_every_statement_the_call_runs() -> None:
             "the range must cover every body statement, not the clear alone"
         )
     assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+
+
+def test_a_foreground_call_is_not_dropped_by_a_backgrounded_twin() -> None:
+    """A backgrounded call must be judged by position, not by its text.
+
+    ``f & wait; f`` runs the SECOND call in the foreground, so bash leaves the
+    body's literal in the parent; matching the text dropped both calls and a
+    valid step was rejected.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(tail: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"f() {{ export MAKEFLAGS=-s; }}; {tail} "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("f & wait; f; "), "the foreground twin still clears"
+    assert not verdict("f & wait; "), "a lone backgrounded call clears nothing"
+    assert not verdict("(f) & wait; "), "a backgrounded subshell call too"
+    assert not verdict("f | cat; "), "a pipeline stage cannot clear the parent"
+
+
+def test_a_called_body_delivers_its_own_literal_to_the_make() -> None:
+    """The body's literal must survive the clear, not become a placeholder.
+
+    The make-option checks read the exported value, so an empty placeholder
+    made ``export MAKEFLAGS=-n`` inside a called body invisible and a dry-run
+    make certified a step the same script rejects when written at top level.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(body: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; f() {{ {body} }}; f; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not verdict("export MAKEFLAGS=-n"), (
+        "a dry-run flag in a called body must not certify"
+    )
+    assert verdict("export MAKEFLAGS=-s"), "a harmless flag still certifies"
+
+
+def test_a_literal_loop_body_ignores_an_early_exit() -> None:
+    """Pin the KNOWN LIMITATION the loop-body rule does not model.
+
+    bash runs ``export MAKEFLAGS=-s; break`` (the clear lands) but not
+    ``break; export MAKEFLAGS=-s`` (it never runs).  One branch state covers a
+    whole body, so the second shape cannot be told from the first here, and
+    modelling it per-statement would reject the first -- which real workflows
+    rely on (install-verify.yml breaks after the work).  Both are therefore
+    CERTIFIED here; the asymmetry is recorded rather than modelled.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(body: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"for i in 1 2 3; do {body} done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("export MAKEFLAGS=-s; break; "), "clear then break runs"
+    assert verdict("break; export MAKEFLAGS=-s; "), (
+        "KNOWN LIMITATION: break first is accepted though the clear never runs"
+    )
+    assert verdict("continue; export MAKEFLAGS=-s; "), (
+        "KNOWN LIMITATION: continue first, same reason"
+    )
+    # A list that may iterate zero times keeps its body conditional.
+    def variable_list() -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"for i in $LIST; do export MAKEFLAGS=-s; done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not variable_list(), "an unset variable iterates zero times"
 
 
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:

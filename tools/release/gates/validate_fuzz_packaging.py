@@ -2399,6 +2399,14 @@ def _open_keyword_branch(
         word in {"do"} or _glob_or_command_substitution(word) for word in items
     ):
         return (False, _UNKNOWN_CHAIN)
+    # A `break`/`continue` in the body would need per-statement state to model
+    # exactly: bash runs `export MAKEFLAGS=-s; break` (CERTIFY) but not
+    # `break; export MAKEFLAGS=-s` (REJECT).  One branch state covers the whole
+    # body, so choosing either loses a legal acceptance -- and real workflows do
+    # put `break` after the work inside a literal loop (install-verify.yml).  The
+    # body therefore keeps its classification, which is the fail-open this branch
+    # is recorded against rather than a regression: the `break`-first shape was
+    # already accepted before this loop handling existed.
     return (True, _CLEAR_CHAIN)
 
 
@@ -8519,7 +8527,7 @@ def _substitution_taint_events(
     exports: dict[int, set[str]] = {}
     _record_cut_taints(may_entries, executable, cut_positions, taints, exports)
     call_pairs = _body_clear_call_pairs(pairs, executable, script)
-    backgrounded = _backgrounded_command_segments(executable)
+    backgrounded = _backgrounded_pair_indices(executable)
     # A body-derived clear is only real AT THE CALL, so it is returned in its
     # own channel keyed by the call's index rather than moved into `clears`.
     # `clears` is consumed by `_pip_step_scan`, which folds it through the
@@ -8528,15 +8536,19 @@ def _substitution_taint_events(
     # the call's index fires without the matching export VIEW update, so the
     # make still sees the unresolved sentinel.  Keeping it separate lets the
     # caller apply the value at the call and nothing before it.
-    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]] = {}
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]] = {}
     for index, command in live_entries:
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if not names:
             continue
+        literals = _cleared_literals(command, executable, names)
         if index in call_pairs:
             _record_body_clear(
-                index, call_pairs[index], call_pairs, pairs, executable,
-                backgrounded, names, body_clears,
+                index, call_pairs[index], call_pairs,
+                _BodyClearContext(
+                    pairs, executable, backgrounded, names, literals
+                ),
+                body_clears,
             )
             continue
         if not _runs_in_parent_shell(pairs, executable, index):
@@ -8545,15 +8557,32 @@ def _substitution_taint_events(
     return taints, clears, exports, body_clears
 
 
+class _BodyClearContext:
+    """What one body statement contributes, plus the shell facts it is judged in."""
+
+    __slots__ = ("pairs", "executable", "backgrounded", "names", "literals")
+
+    def __init__(
+        self,
+        pairs: list[tuple[str, str]],
+        executable: str,
+        backgrounded: set[int],
+        names: set[str],
+        literals: dict[str, str],
+    ) -> None:
+        self.pairs = pairs
+        self.executable = executable
+        self.backgrounded = backgrounded
+        self.names = names
+        self.literals = literals
+
+
 def _record_body_clear(
     index: int,
     calls: list[int],
     call_pairs: dict[int, list[int]],
-    pairs: list[tuple[str, str]],
-    executable: str,
-    backgrounded: set[str],
-    names: set[str],
-    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]],
+    context: "_BodyClearContext",
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
 ) -> None:
     """Record a function body's clear at every call that can deliver it.
 
@@ -8562,8 +8591,15 @@ def _record_body_clear(
     nothing.  A backgrounded call is not a live entry, so its shell cannot be
     classified by position and is refused here instead.
     """
+    pairs, executable, backgrounded, literals = (
+        context.pairs, context.executable, context.backgrounded, context.literals
+    )
+    names = context.names
     for call in calls:
-        if pairs[call][0].strip() in backgrounded:
+        # By PAIR INDEX, not by text: `f & wait; f` runs the second call in the
+        # foreground, and matching the text dropped both, so a step bash accepts
+        # was rejected (probed: the parent holds the body's literal there).
+        if call in backgrounded:
             continue
         if not _runs_in_parent_shell(pairs, executable, call):
             continue
@@ -8571,10 +8607,9 @@ def _record_body_clear(
         # whether the body cleared the name or re-cut it afterwards depends on
         # the order of events INSIDE the body, which the call index cannot say.
         span = _span_for_call(call_pairs, call, index)
-        seen = body_clears.get(call, (span, set()))[1]
-        # The clearing statement's own index decides the ORDER: a cut before
-        # it is superseded, a cut after it survives.
-        body_clears[call] = (span + (index,), seen | names)
+        seen = body_clears.get(call, (span, {}))[1]
+        # A later literal in the body wins: the call delivers the last one.
+        body_clears[call] = (span + (index,), {**seen, **literals})
 
 
 def _span_for_call(
@@ -9024,13 +9059,6 @@ def _inside_command_substitution(prefix: str) -> bool:
 
 
 _CASE_KEYWORD_RE = re.compile(r"\bcase\b")
-
-# The value recorded for a name a called function body cleared.  It must be a
-# value no make-option check rejects: `--body-cleared` was tried and
-# `_make_option_prevents_execution` reads the leading `--` as an option that
-# stops the recipe, so the docs-check lost its prerequisite.  An empty string
-# is inert everywhere and only has to differ from the unresolved sentinel.
-_BODY_CLEARED_VALUE = ""
 
 
 def _ends_case_item(prefix: str, start: int) -> bool:
@@ -9732,9 +9760,43 @@ def _advance_export_tracking(
             exported[name] = value
 
 
+def _cleared_literals(
+    command: str, executable: str, names: set[str]
+) -> dict[str, str]:
+    """The literal each cleared name is given by *command*.
+
+    The caller's make-option checks read this value, so it has to survive the
+    body's clear: an empty placeholder made ``export MAKEFLAGS=-n`` invisible
+    and a dry-run make certified a step the direct form rejects (verified: the
+    same script rejects when the literal is written at top level).
+    """
+    literals: dict[str, str] = {}
+    for name in names:
+        value = _assigned_literal_value(command, executable, name)
+        if value is not None:
+            literals[name] = value
+    return literals
+
+
+def _assigned_literal_value(
+    command: str, executable: str, name: str
+) -> str | None:
+    """The literal *name* is assigned in *command*, or None if it is cut."""
+    state = _make_relevant_export_state(command, {})
+    if state is None:
+        return None
+    names, values = state
+    if name not in names:
+        return None
+    value = values.get(name)
+    if value is None or "`" in value:
+        return None
+    return value
+
+
 def _apply_body_clear(
     pair_index: int,
-    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]],
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
     tracker: _TaintTracker,
     exported: dict[str, str],
 ) -> None:
@@ -9749,9 +9811,10 @@ def _apply_body_clear(
     recorded = body_clears.get(pair_index)
     if recorded is None:
         return
-    body_span, names = recorded
-    if not names:
+    body_span, literals = recorded
+    if not literals:
         return
+    names = set(literals)
     # Only the names the body cleared AFTER its last cut may be unmarked.  A
     # body can assign twice -- clear, then cut again -- and the later cut is
     # what the make inherits, so unmarking it here would certify a make that
@@ -9762,8 +9825,10 @@ def _apply_body_clear(
     if not cleared:
         return
     tracker.clear_at(pair_index, cleared)
+    # The body's own literal, not a placeholder: the make-option checks read
+    # this value, and an empty one made `export MAKEFLAGS=-n` invisible.
     for name in cleared:
-        exported[name] = _BODY_CLEARED_VALUE
+        exported[name] = literals[name]
 
 
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
