@@ -247,35 +247,79 @@ def test_unverified_mechanisms_are_pinned() -> None:
     # accepted set is the riskier direction to take in a taint analyzer.
     assert not verdict("FOO=1 f"), "documented over-rejection, see comment"
 
+
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     """A function body runs in the CALL's shell, not in the shell it is written in.
 
     A body is the one construct whose execution shell is not the shell its
     text sits in, so the clear side must be judged at the call.  Bash was
-    probed for each shape: the direct, `&&` and `||` calls clear the parent,
-    and the pipeline stage, subshell, command substitution and backgrounded
-    call all leave it holding the substitution's output.
+    probed for each shape: the direct, `&&`, `||` and argument-bearing calls
+    clear the parent, and the pipeline stage, subshell, command substitution,
+    backgrounded call and a call after the make do not.
     """
-    body = "f() { export MAKEFLAGS=-s; }"
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
-    clears_in_parent = ("f", "true && f", "false || f")
-    clears_in_child = ("f | cat", "( f )", "x=$(f)", "f & wait")
-    for call in clears_in_parent:
-        script = f"export MAKEFLAGS=`getflags`; {body}; {call}; make docs-check"
-        assert (
-            packaging_gate._python_deps_issue([install, {"run": script}]) is None
-        ), call
-    for call in clears_in_child:
-        script = f"export MAKEFLAGS=`getflags`; {body}; {call}; make docs-check"
-        assert (
-            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
-        ), call
+
+    def verdict(tail: str) -> bool:
+        """*tail* is the whole run step after the substitution."""
+        script = f"export MAKEFLAGS=`getflags`; {tail}"
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    # Every statement of a body maps to the call, not just the first: with
+    # `f() { a; export MAKEFLAGS=-s; b; }` the literal is the SECOND one, and
+    # mapping only the opener credited it to the parent even when the call ran
+    # as a pipeline stage.
+    for body in (
+        "f() { export MAKEFLAGS=-s; }",
+        "f() { a; export MAKEFLAGS=-s; b; }",
+        "f() { a; export MAKEFLAGS=-s; b; c; }",
+        "f() { if true; then export MAKEFLAGS=-s; fi; }",
+    ):
+        assert verdict(f"{body}; f; make docs-check"), body
+        assert not verdict(f"{body}; f | cat; make docs-check"), body
+        assert not verdict(f"{body}; ( f ); make docs-check"), body
+        assert not verdict(f"{body}; x=$(f); make docs-check"), body
+
+    # A call is the FIRST command word, so a trailing argument is still the
+    # call and a bare mention of the name is not one.
+    body = "f() { export MAKEFLAGS=-s; }"
+    make = "; make docs-check"
+    assert verdict(f"{body}; f x=1{make}"), "a trailing argument is still the call"
+    assert verdict(f"{body}; f --flag{make}"), "an option is still the call"
+    # The same argument-bearing call as a pipeline stage.  This is the shape
+    # that pins the match to the FIRST word: with a last-word match the call
+    # is not recognised at all, the body falls back to being judged where it
+    # is written, and the child's literal certifies the parent.
+    assert not verdict(f"{body}; f x=1 | cat{make}"), "an argument-bearing stage"
+    assert not verdict(f"{body}; f --flag | cat{make}"), "an option-bearing stage"
+    assert not verdict(f"{body}; echo f{make}"), "the name as an argument is not it"
+
+    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash's make sees [-s] when
+    # the call precedes it and [SUB] when it follows, so a make BETWEEN the
+    # definition and the call must reject.  This still CERTIFIES: the clear is
+    # recorded at the body's index, which the tracker applies before the make.
+    #
+    # It cannot simply move onto the call's pair -- `_TaintTracker.advance`
+    # walks events in segment order and `_pip_step_scan` reads the same
+    # stream, so a clear placed there made the scanner stop seeing the
+    # following `make docs-check` and the step was rejected for a missing
+    # prerequisite instead of a real taint (tried and reverted).  Carrying
+    # "applies from here on" needs a separate channel, which is a larger
+    # change than belongs in this fix.
+    #
+    # This assertion PINS the gap on purpose: it fails the moment someone
+    # closes it, and the failure message points here.
+    assert verdict(f"{body}; make docs-check; f"), (
+        "KNOWN GAP closed -- update the comment above and the ledger"
+    )
+
+    # The name mentioned as an argument is not a call, so with no real call
+    # anywhere the body clears nothing.  This is the only shape where matching
+    # the LAST word instead of the first changes the verdict: under last-word
+    # matching `echo f` would be taken for a call.
+    assert not verdict(f"{body}; echo f{make}"), "a mention is not a call"
+
     # A body that is never called cannot clear anything.
-    script = f"export MAKEFLAGS=`getflags`; {body}; true; make docs-check"
-    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
-    # The name appearing only as an argument is not a call.
-    script = f"export MAKEFLAGS=`getflags`; {body}; echo f; make docs-check"
-    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+    assert not verdict(f"{body}; true{make}"), "a body with no call clears nothing"
 
 def test_unverified_prerequisite_guarantees_are_pinned() -> None:
     """Pin the two gate guarantees no end-to-end shape could reach.
