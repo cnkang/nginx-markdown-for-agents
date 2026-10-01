@@ -2325,8 +2325,24 @@ def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
         assert (
             packaging_gate._python_deps_issue([install, {"run": script}]) is not None
         ), script
+    # Every statement INSIDE a region runs in that region, not just the
+    # first one the separator happens to mark.  A classification that reads
+    # only the segment's own separator credits the parent for all of these.
+    for tail in (
+        "( true; export MAKEFLAGS=-s )",
+        "( true; export MAKEFLAGS=-s; true )",
+        "true | export MAKEFLAGS=-s",
+        "{ export MAKEFLAGS=-s; } | true",
+        "{ true; export MAKEFLAGS=-s; } | true",
+        "x=`export MAKEFLAGS=-s; true`",
+    ):
+        script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
     # Positive controls: the same literal in the parent shell clears, both
-    # after a substitution cut and in a separate statement.
+    # after a substitution cut and in a separate statement.  An even number
+    # of backticks before the literal is what keeps these clearing.
     for script in (
         "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check",
         "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check",
@@ -2365,6 +2381,14 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
     for tail in (
         "true | { export MAKEFLAGS=-s; }",
         "true | export MAKEFLAGS=-s",
+    ):
+        assert verdict(tail) is not None, tail
+    # A group on the LEFT of a pipe is a child too: the pipe follows the
+    # closing brace rather than introducing the group, so a probe that only
+    # looks backwards from the group opener misses it.
+    for tail in (
+        "{ export MAKEFLAGS=-s; } | true",
+        "{ true; export MAKEFLAGS=-s; } | true",
     ):
         assert verdict(tail) is not None, tail
 
