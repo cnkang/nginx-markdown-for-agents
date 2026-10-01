@@ -2331,6 +2331,39 @@ def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
         ), script
 
 
+def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
+    """``{ ...; }`` runs in the current shell, so it clears; a stage does not.
+
+    Regression: the child-shell guard treated every ``{`` as a child region,
+    so the first statement of a standalone brace group lost its clear and a
+    legitimate parent-shell clear was rejected.  Bash runs ``{ ...; }`` in
+    the CURRENT shell (verified: the parent's value becomes ``-s``), while
+    the same group used as a PIPELINE stage forks a child and does not
+    (verified: the parent keeps the substitution's output).
+
+    Both directions are asserted so neither the child nor the parent case
+    can regress silently.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    def verdict(tail: str) -> str | None:
+        return packaging_gate._python_deps_issue(
+            [install, {"run": f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"}]
+        )
+
+    for tail in (
+        "{ export MAKEFLAGS=-s; }",
+        "true && { export MAKEFLAGS=-s; }",
+        "{ true; export MAKEFLAGS=-s; }",
+    ):
+        assert verdict(tail) is None, tail
+    for tail in (
+        "true | { export MAKEFLAGS=-s; }",
+        "true | export MAKEFLAGS=-s",
+    ):
+        assert verdict(tail) is not None, tail
+
+
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     """A ``set`` behind a short-circuit must not change the shell's mode.
 
