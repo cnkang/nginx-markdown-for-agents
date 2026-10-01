@@ -326,6 +326,19 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
         "the make before the call must not see the body's clear"
     )
 
+    # EVERY call must be able to deliver the clear, not just the first: a
+    # substitution raised between two calls is only cleared by the second.
+    body = "f() { export MAKEFLAGS=-s; }"
+    assert verdict(f"{body}; f; export MAKEFLAGS=`b`; f{make}"), (
+        "a second parent-shell call must clear a taint raised between calls"
+    )
+    assert verdict(f"{body}; f | cat; export MAKEFLAGS=`b`; f{make}"), (
+        "the pipeline stage does not stop the later parent-shell call"
+    )
+    assert not verdict(f"{body}; f | cat; make docs-check"), (
+        "but a call that is ONLY a stage still cannot clear the parent"
+    )
+
     # The name mentioned as an argument is not a call, so with no real call
     # anywhere the body clears nothing.  This is the only shape where matching
     # the LAST word instead of the first changes the verdict: under last-word

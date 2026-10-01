@@ -32,7 +32,7 @@ No user-supplied patterns are compiled at runtime.
 from __future__ import annotations
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import functools
 import re
 import shlex
@@ -8427,7 +8427,13 @@ def _substitution_taint_events(
 ) -> tuple[
     dict[int, set[str]], dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]
 ]:
-    """Taint, clear, and export events keyed by pair index.
+    """Taint, clear, export and body-clear events keyed by pair index.
+
+    Returns four mappings.  The fourth, ``body_clears``, is keyed by CALL
+    position rather than by where the body is written, and a caller MUST
+    apply it together with the export-view update -- see `_apply_body_clear`.
+    Treating it as part of ``clears`` applies the clear at the body's own
+    index, before a make that runs between the definition and the call.
 
     ``taints[index]`` holds the make names a substitution cut at that
     segment may leave unresolved.  The event is drawn from the
@@ -8471,23 +8477,40 @@ def _substitution_taint_events(
     # caller apply the value at the call and nothing before it.
     body_clears: dict[int, set[str]] = {}
     for index, command in live_entries:
-        judged = call_pairs.get(index, index)
-        if index in call_pairs and pairs[judged][0].strip() in backgrounded:
-            # The call is backgrounded: its environment changes stay in the
-            # background shell, so the body never reaches the parent.  The
-            # call is not a live entry either, so this cannot be answered by
-            # the call's own position being classified as a child.
-            continue
-        if not _runs_in_parent_shell(pairs, executable, judged):
-            continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if not names:
             continue
-        if judged != index:
-            body_clears.setdefault(judged, set()).update(names)
+        if index in call_pairs:
+            _record_body_clear(index, call_pairs[index], pairs, executable, backgrounded, names, body_clears)
+            continue
+        if not _runs_in_parent_shell(pairs, executable, index):
             continue
         clears.setdefault(index, set()).update(names)
     return taints, clears, exports, body_clears
+
+
+def _record_body_clear(
+    index: int,
+    calls: list[int],
+    pairs: list[tuple[str, str]],
+    executable: str,
+    backgrounded: set[str],
+    names: set[str],
+    body_clears: dict[int, set[str]],
+) -> None:
+    """Record a function body's clear at every call that can deliver it.
+
+    Each call is judged on its own: one in the parent clears the parent, a
+    pipeline stage or subshell does not, and a backgrounded call clears
+    nothing.  A backgrounded call is not a live entry, so its shell cannot be
+    classified by position and is refused here instead.
+    """
+    for call in calls:
+        if pairs[call][0].strip() in backgrounded:
+            continue
+        if not _runs_in_parent_shell(pairs, executable, call):
+            continue
+        body_clears.setdefault(call, set()).update(names)
 
 
 def _record_cut_taints(
@@ -8510,7 +8533,7 @@ def _record_cut_taints(
 
 def _body_clear_call_pairs(
     pairs: list[tuple[str, str]], executable: str, source: str
-) -> dict[int, int]:  # noqa: C901
+) -> dict[int, list[int]]:
     """Map a FUNCTION-BODY statement's pair index to the pair that CALLS it.
 
     A function body is the one construct whose execution shell is not the
@@ -8521,14 +8544,18 @@ def _body_clear_call_pairs(
     ``make`` inheriting the substitution certified (verified in bash: the
     parent keeps the substitution's output in every one of them).
 
-    The mapping is to the FIRST live call of that function's name after the
-    definition.  Only the first is used because a name may be called from
-    several places; a later call that runs in the parent cannot retroactively
-    credit a child's clear, so the conservative first call is the right
-    choice.  A body with no call keeps its own index, which preserves the
+    The mapping is to EVERY call of that function's name after the
+    definition, not just the first.  Each call keeps its own verdict: a call
+    in the parent clears the parent, a pipeline stage or subshell does not,
+    and a backgrounded call clears nothing.  Mapping only the first call left
+    a SECOND parent-shell call unable to clear a taint raised between the two
+    (`f; export MAKEFLAGS=`b`; f; make docs-check`), so a valid step was
+    rejected -- verified in bash, the parent holds `-s` there.
+
+    A body with no call is absent from the mapping, which preserves the
     existing never-called behaviour.
     """
-    mapping: dict[int, int] = {}
+    mapping: dict[int, list[int]] = {}
     # A body is the run of pairs from the opening `{` to the matching `}`.
     # Every pair in that run must map to the call, not just the opener: with
     # `f() { a; export MAKEFLAGS=-s; b; }` the literal is the SECOND
@@ -8544,26 +8571,46 @@ def _body_clear_call_pairs(
     # and translated back by segment start.
     joined = _join_continuations(_strip_heredocs(_strip_shell_comments(source)))
     joined_pairs = _command_segments_with_separators(joined)
+    # The blanked body keeps its offsets, so a pair is identified by its
+    # segment START in both streams.  Building the map once keeps the loop
+    # below within the complexity budget.
     stripped_by_start = {
         _segment_start(pairs, executable, index): index for index in range(len(pairs))
     }
-    for name, lo, hi in spans:
-        body = _body_statement_indices(joined_pairs, joined, (lo, hi))
-        if not body:
-            continue
-        call = _first_call_after(joined_pairs, body[-1], name)
-        if call is None:
-            continue
-        call_index = stripped_by_start.get(_segment_start(joined_pairs, joined, call))
-        if call_index is None:
-            continue
-        for statement in body:
-            stripped = stripped_by_start.get(
-                _segment_start(joined_pairs, joined, statement)
-            )
-            if stripped is not None:
-                mapping[stripped] = call_index
+
+    def stripped_at(index: int) -> int | None:
+        return stripped_by_start.get(_segment_start(joined_pairs, joined, index))
+
+    for span in spans:
+        _map_one_span(span, joined, joined_pairs, stripped_at, mapping)
     return mapping
+
+
+def _map_one_span(
+    span: tuple[str, int, int],
+    joined: str,
+    joined_pairs: list[tuple[str, str]],
+    stripped_at: Callable[[int], int | None],
+    mapping: dict[int, list[int]],
+) -> None:
+    """Point every statement of one body at every call that can clear it."""
+    name, lo, hi = span
+    body = _body_statement_indices(joined_pairs, joined, (lo, hi))
+    if not body:
+        return
+    indices = [
+        index
+        for index in (
+            stripped_at(call) for call in _calls_after(joined_pairs, body[-1], name)
+        )
+        if index is not None
+    ]
+    if not indices:
+        return
+    for statement in body:
+        stripped = stripped_at(statement)
+        if stripped is not None:
+            mapping[stripped] = list(indices)
 
 
 def _body_statement_indices(
@@ -8600,25 +8647,26 @@ def _is_command_name(word: str) -> bool:
     )
 
 
-def _first_call_after(
+def _calls_after(
     pairs: list[tuple[str, str]], body_index: int, name: str
-) -> int | None:
-    """Index of the first pair after *body_index* that calls *name*.
+) -> list[int]:
+    """Every pair index after *body_index* that calls *name*.
 
-    The name is the FIRST command word: ``f`` and ``f --flag`` and
-    ``f x=1`` are all calls, while ``echo f`` is not.  Leading environment
-    assignments are skipped, so ``FOO=1 f`` is a call too.
+    All of them, not just the first: a function called twice must have its
+    clear available at BOTH calls, or a substitution raised between them is
+    never cleared and a valid step is rejected.
 
-    Matching the LAST word instead missed every call that carries an
-    argument, which left the body's literal credited to the parent whenever
-    the argument-bearing call ran as a pipeline stage.
+    The name is the FIRST command word: ``f`` and ``f --flag`` and ``f x=1``
+    are all calls, while ``echo f`` is not.  Leading environment assignments
+    are skipped, so ``FOO=1 f`` is a call too.  Matching the LAST word
+    instead missed every call carrying an argument, which left the body's
+    literal credited to the parent whenever such a call ran as a stage.
     """
-    for index in range(body_index + 1, len(pairs)):
-        segment, _separator = pairs[index]
-        words = _command_words(_masked_quotes(segment))
-        if name in words[:1]:
-            return index
-    return None
+    return [
+        index
+        for index in range(body_index + 1, len(pairs))
+        if name in _command_words(_masked_quotes(pairs[index][0]))[:1]
+    ]
 
 
 def _command_words(segment: str) -> list[str]:
