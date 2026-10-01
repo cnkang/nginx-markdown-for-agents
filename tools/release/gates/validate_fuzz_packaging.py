@@ -8426,7 +8426,7 @@ def _substitution_taint_events(
         if words and words[0] == "export":
             exports.setdefault(index, set()).add(name)
     for index, command in live_entries:
-        if not _runs_in_parent_shell(pairs, index):
+        if not _runs_in_parent_shell(pairs, executable, index):
             continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if names:
@@ -8434,28 +8434,80 @@ def _substitution_taint_events(
     return taints, clears, exports
 
 
-# Separators that open a region the parent shell does not run in: a subshell
-# group, a brace group used as a pipeline stage, and a pipeline stage
-# boundary.  A command substitution is excluded because the same backtick
-# also terminates a preceding substitution, and the segment after a cut
-# carries it too (`export MAKEFLAGS=\`g\`\nMAKEFLAGS=-s` puts a backtick in
-# front of the literal that legitimately clears the taint).
-_NON_PARENT_SHELL_SEPARATORS = frozenset({"(", "{", "|"})
+# Separators that always open a region the parent shell does not run in: a
+# subshell group and a bare pipeline stage.  A command substitution is NOT
+# listed because the same backtick also terminates a preceding substitution,
+# and the segment after a cut carries it in front of the literal that
+# legitimately clears the taint.
+_NON_PARENT_SHELL_SEPARATORS = frozenset({"(", "|"})
+# How much text before a segment the pipeline-stage probe inspects.  It must
+# span the group opener, so `true | { cmd` needs more than the operator alone.
+_OPERATOR_WINDOW = 8
 
 
-def _runs_in_parent_shell(pairs: list[tuple[str, str]], index: int) -> bool:
+def _runs_in_parent_shell(
+    pairs: list[tuple[str, str]], executable: str, index: int
+) -> bool:
     """True when the segment at *index* executes in the parent shell itself.
 
-    A subshell or a pipeline stage runs the assignment in a child
-    environment, so a literal there never changes the value a later
-    ``make`` in the parent shell receives (verified: the parent keeps the
-    substitution's output after ``( export MAKEFLAGS=-s )`` and after
-    ``true | { export MAKEFLAGS=-s; }``).  Those regions are marked by the
-    separator that opens them.
+    A subshell, a bare pipeline stage, or a brace group used AS a pipeline
+    stage runs the assignment in a child environment, so a literal there
+    never changes the value a later ``make`` in the parent shell receives
+    (verified: the parent keeps the substitution's output after
+    ``( export MAKEFLAGS=-s )``, after ``true | export MAKEFLAGS=-s`` and
+    after ``true | { export MAKEFLAGS=-s; }``).
+
+    A standalone brace group is the exception: bash runs ``{ ...; }`` in the
+    CURRENT shell, so ``{ export MAKEFLAGS=-s; }`` and
+    ``true && { export MAKEFLAGS=-s; }`` DO clear the parent's value.  The
+    pair stream marks both with the same ``{`` separator, so the two cases
+    are told apart by the operator in front of the group: only a ``|`` puts
+    the brace group in a child shell.
     """
     if not 0 <= index < len(pairs):
         return False
-    return pairs[index][1] not in _NON_PARENT_SHELL_SEPARATORS
+    separator = pairs[index][1]
+    if separator in _NON_PARENT_SHELL_SEPARATORS:
+        return False
+    if separator == "{":
+        return not _opens_pipeline_stage(pairs, executable, index)
+    return True
+
+
+def _opens_pipeline_stage(
+    pairs: list[tuple[str, str]], executable: str, index: int
+) -> bool:
+    """True when the brace group opened at *index* is a pipeline stage.
+
+    The pair stream drops the operator that introduces the group, so the
+    text just before this segment's start is consulted directly: a
+    standalone group and an ``&&``-led group are introduced by ``;`` or
+    ``&&`` and run in the parent shell, while a ``|`` puts the group in a
+    child shell.
+    """
+    if index == 0:
+        return False
+    start = _segment_start(pairs, executable, index)
+    if start <= 0:
+        return False
+    # The group opener sits between the operator and the segment, so the
+    # window has to span the opener as well (``true | { ``).
+    return "|" in executable[max(0, start - _OPERATOR_WINDOW) : start]
+
+
+def _segment_start(pairs: list[tuple[str, str]], executable: str, index: int) -> int:
+    """Offset of the segment at *index* within *executable*.
+
+    The pair stream is produced from *executable*, so each segment is a
+    literal substring at or after the running cursor.
+    """
+    cursor = 0
+    for position, (segment, _separator) in enumerate(pairs):
+        found = executable.find(segment, cursor) if segment else cursor
+        if position == index:
+            return found if found >= 0 else cursor
+        cursor = (found + len(segment)) if found >= 0 else cursor
+    return cursor
 
 
 def _cut_taint_name(command: str, executable: str, cut: int) -> str | None:
