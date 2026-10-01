@@ -7,7 +7,11 @@ UNAME_M := $(shell uname -m)
 # instead of one core.  The flag is added only when xdist is importable, so a
 # checkout without it (or a runner that installs pytest alone) still runs the
 # suites serially instead of failing on an unknown option.  Override with
-# `make PYTEST_JOBS=-n 8 ...` or `make PYTEST_JOBS= ...` to pin the choice.
+# a single quoted word, `make PYTEST_JOBS='-n 8' ...`, or an empty value,
+# `make PYTEST_JOBS= ...`, to pin the choice.  The value must stay in ONE
+# shell word: unquoted, the shell splits `-n 8` into the assignment
+# `PYTEST_JOBS=-n` plus a bare goal `8`, and make stops with
+# "No rule to make target 8".
 PYTEST_JOBS ?= $(shell python3 -c "import xdist" >/dev/null 2>&1 && echo "-n 4")
 
 LINUX_LIBC := $(shell if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then echo musl; elif command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -qi musl; then echo musl; else echo gnu; fi)
