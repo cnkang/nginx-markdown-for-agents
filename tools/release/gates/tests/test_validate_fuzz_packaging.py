@@ -179,6 +179,74 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
 
 
 
+
+def test_unverified_mechanisms_are_pinned() -> None:
+    """Pin mechanisms no end-to-end shape could see removed.
+
+    Each was load-bearing while every suite stayed green when it was stubbed
+    out, so each is asserted at the level it acts on rather than through a
+    shell shape that another mechanism happens to cover as well.
+    """
+    bt = chr(96)
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    # The may-execute view's contribution to the TAINT stream: an assignment
+    # behind an unknown condition still marks the name, because the
+    # substitution may run and the scan cannot attribute make's value.  The
+    # live view alone would drop all of these, so only this assertion can
+    # tell the two views apart.
+    for tail in (
+        f"if [ -f M ]; then export MAKEFLAGS={bt}g{bt}; fi",
+        f"[ -f M ] && export MAKEFLAGS={bt}g{bt}",
+        f"for i in 1; do export MAKEFLAGS={bt}g{bt}; done",
+        f"while false; do export MAKEFLAGS={bt}g{bt}; done",
+    ):
+        taints, clears, exports = packaging_gate._substitution_taint_events(
+            {"run": tail}
+        )
+        assert taints and all("MAKEFLAGS" in names for names in taints.values()), tail
+        assert exports and all(
+            "MAKEFLAGS" in names for names in exports.values()
+        ), tail
+        assert not clears, tail
+
+    # A `case` item body may hold more than one command, and the pattern's
+    # `)` must still be recognised across all of them.  Every shape here runs
+    # in a child shell, so the literal cannot reach the parent.
+    for tail in (
+        "( case x in y) a; b ;; esac; export MAKEFLAGS=-s )",
+        "( case x in y) a; b; c ;; esac; export MAKEFLAGS=-s )",
+        "( case $x in y|z) a; b ;; esac; export MAKEFLAGS=-s )",
+        "( case $x in y) for i in 1; do true; done ;; esac; export MAKEFLAGS=-s )",
+        "( case $x in y) if true; then true; fi ;; esac; export MAKEFLAGS=-s )",
+        "( true; case x in y) a; b ;; esac; export MAKEFLAGS=-s )",
+        "( case x in y) a; b ;; esac; { export MAKEFLAGS=-s; } )",
+        "{ ( case x in y) a; b ;; esac; export MAKEFLAGS=-s ); }",
+    ):
+        script = f"export MAKEFLAGS={bt}g{bt}; {tail}; make docs-check"
+        assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+
+    # A call is the name as the LAST command word, so a trailing argument
+    # does not hide the call and a mere mention of the name is not one.
+    def verdict(tail: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}g{bt}; f() {{ export MAKEFLAGS=-s; }}; "
+            f"{tail}; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("f"), "a bare call clears in the parent"
+    assert verdict("f x=1"), "a trailing argument is still the call"
+    assert not verdict("echo f"), "the name as an argument is not a call"
+
+    # KNOWN LIMITATION, base-identical and fail-closed, recorded not fixed:
+    # bash runs `FOO=1 f` in the parent, so the body's literal clears there,
+    # but an assignment in front of the call makes the body-stripping view
+    # drop the literal entirely and this rejects.  base rejects it too, so it
+    # is a missed acceptance rather than a regression, and widening the
+    # accepted set is the riskier direction to take in a taint analyzer.
+    assert not verdict("FOO=1 f"), "documented over-rejection, see comment"
+
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     """A function body runs in the CALL's shell, not in the shell it is written in.
 
