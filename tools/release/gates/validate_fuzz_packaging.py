@@ -1309,6 +1309,28 @@ _NON_BUILTIN_COMMANDS = frozenset({
     "env", "command", "exec", "nohup", "sudo",
 })
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_](?a:\w)*=")
+# A bare shell identifier: `export FOO` names FOO without assigning it.
+_SHELL_NAME_RE = re.compile(r"^[A-Za-z_](?a:\w)*$")
+
+
+def _is_export_operand(word: str) -> bool:
+    """True when *word* can precede the tracked name in an ``export`` list.
+
+    ``export`` accepts three operand shapes before the assignment whose
+    value is in question: an assignment (``FOO=1``), a bare name whose
+    existing value it exports (``FOO``), and its own options (``-n``,
+    ``--``).  Anything else means the word is a command word rather than an
+    export operand, so the tracked name is not reached by this statement.
+    """
+    if _ENV_ASSIGN_RE.match(word):
+        return True
+    if word == "--":
+        return True
+    if _SHELL_NAME_RE.match(word):
+        return True
+    # `export -n NAME` and `export --option=VALUE` style operands.
+    return word.startswith("-")
+
 _SHELL_VARIABLE_REFERENCE_RE = re.compile(
     r"\$\{([A-Za-z_](?a:\w)*)\}|\$([A-Za-z_](?a:\w)*)"
 )
@@ -1745,14 +1767,16 @@ def _possible_marker_carry(
     return _body_marker_command(segment) or None
 
 
-def _possibly_reached_segments(script: str) -> list[str]:
-    """Segments that are not provably dead.
+def _possibly_reached_entries(script: str) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for segments that are not provably dead.
 
     Literal-``false`` branches and short-circuits are dead; loops and
     unevaluated conditions stay possible, so an invocation a retry
-    implementation wraps in a loop still counts.
+    implementation wraps in a loop still counts.  The pair index stays
+    attached so callers can relate the command back to the exact segment
+    position instead of matching by text.
     """
-    live: list[str] = []
+    live: list[tuple[int, str]] = []
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     pairs = _command_segments_with_separators(script)
@@ -1767,7 +1791,7 @@ def _possibly_reached_segments(script: str) -> list[str]:
             if carried := _possible_marker_carry(
                 segment, separator, previous, branches
             ):
-                live.append(carried)
+                live.append((index, carried))
             previous = None
             continue
         if not _region_runs(branches):
@@ -1779,9 +1803,14 @@ def _possibly_reached_segments(script: str) -> list[str]:
             and not _chain_skips(separator, previous)
         ):
             break
-        live.append(segment)
+        live.append((index, segment))
         previous = _segment_literal(segment)
     return live
+
+
+def _possibly_reached_segments(script: str) -> list[str]:
+    """Segments that are not provably dead (see ``_possibly_reached_entries``)."""
+    return [command for _index, command in _possibly_reached_entries(script)]
 
 
 def _payload_end_index(text: str) -> int:
@@ -2832,14 +2861,14 @@ def _live_scan_step(
     return True, exited, status, errexit, True
 
 
-def _live_command_segments(
+def _live_command_entries(
     script: str,
     failing: frozenset[str] = frozenset(),
     exiting: frozenset[str] = frozenset(),
     *,
     errexit: bool = True,
-) -> list[str]:
-    """Segments on the unconditional path of one shell's script.
+) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for segments on the unconditional path.
 
     A command counts when the analyzer can prove it runs: an ``if`` with an
     unevaluated condition hides both branches, loops and ``case`` hide
@@ -2849,8 +2878,10 @@ def _live_command_segments(
     ``if true`` bodies and ``true &&`` chains still count; a standalone
     failing command under ``set -e`` ends the run too, including through
     calls to local functions that provably end in a failure or an exit.
+    The pair index stays attached so callers can relate the command back
+    to the exact segment position instead of matching by text.
     """
-    live: list[str] = []
+    live: list[tuple[int, str]] = []
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     exited = False
@@ -2870,12 +2901,28 @@ def _live_command_segments(
                 if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
                 else ""
             )
-            live.append(carried or segment)
+            live.append((index, carried or segment))
         if carry:
             exited = exited_out
             previous = previous_out
             errexit = errexit_out
     return live
+
+
+def _live_command_segments(
+    script: str,
+    failing: frozenset[str] = frozenset(),
+    exiting: frozenset[str] = frozenset(),
+    *,
+    errexit: bool = True,
+) -> list[str]:
+    """Segments on the unconditional path of one shell's script."""
+    return [
+        command
+        for _index, command in _live_command_entries(
+            script, failing, exiting, errexit=errexit
+        )
+    ]
 
 
 def _rustfmt_component_index(
@@ -7556,11 +7603,17 @@ def _errexit_state_by_segment(
     """The errexit mode in force at each command's position.
 
     Only a REACHABLE ``set`` changes the mode: ``live_indices`` is the set
-    of segment indices that are foreground-live (normalized the same way),
+    of pair indices that are foreground-live (attached by the scan itself),
     so a ``set`` that sits behind a short-circuit or a dead branch must not
     flip the state for the commands after it.  ``false && set -e;
     make docs-check; true`` keeps errexit off (verified live: the failing
     make exits the step 0), while ``true && set -e`` turns it on.
+
+    The state is read from the pair's raw text.  A marker segment such as
+    ``then set -e`` is a separate question: its carried command is not the
+    pair's own text, and reading the carried form here would apply ``set -e``
+    to every pair that merely follows a marker, which rejects scripts whose
+    failure is genuinely masked.
     """
     states: list[bool] = []
     errexit = initial
@@ -7589,11 +7642,58 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     # command out of an earlier command's view (``make docs-check; set -e;
     # true`` swallowed a failing make that way - verified: step exit 0).
     # The live indices come from the same foreground view the prerequisite
-    # checks consume, so a `set` behind a dead branch or a short-circuit
-    # cannot flip the mode for the commands after it.
-    live_indices = _foreground_live_indices(step, pairs)
+    # checks consume (pair indices, attached by the scan itself), so a
+    # `set` behind a dead branch or a short-circuit cannot flip the mode
+    # for the commands after it.
+    live_indices = _foreground_live_indices(step)
     errexit_by_index = _errexit_state_by_segment(pairs, live_indices, initial)
     return _failure_masked_segments_from_pairs(pairs, errexit_by_index)
+
+
+def _step_foreground_views(
+    step: str | dict,
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """``(may_entries, live_entries)`` for one run step's script.
+
+    Both views return ``(pair_index, command)`` in execution order, in the
+    same pair-index space as the step's executable text, so callers relate
+    a command back to its exact segment position instead of matching by
+    text (identical normalized commands at different positions stay
+    distinguishable).  ``may_entries`` keeps every command that is not
+    provably dead: literal-``false`` branches and short-circuits drop out,
+    while unknown conditions and loops stay possible.  ``live_entries``
+    keeps only the commands the analyzer can prove run.  Backgrounded
+    commands are excluded from both views: their exit status is never
+    observed and their environment effects stay in the background shell.
+    """
+    script = _step_script(step)
+    if script is None:
+        return [], []
+    stripped = _strip_heredocs(_strip_shell_comments(script))
+    executable_source = _join_continuations(stripped)
+    executable = _strip_function_bodies(executable_source)
+    failing, exiting = _function_kill_sets(executable_source)
+    shell = step.get("shell") if isinstance(step, dict) else None
+    backgrounded = _backgrounded_command_segments(executable)
+    live_entries = [
+        (index, command)
+        for index, command in _live_command_entries(
+            executable, failing, exiting, errexit=_shell_initial_errexit(shell)
+        )
+        if command.strip() not in backgrounded
+    ]
+    may_entries = [
+        (index, command)
+        for index, command in _possibly_reached_entries(executable)
+        if command.strip() not in backgrounded
+    ]
+    return may_entries, live_entries
+
+
+def _foreground_live_entries(step: str | dict) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for the foreground-live view of a step."""
+    _may_entries, live_entries = _step_foreground_views(step)
+    return live_entries
 
 
 def _foreground_live_commands(step: str | dict) -> list[str]:
@@ -7603,45 +7703,12 @@ def _foreground_live_commands(step: str | dict) -> list[str]:
     install`` or ``make docs-check`` cannot count as satisfied: the shell
     never waits for ``cmd &``, so its exit status proves nothing.
     """
-    script = _step_script(step)
-    if script is None:
-        return []
-    stripped = _strip_heredocs(_strip_shell_comments(script))
-    executable_source = _join_continuations(stripped)
-    executable = _strip_function_bodies(executable_source)
-    backgrounded = _backgrounded_command_segments(executable)
-    return [
-        segment
-        for segment in _step_live_commands(step)
-        if segment.strip() not in backgrounded
-    ]
+    return [command for _index, command in _foreground_live_entries(step)]
 
 
-def _foreground_live_indices(
-    step: str | dict, pairs: list[tuple[str, str]]
-) -> set[int]:
-    """Segment indices (into ``pairs``) that are foreground-live.
-
-    ``_foreground_live_commands`` returns raw segment texts in execution
-    order; matching them back to the pair stream by normalized text in
-    order keeps liveness (dead branches, short-circuits, masked retries,
-    backgrounds, exits) attached to the exact segment positions.
-    """
-    live_segments = _foreground_live_commands(step)
-    live_indices: set[int] = set()
-    live_iter = iter(live_segments)
-    live_text = (
-        _prerequisite_view_text(next(live_iter).strip()) if live_segments else None
-    )
-    for index, (segment, _separator) in enumerate(pairs):
-        seg_text = _prerequisite_view_text(segment.strip())
-        if live_text is not None and seg_text == live_text:
-            live_indices.add(index)
-            try:
-                live_text = _prerequisite_view_text(next(live_iter).strip())
-            except StopIteration:
-                live_text = None
-    return live_indices
+def _foreground_live_indices(step: str | dict) -> set[int]:
+    """Segment indices (into the step's pair stream) that are live."""
+    return {index for index, _command in _foreground_live_entries(step)}
 
 
 def _normalize_shell_command_words(words: list[str]) -> list[str]:
@@ -8232,10 +8299,10 @@ def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
 # A make name assigned from a backtick substitution: the segment scanner
 # cuts at the backtick, so the assignment word ends at the cut (``export
 # MAKEFLAGS=``) and the reference is visible only where the cut lands in
-# the executable text.  The taint is derived from the reachable-command
-# walk (see ``_make_flag_backtick_references``) instead of a raw-text
-# regex, so cuts inside dead branches, comments, and heredocs cannot
-# mark a name unresolved.
+# the executable text.  The taint is derived from the may-execute walk
+# (see ``_substitution_taint_events``) instead of a raw-text regex, so
+# cuts inside provably dead branches, comments, and heredocs cannot mark
+# a name unresolved.
 
 # Fail-closed marker: the value cannot be attributed, so any make that
 # inherits it is not a certified docs-check.
@@ -8247,11 +8314,23 @@ def _cut_make_assignment_name(segment: str) -> str | None:
 
     The cut leaves the shell word unfinished, so ``export MAKEFLAGS=``
     and the concatenated ``export MAKEFLAGS=-s`` both continue into the
-    substitution and stay unresolved.  Only assignment words in
-    assignment position count: ``echo MAKEFLAGS=`` is not an assignment,
-    and after ``export`` every earlier word must be an assignment too.
+    substitution and stay unresolved.  A cut inside an open double quote
+    (``export MAKEFLAGS="``) leaves the quote unmatched, which defeats
+    full shell tokenization; a whitespace split still shows the trailing
+    assignment word, so that fallback preserves the name.  Only
+    assignment words in assignment position count: ``echo MAKEFLAGS=``
+    is not an assignment.
+
+    After ``export`` every earlier word must be either an assignment
+    (``FOO=1``) or a bare name that ``export`` itself turns into an
+    export attribute (``export FOO MAKEFLAGS=``) or an ``export`` option
+    (``export -n``).  Rejecting a bare name would drop the make name
+    entirely and certify a step whose make inherits the substitution
+    output (verified with a recipe that echoes ``$(MAKEFLAGS)``).
     """
     words = _parse_segment_words(segment)
+    if words is None:
+        words = segment.split()
     if not words:
         return None
     if words[0] == "export":
@@ -8261,7 +8340,7 @@ def _cut_make_assignment_name(segment: str) -> str | None:
     name, separator, _value = words[-1].partition("=")
     if not separator or name not in _MAKE_ENV_NAMES:
         return None
-    if any(not _ENV_ASSIGN_RE.match(word) for word in words[:-1]):
+    if not all(_is_export_operand(word) for word in words[:-1]):
         return None
     return name
 
@@ -8289,69 +8368,336 @@ def _literal_make_assignments(segment: str) -> dict[str, str]:
     }
 
 
-def _fold_segment_taint(view: str, cut_at_backtick: bool, state: dict[str, str]) -> None:
-    """Apply one reachable segment's assignment effect to the taint state.
-
-    A literal assignment (standalone or export form) clears the name; a
-    substitution cut at the segment's end marks it unresolved; anything
-    else leaves the state untouched.
-    """
-    for name in _literal_make_assignments(view):
-        state[name] = "literal"
-    if not cut_at_backtick:
-        return
-    name = _cut_make_assignment_name(view)
-    if name is not None:
-        state[name] = "subst"
-
-
-def _taint_state_by_segment(
-    executable: str, pairs: list[tuple[str, str]], live_indices: set[int]
-) -> dict[str, str]:
-    """The last reachable assignment form per make name in the step."""
-    state: dict[str, str] = {}
+def _segment_cut_positions(
+    executable: str, pairs: list[tuple[str, str]]
+) -> dict[int, int]:
+    """The pair index -> offset of each segment's end within the text."""
+    positions: dict[int, int] = {}
     cursor = 0
     for index, (segment, _separator) in enumerate(pairs):
         position = executable.find(segment, cursor)
         if position < 0:
             position = cursor
-        cut = position + len(segment)
-        cursor = cut
-        if index in live_indices:
-            _fold_segment_taint(
-                _prerequisite_view_text(segment.strip()),
-                cut < len(executable) and executable[cut] == "`",
-                state,
-            )
-    return state
+        positions[index] = position + len(segment)
+        cursor = position + len(segment)
+    return positions
 
 
-def _make_flag_backtick_references(step: str | dict) -> frozenset[str]:
-    """Make-flag names whose LAST reachable assignment is a substitution.
+def _substitution_taint_events(
+    step: str | dict,
+) -> tuple[dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]]:
+    """Taint, clear, and export events keyed by pair index.
 
-    The walk follows the same foreground-live view the export tracking
-    consumes, so a substitution inside a dead branch, a comment, a
-    heredoc body, or an uninvoked function never taints a later make
-    (none of them runs).  A reachable substitution taints a name until a
-    later reachable assignment of a literal value - in either the
-    standalone or the export form - clears it; the reverse order leaves
-    the substitution in force.  The cut is recognized on the executable
+    ``taints[index]`` holds the make names a substitution cut at that
+    segment may leave unresolved.  The event is drawn from the
+    may-execute view, so an assignment inside a branch with an unknown
+    condition still marks the name: the substitution may run, and the
+    scan cannot attribute the value make would receive.  ``clears[index]``
+    holds the names a fully literal assignment at that segment is
+    guaranteed to replace; it is drawn from the live view, so an
+    assignment behind a dead branch or a short-circuit cannot clear an
+    earlier substitution.  ``exports[index]`` holds the names whose
+    export attribute may be established at that segment; the taint is
+    only inheritable through an export attribute, so the consumer joins
+    the two event streams.  The cut is recognized on the executable
     text: the assignment word ends exactly where a backtick begins
-    (``export MAKEFLAGS=`getflags```), and a substitution concatenated
+    (``export MAKEFLAGS=`getflags```, including the quoted
+    ``export MAKEFLAGS=\"`getflags`\"``), and a substitution concatenated
     into the value (``export MAKEFLAGS=-s`extra```) stays unresolved too.
     """
     script = _step_script(step)
     if script is None:
-        return frozenset()
+        return {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
     pairs = _command_segments_with_separators(executable)
-    live_indices = _foreground_live_indices(step, pairs)
-    state = _taint_state_by_segment(executable, pairs, live_indices)
-    return frozenset(
-        name for name, form in state.items() if form == "subst"
-    )
+    may_entries, live_entries = _step_foreground_views(step)
+    cut_positions = _segment_cut_positions(executable, pairs)
+    taints: dict[int, set[str]] = {}
+    clears: dict[int, set[str]] = {}
+    exports: dict[int, set[str]] = {}
+    for index, command in may_entries:
+        name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
+        if name is None:
+            continue
+        taints.setdefault(index, set()).add(name)
+        words = command.split()
+        if words and words[0] == "export":
+            exports.setdefault(index, set()).add(name)
+    for index, command in live_entries:
+        if not _runs_in_parent_shell(pairs, executable, index):
+            continue
+        names = _cleared_names(command, executable, cut_positions.get(index, 0))
+        if names:
+            clears.setdefault(index, set()).update(names)
+    return taints, clears, exports
+
+
+# How much text around a brace group the pipeline-component probe inspects.
+# It must span the operator AND the group opener, because the pipe may sit
+# on either side of the group (`true | { ...; }` and `{ ...; } | true`).
+_OPERATOR_WINDOW = 8
+
+
+def _runs_in_parent_shell(
+    pairs: list[tuple[str, str]], executable: str, index: int
+) -> bool:
+    """True when the segment at *index* executes in the parent shell itself.
+
+    This is a REGION question, so the text before the segment is consulted,
+    not just the segment's own separator.  A separator alone classifies only
+    the FIRST statement of a region and misses every later one: in
+    ``( true; export MAKEFLAGS=-s )`` only ``true`` carries ``(``.
+
+    A region the parent does not run in, each verified to leave the parent
+    holding the substitution's output:
+
+    * a subshell or ``$( )`` — an unclosed ``(`` before the segment;
+    * a backtick command substitution — an ODD number of backticks before it
+      (an even count means the preceding substitution is closed, which is
+      what keeps ``export MAKEFLAGS=\\`g\\`; export MAKEFLAGS=-s`` clearing);
+    * a bare pipeline stage — the segment's own separator is ``|``;
+    * a brace group used as a PIPELINE component, on either side of the
+      pipe: ``true | { ...; }`` and ``{ ...; } | true``.
+
+    A standalone brace group is the exception: bash runs ``{ ...; }`` in the
+    CURRENT shell, so ``{ export MAKEFLAGS=-s; }`` and
+    ``true && { export MAKEFLAGS=-s; }`` DO clear the parent's value.
+    """
+    if not 0 <= index < len(pairs):
+        return False
+    if _is_pipeline_stage(pairs, executable, index):
+        # A bare pipeline stage: the shell forks before this segment runs.
+        return False
+    start = _segment_start(pairs, executable, index)
+    if start < 0:
+        return False
+    prefix = _masked_quotes(executable[:start])
+    if _inside_command_substitution(prefix):
+        return False
+    brace_at = _innermost_open_brace(prefix)
+    if brace_at < 0:
+        return True
+    # The segment is inside a brace group.  Bash forks for EVERY statement in
+    # a group that is a pipeline component, and the group is a component when
+    # a pipe bounds it on either side.  Neither side always survives into a
+    # pair's separator -- the pipe can be swallowed by the adjacent text --
+    # so both are read from the executable: the one in front of the group's
+    # opener, and the one after its closing brace.  Asking only "does a pipe
+    # follow this statement" misses a group with later statements, so the
+    # group's whole extent decides.
+    if "|" in prefix[max(0, brace_at - _OPERATOR_WINDOW) : brace_at]:
+        return False
+    close_at = _matching_close_brace(executable, brace_at)
+    if close_at < 0:
+        return True
+    tail = executable[close_at + 1 : close_at + 1 + _OPERATOR_WINDOW]
+    return "|" not in tail
+
+
+def _is_pipeline_stage(
+    pairs: list[tuple[str, str]], executable: str, index: int
+) -> bool:
+    """True when the segment at *index* is a stage of a pipeline.
+
+    A pipeline stage forks a child shell, so an assignment there never
+    reaches the parent.  The pipe can bound the stage on either side, and it
+    does not always survive into a pair's separator:
+
+    * a bare stage puts it in the NEXT pair's separator (``export
+      MAKEFLAGS=-s | true`` puts ``|`` in front of ``true``);
+    * when the stage after the pipe is itself a brace group, the ``{`` takes
+      that separator slot and the pipe is dropped entirely, so
+      ``{ ...; } | { true; }`` shows no ``|`` at all.
+
+    The forward probe therefore skips the pairs that cannot end a stage — a
+    group closer or a redirection still belongs to this stage — and, once
+    they are exhausted, reads the executable text for the pipe the pair
+    stream lost.  Verified in bash: the parent keeps the substitution's
+    output in every one of these forms.
+    """
+    if index < len(pairs) and pairs[index][1] == "|":
+        return True
+    probe = index + 1
+    while probe < len(pairs):
+        if pairs[probe][1] == "|":
+            return True
+        if not _is_group_closer_or_redirection(pairs[probe][0]):
+            # The next statement may be the first of a group on the far side
+            # of the pipe, in which case the `{` took the separator slot and
+            # the pipe survives only in the text between the two segments.
+            if _pipe_between(pairs, executable, probe - 1, probe):
+                return True
+            return False
+        probe += 1
+    return False
+
+
+def _pipe_between(
+    pairs: list[tuple[str, str]], executable: str, left: int, right: int
+) -> bool:
+    """True when a ``|`` sits between the segments at *left* and *right*.
+
+    The pair stream keeps one separator per boundary, so a pipe followed by a
+    brace group's opener is lost: ``{ ...; } | { true; }`` records ``{`` and
+    drops ``|`` entirely.  The text between the two segments still has it.
+    """
+    if not (0 <= left < right < len(pairs)):
+        return False
+    end = _segment_start(pairs, executable, left) + len(pairs[left][0])
+    start = _segment_start(pairs, executable, right)
+    if start < end:
+        return False
+    return "|" in executable[end:start]
+
+
+# One redirection word: an optional file-descriptor prefix, a redirect
+# operator, and its target.  `&>` is the bash "redirect both" form.
+_REDIRECTION_WORD_RE = re.compile(r"^\d*(?:>>?|<&|<>|>&|&>)\s*\S*$")
+
+
+def _is_group_closer_or_redirection(segment: str) -> bool:
+    """True when *segment* only closes a group or carries redirections.
+
+    Neither can end a pipeline stage on its own, so the forward probe for the
+    stage's closing pipe has to look past them.  A segment may carry SEVERAL
+    redirections (``>/dev/null 2>&1``, ``> a > b``), so the whole run has to
+    match word by word; testing a single word let a multi-redirection stage
+    read as a standalone parent group and certify a tainted make.
+
+    A redirection whose target is a bare word splits across two tokens
+    (``> a``), so a target is accepted as the word right after an operator.
+    """
+    text = segment.strip()
+    if text in ("}", ");", "};"):
+        return True
+    words = text.split()
+    if not words:
+        return False
+    expecting_target = False
+    for word in words:
+        if expecting_target:
+            expecting_target = False
+            continue
+        # A bare operator is tested first: `>` also satisfies the
+        # single-word pattern, and only the operator form means the target
+        # arrives as the next word.
+        if _is_redirect_operator(word):
+            expecting_target = True
+            continue
+        if _REDIRECTION_WORD_RE.match(word):
+            continue
+        return False
+    return True
+
+
+def _is_redirect_operator(word: str) -> bool:
+    """True when *word* is a bare redirect operator with no target attached.
+
+    ``> a`` is tokenised as ``>`` and ``a``, so the operator and its target can
+    land in different words of the same segment.
+    """
+    return bool(re.fullmatch(r"\d*(?:>>?|<&|<>|>&|&>)<?", word))
+
+
+def _inside_command_substitution(prefix: str) -> bool:
+    """True when an unclosed subshell or backtick substitution precedes.
+
+    The prefix must already have its quoted spans masked: a ``(``, ``{`` or
+    backtick inside a string is data the shell never executes, and counting
+    it opens a region that does not exist (verified: ``echo "{"; export
+    MAKEFLAGS=-s`` runs in the parent and clears, while the unmasked text
+    reads as an unclosed brace group).
+
+    Backtick parity is the test: ``export MAKEFLAGS=`g`; x=`` leaves an odd
+    count (inside a substitution), while ``export MAKEFLAGS=`g`; export`` is
+    balanced (the parent), which is what preserves the legitimate clear.
+
+    The paren depth is clamped at zero: a ``case`` pattern contributes a
+    ``)`` that never opened anything, and letting it cancel a LATER real
+    subshell hid that subshell from the scan — in
+    ``case x in y) ;; esac; ( true; export MAKEFLAGS=-s )`` the depth
+    returned to zero and the parent's clear was credited (verified in bash:
+    the parent keeps the substitution's output).  Clamping keeps every
+    unclosed opener visible, which is the fail-closed direction.
+    """
+    depth = 0
+    for char in prefix:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+    if depth > 0:
+        return True
+    return prefix.count("`") % 2 == 1
+
+
+def _innermost_open_brace(prefix: str) -> int:
+    """Index of the innermost brace group still open at the end of *prefix*."""
+    stack: list[int] = []
+    for position, char in enumerate(prefix):
+        if char == "{":
+            stack.append(position)
+        elif char == "}" and stack:
+            stack.pop()
+    return stack[-1] if stack else -1
+
+
+def _matching_close_brace(text: str, open_at: int) -> int:
+    """Index of the ``}`` matching the ``{`` at *open_at*, or -1.
+
+    The text is expected to have its quoted spans masked, so a brace inside a
+    string does not close a group.
+    """
+    depth = 0
+    for position in range(open_at, len(text)):
+        char = text[position]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return position
+    return -1
+
+
+def _segment_start(pairs: list[tuple[str, str]], executable: str, index: int) -> int:
+    """Offset of the segment at *index* within *executable*.
+
+    The pair stream is produced from *executable*, so each segment is a
+    literal substring at or after the running cursor.
+    """
+    cursor = 0
+    for position, (segment, _separator) in enumerate(pairs):
+        found = executable.find(segment, cursor) if segment else cursor
+        if position == index:
+            return found if found >= 0 else cursor
+        cursor = (found + len(segment)) if found >= 0 else cursor
+    return cursor
+
+
+def _cut_taint_name(command: str, executable: str, cut: int) -> str | None:
+    """The make name a substitution cut at a segment's end resolves to.
+
+    None when the segment does not end at a backtick cut or the cut word
+    does not assign a make name.
+    """
+    if cut >= len(executable) or executable[cut] != "`":
+        return None
+    return _cut_make_assignment_name(command)
+
+
+def _cleared_names(command: str, executable: str, cut: int) -> set[str]:
+    """The make names a segment's fully literal assignment clears.
+
+    A segment ending at a substitution cut carries an unfinished word
+    (``export MAKEFLAGS=`` reads as an empty value); it is not a literal
+    assignment and cannot clear an earlier taint.
+    """
+    if cut < len(executable) and executable[cut] == "`":
+        return set()
+    return set(_literal_make_assignments(command))
 
 
 
@@ -8842,7 +9188,6 @@ def _advance_export_tracking(
     assigned: dict[str, str],
     export_names: set[str],
     exported: dict[str, str],
-    unresolved: set[str],
 ) -> None:
     """Fold one command's assignments into the running export view.
 
@@ -8851,11 +9196,10 @@ def _advance_export_tracking(
     inherits them.  Bash also keeps the export ATTRIBUTE when a later
     standalone assignment replaces the value: ``export MAKEFLAGS=``
     followed by ``MAKEFLAGS=-n`` still hands ``-n`` to every later make
-    (verified: the recipe only prints and the step exits 0).  ``unresolved``
-    is the step's taint set (see ``_make_flag_backtick_references``): a
-    name whose LAST assignment is a substitution keeps the sentinel
-    wherever the attribute is set, so a make inheriting it cannot certify
-    (fail closed).
+    (verified: the recipe only prints and the step exits 0).  Substitution
+    taint is maintained by the caller per command position (see
+    ``_substitution_taint_events``), which folds the step's events in
+    execution order so a later literal cannot clear an earlier make.
     """
     assigned.update(_plain_make_assignments(segment))
     export_state = _make_relevant_export_state(segment, assigned)
@@ -8866,9 +9210,6 @@ def _advance_export_tracking(
     for name, value in _standalone_make_assignments(segment).items():
         if name in export_names:
             exported[name] = value
-    for name in unresolved:
-        if name in export_names:
-            exported[name] = _UNRESOLVED_FLAG_SENTINEL
 
 
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
@@ -8886,11 +9227,14 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
-    # A make name whose last REACHABLE assignment is a backtick
-    # substitution cannot be attributed, so any make inheriting it in
-    # this step fails closed; dead branches, comments, and heredocs are
-    # already dropped by the live view and the executable text.
-    unresolved = set(_make_flag_backtick_references(step))
+    # Substitution taint is folded in execution order: a taint event from
+    # the may-execute view (an unknown branch may run) marks the name
+    # unresolved from its position onward, and only a GUARANTEED literal
+    # assignment (the live view) clears it.  Folding per command position
+    # keeps the state in force at each make invocation, so a later
+    # literal cannot clear the taint for an earlier make (fail closed).
+    taints, clears, export_events = _substitution_taint_events(step)
+    tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
     # assignment to a name the environment carries keeps the export
@@ -8908,12 +9252,14 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
                 export_names.add(name)
                 exported[name] = value
     scanned: list[tuple[int, bool, bool]] = []
-    for command_index, segment in enumerate(_foreground_live_commands(step)):
+    for command_index, (pair_index, segment) in enumerate(
+        _foreground_live_entries(step)
+    ):
+        tracker.advance(pair_index, export_names)
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
-        _advance_export_tracking(
-            segment, assigned, export_names, exported, unresolved
-        )
+        _advance_export_tracking(segment, assigned, export_names, exported)
+        tracker.mark(exported, export_names)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
         installs, checks_docs = _pip_step_commands(
@@ -8921,6 +9267,53 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         )
         scanned.append((command_index, installs, checks_docs))
     return scanned
+
+
+class _TaintTracker:
+    """Substitution taint folded in execution order, one command at a time.
+
+    ``advance`` applies every event up to the current pair index (a taint
+    from the may-execute view marks the name; a literal clear from the
+    live view unmarks it; an export event establishes the attribute), and
+    ``mark`` stamps the unresolved sentinel onto every exported name still
+    carrying taint.  Folding at each position keeps the state in force at
+    every make invocation, so a later literal cannot clear the taint for
+    an earlier make (fail closed).
+    """
+
+    def __init__(
+        self,
+        taints: dict[int, set[str]],
+        clears: dict[int, set[str]],
+        export_events: dict[int, set[str]],
+    ) -> None:
+        self._taints = taints
+        self._clears = clears
+        self._exports = export_events
+        self._pending = sorted(set(taints) | set(clears) | set(export_events))
+        self._cursor = 0
+        self._tainted: set[str] = set()
+
+    def advance(self, pair_index: int, export_names: set[str]) -> None:
+        """Apply every event at or before ``pair_index``."""
+        while (
+            self._cursor < len(self._pending)
+            and self._pending[self._cursor] <= pair_index
+        ):
+            event_index = self._pending[self._cursor]
+            self._cursor += 1
+            if event_index in self._exports:
+                export_names |= self._exports[event_index]
+            if event_index in self._taints:
+                self._tainted |= self._taints[event_index]
+            if event_index in self._clears:
+                self._tainted -= self._clears[event_index]
+
+    def mark(self, exported: dict[str, str], export_names: set[str]) -> None:
+        """Stamp the unresolved sentinel onto every tainted export."""
+        for name in self._tainted:
+            if name in export_names:
+                exported[name] = _UNRESOLVED_FLAG_SENTINEL
 
 
 def _pip_first_steps(

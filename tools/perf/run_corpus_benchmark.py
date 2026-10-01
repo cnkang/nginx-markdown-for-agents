@@ -427,36 +427,34 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        # Containment validator at the write sinks: resolve the examples
-        # root and each destination to absolute form, then require the
-        # destination to stay inside the root before any content reaches
-        # it.  The destination file names are generated (never derived
-        # from metadata), so only the root and the join are re-checked
-        # here; the absolute forms are what the writes consume.
-        safe_examples_root = os.path.abspath(str(resolved_examples_dir))
-        html_dest_abs = os.path.abspath(
-            str((resolved_examples_dir / f"{base_name}.html").resolve())
+        # Canonical containment validator at each write sink (S2083):
+        # the destination is joined onto the validated examples root and
+        # handed to validate_write_path_within_root, which resolves it
+        # (following any symlink) and refuses anything that lands outside
+        # the root.  The generated base_name never comes from metadata, but
+        # the destination must still be re-checked here because a symlink
+        # can be planted at a generated name before the run.
+        html_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.html",
+            resolved_examples_dir,
+            purpose="example HTML output",
         )
-        md_dest_abs = os.path.abspath(
-            str((resolved_examples_dir / f"{base_name}.md").resolve())
+        md_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.md",
+            resolved_examples_dir,
+            purpose="example markdown output",
         )
-        if not html_dest_abs.startswith(safe_examples_root + os.sep):
-            raise ValueError(
-                "Example output path escapes examples directory root; "
-                "refusing to write outside the intended directory tree"
-            )
-        if not md_dest_abs.startswith(safe_examples_root + os.sep):
-            raise ValueError(
-                "Example output path escapes examples directory root; "
-                "refusing to write outside the intended directory tree"
-            )
 
-        # Copy HTML input after explicit root-bound checks on both paths.
-        Path(html_dest_abs).write_bytes(validated_html.read_bytes())
+        # Write through the opened file handle rather than a Path I/O
+        # method: the handle is the trust boundary, so no destination
+        # expression reaches the write sink.
+        with html_dest.open("wb") as html_file:
+            html_file.write(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
-        Path(md_dest_abs).write_text(output, encoding="utf-8")
+        with md_dest.open("w", encoding="utf-8") as md_file:
+            md_file.write(output)
 
 
 # ---------------------------------------------------------------------------
