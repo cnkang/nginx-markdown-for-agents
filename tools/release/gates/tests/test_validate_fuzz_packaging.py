@@ -239,13 +239,13 @@ def test_unverified_mechanisms_are_pinned() -> None:
     assert verdict("f x=1"), "a trailing argument is still the call"
     assert not verdict("echo f"), "the name as an argument is not a call"
 
-    # KNOWN LIMITATION, base-identical and fail-closed, recorded not fixed:
-    # bash runs `FOO=1 f` in the parent, so the body's literal clears there,
-    # but an assignment in front of the call makes the body-stripping view
-    # drop the literal entirely and this rejects.  base rejects it too, so it
-    # is a missed acceptance rather than a regression, and widening the
-    # accepted set is the riskier direction to take in a taint analyzer.
-    assert not verdict("FOO=1 f"), "documented over-rejection, see comment"
+    # A leading environment assignment does not change the execution shell, so
+    # `FOO=1 f` is a parent-shell call and must clear.  The call matcher now
+    # reads the first COMMAND word, dropping the assignment prefix the same way
+    # the reachability scan does.
+    assert verdict("FOO=1 f"), "an assignment prefix is still a parent call"
+    assert verdict("A=1 B=2 f"), "several assignment prefixes"
+    assert verdict("FOO=1 f x=1"), "assignments on both sides"
 
 
 
@@ -286,6 +286,8 @@ def test_a_step_without_a_run_script_is_skipped_not_crashed() -> None:
     assert packaging_gate._substitution_taint_events({"useshell": True}) == (
         {}, {}, {}, {},
     )
+    # The scanner unpacks four values, so the early exit must not raise there.
+    assert list(packaging_gate._pip_step_scan({"useshell": True})) == []
 
 
 def test_a_body_clear_does_not_erase_a_later_cut_inside_the_body() -> None:
@@ -500,18 +502,14 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
         assert verdict(f"{body}; if true; then f; fi; make docs-check"), body
         assert not verdict(f"{body}; while false; do f; done; make docs-check"), body
 
-    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash also clears the parent
-    # for `for i in 1; do f; done`, and `base` rejects that shape too, so it
-    # is a missed acceptance rather than a regression.  The cause is
-    # structural: `_strip_function_bodies` blanks the body in place, and when
-    # a construct follows, the blanked run swallows the `;` so the body stops
-    # being a pair of its own and no mapping can reach it.  Fixing that means
-    # walking a body's own segments instead of mapping onto the stripped pair
-    # stream -- a larger change than belongs in this fix.
+    # A `for` over a literal, non-empty word list runs at least once, so bash
+    # clears the parent there and the gate must accept.  A `while`/`until`
+    # whose condition may never hold must still reject.
     body = "f() { export MAKEFLAGS=-s; }"
-    assert not verdict(f"{body}; for i in 1; do f; done{make}"), (
-        "KNOWN GAP closed -- update the comment above and the ledger"
-    )
+    assert verdict(f"{body}; for i in 1; do f; done{make}"), "a literal for-list"
+    assert verdict(f"{body}; for i in 1 2 3; do f; done{make}"), "a longer list"
+    assert not verdict(f"{body}; for i in $LIST; do f; done{make}"), "a variable"
+    assert not verdict(f"{body}; for i in *.txt; do f; done{make}"), "a glob"
 
     # A literal between the body and the call re-cuts the taint, so only a
     # clear that actually reaches the parent can rescue the step afterwards.
@@ -541,7 +539,6 @@ def test_unverified_prerequisite_guarantees_are_pinned() -> None:
     for tail in (
         "if [ -f M ]; then export MAKEFLAGS=-s; fi",
         "[ -f M ] && export MAKEFLAGS=-s",
-        "for i in 1 2; do export MAKEFLAGS=-s; done",
         "while false; do export MAKEFLAGS=-s; done",
         "until true; do export MAKEFLAGS=-s; done",
         "case x in y) export MAKEFLAGS=-s ;; esac",

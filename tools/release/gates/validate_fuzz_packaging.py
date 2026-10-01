@@ -898,16 +898,22 @@ def _shadowed_alias_names(options: list[str]) -> set[str]:
 
 
 def _called_function_names(script: str, defined: set[str]) -> set[str]:
-    """Names the script calls: the first word of command-position lines.
+    """Names the script calls: the first COMMAND word of each segment.
 
     The input is a joined list of command segments with definition heads
-    masked out, so a call is exactly a segment whose first word (after quote
-    removal) names a defined function; arguments, quoted text and escaped
-    text never sit in first-word position.
+    masked out, so a call is exactly a segment whose first command word (after
+    quote removal) names a defined function; arguments, quoted text and escaped
+    text never sit in command position.
+
+    ``_command_words`` supplies that first word: it drops leading ``NAME=value``
+    assignments so ``FOO=1 f`` is seen as a call, and drops a construct keyword
+    the pair stream glued on so ``do f`` and ``then f`` are too.  Without both,
+    a body called that way looked unreachable, its text was blanked, and a step
+    bash accepts was rejected (probed: bash clears the parent in both shapes).
     """
     called: set[str] = set()
     for line in script.splitlines():
-        words = line.split()
+        words = _command_words(line)
         if not words:
             continue
         name = _resolve_heredoc_word(words[0])[0]
@@ -1223,7 +1229,8 @@ def _trim_body_after_terminator(body: str) -> str:
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
         disposition = _body_segment_disposition(
-            segment, separator, keyword, condition, previous, branches
+            segment, separator, keyword, condition, previous, branches,
+            pairs, index,
         )
         if disposition == "return":
             cut = found
@@ -1248,9 +1255,11 @@ def _body_segment_disposition(
     condition: bool | None,
     previous: bool | None,
     branches: list[tuple[bool, int]],
+    pairs: list[tuple[str, str]] | None = None,
+    index: int | None = None,
 ) -> str:
     """Classify a body segment as branch, skipped, live, or terminating."""
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         marker_returns = _marker_return_status(
             segment, separator, previous, branches
         ) is not None
@@ -1784,7 +1793,7 @@ def _possibly_reached_entries(script: str) -> list[tuple[int, str]]:
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
         prior_chain = branches[-1][1] if branches else None
-        if _branch_keyword_step(branches, segment, condition):
+        if _branch_keyword_step(branches, segment, condition, pairs, index):
             _possible_branch_state(
                 branches, keyword, condition, prior_chain
             )
@@ -2366,8 +2375,44 @@ def _branch_select(
         branches.append((condition is True, _branch_chain_state(condition)))
 
 
+def _open_keyword_branch(
+    pairs: list[tuple[str, str]], index: int, keyword: str
+) -> tuple[bool, int]:
+    """The branch state a loop or ``case`` header opens.
+
+    ``for NAME in a b c`` iterates a literal, non-empty word list, so its body
+    runs at least once and is on the unconditional path.  ``while``/``until``
+    depend on a condition that may never hold and ``select`` on input that may
+    never arrive, so all of those keep the body conditional -- probed: bash
+    clears the parent after ``for i in 1; do f; done`` and does not after
+    ``while false; do f; done``.
+    """
+    if keyword != "for" or index >= len(pairs):
+        return (False, _UNKNOWN_CHAIN)
+    words = pairs[index][0].split()
+    if len(words) < 4 or words[2] != "in":
+        return (False, _UNKNOWN_CHAIN)
+    items = words[3:]
+    # `do` ends the header; an unquoted item that is not a variable or glob may
+    # expand to nothing, so only a plainly literal list is guaranteed.
+    if any(
+        word in {"do"} or _glob_or_command_substitution(word) for word in items
+    ):
+        return (False, _UNKNOWN_CHAIN)
+    return (True, _CLEAR_CHAIN)
+
+
+def _glob_or_command_substitution(word: str) -> bool:
+    """True when a word's expansion may yield nothing or several items."""
+    return any(char in word for char in "*?[`$")
+
+
 def _branch_keyword_step(
-    branches: list[tuple[bool, int]], segment: str, condition: bool | None
+    branches: list[tuple[bool, int]],
+    segment: str,
+    condition: bool | None,
+    pairs: list[tuple[str, str]] | None = None,
+    index: int | None = None,
 ) -> bool:
     """Update the branch stack for a construct keyword; True when handled.
 
@@ -2393,7 +2438,9 @@ def _branch_keyword_step(
             branches[-1] = (chain == _CLEAR_CHAIN, _OPEN_CHAIN)
         return True
     if keyword in _OPEN_KEYWORDS:
-        branches.append((False, _UNKNOWN_CHAIN))
+        branches.append(
+            _open_keyword_branch(pairs or [], index or 0, keyword)
+        )
         return True
     return False
 
@@ -2757,7 +2804,7 @@ def _body_step_verdict(
     following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
     keyword = _segment_keyword(segment)
     condition = _pair_condition(pairs, index, keyword)
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         verdict, status = _branch_step_state(
             segment, keyword, separator, following, previous, branches,
             failing, exiting,
@@ -2823,7 +2870,7 @@ def _live_scan_step(
     segment, separator = pairs[index]
     following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
     condition = _pair_condition(pairs, index, _segment_keyword(segment))
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         carried = (
             _body_marker_command(segment)
             if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
@@ -8457,6 +8504,9 @@ def _substitution_taint_events(
     """
     script = _step_script(step)
     if script is None:
+        # Four mappings, matching this function's contract and the caller's
+        # four-value unpack; returning three here crashes the gate with
+        # `ValueError: not enough values to unpack` instead of reporting.
         return {}, {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
