@@ -7438,6 +7438,12 @@ def _prerequisite_view_text(segment: str) -> str:
 def _backgrounded_command_segments(script: str) -> set[str]:
     """Segment texts the shell runs in the background (``cmd &``).
 
+    Returned as TEXTS, which is why the live views below compare by text.  A
+    backgrounded segment whose text equals a FOREGROUND segment hides that
+    foreground one from both views, so `make docs-check; make docs-check & true`
+    lost its prerequisite and the step was rejected for a missing docs-check.
+    Use `_backgrounded_pair_indices` where a pair index is available.
+
     A backgrounded command's exit status is never observed by the step, so
     it cannot satisfy a prerequisite in that step.  The shell backgrounds
     the WHOLE list the ``&`` terminates: in ``a && b &`` the operator
@@ -7674,20 +7680,53 @@ def _step_foreground_views(
     executable = _strip_function_bodies(executable_source)
     failing, exiting = _function_kill_sets(executable_source)
     shell = step.get("shell") if isinstance(step, dict) else None
-    backgrounded = _backgrounded_command_segments(executable)
+    backgrounded = _backgrounded_pair_indices(executable)
     live_entries = [
         (index, command)
         for index, command in _live_command_entries(
             executable, failing, exiting, errexit=_shell_initial_errexit(shell)
         )
-        if command.strip() not in backgrounded
+        if index not in backgrounded
     ]
     may_entries = [
         (index, command)
         for index, command in _possibly_reached_entries(executable)
-        if command.strip() not in backgrounded
+        if index not in backgrounded
     ]
     return may_entries, live_entries
+
+
+def _backgrounded_pair_indices(script: str) -> set[int]:
+    """Pair indices the shell runs in the background (``cmd &``).
+
+    The index form of `_backgrounded_command_segments`, for callers that
+    already hold pair indices.  Filtering by text let a backgrounded segment
+    hide a foreground one carrying the same text: in
+    ``make docs-check; make docs-check & true`` the foreground prerequisite
+    disappeared from both views and the step was rejected for a missing
+    docs-check.  Text matching cannot tell those two segments apart, so the
+    comparison is done where identity is available.
+    """
+    pairs = _command_segments_with_separators(script)
+    if not pairs:
+        return set()
+    indices: set[int] = set()
+    group: list[int] = []
+    followings = [
+        pairs[index + 1][1]
+        if index + 1 < len(pairs)
+        else ("&" if _ends_with_background_operator(script) else "")
+        for index in range(len(pairs))
+    ]
+    for index, (_pair, following) in enumerate(zip(pairs, followings)):
+        group.append(index)
+        if following in ("&&", "||", "|"):
+            # The list continues; the terminator decides its fate.
+            continue
+        if following == "&":
+            indices.update(group)
+        group = []
+    return indices
 
 
 def _foreground_live_entries(step: str | dict) -> list[tuple[int, str]]:
@@ -8487,7 +8526,7 @@ def _body_clear_call_pairs(
         name = _defined_function_name_at(executable, pairs, body_index)
         if not name:
             continue
-        call_index = _first_call_after(pairs, executable, body_index, name)
+        call_index = _first_call_after(pairs, body_index, name)
         if call_index is None:
             continue
         for statement in _body_statement_indices(pairs, body_index, call_index):
@@ -8559,7 +8598,7 @@ def _defined_function_name_at(
 
 
 def _first_call_after(
-    pairs: list[tuple[str, str]], executable: str, body_index: int, name: str
+    pairs: list[tuple[str, str]], body_index: int, name: str
 ) -> int | None:
     """Index of the first pair after *body_index* that calls *name*.
 
@@ -9619,7 +9658,15 @@ class _TaintTracker:
         self._tainted: set[str] = set()
 
     def advance(self, pair_index: int, export_names: set[str]) -> None:
-        """Apply every event at or before ``pair_index``."""
+        """Apply every event at or before ``pair_index``.
+
+        *export_names* is grown IN PLACE by ``set.update``, which is why the
+        caller's set is passed at all.  It is written that way rather than as
+        ``export_names |= ...`` because the augmented form never reads the
+        local name and Sonar then reports the parameter as an unused local
+        (S1481) even though deleting it would drop every export event the
+        taint consumer joins against.
+        """
         while (
             self._cursor < len(self._pending)
             and self._pending[self._cursor] <= pair_index
@@ -9627,7 +9674,7 @@ class _TaintTracker:
             event_index = self._pending[self._cursor]
             self._cursor += 1
             if event_index in self._exports:
-                export_names |= self._exports[event_index]
+                export_names.update(self._exports[event_index])
             if event_index in self._taints:
                 self._tainted |= self._taints[event_index]
             if event_index in self._clears:
