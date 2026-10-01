@@ -204,10 +204,10 @@ def test_unverified_mechanisms_are_pinned() -> None:
         taints, clears, exports = packaging_gate._substitution_taint_events(
             {"run": tail}
         )
-        assert taints and all("MAKEFLAGS" in names for names in taints.values()), tail
-        assert exports and all(
-            "MAKEFLAGS" in names for names in exports.values()
-        ), tail
+        assert taints, tail
+        assert all("MAKEFLAGS" in names for names in taints.values()), tail
+        assert exports, tail
+        assert all("MAKEFLAGS" in names for names in exports.values()), tail
         assert not clears, tail
 
     # A `case` item body may hold more than one command, and the pattern's
@@ -246,6 +246,30 @@ def test_unverified_mechanisms_are_pinned() -> None:
     # is a missed acceptance rather than a regression, and widening the
     # accepted set is the riskier direction to take in a taint analyzer.
     assert not verdict("FOO=1 f"), "documented over-rejection, see comment"
+
+
+
+def test_a_backgrounded_segment_cannot_hide_an_identical_foreground_one() -> None:
+    """Identity decides backgrounding, not the segment text.
+
+    The filter used to compare texts, so a backgrounded segment sharing text
+    with a foreground one removed the foreground one from both views.  In
+    `make docs-check; make docs-check & true` the real prerequisite vanished
+    and the step was rejected for a missing docs-check.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    def issue(script: str) -> object:
+        return packaging_gate._python_deps_issue([install, {"run": script}])
+
+    # The foreground prerequisite survives a backgrounded twin, in either order.
+    assert issue("make docs-check; make docs-check & true") is None
+    assert issue("make docs-check & true; make docs-check") is None
+    # A backgrounded `&&` list still cannot satisfy the prerequisite.
+    assert issue("make docs-check && true & ") is not None
+    # And a backgrounded-only docs-check is still refused, so the fix did not
+    # simply stop honouring `&`.
+    assert issue("make docs-check & true") is not None
 
 
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
