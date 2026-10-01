@@ -272,6 +272,150 @@ def test_a_backgrounded_segment_cannot_hide_an_identical_foreground_one() -> Non
     assert issue("make docs-check & true") is not None
 
 
+
+def test_a_step_without_a_run_script_is_skipped_not_crashed() -> None:
+    """A step carrying no ``run`` must be skipped, not crash the gate.
+
+    ``_substitution_taint_events`` returns four mappings; the early exit for a
+    step with no script has to return four as well or the caller's unpack
+    raises ``ValueError`` and the gate crashes instead of reporting an issue.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    # Reachable: _python_deps_issue passes such a step to _pip_first_steps.
+    assert packaging_gate._python_deps_issue([install, {"useshell": True}]) is not None
+    assert packaging_gate._substitution_taint_events({"useshell": True}) == (
+        {}, {}, {}, {},
+    )
+
+
+def test_a_body_clear_does_not_erase_a_later_cut_inside_the_body() -> None:
+    """A body may clear and then cut again; the later cut must survive.
+
+    The clear is applied at the CALL, so without ordering it unmarks the cut the
+    body made after clearing, and a make inheriting the substitution certifies.
+    Verified in bash: clear-then-cut leaves the parent holding the cut result,
+    cut-then-clear leaves it holding the literal.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    body = "f() {{ {inner} }}; f"
+    bt = chr(96)
+
+    def verdict(inner: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            + body.format(inner=inner)
+            + "; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not verdict(f"export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}"), (
+        "a cut AFTER the body's clear must survive it"
+    )
+    assert verdict(f"export MAKEFLAGS={bt}g{bt}; export MAKEFLAGS=-s"), (
+        "a cut BEFORE the body's clear is superseded by it"
+    )
+    assert verdict("export MAKEFLAGS=-s"), "a clear-only body still clears"
+
+
+def test_the_body_ordering_check_is_what_survives_a_later_cut() -> None:
+    """Pin the ordering logic at the level it acts on.
+
+    A shell shape cannot isolate it: a body that re-cuts ALSO makes the
+    analyzer lose the docs-check prerequisite, so the step rejects either way
+    and the two cases look identical from outside.  The guarantee is therefore
+    asserted on the tracker's own view -- which names survive a body's clear.
+    """
+    # Body statements 3..5.  A cut at 4 (after the clear at 3) survives; a cut
+    # at 2 (before the clear) does not, and neither does one at 3 itself --
+    # only a cut STRICTLY after the clearing statement outlives it.
+    tracker = packaging_gate._TaintTracker(
+        {2: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}},
+        {},
+        {},
+    )
+    tracker.advance(4, set())
+    assert tracker.recut_in_body((3, 5, 3), {"MAKEFLAGS"}) == {"MAKEFLAGS"}, (
+        "a cut after the body's clear must survive it"
+    )
+    assert tracker.recut_in_body((3, 5, 5), {"MAKEFLAGS"}) == set(), (
+        "a cut before the body's clear is superseded by it"
+    )
+    assert tracker.recut_in_body((3, 3, 3), {"MAKEFLAGS"}) == set(), (
+        "the clearing statement itself is not a surviving cut"
+    )
+    assert tracker.recut_in_body((6, 7, 6), {"MAKEFLAGS"}) == set(), (
+        "a cut outside the body's own range does not survive it"
+    )
+
+
+def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
+    """Pin the call site, not just the helper it calls.
+
+    ``_apply_body_clear`` is where the ordering and the body span are consumed.
+    Asserting only on ``recut_in_body`` leaves both load-bearing checks
+    untested: a body whose only statement clears, followed by a cut inside the
+    body, must leave the name marked.
+    """
+    # Body statements 3..4: a clear at 3, then a cut at 4 inside the body.
+    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS"})}
+    tracker = packaging_gate._TaintTracker(
+        {0: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}}, {}, {}
+    )
+    tracker.advance(6, set())
+    exported = {"MAKEFLAGS": "$"}
+
+    packaging_gate._apply_body_clear(6, body_clears, tracker, exported)
+
+    assert "MAKEFLAGS" in tracker._tainted, (
+        "a cut after the body's clear must survive the call"
+    )
+
+    # Same body, but the cut precedes the clear: the clear wins.
+    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS"})}
+    superseded = packaging_gate._TaintTracker(
+        {0: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}}, {}, {}
+    )
+    superseded.advance(6, set())
+    view = {"MAKEFLAGS": "$"}
+    packaging_gate._apply_body_clear(6, body_clears, superseded, view)
+
+    assert "MAKEFLAGS" not in superseded._tainted, (
+        "a cut before the body's clear is superseded by it"
+    )
+    assert view["MAKEFLAGS"] == packaging_gate._BODY_CLEARED_VALUE, (
+        "a superseded clear must still refresh the export view"
+    )
+
+def test_the_body_span_covers_every_statement_the_call_runs() -> None:
+    """Pin the span the producer builds, not just the consumer that reads it.
+
+    ``_span_for_call`` derives the body range from the statements that share a
+    call.  Collapsing it to the clearing statement alone would let a cut in a
+    LATER body statement be mistaken for one outside the body, so the range
+    has to span the whole body.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+    script = (
+        f"export MAKEFLAGS={bt}getflags{bt}; "
+        f"f() {{ export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}; }}; "
+        "f; make docs-check"
+    )
+    _, _, _, body_clears = packaging_gate._substitution_taint_events(
+        {"run": script}
+    )
+    assert body_clears, "the body's clear must be recorded for its call"
+    for _, (span, _names) in body_clears.items():
+        first, last, cleared_at = span
+        assert first <= cleared_at <= last, (
+            "the clearing statement must lie inside the body's own range"
+        )
+        assert last > first, (
+            "the range must cover every body statement, not the clear alone"
+        )
+    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+
+
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     """A function body runs in the CALL's shell, not in the shell it is written in.
 

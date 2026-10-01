@@ -8425,7 +8425,10 @@ def _segment_cut_positions(
 def _substitution_taint_events(
     step: str | dict,
 ) -> tuple[
-    dict[int, set[str]], dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]
+    dict[int, set[str]],
+    dict[int, set[str]],
+    dict[int, set[str]],
+    dict[int, tuple[tuple[int, int, int], set[str]]],
 ]:
     """Taint, clear, export and body-clear events keyed by pair index.
 
@@ -8454,7 +8457,7 @@ def _substitution_taint_events(
     """
     script = _step_script(step)
     if script is None:
-        return {}, {}, {}
+        return {}, {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
@@ -8475,13 +8478,16 @@ def _substitution_taint_events(
     # the call's index fires without the matching export VIEW update, so the
     # make still sees the unresolved sentinel.  Keeping it separate lets the
     # caller apply the value at the call and nothing before it.
-    body_clears: dict[int, set[str]] = {}
+    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]] = {}
     for index, command in live_entries:
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if not names:
             continue
         if index in call_pairs:
-            _record_body_clear(index, call_pairs[index], pairs, executable, backgrounded, names, body_clears)
+            _record_body_clear(
+                index, call_pairs[index], call_pairs, pairs, executable,
+                backgrounded, names, body_clears,
+            )
             continue
         if not _runs_in_parent_shell(pairs, executable, index):
             continue
@@ -8492,11 +8498,12 @@ def _substitution_taint_events(
 def _record_body_clear(
     index: int,
     calls: list[int],
+    call_pairs: dict[int, list[int]],
     pairs: list[tuple[str, str]],
     executable: str,
     backgrounded: set[str],
     names: set[str],
-    body_clears: dict[int, set[str]],
+    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]],
 ) -> None:
     """Record a function body's clear at every call that can deliver it.
 
@@ -8510,7 +8517,33 @@ def _record_body_clear(
             continue
         if not _runs_in_parent_shell(pairs, executable, call):
             continue
-        body_clears.setdefault(call, set()).update(names)
+        # Keyed by the CALL, but the body's own LAST index travels with it:
+        # whether the body cleared the name or re-cut it afterwards depends on
+        # the order of events INSIDE the body, which the call index cannot say.
+        span = _span_for_call(call_pairs, call, index)
+        seen = body_clears.get(call, (span, set()))[1]
+        # The clearing statement's own index decides the ORDER: a cut before
+        # it is superseded, a cut after it survives.
+        body_clears[call] = (span + (index,), seen | names)
+
+
+def _span_for_call(
+    call_pairs: dict[int, list[int]], call: int, fallback: int
+) -> tuple[int, int]:
+    """The range of body statements one call can run.
+
+    ``call_pairs`` already maps every body statement to the calls that reach
+    it, so the range is the statements that share this call -- no index
+    arithmetic and no guessing about how far a cut reaches.
+    """
+    indices = [
+        statement
+        for statement, calls in call_pairs.items()
+        if call in calls
+    ]
+    if not indices:
+        return (fallback, fallback)
+    return (min(indices), max(indices))
 
 
 def _record_cut_taints(
@@ -9651,7 +9684,7 @@ def _advance_export_tracking(
 
 def _apply_body_clear(
     pair_index: int,
-    body_clears: dict[int, set[str]],
+    body_clears: dict[int, tuple[tuple[int, int, int], set[str]]],
     tracker: _TaintTracker,
     exported: dict[str, str],
 ) -> None:
@@ -9663,11 +9696,23 @@ def _apply_body_clear(
     alone would leave the name marked, and refreshing it before the call would
     clear a make that runs in between.
     """
-    names = body_clears.get(pair_index)
+    recorded = body_clears.get(pair_index)
+    if recorded is None:
+        return
+    body_span, names = recorded
     if not names:
         return
-    tracker.clear_at(pair_index, names)
-    for name in names:
+    # Only the names the body cleared AFTER its last cut may be unmarked.  A
+    # body can assign twice -- clear, then cut again -- and the later cut is
+    # what the make inherits, so unmarking it here would certify a make that
+    # receives the substitution (verified in bash: the parent holds the cut
+    # result in that order).
+    still_cut = tracker.recut_in_body(body_span, names)
+    cleared = names - still_cut
+    if not cleared:
+        return
+    tracker.clear_at(pair_index, cleared)
+    for name in cleared:
         exported[name] = _BODY_CLEARED_VALUE
 
 
@@ -9786,6 +9831,31 @@ class _TaintTracker:
         being queued.
         """
         self._tainted -= names
+
+    def recut_in_body(
+        self, body_span: tuple[int, int, int], names: set[str]
+    ) -> set[str]:
+        """Which of *names* a cut INSIDE this body followed with another cut.
+
+        A body may assign twice -- clear, then cut again -- and the later cut
+        is what the make inherits, so a clear moved to the call must not unmark
+        it.  The bound is the body's own index RANGE: a cut outside it is a
+        different statement and does not survive this body's clear.
+        """
+        first, last, cleared_at = body_span
+        # ORDER decides, not membership.  A cut before the body's own clear is
+        # superseded by that clear; a cut strictly after it is what the make
+        # inherits.  The bound is strict because the clearing statement's own
+        # pair carries the clear, not a surviving cut.
+        return {
+            name
+            for name in names
+            if any(
+                name in marks
+                for index, marks in self._taints.items()
+                if first <= index <= last and index > cleared_at
+            )
+        }
 
     def mark(self, exported: dict[str, str], export_names: set[str]) -> None:
         """Stamp the unresolved sentinel onto every tainted export."""
