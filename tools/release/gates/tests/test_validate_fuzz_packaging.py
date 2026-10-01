@@ -33,6 +33,109 @@ DRIFT_NO_NL = DRIFT.rstrip("\n")
 INSTALLER_NO_NL = INSTALLER.rstrip("\n")
 COMPONENT_NO_NL = COMPONENT.rstrip("\n")
 
+# One table for the parent-vs-child question the make-flag clear depends on.
+# Every entry was taken from real `bash`: the parent keeps the substitution's
+# output when the form forks (child) and holds the literal when it does not
+# (parent).  The install is its OWN step, because a region under test would
+# otherwise absorb the make invocation and the verdict would be meaningless.
+#
+# A backtick inside a string is deliberately absent: any backtick makes the
+# whole script opaque to the alias/shadowing guard, which rejects it for an
+# unrelated reason both at base and at head.
+SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
+    # -- the parent shell clears ------------------------------------------
+    ("plain literal", "export MAKEFLAGS=-s", True),
+    ("multi-name export", "export FOO MAKEFLAGS=-s", True),
+    ("export -n with literal", "export -n MAKEFLAGS=-s", True),
+    ("standalone brace group", "{ export MAKEFLAGS=-s; }", True),
+    ("brace group led by &&", "true && { export MAKEFLAGS=-s; }", True),
+    ("brace group with a later statement", "{ export MAKEFLAGS=-s; echo x; }", True),
+    ("brace group with a nested group", "{ export MAKEFLAGS=-s; { true; }; }", True),
+    ('quoted brace is data', 'echo "{"; export MAKEFLAGS=-s', True),
+    ("quoted paren is data", "echo '('; export MAKEFLAGS=-s", True),
+    ("quoted brace pair is data", "echo '{ }'; export MAKEFLAGS=-s", True),
+    # -- a child shell does not clear -------------------------------------
+    ("subshell, literal first", "( export MAKEFLAGS=-s )", False),
+    ("subshell, literal second", "( true; export MAKEFLAGS=-s )", False),
+    ("subshell, three statements", "( true; export MAKEFLAGS=-s; true )", False),
+    ("command substitution", "x=$(export MAKEFLAGS=-s; true)", False),
+    ("bare pipeline stage, right", "true | export MAKEFLAGS=-s", False),
+    ("bare pipeline stage, left", "export MAKEFLAGS=-s | true", False),
+    ("two pipes", "true | true | export MAKEFLAGS=-s", False),
+    ("brace group, right of pipe", "true | { export MAKEFLAGS=-s; }", False),
+    (
+        "brace group, right of pipe, extra statement",
+        "true | { export MAKEFLAGS=-s; echo x; }",
+        False,
+    ),
+    ("brace group, left of pipe", "{ export MAKEFLAGS=-s; } | true", False),
+    ("brace group, left of pipe, unspaced", "{ export MAKEFLAGS=-s; }|true", False),
+    (
+        "brace group with a later statement, piped",
+        "{ export MAKEFLAGS=-s; echo x; } | true",
+        False,
+    ),
+    (
+        "brace group with two later statements, piped",
+        "{ export MAKEFLAGS=-s; echo x; echo y; } | true",
+        False,
+    ),
+    ("brace group, nested group, piped", "{ export MAKEFLAGS=-s; { true; }; } | true", False),
+    (
+        "brace group piped into a brace group",
+        "{ export MAKEFLAGS=-s; } | { true; }",
+        False,
+    ),
+    ("multi-name export with taint", "export FOO MAKEFLAGS=`g`", False),
+    ("unknown branch with taint", "[ -f M ] && export MAKEFLAGS=`g`", False),
+    # -- redirections do not move the fork --------------------------------
+    ("one redirection", "{ export MAKEFLAGS=-s; } 2>&1 | true", False),
+    ("two redirections", "{ export MAKEFLAGS=-s; } >/dev/null 2>&1 | true", False),
+    ("two redirections, swapped", "{ export MAKEFLAGS=-s; } 2>&1 >/dev/null | true", False),
+    ("same redirection twice", "{ export MAKEFLAGS=-s; } >/dev/null >/dev/null | true", False),
+    ("redirection with fd prefix", "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true", False),
+    ("&> operator", "{ export MAKEFLAGS=-s; } &>/dev/null | true", False),
+    ("two bare targets", "{ export MAKEFLAGS=-s; } > a > b | true", False),
+    ("redirection then piped brace", "{ export MAKEFLAGS=-s; } 2>&1 | { true; }", False),
+    (
+        "piped brace then another pipe",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; } | cat",
+        False,
+    ),
+    ("redirection after a later statement", "{ export MAKEFLAGS=-s; echo x; } 2>&1 | true", False),
+)
+
+
+
+
+def test_parent_versus_child_shapes_match_bash() -> None:
+    """Every parent/child shape the clear depends on, in one table.
+
+    The gate certifies a release job only when a ``make docs-check`` runs
+    with an attributable ``MAKEFLAGS``.  A literal clears the taint only
+    when it executes in the PARENT shell, so each construct has to be
+    classified the way bash classifies it.  Every row of
+    ``SHELL_REGION_SHAPES`` was taken from a live bash probe, and the rows
+    span the whole shape space: subshell, brace group, command
+    substitution, pipeline stage on either side, nestings, and redirection
+    runs.  Keeping them in one table means a fix that handles one instance
+    of a repeated token cannot silently break its neighbour.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    failures: list[str] = []
+    for label, tail, runs_in_parent in SHELL_REGION_SHAPES:
+        script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
+        issue = packaging_gate._python_deps_issue([install, {"run": script}])
+        # runs_in_parent -> the literal is real, so the step must certify.
+        # otherwise the literal is in a child, so the taint stands and the
+        # step must be rejected.
+        certified = issue is None
+        if certified != runs_in_parent:
+            failures.append(
+                f"{label}: want {'CERTIFY' if runs_in_parent else 'REJECT'}"
+                f" got {'CERTIFY' if certified else 'REJECT'}"
+            )
+    assert not failures, "; ".join(failures)
 
 def test_toolchain_gate_keeps_heredoc_body_quotes_out_of_later_comments() -> None:
     """A heredoc apostrophe cannot make a later shell comment executable."""
