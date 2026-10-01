@@ -2430,6 +2430,18 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "true | { true; export MAKEFLAGS=-s; }",
     ):
         assert verdict(tail) is not None, tail
+    # The pipe can sit further away than the very next pair: a group closer
+    # or a redirection still belongs to the stage, so the forward probe has
+    # to look past them.  Without this the spaced form passes only because
+    # the scanner swallows the `}`.
+    for tail in (
+        "{ export MAKEFLAGS=-s; }|true",
+        "{ export MAKEFLAGS=-s; } 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } 2>&1|true",
+        "{ export MAKEFLAGS=-s; } 2>/dev/null | tee log",
+        "if true; then { export MAKEFLAGS=-s; }|true; fi",
+    ):
+        assert verdict(tail) is not None, tail
 
 
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:

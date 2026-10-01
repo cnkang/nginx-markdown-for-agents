@@ -8488,12 +8488,42 @@ def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
     A pipeline stage forks a child shell, so an assignment there never
     reaches the parent.  The pipe can bound the stage on either side: the
     pair stream records the separator BEFORE a segment, so the trailing
-    side lives in the NEXT pair's separator (``export MAKEFLAGS=-s | true``
+    side lives in a LATER pair's separator (``export MAKEFLAGS=-s | true``
     puts ``|`` in front of ``true``, not in front of the assignment).
+
+    The forward probe therefore skips the pairs that cannot end a stage: a
+    pair that only carries a group closer or a redirection still belongs to
+    this stage, so ``{ ...; } 2>&1 | true`` and ``{ ...; }|true`` fork even
+    though the pipe is two or three pairs away (verified in bash: the parent
+    keeps the substitution's output in every form).
     """
     if index < len(pairs) and pairs[index][1] == "|":
         return True
-    return index + 1 < len(pairs) and pairs[index + 1][1] == "|"
+    probe = index + 1
+    while probe < len(pairs):
+        if pairs[probe][1] == "|":
+            return True
+        if not _is_group_closer_or_redirection(pairs[probe][0]):
+            return False
+        probe += 1
+    return False
+
+
+# A redirection word: `2>&1`, `>/dev/null`, `2>/dev/null`, `< in`, and the
+# redirections that may be attached to such a word.
+_REDIRECTION_ONLY_RE = re.compile(r"^\d*(?:>>?|<&|<>|>&|<)\s*\S*$")
+
+
+def _is_group_closer_or_redirection(segment: str) -> bool:
+    """True when *segment* only closes a group or carries a redirection.
+
+    Neither can end a pipeline stage on its own, so the forward probe for the
+    stage's closing pipe has to look past them.
+    """
+    text = segment.strip()
+    if text in ("}", ");", "};"):
+        return True
+    return bool(_REDIRECTION_ONLY_RE.match(text))
 
 
 def _inside_command_substitution(prefix: str) -> bool:
