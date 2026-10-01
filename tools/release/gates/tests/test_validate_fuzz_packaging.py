@@ -2294,6 +2294,43 @@ def test_multi_name_export_keeps_the_make_taint() -> None:
         ), script
 
 
+def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
+    """A literal in a child shell must not clear the parent's taint.
+
+    Regression: the clear stream is drawn from the foreground-live view, which
+    flattens subshell bodies and pipeline stages because they execute.  A
+    literal in one of those regions therefore cleared the parent's taint and
+    certified a step whose ``make`` inherits the substitution output.
+    Verified live: the parent keeps the tainted value after
+    ``( export MAKEFLAGS=-s )``, after ``true | { export MAKEFLAGS=-s; }``
+    and after ``x=$(export MAKEFLAGS=-s; true)``.
+
+    The parent-shell literal still clears, so the fix does not simply
+    disable clearing: the clear separator set deliberately excludes the
+    backtick, which also terminates a preceding substitution and would
+    otherwise suppress a legitimate clear.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=`getflags`; ( export MAKEFLAGS=-s ); make docs-check",
+        "export MAKEFLAGS=`getflags`; true | { export MAKEFLAGS=-s; }; make docs-check",
+        "export MAKEFLAGS=`getflags`; x=$(export MAKEFLAGS=-s; true); make docs-check",
+        "export MAKEFLAGS=`getflags`; ( export MAKEFLAGS=-s; true ); make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # Positive controls: the same literal in the parent shell clears, both
+    # after a substitution cut and in a separate statement.
+    for script in (
+        "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check",
+        "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+
+
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     """A ``set`` behind a short-circuit must not change the shell's mode.
 

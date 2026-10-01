@@ -7608,6 +7608,12 @@ def _errexit_state_by_segment(
     flip the state for the commands after it.  ``false && set -e;
     make docs-check; true`` keeps errexit off (verified live: the failing
     make exits the step 0), while ``true && set -e`` turns it on.
+
+    The state is read from the pair's raw text.  A marker segment such as
+    ``then set -e`` is a separate question: its carried command is not the
+    pair's own text, and reading the carried form here would apply ``set -e``
+    to every pair that merely follows a marker, which rejects scripts whose
+    failure is genuinely masked.
     """
     states: list[bool] = []
     errexit = initial
@@ -8420,10 +8426,36 @@ def _substitution_taint_events(
         if words and words[0] == "export":
             exports.setdefault(index, set()).add(name)
     for index, command in live_entries:
+        if not _runs_in_parent_shell(pairs, index):
+            continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if names:
             clears.setdefault(index, set()).update(names)
     return taints, clears, exports
+
+
+# Separators that open a region the parent shell does not run in: a subshell
+# group, a brace group used as a pipeline stage, and a pipeline stage
+# boundary.  A command substitution is excluded because the same backtick
+# also terminates a preceding substitution, and the segment after a cut
+# carries it too (`export MAKEFLAGS=\`g\`\nMAKEFLAGS=-s` puts a backtick in
+# front of the literal that legitimately clears the taint).
+_NON_PARENT_SHELL_SEPARATORS = frozenset({"(", "{", "|"})
+
+
+def _runs_in_parent_shell(pairs: list[tuple[str, str]], index: int) -> bool:
+    """True when the segment at *index* executes in the parent shell itself.
+
+    A subshell or a pipeline stage runs the assignment in a child
+    environment, so a literal there never changes the value a later
+    ``make`` in the parent shell receives (verified: the parent keeps the
+    substitution's output after ``( export MAKEFLAGS=-s )`` and after
+    ``true | { export MAKEFLAGS=-s; }``).  Those regions are marked by the
+    separator that opens them.
+    """
+    if not 0 <= index < len(pairs):
+        return False
+    return pairs[index][1] not in _NON_PARENT_SHELL_SEPARATORS
 
 
 def _cut_taint_name(command: str, executable: str, cut: int) -> str | None:
