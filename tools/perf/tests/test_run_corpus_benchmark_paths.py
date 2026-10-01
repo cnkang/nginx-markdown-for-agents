@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import run_corpus_benchmark as rcb  # noqa: E402
@@ -248,3 +250,51 @@ def test_write_examples_uses_non_metadata_filenames(tmp_path, monkeypatch):
 
     generated = sorted(p.name for p in out_dir.iterdir() if p.is_file())
     assert generated == ["example-001.html", "example-001.md"]
+
+
+def test_write_examples_rejects_a_symlinked_destination(tmp_path, monkeypatch):
+    """A planted symlink at the destination name must not redirect the write.
+
+    The destination names are generated, but the destination path can
+    still be substituted before the run: a symlink planted at the target
+    name resolves outside the examples root, so the containment check
+    must refuse the write instead of following the link off the tree.
+
+    This pins the containment property the S2083 fix had to PRESERVE, not
+    a behaviour the fix introduced: the previous implementation already
+    refused the link, so the test guards against a future change losing
+    that guarantee rather than against this refactor's own diff.  Both
+    destination names are planted in turn because each is validated at its
+    own sink.
+    """
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    meta_path = corpus_dir / "fixture.meta.json"
+    html_path = corpus_dir / "fixture.html"
+    meta_path.write_text(
+        json.dumps({"fixture-id": "fixture", "failure-corpus": False}),
+        encoding="utf-8",
+    )
+    html_path.write_text("<html><body>ok</body></html>", encoding="utf-8")
+
+    examples = [{"fixture-id": "fixture", "page-type": "article"}]
+    fixtures_meta = [{
+        "fixture-id": "fixture",
+        "failure-corpus": False,
+        "_meta_path": str(meta_path),
+    }]
+
+    monkeypatch.setattr(
+        rcb, "run_converter", lambda _bin, _html: ("# converted\n", 0, 0.1),
+    )
+    # Both destination names are guarded independently: plant the symlink
+    # at each in turn and require the write to be refused every time.
+    for planted_name in ("example-001.html", "example-001.md"):
+        out_dir = tmp_path / ("examples-" + planted_name.replace(".", "-"))
+        out_dir.mkdir()
+        outside_target = tmp_path / ("outside-target-" + planted_name)
+        (out_dir / planted_name).symlink_to(outside_target)
+
+        with pytest.raises(ValueError, match="escapes root"):
+            write_examples(examples, fixtures_meta, "/bin/echo", out_dir)
+        assert not outside_target.exists()
