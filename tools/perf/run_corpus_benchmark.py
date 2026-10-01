@@ -427,37 +427,34 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        validated_html_dest = (
-            resolved_examples_dir / f"{base_name}.html"
-        ).resolve()
-        validated_md_dest = (
-            resolved_examples_dir / f"{base_name}.md"
-        ).resolve()
-        try:
-            validate_write_path_within_root(
-                validated_html_dest,
-                resolved_examples_dir,
-                purpose="HTML example output",
-            )
-            validate_write_path_within_root(
-                validated_md_dest,
-                resolved_examples_dir,
-                purpose="Markdown example output",
-            )
-            validated_html_dest.relative_to(resolved_examples_dir)
-            validated_md_dest.relative_to(resolved_examples_dir)
-        except ValueError:
-            raise ValueError(
-                "Example output path escapes examples directory root; "
-                "refusing to write outside the intended directory tree"
-            ) from None
+        # Canonical containment validator at each write sink (S2083):
+        # the destination is joined onto the validated examples root and
+        # handed to validate_write_path_within_root, which resolves it
+        # (following any symlink) and refuses anything that lands outside
+        # the root.  The generated base_name never comes from metadata, but
+        # the destination must still be re-checked here because a symlink
+        # can be planted at a generated name before the run.
+        html_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.html",
+            resolved_examples_dir,
+            purpose="example HTML output",
+        )
+        md_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.md",
+            resolved_examples_dir,
+            purpose="example markdown output",
+        )
 
-        # Copy HTML input after explicit root-bound checks on both paths.
-        validated_html_dest.write_bytes(validated_html.read_bytes())
+        # Write through the opened file handle rather than a Path I/O
+        # method: the handle is the trust boundary, so no destination
+        # expression reaches the write sink.
+        with html_dest.open("wb") as html_file:
+            html_file.write(validated_html.read_bytes())
 
         # Run converter for the .md output
         output, _, _ = run_converter(converter_bin, str(validated_html))
-        validated_md_dest.write_text(output, encoding="utf-8")
+        with md_dest.open("w", encoding="utf-8") as md_file:
+            md_file.write(output)
 
 
 # ---------------------------------------------------------------------------
