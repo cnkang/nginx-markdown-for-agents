@@ -71,6 +71,36 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
         "{ export MAKEFLAGS=-s; }          | true",
         False,
     ),
+    # A `)` inside a string, and a `)` that ends a `case` PATTERN, both
+    # reach the scanners as syntax.  The first closed a brace group early
+    # so a piped group looked unclosed in the parent; the second cancelled
+    # a real subshell opener, so the child's literal cleared the parent's
+    # taint.  Bash keeps the substitution's output in every one of these.
+    (
+        "subshell holding a case pattern",
+        "( case x in y) ;; esac; true; export MAKEFLAGS=-s )",
+        False,
+    ),
+    (
+        "subshell holding a case with a body",
+        "( case x in y) true ;; esac; export MAKEFLAGS=-s )",
+        False,
+    ),
+    (
+        "subshell closing before the literal",
+        "( case x in y) true ;; esac ); export MAKEFLAGS=-s",
+        True,
+    ),
+    (
+        "piped group containing a quoted closing brace",
+        '{ export MAKEFLAGS=-s; echo "}"; } | true',
+        False,
+    ),
+    (
+        "piped group containing a quoted pipe",
+        '{ export MAKEFLAGS=-s; echo "|"; } | true',
+        False,
+    ),
     # A `case` pattern contributes a `)` that opened nothing.  If it were
     # allowed to cancel a LATER real subshell, that subshell would vanish
     # from the scan and the parent's clear would be credited.
@@ -147,6 +177,37 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
 
 
 
+
+
+def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
+    """A function body runs in the CALL's shell, not in the shell it is written in.
+
+    A body is the one construct whose execution shell is not the shell its
+    text sits in, so the clear side must be judged at the call.  Bash was
+    probed for each shape: the direct, `&&` and `||` calls clear the parent,
+    and the pipeline stage, subshell, command substitution and backgrounded
+    call all leave it holding the substitution's output.
+    """
+    body = "f() { export MAKEFLAGS=-s; }"
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    clears_in_parent = ("f", "true && f", "false || f")
+    clears_in_child = ("f | cat", "( f )", "x=$(f)", "f & wait")
+    for call in clears_in_parent:
+        script = f"export MAKEFLAGS=`getflags`; {body}; {call}; make docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), call
+    for call in clears_in_child:
+        script = f"export MAKEFLAGS=`getflags`; {body}; {call}; make docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), call
+    # A body that is never called cannot clear anything.
+    script = f"export MAKEFLAGS=`getflags`; {body}; true; make docs-check"
+    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+    # The name appearing only as an argument is not a call.
+    script = f"export MAKEFLAGS=`getflags`; {body}; echo f; make docs-check"
+    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
 
 def test_unverified_prerequisite_guarantees_are_pinned() -> None:
     """Pin the two gate guarantees no end-to-end shape could reach.
