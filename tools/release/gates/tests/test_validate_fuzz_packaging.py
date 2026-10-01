@@ -2357,6 +2357,36 @@ def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
         ), script
 
 
+def test_quoted_region_characters_do_not_open_a_region() -> None:
+    """A ``(``, ``{`` or backtick inside a string is data, not syntax.
+
+    Regression: the region scan counted every parenthesis and brace in the
+    text before the literal, so ``echo "{"`` read as an unclosed brace group
+    and a legitimate parent-shell clear was rejected.  Verified in bash:
+    ``echo "{"; export MAKEFLAGS=-s`` leaves the parent with ``-s``, and so
+    does ``echo '('`` and ``echo '{ }'``.
+
+    The real forms must still be recognised, so both directions are pinned.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    def verdict(tail: str) -> str | None:
+        return packaging_gate._python_deps_issue(
+            [install, {"run": f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"}]
+        )
+
+    for tail in (
+        'echo "{"; export MAKEFLAGS=-s',
+        "echo '{'; export MAKEFLAGS=-s",
+        "echo '('; export MAKEFLAGS=-s",
+        "echo '{ }'; export MAKEFLAGS=-s",
+        "echo ')'; export MAKEFLAGS=-s",
+    ):
+        assert verdict(tail) is None, tail
+    # A real subshell still takes the literal out of the parent.
+    assert verdict("( true; export MAKEFLAGS=-s )") is not None
+
+
 def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
     """``{ ...; }`` runs in the current shell, so it clears; a stage does not.
 

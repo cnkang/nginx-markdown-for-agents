@@ -8473,13 +8473,13 @@ def _runs_in_parent_shell(
     start = _segment_start(pairs, executable, index)
     if start < 0:
         return False
-    prefix = executable[:start]
+    prefix = _masked_quotes(executable[:start])
     if _inside_command_substitution(prefix):
         return False
     brace_at = _innermost_open_brace(prefix)
     if brace_at < 0:
         return True
-    return not _brace_group_is_pipeline_stage(executable, brace_at)
+    return not _brace_group_is_pipeline_stage(prefix, brace_at)
 
 
 def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
@@ -8498,6 +8498,12 @@ def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
 
 def _inside_command_substitution(prefix: str) -> bool:
     """True when an unclosed subshell or backtick substitution precedes.
+
+    The prefix must already have its quoted spans masked: a ``(``, ``{`` or
+    backtick inside a string is data the shell never executes, and counting
+    it opens a region that does not exist (verified: ``echo "{"; export
+    MAKEFLAGS=-s`` runs in the parent and clears, while the unmasked text
+    reads as an unclosed brace group).
 
     Backtick parity is the test: ``export MAKEFLAGS=`g`; x=`` leaves an odd
     count (inside a substitution), while ``export MAKEFLAGS=`g`; export`` is
