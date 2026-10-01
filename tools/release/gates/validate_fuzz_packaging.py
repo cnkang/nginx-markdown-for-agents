@@ -8467,8 +8467,8 @@ def _runs_in_parent_shell(
     """
     if not 0 <= index < len(pairs):
         return False
-    if pairs[index][1] == "|":
-        # A bare pipeline stage: the shell forks before this segment.
+    if _is_pipeline_stage(pairs, index):
+        # A bare pipeline stage: the shell forks before this segment runs.
         return False
     start = _segment_start(pairs, executable, index)
     if start < 0:
@@ -8480,6 +8480,20 @@ def _runs_in_parent_shell(
     if brace_at < 0:
         return True
     return not _brace_group_is_pipeline_stage(executable, brace_at)
+
+
+def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
+    """True when the segment at *index* is a stage of a pipeline.
+
+    A pipeline stage forks a child shell, so an assignment there never
+    reaches the parent.  The pipe can bound the stage on either side: the
+    pair stream records the separator BEFORE a segment, so the trailing
+    side lives in the NEXT pair's separator (``export MAKEFLAGS=-s | true``
+    puts ``|`` in front of ``true``, not in front of the assignment).
+    """
+    if index < len(pairs) and pairs[index][1] == "|":
+        return True
+    return index + 1 < len(pairs) and pairs[index + 1][1] == "|"
 
 
 def _inside_command_substitution(prefix: str) -> bool:
@@ -8507,33 +8521,17 @@ def _innermost_open_brace(prefix: str) -> int:
 
 
 def _brace_group_is_pipeline_stage(executable: str, open_at: int) -> bool:
-    """True when the brace group opened at *open_at* is a pipeline component.
+    """True when the brace group opened at *open_at* starts a pipeline stage.
 
-    A pipeline stage forks a child, and the ``|`` may sit in front of the
-    group (``true | { ...; }``) or after its closing brace
-    (``{ ...; } | true``); both positions are checked.
+    A pipeline stage forks a child.  Only the leading side needs this test:
+    the segment's own separator catches the right-hand form
+    (``true | { ...; }``), and the trailing form (``{ ...; } | true``) is
+    caught by ``_is_pipeline_stage``, which looks at the next pair's
+    separator.  The pair stream records each separator BEFORE its segment, so
+    for a group on the left the ``|`` is the separator in front of the
+    stage that follows the closing brace.
     """
-    if "|" in executable[max(0, open_at - _OPERATOR_WINDOW) : open_at]:
-        return True
-    close_at = _matching_close_brace(executable, open_at)
-    if close_at < 0:
-        return False
-    after = executable[close_at + 1 : close_at + 1 + _OPERATOR_WINDOW]
-    return "|" in after
-
-
-def _matching_close_brace(text: str, open_at: int) -> int:
-    """Index of the ``}`` matching the ``{`` at *open_at*, or -1."""
-    depth = 0
-    for position in range(open_at, len(text)):
-        char = text[position]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return position
-    return -1
+    return "|" in executable[max(0, open_at - _OPERATOR_WINDOW) : open_at]
 
 
 def _segment_start(pairs: list[tuple[str, str]], executable: str, index: int) -> int:

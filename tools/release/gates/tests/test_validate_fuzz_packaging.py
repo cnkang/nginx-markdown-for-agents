@@ -2335,6 +2335,11 @@ def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
         "{ export MAKEFLAGS=-s; } | true",
         "{ true; export MAKEFLAGS=-s; } | true",
         "x=`export MAKEFLAGS=-s; true`",
+        # A bare pipeline stage on either side of the pipe.  The pair
+        # stream records the separator BEFORE a segment, so the trailing
+        # side of a stage lands in the NEXT pair, not this one.
+        "export MAKEFLAGS=-s | true",
+        "export MAKEFLAGS=-s | cat",
     ):
         script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
         assert (
@@ -2385,10 +2390,14 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         assert verdict(tail) is not None, tail
     # A group on the LEFT of a pipe is a child too: the pipe follows the
     # closing brace rather than introducing the group, so a probe that only
-    # looks backwards from the group opener misses it.
+    # looks backwards from the group opener misses it.  The RIGHT-hand form
+    # is listed again here because a group inside a pipeline stage is the
+    # one case that cannot be seen from the segment's own separators alone.
     for tail in (
         "{ export MAKEFLAGS=-s; } | true",
         "{ true; export MAKEFLAGS=-s; } | true",
+        "true | { export MAKEFLAGS=-s; }",
+        "true | { true; export MAKEFLAGS=-s; }",
     ):
         assert verdict(tail) is not None, tail
 
