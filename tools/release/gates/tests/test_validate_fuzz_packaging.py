@@ -86,6 +86,15 @@ SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
         "{ export MAKEFLAGS=-s; } | { true; }",
         False,
     ),
+    # A bare stage on the LEFT with a group on the RIGHT: the pipe is
+    # consumed into the previous segment's text, so this is the only shape
+    # where the between-segments probe is the sole defence.
+    ("bare stage left, group right", "export MAKEFLAGS=-s | { true; }", False),
+    (
+        "bare stage left, group right with a statement",
+        "export MAKEFLAGS=-s | { true; echo y; }",
+        False,
+    ),
     ("multi-name export with taint", "export FOO MAKEFLAGS=`g`", False),
     ("unknown branch with taint", "[ -f M ] && export MAKEFLAGS=`g`", False),
     # -- redirections do not move the fork --------------------------------
