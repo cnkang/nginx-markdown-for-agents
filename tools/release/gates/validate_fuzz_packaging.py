@@ -1309,6 +1309,28 @@ _NON_BUILTIN_COMMANDS = frozenset({
     "env", "command", "exec", "nohup", "sudo",
 })
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_](?a:\w)*=")
+# A bare shell identifier: `export FOO` names FOO without assigning it.
+_SHELL_NAME_RE = re.compile(r"^[A-Za-z_](?a:\w)*$")
+
+
+def _is_export_operand(word: str) -> bool:
+    """True when *word* can precede the tracked name in an ``export`` list.
+
+    ``export`` accepts three operand shapes before the assignment whose
+    value is in question: an assignment (``FOO=1``), a bare name whose
+    existing value it exports (``FOO``), and its own options (``-n``,
+    ``--``).  Anything else means the word is a command word rather than an
+    export operand, so the tracked name is not reached by this statement.
+    """
+    if _ENV_ASSIGN_RE.match(word):
+        return True
+    if word == "--":
+        return True
+    if _SHELL_NAME_RE.match(word):
+        return True
+    # `export -n NAME` and `export --option=VALUE` style operands.
+    return word.startswith("-")
+
 _SHELL_VARIABLE_REFERENCE_RE = re.compile(
     r"\$\{([A-Za-z_](?a:\w)*)\}|\$([A-Za-z_](?a:\w)*)"
 )
@@ -8291,8 +8313,14 @@ def _cut_make_assignment_name(segment: str) -> str | None:
     full shell tokenization; a whitespace split still shows the trailing
     assignment word, so that fallback preserves the name.  Only
     assignment words in assignment position count: ``echo MAKEFLAGS=``
-    is not an assignment, and after ``export`` every earlier word must
-    be an assignment too.
+    is not an assignment.
+
+    After ``export`` every earlier word must be either an assignment
+    (``FOO=1``) or a bare name that ``export`` itself turns into an
+    export attribute (``export FOO MAKEFLAGS=``) or an ``export`` option
+    (``export -n``).  Rejecting a bare name would drop the make name
+    entirely and certify a step whose make inherits the substitution
+    output (verified with a recipe that echoes ``$(MAKEFLAGS)``).
     """
     words = _parse_segment_words(segment)
     if words is None:
@@ -8306,7 +8334,7 @@ def _cut_make_assignment_name(segment: str) -> str | None:
     name, separator, _value = words[-1].partition("=")
     if not separator or name not in _MAKE_ENV_NAMES:
         return None
-    if any(not _ENV_ASSIGN_RE.match(word) for word in words[:-1]):
+    if not all(_is_export_operand(word) for word in words[:-1]):
         return None
     return name
 
