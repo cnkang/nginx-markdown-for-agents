@@ -2135,17 +2135,19 @@ def test_substitution_taint_clears_on_a_later_export_assignment() -> None:
     )
 
 
-def test_substitution_taint_ignores_unreachable_regions() -> None:
-    """Only a REACHABLE substitution taints a later make.
+def test_substitution_taint_ignores_provably_dead_regions() -> None:
+    """Only a NOT-provably-dead substitution taints a later make.
 
     Regression: the taint scan swept the raw script text, so a
     substitution inside a dead branch, a comment, or a heredoc body - none
     of which runs - still marked the name unresolved and rejected an
-    otherwise certified check.  A reachable substitution and a call into a
-    function whose body carries one must keep failing closed.
+    otherwise certified check.  A provably running substitution and a call
+    into a function whose body carries one must keep failing closed, and a
+    branch whose condition is unevaluated stays a taint source (it may
+    run; the scan cannot attribute the value make would receive).
     """
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
-    # Unreachable substitution sources do not taint the step.
+    # Provably dead substitution sources do not taint the step.
     for script in (
         "if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
         "export MAKEFLAGS=-s; if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
@@ -2183,6 +2185,15 @@ def test_substitution_taint_ignores_unreachable_regions() -> None:
         assert (
             packaging_gate._python_deps_issue([install, {"run": script}]) is not None
         ), script
+    # A branch whose condition is unevaluated may run: its substitution
+    # keeps the name unresolved (fail closed).
+    for script in (
+        "[ -f Makefile ] && export MAKEFLAGS=`getflags`; make docs-check",
+        'X=1; if [ -n "$X" ]; then export MAKEFLAGS=`getflags`; fi; make docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
     # An unreachable literal assignment does not clear the taint either.
     assert (
         packaging_gate._python_deps_issue(
@@ -2190,6 +2201,61 @@ def test_substitution_taint_ignores_unreachable_regions() -> None:
         )
         is not None
     )
+
+
+def test_substitution_taint_is_evaluated_at_each_make_invocation() -> None:
+    """A later literal cannot clear the taint for an earlier make.
+
+    Regression: the taint was resolved to a single last-assignment set for
+    the whole step, so ``export MAKEFLAGS=``getflags``; make docs-check;
+    export MAKEFLAGS=-s`` read the make as certified although the make ran
+    while the substitution's output was in force.  The state now folds in
+    execution order, so the taint in force at the invocation decides it.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`; make docs-check; export MAKEFLAGS=-s"}]
+        )
+        is not None
+    )
+    # The reverse order still certifies: the literal ran before the make.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check"}]
+        )
+        is None
+    )
+
+
+def test_double_quoted_substitutions_keep_the_taint() -> None:
+    """A quoted substitution assigned to a make name stays unresolved.
+
+    Regression: a cut inside an open double quote (``export
+    MAKEFLAGS=\\"`getflags`\\"``) leaves the shell word unparseable, so the
+    assignment name was dropped and the name never marked unresolved
+    although make receives the substitution's output.  The name is
+    recovered from the cut segment and the taint holds for quoted and
+    concatenated forms.
+
+    The taint events are asserted directly rather than through
+    ``_python_deps_issue``: a backtick substitution makes the whole script
+    opaque to the alias/shadowing guard, which rejects these scripts for an
+    unrelated reason and would therefore mask any regression in the taint
+    analysis.
+    """
+    for script, expected in (
+        ('export MAKEFLAGS="`getflags`"; make docs-check', {"MAKEFLAGS"}),
+        ('export MAKEFLAGS="`getflags`"\nmake docs-check', {"MAKEFLAGS"}),
+        ('export MAKEFLAGS="x`getflags`"; make docs-check', {"MAKEFLAGS"}),
+        # A quoted literal without a substitution must not taint: the
+        # positive control proves the recovery is not a blanket allow.
+        ('export MAKEFLAGS="-s"; make docs-check', set()),
+    ):
+        taints, _clears, _exports = packaging_gate._substitution_taint_events(
+            {"run": script}
+        )
+        assert set().union(*taints.values()) == expected, script
 
 
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:

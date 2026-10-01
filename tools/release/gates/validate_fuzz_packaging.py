@@ -1745,14 +1745,16 @@ def _possible_marker_carry(
     return _body_marker_command(segment) or None
 
 
-def _possibly_reached_segments(script: str) -> list[str]:
-    """Segments that are not provably dead.
+def _possibly_reached_entries(script: str) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for segments that are not provably dead.
 
     Literal-``false`` branches and short-circuits are dead; loops and
     unevaluated conditions stay possible, so an invocation a retry
-    implementation wraps in a loop still counts.
+    implementation wraps in a loop still counts.  The pair index stays
+    attached so callers can relate the command back to the exact segment
+    position instead of matching by text.
     """
-    live: list[str] = []
+    live: list[tuple[int, str]] = []
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     pairs = _command_segments_with_separators(script)
@@ -1767,7 +1769,7 @@ def _possibly_reached_segments(script: str) -> list[str]:
             if carried := _possible_marker_carry(
                 segment, separator, previous, branches
             ):
-                live.append(carried)
+                live.append((index, carried))
             previous = None
             continue
         if not _region_runs(branches):
@@ -1779,9 +1781,14 @@ def _possibly_reached_segments(script: str) -> list[str]:
             and not _chain_skips(separator, previous)
         ):
             break
-        live.append(segment)
+        live.append((index, segment))
         previous = _segment_literal(segment)
     return live
+
+
+def _possibly_reached_segments(script: str) -> list[str]:
+    """Segments that are not provably dead (see ``_possibly_reached_entries``)."""
+    return [command for _index, command in _possibly_reached_entries(script)]
 
 
 def _payload_end_index(text: str) -> int:
@@ -2832,14 +2839,14 @@ def _live_scan_step(
     return True, exited, status, errexit, True
 
 
-def _live_command_segments(
+def _live_command_entries(
     script: str,
     failing: frozenset[str] = frozenset(),
     exiting: frozenset[str] = frozenset(),
     *,
     errexit: bool = True,
-) -> list[str]:
-    """Segments on the unconditional path of one shell's script.
+) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for segments on the unconditional path.
 
     A command counts when the analyzer can prove it runs: an ``if`` with an
     unevaluated condition hides both branches, loops and ``case`` hide
@@ -2849,8 +2856,10 @@ def _live_command_segments(
     ``if true`` bodies and ``true &&`` chains still count; a standalone
     failing command under ``set -e`` ends the run too, including through
     calls to local functions that provably end in a failure or an exit.
+    The pair index stays attached so callers can relate the command back
+    to the exact segment position instead of matching by text.
     """
-    live: list[str] = []
+    live: list[tuple[int, str]] = []
     previous: bool | None = None
     branches: list[tuple[bool, int]] = []
     exited = False
@@ -2870,12 +2879,28 @@ def _live_command_segments(
                 if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
                 else ""
             )
-            live.append(carried or segment)
+            live.append((index, carried or segment))
         if carry:
             exited = exited_out
             previous = previous_out
             errexit = errexit_out
     return live
+
+
+def _live_command_segments(
+    script: str,
+    failing: frozenset[str] = frozenset(),
+    exiting: frozenset[str] = frozenset(),
+    *,
+    errexit: bool = True,
+) -> list[str]:
+    """Segments on the unconditional path of one shell's script."""
+    return [
+        command
+        for _index, command in _live_command_entries(
+            script, failing, exiting, errexit=errexit
+        )
+    ]
 
 
 def _rustfmt_component_index(
@@ -7556,7 +7581,7 @@ def _errexit_state_by_segment(
     """The errexit mode in force at each command's position.
 
     Only a REACHABLE ``set`` changes the mode: ``live_indices`` is the set
-    of segment indices that are foreground-live (normalized the same way),
+    of pair indices that are foreground-live (attached by the scan itself),
     so a ``set`` that sits behind a short-circuit or a dead branch must not
     flip the state for the commands after it.  ``false && set -e;
     make docs-check; true`` keeps errexit off (verified live: the failing
@@ -7589,11 +7614,58 @@ def _masked_command_segments_for_step(step: str | dict) -> set[str]:
     # command out of an earlier command's view (``make docs-check; set -e;
     # true`` swallowed a failing make that way - verified: step exit 0).
     # The live indices come from the same foreground view the prerequisite
-    # checks consume, so a `set` behind a dead branch or a short-circuit
-    # cannot flip the mode for the commands after it.
-    live_indices = _foreground_live_indices(step, pairs)
+    # checks consume (pair indices, attached by the scan itself), so a
+    # `set` behind a dead branch or a short-circuit cannot flip the mode
+    # for the commands after it.
+    live_indices = _foreground_live_indices(step)
     errexit_by_index = _errexit_state_by_segment(pairs, live_indices, initial)
     return _failure_masked_segments_from_pairs(pairs, errexit_by_index)
+
+
+def _step_foreground_views(
+    step: str | dict,
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """``(may_entries, live_entries)`` for one run step's script.
+
+    Both views return ``(pair_index, command)`` in execution order, in the
+    same pair-index space as the step's executable text, so callers relate
+    a command back to its exact segment position instead of matching by
+    text (identical normalized commands at different positions stay
+    distinguishable).  ``may_entries`` keeps every command that is not
+    provably dead: literal-``false`` branches and short-circuits drop out,
+    while unknown conditions and loops stay possible.  ``live_entries``
+    keeps only the commands the analyzer can prove run.  Backgrounded
+    commands are excluded from both views: their exit status is never
+    observed and their environment effects stay in the background shell.
+    """
+    script = _step_script(step)
+    if script is None:
+        return [], []
+    stripped = _strip_heredocs(_strip_shell_comments(script))
+    executable_source = _join_continuations(stripped)
+    executable = _strip_function_bodies(executable_source)
+    failing, exiting = _function_kill_sets(executable_source)
+    shell = step.get("shell") if isinstance(step, dict) else None
+    backgrounded = _backgrounded_command_segments(executable)
+    live_entries = [
+        (index, command)
+        for index, command in _live_command_entries(
+            executable, failing, exiting, errexit=_shell_initial_errexit(shell)
+        )
+        if command.strip() not in backgrounded
+    ]
+    may_entries = [
+        (index, command)
+        for index, command in _possibly_reached_entries(executable)
+        if command.strip() not in backgrounded
+    ]
+    return may_entries, live_entries
+
+
+def _foreground_live_entries(step: str | dict) -> list[tuple[int, str]]:
+    """``(pair_index, command)`` for the foreground-live view of a step."""
+    _may_entries, live_entries = _step_foreground_views(step)
+    return live_entries
 
 
 def _foreground_live_commands(step: str | dict) -> list[str]:
@@ -7603,45 +7675,12 @@ def _foreground_live_commands(step: str | dict) -> list[str]:
     install`` or ``make docs-check`` cannot count as satisfied: the shell
     never waits for ``cmd &``, so its exit status proves nothing.
     """
-    script = _step_script(step)
-    if script is None:
-        return []
-    stripped = _strip_heredocs(_strip_shell_comments(script))
-    executable_source = _join_continuations(stripped)
-    executable = _strip_function_bodies(executable_source)
-    backgrounded = _backgrounded_command_segments(executable)
-    return [
-        segment
-        for segment in _step_live_commands(step)
-        if segment.strip() not in backgrounded
-    ]
+    return [command for _index, command in _foreground_live_entries(step)]
 
 
-def _foreground_live_indices(
-    step: str | dict, pairs: list[tuple[str, str]]
-) -> set[int]:
-    """Segment indices (into ``pairs``) that are foreground-live.
-
-    ``_foreground_live_commands`` returns raw segment texts in execution
-    order; matching them back to the pair stream by normalized text in
-    order keeps liveness (dead branches, short-circuits, masked retries,
-    backgrounds, exits) attached to the exact segment positions.
-    """
-    live_segments = _foreground_live_commands(step)
-    live_indices: set[int] = set()
-    live_iter = iter(live_segments)
-    live_text = (
-        _prerequisite_view_text(next(live_iter).strip()) if live_segments else None
-    )
-    for index, (segment, _separator) in enumerate(pairs):
-        seg_text = _prerequisite_view_text(segment.strip())
-        if live_text is not None and seg_text == live_text:
-            live_indices.add(index)
-            try:
-                live_text = _prerequisite_view_text(next(live_iter).strip())
-            except StopIteration:
-                live_text = None
-    return live_indices
+def _foreground_live_indices(step: str | dict) -> set[int]:
+    """Segment indices (into the step's pair stream) that are live."""
+    return {index for index, _command in _foreground_live_entries(step)}
 
 
 def _normalize_shell_command_words(words: list[str]) -> list[str]:
@@ -8232,10 +8271,10 @@ def _make_flags_value_has_unresolved_expansion(value: str) -> bool:
 # A make name assigned from a backtick substitution: the segment scanner
 # cuts at the backtick, so the assignment word ends at the cut (``export
 # MAKEFLAGS=``) and the reference is visible only where the cut lands in
-# the executable text.  The taint is derived from the reachable-command
-# walk (see ``_make_flag_backtick_references``) instead of a raw-text
-# regex, so cuts inside dead branches, comments, and heredocs cannot
-# mark a name unresolved.
+# the executable text.  The taint is derived from the may-execute walk
+# (see ``_substitution_taint_events``) instead of a raw-text regex, so
+# cuts inside provably dead branches, comments, and heredocs cannot mark
+# a name unresolved.
 
 # Fail-closed marker: the value cannot be attributed, so any make that
 # inherits it is not a certified docs-check.
@@ -8247,11 +8286,17 @@ def _cut_make_assignment_name(segment: str) -> str | None:
 
     The cut leaves the shell word unfinished, so ``export MAKEFLAGS=``
     and the concatenated ``export MAKEFLAGS=-s`` both continue into the
-    substitution and stay unresolved.  Only assignment words in
-    assignment position count: ``echo MAKEFLAGS=`` is not an assignment,
-    and after ``export`` every earlier word must be an assignment too.
+    substitution and stay unresolved.  A cut inside an open double quote
+    (``export MAKEFLAGS="``) leaves the quote unmatched, which defeats
+    full shell tokenization; a whitespace split still shows the trailing
+    assignment word, so that fallback preserves the name.  Only
+    assignment words in assignment position count: ``echo MAKEFLAGS=``
+    is not an assignment, and after ``export`` every earlier word must
+    be an assignment too.
     """
     words = _parse_segment_words(segment)
+    if words is None:
+        words = segment.split()
     if not words:
         return None
     if words[0] == "export":
@@ -8289,69 +8334,91 @@ def _literal_make_assignments(segment: str) -> dict[str, str]:
     }
 
 
-def _fold_segment_taint(view: str, cut_at_backtick: bool, state: dict[str, str]) -> None:
-    """Apply one reachable segment's assignment effect to the taint state.
-
-    A literal assignment (standalone or export form) clears the name; a
-    substitution cut at the segment's end marks it unresolved; anything
-    else leaves the state untouched.
-    """
-    for name in _literal_make_assignments(view):
-        state[name] = "literal"
-    if not cut_at_backtick:
-        return
-    name = _cut_make_assignment_name(view)
-    if name is not None:
-        state[name] = "subst"
-
-
-def _taint_state_by_segment(
-    executable: str, pairs: list[tuple[str, str]], live_indices: set[int]
-) -> dict[str, str]:
-    """The last reachable assignment form per make name in the step."""
-    state: dict[str, str] = {}
+def _segment_cut_positions(
+    executable: str, pairs: list[tuple[str, str]]
+) -> dict[int, int]:
+    """The pair index -> offset of each segment's end within the text."""
+    positions: dict[int, int] = {}
     cursor = 0
     for index, (segment, _separator) in enumerate(pairs):
         position = executable.find(segment, cursor)
         if position < 0:
             position = cursor
-        cut = position + len(segment)
-        cursor = cut
-        if index in live_indices:
-            _fold_segment_taint(
-                _prerequisite_view_text(segment.strip()),
-                cut < len(executable) and executable[cut] == "`",
-                state,
-            )
-    return state
+        positions[index] = position + len(segment)
+        cursor = position + len(segment)
+    return positions
 
 
-def _make_flag_backtick_references(step: str | dict) -> frozenset[str]:
-    """Make-flag names whose LAST reachable assignment is a substitution.
+def _substitution_taint_events(
+    step: str | dict,
+) -> tuple[dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]]:
+    """Taint, clear, and export events keyed by pair index.
 
-    The walk follows the same foreground-live view the export tracking
-    consumes, so a substitution inside a dead branch, a comment, a
-    heredoc body, or an uninvoked function never taints a later make
-    (none of them runs).  A reachable substitution taints a name until a
-    later reachable assignment of a literal value - in either the
-    standalone or the export form - clears it; the reverse order leaves
-    the substitution in force.  The cut is recognized on the executable
+    ``taints[index]`` holds the make names a substitution cut at that
+    segment may leave unresolved.  The event is drawn from the
+    may-execute view, so an assignment inside a branch with an unknown
+    condition still marks the name: the substitution may run, and the
+    scan cannot attribute the value make would receive.  ``clears[index]``
+    holds the names a fully literal assignment at that segment is
+    guaranteed to replace; it is drawn from the live view, so an
+    assignment behind a dead branch or a short-circuit cannot clear an
+    earlier substitution.  ``exports[index]`` holds the names whose
+    export attribute may be established at that segment; the taint is
+    only inheritable through an export attribute, so the consumer joins
+    the two event streams.  The cut is recognized on the executable
     text: the assignment word ends exactly where a backtick begins
-    (``export MAKEFLAGS=`getflags```), and a substitution concatenated
+    (``export MAKEFLAGS=`getflags```, including the quoted
+    ``export MAKEFLAGS=\"`getflags`\"``), and a substitution concatenated
     into the value (``export MAKEFLAGS=-s`extra```) stays unresolved too.
     """
     script = _step_script(step)
     if script is None:
-        return frozenset()
+        return {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
     pairs = _command_segments_with_separators(executable)
-    live_indices = _foreground_live_indices(step, pairs)
-    state = _taint_state_by_segment(executable, pairs, live_indices)
-    return frozenset(
-        name for name, form in state.items() if form == "subst"
-    )
+    may_entries, live_entries = _step_foreground_views(step)
+    cut_positions = _segment_cut_positions(executable, pairs)
+    taints: dict[int, set[str]] = {}
+    clears: dict[int, set[str]] = {}
+    exports: dict[int, set[str]] = {}
+    for index, command in may_entries:
+        name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
+        if name is None:
+            continue
+        taints.setdefault(index, set()).add(name)
+        words = command.split()
+        if words and words[0] == "export":
+            exports.setdefault(index, set()).add(name)
+    for index, command in live_entries:
+        names = _cleared_names(command, executable, cut_positions.get(index, 0))
+        if names:
+            clears.setdefault(index, set()).update(names)
+    return taints, clears, exports
+
+
+def _cut_taint_name(command: str, executable: str, cut: int) -> str | None:
+    """The make name a substitution cut at a segment's end resolves to.
+
+    None when the segment does not end at a backtick cut or the cut word
+    does not assign a make name.
+    """
+    if cut >= len(executable) or executable[cut] != "`":
+        return None
+    return _cut_make_assignment_name(command)
+
+
+def _cleared_names(command: str, executable: str, cut: int) -> set[str]:
+    """The make names a segment's fully literal assignment clears.
+
+    A segment ending at a substitution cut carries an unfinished word
+    (``export MAKEFLAGS=`` reads as an empty value); it is not a literal
+    assignment and cannot clear an earlier taint.
+    """
+    if cut < len(executable) and executable[cut] == "`":
+        return set()
+    return set(_literal_make_assignments(command))
 
 
 
@@ -8842,7 +8909,6 @@ def _advance_export_tracking(
     assigned: dict[str, str],
     export_names: set[str],
     exported: dict[str, str],
-    unresolved: set[str],
 ) -> None:
     """Fold one command's assignments into the running export view.
 
@@ -8851,11 +8917,10 @@ def _advance_export_tracking(
     inherits them.  Bash also keeps the export ATTRIBUTE when a later
     standalone assignment replaces the value: ``export MAKEFLAGS=``
     followed by ``MAKEFLAGS=-n`` still hands ``-n`` to every later make
-    (verified: the recipe only prints and the step exits 0).  ``unresolved``
-    is the step's taint set (see ``_make_flag_backtick_references``): a
-    name whose LAST assignment is a substitution keeps the sentinel
-    wherever the attribute is set, so a make inheriting it cannot certify
-    (fail closed).
+    (verified: the recipe only prints and the step exits 0).  Substitution
+    taint is maintained by the caller per command position (see
+    ``_substitution_taint_events``), which folds the step's events in
+    execution order so a later literal cannot clear an earlier make.
     """
     assigned.update(_plain_make_assignments(segment))
     export_state = _make_relevant_export_state(segment, assigned)
@@ -8866,9 +8931,6 @@ def _advance_export_tracking(
     for name, value in _standalone_make_assignments(segment).items():
         if name in export_names:
             exported[name] = value
-    for name in unresolved:
-        if name in export_names:
-            exported[name] = _UNRESOLVED_FLAG_SENTINEL
 
 
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
@@ -8886,11 +8948,14 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     masked = _masked_command_segments_for_step(step)
     step_env = step.get("env") if isinstance(step, dict) else None
     cwd_at_root = _step_working_directory_keeps_root(step)
-    # A make name whose last REACHABLE assignment is a backtick
-    # substitution cannot be attributed, so any make inheriting it in
-    # this step fails closed; dead branches, comments, and heredocs are
-    # already dropped by the live view and the executable text.
-    unresolved = set(_make_flag_backtick_references(step))
+    # Substitution taint is folded in execution order: a taint event from
+    # the may-execute view (an unknown branch may run) marks the name
+    # unresolved from its position onward, and only a GUARANTEED literal
+    # assignment (the live view) clears it.  Folding per command position
+    # keeps the state in force at each make invocation, so a later
+    # literal cannot clear the taint for an earlier make (fail closed).
+    taints, clears, export_events = _substitution_taint_events(step)
+    tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
     # assignment to a name the environment carries keeps the export
@@ -8908,12 +8973,14 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
                 export_names.add(name)
                 exported[name] = value
     scanned: list[tuple[int, bool, bool]] = []
-    for command_index, segment in enumerate(_foreground_live_commands(step)):
+    for command_index, (pair_index, segment) in enumerate(
+        _foreground_live_entries(step)
+    ):
+        tracker.advance(pair_index, export_names)
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
-        _advance_export_tracking(
-            segment, assigned, export_names, exported, unresolved
-        )
+        _advance_export_tracking(segment, assigned, export_names, exported)
+        tracker.mark(exported, export_names)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
         installs, checks_docs = _pip_step_commands(
@@ -8921,6 +8988,53 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         )
         scanned.append((command_index, installs, checks_docs))
     return scanned
+
+
+class _TaintTracker:
+    """Substitution taint folded in execution order, one command at a time.
+
+    ``advance`` applies every event up to the current pair index (a taint
+    from the may-execute view marks the name; a literal clear from the
+    live view unmarks it; an export event establishes the attribute), and
+    ``mark`` stamps the unresolved sentinel onto every exported name still
+    carrying taint.  Folding at each position keeps the state in force at
+    every make invocation, so a later literal cannot clear the taint for
+    an earlier make (fail closed).
+    """
+
+    def __init__(
+        self,
+        taints: dict[int, set[str]],
+        clears: dict[int, set[str]],
+        export_events: dict[int, set[str]],
+    ) -> None:
+        self._taints = taints
+        self._clears = clears
+        self._exports = export_events
+        self._pending = sorted(set(taints) | set(clears) | set(export_events))
+        self._cursor = 0
+        self._tainted: set[str] = set()
+
+    def advance(self, pair_index: int, export_names: set[str]) -> None:
+        """Apply every event at or before ``pair_index``."""
+        while (
+            self._cursor < len(self._pending)
+            and self._pending[self._cursor] <= pair_index
+        ):
+            event_index = self._pending[self._cursor]
+            self._cursor += 1
+            if event_index in self._exports:
+                export_names |= self._exports[event_index]
+            if event_index in self._taints:
+                self._tainted |= self._taints[event_index]
+            if event_index in self._clears:
+                self._tainted -= self._clears[event_index]
+
+    def mark(self, exported: dict[str, str], export_names: set[str]) -> None:
+        """Stamp the unresolved sentinel onto every tainted export."""
+        for name in self._tainted:
+            if name in export_names:
+                exported[name] = _UNRESOLVED_FLAG_SENTINEL
 
 
 def _pip_first_steps(
