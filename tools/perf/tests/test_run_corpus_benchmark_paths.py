@@ -259,6 +259,13 @@ def test_write_examples_rejects_a_symlinked_destination(tmp_path, monkeypatch):
     still be substituted before the run: a symlink planted at the target
     name resolves outside the examples root, so the containment check
     must refuse the write instead of following the link off the tree.
+
+    This pins the containment property the S2083 fix had to PRESERVE, not
+    a behaviour the fix introduced: the previous implementation already
+    refused the link, so the test guards against a future change losing
+    that guarantee rather than against this refactor's own diff.  Both
+    destination names are planted in turn because each is validated at its
+    own sink.
     """
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()
@@ -288,6 +295,6 @@ def test_write_examples_rejects_a_symlinked_destination(tmp_path, monkeypatch):
         outside_target = tmp_path / ("outside-target-" + planted_name)
         (out_dir / planted_name).symlink_to(outside_target)
 
-        with pytest.raises(ValueError, match="escapes examples directory root"):
+        with pytest.raises(ValueError, match="escapes root"):
             write_examples(examples, fixtures_meta, "/bin/echo", out_dir)
         assert not outside_target.exists()

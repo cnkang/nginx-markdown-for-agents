@@ -33,6 +33,198 @@ DRIFT_NO_NL = DRIFT.rstrip("\n")
 INSTALLER_NO_NL = INSTALLER.rstrip("\n")
 COMPONENT_NO_NL = COMPONENT.rstrip("\n")
 
+# One table for the parent-vs-child question the make-flag clear depends on.
+# Every entry was taken from real `bash`: the parent keeps the substitution's
+# output when the form forks (child) and holds the literal when it does not
+# (parent).  The install is its OWN step, because a region under test would
+# otherwise absorb the make invocation and the verdict would be meaningless.
+#
+# A backtick inside a string is deliberately absent: any backtick makes the
+# whole script opaque to the alias/shadowing guard, which rejects it for an
+# unrelated reason both at base and at head.
+SHELL_REGION_SHAPES: tuple[tuple[str, str, bool], ...] = (
+    # -- the parent shell clears ------------------------------------------
+    ("plain literal", "export MAKEFLAGS=-s", True),
+    ("multi-name export", "export FOO MAKEFLAGS=-s", True),
+    ("export -n with literal", "export -n MAKEFLAGS=-s", True),
+    ("standalone brace group", "{ export MAKEFLAGS=-s; }", True),
+    (
+        "case pattern then a parent literal",
+        "case x in y) ;; esac; export MAKEFLAGS=-s",
+        True,
+    ),
+    ("brace group led by &&", "true && { export MAKEFLAGS=-s; }", True),
+    ("brace group with a later statement", "{ export MAKEFLAGS=-s; echo x; }", True),
+    ("brace group with a nested group", "{ export MAKEFLAGS=-s; { true; }; }", True),
+    ('quoted brace is data', 'echo "{"; export MAKEFLAGS=-s', True),
+    ("quoted paren is data", "echo '('; export MAKEFLAGS=-s", True),
+    ("quoted brace pair is data", "echo '{ }'; export MAKEFLAGS=-s", True),
+    # -- a child shell does not clear -------------------------------------
+    ("subshell, literal first", "( export MAKEFLAGS=-s )", False),
+    # A `case` pattern contributes a `)` that opened nothing.  If it were
+    # allowed to cancel a LATER real subshell, that subshell would vanish
+    # from the scan and the parent's clear would be credited.
+    ("case pattern then a subshell", "case x in y) ;; esac; ( true; export MAKEFLAGS=-s )", False),
+    (
+        "function with a case, subshell after",
+        "f() { case x in y) ;; esac; }; f; ( true; export MAKEFLAGS=-s )",
+        False,
+    ),
+    (
+        "case branch holding a subshell",
+        "case x in x) ( true; export MAKEFLAGS=-s ) ;; esac",
+        False,
+    ),
+    ("subshell, literal second", "( true; export MAKEFLAGS=-s )", False),
+    ("subshell, three statements", "( true; export MAKEFLAGS=-s; true )", False),
+    ("command substitution", "x=$(export MAKEFLAGS=-s; true)", False),
+    ("bare pipeline stage, right", "true | export MAKEFLAGS=-s", False),
+    ("bare pipeline stage, left", "export MAKEFLAGS=-s | true", False),
+    ("two pipes", "true | true | export MAKEFLAGS=-s", False),
+    ("brace group, right of pipe", "true | { export MAKEFLAGS=-s; }", False),
+    (
+        "brace group, right of pipe, extra statement",
+        "true | { export MAKEFLAGS=-s; echo x; }",
+        False,
+    ),
+    ("brace group, left of pipe", "{ export MAKEFLAGS=-s; } | true", False),
+    ("brace group, left of pipe, unspaced", "{ export MAKEFLAGS=-s; }|true", False),
+    (
+        "brace group with a later statement, piped",
+        "{ export MAKEFLAGS=-s; echo x; } | true",
+        False,
+    ),
+    (
+        "brace group with two later statements, piped",
+        "{ export MAKEFLAGS=-s; echo x; echo y; } | true",
+        False,
+    ),
+    ("brace group, nested group, piped", "{ export MAKEFLAGS=-s; { true; }; } | true", False),
+    (
+        "brace group piped into a brace group",
+        "{ export MAKEFLAGS=-s; } | { true; }",
+        False,
+    ),
+    # A bare stage on the LEFT with a group on the RIGHT: the pipe is
+    # consumed into the previous segment's text, so this is the only shape
+    # where the between-segments probe is the sole defence.
+    ("bare stage left, group right", "export MAKEFLAGS=-s | { true; }", False),
+    (
+        "bare stage left, group right with a statement",
+        "export MAKEFLAGS=-s | { true; echo y; }",
+        False,
+    ),
+    ("multi-name export with taint", "export FOO MAKEFLAGS=`g`", False),
+    ("unknown branch with taint", "[ -f M ] && export MAKEFLAGS=`g`", False),
+    # -- redirections do not move the fork --------------------------------
+    ("one redirection", "{ export MAKEFLAGS=-s; } 2>&1 | true", False),
+    ("two redirections", "{ export MAKEFLAGS=-s; } >/dev/null 2>&1 | true", False),
+    ("two redirections, swapped", "{ export MAKEFLAGS=-s; } 2>&1 >/dev/null | true", False),
+    ("same redirection twice", "{ export MAKEFLAGS=-s; } >/dev/null >/dev/null | true", False),
+    ("redirection with fd prefix", "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true", False),
+    ("&> operator", "{ export MAKEFLAGS=-s; } &>/dev/null | true", False),
+    ("two bare targets", "{ export MAKEFLAGS=-s; } > a > b | true", False),
+    ("redirection then piped brace", "{ export MAKEFLAGS=-s; } 2>&1 | { true; }", False),
+    (
+        "piped brace then another pipe",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; } | cat",
+        False,
+    ),
+    ("redirection after a later statement", "{ export MAKEFLAGS=-s; echo x; } 2>&1 | true", False),
+)
+
+
+
+
+
+def test_unverified_taint_mechanisms_are_pinned() -> None:
+    """Pin the three taint mechanisms no end-to-end shape reaches.
+
+    Each of these was load-bearing in review but no shape in the table
+    could see it, so stubbing any one away left the suite green.  They are
+    asserted at the level they act on rather than through the gate verdict:
+
+    * a segment ending at a substitution cut is not a literal assignment,
+      so it must not clear; the tracker applies a taint before a clear at
+      the same index, which makes this the only brake on a same-index
+      self-clear (``_TaintTracker.advance`` orders taints first);
+    * the name recovery must also work for a standalone assignment, not
+      only for one inside an ``export`` list;
+    * a backslash continuation must be joined before the segments are cut,
+      otherwise a split statement reads as two.
+    """
+    bt = chr(96)
+    script = f"export MAKEFLAGS={bt}printf X{bt}; export MAKEFLAGS=-s; make docs-check"
+    executable = packaging_gate._strip_function_bodies(
+        packaging_gate._join_continuations(
+            packaging_gate._strip_heredocs(packaging_gate._strip_shell_comments(script))
+        )
+    )
+    pairs = packaging_gate._command_segments_with_separators(executable)
+    cut_at = packaging_gate._segment_cut_positions(executable, pairs)[0]
+
+    # A cut is not a literal: no clear event may be produced for it.
+    taints, clears, _exports = packaging_gate._substitution_taint_events(
+        {"run": script}
+    )
+    assert taints[0] == {"MAKEFLAGS"}
+    assert 0 not in clears, clears
+    assert executable[cut_at] == bt
+    assert packaging_gate._cleared_names(
+        "export MAKEFLAGS=", executable, cut_at
+    ) == set()
+
+    # The name is recovered from a standalone assignment too: the recovery
+    # must not depend on the statement starting with `export`, which is
+    # what keeps `MAKEFLAGS=-s` followed by a substitution tainting.
+    standalone = packaging_gate._cut_make_assignment_name("MAKEFLAGS=")
+    assert standalone == "MAKEFLAGS"
+    assert (
+        packaging_gate._cut_make_assignment_name("export MAKEFLAGS=") == "MAKEFLAGS"
+    )
+    # A name that is not a make-flag variable is still not recovered, and a
+    # non-assignment word carries no name at all.
+    assert packaging_gate._cut_make_assignment_name("OTHER=") is None
+    assert packaging_gate._cut_make_assignment_name("echo") is None
+
+    # A continuation is joined: the joined and plain forms agree.
+    continued = f"export MAKEFLAGS={bt}printf X{bt} \\\n; export MAKEFLAGS=-s; make docs-check"
+    joined = packaging_gate._join_continuations(continued)
+    assert "\\" not in joined
+    continued_events = packaging_gate._substitution_taint_events(
+        {"run": continued}
+    )
+    plain_events = packaging_gate._substitution_taint_events({"run": script})
+    assert continued_events == plain_events
+
+def test_parent_versus_child_shapes_match_bash() -> None:
+    """Every parent/child shape the clear depends on, in one table.
+
+    The gate certifies a release job only when a ``make docs-check`` runs
+    with an attributable ``MAKEFLAGS``.  A literal clears the taint only
+    when it executes in the PARENT shell, so each construct has to be
+    classified the way bash classifies it.  Every row of
+    ``SHELL_REGION_SHAPES`` was taken from a live bash probe, and the rows
+    span the whole shape space: subshell, brace group, command
+    substitution, pipeline stage on either side, nestings, and redirection
+    runs.  Keeping them in one table means a fix that handles one instance
+    of a repeated token cannot silently break its neighbour.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    failures: list[str] = []
+    for label, tail, runs_in_parent in SHELL_REGION_SHAPES:
+        script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
+        issue = packaging_gate._python_deps_issue([install, {"run": script}])
+        # runs_in_parent -> the literal is real, so the step must certify.
+        # otherwise the literal is in a child, so the taint stands and the
+        # step must be rejected.
+        certified = issue is None
+        if certified != runs_in_parent:
+            failures.append(
+                f"{label}: want {'CERTIFY' if runs_in_parent else 'REJECT'}"
+                f" got {'CERTIFY' if certified else 'REJECT'}"
+            )
+    assert not failures, "; ".join(failures)
 
 def test_toolchain_gate_keeps_heredoc_body_quotes_out_of_later_comments() -> None:
     """A heredoc apostrophe cannot make a later shell comment executable."""
@@ -2135,17 +2327,19 @@ def test_substitution_taint_clears_on_a_later_export_assignment() -> None:
     )
 
 
-def test_substitution_taint_ignores_unreachable_regions() -> None:
-    """Only a REACHABLE substitution taints a later make.
+def test_substitution_taint_ignores_provably_dead_regions() -> None:
+    """Only a NOT-provably-dead substitution taints a later make.
 
     Regression: the taint scan swept the raw script text, so a
     substitution inside a dead branch, a comment, or a heredoc body - none
     of which runs - still marked the name unresolved and rejected an
-    otherwise certified check.  A reachable substitution and a call into a
-    function whose body carries one must keep failing closed.
+    otherwise certified check.  A provably running substitution and a call
+    into a function whose body carries one must keep failing closed, and a
+    branch whose condition is unevaluated stays a taint source (it may
+    run; the scan cannot attribute the value make would receive).
     """
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
-    # Unreachable substitution sources do not taint the step.
+    # Provably dead substitution sources do not taint the step.
     for script in (
         "if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
         "export MAKEFLAGS=-s; if false; then export MAKEFLAGS=`getflags`; fi; make docs-check",
@@ -2183,6 +2377,15 @@ def test_substitution_taint_ignores_unreachable_regions() -> None:
         assert (
             packaging_gate._python_deps_issue([install, {"run": script}]) is not None
         ), script
+    # A branch whose condition is unevaluated may run: its substitution
+    # keeps the name unresolved (fail closed).
+    for script in (
+        "[ -f Makefile ] && export MAKEFLAGS=`getflags`; make docs-check",
+        'X=1; if [ -n "$X" ]; then export MAKEFLAGS=`getflags`; fi; make docs-check',
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
     # An unreachable literal assignment does not clear the taint either.
     assert (
         packaging_gate._python_deps_issue(
@@ -2190,6 +2393,270 @@ def test_substitution_taint_ignores_unreachable_regions() -> None:
         )
         is not None
     )
+
+
+def test_substitution_taint_is_evaluated_at_each_make_invocation() -> None:
+    """A later literal cannot clear the taint for an earlier make.
+
+    Regression: the taint was resolved to a single last-assignment set for
+    the whole step, so ``export MAKEFLAGS=``getflags``; make docs-check;
+    export MAKEFLAGS=-s`` read the make as certified although the make ran
+    while the substitution's output was in force.  The state now folds in
+    execution order, so the taint in force at the invocation decides it.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`; make docs-check; export MAKEFLAGS=-s"}]
+        )
+        is not None
+    )
+    # The reverse order still certifies: the literal ran before the make.
+    assert (
+        packaging_gate._python_deps_issue(
+            [install, {"run": "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check"}]
+        )
+        is None
+    )
+
+
+def test_double_quoted_substitutions_keep_the_taint() -> None:
+    """A quoted substitution assigned to a make name stays unresolved.
+
+    Regression: a cut inside an open double quote (``export
+    MAKEFLAGS=\\"`getflags`\\"``) leaves the shell word unparseable, so the
+    assignment name was dropped and the name never marked unresolved
+    although make receives the substitution's output.  The name is
+    recovered from the cut segment and the taint holds for quoted and
+    concatenated forms.
+
+    The taint events are asserted directly rather than through
+    ``_python_deps_issue``: a backtick substitution makes the whole script
+    opaque to the alias/shadowing guard, which rejects these scripts for an
+    unrelated reason and would therefore mask any regression in the taint
+    analysis.
+    """
+    for script, expected in (
+        ('export MAKEFLAGS="`getflags`"; make docs-check', {"MAKEFLAGS"}),
+        ('export MAKEFLAGS="`getflags`"\nmake docs-check', {"MAKEFLAGS"}),
+        ('export MAKEFLAGS="x`getflags`"; make docs-check', {"MAKEFLAGS"}),
+        # A quoted literal without a substitution must not taint: the
+        # positive control proves the recovery is not a blanket allow.
+        ('export MAKEFLAGS="-s"; make docs-check', set()),
+    ):
+        taints, _clears, _exports = packaging_gate._substitution_taint_events(
+            {"run": script}
+        )
+        assert set().union(*taints.values()) == expected, script
+
+
+def test_multi_name_export_keeps_the_make_taint() -> None:
+    """A bare name in an ``export`` list must not drop the make taint.
+
+    Regression: the operand check required every word before the tracked
+    name to be an ``NAME=`` assignment, so ``export FOO MAKEFLAGS=`` failed
+    the check, the make name was dropped, and the step certified although
+    ``export`` publishes the substitution output to every later make
+    (verified live: the recipe echoed the tainted ``$(MAKEFLAGS)``).
+    ``export`` also accepts its own options and the ``--`` terminator.
+
+    The verdict depends on the export attribute, so the bare (non-``export``)
+    form stays certifiable: an unexported assignment never reaches make.
+    """
+    # The name recovery itself: a bare name in the export list must not make
+    # the parser drop the tracked make name.  This asserts the new code path
+    # directly, since the previous implementation was a raw-text regex that
+    # happened to match the same name and so does not differ here.
+    assert packaging_gate._cut_make_assignment_name("export FOO MAKEFLAGS=") == "MAKEFLAGS"
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export FOO MAKEFLAGS=`getflags`; make docs-check",
+        "export FOO=1 MAKEFLAGS=`getflags`; make docs-check",
+        "export -n MAKEFLAGS=`getflags`; make docs-check",
+        "export -- MAKEFLAGS=`getflags`; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # Positive controls: a live literal in the same shapes certifies, and a
+    # bare (unexported) assignment never reaches make's environment.
+    for script in (
+        "export FOO MAKEFLAGS=-s; make docs-check",
+        "export FOO=1 MAKEFLAGS=-s; make docs-check",
+        "MAKEFLAGS=`getflags`; make docs-check",
+        "FOO MAKEFLAGS=`getflags`; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+
+
+def test_a_child_shell_literal_cannot_clear_the_make_taint() -> None:
+    """A literal in a child shell must not clear the parent's taint.
+
+    Regression: the clear stream is drawn from the foreground-live view, which
+    flattens subshell bodies and pipeline stages because they execute.  A
+    literal in one of those regions therefore cleared the parent's taint and
+    certified a step whose ``make`` inherits the substitution output.
+    Verified live: the parent keeps the tainted value after
+    ``( export MAKEFLAGS=-s )``, after ``true | { export MAKEFLAGS=-s; }``
+    and after ``x=$(export MAKEFLAGS=-s; true)``.
+
+    The parent-shell literal still clears, so the fix does not simply
+    disable clearing: the clear separator set deliberately excludes the
+    backtick, which also terminates a preceding substitution and would
+    otherwise suppress a legitimate clear.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export MAKEFLAGS=`getflags`; ( export MAKEFLAGS=-s ); make docs-check",
+        "export MAKEFLAGS=`getflags`; true | { export MAKEFLAGS=-s; }; make docs-check",
+        "export MAKEFLAGS=`getflags`; x=$(export MAKEFLAGS=-s; true); make docs-check",
+        "export MAKEFLAGS=`getflags`; ( export MAKEFLAGS=-s; true ); make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # Every statement INSIDE a region runs in that region, not just the
+    # first one the separator happens to mark.  A classification that reads
+    # only the segment's own separator credits the parent for all of these.
+    for tail in (
+        "( true; export MAKEFLAGS=-s )",
+        "( true; export MAKEFLAGS=-s; true )",
+        "true | export MAKEFLAGS=-s",
+        "{ export MAKEFLAGS=-s; } | true",
+        "{ true; export MAKEFLAGS=-s; } | true",
+        "x=`export MAKEFLAGS=-s; true`",
+        # A bare pipeline stage on either side of the pipe.  The pair
+        # stream records the separator BEFORE a segment, so the trailing
+        # side of a stage lands in the NEXT pair, not this one.
+        "export MAKEFLAGS=-s | true",
+        "export MAKEFLAGS=-s | cat",
+    ):
+        script = f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # Positive controls: the same literal in the parent shell clears, both
+    # after a substitution cut and in a separate statement.  An even number
+    # of backticks before the literal is what keeps these clearing.
+    for script in (
+        "export MAKEFLAGS=`getflags`; export MAKEFLAGS=-s; make docs-check",
+        "export MAKEFLAGS=`getflags`\nMAKEFLAGS=-s\nmake docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+
+
+def test_quoted_region_characters_do_not_open_a_region() -> None:
+    """A ``(``, ``{`` or backtick inside a string is data, not syntax.
+
+    Regression: the region scan counted every parenthesis and brace in the
+    text before the literal, so ``echo "{"`` read as an unclosed brace group
+    and a legitimate parent-shell clear was rejected.  Verified in bash:
+    ``echo "{"; export MAKEFLAGS=-s`` leaves the parent with ``-s``, and so
+    does ``echo '('`` and ``echo '{ }'``.
+
+    The real forms must still be recognised, so both directions are pinned.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    def verdict(tail: str) -> str | None:
+        return packaging_gate._python_deps_issue(
+            [install, {"run": f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"}]
+        )
+
+    for tail in (
+        'echo "{"; export MAKEFLAGS=-s',
+        "echo '{'; export MAKEFLAGS=-s",
+        "echo '('; export MAKEFLAGS=-s",
+        "echo '{ }'; export MAKEFLAGS=-s",
+        "echo ')'; export MAKEFLAGS=-s",
+    ):
+        assert verdict(tail) is None, tail
+    # A real subshell still takes the literal out of the parent.
+    assert verdict("( true; export MAKEFLAGS=-s )") is not None
+
+
+def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
+    """``{ ...; }`` runs in the current shell, so it clears; a stage does not.
+
+    Regression: the child-shell guard treated every ``{`` as a child region,
+    so the first statement of a standalone brace group lost its clear and a
+    legitimate parent-shell clear was rejected.  Bash runs ``{ ...; }`` in
+    the CURRENT shell (verified: the parent's value becomes ``-s``), while
+    the same group used as a PIPELINE stage forks a child and does not
+    (verified: the parent keeps the substitution's output).
+
+    Both directions are asserted so neither the child nor the parent case
+    can regress silently.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+
+    def verdict(tail: str) -> str | None:
+        return packaging_gate._python_deps_issue(
+            [install, {"run": f"export MAKEFLAGS=`getflags`; {tail}; make docs-check"}]
+        )
+
+    for tail in (
+        "{ export MAKEFLAGS=-s; }",
+        "true && { export MAKEFLAGS=-s; }",
+        "{ true; export MAKEFLAGS=-s; }",
+    ):
+        assert verdict(tail) is None, tail
+    for tail in (
+        "true | { export MAKEFLAGS=-s; }",
+        "true | export MAKEFLAGS=-s",
+    ):
+        assert verdict(tail) is not None, tail
+    # A group on the LEFT of a pipe is a child too: the pipe follows the
+    # closing brace rather than introducing the group, so a probe that only
+    # looks backwards from the group opener misses it.  The RIGHT-hand form
+    # is listed again here because a group inside a pipeline stage is the
+    # one case that cannot be seen from the segment's own separators alone.
+    for tail in (
+        "{ export MAKEFLAGS=-s; } | true",
+        "{ true; export MAKEFLAGS=-s; } | true",
+        "true | { export MAKEFLAGS=-s; }",
+        "true | { true; export MAKEFLAGS=-s; }",
+    ):
+        assert verdict(tail) is not None, tail
+    # The pipe can sit further away than the very next pair: a group closer
+    # or a redirection still belongs to the stage, so the forward probe has
+    # to look past them.  Without this the spaced form passes only because
+    # the scanner swallows the `}`.
+    for tail in (
+        "{ export MAKEFLAGS=-s; }|true",
+        "{ export MAKEFLAGS=-s; } 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } 2>&1|true",
+        "{ export MAKEFLAGS=-s; } 2>/dev/null | tee log",
+        "if true; then { export MAKEFLAGS=-s; }|true; fi",
+        # Several redirections in one stage, and the `&>` form.  A stage may
+        # carry more than one redirection word, and a bare operator splits
+        # its target into the next token (`> a`), so neither a single-word
+        # match nor a missing `&>` may be relied on.
+        "{ export MAKEFLAGS=-s; } >/dev/null 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } 2>&1 >/dev/null | true",
+        "{ export MAKEFLAGS=-s; } >/dev/null >/dev/null | true",
+        "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } &>/dev/null | true",
+        "{ export MAKEFLAGS=-s; } > a > b | true",
+        # A brace group on the far side of the pipe takes the separator slot,
+        # so the `|` is dropped from the pair stream entirely; the text
+        # between the two segments is the only place it survives.
+        "{ export MAKEFLAGS=-s; } | { true; }",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; }",
+        "{ export MAKEFLAGS=-s; } 2>&1 | { true; } | cat",
+        # Statements AFTER the literal inside the group do not move the fork:
+        # bash treats the whole group as one pipeline component, so a pipe
+        # anywhere after the closing brace covers every statement in it.
+        "{ export MAKEFLAGS=-s; echo x; } | true",
+        "{ export MAKEFLAGS=-s; echo x; echo y; } | true",
+        "{ export MAKEFLAGS=-s; echo x; } 2>&1 | true",
+        "{ export MAKEFLAGS=-s; { true; }; } | true",
+    ):
+        assert verdict(tail) is not None, tail
 
 
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
