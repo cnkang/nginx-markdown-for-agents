@@ -86,7 +86,7 @@ jobs:
 
       - name: Install source audit test dependencies
         if: steps.token.outputs.enabled == 'true'
-        run: python3 -m pip install --upgrade pip && python3 -m pip install pytest==8.3.5
+        run: python3 -m pip install --upgrade pip && python3 -m pip install pytest==9.0.3 pytest-xdist==3.8.0
 
       - name: Validate tracked source encodings
         if: steps.token.outputs.enabled == 'true'
