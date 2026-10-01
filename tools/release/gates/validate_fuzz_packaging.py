@@ -8525,25 +8525,21 @@ def _first_call_after(
 ) -> int | None:
     """Index of the first pair after *body_index* that calls *name*.
 
-    A call is the name standing as the last command word, with any run of
-    environment assignments in front of it (``FOO=bar f`` is still a call).
-    A name that only appears as an argument, in a definition, or inside
-    quotes is not a call.
+    A call is the name standing as the LAST command word, so ``FOO=bar f``
+    matches because ``f`` is last rather than because the assignments were
+    stripped -- and ``echo f``, ``f --flag`` and a mention inside quotes or a
+    definition are not calls.
+
+    Only the last word is compared.  An earlier version stripped leading
+    ``NAME=value`` words first, but that can never change which word is last,
+    so the loop was dead code and its predicate had no test that could fail.
     """
     for index in range(body_index + 1, len(pairs)):
         segment, _separator = pairs[index]
         words = _masked_quotes(segment).split()
-        while len(words) > 1 and _is_env_assignment(words[0]):
-            words = words[1:]
         if words and words[-1] == name:
             return index
     return None
-
-
-def _is_env_assignment(word: str) -> bool:
-    """True when *word* is a ``NAME=value`` prefix, not a command name."""
-    name, separator, _value = word.partition("=")
-    return bool(separator) and _is_command_name(name)
 
 
 def _group_is_pipeline_stage_after(executable: str, close_at: int) -> bool:
@@ -8787,24 +8783,98 @@ def _inside_command_substitution(prefix: str) -> bool:
     return prefix.count("`") % 2 == 1
 
 
-# What terminates a `case` item.  A pattern's `)` may be followed by the
-# case body before the `;;`, so the lookahead spans to the item terminator
-# rather than the next few characters; a `)` that closes a real subshell has
-# no such terminator before the next command.
-_CASE_ITEM_END_RE = re.compile(r"(?:;;|;&|;&&|\besac\b)")
+_CASE_KEYWORD_RE = re.compile(r"\bcase\b")
 
 
 def _ends_case_item(prefix: str, start: int) -> bool:
-    """True when a `case` item terminator follows, so a `)` ended a pattern.
+    """True when the `)` at *start - 1* ended a `case` PATTERN, not a subshell.
 
-    The scan is bounded so a later terminator belonging to a DIFFERENT case
-    cannot retroactively excuse this `)`.
+    Walks the text once and tracks whether the scan sits inside a `case`
+    PATTERN list, so state composes with subshells, ``$( )`` and nesting.  The
+    previous version looked for a following ``;;`` and gave up when the span
+    contained ``;`` or ``(``, which a legitimate multi-command item always
+    has -- so ``( case x in y) a; b ;; esac; export MAKEFLAGS=-s )`` read as
+    depth 0 and the child's literal cleared the parent (verified in bash:
+    the parent keeps the substitution's output).
+
+    A pattern list opens at a `case`'s `in` and closes at the first `)`
+    after it.  The first `)` of an ENCLOSING subshell, seen before any
+    `case`, still decrements depth as it should.
     """
-    for match in _CASE_ITEM_END_RE.finditer(prefix, start):
-        if ";" in prefix[start : match.start()] or "(" in prefix[start : match.start()]:
-            return False
-        return True
+    for index in _case_pattern_terminators(prefix):
+        if index + 1 == start:
+            return True
     return False
+
+
+def _case_pattern_terminators(prefix: str) -> list[int]:
+    """Offsets of every `)` in *prefix* that ends a `case` PATTERN.
+
+    One left-to-right walk carrying the paren depth and whether the scan sits
+    in a pattern list, so the state composes with subshells, ``$( )`` and
+    nested cases without a second pass over the text.
+    """
+    found: list[int] = []
+    depth = 0
+    in_pattern_list = False
+    index = 0
+    length = len(prefix)
+    while index < length:
+        char = prefix[index]
+        if char == ")":
+            if in_pattern_list:
+                found.append(index)
+                in_pattern_list = False
+            else:
+                depth = max(0, depth - 1)
+        elif char == "(":
+            depth += 1
+        elif char.isalpha() and not in_pattern_list:
+            marker = _case_opens_at(prefix, index, depth)
+            index = index + 1 if marker is None else marker + 1
+            in_pattern_list = marker is not None
+            continue
+        index += 1
+    return found
+
+
+def _case_opens_at(prefix: str, index: int, depth: int) -> int | None:
+    """Offset of a `case`'s `in` when the keyword at *index* opens a pattern list.
+
+    Returns None when the word at *index* is not a `case`, or when its `in` is
+    nested at a different paren depth (a `case` inside a subshell, which must
+    leave the enclosing depth alone).  Kept separate so the walk above stays
+    within the complexity budget.
+    """
+    keyword = _CASE_KEYWORD_RE.match(prefix, index)
+    if keyword is None:
+        return None
+    return _case_pattern_in(prefix, keyword.end(), depth)
+
+
+def _case_pattern_in(prefix: str, after_keyword: int, depth: int) -> int | None:
+    """Offset of a `case`'s `in` when it opens a pattern list, else None.
+
+    A `case` introduces a pattern list only when its `in` sits at the current
+    paren depth, so a `case` nested in a subshell leaves the enclosing depth
+    alone.  The returned offset is the space before `in`; the caller resumes
+    just after it so the pattern list opens on the next `)`.
+    """
+    marker = prefix.find(" in ", after_keyword)
+    if marker == -1 or _paren_depth(prefix[:marker]) != depth:
+        return None
+    return marker
+
+
+def _paren_depth(text: str) -> int:
+    """Plain paren depth of *text*, used only to compare nesting levels."""
+    depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+    return depth
 
 
 def _unclosed_paren_depth(prefix: str) -> int:
