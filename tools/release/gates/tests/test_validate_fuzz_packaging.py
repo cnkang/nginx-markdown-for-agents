@@ -2258,6 +2258,42 @@ def test_double_quoted_substitutions_keep_the_taint() -> None:
         assert set().union(*taints.values()) == expected, script
 
 
+def test_multi_name_export_keeps_the_make_taint() -> None:
+    """A bare name in an ``export`` list must not drop the make taint.
+
+    Regression: the operand check required every word before the tracked
+    name to be an ``NAME=`` assignment, so ``export FOO MAKEFLAGS=`` failed
+    the check, the make name was dropped, and the step certified although
+    ``export`` publishes the substitution output to every later make
+    (verified live: the recipe echoed the tainted ``$(MAKEFLAGS)``).
+    ``export`` also accepts its own options and the ``--`` terminator.
+
+    The verdict depends on the export attribute, so the bare (non-``export``)
+    form stays certifiable: an unexported assignment never reaches make.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    for script in (
+        "export FOO MAKEFLAGS=`getflags`; make docs-check",
+        "export FOO=1 MAKEFLAGS=`getflags`; make docs-check",
+        "export -n MAKEFLAGS=`getflags`; make docs-check",
+        "export -- MAKEFLAGS=`getflags`; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+        ), script
+    # Positive controls: a live literal in the same shapes certifies, and a
+    # bare (unexported) assignment never reaches make's environment.
+    for script in (
+        "export FOO MAKEFLAGS=-s; make docs-check",
+        "export FOO=1 MAKEFLAGS=-s; make docs-check",
+        "MAKEFLAGS=`getflags`; make docs-check",
+        "FOO MAKEFLAGS=`getflags`; make docs-check",
+    ):
+        assert (
+            packaging_gate._python_deps_issue([install, {"run": script}]) is None
+        ), script
+
+
 def test_unreachable_errexit_change_does_not_flip_the_mode() -> None:
     """A ``set`` behind a short-circuit must not change the shell's mode.
 
