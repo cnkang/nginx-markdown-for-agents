@@ -8434,14 +8434,9 @@ def _substitution_taint_events(
     return taints, clears, exports
 
 
-# Separators that always open a region the parent shell does not run in: a
-# subshell group and a bare pipeline stage.  A command substitution is NOT
-# listed because the same backtick also terminates a preceding substitution,
-# and the segment after a cut carries it in front of the literal that
-# legitimately clears the taint.
-_NON_PARENT_SHELL_SEPARATORS = frozenset({"(", "|"})
-# How much text before a segment the pipeline-stage probe inspects.  It must
-# span the group opener, so `true | { cmd` needs more than the operator alone.
+# How much text around a brace group the pipeline-component probe inspects.
+# It must span the operator AND the group opener, because the pipe may sit
+# on either side of the group (`true | { ...; }` and `{ ...; } | true`).
 _OPERATOR_WINDOW = 8
 
 
@@ -8450,49 +8445,95 @@ def _runs_in_parent_shell(
 ) -> bool:
     """True when the segment at *index* executes in the parent shell itself.
 
-    A subshell, a bare pipeline stage, or a brace group used AS a pipeline
-    stage runs the assignment in a child environment, so a literal there
-    never changes the value a later ``make`` in the parent shell receives
-    (verified: the parent keeps the substitution's output after
-    ``( export MAKEFLAGS=-s )``, after ``true | export MAKEFLAGS=-s`` and
-    after ``true | { export MAKEFLAGS=-s; }``).
+    This is a REGION question, so the text before the segment is consulted,
+    not just the segment's own separator.  A separator alone classifies only
+    the FIRST statement of a region and misses every later one: in
+    ``( true; export MAKEFLAGS=-s )`` only ``true`` carries ``(``.
+
+    A region the parent does not run in, each verified to leave the parent
+    holding the substitution's output:
+
+    * a subshell or ``$( )`` — an unclosed ``(`` before the segment;
+    * a backtick command substitution — an ODD number of backticks before it
+      (an even count means the preceding substitution is closed, which is
+      what keeps ``export MAKEFLAGS=\\`g\\`; export MAKEFLAGS=-s`` clearing);
+    * a bare pipeline stage — the segment's own separator is ``|``;
+    * a brace group used as a PIPELINE component, on either side of the
+      pipe: ``true | { ...; }`` and ``{ ...; } | true``.
 
     A standalone brace group is the exception: bash runs ``{ ...; }`` in the
     CURRENT shell, so ``{ export MAKEFLAGS=-s; }`` and
-    ``true && { export MAKEFLAGS=-s; }`` DO clear the parent's value.  The
-    pair stream marks both with the same ``{`` separator, so the two cases
-    are told apart by the operator in front of the group: only a ``|`` puts
-    the brace group in a child shell.
+    ``true && { export MAKEFLAGS=-s; }`` DO clear the parent's value.
     """
     if not 0 <= index < len(pairs):
         return False
-    separator = pairs[index][1]
-    if separator in _NON_PARENT_SHELL_SEPARATORS:
-        return False
-    if separator == "{":
-        return not _opens_pipeline_stage(pairs, executable, index)
-    return True
-
-
-def _opens_pipeline_stage(
-    pairs: list[tuple[str, str]], executable: str, index: int
-) -> bool:
-    """True when the brace group opened at *index* is a pipeline stage.
-
-    The pair stream drops the operator that introduces the group, so the
-    text just before this segment's start is consulted directly: a
-    standalone group and an ``&&``-led group are introduced by ``;`` or
-    ``&&`` and run in the parent shell, while a ``|`` puts the group in a
-    child shell.
-    """
-    if index == 0:
+    if pairs[index][1] == "|":
+        # A bare pipeline stage: the shell forks before this segment.
         return False
     start = _segment_start(pairs, executable, index)
-    if start <= 0:
+    if start < 0:
         return False
-    # The group opener sits between the operator and the segment, so the
-    # window has to span the opener as well (``true | { ``).
-    return "|" in executable[max(0, start - _OPERATOR_WINDOW) : start]
+    prefix = executable[:start]
+    if _inside_command_substitution(prefix):
+        return False
+    brace_at = _innermost_open_brace(prefix)
+    if brace_at < 0:
+        return True
+    return not _brace_group_is_pipeline_stage(executable, brace_at)
+
+
+def _inside_command_substitution(prefix: str) -> bool:
+    """True when an unclosed subshell or backtick substitution precedes.
+
+    Backtick parity is the test: ``export MAKEFLAGS=`g`; x=`` leaves an odd
+    count (inside a substitution), while ``export MAKEFLAGS=`g`; export`` is
+    balanced (the parent), which is what preserves the legitimate clear.
+    """
+    depth = prefix.count("(") - prefix.count(")")
+    if depth > 0:
+        return True
+    return prefix.count("`") % 2 == 1
+
+
+def _innermost_open_brace(prefix: str) -> int:
+    """Index of the innermost brace group still open at the end of *prefix*."""
+    stack: list[int] = []
+    for position, char in enumerate(prefix):
+        if char == "{":
+            stack.append(position)
+        elif char == "}" and stack:
+            stack.pop()
+    return stack[-1] if stack else -1
+
+
+def _brace_group_is_pipeline_stage(executable: str, open_at: int) -> bool:
+    """True when the brace group opened at *open_at* is a pipeline component.
+
+    A pipeline stage forks a child, and the ``|`` may sit in front of the
+    group (``true | { ...; }``) or after its closing brace
+    (``{ ...; } | true``); both positions are checked.
+    """
+    if "|" in executable[max(0, open_at - _OPERATOR_WINDOW) : open_at]:
+        return True
+    close_at = _matching_close_brace(executable, open_at)
+    if close_at < 0:
+        return False
+    after = executable[close_at + 1 : close_at + 1 + _OPERATOR_WINDOW]
+    return "|" in after
+
+
+def _matching_close_brace(text: str, open_at: int) -> int:
+    """Index of the ``}`` matching the ``{`` at *open_at*, or -1."""
+    depth = 0
+    for position in range(open_at, len(text)):
+        char = text[position]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return position
+    return -1
 
 
 def _segment_start(pairs: list[tuple[str, str]], executable: str, index: int) -> int:
