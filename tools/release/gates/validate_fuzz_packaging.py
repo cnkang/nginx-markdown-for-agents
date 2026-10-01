@@ -8613,8 +8613,21 @@ def _inside_command_substitution(prefix: str) -> bool:
     Backtick parity is the test: ``export MAKEFLAGS=`g`; x=`` leaves an odd
     count (inside a substitution), while ``export MAKEFLAGS=`g`; export`` is
     balanced (the parent), which is what preserves the legitimate clear.
+
+    The paren depth is clamped at zero: a ``case`` pattern contributes a
+    ``)`` that never opened anything, and letting it cancel a LATER real
+    subshell hid that subshell from the scan — in
+    ``case x in y) ;; esac; ( true; export MAKEFLAGS=-s )`` the depth
+    returned to zero and the parent's clear was credited (verified in bash:
+    the parent keeps the substitution's output).  Clamping keeps every
+    unclosed opener visible, which is the fail-closed direction.
     """
-    depth = prefix.count("(") - prefix.count(")")
+    depth = 0
+    for char in prefix:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
     if depth > 0:
         return True
     return prefix.count("`") % 2 == 1
