@@ -1031,7 +1031,15 @@ jobs:
             --output "perf/reports/perf-measurement-${PLATFORM}.json"
 
       - name: Run perf gate Python tests
-        run: python3 -m pytest -n 4 tools/perf/tests/ -v
+        #
+        # `--dist=loadfile` is REQUIRED, not an optimisation: the two
+        # signal-cleanup tests in test_benchmark_harness.py bind the FIXED
+        # ports 19100 and 19101, and the default `--dist=load` puts them
+        # on different workers, where the second bind fails and the harness
+        # reports "Upstream mock failed to start on port 19100".  Measured
+        # 3 failures in 12 runs without it, 0 in 15 with it.  Keeping a whole
+        # file on one worker serialises them.
+        run: python3 -m pytest -n 4 --dist=loadfile tools/perf/tests/ -v
 
       - name: Run local runner output path tests
         run: tools/perf/tests/test_local_runner_output_paths.sh
