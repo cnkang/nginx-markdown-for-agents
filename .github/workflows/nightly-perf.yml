@@ -88,7 +88,11 @@ jobs:
             --tiers small medium medium-front-matter large-1m
 
       - name: Run perf gate Python tests
-        run: python3 -m pytest tools/perf/tests/ -v
+        # Parallelise the perf suite the same way ci.yml does.  This job
+        # already installs requirements-dev.txt, so pytest-xdist is present;
+        # the flag sits before the path here because a workflow `run:` line is
+        # a plain argv, not a Makefile recipe.
+        run: python3 -m pytest -n 4 tools/perf/tests/ -v
 
       - name: Run local runner output path tests
         run: tools/perf/tests/test_local_runner_output_paths.sh
