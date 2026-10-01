@@ -2642,7 +2642,17 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true",
         "{ export MAKEFLAGS=-s; } &>/dev/null | true",
         "{ export MAKEFLAGS=-s; } > a > b | true",
-        # A brace group on the far side of the pipe takes the separator slot,
+        # Any amount of whitespace may sit between the pipe and the brace, so the
+    # operator is matched as a word and not inside a fixed character window:
+    # `true |          { ...; }` is the same stage as `true | { ...; }`.
+    ("right of a widely spaced pipe", "true |          { export MAKEFLAGS=-s; }", False),
+    ("right of a tab-separated pipe", "true |\t{ export MAKEFLAGS=-s; }", False),
+    (
+        "left of a widely spaced pipe",
+        "{ export MAKEFLAGS=-s; }          | true",
+        False,
+    ),
+    # A brace group on the far side of the pipe takes the separator slot,
         # so the `|` is dropped from the pair stream entirely; the text
         # between the two segments is the only place it survives.
         "{ export MAKEFLAGS=-s; } | { true; }",

@@ -8434,10 +8434,58 @@ def _substitution_taint_events(
     return taints, clears, exports
 
 
-# How much text around a brace group the pipeline-component probe inspects.
-# It must span the operator AND the group opener, because the pipe may sit
-# on either side of the group (`true | { ...; }` and `{ ...; } | true`).
-_OPERATOR_WINDOW = 8
+def _group_is_pipeline_stage_after(executable: str, close_at: int) -> bool:
+    """True when a ``|`` follows the group closed at *close_at*.
+
+    Only whitespace and redirections may sit between the closing brace and
+    the pipe: they are part of the same command, so ``{ ...; } 2>&1 | true``
+    is one stage exactly as ``{ ...; } | true`` is.  Any amount of
+    whitespace may separate them, so the words are walked rather than
+    scanned inside a fixed character window.
+    """
+    tail = executable[close_at + 1 :]
+    index = 0
+    while index < len(tail):
+        if tail[index].isspace():
+            index += 1
+            continue
+        word = _next_shell_word(tail, index)
+        if word is None:
+            return False
+        text, index = word
+        if _PIPE_WORD.fullmatch(text):
+            return True
+        # A redirection belongs to this command, so the stage continues;
+        # any other word means the pipe is further along or absent.
+        if not _is_group_closer_or_redirection(text):
+            return False
+    return False
+
+
+def _next_shell_word(text: str, index: int) -> tuple[str, int] | None:
+    """The whitespace-delimited word at *index* and the offset after it."""
+    end = index
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return (text[index:end], end) if end > index else None
+
+
+# A group is the LEFT component of a pipeline when only whitespace and
+# redirection words separate its closing brace from a pipe, and it is the
+# RIGHT component when a pipe precedes its opening brace.  Both are matched as
+# words with unbounded whitespace, never by a fixed character window: any
+# amount of space may sit between the operator and the brace, and a windowed
+# scan silently missed the group and let its literal clear a taint the parent
+# still carried.
+#
+# A pipe with only whitespace before it, as a word.  The trailing side is
+# matched by `_group_is_pipeline_stage_after`, which walks the words with the
+# module's own redirection classifier instead of one pattern: a single
+# regular expression either nests unbounded quantifiers (which this
+# repository's regex-safety gate rejects) or drops the bare-target form
+# (`> a`), and the word walk keeps the classification in one place.
+_GROUP_PIPELINE_LEAD_RE = re.compile(r"\|[ \t\n]*$")
+_PIPE_WORD = re.compile(r"\|")
 
 
 def _runs_in_parent_shell(
@@ -8487,13 +8535,12 @@ def _runs_in_parent_shell(
     # opener, and the one after its closing brace.  Asking only "does a pipe
     # follow this statement" misses a group with later statements, so the
     # group's whole extent decides.
-    if "|" in prefix[max(0, brace_at - _OPERATOR_WINDOW) : brace_at]:
+    if _GROUP_PIPELINE_LEAD_RE.search(prefix[:brace_at]):
         return False
     close_at = _matching_close_brace(executable, brace_at)
     if close_at < 0:
         return True
-    tail = executable[close_at + 1 : close_at + 1 + _OPERATOR_WINDOW]
-    return "|" not in tail
+    return not _group_is_pipeline_stage_after(executable, close_at)
 
 
 def _is_pipeline_stage(
