@@ -2456,6 +2456,13 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "{ export MAKEFLAGS=-s; } | { true; }",
         "{ export MAKEFLAGS=-s; } 2>&1 | { true; }",
         "{ export MAKEFLAGS=-s; } 2>&1 | { true; } | cat",
+        # Statements AFTER the literal inside the group do not move the fork:
+        # bash treats the whole group as one pipeline component, so a pipe
+        # anywhere after the closing brace covers every statement in it.
+        "{ export MAKEFLAGS=-s; echo x; } | true",
+        "{ export MAKEFLAGS=-s; echo x; echo y; } | true",
+        "{ export MAKEFLAGS=-s; echo x; } 2>&1 | true",
+        "{ export MAKEFLAGS=-s; { true; }; } | true",
     ):
         assert verdict(tail) is not None, tail
 

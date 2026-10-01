@@ -8479,7 +8479,21 @@ def _runs_in_parent_shell(
     brace_at = _innermost_open_brace(prefix)
     if brace_at < 0:
         return True
-    return not _brace_group_is_pipeline_stage(prefix, brace_at)
+    # The segment is inside a brace group.  Bash forks for EVERY statement in
+    # a group that is a pipeline component, and the group is a component when
+    # a pipe bounds it on either side.  Neither side always survives into a
+    # pair's separator -- the pipe can be swallowed by the adjacent text --
+    # so both are read from the executable: the one in front of the group's
+    # opener, and the one after its closing brace.  Asking only "does a pipe
+    # follow this statement" misses a group with later statements, so the
+    # group's whole extent decides.
+    if "|" in prefix[max(0, brace_at - _OPERATOR_WINDOW) : brace_at]:
+        return False
+    close_at = _matching_close_brace(executable, brace_at)
+    if close_at < 0:
+        return True
+    tail = executable[close_at + 1 : close_at + 1 + _OPERATOR_WINDOW]
+    return "|" not in tail
 
 
 def _is_pipeline_stage(
@@ -8617,18 +8631,22 @@ def _innermost_open_brace(prefix: str) -> int:
     return stack[-1] if stack else -1
 
 
-def _brace_group_is_pipeline_stage(executable: str, open_at: int) -> bool:
-    """True when the brace group opened at *open_at* starts a pipeline stage.
+def _matching_close_brace(text: str, open_at: int) -> int:
+    """Index of the ``}`` matching the ``{`` at *open_at*, or -1.
 
-    A pipeline stage forks a child.  Only the leading side needs this test:
-    the segment's own separator catches the right-hand form
-    (``true | { ...; }``), and the trailing form (``{ ...; } | true``) is
-    caught by ``_is_pipeline_stage``, which looks at the next pair's
-    separator.  The pair stream records each separator BEFORE its segment, so
-    for a group on the left the ``|`` is the separator in front of the
-    stage that follows the closing brace.
+    The text is expected to have its quoted spans masked, so a brace inside a
+    string does not close a group.
     """
-    return "|" in executable[max(0, open_at - _OPERATOR_WINDOW) : open_at]
+    depth = 0
+    for position in range(open_at, len(text)):
+        char = text[position]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return position
+    return -1
 
 
 def _segment_start(pairs: list[tuple[str, str]], executable: str, index: int) -> int:
