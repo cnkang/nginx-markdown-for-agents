@@ -8464,7 +8464,7 @@ def _substitution_taint_events(
         words = command.split()
         if words and words[0] == "export":
             exports.setdefault(index, set()).add(name)
-    call_pairs = _body_clear_call_pairs(pairs, executable)
+    call_pairs = _body_clear_call_pairs(pairs, executable, script)
     backgrounded = _backgrounded_command_segments(executable)
     for index, command in live_entries:
         judged = call_pairs.get(index, index)
@@ -8497,8 +8497,8 @@ def _substitution_taint_events(
 
 
 def _body_clear_call_pairs(
-    pairs: list[tuple[str, str]], executable: str
-) -> dict[int, int]:
+    pairs: list[tuple[str, str]], executable: str, source: str
+) -> dict[int, int]:  # noqa: C901
     """Map a FUNCTION-BODY statement's pair index to the pair that CALLS it.
 
     A function body is the one construct whose execution shell is not the
@@ -8522,41 +8522,63 @@ def _body_clear_call_pairs(
     # `f() { a; export MAKEFLAGS=-s; b; }` the literal is the SECOND
     # statement, and mapping only the opener left it judged as the body and
     # credited to the parent even when the call was a pipeline stage.
-    for body_index in _function_body_openers(pairs):
-        name = _defined_function_name_at(executable, pairs, body_index)
-        if not name:
+    spans = _function_body_spans(source)
+    if not spans:
+        return mapping
+    # `_strip_function_bodies` blanks a body IN PLACE, so offsets line up, but
+    # when another construct follows the body the blanked run swallows the `;`
+    # and the body stops being a pair of its own in the stripped stream.  So
+    # the body and its call are located in the JOINED text, where both survive,
+    # and translated back by segment start.
+    joined = _join_continuations(_strip_heredocs(_strip_shell_comments(source)))
+    joined_pairs = _command_segments_with_separators(joined)
+    stripped_by_start = {
+        _segment_start(pairs, executable, index): index for index in range(len(pairs))
+    }
+    for name, lo, hi in spans:
+        body = _body_statement_indices(joined_pairs, joined, (lo, hi))
+        if not body:
             continue
-        call_index = _first_call_after(pairs, body_index, name)
+        call = _first_call_after(joined_pairs, body[-1], name)
+        if call is None:
+            continue
+        call_index = stripped_by_start.get(_segment_start(joined_pairs, joined, call))
         if call_index is None:
             continue
-        for statement in _body_statement_indices(pairs, body_index, call_index):
-            mapping[statement] = call_index
+        for statement in body:
+            stripped = stripped_by_start.get(
+                _segment_start(joined_pairs, joined, statement)
+            )
+            if stripped is not None:
+                mapping[stripped] = call_index
     return mapping
 
 
-def _function_body_openers(pairs: list[tuple[str, str]]) -> list[int]:
-    """Pair indices whose separator opens a function body."""
-    return [
-        index
-        for index, (_segment, separator) in enumerate(pairs)
-        if separator == "{"
-    ]
-
-
 def _body_statement_indices(
-    pairs: list[tuple[str, str]], opener: int, call_index: int | None
+    pairs: list[tuple[str, str]], source: str, span: tuple[int, int]
 ) -> list[int]:
-    """Every pair index from a body's ``{`` through its matching ``}``.
+    """Pair indices whose segment starts inside the body span *(lo, hi)*.
 
-    The closing `}` is NOT a pair separator -- the body-stripping view leaves
-    it out of the stream -- so a brace-depth walk cannot find the end and
-    would run on into the top-level commands after the body.  The call bounds
-    the run instead: a body holds exactly the statements between its
-    definition and the call, and everything from the call onwards belongs to
-    the caller.
+    The span comes from `_function_body_spans`, so the run ends where the
+    body actually does.  Two earlier attempts were wrong:
+
+    * bounding by the closing `}` fails because the body-stripping view leaves
+      that brace out of the pair stream, so a depth walk cannot find it;
+    * bounding by the CALL swept in every top-level command between the
+      definition and the call, and `_strip_function_bodies` drops the opening
+      `{` pair entirely when another construct follows the body, so a
+      separator-based scan misses the body altogether.
+
+    Segment starts are compared against the span, which is identity rather
+    than text, and holds in all three shapes.
     """
-    stop = call_index if call_index is not None else len(pairs)
-    return list(range(opener, stop))
+    lo, hi = span
+    indices: list[int] = []
+    for index in range(len(pairs)):
+        start = _segment_start(pairs, source, index)
+        if start >= 0 and lo <= start < hi:
+            indices.append(index)
+    return indices
 
 
 def _is_command_name(word: str) -> bool:
@@ -8564,37 +8586,6 @@ def _is_command_name(word: str) -> bool:
     return bool(word) and all(
         char.isascii() and (char.isalnum() or char == "_") for char in word
     )
-
-
-def _defined_function_name_at(
-    executable: str, pairs: list[tuple[str, str]], body_index: int
-) -> str | None:
-    """Name of the function whose body opens at *body_index*, if any.
-
-    The definition is the pair immediately before the body, so the text is
-    read backwards from the body's own ``{``.  A pair that opens a body
-    without a preceding ``name()`` is a plain brace group and yields None.
-
-    The words are walked rather than matched with a regex: a nested
-    unbounded quantifier inside another one is a blocking finding for the
-    harness security gate.
-    """
-    start = _segment_start(pairs, executable, body_index)
-    if start < 0:
-        return None
-    masked = _masked_quotes(executable)
-    # The text before the body's first statement ends with the opening `{`,
-    # so the name is the last word that is not that brace.
-    words = [word for word in masked[:start].split() if word != "{"]
-    if not words:
-        return None
-    last = words[-1]
-    if not last.endswith("()") or len(last) == 2:
-        return None
-    name = last[:-2]
-    if not _is_command_name(name):
-        return None
-    return name
 
 
 def _first_call_after(
@@ -8619,11 +8610,27 @@ def _first_call_after(
 
 
 def _command_words(segment: str) -> list[str]:
-    """The segment's words with leading ``NAME=value`` assignments dropped."""
+    """The segment's words with leading ``NAME=value`` assignments dropped.
+
+    A construct keyword the pair stream glued onto the command is dropped too:
+    ``then f`` and ``do f`` carry the same call as ``f``, and without this the
+    keyword hid it, so `for i in 1; do f; done` looked like a body that was
+    never called and a step bash accepts was rejected (probed: bash clears the
+    parent there, ``while false; do f; done`` does not, and the dead-condition
+    case is handled by the live view rather than here).
+    """
     words = segment.split()
     while len(words) > 1 and _is_env_assignment(words[0]):
         words = words[1:]
+    if len(words) > 1 and words[0] in _BRANCH_KEYWORD_PREFIXES:
+        words = words[1:]
     return words
+
+
+# Construct keywords the pair stream may glue to the command that follows.
+_BRANCH_KEYWORD_PREFIXES = frozenset(
+    {"then", "do", "else", "time", "!", "{", "(", "if", "while", "until"}
+)
 
 
 def _is_env_assignment(word: str) -> bool:
