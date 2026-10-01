@@ -3,6 +3,13 @@
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
+# Python test suites run under pytest-xdist so a multi-core host is used
+# instead of one core.  The flag is added only when xdist is importable, so a
+# checkout without it (or a runner that installs pytest alone) still runs the
+# suites serially instead of failing on an unknown option.  Override with
+# `make PYTEST_JOBS=-n 8 ...` or `make PYTEST_JOBS= ...` to pin the choice.
+PYTEST_JOBS ?= $(shell python3 -c "import xdist" >/dev/null 2>&1 && echo "-n 4")
+
 LINUX_LIBC := $(shell if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then echo musl; elif command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -qi musl; then echo musl; else echo gnu; fi)
 
 ifeq ($(UNAME_S),Darwin)
@@ -407,7 +414,7 @@ ci-local-check:
 perf-gate-check:
 	@echo "=== perf-gate-check: host-runnable Perf Smoke Gate steps ==="
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
-		python3 -m pytest tools/perf/tests/ -q --tb=short; \
+		python3 -m pytest $(PYTEST_JOBS) tools/perf/tests/ -q --tb=short; \
 	else \
 		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
 		exit 1; \
@@ -500,7 +507,7 @@ test-property:
 		cargo test --locked --test "$$target" || exit 1; \
 	done
 	@echo "=== Property-based tests (Python Hypothesis) ==="
-	@python3 -m pytest tests/property/ -q
+	@python3 -m pytest $(PYTEST_JOBS) tests/property/ -q
 	@echo "=== Property-based tests (shell) ==="
 	@bash tests/property/test_log_prefix_canonical.sh
 	@bash tests/property/test_log_prefix_preservation.sh
@@ -740,8 +747,8 @@ test-harness:
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_release_build_context.py -q --tb=short
-	PYTHONPATH=. python3 -m pytest tools/docs/tests/ -q --tb=short
-	PYTHONPATH=. python3 -m pytest tools/sonar/tests/ -q --tb=short
+	PYTHONPATH=. python3 -m pytest $(PYTEST_JOBS) tools/docs/tests/ -q --tb=short
+	PYTHONPATH=. python3 -m pytest $(PYTEST_JOBS) tools/sonar/tests/ -q --tb=short
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
@@ -771,7 +778,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_header_hash_filter.sh
 	bash tools/harness/tests/test_detect_version_consistency.sh
 	bash tools/harness/tests/test_e2e_wrapper_cleanup.sh
-	python3 -m pytest tools/harness/tests/ -q --tb=short
+	python3 -m pytest $(PYTEST_JOBS) tools/harness/tests/ -q --tb=short
 
 workflow-context-check:
 	python3 tools/ci/validate_required_workflow_contexts.py
@@ -881,8 +888,8 @@ release-gates-check-070-strict:
 # 41 gate + 12 matrix test files). Catches release-gate/matrix regressions
 # locally before CI does.
 release-pytest-check:
-	PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
-	PYTHONPATH=. python3 -m pytest -q tools/release/gates/tests/
+	PYTHONPATH=. python3 -m pytest $(PYTEST_JOBS) -q tools/release/matrix/tests/
+	PYTHONPATH=. python3 -m pytest $(PYTEST_JOBS) -q tools/release/gates/tests/
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 # (The 070 gate packages the CURRENT 0.9.2 version by default —
@@ -1376,7 +1383,7 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
-		python3 -m pytest tools/perf/tests/ -q --tb=short; \
+		python3 -m pytest $(PYTEST_JOBS) tools/perf/tests/ -q --tb=short; \
 	else \
 		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
 		exit 1; \
