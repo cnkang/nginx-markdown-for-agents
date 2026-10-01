@@ -8424,7 +8424,9 @@ def _segment_cut_positions(
 
 def _substitution_taint_events(
     step: str | dict,
-) -> tuple[dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]]:
+) -> tuple[
+    dict[int, set[str]], dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]
+]:
     """Taint, clear, and export events keyed by pair index.
 
     ``taints[index]`` holds the make names a substitution cut at that
@@ -8456,16 +8458,18 @@ def _substitution_taint_events(
     taints: dict[int, set[str]] = {}
     clears: dict[int, set[str]] = {}
     exports: dict[int, set[str]] = {}
-    for index, command in may_entries:
-        name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
-        if name is None:
-            continue
-        taints.setdefault(index, set()).add(name)
-        words = command.split()
-        if words and words[0] == "export":
-            exports.setdefault(index, set()).add(name)
+    _record_cut_taints(may_entries, executable, cut_positions, taints, exports)
     call_pairs = _body_clear_call_pairs(pairs, executable, script)
     backgrounded = _backgrounded_command_segments(executable)
+    # A body-derived clear is only real AT THE CALL, so it is returned in its
+    # own channel keyed by the call's index rather than moved into `clears`.
+    # `clears` is consumed by `_pip_step_scan`, which folds it through the
+    # export view; a clear placed on the body's own index fires before the
+    # make that sits between the definition and the call, and one placed on
+    # the call's index fires without the matching export VIEW update, so the
+    # make still sees the unresolved sentinel.  Keeping it separate lets the
+    # caller apply the value at the call and nothing before it.
+    body_clears: dict[int, set[str]] = {}
     for index, command in live_entries:
         judged = call_pairs.get(index, index)
         if index in call_pairs and pairs[judged][0].strip() in backgrounded:
@@ -8477,23 +8481,31 @@ def _substitution_taint_events(
         if not _runs_in_parent_shell(pairs, executable, judged):
             continue
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
-        if names:
-            # Recorded at the BODY's index.  A body-derived clear becomes real
-            # only at the CALL, so a make BETWEEN the definition and the call
-            # should still see the taint -- probed in bash, the make sees [-s]
-            # when the call precedes it and [SUB] when it follows.
-            #
-            # Moving the clear onto the call's index is NOT the fix:
-            # `_TaintTracker.advance` walks events in segment order and
-            # `_pip_step_scan` reads the same stream, so a clear placed there
-            # made the scanner stop recognising the following
-            # `make docs-check`, and the step was rejected for a missing
-            # prerequisite rather than a real taint.  Carrying "applies from
-            # here on" needs a separate channel, which is a bigger change than
-            # this fix should make; the case is recorded in the ledger and
-            # pinned by a test.
-            clears.setdefault(index, set()).update(names)
-    return taints, clears, exports
+        if not names:
+            continue
+        if judged != index:
+            body_clears.setdefault(judged, set()).update(names)
+            continue
+        clears.setdefault(index, set()).update(names)
+    return taints, clears, exports, body_clears
+
+
+def _record_cut_taints(
+    may_entries: list[tuple[int, str]],
+    executable: str,
+    cut_positions: dict[int, int],
+    taints: dict[int, set[str]],
+    exports: dict[int, set[str]],
+) -> None:
+    """Record every substitution cut, and the export attribute it implies."""
+    for index, command in may_entries:
+        name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
+        if name is None:
+            continue
+        taints.setdefault(index, set()).add(name)
+        words = command.split()
+        if words and words[0] == "export":
+            exports.setdefault(index, set()).add(name)
 
 
 def _body_clear_call_pairs(
@@ -8881,6 +8893,13 @@ def _inside_command_substitution(prefix: str) -> bool:
 
 
 _CASE_KEYWORD_RE = re.compile(r"\bcase\b")
+
+# The value recorded for a name a called function body cleared.  It must be a
+# value no make-option check rejects: `--body-cleared` was tried and
+# `_make_option_prevents_execution` reads the leading `--` as an option that
+# stops the recipe, so the docs-check lost its prerequisite.  An empty string
+# is inert everywhere and only has to differ from the unresolved sentinel.
+_BODY_CLEARED_VALUE = ""
 
 
 def _ends_case_item(prefix: str, start: int) -> bool:
@@ -9582,6 +9601,28 @@ def _advance_export_tracking(
             exported[name] = value
 
 
+def _apply_body_clear(
+    pair_index: int,
+    body_clears: dict[int, set[str]],
+    tracker: _TaintTracker,
+    exported: dict[str, str],
+) -> None:
+    """Apply a called function body's clear, which becomes real AT THE CALL.
+
+    Both halves are needed and neither is enough.  Unmarking the taint
+    without refreshing the export view leaves the make reading the unresolved
+    sentinel, so the docs-check loses its prerequisite; refreshing the view
+    alone would leave the name marked, and refreshing it before the call would
+    clear a make that runs in between.
+    """
+    names = body_clears.get(pair_index)
+    if not names:
+        return
+    tracker.clear_at(pair_index, names)
+    for name in names:
+        exported[name] = _BODY_CLEARED_VALUE
+
+
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     """Classify each live, unmasked segment of one step.
 
@@ -9603,7 +9644,7 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     # assignment (the live view) clears it.  Folding per command position
     # keeps the state in force at each make invocation, so a later
     # literal cannot clear the taint for an earlier make (fail closed).
-    taints, clears, export_events = _substitution_taint_events(step)
+    taints, clears, export_events, body_clears = _substitution_taint_events(step)
     tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
@@ -9629,6 +9670,7 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
         _advance_export_tracking(segment, assigned, export_names, exported)
+        _apply_body_clear(pair_index, body_clears, tracker, exported)
         tracker.mark(exported, export_names)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
@@ -9686,6 +9728,16 @@ class _TaintTracker:
                 self._tainted |= self._taints[event_index]
             if event_index in self._clears:
                 self._tainted -= self._clears[event_index]
+
+    def clear_at(self, pair_index: int, names: set[str]) -> None:
+        """Unmark *names* as tainted at an already-advanced position.
+
+        Used by a called function body's clear, which becomes real at the CALL
+        rather than where the body is written.  ``advance`` has already moved
+        the cursor past this index, so the event is applied directly instead of
+        being queued.
+        """
+        self._tainted -= names
 
     def mark(self, exported: dict[str, str], export_names: set[str]) -> None:
         """Stamp the unresolved sentinel onto every tainted export."""

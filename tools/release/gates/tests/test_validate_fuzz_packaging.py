@@ -201,7 +201,7 @@ def test_unverified_mechanisms_are_pinned() -> None:
         f"for i in 1; do export MAKEFLAGS={bt}g{bt}; done",
         f"while false; do export MAKEFLAGS={bt}g{bt}; done",
     ):
-        taints, clears, exports = packaging_gate._substitution_taint_events(
+        taints, clears, exports, _body = packaging_gate._substitution_taint_events(
             {"run": tail}
         )
         assert taints, tail
@@ -317,23 +317,13 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     assert not verdict(f"{body}; f --flag | cat{make}"), "an option-bearing stage"
     assert not verdict(f"{body}; echo f{make}"), "the name as an argument is not it"
 
-    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash's make sees [-s] when
-    # the call precedes it and [SUB] when it follows, so a make BETWEEN the
-    # definition and the call must reject.  This still CERTIFIES: the clear is
-    # recorded at the body's index, which the tracker applies before the make.
-    #
-    # It cannot simply move onto the call's pair -- `_TaintTracker.advance`
-    # walks events in segment order and `_pip_step_scan` reads the same
-    # stream, so a clear placed there made the scanner stop seeing the
-    # following `make docs-check` and the step was rejected for a missing
-    # prerequisite instead of a real taint (tried and reverted).  Carrying
-    # "applies from here on" needs a separate channel, which is a larger
-    # change than belongs in this fix.
-    #
-    # This assertion PINS the gap on purpose: it fails the moment someone
-    # closes it, and the failure message points here.
-    assert verdict(f"{body}; make docs-check; f"), (
-        "KNOWN GAP closed -- update the comment above and the ledger"
+    # A make BETWEEN the definition and the call must reject: bash's make sees
+    # [-s] when the call precedes it and [SUB] when it follows, so the clear is
+    # only real from the call onward.  This used to CERTIFY because the clear
+    # was recorded at the body's index and the tracker applied it before the
+    # make.  It is applied at the call now, through its own event channel.
+    assert not verdict(f"{body}; make docs-check; f"), (
+        "the make before the call must not see the body's clear"
     )
 
     # The name mentioned as an argument is not a call, so with no real call
@@ -366,13 +356,12 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
         "KNOWN GAP closed -- update the comment above and the ledger"
     )
 
-    # A top-level literal between the body and the call must not inherit the
-    # call's verdict: the substitution is re-cut AFTER the literal, so only a
-    # clear that actually reaches the parent can rescue it.
+    # A literal between the body and the call re-cuts the taint, so only a
+    # clear that actually reaches the parent can rescue the step afterwards.
     body = "f() { export MAKEFLAGS=-s; }"
     recut = f"export MAKEFLAGS=`a`; {body}; export MAKEFLAGS=`b`; "
-    assert not verdict(f"{recut} f{make}"), "a piped call cannot clear the parent"
-    assert not verdict(f"{recut} f | cat{make}"), "nor can a pipeline stage"
+    assert verdict(f"{recut} f{make}"), "a parent-shell call clears the re-cut"
+    assert not verdict(f"{recut} f | cat{make}"), "a pipeline stage cannot"
 
     # A body that is never called cannot clear anything.
     assert not verdict(f"{body}; true{make}"), "a body with no call clears nothing"
@@ -445,7 +434,7 @@ def test_unverified_taint_mechanisms_are_pinned() -> None:
     cut_at = packaging_gate._segment_cut_positions(executable, pairs)[0]
 
     # A cut is not a literal: no clear event may be produced for it.
-    taints, clears, _exports = packaging_gate._substitution_taint_events(
+    taints, clears, _exports, _body = packaging_gate._substitution_taint_events(
         {"run": script}
     )
     assert taints[0] == {"MAKEFLAGS"}
@@ -2725,7 +2714,7 @@ def test_double_quoted_substitutions_keep_the_taint() -> None:
         # positive control proves the recovery is not a blanket allow.
         ('export MAKEFLAGS="-s"; make docs-check', set()),
     ):
-        taints, _clears, _exports = packaging_gate._substitution_taint_events(
+        taints, _clears, _exports, _body = packaging_gate._substitution_taint_events(
             {"run": script}
         )
         assert set().union(*taints.values()) == expected, script
