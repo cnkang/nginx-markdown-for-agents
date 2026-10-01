@@ -8509,21 +8509,53 @@ def _is_pipeline_stage(pairs: list[tuple[str, str]], index: int) -> bool:
     return False
 
 
-# A redirection word: `2>&1`, `>/dev/null`, `2>/dev/null`, `< in`, and the
-# redirections that may be attached to such a word.
-_REDIRECTION_ONLY_RE = re.compile(r"^\d*(?:>>?|<&|<>|>&|<)\s*\S*$")
+# One redirection word: an optional file-descriptor prefix, a redirect
+# operator, and its target.  `&>` is the bash "redirect both" form.
+_REDIRECTION_WORD_RE = re.compile(r"^\d*(?:>>?|<&|<>|>&|&>)\s*\S*$")
 
 
 def _is_group_closer_or_redirection(segment: str) -> bool:
-    """True when *segment* only closes a group or carries a redirection.
+    """True when *segment* only closes a group or carries redirections.
 
     Neither can end a pipeline stage on its own, so the forward probe for the
-    stage's closing pipe has to look past them.
+    stage's closing pipe has to look past them.  A segment may carry SEVERAL
+    redirections (``>/dev/null 2>&1``, ``> a > b``), so the whole run has to
+    match word by word; testing a single word let a multi-redirection stage
+    read as a standalone parent group and certify a tainted make.
+
+    A redirection whose target is a bare word splits across two tokens
+    (``> a``), so a target is accepted as the word right after an operator.
     """
     text = segment.strip()
     if text in ("}", ");", "};"):
         return True
-    return bool(_REDIRECTION_ONLY_RE.match(text))
+    words = text.split()
+    if not words:
+        return False
+    expecting_target = False
+    for word in words:
+        if expecting_target:
+            expecting_target = False
+            continue
+        # A bare operator is tested first: `>` also satisfies the
+        # single-word pattern, and only the operator form means the target
+        # arrives as the next word.
+        if _is_redirect_operator(word):
+            expecting_target = True
+            continue
+        if _REDIRECTION_WORD_RE.match(word):
+            continue
+        return False
+    return True
+
+
+def _is_redirect_operator(word: str) -> bool:
+    """True when *word* is a bare redirect operator with no target attached.
+
+    ``> a`` is tokenised as ``>`` and ``a``, so the operator and its target can
+    land in different words of the same segment.
+    """
+    return bool(re.fullmatch(r"\d*(?:>>?|<&|<>|>&|&>)<?", word))
 
 
 def _inside_command_substitution(prefix: str) -> bool:

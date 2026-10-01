@@ -2440,6 +2440,16 @@ def test_a_standalone_brace_group_clears_in_the_parent_shell() -> None:
         "{ export MAKEFLAGS=-s; } 2>&1|true",
         "{ export MAKEFLAGS=-s; } 2>/dev/null | tee log",
         "if true; then { export MAKEFLAGS=-s; }|true; fi",
+        # Several redirections in one stage, and the `&>` form.  A stage may
+        # carry more than one redirection word, and a bare operator splits
+        # its target into the next token (`> a`), so neither a single-word
+        # match nor a missing `&>` may be relied on.
+        "{ export MAKEFLAGS=-s; } >/dev/null 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } 2>&1 >/dev/null | true",
+        "{ export MAKEFLAGS=-s; } >/dev/null >/dev/null | true",
+        "{ export MAKEFLAGS=-s; } 1>/dev/null 2>&1 | true",
+        "{ export MAKEFLAGS=-s; } &>/dev/null | true",
+        "{ export MAKEFLAGS=-s; } > a > b | true",
     ):
         assert verdict(tail) is not None, tail
 
