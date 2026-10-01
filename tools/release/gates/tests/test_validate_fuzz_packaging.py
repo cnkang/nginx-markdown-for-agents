@@ -342,6 +342,38 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     # matching `echo f` would be taken for a call.
     assert not verdict(f"{body}; echo f{make}"), "a mention is not a call"
 
+    # The pair stream glues a construct keyword onto the command that follows,
+    # so `do f` and `then f` carry the same call as a bare `f`.  Probed in
+    # bash: the `if` form clears the parent, and `while false` does not --
+    # the dead-condition case is the live view's job, not this match.
+    for body in (
+        "f() { export MAKEFLAGS=-s; }",
+        "f() { a; export MAKEFLAGS=-s; b; }",
+    ):
+        assert verdict(f"{body}; if true; then f; fi; make docs-check"), body
+        assert not verdict(f"{body}; while false; do f; done; make docs-check"), body
+
+    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash also clears the parent
+    # for `for i in 1; do f; done`, and `base` rejects that shape too, so it
+    # is a missed acceptance rather than a regression.  The cause is
+    # structural: `_strip_function_bodies` blanks the body in place, and when
+    # a construct follows, the blanked run swallows the `;` so the body stops
+    # being a pair of its own and no mapping can reach it.  Fixing that means
+    # walking a body's own segments instead of mapping onto the stripped pair
+    # stream -- a larger change than belongs in this fix.
+    body = "f() { export MAKEFLAGS=-s; }"
+    assert not verdict(f"{body}; for i in 1; do f; done{make}"), (
+        "KNOWN GAP closed -- update the comment above and the ledger"
+    )
+
+    # A top-level literal between the body and the call must not inherit the
+    # call's verdict: the substitution is re-cut AFTER the literal, so only a
+    # clear that actually reaches the parent can rescue it.
+    body = "f() { export MAKEFLAGS=-s; }"
+    recut = f"export MAKEFLAGS=`a`; {body}; export MAKEFLAGS=`b`; "
+    assert not verdict(f"{recut} f{make}"), "a piped call cannot clear the parent"
+    assert not verdict(f"{recut} f | cat{make}"), "nor can a pipeline stage"
+
     # A body that is never called cannot clear anything.
     assert not verdict(f"{body}; true{make}"), "a body with no call clears nothing"
 
