@@ -92,7 +92,14 @@ jobs:
         # already installs requirements-dev.txt, so pytest-xdist is present;
         # the flag sits before the path here because a workflow `run:` line is
         # a plain argv, not a Makefile recipe.
-        run: python3 -m pytest -n 4 tools/perf/tests/ -v
+        #
+        # `--dist=loadfile` is REQUIRED, not an optimisation: the two
+        # signal-cleanup tests bind the FIXED ports 19100 and 19101, and the
+        # default `--dist=load` puts them on different workers, where the
+        # second bind fails and the harness reports "Upstream mock failed to
+        # start on port 19100".  Measured 3 failures in 12 runs before this
+        # was set.  Keeping a whole file on one worker serialises them.
+        run: python3 -m pytest -n 4 --dist=loadfile tools/perf/tests/ -v
 
       - name: Run local runner output path tests
         run: tools/perf/tests/test_local_runner_output_paths.sh
