@@ -9,7 +9,7 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current release line. It shipped on 2026-09-30 after the
+- v0.9.2 is the current release line. It shipped on 2026-10-02 after the
   merge and the candidate-bound gates passed. The release consolidates the
   v0.9.1 baseline and resets compatibility.
 - 0.9.1 is the previous release (2026-07-29).

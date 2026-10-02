@@ -10,7 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release 0.9.2 (published 2026-09-30)**, the project includes a
+As of the **current release 0.9.2 (published 2026-10-02)**, the project includes a
 bounded full-buffer conversion by default (`markdown_streaming off`),
 with explicit streaming opt-in,
 Rust-first
@@ -28,7 +28,7 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.2
 
-**Status:** Stable release, published 2026-09-30. 0.9.1 was the previous
+**Status:** Stable release, published 2026-10-02. 0.9.1 was the previous
 release (2026-07-29). 0.9.2 is the final pre-1.0 breaking release: the public
 configuration surface shrank to 20 active directives with the seven
 highlighted retired names (a subset of the removal inventory) dropped from
@@ -217,7 +217,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current release
-is 0.9.2 (published 2026-09-30). 0.9.1 is the previous release. 0.9.2 is a
+is 0.9.2 (published 2026-10-02). 0.9.1 is the previous release. 0.9.2 is a
 breaking surface-freeze release that consolidates the configuration surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
@@ -412,7 +412,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
-release (published 2026-09-30) and 0.9.1 is the previous release. The project
+release (published 2026-10-02) and 0.9.1 is the previous release. The project
 provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 bounded full-buffer default, explicit streaming opt-in, bounded-memory
@@ -430,7 +430,7 @@ the active release documentation.
 
 ### Current State
 The team has implemented and tested the core feature set. The release
-shipped on 2026-09-30: the merge landed, the performance-baseline check, the
+shipped on 2026-10-02: the merge landed, the performance-baseline check, the
 final-SHA SonarCloud scan, and the full release-gate checks passed, and the
 project published the assets. The focus is on operational validation,
 performance optimization, and community feedback integration.
