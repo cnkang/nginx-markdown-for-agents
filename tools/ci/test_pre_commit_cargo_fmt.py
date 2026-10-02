@@ -83,6 +83,13 @@ def test_the_hook_restages_what_it_reformatted() -> None:
         "the snapshot selector must be `git diff HEAD`, or a file whose "
         "unformatted blob is already staged escapes the re-stage"
     )
+    # An ADDED Rust file is as unformatted as a modified one. With `M` only, a
+    # brand-new file stayed out of the snapshot: cargo fmt fixed the worktree,
+    # the commit carried the unformatted blob, and the hook still exited 0.
+    assert re.search(r"git diff HEAD --name-only --diff-filter=ACM", text), (
+        "the snapshot must cover added files (ACM); with M only a new "
+        "unformatted file is committed unformatted"
+    )
     fmt_at = text.index("cargo fmt --manifest-path")
     snap_at = text.index("git hash-object")
     assert snap_at < fmt_at, (
