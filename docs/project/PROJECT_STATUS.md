@@ -447,6 +447,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-02 | Hermes | Release finalization: the release date corrected to the finalization day; the tag had never been pushed, so the date was still that of an abandoned first attempt |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: status line, release-line headings, and current-state wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
