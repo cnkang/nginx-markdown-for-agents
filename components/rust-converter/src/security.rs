@@ -108,11 +108,14 @@ pub(crate) fn input_type_is_suppressed(normalized_type: &str) -> bool {
 /// body) recurse through their own copies of that walk, so without this guard a
 /// `<textarea>` nested inside an `<a>` or `<pre>` leaks its prefilled default
 /// text into the AI-facing Markdown -- which SECURITY_MODEL.md forbids.
+///
+/// Only the controls whose child text IS the submitted or prefilled value
+/// belong here. `<option>`, `<optgroup>` and `<datalist>` hold page-provided
+/// CHOICE labels, which `FORM_ELEMENTS` and SECURITY_MODEL.md both describe as
+/// visible content that remains: suppressing them would make the extractors
+/// disagree with the ordinary traversal, which keeps their text.
 pub(crate) fn is_form_state_subtree(local_name: &str) -> bool {
-    matches!(
-        local_name,
-        "textarea" | "input" | "select" | "datalist" | "option"
-    )
+    matches!(local_name, "textarea" | "input")
 }
 
 /// Select descriptive text for an input-like control using the shared privacy

@@ -173,6 +173,35 @@ fn nested_textarea_defaults_are_suppressed_in_link_and_code_extractors() {
     );
 }
 
+/// The form-state guard must suppress prefilled STATE without swallowing
+/// page-provided CHOICE labels.
+///
+/// `<option>`, `<optgroup>` and `<datalist>` hold labels the page offers to the
+/// reader, which `FORM_ELEMENTS` and SECURITY_MODEL.md both describe as visible
+/// content that remains. Treating them as form state made the extractors drop
+/// those labels inside an `<a>` or `<pre>` while the ordinary traversal kept
+/// them, so the two paths disagreed on the same markup.
+#[test]
+fn option_labels_survive_the_link_and_code_extractors() {
+    let in_link =
+        convert_html(b"<p><a href=\"/x\"><select><option>RED CHOICE</option></select></a></p>");
+    assert!(
+        in_link.contains("RED CHOICE"),
+        "an option label is page content, not form state, and must survive: {in_link:?}"
+    );
+
+    let in_code =
+        convert_html(b"<pre><code><select><option>RED CHOICE</option></select></code></pre>");
+    assert!(
+        in_code.contains("RED CHOICE"),
+        "the same label must survive inside a code body: {in_code:?}"
+    );
+
+    // The ordinary traversal is the reference: the two must agree.
+    let bare = convert_html(b"<p><select><option>RED CHOICE</option></select></p>");
+    assert!(bare.contains("RED CHOICE"), "{bare:?}");
+}
+
 /// A textarea outside those containers keeps the existing suppression, so the
 /// new guard must not change the ordinary path.
 #[test]
