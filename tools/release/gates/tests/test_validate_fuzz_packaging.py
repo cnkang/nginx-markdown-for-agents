@@ -359,7 +359,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     body, must leave the name marked.
     """
     # Body statements 3..4: a clear at 3, then a cut at 4 inside the body.
-    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS": "-s"})}
+    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS": "-s"}, {"MAKEFLAGS": 3})}
     tracker = packaging_gate._TaintTracker(
         {0: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}}, {}, {}
     )
@@ -373,7 +373,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     )
 
     # Same body, but the cut precedes the clear: the clear wins.
-    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS": "-s"})}
+    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS": "-s"}, {"MAKEFLAGS": 4})}
     superseded = packaging_gate._TaintTracker(
         {0: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}}, {}, {}
     )
@@ -387,6 +387,37 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     assert view["MAKEFLAGS"] == "-s", (
         "a superseded clear must still deliver the body's own literal"
     )
+
+def test_a_cut_is_ordered_against_that_names_own_clear() -> None:
+    """A clear of ANOTHER variable must not supersede this name's cut.
+
+    ``cleared_at`` is the last clear of any name in the body, so comparing a
+    cut against it let a trailing ``export MAKEOVERRIDES=-j2`` look like it
+    superseded ``MAKEFLAGS``'s cut -- while bash leaves MAKEFLAGS on the
+    substitution (both orders probed).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+    install_run = "python3 -m pip install -r requirements-release.txt"
+
+    def verdict(body: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; f() {{ {body} }}; f; "
+            f"{install_run}; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    other = "export UNRELATED_VAR=1; "
+    assert not verdict(f"export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}; {other}")
+    assert not verdict(f"export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}; ")
+    assert verdict(f"export MAKEFLAGS={bt}g{bt}; export MAKEFLAGS=-s; {other}")
+    assert verdict(f"export MAKEFLAGS={bt}g{bt}; export MAKEFLAGS=-s; ")
+    assert verdict(f"export MAKEFLAGS=-s; {other}")
+    # A body that clears only ANOTHER variable leaves MAKEFLAGS on the
+    # substitution, so the step still cannot certify (probed).
+    assert not verdict(other)
+
+
 
 def test_a_body_cut_reaches_the_parent_only_at_a_call() -> None:
     """A cut inside a body is an event of the CALL, not of the definition.
@@ -409,6 +440,24 @@ def test_a_body_cut_reaches_the_parent_only_at_a_call() -> None:
     def verdict(tail: str) -> bool:
         script = f"{prologue}{tail}{install_run}; make docs-check"
         return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    # A call in a child shell cannot reach the parent, so its body's cut must
+    # not undo a clear the parent already has (probed: the parent keeps -s).
+    cleared_first = (
+        f"export MAKEFLAGS={bt}getflags{bt}; "
+        f"g2() {{ export MAKEFLAGS={bt}b{bt}; }}; "
+        f"f() {{ export MAKEFLAGS=-s; }}; f; "
+    )
+
+    def after_clear(tail: str) -> bool:
+        script = f"{cleared_first}{tail}{install_run}; make docs-check"
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert after_clear("g2 | cat; "), "a pipeline stage cannot reach the parent"
+    assert after_clear("(g2); "), "nor can a subshell"
+    assert after_clear("x=$(g2); "), "nor a command substitution"
+    assert after_clear("g2 & wait; "), "nor a backgrounded call"
+    assert not after_clear("g2; "), "a foreground cut does reach it"
 
     assert verdict("g2; f; "), "the clear after the cut wins"
     assert not verdict("f; g2; "), "the cut after the clear must survive"
@@ -439,8 +488,11 @@ def test_the_body_span_covers_every_statement_the_call_runs() -> None:
         packaging_gate._substitution_taint_events({"run": script})
     )
     assert body_clears, "the body's clear must be recorded for its call"
-    for _, (span, _names) in body_clears.items():
+    for _, (span, _names, order) in body_clears.items():
         first, last, cleared_at = span
+        assert set(order) == set(_names), (
+            "every cleared name must carry its own last-clear index"
+        )
         assert first <= cleared_at <= last, (
             "the clearing statement must lie inside the body's own range"
         )

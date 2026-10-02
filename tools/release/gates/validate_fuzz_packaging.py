@@ -8519,7 +8519,7 @@ def _substitution_taint_events(
     dict[int, set[str]],
     dict[int, set[str]],
     dict[int, set[str]],
-    dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    dict[int, _BodyClear],
     dict[int, list[tuple[int, str]]],
 ]:
     """Taint, clear, export and body-clear events keyed by pair index.
@@ -8578,7 +8578,7 @@ def _substitution_taint_events(
     # the call's index fires without the matching export VIEW update, so the
     # make still sees the unresolved sentinel.  Keeping it separate lets the
     # caller apply the value at the call and nothing before it.
-    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]] = {}
+    body_clears: dict[int, _BodyClear] = {}
     for index, command in live_entries:
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if not names:
@@ -8595,6 +8595,15 @@ def _substitution_taint_events(
             continue
         clears.setdefault(index, set()).update(names)
     return taints, clears, exports, body_clears, body_cuts
+
+
+# One call's body deliverable: the body's own index range, the literal each
+# cleared name is given, and the index of the LAST clear of that name -- the
+# order is judged per name, since a clear of one variable says nothing about
+# another's cut.
+_BodyClear = tuple[
+    tuple[int, int, int], dict[str, str], dict[str, int]
+]
 
 
 class _BodyClearContext:
@@ -8620,7 +8629,7 @@ def _record_body_clear(
     calls: list[int],
     call_pairs: dict[int, list[int]],
     context: "_BodyClearContext",
-    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    body_clears: dict[int, _BodyClear],
 ) -> None:
     """Record a function body's clear at every call that can deliver it.
 
@@ -8644,9 +8653,16 @@ def _record_body_clear(
         # whether the body cleared the name or re-cut it afterwards depends on
         # the order of events INSIDE the body, which the call index cannot say.
         span = _span_for_call(call_pairs, call, index)
-        seen = body_clears.get(call, (span, {}))[1]
-        # A later literal in the body wins: the call delivers the last one.
-        body_clears[call] = (span + (index,), {**seen, **literals})
+        seen = body_clears.get(call, (span, {}, {}))[1]
+        order = body_clears.get(call, (span, {}, {}))[2]
+        # A later literal in the body wins: the call delivers the last one, and
+        # the order is remembered PER NAME so one variable's clear cannot
+        # supersede another's cut.
+        body_clears[call] = (
+            span + (index,),
+            {**seen, **literals},
+            {**order, **{name: index for name in literals}},
+        )
 
 
 def _span_for_call(
@@ -9860,7 +9876,7 @@ def _retain_body_cut(
 
 def _apply_body_clear(
     pair_index: int,
-    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    body_clears: dict[int, _BodyClear],
     body_cuts: dict[int, list[tuple[int, str]]],
     tracker: _TaintTracker,
     exported: dict[str, str],
@@ -9880,7 +9896,7 @@ def _apply_body_clear(
         # substitution and no literal from the body ever reaches it.
         _retain_body_cut(pair_index, cuts, tracker, exported)
         return
-    body_span, literals = recorded
+    body_span, literals, cleared_at_for = recorded
     if not literals:
         return
     names = set(literals)
@@ -9893,9 +9909,16 @@ def _apply_body_clear(
     # own clear came AFTER it -- the same ordering rule, applied to the cut.
     # So `export MAKEFLAGS=-s; export MAKEFLAGS=`g`` leaves the parent on the
     # substitution and `export MAKEFLAGS=`g`; export MAKEFLAGS=-s` does not.
-    _first, _last, cleared_at = body_span
+    # The order is judged PER NAME: a clear of some OTHER variable must not
+    # supersede this name's cut.  `cleared_at` is the last clear of any name in
+    # the body, so comparing against it let `export MAKEFLAGS=-s;
+    # export MAKEFLAGS=`g`; export MAKEOVERRIDES=-j2` look like the cut was
+    # superseded -- while bash leaves MAKEFLAGS on the substitution.
+    _first, _last, _cleared_at = body_span
     still_cut = tracker.recut_in_body(body_span, names) | {
-        name for index, name in cuts if index > cleared_at and name in names
+        name
+        for index, name in cuts
+        if name not in names or index > cleared_at_for.get(name, index)
     }
     for name in still_cut:
         tracker.retain_at(pair_index, {name})
@@ -9908,6 +9931,34 @@ def _apply_body_clear(
     # this value, and an empty one made `export MAKEFLAGS=-n` invisible.
     for name in cleared:
         exported[name] = literals[name]
+
+
+def _parent_shell_body_cuts(
+    step: str | dict, body_cuts: dict[int, list[tuple[int, str]]]
+) -> dict[int, list[tuple[int, str]]]:
+    """Keep only the body cuts whose call runs in the PARENT shell.
+
+    A call in a pipeline stage, subshell, command substitution or the
+    background cannot change the parent's variable, so its body's cut belongs to
+    that child.  The body's CLEAR is already filtered by the same test where it
+    is recorded; this applies the identical rule to the cut.
+    """
+    if not body_cuts:
+        return body_cuts
+    script = _step_script(step)
+    if script is None:
+        return {}
+    executable = _strip_function_bodies(
+        _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
+    )
+    pairs = _command_segments_with_separators(executable)
+    backgrounded = _backgrounded_pair_indices(executable)
+    return {
+        call: cuts
+        for call, cuts in body_cuts.items()
+        if call not in backgrounded
+        and _runs_in_parent_shell(pairs, executable, call)
+    }
 
 
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
@@ -9934,6 +9985,12 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     taints, clears, export_events, body_clears, body_cuts = (
         _substitution_taint_events(step)
     )
+    # A call in a child shell cannot reach the parent, so neither half of the
+    # body's effect lands there.  The CLEAR was already filtered where it is
+    # recorded; a CUT was not, so a pipeline stage or backgrounded call still
+    # re-tainted the parent (its verdicts happened to stay correct because the
+    # name was already tainted, but the event belonged to the child).
+    body_cuts = _parent_shell_body_cuts(step, body_cuts)
     tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
