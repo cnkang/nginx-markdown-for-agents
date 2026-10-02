@@ -9803,15 +9803,13 @@ def _cleared_literals(
     """
     literals: dict[str, str] = {}
     for name in names:
-        value = _assigned_literal_value(command, executable, name)
+        value = _assigned_literal_value(command, name)
         if value is not None:
             literals[name] = value
     return literals
 
 
-def _assigned_literal_value(
-    command: str, executable: str, name: str
-) -> str | None:
+def _assigned_literal_value(command: str, name: str) -> str | None:
     """The literal *name* is assigned in *command*, or None if it is cut."""
     state = _make_relevant_export_state(command, {})
     if state is None:
@@ -9855,7 +9853,7 @@ def _apply_body_clear(
     cleared = names - still_cut
     if not cleared:
         return
-    tracker.clear_at(pair_index, cleared)
+    tracker.clear_at(cleared)
     # The body's own literal, not a placeholder: the make-option checks read
     # this value, and an empty one made `export MAKEFLAGS=-n` invisible.
     for name in cleared:
@@ -9968,12 +9966,12 @@ class _TaintTracker:
             if event_index in self._clears:
                 self._tainted -= self._clears[event_index]
 
-    def clear_at(self, pair_index: int, names: set[str]) -> None:
-        """Unmark *names* as tainted at an already-advanced position.
+    def clear_at(self, names: set[str]) -> None:
+        """Unmark *names* as tainted at the already-advanced position.
 
         Used by a called function body's clear, which becomes real at the CALL
         rather than where the body is written.  ``advance`` has already moved
-        the cursor past this index, so the event is applied directly instead of
+        the cursor past the call, so the event is applied directly instead of
         being queued.
         """
         self._tainted -= names
