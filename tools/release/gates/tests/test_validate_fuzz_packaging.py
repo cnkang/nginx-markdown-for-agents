@@ -201,7 +201,7 @@ def test_unverified_mechanisms_are_pinned() -> None:
         f"for i in 1; do export MAKEFLAGS={bt}g{bt}; done",
         f"while false; do export MAKEFLAGS={bt}g{bt}; done",
     ):
-        taints, clears, exports = packaging_gate._substitution_taint_events(
+        taints, clears, exports, _body = packaging_gate._substitution_taint_events(
             {"run": tail}
         )
         assert taints, tail
@@ -239,13 +239,13 @@ def test_unverified_mechanisms_are_pinned() -> None:
     assert verdict("f x=1"), "a trailing argument is still the call"
     assert not verdict("echo f"), "the name as an argument is not a call"
 
-    # KNOWN LIMITATION, base-identical and fail-closed, recorded not fixed:
-    # bash runs `FOO=1 f` in the parent, so the body's literal clears there,
-    # but an assignment in front of the call makes the body-stripping view
-    # drop the literal entirely and this rejects.  base rejects it too, so it
-    # is a missed acceptance rather than a regression, and widening the
-    # accepted set is the riskier direction to take in a taint analyzer.
-    assert not verdict("FOO=1 f"), "documented over-rejection, see comment"
+    # A leading environment assignment does not change the execution shell, so
+    # `FOO=1 f` is a parent-shell call and must clear.  The call matcher now
+    # reads the first COMMAND word, dropping the assignment prefix the same way
+    # the reachability scan does.
+    assert verdict("FOO=1 f"), "an assignment prefix is still a parent call"
+    assert verdict("A=1 B=2 f"), "several assignment prefixes"
+    assert verdict("FOO=1 f x=1"), "assignments on both sides"
 
 
 
@@ -270,6 +270,283 @@ def test_a_backgrounded_segment_cannot_hide_an_identical_foreground_one() -> Non
     # And a backgrounded-only docs-check is still refused, so the fix did not
     # simply stop honouring `&`.
     assert issue("make docs-check & true") is not None
+
+
+
+def test_a_step_without_a_run_script_is_skipped_not_crashed() -> None:
+    """A step carrying no ``run`` must be skipped, not crash the gate.
+
+    ``_substitution_taint_events`` returns four mappings; the early exit for a
+    step with no script has to return four as well or the caller's unpack
+    raises ``ValueError`` and the gate crashes instead of reporting an issue.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    # Reachable: _python_deps_issue passes such a step to _pip_first_steps.
+    assert packaging_gate._python_deps_issue([install, {"useshell": True}]) is not None
+    assert packaging_gate._substitution_taint_events({"useshell": True}) == (
+        {}, {}, {}, {},
+    )
+    # The scanner unpacks four values, so the early exit must not raise there.
+    assert list(packaging_gate._pip_step_scan({"useshell": True})) == []
+
+
+def test_a_body_clear_does_not_erase_a_later_cut_inside_the_body() -> None:
+    """A body may clear and then cut again; the later cut must survive.
+
+    The clear is applied at the CALL, so without ordering it unmarks the cut the
+    body made after clearing, and a make inheriting the substitution certifies.
+    Verified in bash: clear-then-cut leaves the parent holding the cut result,
+    cut-then-clear leaves it holding the literal.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    body = "f() {{ {inner} }}; f"
+    bt = chr(96)
+
+    def verdict(inner: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            + body.format(inner=inner)
+            + "; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not verdict(f"export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}"), (
+        "a cut AFTER the body's clear must survive it"
+    )
+    assert verdict(f"export MAKEFLAGS={bt}g{bt}; export MAKEFLAGS=-s"), (
+        "a cut BEFORE the body's clear is superseded by it"
+    )
+    assert verdict("export MAKEFLAGS=-s"), "a clear-only body still clears"
+
+
+def test_the_body_ordering_check_is_what_survives_a_later_cut() -> None:
+    """Pin the ordering logic at the level it acts on.
+
+    A shell shape cannot isolate it: a body that re-cuts ALSO makes the
+    analyzer lose the docs-check prerequisite, so the step rejects either way
+    and the two cases look identical from outside.  The guarantee is therefore
+    asserted on the tracker's own view -- which names survive a body's clear.
+    """
+    # Body statements 3..5.  A cut at 4 (after the clear at 3) survives; a cut
+    # at 2 (before the clear) does not, and neither does one at 3 itself --
+    # only a cut STRICTLY after the clearing statement outlives it.
+    tracker = packaging_gate._TaintTracker(
+        {2: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}},
+        {},
+        {},
+    )
+    tracker.advance(4, set())
+    assert tracker.recut_in_body((3, 5, 3), {"MAKEFLAGS"}) == {"MAKEFLAGS"}, (
+        "a cut after the body's clear must survive it"
+    )
+    assert tracker.recut_in_body((3, 5, 5), {"MAKEFLAGS"}) == set(), (
+        "a cut before the body's clear is superseded by it"
+    )
+    assert tracker.recut_in_body((3, 3, 3), {"MAKEFLAGS"}) == set(), (
+        "the clearing statement itself is not a surviving cut"
+    )
+    assert tracker.recut_in_body((6, 7, 6), {"MAKEFLAGS"}) == set(), (
+        "a cut outside the body's own range does not survive it"
+    )
+
+
+def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
+    """Pin the call site, not just the helper it calls.
+
+    ``_apply_body_clear`` is where the ordering and the body span are consumed.
+    Asserting only on ``recut_in_body`` leaves both load-bearing checks
+    untested: a body whose only statement clears, followed by a cut inside the
+    body, must leave the name marked.
+    """
+    # Body statements 3..4: a clear at 3, then a cut at 4 inside the body.
+    body_clears = {6: ((3, 4, 3), {"MAKEFLAGS": "-s"})}
+    tracker = packaging_gate._TaintTracker(
+        {0: {"MAKEFLAGS"}, 4: {"MAKEFLAGS"}}, {}, {}
+    )
+    tracker.advance(6, set())
+    exported = {"MAKEFLAGS": "$"}
+
+    packaging_gate._apply_body_clear(6, body_clears, tracker, exported)
+
+    assert "MAKEFLAGS" in tracker._tainted, (
+        "a cut after the body's clear must survive the call"
+    )
+
+    # Same body, but the cut precedes the clear: the clear wins.
+    body_clears = {6: ((3, 4, 4), {"MAKEFLAGS": "-s"})}
+    superseded = packaging_gate._TaintTracker(
+        {0: {"MAKEFLAGS"}, 3: {"MAKEFLAGS"}}, {}, {}
+    )
+    superseded.advance(6, set())
+    view = {"MAKEFLAGS": "$"}
+    packaging_gate._apply_body_clear(6, body_clears, superseded, view)
+
+    assert "MAKEFLAGS" not in superseded._tainted, (
+        "a cut before the body's clear is superseded by it"
+    )
+    assert view["MAKEFLAGS"] == "-s", (
+        "a superseded clear must still deliver the body's own literal"
+    )
+
+def test_the_body_span_covers_every_statement_the_call_runs() -> None:
+    """Pin the span the producer builds, not just the consumer that reads it.
+
+    ``_span_for_call`` derives the body range from the statements that share a
+    call.  Collapsing it to the clearing statement alone would let a cut in a
+    LATER body statement be mistaken for one outside the body, so the range
+    has to span the whole body.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+    script = (
+        f"export MAKEFLAGS={bt}getflags{bt}; "
+        f"f() {{ export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}; }}; "
+        "f; make docs-check"
+    )
+    _, _, _, body_clears = packaging_gate._substitution_taint_events(
+        {"run": script}
+    )
+    assert body_clears, "the body's clear must be recorded for its call"
+    for _, (span, _names) in body_clears.items():
+        first, last, cleared_at = span
+        assert first <= cleared_at <= last, (
+            "the clearing statement must lie inside the body's own range"
+        )
+        assert last > first, (
+            "the range must cover every body statement, not the clear alone"
+        )
+    assert packaging_gate._python_deps_issue([install, {"run": script}]) is not None
+
+
+def test_a_foreground_call_is_not_dropped_by_a_backgrounded_twin() -> None:
+    """A backgrounded call must be judged by position, not by its text.
+
+    ``f & wait; f`` runs the SECOND call in the foreground, so bash leaves the
+    body's literal in the parent; matching the text dropped both calls and a
+    valid step was rejected.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(tail: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"f() {{ export MAKEFLAGS=-s; }}; {tail} "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("f & wait; f; "), "the foreground twin still clears"
+    assert not verdict("f & wait; "), "a lone backgrounded call clears nothing"
+    assert not verdict("(f) & wait; "), "a backgrounded subshell call too"
+    assert not verdict("f | cat; "), "a pipeline stage cannot clear the parent"
+
+
+def test_a_called_body_delivers_its_own_literal_to_the_make() -> None:
+    """The body's literal must survive the clear, not become a placeholder.
+
+    The make-option checks read the exported value, so an empty placeholder
+    made ``export MAKEFLAGS=-n`` inside a called body invisible and a dry-run
+    make certified a step the same script rejects when written at top level.
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(body: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; f() {{ {body} }}; f; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not verdict("export MAKEFLAGS=-n"), (
+        "a dry-run flag in a called body must not certify"
+    )
+    assert verdict("export MAKEFLAGS=-s"), "a harmless flag still certifies"
+
+
+def test_a_literal_loop_list_may_name_the_do_keyword() -> None:
+    """``for i in do; do f; done`` iterates once over the word ``do``.
+
+    The keyword that opens the body is in the NEXT pair, so the header pair's
+    ``do`` is an ordinary item.  Bailing out on it rejected a body bash runs
+    (probed: the parent's literal is cleared after one iteration).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(items: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"f() {{ export MAKEFLAGS=-s; }}; for i in {items}; do f; done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("do"), "an item named do"
+    assert verdict("1 do"), "a list ending in do"
+    assert verdict("1"), "a plain list"
+    assert not verdict("$LIST"), "a variable may expand to nothing"
+    assert not verdict("*.txt"), "a glob may match nothing"
+    assert not verdict(""), "an empty list never iterates"
+
+
+def test_an_early_exit_demotes_the_rest_of_a_literal_loop_body() -> None:
+    """``break``/``continue`` make what FOLLOWS them conditional, not before.
+
+    bash runs ``export MAKEFLAGS=-s; break`` (the clear lands) but not
+    ``break; export MAKEFLAGS=-s`` (it never runs), so the two orders differ.
+    Demoting the loop's stack frame when the keyword is stepped models both:
+    the frame is demoted rather than popped, so the first order still
+    certifies -- which is the order real workflows use (install-verify.yml).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(body: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"for i in 1 2 3; do {body} done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("export MAKEFLAGS=-s; "), "no early exit at all"
+    assert verdict("export MAKEFLAGS=-s; break; "), "clear then break runs"
+    assert not verdict("break; export MAKEFLAGS=-s; "), (
+        "break first means the clear never runs"
+    )
+    assert verdict("export MAKEFLAGS=-s; continue; "), "clear then continue"
+    assert not verdict("continue; export MAKEFLAGS=-s; "), (
+        "continue first, same reason"
+    )
+    # The same rule reaches a CALL inside the body: `break` before the call
+    # means it never runs, and the call is what delivers the body's clear.
+    body = "f() { export MAKEFLAGS=-s; }; "
+
+    def with_call(tail: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; {body}{tail} "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert with_call("for i in 1; do f; done; "), "the call runs"
+    assert with_call("for i in 1; do f; break; done; "), "call then break"
+    assert not with_call("for i in 1; do break; f; done; "), (
+        "break first means the call never runs"
+    )
+
+    # A list that may iterate zero times keeps its body conditional.
+    def variable_list() -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"for i in $LIST; do export MAKEFLAGS=-s; done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert not variable_list(), "an unset variable iterates zero times"
 
 
 def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
@@ -317,23 +594,26 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
     assert not verdict(f"{body}; f --flag | cat{make}"), "an option-bearing stage"
     assert not verdict(f"{body}; echo f{make}"), "the name as an argument is not it"
 
-    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash's make sees [-s] when
-    # the call precedes it and [SUB] when it follows, so a make BETWEEN the
-    # definition and the call must reject.  This still CERTIFIES: the clear is
-    # recorded at the body's index, which the tracker applies before the make.
-    #
-    # It cannot simply move onto the call's pair -- `_TaintTracker.advance`
-    # walks events in segment order and `_pip_step_scan` reads the same
-    # stream, so a clear placed there made the scanner stop seeing the
-    # following `make docs-check` and the step was rejected for a missing
-    # prerequisite instead of a real taint (tried and reverted).  Carrying
-    # "applies from here on" needs a separate channel, which is a larger
-    # change than belongs in this fix.
-    #
-    # This assertion PINS the gap on purpose: it fails the moment someone
-    # closes it, and the failure message points here.
-    assert verdict(f"{body}; make docs-check; f"), (
-        "KNOWN GAP closed -- update the comment above and the ledger"
+    # A make BETWEEN the definition and the call must reject: bash's make sees
+    # [-s] when the call precedes it and [SUB] when it follows, so the clear is
+    # only real from the call onward.  This used to CERTIFY because the clear
+    # was recorded at the body's index and the tracker applied it before the
+    # make.  It is applied at the call now, through its own event channel.
+    assert not verdict(f"{body}; make docs-check; f"), (
+        "the make before the call must not see the body's clear"
+    )
+
+    # EVERY call must be able to deliver the clear, not just the first: a
+    # substitution raised between two calls is only cleared by the second.
+    body = "f() { export MAKEFLAGS=-s; }"
+    assert verdict(f"{body}; f; export MAKEFLAGS=`b`; f{make}"), (
+        "a second parent-shell call must clear a taint raised between calls"
+    )
+    assert verdict(f"{body}; f | cat; export MAKEFLAGS=`b`; f{make}"), (
+        "the pipeline stage does not stop the later parent-shell call"
+    )
+    assert not verdict(f"{body}; f | cat; make docs-check"), (
+        "but a call that is ONLY a stage still cannot clear the parent"
     )
 
     # The name mentioned as an argument is not a call, so with no real call
@@ -353,26 +633,21 @@ def test_a_called_function_body_clears_only_where_the_call_runs() -> None:
         assert verdict(f"{body}; if true; then f; fi; make docs-check"), body
         assert not verdict(f"{body}; while false; do f; done; make docs-check"), body
 
-    # KNOWN LIMITATION, OPEN, recorded not fixed.  bash also clears the parent
-    # for `for i in 1; do f; done`, and `base` rejects that shape too, so it
-    # is a missed acceptance rather than a regression.  The cause is
-    # structural: `_strip_function_bodies` blanks the body in place, and when
-    # a construct follows, the blanked run swallows the `;` so the body stops
-    # being a pair of its own and no mapping can reach it.  Fixing that means
-    # walking a body's own segments instead of mapping onto the stripped pair
-    # stream -- a larger change than belongs in this fix.
+    # A `for` over a literal, non-empty word list runs at least once, so bash
+    # clears the parent there and the gate must accept.  A `while`/`until`
+    # whose condition may never hold must still reject.
     body = "f() { export MAKEFLAGS=-s; }"
-    assert not verdict(f"{body}; for i in 1; do f; done{make}"), (
-        "KNOWN GAP closed -- update the comment above and the ledger"
-    )
+    assert verdict(f"{body}; for i in 1; do f; done{make}"), "a literal for-list"
+    assert verdict(f"{body}; for i in 1 2 3; do f; done{make}"), "a longer list"
+    assert not verdict(f"{body}; for i in $LIST; do f; done{make}"), "a variable"
+    assert not verdict(f"{body}; for i in *.txt; do f; done{make}"), "a glob"
 
-    # A top-level literal between the body and the call must not inherit the
-    # call's verdict: the substitution is re-cut AFTER the literal, so only a
-    # clear that actually reaches the parent can rescue it.
+    # A literal between the body and the call re-cuts the taint, so only a
+    # clear that actually reaches the parent can rescue the step afterwards.
     body = "f() { export MAKEFLAGS=-s; }"
     recut = f"export MAKEFLAGS=`a`; {body}; export MAKEFLAGS=`b`; "
-    assert not verdict(f"{recut} f{make}"), "a piped call cannot clear the parent"
-    assert not verdict(f"{recut} f | cat{make}"), "nor can a pipeline stage"
+    assert verdict(f"{recut} f{make}"), "a parent-shell call clears the re-cut"
+    assert not verdict(f"{recut} f | cat{make}"), "a pipeline stage cannot"
 
     # A body that is never called cannot clear anything.
     assert not verdict(f"{body}; true{make}"), "a body with no call clears nothing"
@@ -395,7 +670,6 @@ def test_unverified_prerequisite_guarantees_are_pinned() -> None:
     for tail in (
         "if [ -f M ]; then export MAKEFLAGS=-s; fi",
         "[ -f M ] && export MAKEFLAGS=-s",
-        "for i in 1 2; do export MAKEFLAGS=-s; done",
         "while false; do export MAKEFLAGS=-s; done",
         "until true; do export MAKEFLAGS=-s; done",
         "case x in y) export MAKEFLAGS=-s ;; esac",
@@ -445,7 +719,7 @@ def test_unverified_taint_mechanisms_are_pinned() -> None:
     cut_at = packaging_gate._segment_cut_positions(executable, pairs)[0]
 
     # A cut is not a literal: no clear event may be produced for it.
-    taints, clears, _exports = packaging_gate._substitution_taint_events(
+    taints, clears, _exports, _body = packaging_gate._substitution_taint_events(
         {"run": script}
     )
     assert taints[0] == {"MAKEFLAGS"}
@@ -2725,7 +2999,7 @@ def test_double_quoted_substitutions_keep_the_taint() -> None:
         # positive control proves the recovery is not a blanket allow.
         ('export MAKEFLAGS="-s"; make docs-check', set()),
     ):
-        taints, _clears, _exports = packaging_gate._substitution_taint_events(
+        taints, _clears, _exports, _body = packaging_gate._substitution_taint_events(
             {"run": script}
         )
         assert set().union(*taints.values()) == expected, script
