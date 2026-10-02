@@ -8661,7 +8661,7 @@ def _record_body_clear(
         body_clears[call] = (
             span + (index,),
             {**seen, **literals},
-            {**order, **{name: index for name in literals}},
+            {**order, **dict.fromkeys(literals, index)},
         )
 
 
@@ -9860,7 +9860,6 @@ def _assigned_literal_value(command: str, name: str) -> str | None:
 
 
 def _retain_body_cut(
-    pair_index: int,
     cuts: list[tuple[int, str]],
     tracker: _TaintTracker,
     exported: dict[str, str],
@@ -9869,7 +9868,7 @@ def _retain_body_cut(
     names = {name for _index, name in cuts}
     if not names:
         return
-    tracker.retain_at(pair_index, names)
+    tracker.retain_at(names)
     for name in names:
         exported[name] = _UNRESOLVED_FLAG_SENTINEL
 
@@ -9894,7 +9893,7 @@ def _apply_body_clear(
     if recorded is None:
         # This body CUTS at the call and never clears, so the parent keeps the
         # substitution and no literal from the body ever reaches it.
-        _retain_body_cut(pair_index, cuts, tracker, exported)
+        _retain_body_cut(cuts, tracker, exported)
         return
     body_span, literals, cleared_at_for = recorded
     if not literals:
@@ -9921,7 +9920,7 @@ def _apply_body_clear(
         if name not in names or index > cleared_at_for.get(name, index)
     }
     for name in still_cut:
-        tracker.retain_at(pair_index, {name})
+        tracker.retain_at({name})
         exported[name] = _UNRESOLVED_FLAG_SENTINEL
     cleared = names - still_cut
     if not cleared:
@@ -10085,8 +10084,8 @@ class _TaintTracker:
         """
         self._tainted -= names
 
-    def retain_at(self, pair_index: int, names: set[str]) -> None:
-        """Re-tain *names* at an already-advanced position."""
+    def retain_at(self, names: set[str]) -> None:
+        """Re-tain *names* at the already-advanced position."""
         self._tainted |= names
 
     def recut_in_body(
