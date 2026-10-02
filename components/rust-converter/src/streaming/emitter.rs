@@ -905,9 +905,14 @@ impl IncrementalEmitter {
             // needed.  Backslash-escaping would corrupt the literal code
             // content (backslashes render verbatim inside a code span),
             // so the original content is appended between the fences.
-            self.append_link_text(&fence);
-            self.append_link_text(&content);
-            self.append_link_text(&fence);
+            //
+            // Appended as ONE unit: `append_link_text` refuses a piece that does
+            // not fit the label budget, so three separate calls could leave the
+            // label holding the opening fence, or the fence plus HALF the body,
+            // with the closing fence dropped -- an unclosed code span whose raw
+            // `<`/`>` bytes a Markdown renderer that allows raw HTML treats as a
+            // tag.  Measured: 35 of the 45 fill levels around the cap did so.
+            self.append_link_code_span(&fence, &content);
         } else {
             self.write_str(&fence)?;
             self.write_str(&content)?;
@@ -1347,24 +1352,52 @@ impl IncrementalEmitter {
     /// the overflow flag is set and further appends are dropped.
     /// A truncation marker is appended when possible so output drift is
     /// operator-visible. The link is still closed on `Exit(Link)`.
-    fn append_link_text(&mut self, s: &str) {
+    ///
+    /// Appending the three pieces separately let truncation land between them,
+    /// leaving the label with an unclosed code span.  When the whole span does
+    /// not fit it is dropped whole and the label is closed by the truncation
+    /// marker, so no partial span ever survives.
+    fn append_link_code_span(&mut self, fence: &str, content: &str) {
+        if self.link_text_overflow {
+            return;
+        }
+        let span_len = fence
+            .len()
+            .saturating_add(content.len())
+            .saturating_add(fence.len());
+        if self.link_text.len().saturating_add(span_len) > self.max_buffer_size {
+            self.truncate_link_text();
+            return;
+        }
+        self.link_text.push_str(fence);
+        self.link_text.push_str(content);
+        self.link_text.push_str(fence);
+    }
+
+    /// Mark the label overflowed, trimming what is there to leave room for the
+    /// operator-visible truncation marker.
+    fn truncate_link_text(&mut self) {
         const LINK_TRUNCATION_MARKER: &str = "...";
 
+        if self.max_buffer_size > 0 {
+            let marker_room = self.max_buffer_size.min(LINK_TRUNCATION_MARKER.len());
+            let keep = self.max_buffer_size.saturating_sub(marker_room);
+            let safe_keep = self.link_text.floor_char_boundary(keep);
+            if self.link_text.len() > safe_keep {
+                self.link_text.truncate(safe_keep);
+            }
+            self.link_text
+                .push_str(&LINK_TRUNCATION_MARKER[..marker_room]);
+        }
+        self.link_text_overflow = true;
+    }
+
+    fn append_link_text(&mut self, s: &str) {
         if self.link_text_overflow {
             return;
         }
         if self.link_text.len().saturating_add(s.len()) > self.max_buffer_size {
-            if self.max_buffer_size > 0 {
-                let marker_room = self.max_buffer_size.min(LINK_TRUNCATION_MARKER.len());
-                let keep = self.max_buffer_size.saturating_sub(marker_room);
-                let safe_keep = self.link_text.floor_char_boundary(keep);
-                if self.link_text.len() > safe_keep {
-                    self.link_text.truncate(safe_keep);
-                }
-                self.link_text
-                    .push_str(&LINK_TRUNCATION_MARKER[..marker_room]);
-            }
-            self.link_text_overflow = true;
+            self.truncate_link_text();
             return;
         }
         self.link_text.push_str(s);
@@ -1835,6 +1868,59 @@ mod tests {
     use crate::streaming::budget::MemoryBudget;
     use crate::streaming::state_machine::{StateMachineAction, StructuralStateMachine};
     use crate::streaming::types::StreamEvent;
+
+    /// Every backtick in a label must pair up; an odd count means a code span
+    /// was left open and its content sits outside any span.
+    fn assert_no_unclosed_code_span(label: &str) {
+        assert_eq!(
+            label.matches('`').count() % 2,
+            0,
+            "unclosed code span in {label:?}"
+        );
+    }
+
+    /// A code span inside a link label must land WHOLE or not at all.
+    ///
+    /// `append_link_text` refuses a piece that does not fit, so three separate
+    /// calls could leave the label holding the opening fence, or the fence plus
+    /// half the body, with the closing fence dropped.  Measured over the fill
+    /// levels around the cap, 35 of 45 did.
+    #[test]
+    fn a_code_span_is_dropped_whole_rather_than_cut() {
+        let fence = "`";
+        let content = "&lt;script&gt;alert(1)&lt;/script&gt;";
+        let budget = MemoryBudget::for_total(4096);
+        let cap = budget.output_buffer;
+
+        for fill in cap.saturating_sub(40)..=(cap + 4) {
+            let mut emitter = IncrementalEmitter::new(&budget);
+            emitter.in_link = true;
+            if fill > 0 {
+                emitter.append_link_text(&"A".repeat(fill));
+            }
+            emitter.append_link_code_span(fence, content);
+
+            assert_no_unclosed_code_span(&emitter.link_text);
+            assert!(
+                !emitter.link_text.contains("<script"),
+                "raw script tag survived truncation at fill={fill}: {}",
+                emitter.link_text
+            );
+        }
+    }
+
+    /// The same call with room to spare must still emit the span intact.
+    #[test]
+    fn a_code_span_that_fits_is_emitted_whole() {
+        let budget = MemoryBudget::for_total(64 * 1024);
+        let mut emitter = IncrementalEmitter::new(&budget);
+        emitter.in_link = true;
+
+        emitter.append_link_code_span("`", "&lt;b&gt;bold&lt;/b&gt;");
+
+        assert_eq!(emitter.link_text, "`&lt;b&gt;bold&lt;/b&gt;`");
+        assert_no_unclosed_code_span(&emitter.link_text);
+    }
 
     /// Create a default `IncrementalEmitter` and `StructuralStateMachine` pair.
     ///
