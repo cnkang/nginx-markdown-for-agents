@@ -7,7 +7,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current line: v0.9.2 shipped on 2026-09-30 as the latest public stable
+> Current line: v0.9.2 shipped on 2026-10-02 as the latest public stable
 > release. It is the final breaking release before v1.0. The v0.9.2 tag,
 > package assets, and checksums are on the project's GitHub Releases page.
 
