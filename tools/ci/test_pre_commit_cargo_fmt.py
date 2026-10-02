@@ -75,21 +75,25 @@ def test_the_hook_restages_what_it_reformatted() -> None:
     assert re.search(r"git commit.*again|run 'git commit' again", text), (
         "the hook re-stages but does not tell the contributor to retry"
     )
-    # The snapshot must be taken before formatting, and it must cover staged
-    # changes too. `git diff` alone compares worktree against index, so a file
-    # whose unformatted blob is ALREADY staged is invisible to it and would stay
-    # unformatted in the commit -- the original defect.
-    assert re.search(r"git diff HEAD --name-only", text), (
-        "the snapshot selector must be `git diff HEAD`, or a file whose "
-        "unformatted blob is already staged escapes the re-stage"
+    # The candidate set must be the TRACKED Rust files, not a diff. A diff
+    # selector cannot see a file unformatted in HEAD with no local change, so
+    # that blob ships with the hook exiting 0; and every omitted
+    # `--diff-filter` letter is a silently ignored class (M missed new files,
+    # ACM missed renames, since git reports those alone).
+    assert re.search(r"git ls-files -z -- '\*\.rs'", text), (
+        "the snapshot must select tracked Rust files with `git ls-files`; a "
+        "diff-based selector misses files that are unformatted in HEAD, and "
+        "every omitted --diff-filter letter is a silently ignored class"
     )
-    # An ADDED Rust file is as unformatted as a modified one. With `M` only, a
-    # brand-new file stayed out of the snapshot: cargo fmt fixed the worktree,
-    # the commit carried the unformatted blob, and the hook still exited 0.
-    assert re.search(r"git diff HEAD --name-only --diff-filter=ACMR", text), (
-        "the snapshot must cover added and renamed files (ACMR). With M only a "
-        "new file is committed unformatted; without R a renamed Rust file "
-        "matches no filter at all and is invisible to the snapshot"
+    # No status-code filter may remain in the COMMANDS. (Comments may still
+    # explain why one is unnecessary.)
+    commands = [
+        line
+        for line in text.splitlines()
+        if "diff-filter" in line and not line.lstrip().startswith("#")
+    ]
+    assert not commands, (
+        f"no status-code filter should remain in the commands, found: {commands}"
     )
     fmt_at = text.index("cargo fmt --manifest-path")
     snap_at = text.index("git hash-object")
@@ -101,7 +105,7 @@ def test_the_hook_restages_what_it_reformatted() -> None:
     # contributor edits before formatting. Staging it would commit work the
     # contributor never asked to commit, so the hook must record whether each
     # path matched the index and skip the ones that did not.
-    assert re.search(r"was_clean|clean=1|clean=0", text), (
+    assert re.search(r"matched=1|matched=0|was_matched", text), (
         "the snapshot does not record whether each path matched the index, so "
         "unstaged contributor edits get swept into the commit"
     )

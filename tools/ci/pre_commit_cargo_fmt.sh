@@ -19,39 +19,36 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-# Record every Rust file this hook might rewrite, together with its content,
-# BEFORE formatting runs -- so the re-stage below can tell a formatter edit from
-# a contributor edit.
+# The candidate set is EVERY TRACKED Rust file, not a diff.
 #
-# `git diff HEAD` (not plain `git diff`) is the selector: plain `git diff` only
-# sees worktree-vs-index, so a file whose UNFORMATTED blob is already staged
-# would be missing from the snapshot and stay unformatted in the commit.
+# A diff-based selector cannot see a file that is unformatted in HEAD with no
+# local change, so that blob shipped with the hook exiting 0. Nor can it express
+# "every class of file this hook may touch" without a status-code filter, and
+# each omitted `--diff-filter` letter is a class it silently ignores: `M` alone
+# missed new files, `ACM` missed renames (git reports those under R alone).
+# Selecting the tracked set removes the whole class of bug.
 #
-# The filter is ACMR, not M: an ADDED Rust file is just as unformatted as a
-# modified one, and `M` alone let a brand-new file through the snapshot while
-# cargo fmt fixed only the worktree -- the commit then carried the unformatted
-# blob and the hook still exited 0. `R` is needed because git reports a rename
-# under R alone: the new path matches no other filter, so a renamed Rust file
-# was invisible to the snapshot entirely.
+# Records are NUL-delimited triples: (content hash, matched-the-index?, path).
+# The second field is what keeps the hook from committing work the contributor
+# never staged: a path whose worktree already differed from the index had
+# unstaged edits BEFORE formatting, so staging it afterwards would sweep those
+# edits into the commit.
 #
-# A temp file, not an associative array: macOS ships bash 3.2, which has no
-# `declare -A`, and this hook must behave the same on a developer Mac and on CI.
-# Each record is (worktree sum, matched-the-index?, path). A file whose worktree
-# already differed from the index had unstaged contributor edits BEFORE
-# formatting, so the hook must not stage it -- doing so would sweep work the
-# contributor never asked to commit.
+# A temp file rather than an associative array: macOS ships bash 3.2, which has
+# no `declare -A`, and this hook must behave the same on a developer Mac and on
+# CI.
 snapshot="$(mktemp)"
 trap 'rm -f "${snapshot}"' EXIT
 while IFS= read -r -d '' path; do
     [[ -f "${path}" ]] || continue
     sum="$(git hash-object -- "${path}")"
     if [[ "${sum}" == "$(git rev-parse --verify --quiet ":${path}" || true)" ]]; then
-        clean=1
+        matched=1
     else
-        clean=0
+        matched=0
     fi
-    printf '%s\0%s\0%s\0' "${sum}" "${clean}" "${path}" >>"${snapshot}"
-done < <(git diff HEAD --name-only --diff-filter=ACMR -z -- '*.rs')
+    printf '%s\0%s\0%s\0' "${sum}" "${matched}" "${path}" >>"${snapshot}"
+done < <(git ls-files -z -- '*.rs')
 
 # Every crate the Make target checks, formatted the same way.
 cargo fmt --manifest-path components/rust-converter/Cargo.toml --all
@@ -76,12 +73,12 @@ make rust-fmt-check
 # is no longer `git diff`-modified, so diffing afterwards can never see it.
 changed=0
 dirty=0
-while IFS= read -r -d '' before_sum && IFS= read -r -d '' was_clean \
+while IFS= read -r -d '' before_sum && IFS= read -r -d '' was_matched \
     && IFS= read -r -d '' path; do
     [[ -f "${path}" ]] || continue
     [[ "${before_sum}" == "$(git hash-object -- "${path}")" ]] && continue
     # The content changed under `cargo fmt`.
-    if [[ "${was_clean}" != "1" ]]; then
+    if [[ "${was_matched}" != "1" ]]; then
         # It also had unstaged edits before formatting: staging it now would
         # commit work the contributor never staged. Report and leave it alone.
         printf '  reformatted, NOT staged (had unstaged edits): %s\n' "${path}" >&2
