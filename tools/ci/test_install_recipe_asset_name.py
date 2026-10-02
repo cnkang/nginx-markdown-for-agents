@@ -56,6 +56,37 @@ def test_usage_recipe_downloads_the_released_asset() -> None:
         )
 
 
+def test_usage_recipe_does_not_leak_shell_state() -> None:
+    """The recipe must not change the state of the shell it is pasted into.
+
+    It sets `-e` and installs an EXIT trap. Pasted directly, errexit persists
+    and the trap fires when that shell exits -- so an unrelated later command
+    aborts the operator's session. The subshell contains both.
+    """
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    recipe = [
+        line.strip().removeprefix("#").strip()
+        for line in text.splitlines()
+        if line.startswith("#") and ("set -e" in line or "trap " in line)
+    ]
+    assert recipe, "the recipe no longer sets errexit or a cleanup trap"
+
+    # The opening paren must precede `set -e`, and a matching close must follow
+    # the installer invocation, so both lines sit inside the subshell.
+    paren = text.index("#   (\n")
+    set_e = text.index("#     set -e")
+    assert paren < set_e, "`set -e` appears before the subshell opens"
+
+    lines = text.splitlines()
+    opener = next(i for i, l in enumerate(lines) if l.strip() == "#   (")
+    closer = next(i for i, l in enumerate(lines) if l.strip() == "#   )")
+    assert opener < closer, "the subshell is not closed"
+    body = "\n".join(lines[opener:closer])
+    assert "set -e" in body, "the subshell does not contain `set -e`"
+    assert "trap " in body, "the subshell does not contain the cleanup trap"
+    assert "sudo " in body, "the installer invocation left the subshell"
+
+
 def test_usage_recipe_uses_a_private_staging_directory() -> None:
     """The recipe must not reintroduce a predictable shared download path.
 

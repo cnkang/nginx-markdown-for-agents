@@ -4,13 +4,18 @@ set -euo pipefail
 # NGINX Markdown for Agents Install Script
 #
 # Usage (private-staging bootstrap; see docs/guides/INSTALLATION.md for the
-# canonical GPG-authenticated recipe, which also authenticates the bytes):
-#   set -e
-#   VERSION=v0.9.2
-#   WORKDIR="$(mktemp -d)" && trap 'rm -rf "$WORKDIR"' EXIT
-#   curl -fsSL -o "$WORKDIR/installer.sh" \
-#     "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh"
-#   sudo env VERSION="${VERSION}" bash "$WORKDIR/installer.sh"
+# canonical GPG-authenticated recipe, which also authenticates the bytes).
+# The subshell keeps `set -e` and the EXIT trap out of your interactive shell:
+# pasted directly, errexit would persist and the trap would fire when that shell
+# exits.
+#   (
+#     set -e
+#     VERSION=v0.9.2
+#     WORKDIR="$(mktemp -d)" && trap 'rm -rf "$WORKDIR"' EXIT
+#     curl -fsSL -o "$WORKDIR/installer.sh" \
+#       "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh"
+#     sudo env VERSION="${VERSION}" bash "$WORKDIR/installer.sh"
+#   )
 #
 # Do not download into a shared /tmp name and then run it with sudo: an
 # unprivileged local user can pre-create that file, deny the downloader write
