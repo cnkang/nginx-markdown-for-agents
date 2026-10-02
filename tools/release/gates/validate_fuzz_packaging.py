@@ -2392,12 +2392,17 @@ def _open_keyword_branch(
     words = pairs[index][0].split()
     if len(words) < 4 or words[2] != "in":
         return (False, _UNKNOWN_CHAIN)
+    # `do` is a legal item as well as the body keyword, so the header pair is
+    # NOT truncated at it:
+    # `for i in do; do f; done` pairs as `for i in do` / `do f` / `done`, so the
+    # keyword that opens the body is in the NEXT pair and `do` here is a plain
+    # item (probed in bash: it iterates once and clears).
+    # `len(words) < 4` above already rejects an empty list, so *items* is
+    # never empty here and needs no separate guard.
     items = words[3:]
-    # `do` ends the header; an unquoted item that is not a variable or glob may
-    # expand to nothing, so only a plainly literal list is guaranteed.
-    if any(
-        word in {"do"} or _glob_or_command_substitution(word) for word in items
-    ):
+    # An unquoted item that is not plainly literal may expand to nothing or to
+    # several words, so only a literal list is guaranteed to iterate.
+    if any(_glob_or_command_substitution(word) for word in items):
         return (False, _UNKNOWN_CHAIN)
     # A `break`/`continue` in the body would need per-statement state to model
     # exactly: bash runs `export MAKEFLAGS=-s; break` (CERTIFY) but not

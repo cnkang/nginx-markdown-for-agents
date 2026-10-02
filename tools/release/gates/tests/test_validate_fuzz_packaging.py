@@ -465,6 +465,32 @@ def test_a_called_body_delivers_its_own_literal_to_the_make() -> None:
     assert verdict("export MAKEFLAGS=-s"), "a harmless flag still certifies"
 
 
+def test_a_literal_loop_list_may_name_the_do_keyword() -> None:
+    """``for i in do; do f; done`` iterates once over the word ``do``.
+
+    The keyword that opens the body is in the NEXT pair, so the header pair's
+    ``do`` is an ordinary item.  Bailing out on it rejected a body bash runs
+    (probed: the parent's literal is cleared after one iteration).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+
+    def verdict(items: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; "
+            f"f() {{ export MAKEFLAGS=-s; }}; for i in {items}; do f; done; "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("do"), "an item named do"
+    assert verdict("1 do"), "a list ending in do"
+    assert verdict("1"), "a plain list"
+    assert not verdict("$LIST"), "a variable may expand to nothing"
+    assert not verdict("*.txt"), "a glob may match nothing"
+    assert not verdict(""), "an empty list never iterates"
+
+
 def test_a_literal_loop_body_ignores_an_early_exit() -> None:
     """Pin the KNOWN LIMITATION the loop-body rule does not model.
 
