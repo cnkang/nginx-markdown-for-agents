@@ -30,6 +30,84 @@ use super::traversal::{
     append_str_with_context, with_reserved_working_set,
 };
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
+use crate::security::is_form_state_subtree;
+
+/// The approved description of a form control, or `""` when it has none.
+///
+/// Uses the same shared policy as the ordinary traversal, so the extractors
+/// keep a page-provided caption (`aria-label`, `placeholder`) while never
+/// exposing the control's own value or prefilled child text.
+fn form_control_description(node: &Handle) -> String {
+    let NodeData::Element {
+        ref name,
+        ref attrs,
+        ..
+    } = node.data
+    else {
+        return String::new();
+    };
+    // `input` is keyed by `type`; the others use their tag name as the type.
+    let control_type = if name.local.as_ref() == "input" {
+        attrs
+            .borrow()
+            .iter()
+            .find(|attribute| {
+                attribute.name.ns.is_empty() && attribute.name.local.as_ref() == "type"
+            })
+            .map(|attribute| attribute.value.to_string())
+            .unwrap_or_else(|| "text".to_string())
+    } else {
+        name.local.to_string()
+    };
+    let owned = attrs
+        .borrow()
+        .iter()
+        .filter(|attribute| attribute.name.ns.is_empty())
+        .map(|attribute| {
+            (
+                attribute.name.local.to_string(),
+                attribute.value.to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    crate::security::select_input_control_text(
+        &control_type,
+        owned
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    )
+    .unwrap_or_default()
+    .to_string()
+}
+
+/// Fold *text* into the code-content stats exactly as a text node would.
+///
+/// The measurement twin must track the same bytes the emitter appends, or the
+/// reserved working set and the chosen fence are computed from a different
+/// string than the one written.
+fn append_code_content_stats(
+    stats: &mut CodeContentStats,
+    text: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    for (byte_index, byte) in text.bytes().enumerate() {
+        check_measurement_checkpoint(ctx, byte_index)?;
+        if stats.first_byte.is_none() {
+            stats.first_byte = Some(byte);
+        }
+        stats.last_byte = Some(byte);
+        if byte == b'`' {
+            stats.current_backtick_run = stats
+                .current_backtick_run
+                .checked_add(1)
+                .ok_or_else(|| ConversionError::MemoryLimit("code fence length overflow".into()))?;
+            stats.max_backtick_run = stats.max_backtick_run.max(stats.current_backtick_run);
+        } else {
+            stats.current_backtick_run = 0;
+        }
+    }
+    Ok(())
+}
 
 /// Statistics for code content collected without materializing a second
 /// `String`.  The backtick run is carried across text-node boundaries so
@@ -419,9 +497,15 @@ impl MarkdownConverter {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(());
                 }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Measure exactly what `extract_code_content` appends, so
+                    // the reserved working set matches the emitted bytes.
+                    append_code_content_stats(stats, &form_control_description(node), ctx)?;
+                    return Ok(());
+                }
 
                 let child_depth = depth.checked_add(1).ok_or_else(|| {
-                    ConversionError::MemoryLimit("code extraction depth overflow".into())
+                    ConversionError::MemoryLimit("code content measurement depth overflow".into())
                 })?;
                 for child in node.children.borrow().iter() {
                     self.measure_code_content_into(child, child_depth, stats, ctx)?;
@@ -456,6 +540,12 @@ impl MarkdownConverter {
             }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Same policy as the ordinary traversal: keep the approved
+                    // description, never the child defaults.
+                    append_str_with_context(output, &form_control_description(node), &mut ctx)?;
                     return Ok(());
                 }
 
@@ -495,6 +585,12 @@ impl MarkdownConverter {
             }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Same policy as the ordinary traversal: keep the approved
+                    // description, never the child defaults.
+                    append_str_with_context(output, &form_control_description(node), &mut ctx)?;
                     return Ok(());
                 }
 

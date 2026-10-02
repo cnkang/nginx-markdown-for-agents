@@ -73,7 +73,7 @@ The converter classifies elements into three categories using `SanitizeAction`:
 **Form Elements — Tags Stripped, Content Policy Applied** (`SanitizeAction::StripElement`):
 - `<form>`, `<button>`, `<fieldset>`, `<legend>`, and `<label>` - The module removes tags. It preserves descriptive child text, such as labels and button captions.
 - `<select>`, `<option>`, and `<datalist>` - The module preserves visible option labels. It never emits an `option[value]` or other control `value` attribute. This keeps stored or suggested user data out of Markdown while retaining page-provided choices.
-- `<textarea>` - The module may emit a non-blank `aria-label`, followed by a non-blank `placeholder`. It suppresses default child text because users can enter or prefill that text.
+- `<textarea>` - The module may emit a non-blank `aria-label`, followed by a non-blank `placeholder`. It suppresses default child text because users can enter or prefill that text. This applies on every extraction path, including a `<textarea>` nested inside an `<a>` or `<pre>`, whose link label or code body would otherwise carry the prefilled text.
 - `<output>` - The module removes the tag. It preserves visible child text because that text represents page content, such as a calculation result.
 - `<input>` (void form control) - The module lowercases `type` using ASCII rules. It does not trim whitespace.
 - `type="password"` - The module suppresses the entire control, including its `aria-label`, `placeholder`, and `value`.

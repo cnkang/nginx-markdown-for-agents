@@ -2,17 +2,25 @@
 set -euo pipefail
 
 # NGINX Markdown for Agents Install Script
-# Usage:
+#
+# Usage (verified bootstrap; see docs/guides/INSTALLATION.md for the canonical
+# GPG-authenticated recipe):
 #   VERSION=v0.9.2
-#   curl -fsSLo /tmp/nginx-markdown-installer.sh \
-#     https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh
-#   sudo env VERSION="${VERSION}" bash /tmp/nginx-markdown-installer.sh
-# OR (if using specific release version):
-#   VERSION=v0.9.2 sudo -E bash /tmp/nginx-markdown-installer.sh
+#   WORKDIR="$(mktemp -d)" && trap 'rm -rf "$WORKDIR"' EXIT
+#   curl -fsSL -o "$WORKDIR/installer.sh" \
+#     "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-installer-${VERSION}.sh"
+#   sudo env VERSION="${VERSION}" bash "$WORKDIR/installer.sh"
+#
+# Do not download into a shared /tmp name and then run it with sudo: an
+# unprivileged local user can pre-create that file, deny the downloader write
+# access, and have root execute their bytes when the download fails.  A private
+# mktemp directory with a failure guard is what makes the bootstrap safe, and
+# the recipe above uses `&&` so a failed download never reaches sudo.
+#
 # OR (in Docker, skip root check):
-# SKIP_ROOT_CHECK=1 bash /path/to/install.sh
+#   SKIP_ROOT_CHECK=1 bash /path/to/install.sh
 # OR (auto-disable stale load_module snippets on ABI mismatch):
-#   AUTO_DISABLE_STALE_MODULE=1 sudo -E bash /tmp/nginx-markdown-install.sh
+#   AUTO_DISABLE_STALE_MODULE=1 sudo -E bash /path/to/install.sh
 
 REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"

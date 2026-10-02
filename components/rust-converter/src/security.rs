@@ -101,6 +101,20 @@ pub(crate) fn input_type_is_suppressed(normalized_type: &str) -> bool {
     matches!(normalized_type, "hidden" | "image" | "password")
 }
 
+/// Elements whose CHILD TEXT is user or prefill state, never page content.
+///
+/// The ordinary traversal applies `select_input_control_text` for these and
+/// returns without visiting children. The alternate extractors (link label, code
+/// body) recurse through their own copies of that walk, so without this guard a
+/// `<textarea>` nested inside an `<a>` or `<pre>` leaks its prefilled default
+/// text into the AI-facing Markdown -- which SECURITY_MODEL.md forbids.
+pub(crate) fn is_form_state_subtree(local_name: &str) -> bool {
+    matches!(
+        local_name,
+        "textarea" | "input" | "select" | "datalist" | "option"
+    )
+}
+
 /// Select descriptive text for an input-like control using the shared privacy
 /// policy.
 ///

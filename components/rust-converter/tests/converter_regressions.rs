@@ -141,3 +141,45 @@ fn link_url_with_angle_brackets_uses_shared_destination_escape() {
         "expected shared escaped destination wrapping, got: {result}"
     );
 }
+
+/// A `<textarea>` nested in an anchor or code block must not leak its prefilled
+/// default text.
+///
+/// The ordinary traversal suppresses form-state child text, but the link-label
+/// and code-body extractors are separate walks that only excluded
+/// script/style/noscript, so a nested textarea's default became the label or
+/// the code body -- which SECURITY_MODEL.md forbids for AI-facing output.
+#[test]
+fn nested_textarea_defaults_are_suppressed_in_link_and_code_extractors() {
+    let in_link = convert_html(
+        b"<p><a href=\"/x\"><textarea aria-label=\"Name\">SECRET-PREFILL</textarea></a></p>",
+    );
+    assert!(
+        !in_link.contains("SECRET-PREFILL"),
+        "textarea default leaked into a link label: {in_link:?}"
+    );
+    // The approved descriptive text still comes through.
+    assert!(
+        in_link.contains("Name"),
+        "the approved aria-label description was dropped: {in_link:?}"
+    );
+
+    let in_code = convert_html(
+        b"<pre><code><textarea placeholder=\"Hint\">SECRET-CODE</textarea></code></pre>",
+    );
+    assert!(
+        !in_code.contains("SECRET-CODE"),
+        "textarea default leaked into a code body: {in_code:?}"
+    );
+}
+
+/// A textarea outside those containers keeps the existing suppression, so the
+/// new guard must not change the ordinary path.
+#[test]
+fn a_bare_textarea_default_is_still_suppressed() {
+    let out = convert_html(b"<p><textarea>SECRET-BARE</textarea></p>");
+    assert!(
+        !out.contains("SECRET-BARE"),
+        "the ordinary traversal regressed: {out:?}"
+    );
+}
