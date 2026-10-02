@@ -49,9 +49,11 @@ def test_usage_recipe_downloads_the_released_asset() -> None:
         # literal tag, so compare the stem, not the whole URL.
         stem = url.rsplit("/", 1)[-1]
         assert stem.endswith("-${VERSION}.sh"), f"unexpected recipe asset: {url}"
-        assert stem.removesuffix("-${VERSION}.sh").endswith(
-            _released_asset_stem()
-        ), f"usage recipe downloads {stem!r}, but the release publishes {expected}"
+        # Exact equality, not `endswith`: a prefixed name such as
+        # `evil-<stem>` also ends with the real stem, and would 404 just the same.
+        assert stem.removesuffix("-${VERSION}.sh") == _released_asset_stem(), (
+            f"usage recipe downloads {stem!r}, but the release publishes {expected}"
+        )
 
 
 def test_usage_recipe_uses_a_private_staging_directory() -> None:
