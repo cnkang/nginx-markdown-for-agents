@@ -201,8 +201,8 @@ def test_unverified_mechanisms_are_pinned() -> None:
         f"for i in 1; do export MAKEFLAGS={bt}g{bt}; done",
         f"while false; do export MAKEFLAGS={bt}g{bt}; done",
     ):
-        taints, clears, exports, _body = packaging_gate._substitution_taint_events(
-            {"run": tail}
+        taints, clears, exports, _body, _cuts = (
+            packaging_gate._substitution_taint_events({"run": tail})
         )
         assert taints, tail
         assert all("MAKEFLAGS" in names for names in taints.values()), tail
@@ -284,7 +284,7 @@ def test_a_step_without_a_run_script_is_skipped_not_crashed() -> None:
     # Reachable: _python_deps_issue passes such a step to _pip_first_steps.
     assert packaging_gate._python_deps_issue([install, {"useshell": True}]) is not None
     assert packaging_gate._substitution_taint_events({"useshell": True}) == (
-        {}, {}, {}, {},
+        {}, {}, {}, {}, {},
     )
     # The scanner unpacks four values, so the early exit must not raise there.
     assert list(packaging_gate._pip_step_scan({"useshell": True})) == []
@@ -366,7 +366,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     tracker.advance(6, set())
     exported = {"MAKEFLAGS": "$"}
 
-    packaging_gate._apply_body_clear(6, body_clears, tracker, exported)
+    packaging_gate._apply_body_clear(6, body_clears, {}, tracker, exported)
 
     assert "MAKEFLAGS" in tracker._tainted, (
         "a cut after the body's clear must survive the call"
@@ -379,7 +379,7 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     )
     superseded.advance(6, set())
     view = {"MAKEFLAGS": "$"}
-    packaging_gate._apply_body_clear(6, body_clears, superseded, view)
+    packaging_gate._apply_body_clear(6, body_clears, {}, superseded, view)
 
     assert "MAKEFLAGS" not in superseded._tainted, (
         "a cut before the body's clear is superseded by it"
@@ -387,6 +387,37 @@ def test_the_call_site_applies_the_body_clear_with_its_own_ordering() -> None:
     assert view["MAKEFLAGS"] == "-s", (
         "a superseded clear must still deliver the body's own literal"
     )
+
+def test_a_body_cut_reaches_the_parent_only_at_a_call() -> None:
+    """A cut inside a body is an event of the CALL, not of the definition.
+
+    Recorded at the body's own index it fired as soon as the definition was
+    scanned, so a taint from one body was still in force after a LATER body's
+    call cleared the name -- ``g2() { export MAKEFLAGS=`b`; }; f() { export
+    MAKEFLAGS=-s; }; f; g2`` certified while bash leaves CUT_B in the parent
+    (probed in both orders).
+    """
+    install = {"run": "python3 -m pip install -r requirements-release.txt"}
+    bt = chr(96)
+    install_run = "python3 -m pip install -r requirements-release.txt"
+    prologue = (
+        f"export MAKEFLAGS={bt}getflags{bt}; "
+        f"g2() {{ export MAKEFLAGS={bt}b{bt}; }}; "
+        f"f() {{ export MAKEFLAGS=-s; }}; "
+    )
+
+    def verdict(tail: str) -> bool:
+        script = f"{prologue}{tail}{install_run}; make docs-check"
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert verdict("g2; f; "), "the clear after the cut wins"
+    assert not verdict("f; g2; "), "the cut after the clear must survive"
+    assert not verdict("g2; "), "a cutting body that is never cleared"
+    assert verdict("f; g2; f; "), "a later clear again wins"
+    assert not verdict("g2 | cat; "), "a pipeline stage cannot reach the parent"
+    assert not verdict("g2 & wait; "), "a backgrounded call cannot either"
+    assert not verdict(""), "an uncalled body never runs"
+
 
 def test_the_body_span_covers_every_statement_the_call_runs() -> None:
     """Pin the span the producer builds, not just the consumer that reads it.
@@ -398,13 +429,14 @@ def test_the_body_span_covers_every_statement_the_call_runs() -> None:
     """
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
     bt = chr(96)
+    install_run = "python3 -m pip install -r requirements-release.txt"
     script = (
         f"export MAKEFLAGS={bt}getflags{bt}; "
         f"f() {{ export MAKEFLAGS=-s; export MAKEFLAGS={bt}g{bt}; }}; "
-        "f; make docs-check"
+        f"f; {install_run}; make docs-check"
     )
-    _, _, _, body_clears = packaging_gate._substitution_taint_events(
-        {"run": script}
+    _, _, _, body_clears, _cuts = (
+        packaging_gate._substitution_taint_events({"run": script})
     )
     assert body_clears, "the body's clear must be recorded for its call"
     for _, (span, _names) in body_clears.items():
@@ -719,8 +751,8 @@ def test_unverified_taint_mechanisms_are_pinned() -> None:
     cut_at = packaging_gate._segment_cut_positions(executable, pairs)[0]
 
     # A cut is not a literal: no clear event may be produced for it.
-    taints, clears, _exports, _body = packaging_gate._substitution_taint_events(
-        {"run": script}
+    taints, clears, _exports, _body, _cuts = (
+        packaging_gate._substitution_taint_events({"run": script})
     )
     assert taints[0] == {"MAKEFLAGS"}
     assert 0 not in clears, clears
@@ -2999,8 +3031,8 @@ def test_double_quoted_substitutions_keep_the_taint() -> None:
         # positive control proves the recovery is not a blanket allow.
         ('export MAKEFLAGS="-s"; make docs-check', set()),
     ):
-        taints, _clears, _exports, _body = packaging_gate._substitution_taint_events(
-            {"run": script}
+        taints, _clears, _exports, _body, _cuts = (
+            packaging_gate._substitution_taint_events({"run": script})
         )
         assert set().union(*taints.values()) == expected, script
 

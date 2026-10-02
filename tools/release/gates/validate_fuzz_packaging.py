@@ -8519,7 +8519,8 @@ def _substitution_taint_events(
     dict[int, set[str]],
     dict[int, set[str]],
     dict[int, set[str]],
-    dict[int, tuple[tuple[int, int, int], set[str]]],
+    dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    dict[int, list[tuple[int, str]]],
 ]:
     """Taint, clear, export and body-clear events keyed by pair index.
 
@@ -8551,7 +8552,7 @@ def _substitution_taint_events(
         # Four mappings, matching this function's contract and the caller's
         # four-value unpack; returning three here crashes the gate with
         # `ValueError: not enough values to unpack` instead of reporting.
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
@@ -8561,8 +8562,13 @@ def _substitution_taint_events(
     taints: dict[int, set[str]] = {}
     clears: dict[int, set[str]] = {}
     exports: dict[int, set[str]] = {}
-    _record_cut_taints(may_entries, executable, cut_positions, taints, exports)
     call_pairs = _body_clear_call_pairs(pairs, executable, script)
+    # A cut inside a body is real only at that body's CALLS, like its clear.
+    body_cuts: dict[int, list[tuple[int, str]]] = {}
+    _record_cut_taints(
+        may_entries, executable, cut_positions, taints, exports, call_pairs,
+        body_cuts,
+    )
     backgrounded = _backgrounded_pair_indices(executable)
     # A body-derived clear is only real AT THE CALL, so it is returned in its
     # own channel keyed by the call's index rather than moved into `clears`.
@@ -8588,7 +8594,7 @@ def _substitution_taint_events(
         if not _runs_in_parent_shell(pairs, executable, index):
             continue
         clears.setdefault(index, set()).update(names)
-    return taints, clears, exports, body_clears
+    return taints, clears, exports, body_clears, body_cuts
 
 
 class _BodyClearContext:
@@ -8668,11 +8674,27 @@ def _record_cut_taints(
     cut_positions: dict[int, int],
     taints: dict[int, set[str]],
     exports: dict[int, set[str]],
+    call_pairs: dict[int, list[int]],
+    body_cuts: dict[int, list[tuple[int, str]]],
 ) -> None:
-    """Record every substitution cut, and the export attribute it implies."""
+    """Record every substitution cut, and the export attribute it implies.
+
+    A cut inside a FUNCTION BODY is keyed by the CALLS that can run it, not by
+    its own index: the body executes in the caller's shell, so it reaches the
+    parent when a call runs and at no other time.  Recorded at the body's own
+    index it fired as soon as the definition was scanned, which left a taint
+    from one body in force after a LATER body's call had cleared the name --
+    ``g2() { export MAKEFLAGS=`b`; }; f() { export MAKEFLAGS=-s; }; f; g2``
+    certified while bash leaves CUT_B in the parent (probed).
+    """
     for index, command in may_entries:
         name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
         if name is None:
+            continue
+        calls = call_pairs.get(index)
+        if calls is not None:
+            for call in calls:
+                body_cuts.setdefault(call, []).append((index, name))
             continue
         taints.setdefault(index, set()).add(name)
         words = command.split()
@@ -9821,9 +9843,25 @@ def _assigned_literal_value(command: str, name: str) -> str | None:
     return value
 
 
+def _retain_body_cut(
+    pair_index: int,
+    cuts: list[tuple[int, str]],
+    tracker: _TaintTracker,
+    exported: dict[str, str],
+) -> None:
+    """Re-tain every name this body cuts, with no literal to show for it."""
+    names = {name for _index, name in cuts}
+    if not names:
+        return
+    tracker.retain_at(pair_index, names)
+    for name in names:
+        exported[name] = _UNRESOLVED_FLAG_SENTINEL
+
+
 def _apply_body_clear(
     pair_index: int,
     body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    body_cuts: dict[int, list[tuple[int, str]]],
     tracker: _TaintTracker,
     exported: dict[str, str],
 ) -> None:
@@ -9835,8 +9873,12 @@ def _apply_body_clear(
     alone would leave the name marked, and refreshing it before the call would
     clear a make that runs in between.
     """
+    cuts = body_cuts.get(pair_index, [])
     recorded = body_clears.get(pair_index)
     if recorded is None:
+        # This body CUTS at the call and never clears, so the parent keeps the
+        # substitution and no literal from the body ever reaches it.
+        _retain_body_cut(pair_index, cuts, tracker, exported)
         return
     body_span, literals = recorded
     if not literals:
@@ -9847,7 +9889,17 @@ def _apply_body_clear(
     # what the make inherits, so unmarking it here would certify a make that
     # receives the substitution (verified in bash: the parent holds the cut
     # result in that order).
-    still_cut = tracker.recut_in_body(body_span, names)
+    # A cut inside this body re-taints the name at the call unless the body's
+    # own clear came AFTER it -- the same ordering rule, applied to the cut.
+    # So `export MAKEFLAGS=-s; export MAKEFLAGS=`g`` leaves the parent on the
+    # substitution and `export MAKEFLAGS=`g`; export MAKEFLAGS=-s` does not.
+    _first, _last, cleared_at = body_span
+    still_cut = tracker.recut_in_body(body_span, names) | {
+        name for index, name in cuts if index > cleared_at and name in names
+    }
+    for name in still_cut:
+        tracker.retain_at(pair_index, {name})
+        exported[name] = _UNRESOLVED_FLAG_SENTINEL
     cleared = names - still_cut
     if not cleared:
         return
@@ -9879,7 +9931,9 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     # assignment (the live view) clears it.  Folding per command position
     # keeps the state in force at each make invocation, so a later
     # literal cannot clear the taint for an earlier make (fail closed).
-    taints, clears, export_events, body_clears = _substitution_taint_events(step)
+    taints, clears, export_events, body_clears, body_cuts = (
+        _substitution_taint_events(step)
+    )
     tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
@@ -9905,7 +9959,7 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
         _advance_export_tracking(segment, assigned, export_names, exported)
-        _apply_body_clear(pair_index, body_clears, tracker, exported)
+        _apply_body_clear(pair_index, body_clears, body_cuts, tracker, exported)
         tracker.mark(exported, export_names)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
@@ -9973,6 +10027,10 @@ class _TaintTracker:
         being queued.
         """
         self._tainted -= names
+
+    def retain_at(self, pair_index: int, names: set[str]) -> None:
+        """Re-tain *names* at an already-advanced position."""
+        self._tainted |= names
 
     def recut_in_body(
         self, body_span: tuple[int, int, int], names: set[str]
