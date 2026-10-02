@@ -643,10 +643,10 @@ mod measurement_twin_tests {
 
             // Walk to the anchor and its form control.
             fn find(node: &Handle, wanted: &str) -> Option<Handle> {
-                if let NodeData::Element { ref name, .. } = node.data {
-                    if name.local.as_ref() == wanted {
-                        return Some(node.clone());
-                    }
+                if let NodeData::Element { ref name, .. } = node.data
+                    && name.local.as_ref() == wanted
+                {
+                    return Some(node.clone());
                 }
                 for child in node.children.borrow().iter() {
                     if let Some(found) = find(child, wanted) {
