@@ -8577,7 +8577,7 @@ def _substitution_taint_events(
         names = _cleared_names(command, executable, cut_positions.get(index, 0))
         if not names:
             continue
-        literals = _cleared_literals(command, executable, names)
+        literals = _cleared_literals(command, names)
         if index in call_pairs:
             _record_body_clear(
                 index, call_pairs[index], call_pairs,
@@ -9791,9 +9791,7 @@ def _advance_export_tracking(
             exported[name] = value
 
 
-def _cleared_literals(
-    command: str, executable: str, names: set[str]
-) -> dict[str, str]:
+def _cleared_literals(command: str, names: set[str]) -> dict[str, str]:
     """The literal each cleared name is given by *command*.
 
     The caller's make-option checks read this value, so it has to survive the
