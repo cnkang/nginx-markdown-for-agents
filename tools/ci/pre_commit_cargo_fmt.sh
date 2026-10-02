@@ -34,11 +34,21 @@ cd "${REPO_ROOT}"
 #
 # A temp file, not an associative array: macOS ships bash 3.2, which has no
 # `declare -A`, and this hook must behave the same on a developer Mac and on CI.
+# Each record is (worktree sum, matched-the-index?, path). A file whose worktree
+# already differed from the index had unstaged contributor edits BEFORE
+# formatting, so the hook must not stage it -- doing so would sweep work the
+# contributor never asked to commit.
 snapshot="$(mktemp)"
 trap 'rm -f "${snapshot}"' EXIT
 while IFS= read -r -d '' path; do
     [[ -f "${path}" ]] || continue
-    printf '%s\0%s\0' "$(git hash-object -- "${path}")" "${path}" >>"${snapshot}"
+    sum="$(git hash-object -- "${path}")"
+    if [[ "${sum}" == "$(git rev-parse --verify --quiet ":${path}" || true)" ]]; then
+        clean=1
+    else
+        clean=0
+    fi
+    printf '%s\0%s\0%s\0' "${sum}" "${clean}" "${path}" >>"${snapshot}"
 done < <(git diff HEAD --name-only --diff-filter=ACM -z -- '*.rs')
 
 # Every crate the Make target checks, formatted the same way.
@@ -63,11 +73,19 @@ make rust-fmt-check
 # Walk the SNAPSHOT, not the current diff: a file the formatter just repaired
 # is no longer `git diff`-modified, so diffing afterwards can never see it.
 changed=0
-while IFS= read -r -d '' before_sum && IFS= read -r -d '' path; do
+dirty=0
+while IFS= read -r -d '' before_sum && IFS= read -r -d '' was_clean \
+    && IFS= read -r -d '' path; do
     [[ -f "${path}" ]] || continue
     [[ "${before_sum}" == "$(git hash-object -- "${path}")" ]] && continue
-    # The content changed under `cargo fmt`, so this difference is the
-    # formatter's, not a contributor edit that happened to be in the tree.
+    # The content changed under `cargo fmt`.
+    if [[ "${was_clean}" != "1" ]]; then
+        # It also had unstaged edits before formatting: staging it now would
+        # commit work the contributor never staged. Report and leave it alone.
+        printf '  reformatted, NOT staged (had unstaged edits): %s\n' "${path}" >&2
+        dirty=1
+        continue
+    fi
     git add -- "${path}"
     changed=1
     printf '  reformatted and re-staged: %s\n' "${path}" >&2
@@ -76,5 +94,11 @@ done < "${snapshot}"
 if [[ "${changed}" -eq 1 ]]; then
     echo "cargo-fmt reformatted the files above; they have been re-staged." >&2
     echo "Review them, then run 'git commit' again." >&2
+    exit 1
+fi
+
+if [[ "${dirty}" -eq 1 ]]; then
+    echo "cargo-fmt reformatted files that also had unstaged edits; those were" >&2
+    echo "NOT staged. Review them and stage what you mean to commit." >&2
     exit 1
 fi

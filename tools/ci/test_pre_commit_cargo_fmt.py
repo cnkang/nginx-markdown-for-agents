@@ -96,6 +96,14 @@ def test_the_hook_restages_what_it_reformatted() -> None:
         "the snapshot is taken after cargo fmt has already rewritten the files, "
         "so it can never detect a formatter edit"
     )
+    # A file whose worktree already differed from the index had unstaged
+    # contributor edits before formatting. Staging it would commit work the
+    # contributor never asked to commit, so the hook must record whether each
+    # path matched the index and skip the ones that did not.
+    assert re.search(r"was_clean|clean=1|clean=0", text), (
+        "the snapshot does not record whether each path matched the index, so "
+        "unstaged contributor edits get swept into the commit"
+    )
 
 
 def test_the_hook_script_is_executable() -> None:
