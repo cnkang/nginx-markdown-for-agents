@@ -9909,11 +9909,11 @@ def _apply_body_clear(
     # So `export MAKEFLAGS=-s; export MAKEFLAGS=`g`` leaves the parent on the
     # substitution and `export MAKEFLAGS=`g`; export MAKEFLAGS=-s` does not.
     # The order is judged PER NAME: a clear of some OTHER variable must not
-    # supersede this name's cut.  `cleared_at` is the last clear of any name in
-    # the body, so comparing against it let `export MAKEFLAGS=-s;
+    # supersede this name's cut.  The body's own `cleared_at` is the last clear of
+    # ANY name in it, so comparing against that let `export MAKEFLAGS=-s;
     # export MAKEFLAGS=`g`; export MAKEOVERRIDES=-j2` look like the cut was
-    # superseded -- while bash leaves MAKEFLAGS on the substitution.
-    _first, _last, _cleared_at = body_span
+    # superseded -- while bash leaves MAKEFLAGS on the substitution.  The span is
+    # passed whole to `recut_in_body`, which reads what it needs.
     still_cut = tracker.recut_in_body(body_span, names) | {
         name
         for index, name in cuts
