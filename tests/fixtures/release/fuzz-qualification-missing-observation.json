@@ -13,7 +13,7 @@
     "rustc_release": "1.100.0-nightly",
     "llvm_version": "23.1.1",
     "cargo_version": "cargo 1.100.0-nightly (495c385d0 2026-09-16)",
-    "cargo_fuzz_version": "cargo-fuzz 0.13.1"
+    "cargo_fuzz_version": "cargo-fuzz 0.13.2"
   },
   "per_target": [
     {

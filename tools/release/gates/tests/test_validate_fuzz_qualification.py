@@ -1131,7 +1131,7 @@ def test_collect_toolchain_identity_uses_pinned_rustup_shims(monkeypatch) -> Non
         "release: 1.100.0-nightly\n"
         "LLVM version: 23.1.1\n",
         "cargo 1.100.0-nightly (495c385d0 2026-09-16)\n",
-        "cargo-fuzz 0.13.1\n",
+        "cargo-fuzz 0.13.2\n",
     ))
     commands = []
 

@@ -66,7 +66,7 @@ SCHEMA_VERSION = "release.fuzz-qualification.v2"
 CORPUS_ROOT = REPO_ROOT / "components" / "rust-converter" / "fuzz" / "corpus"
 FUZZ_CRATE_DIR = REPO_ROOT / "components" / "rust-converter"
 FUZZ_TOOLCHAIN = "nightly-2026-09-21"
-FUZZ_CARGO_FUZZ_PACKAGE_VERSION = "0.13.1"
+FUZZ_CARGO_FUZZ_PACKAGE_VERSION = "0.13.2"
 _EXPECTED_FUZZ_TOOLCHAIN_IDENTITY = {
     "rustup_toolchain": FUZZ_TOOLCHAIN,
     "rustc_version": "rustc 1.100.0-nightly (bba531001 2026-09-20)",
