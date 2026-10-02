@@ -1321,7 +1321,7 @@ def test_implementation_plan_scopes_historical_pending_labels():
     if pending:
         assert "WI-8 publication section below show the current state" in intro
     else:
-        assert "0.9.2 shipped on 2026-09-30" in intro
+        assert "0.9.2 shipped on 2026-10-02" in intro
     published_word_present = any(
         word in intro.lower() for word in ("published", "released")
     )

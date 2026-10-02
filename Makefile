@@ -747,6 +747,8 @@ test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_validate_required_workflow_contexts.py -q --tb=short
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_push_profile.py -q --tb=short
+	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_commit_cargo_fmt.py -q --tb=short
+	PYTHONPATH=. python3 -m pytest tools/ci/test_install_recipe_asset_name.py -q --tb=short
 	bash tools/ci/test_verify_official_nginx_docker_binding.sh
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short

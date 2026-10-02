@@ -6,9 +6,15 @@ repos:
   # Rust formatting and linting
   - repo: local
     hooks:
+      # FORMAT, then verify.  A check-only hook fights the documented workflow
+      # (CONTRIBUTING.md tells contributors to run `cargo fmt` first): pre-commit
+      # stashes the staged tree on failure and restores its own patch, which
+      # silently reverts the formatting the contributor just applied, so the
+      # commit fails twice for the same reason.  Formatting in place and
+      # failing only when `cargo fmt` could not converge keeps one command.
       - id: cargo-fmt
         name: cargo fmt
-        entry: make rust-fmt-check
+        entry: bash tools/ci/pre_commit_cargo_fmt.sh
         language: system
         types: [rust]
         pass_filenames: false

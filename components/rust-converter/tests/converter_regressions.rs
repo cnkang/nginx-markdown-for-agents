@@ -141,3 +141,104 @@ fn link_url_with_angle_brackets_uses_shared_destination_escape() {
         "expected shared escaped destination wrapping, got: {result}"
     );
 }
+
+/// A `<textarea>` nested in an anchor or code block must not leak its prefilled
+/// default text.
+///
+/// The ordinary traversal suppresses form-state child text, but the link-label
+/// and code-body extractors are separate walks that only excluded
+/// script/style/noscript, so a nested textarea's default became the label or
+/// the code body -- which SECURITY_MODEL.md forbids for AI-facing output.
+#[test]
+fn nested_textarea_defaults_are_suppressed_in_link_and_code_extractors() {
+    let in_link = convert_html(
+        b"<p><a href=\"/x\"><textarea aria-label=\"Name\">SECRET-PREFILL</textarea></a></p>",
+    );
+    assert!(
+        !in_link.contains("SECRET-PREFILL"),
+        "textarea default leaked into a link label: {in_link:?}"
+    );
+    // The approved descriptive text still comes through.
+    assert!(
+        in_link.contains("Name"),
+        "the approved aria-label description was dropped: {in_link:?}"
+    );
+
+    let in_code = convert_html(
+        b"<pre><code><textarea placeholder=\"Hint\">SECRET-CODE</textarea></code></pre>",
+    );
+    assert!(
+        !in_code.contains("SECRET-CODE"),
+        "textarea default leaked into a code body: {in_code:?}"
+    );
+}
+
+/// The form-state guard must suppress prefilled STATE without swallowing
+/// page-provided CHOICE labels.
+///
+/// `<option>`, `<optgroup>` and `<datalist>` hold labels the page offers to the
+/// reader, which `FORM_ELEMENTS` and SECURITY_MODEL.md both describe as visible
+/// content that remains. Treating them as form state made the extractors drop
+/// those labels inside an `<a>` or `<pre>` while the ordinary traversal kept
+/// them, so the two paths disagreed on the same markup.
+#[test]
+fn option_labels_survive_the_link_and_code_extractors() {
+    let in_link =
+        convert_html(b"<p><a href=\"/x\"><select><option>RED CHOICE</option></select></a></p>");
+    assert!(
+        in_link.contains("RED CHOICE"),
+        "an option label is page content, not form state, and must survive: {in_link:?}"
+    );
+
+    let in_code =
+        convert_html(b"<pre><code><select><option>RED CHOICE</option></select></code></pre>");
+    assert!(
+        in_code.contains("RED CHOICE"),
+        "the same label must survive inside a code body: {in_code:?}"
+    );
+
+    // The ordinary traversal is the reference: the two must agree.
+    let bare = convert_html(b"<p><select><option>RED CHOICE</option></select></p>");
+    assert!(bare.contains("RED CHOICE"), "{bare:?}");
+}
+
+/// The extractors must apply the shared input-type normalization, so an
+/// uppercase `type` follows the same policy as the ordinary traversal.
+///
+/// `normalize_input_type` lowercases the attribute; without it the extractors
+/// looked the raw value up and treated `type="BUTTON"` as an unknown type, which
+/// suppressed a description the ordinary path emits.
+#[test]
+fn an_uppercase_input_type_follows_the_ordinary_policy_in_the_extractors() {
+    let lower = convert_html(b"<p><a href=\"/x\"><input type=\"button\" value=\"GO\"></a></p>");
+    let upper = convert_html(b"<p><a href=\"/x\"><input type=\"BUTTON\" value=\"GO\"></a></p>");
+    assert!(
+        lower.contains("GO") && upper.contains("GO"),
+        "case must not change the policy: lower={lower:?} upper={upper:?}"
+    );
+
+    // And the suppressed types stay suppressed whatever their case.
+    for html in [
+        "<p><a href=\"/x\"><input type=\"PASSWORD\" value=\"SEKRIT\"></a></p>",
+        "<p><a href=\"/x\"><input type=\"Hidden\" value=\"SEKRIT\"></a></p>",
+    ] {
+        let out = convert_html(html.as_bytes());
+        assert!(
+            !out.contains("SEKRIT"),
+            "a suppressed type leaked through in a different case: {out:?}"
+        );
+    }
+}
+
+/// A textarea outside those containers keeps the existing suppression, so the
+/// new guard must not change the ordinary path.
+#[test]
+fn a_bare_textarea_default_is_still_suppressed() {
+    let out = convert_html(b"<p><textarea>SECRET-BARE</textarea></p>");
+    assert!(
+        !out.contains("SECRET-BARE"),
+        "the ordinary traversal regressed: {out:?}"
+    );
+}
+
+// scenario marker

@@ -30,6 +30,87 @@ use super::traversal::{
     append_str_with_context, with_reserved_working_set,
 };
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
+use crate::security::{is_form_state_subtree, normalize_input_type};
+
+/// The approved description of a form control, or `""` when it has none.
+///
+/// Uses the same shared policy as the ordinary traversal, so the extractors
+/// keep a page-provided caption (`aria-label`, `placeholder`) while never
+/// exposing the control's own value or prefilled child text.
+fn form_control_description(node: &Handle) -> String {
+    let NodeData::Element {
+        ref name,
+        ref attrs,
+        ..
+    } = node.data
+    else {
+        return String::new();
+    };
+    // `input` is keyed by `type`; the others use their tag name as the type.
+    // The raw attribute goes through the shared normalizer, exactly as the
+    // ordinary traversal does, so an uppercase `type="BUTTON"` follows the same
+    // policy here and stops diverging from it.
+    let control_type = if name.local.as_ref() == "input" {
+        let raw_type = attrs
+            .borrow()
+            .iter()
+            .find(|attribute| {
+                attribute.name.ns.is_empty() && attribute.name.local.as_ref() == "type"
+            })
+            .map(|attribute| attribute.value.to_string());
+        normalize_input_type(raw_type.as_deref())
+    } else {
+        name.local.to_string()
+    };
+    let owned = attrs
+        .borrow()
+        .iter()
+        .filter(|attribute| attribute.name.ns.is_empty())
+        .map(|attribute| {
+            (
+                attribute.name.local.to_string(),
+                attribute.value.to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    crate::security::select_input_control_text(
+        &control_type,
+        owned
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    )
+    .unwrap_or_default()
+    .to_string()
+}
+
+/// Fold *text* into the code-content stats exactly as a text node would.
+///
+/// The measurement twin must track the same bytes the emitter appends, or the
+/// reserved working set and the chosen fence are computed from a different
+/// string than the one written.
+fn append_code_content_stats(
+    stats: &mut CodeContentStats,
+    text: &str,
+    ctx: &mut Option<&mut ConversionContext>,
+) -> Result<(), ConversionError> {
+    for (byte_index, byte) in text.bytes().enumerate() {
+        check_measurement_checkpoint(ctx, byte_index)?;
+        if stats.first_byte.is_none() {
+            stats.first_byte = Some(byte);
+        }
+        stats.last_byte = Some(byte);
+        if byte == b'`' {
+            stats.current_backtick_run = stats
+                .current_backtick_run
+                .checked_add(1)
+                .ok_or_else(|| ConversionError::MemoryLimit("code fence length overflow".into()))?;
+            stats.max_backtick_run = stats.max_backtick_run.max(stats.current_backtick_run);
+        } else {
+            stats.current_backtick_run = 0;
+        }
+    }
+    Ok(())
+}
 
 /// Statistics for code content collected without materializing a second
 /// `String`.  The backtick run is carried across text-node boundaries so
@@ -350,6 +431,15 @@ impl MarkdownConverter {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(0);
                 }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Measure exactly what `extract_text` appends, so the
+                    // reserved working set matches the emitted bytes. Counting
+                    // the child defaults here while the extractor writes the
+                    // approved description would reserve the wrong amount.
+                    let description = form_control_description(node);
+                    check_measurement_bytes(ctx, description.as_bytes())?;
+                    return Ok(description.len());
+                }
 
                 let child_depth = depth.checked_add(1).ok_or_else(|| {
                     ConversionError::MemoryLimit("text extraction depth overflow".into())
@@ -419,9 +509,15 @@ impl MarkdownConverter {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(());
                 }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Measure exactly what `extract_code_content` appends, so
+                    // the reserved working set matches the emitted bytes.
+                    append_code_content_stats(stats, &form_control_description(node), ctx)?;
+                    return Ok(());
+                }
 
                 let child_depth = depth.checked_add(1).ok_or_else(|| {
-                    ConversionError::MemoryLimit("code extraction depth overflow".into())
+                    ConversionError::MemoryLimit("code content measurement depth overflow".into())
                 })?;
                 for child in node.children.borrow().iter() {
                     self.measure_code_content_into(child, child_depth, stats, ctx)?;
@@ -456,6 +552,12 @@ impl MarkdownConverter {
             }
             NodeData::Element { ref name, .. } => {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                    return Ok(());
+                }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Same policy as the ordinary traversal: keep the approved
+                    // description, never the child defaults.
+                    append_str_with_context(output, &form_control_description(node), &mut ctx)?;
                     return Ok(());
                 }
 
@@ -497,6 +599,12 @@ impl MarkdownConverter {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(());
                 }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Same policy as the ordinary traversal: keep the approved
+                    // description, never the child defaults.
+                    append_str_with_context(output, &form_control_description(node), &mut ctx)?;
+                    return Ok(());
+                }
 
                 for child in node.children.borrow().iter() {
                     let child_depth = depth.checked_add(1).ok_or_else(|| {
@@ -508,5 +616,69 @@ impl MarkdownConverter {
             _ => {}
         }
         Ok(())
+    }
+}
+#[cfg(test)]
+mod measurement_twin_tests {
+    use super::*;
+    use crate::parser::parse_html;
+
+    /// `text_content_len` must charge exactly the bytes `extract_text` emits.
+    ///
+    /// It pre-reserves the link-label working set from what the extractor will
+    /// write. When it recursed into a form-state subtree while the extractor
+    /// wrote the approved description, it reserved the child's default-text
+    /// length instead: an over-reservation can spuriously trip `MemoryLimit`
+    /// near the budget, and `text_content_len`'s own doc comment becomes false.
+    ///
+    /// The end-to-end Markdown is identical either way, so the invariant has to
+    /// be asserted on the measurement itself.
+    #[test]
+    fn the_link_measurement_twin_charges_the_description_not_the_default() {
+        let converter = MarkdownConverter::new();
+
+        for default_len in [1usize, 4096] {
+            let html = format!(
+                "<p><a href=\"/x\"><textarea aria-label=\"N\">{}</textarea></a></p>",
+                "D".repeat(default_len)
+            );
+            let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+
+            // Walk to the anchor and its form control.
+            fn find(node: &Handle, wanted: &str) -> Option<Handle> {
+                if let NodeData::Element { ref name, .. } = node.data
+                    && name.local.as_ref() == wanted
+                {
+                    return Some(node.clone());
+                }
+                for child in node.children.borrow().iter() {
+                    if let Some(found) = find(child, wanted) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            let anchor = find(&dom.document, "a").expect("anchor not found");
+            let control = find(&dom.document, "textarea").expect("form control not found");
+
+            let mut measure_ctx = None;
+            let measured = converter
+                .text_content_len(&anchor, 0, &mut measure_ctx)
+                .expect("measurement failed");
+
+            let mut emitted = String::new();
+            converter
+                .extract_text(&control, &mut emitted, 0, None)
+                .expect("extraction failed");
+
+            // The label holds only the control, so the two must agree exactly.
+            assert_eq!(
+                measured,
+                emitted.len(),
+                "with a {default_len}-byte default the twin reserved {measured} \
+                 bytes but the extractor wrote {}",
+                emitted.len()
+            );
+        }
     }
 }
