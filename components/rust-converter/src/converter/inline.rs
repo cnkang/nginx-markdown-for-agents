@@ -428,6 +428,15 @@ impl MarkdownConverter {
                 if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
                     return Ok(0);
                 }
+                if is_form_state_subtree(name.local.as_ref()) {
+                    // Measure exactly what `extract_text` appends, so the
+                    // reserved working set matches the emitted bytes. Counting
+                    // the child defaults here while the extractor writes the
+                    // approved description would reserve the wrong amount.
+                    let description = form_control_description(node);
+                    check_measurement_bytes(ctx, description.as_bytes())?;
+                    return Ok(description.len());
+                }
 
                 let child_depth = depth.checked_add(1).ok_or_else(|| {
                     ConversionError::MemoryLimit("text extraction depth overflow".into())
@@ -604,5 +613,69 @@ impl MarkdownConverter {
             _ => {}
         }
         Ok(())
+    }
+}
+#[cfg(test)]
+mod measurement_twin_tests {
+    use super::*;
+    use crate::parser::parse_html;
+
+    /// `text_content_len` must charge exactly the bytes `extract_text` emits.
+    ///
+    /// It pre-reserves the link-label working set from what the extractor will
+    /// write. When it recursed into a form-state subtree while the extractor
+    /// wrote the approved description, it reserved the child's default-text
+    /// length instead: an over-reservation can spuriously trip `MemoryLimit`
+    /// near the budget, and `text_content_len`'s own doc comment becomes false.
+    ///
+    /// The end-to-end Markdown is identical either way, so the invariant has to
+    /// be asserted on the measurement itself.
+    #[test]
+    fn the_link_measurement_twin_charges_the_description_not_the_default() {
+        let converter = MarkdownConverter::new();
+
+        for default_len in [1usize, 4096] {
+            let html = format!(
+                "<p><a href=\"/x\"><textarea aria-label=\"N\">{}</textarea></a></p>",
+                "D".repeat(default_len)
+            );
+            let dom = parse_html(html.as_bytes()).expect("test HTML should parse");
+
+            // Walk to the anchor and its form control.
+            fn find(node: &Handle, wanted: &str) -> Option<Handle> {
+                if let NodeData::Element { ref name, .. } = node.data {
+                    if name.local.as_ref() == wanted {
+                        return Some(node.clone());
+                    }
+                }
+                for child in node.children.borrow().iter() {
+                    if let Some(found) = find(child, wanted) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            let anchor = find(&dom.document, "a").expect("anchor not found");
+            let control = find(&dom.document, "textarea").expect("form control not found");
+
+            let mut measure_ctx = None;
+            let measured = converter
+                .text_content_len(&anchor, 0, &mut measure_ctx)
+                .expect("measurement failed");
+
+            let mut emitted = String::new();
+            converter
+                .extract_text(&control, &mut emitted, 0, None)
+                .expect("extraction failed");
+
+            // The label holds only the control, so the two must agree exactly.
+            assert_eq!(
+                measured,
+                emitted.len(),
+                "with a {default_len}-byte default the twin reserved {measured} \
+                 bytes but the extractor wrote {}",
+                emitted.len()
+            );
+        }
     }
 }
