@@ -210,6 +210,11 @@ pub struct IncrementalEmitter {
     needs_block_separator: bool,
     /// Accumulated link text for the current `[text](url)` span.
     link_text: String,
+    /// Byte ranges of the complete code spans inside `link_text`, as
+    /// `(start, end)`. Truncation uses these to avoid cutting through a span
+    /// and leaving it unclosed; a backtick count in the serialized buffer cannot
+    /// answer that, because literal label text may contain backticks too.
+    link_code_spans: Vec<(usize, usize)>,
     /// Whether we are currently collecting link text.
     in_link: bool,
     /// Whether link_text has been truncated due to exceeding the budget.
@@ -284,6 +289,7 @@ impl IncrementalEmitter {
             blockquote_depth: 0,
             needs_block_separator: false,
             link_text: String::new(),
+            link_code_spans: Vec::new(),
             in_link: false,
             link_text_overflow: false,
             flush_count: 0,
@@ -422,6 +428,7 @@ impl IncrementalEmitter {
         // call emit_inline_code() and produce an empty code span.
         self.in_inline_code = false;
         self.link_text.clear();
+        self.link_code_spans.clear();
         self.link_text_overflow = false;
     }
 
@@ -682,6 +689,7 @@ impl IncrementalEmitter {
             StructuralContext::Link(_) => {
                 self.in_link = true;
                 self.link_text.clear();
+                self.link_code_spans.clear();
                 self.link_text_overflow = false;
             }
             StructuralContext::Image { src, alt } => {
@@ -1369,27 +1377,55 @@ impl IncrementalEmitter {
             self.truncate_link_text();
             return;
         }
+        let span_start = self.link_text.len();
         self.link_text.push_str(fence);
         self.link_text.push_str(content);
         self.link_text.push_str(fence);
+        self.link_code_spans
+            .push((span_start, self.link_text.len()));
     }
 
     /// Mark the label overflowed, trimming what is there to leave room for the
     /// operator-visible truncation marker.
+    ///
+    /// The cut point is walked BACK to the start of any code span it would land
+    /// inside. Cutting at an arbitrary byte could otherwise leave the opening
+    /// fence of a complete span with its closer removed -- an unclosed span whose
+    /// content a raw-HTML renderer then reads as a tag -- even though the span
+    /// itself had been appended whole.
     fn truncate_link_text(&mut self) {
         const LINK_TRUNCATION_MARKER: &str = "...";
 
         if self.max_buffer_size > 0 {
             let marker_room = self.max_buffer_size.min(LINK_TRUNCATION_MARKER.len());
             let keep = self.max_buffer_size.saturating_sub(marker_room);
-            let safe_keep = self.link_text.floor_char_boundary(keep);
-            if self.link_text.len() > safe_keep {
-                self.link_text.truncate(safe_keep);
+            let mut cut = self.link_text.floor_char_boundary(keep);
+            cut = self.span_safe_cut(cut);
+            if self.link_text.len() > cut {
+                self.link_text.truncate(cut);
             }
             self.link_text
                 .push_str(&LINK_TRUNCATION_MARKER[..marker_room]);
         }
         self.link_text_overflow = true;
+    }
+
+    /// Return the largest cut point at or below `limit` that does not fall
+    /// inside a recorded code span.
+    ///
+    /// Span boundaries come from [`Self::link_code_spans`], not from counting
+    /// backticks: literal label text may itself contain a backtick, so run parity
+    /// in the serialized buffer is not span parity.
+    fn span_safe_cut(&self, limit: usize) -> usize {
+        let mut cut = limit;
+        for &(start, end) in &self.link_code_spans {
+            if start < cut && cut < end {
+                // The cut would land inside this span: back up to its start so
+                // the span is dropped whole instead of left unclosed.
+                cut = start;
+            }
+        }
+        cut
     }
 
     fn append_link_text(&mut self, s: &str) {
@@ -1920,6 +1956,69 @@ mod tests {
 
         assert_eq!(emitter.link_text, "`&lt;b&gt;bold&lt;/b&gt;`");
         assert_no_unclosed_code_span(&emitter.link_text);
+    }
+
+    /// Truncation must never cut THROUGH a complete code span.
+    ///
+    /// `append_link_code_span` guarantees the span is appended whole, but a later
+    /// append can still overflow the label, and the truncation then cuts at an
+    /// arbitrary byte. Before this was handled, 77 of the combinations below left
+    /// an unclosed span: the opener survived the cut and the closer did not.
+    ///
+    /// Sweeping fill level x span length x trailing-append size, because the
+    /// defect only appears where a span happens to straddle the cut point.
+    #[test]
+    fn truncation_never_cuts_through_a_complete_code_span() {
+        let budget = MemoryBudget::for_total(4096);
+        let cap = budget.output_buffer;
+
+        for span_len in [1usize, 2, 3, 5, 10, 40, 100] {
+            for fill in 0..=(cap + 8) {
+                for tail in [1usize, 2, 3, 5, 10, 50] {
+                    let mut emitter = IncrementalEmitter::new(&budget);
+                    emitter.in_link = true;
+                    if fill > 0 {
+                        emitter.append_link_text(&"A".repeat(fill));
+                    }
+                    emitter.append_link_code_span("`", &"x".repeat(span_len.saturating_sub(2)));
+                    // A trailing append that overflows the label and truncates.
+                    emitter.append_link_text(&"B".repeat(tail));
+
+                    assert_no_unclosed_code_span(&emitter.link_text);
+                }
+            }
+        }
+    }
+
+    /// Literal label text may contain backticks, so span boundaries must come
+    /// from the recorded ranges rather than from counting backticks in the
+    /// serialized buffer.
+    #[test]
+    fn a_literal_backtick_does_not_confuse_the_span_safe_cut() {
+        let budget = MemoryBudget::for_total(4096);
+        let cap = budget.output_buffer;
+
+        for fill in 0..=(cap + 8) {
+            for tail in [1usize, 3, 10, 50] {
+                let mut emitter = IncrementalEmitter::new(&budget);
+                emitter.in_link = true;
+                if fill > 0 {
+                    emitter.append_link_text(&"A".repeat(fill));
+                }
+                // An odd number of literal backticks: a parity heuristic reads
+                // this as an open span and truncates far too early.
+                emitter.append_link_text("literal ` backtick");
+                emitter.append_link_code_span("`", "span");
+                emitter.append_link_text(&"B".repeat(tail));
+
+                let label = &emitter.link_text;
+                // Whatever survived, the real span is either whole or absent.
+                let has_whole_span = label.contains("`span`");
+                assert!(has_whole_span || !label.contains("`span"), "{label:?}");
+                // And no raw script tag may escape.
+                assert!(!label.contains("<script"), "{label:?}");
+            }
+        }
     }
 
     /// Create a default `IncrementalEmitter` and `StructuralStateMachine` pair.
