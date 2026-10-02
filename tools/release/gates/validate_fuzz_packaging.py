@@ -2191,6 +2191,9 @@ def _builtin_command_literal(words):
 _OPEN_KEYWORDS = {"while", "until", "for", "case", "select"}
 _CLOSE_KEYWORDS = {"fi", "done", "esac"}
 _BODY_MARKERS = {"then", "do"}
+# Statements that leave the innermost loop, making the rest of its body
+# conditional.  `return`/`exit` end the run outright and are handled elsewhere.
+_EXITING_KEYWORDS = {"break", "continue"}
 _CARRIED_BODY_MARKERS = _BODY_MARKERS | {"else"}
 
 
@@ -2404,20 +2407,37 @@ def _open_keyword_branch(
     # several words, so only a literal list is guaranteed to iterate.
     if any(_glob_or_command_substitution(word) for word in items):
         return (False, _UNKNOWN_CHAIN)
-    # A `break`/`continue` in the body would need per-statement state to model
-    # exactly: bash runs `export MAKEFLAGS=-s; break` (CERTIFY) but not
-    # `break; export MAKEFLAGS=-s` (REJECT).  One branch state covers the whole
-    # body, so choosing either loses a legal acceptance -- and real workflows do
-    # put `break` after the work inside a literal loop (install-verify.yml).  The
-    # body therefore keeps its classification, which is the fail-open this branch
-    # is recorded against rather than a regression: the `break`-first shape was
-    # already accepted before this loop handling existed.
+    # An early exit inside the body is handled where the statement is stepped
+    # (`_EXITING_KEYWORDS`), which demotes this frame from there on -- so the
+    # order inside the body decides, and both orders match bash.
     return (True, _CLEAR_CHAIN)
 
 
 def _glob_or_command_substitution(word: str) -> bool:
     """True when a word's expansion may yield nothing or several items."""
     return any(char in word for char in "*?[`$")
+
+
+def _step_carried_statement(
+    branches: list[tuple[bool, int]],
+    segment: str,
+    pairs: list[tuple[str, str]] | None,
+    index: int | None,
+) -> None:
+    """Step the statement a body marker glued onto itself.
+
+    The segmentizer emits ``do break`` as ONE segment, so without this the
+    first statement of a body is never stepped and a ``break`` there leaves the
+    loop's frame unchanged.
+    """
+    carried = _body_marker_command(segment)
+    if not carried:
+        return
+    keyword = _segment_keyword(segment)
+    _branch_keyword_step(
+        branches, carried, _pair_condition(pairs or [], index or 0, keyword),
+        pairs, index,
+    )
 
 
 def _branch_keyword_step(
@@ -2441,6 +2461,7 @@ def _branch_keyword_step(
             branches.pop()
         return True
     if keyword in _BODY_MARKERS:
+        _step_carried_statement(branches, segment, pairs, index)
         return True
     if keyword in ("if", "elif"):
         _branch_select(branches, keyword, condition)
@@ -2454,6 +2475,16 @@ def _branch_keyword_step(
         branches.append(
             _open_keyword_branch(pairs or [], index or 0, keyword)
         )
+        return True
+    if keyword in _EXITING_KEYWORDS and branches:
+        # `break`/`continue` leave the innermost LOOP, so everything after one
+        # inside that body is conditional again.  Without this the whole body
+        # inherited the header's classification and `break; export
+        # MAKEFLAGS=-s` certified a clear that never runs (probed in bash: the
+        # parent keeps the substitution).  The stack frame is demoted rather
+        # than popped, so `export MAKEFLAGS=-s; break` -- where the clear comes
+        # first -- still certifies, and real workflows use that order.
+        branches[-1] = (False, _UNKNOWN_CHAIN)
         return True
     return False
 
@@ -8550,9 +8581,7 @@ def _substitution_taint_events(
         if index in call_pairs:
             _record_body_clear(
                 index, call_pairs[index], call_pairs,
-                _BodyClearContext(
-                    pairs, executable, backgrounded, names, literals
-                ),
+                _BodyClearContext(pairs, executable, backgrounded, literals),
                 body_clears,
             )
             continue
@@ -8565,20 +8594,18 @@ def _substitution_taint_events(
 class _BodyClearContext:
     """What one body statement contributes, plus the shell facts it is judged in."""
 
-    __slots__ = ("pairs", "executable", "backgrounded", "names", "literals")
+    __slots__ = ("pairs", "executable", "backgrounded", "literals")
 
     def __init__(
         self,
         pairs: list[tuple[str, str]],
         executable: str,
         backgrounded: set[int],
-        names: set[str],
         literals: dict[str, str],
     ) -> None:
         self.pairs = pairs
         self.executable = executable
         self.backgrounded = backgrounded
-        self.names = names
         self.literals = literals
 
 
@@ -8599,7 +8626,6 @@ def _record_body_clear(
     pairs, executable, backgrounded, literals = (
         context.pairs, context.executable, context.backgrounded, context.literals
     )
-    names = context.names
     for call in calls:
         # By PAIR INDEX, not by text: `f & wait; f` runs the second call in the
         # foreground, and matching the text dropped both, so a step bash accepts

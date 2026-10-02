@@ -491,15 +491,14 @@ def test_a_literal_loop_list_may_name_the_do_keyword() -> None:
     assert not verdict(""), "an empty list never iterates"
 
 
-def test_a_literal_loop_body_ignores_an_early_exit() -> None:
-    """Pin the KNOWN LIMITATION the loop-body rule does not model.
+def test_an_early_exit_demotes_the_rest_of_a_literal_loop_body() -> None:
+    """``break``/``continue`` make what FOLLOWS them conditional, not before.
 
     bash runs ``export MAKEFLAGS=-s; break`` (the clear lands) but not
-    ``break; export MAKEFLAGS=-s`` (it never runs).  One branch state covers a
-    whole body, so the second shape cannot be told from the first here, and
-    modelling it per-statement would reject the first -- which real workflows
-    rely on (install-verify.yml breaks after the work).  Both are therefore
-    CERTIFIED here; the asymmetry is recorded rather than modelled.
+    ``break; export MAKEFLAGS=-s`` (it never runs), so the two orders differ.
+    Demoting the loop's stack frame when the keyword is stepped models both:
+    the frame is demoted rather than popped, so the first order still
+    certifies -- which is the order real workflows use (install-verify.yml).
     """
     install = {"run": "python3 -m pip install -r requirements-release.txt"}
     bt = chr(96)
@@ -512,13 +511,32 @@ def test_a_literal_loop_body_ignores_an_early_exit() -> None:
         )
         return packaging_gate._python_deps_issue([install, {"run": script}]) is None
 
+    assert verdict("export MAKEFLAGS=-s; "), "no early exit at all"
     assert verdict("export MAKEFLAGS=-s; break; "), "clear then break runs"
-    assert verdict("break; export MAKEFLAGS=-s; "), (
-        "KNOWN LIMITATION: break first is accepted though the clear never runs"
+    assert not verdict("break; export MAKEFLAGS=-s; "), (
+        "break first means the clear never runs"
     )
-    assert verdict("continue; export MAKEFLAGS=-s; "), (
-        "KNOWN LIMITATION: continue first, same reason"
+    assert verdict("export MAKEFLAGS=-s; continue; "), "clear then continue"
+    assert not verdict("continue; export MAKEFLAGS=-s; "), (
+        "continue first, same reason"
     )
+    # The same rule reaches a CALL inside the body: `break` before the call
+    # means it never runs, and the call is what delivers the body's clear.
+    body = "f() { export MAKEFLAGS=-s; }; "
+
+    def with_call(tail: str) -> bool:
+        script = (
+            f"export MAKEFLAGS={bt}getflags{bt}; {body}{tail} "
+            "python3 -m pip install -r requirements-release.txt; make docs-check"
+        )
+        return packaging_gate._python_deps_issue([install, {"run": script}]) is None
+
+    assert with_call("for i in 1; do f; done; "), "the call runs"
+    assert with_call("for i in 1; do f; break; done; "), "call then break"
+    assert not with_call("for i in 1; do break; f; done; "), (
+        "break first means the call never runs"
+    )
+
     # A list that may iterate zero times keeps its body conditional.
     def variable_list() -> bool:
         script = (
