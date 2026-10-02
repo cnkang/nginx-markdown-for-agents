@@ -32,7 +32,7 @@ No user-supplied patterns are compiled at runtime.
 from __future__ import annotations
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import functools
 import re
 import shlex
@@ -898,16 +898,22 @@ def _shadowed_alias_names(options: list[str]) -> set[str]:
 
 
 def _called_function_names(script: str, defined: set[str]) -> set[str]:
-    """Names the script calls: the first word of command-position lines.
+    """Names the script calls: the first COMMAND word of each segment.
 
     The input is a joined list of command segments with definition heads
-    masked out, so a call is exactly a segment whose first word (after quote
-    removal) names a defined function; arguments, quoted text and escaped
-    text never sit in first-word position.
+    masked out, so a call is exactly a segment whose first command word (after
+    quote removal) names a defined function; arguments, quoted text and escaped
+    text never sit in command position.
+
+    ``_command_words`` supplies that first word: it drops leading ``NAME=value``
+    assignments so ``FOO=1 f`` is seen as a call, and drops a construct keyword
+    the pair stream glued on so ``do f`` and ``then f`` are too.  Without both,
+    a body called that way looked unreachable, its text was blanked, and a step
+    bash accepts was rejected (probed: bash clears the parent in both shapes).
     """
     called: set[str] = set()
     for line in script.splitlines():
-        words = line.split()
+        words = _command_words(line)
         if not words:
             continue
         name = _resolve_heredoc_word(words[0])[0]
@@ -1223,7 +1229,8 @@ def _trim_body_after_terminator(body: str) -> str:
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
         disposition = _body_segment_disposition(
-            segment, separator, keyword, condition, previous, branches
+            segment, separator, keyword, condition, previous, branches,
+            pairs, index,
         )
         if disposition == "return":
             cut = found
@@ -1248,9 +1255,11 @@ def _body_segment_disposition(
     condition: bool | None,
     previous: bool | None,
     branches: list[tuple[bool, int]],
+    pairs: list[tuple[str, str]] | None = None,
+    index: int | None = None,
 ) -> str:
     """Classify a body segment as branch, skipped, live, or terminating."""
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         marker_returns = _marker_return_status(
             segment, separator, previous, branches
         ) is not None
@@ -1784,7 +1793,7 @@ def _possibly_reached_entries(script: str) -> list[tuple[int, str]]:
         keyword = _segment_keyword(segment)
         condition = _pair_condition(pairs, index, keyword)
         prior_chain = branches[-1][1] if branches else None
-        if _branch_keyword_step(branches, segment, condition):
+        if _branch_keyword_step(branches, segment, condition, pairs, index):
             _possible_branch_state(
                 branches, keyword, condition, prior_chain
             )
@@ -2182,6 +2191,9 @@ def _builtin_command_literal(words):
 _OPEN_KEYWORDS = {"while", "until", "for", "case", "select"}
 _CLOSE_KEYWORDS = {"fi", "done", "esac"}
 _BODY_MARKERS = {"then", "do"}
+# Statements that leave the innermost loop, making the rest of its body
+# conditional.  `return`/`exit` end the run outright and are handled elsewhere.
+_EXITING_KEYWORDS = {"break", "continue"}
 _CARRIED_BODY_MARKERS = _BODY_MARKERS | {"else"}
 
 
@@ -2366,8 +2378,74 @@ def _branch_select(
         branches.append((condition is True, _branch_chain_state(condition)))
 
 
+def _open_keyword_branch(
+    pairs: list[tuple[str, str]], index: int, keyword: str
+) -> tuple[bool, int]:
+    """The branch state a loop or ``case`` header opens.
+
+    ``for NAME in a b c`` iterates a literal, non-empty word list, so its body
+    runs at least once and is on the unconditional path.  ``while``/``until``
+    depend on a condition that may never hold and ``select`` on input that may
+    never arrive, so all of those keep the body conditional -- probed: bash
+    clears the parent after ``for i in 1; do f; done`` and does not after
+    ``while false; do f; done``.
+    """
+    if keyword != "for" or index >= len(pairs):
+        return (False, _UNKNOWN_CHAIN)
+    words = pairs[index][0].split()
+    if len(words) < 4 or words[2] != "in":
+        return (False, _UNKNOWN_CHAIN)
+    # `do` is a legal item as well as the body keyword, so the header pair is
+    # NOT truncated at it:
+    # `for i in do; do f; done` pairs as `for i in do` / `do f` / `done`, so the
+    # keyword that opens the body is in the NEXT pair and `do` here is a plain
+    # item (probed in bash: it iterates once and clears).
+    # `len(words) < 4` above already rejects an empty list, so *items* is
+    # never empty here and needs no separate guard.
+    items = words[3:]
+    # An unquoted item that is not plainly literal may expand to nothing or to
+    # several words, so only a literal list is guaranteed to iterate.
+    if any(_glob_or_command_substitution(word) for word in items):
+        return (False, _UNKNOWN_CHAIN)
+    # An early exit inside the body is handled where the statement is stepped
+    # (`_EXITING_KEYWORDS`), which demotes this frame from there on -- so the
+    # order inside the body decides, and both orders match bash.
+    return (True, _CLEAR_CHAIN)
+
+
+def _glob_or_command_substitution(word: str) -> bool:
+    """True when a word's expansion may yield nothing or several items."""
+    return any(char in word for char in "*?[`$")
+
+
+def _step_carried_statement(
+    branches: list[tuple[bool, int]],
+    segment: str,
+    pairs: list[tuple[str, str]] | None,
+    index: int | None,
+) -> None:
+    """Step the statement a body marker glued onto itself.
+
+    The segmentizer emits ``do break`` as ONE segment, so without this the
+    first statement of a body is never stepped and a ``break`` there leaves the
+    loop's frame unchanged.
+    """
+    carried = _body_marker_command(segment)
+    if not carried:
+        return
+    keyword = _segment_keyword(segment)
+    _branch_keyword_step(
+        branches, carried, _pair_condition(pairs or [], index or 0, keyword),
+        pairs, index,
+    )
+
+
 def _branch_keyword_step(
-    branches: list[tuple[bool, int]], segment: str, condition: bool | None
+    branches: list[tuple[bool, int]],
+    segment: str,
+    condition: bool | None,
+    pairs: list[tuple[str, str]] | None = None,
+    index: int | None = None,
 ) -> bool:
     """Update the branch stack for a construct keyword; True when handled.
 
@@ -2383,6 +2461,7 @@ def _branch_keyword_step(
             branches.pop()
         return True
     if keyword in _BODY_MARKERS:
+        _step_carried_statement(branches, segment, pairs, index)
         return True
     if keyword in ("if", "elif"):
         _branch_select(branches, keyword, condition)
@@ -2393,7 +2472,19 @@ def _branch_keyword_step(
             branches[-1] = (chain == _CLEAR_CHAIN, _OPEN_CHAIN)
         return True
     if keyword in _OPEN_KEYWORDS:
-        branches.append((False, _UNKNOWN_CHAIN))
+        branches.append(
+            _open_keyword_branch(pairs or [], index or 0, keyword)
+        )
+        return True
+    if keyword in _EXITING_KEYWORDS and branches:
+        # `break`/`continue` leave the innermost LOOP, so everything after one
+        # inside that body is conditional again.  Without this the whole body
+        # inherited the header's classification and `break; export
+        # MAKEFLAGS=-s` certified a clear that never runs (probed in bash: the
+        # parent keeps the substitution).  The stack frame is demoted rather
+        # than popped, so `export MAKEFLAGS=-s; break` -- where the clear comes
+        # first -- still certifies, and real workflows use that order.
+        branches[-1] = (False, _UNKNOWN_CHAIN)
         return True
     return False
 
@@ -2757,7 +2848,7 @@ def _body_step_verdict(
     following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
     keyword = _segment_keyword(segment)
     condition = _pair_condition(pairs, index, keyword)
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         verdict, status = _branch_step_state(
             segment, keyword, separator, following, previous, branches,
             failing, exiting,
@@ -2823,7 +2914,7 @@ def _live_scan_step(
     segment, separator = pairs[index]
     following = pairs[index + 1][1] if index + 1 < len(pairs) else ""
     condition = _pair_condition(pairs, index, _segment_keyword(segment))
-    if _branch_keyword_step(branches, segment, condition):
+    if _branch_keyword_step(branches, segment, condition, pairs, index):
         carried = (
             _body_marker_command(segment)
             if _segment_keyword(segment) in _CARRIED_BODY_MARKERS
@@ -8424,8 +8515,19 @@ def _segment_cut_positions(
 
 def _substitution_taint_events(
     step: str | dict,
-) -> tuple[dict[int, set[str]], dict[int, set[str]], dict[int, set[str]]]:
-    """Taint, clear, and export events keyed by pair index.
+) -> tuple[
+    dict[int, set[str]],
+    dict[int, set[str]],
+    dict[int, set[str]],
+    dict[int, tuple[tuple[int, int, int], set[str]]],
+]:
+    """Taint, clear, export and body-clear events keyed by pair index.
+
+    Returns four mappings.  The fourth, ``body_clears``, is keyed by CALL
+    position rather than by where the body is written, and a caller MUST
+    apply it together with the export-view update -- see `_apply_body_clear`.
+    Treating it as part of ``clears`` applies the clear at the body's own
+    index, before a make that runs between the definition and the call.
 
     ``taints[index]`` holds the make names a substitution cut at that
     segment may leave unresolved.  The event is drawn from the
@@ -8446,7 +8548,10 @@ def _substitution_taint_events(
     """
     script = _step_script(step)
     if script is None:
-        return {}, {}, {}
+        # Four mappings, matching this function's contract and the caller's
+        # four-value unpack; returning three here crashes the gate with
+        # `ValueError: not enough values to unpack` instead of reporting.
+        return {}, {}, {}, {}
     executable = _strip_function_bodies(
         _join_continuations(_strip_heredocs(_strip_shell_comments(script)))
     )
@@ -8456,6 +8561,115 @@ def _substitution_taint_events(
     taints: dict[int, set[str]] = {}
     clears: dict[int, set[str]] = {}
     exports: dict[int, set[str]] = {}
+    _record_cut_taints(may_entries, executable, cut_positions, taints, exports)
+    call_pairs = _body_clear_call_pairs(pairs, executable, script)
+    backgrounded = _backgrounded_pair_indices(executable)
+    # A body-derived clear is only real AT THE CALL, so it is returned in its
+    # own channel keyed by the call's index rather than moved into `clears`.
+    # `clears` is consumed by `_pip_step_scan`, which folds it through the
+    # export view; a clear placed on the body's own index fires before the
+    # make that sits between the definition and the call, and one placed on
+    # the call's index fires without the matching export VIEW update, so the
+    # make still sees the unresolved sentinel.  Keeping it separate lets the
+    # caller apply the value at the call and nothing before it.
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]] = {}
+    for index, command in live_entries:
+        names = _cleared_names(command, executable, cut_positions.get(index, 0))
+        if not names:
+            continue
+        literals = _cleared_literals(command, executable, names)
+        if index in call_pairs:
+            _record_body_clear(
+                index, call_pairs[index], call_pairs,
+                _BodyClearContext(pairs, executable, backgrounded, literals),
+                body_clears,
+            )
+            continue
+        if not _runs_in_parent_shell(pairs, executable, index):
+            continue
+        clears.setdefault(index, set()).update(names)
+    return taints, clears, exports, body_clears
+
+
+class _BodyClearContext:
+    """What one body statement contributes, plus the shell facts it is judged in."""
+
+    __slots__ = ("pairs", "executable", "backgrounded", "literals")
+
+    def __init__(
+        self,
+        pairs: list[tuple[str, str]],
+        executable: str,
+        backgrounded: set[int],
+        literals: dict[str, str],
+    ) -> None:
+        self.pairs = pairs
+        self.executable = executable
+        self.backgrounded = backgrounded
+        self.literals = literals
+
+
+def _record_body_clear(
+    index: int,
+    calls: list[int],
+    call_pairs: dict[int, list[int]],
+    context: "_BodyClearContext",
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+) -> None:
+    """Record a function body's clear at every call that can deliver it.
+
+    Each call is judged on its own: one in the parent clears the parent, a
+    pipeline stage or subshell does not, and a backgrounded call clears
+    nothing.  A backgrounded call is not a live entry, so its shell cannot be
+    classified by position and is refused here instead.
+    """
+    pairs, executable, backgrounded, literals = (
+        context.pairs, context.executable, context.backgrounded, context.literals
+    )
+    for call in calls:
+        # By PAIR INDEX, not by text: `f & wait; f` runs the second call in the
+        # foreground, and matching the text dropped both, so a step bash accepts
+        # was rejected (probed: the parent holds the body's literal there).
+        if call in backgrounded:
+            continue
+        if not _runs_in_parent_shell(pairs, executable, call):
+            continue
+        # Keyed by the CALL, but the body's own LAST index travels with it:
+        # whether the body cleared the name or re-cut it afterwards depends on
+        # the order of events INSIDE the body, which the call index cannot say.
+        span = _span_for_call(call_pairs, call, index)
+        seen = body_clears.get(call, (span, {}))[1]
+        # A later literal in the body wins: the call delivers the last one.
+        body_clears[call] = (span + (index,), {**seen, **literals})
+
+
+def _span_for_call(
+    call_pairs: dict[int, list[int]], call: int, fallback: int
+) -> tuple[int, int]:
+    """The range of body statements one call can run.
+
+    ``call_pairs`` already maps every body statement to the calls that reach
+    it, so the range is the statements that share this call -- no index
+    arithmetic and no guessing about how far a cut reaches.
+    """
+    indices = [
+        statement
+        for statement, calls in call_pairs.items()
+        if call in calls
+    ]
+    if not indices:
+        return (fallback, fallback)
+    return (min(indices), max(indices))
+
+
+def _record_cut_taints(
+    may_entries: list[tuple[int, str]],
+    executable: str,
+    cut_positions: dict[int, int],
+    taints: dict[int, set[str]],
+    exports: dict[int, set[str]],
+) -> None:
+    """Record every substitution cut, and the export attribute it implies."""
     for index, command in may_entries:
         name = _cut_taint_name(command, executable, cut_positions.get(index, 0))
         if name is None:
@@ -8464,41 +8678,11 @@ def _substitution_taint_events(
         words = command.split()
         if words and words[0] == "export":
             exports.setdefault(index, set()).add(name)
-    call_pairs = _body_clear_call_pairs(pairs, executable, script)
-    backgrounded = _backgrounded_command_segments(executable)
-    for index, command in live_entries:
-        judged = call_pairs.get(index, index)
-        if index in call_pairs and pairs[judged][0].strip() in backgrounded:
-            # The call is backgrounded: its environment changes stay in the
-            # background shell, so the body never reaches the parent.  The
-            # call is not a live entry either, so this cannot be answered by
-            # the call's own position being classified as a child.
-            continue
-        if not _runs_in_parent_shell(pairs, executable, judged):
-            continue
-        names = _cleared_names(command, executable, cut_positions.get(index, 0))
-        if names:
-            # Recorded at the BODY's index.  A body-derived clear becomes real
-            # only at the CALL, so a make BETWEEN the definition and the call
-            # should still see the taint -- probed in bash, the make sees [-s]
-            # when the call precedes it and [SUB] when it follows.
-            #
-            # Moving the clear onto the call's index is NOT the fix:
-            # `_TaintTracker.advance` walks events in segment order and
-            # `_pip_step_scan` reads the same stream, so a clear placed there
-            # made the scanner stop recognising the following
-            # `make docs-check`, and the step was rejected for a missing
-            # prerequisite rather than a real taint.  Carrying "applies from
-            # here on" needs a separate channel, which is a bigger change than
-            # this fix should make; the case is recorded in the ledger and
-            # pinned by a test.
-            clears.setdefault(index, set()).update(names)
-    return taints, clears, exports
 
 
 def _body_clear_call_pairs(
     pairs: list[tuple[str, str]], executable: str, source: str
-) -> dict[int, int]:  # noqa: C901
+) -> dict[int, list[int]]:
     """Map a FUNCTION-BODY statement's pair index to the pair that CALLS it.
 
     A function body is the one construct whose execution shell is not the
@@ -8509,14 +8693,18 @@ def _body_clear_call_pairs(
     ``make`` inheriting the substitution certified (verified in bash: the
     parent keeps the substitution's output in every one of them).
 
-    The mapping is to the FIRST live call of that function's name after the
-    definition.  Only the first is used because a name may be called from
-    several places; a later call that runs in the parent cannot retroactively
-    credit a child's clear, so the conservative first call is the right
-    choice.  A body with no call keeps its own index, which preserves the
+    The mapping is to EVERY call of that function's name after the
+    definition, not just the first.  Each call keeps its own verdict: a call
+    in the parent clears the parent, a pipeline stage or subshell does not,
+    and a backgrounded call clears nothing.  Mapping only the first call left
+    a SECOND parent-shell call unable to clear a taint raised between the two
+    (`f; export MAKEFLAGS=`b`; f; make docs-check`), so a valid step was
+    rejected -- verified in bash, the parent holds `-s` there.
+
+    A body with no call is absent from the mapping, which preserves the
     existing never-called behaviour.
     """
-    mapping: dict[int, int] = {}
+    mapping: dict[int, list[int]] = {}
     # A body is the run of pairs from the opening `{` to the matching `}`.
     # Every pair in that run must map to the call, not just the opener: with
     # `f() { a; export MAKEFLAGS=-s; b; }` the literal is the SECOND
@@ -8532,26 +8720,46 @@ def _body_clear_call_pairs(
     # and translated back by segment start.
     joined = _join_continuations(_strip_heredocs(_strip_shell_comments(source)))
     joined_pairs = _command_segments_with_separators(joined)
+    # The blanked body keeps its offsets, so a pair is identified by its
+    # segment START in both streams.  Building the map once keeps the loop
+    # below within the complexity budget.
     stripped_by_start = {
         _segment_start(pairs, executable, index): index for index in range(len(pairs))
     }
-    for name, lo, hi in spans:
-        body = _body_statement_indices(joined_pairs, joined, (lo, hi))
-        if not body:
-            continue
-        call = _first_call_after(joined_pairs, body[-1], name)
-        if call is None:
-            continue
-        call_index = stripped_by_start.get(_segment_start(joined_pairs, joined, call))
-        if call_index is None:
-            continue
-        for statement in body:
-            stripped = stripped_by_start.get(
-                _segment_start(joined_pairs, joined, statement)
-            )
-            if stripped is not None:
-                mapping[stripped] = call_index
+
+    def stripped_at(index: int) -> int | None:
+        return stripped_by_start.get(_segment_start(joined_pairs, joined, index))
+
+    for span in spans:
+        _map_one_span(span, joined, joined_pairs, stripped_at, mapping)
     return mapping
+
+
+def _map_one_span(
+    span: tuple[str, int, int],
+    joined: str,
+    joined_pairs: list[tuple[str, str]],
+    stripped_at: Callable[[int], int | None],
+    mapping: dict[int, list[int]],
+) -> None:
+    """Point every statement of one body at every call that can clear it."""
+    name, lo, hi = span
+    body = _body_statement_indices(joined_pairs, joined, (lo, hi))
+    if not body:
+        return
+    indices = [
+        index
+        for index in (
+            stripped_at(call) for call in _calls_after(joined_pairs, body[-1], name)
+        )
+        if index is not None
+    ]
+    if not indices:
+        return
+    for statement in body:
+        stripped = stripped_at(statement)
+        if stripped is not None:
+            mapping[stripped] = list(indices)
 
 
 def _body_statement_indices(
@@ -8588,25 +8796,26 @@ def _is_command_name(word: str) -> bool:
     )
 
 
-def _first_call_after(
+def _calls_after(
     pairs: list[tuple[str, str]], body_index: int, name: str
-) -> int | None:
-    """Index of the first pair after *body_index* that calls *name*.
+) -> list[int]:
+    """Every pair index after *body_index* that calls *name*.
 
-    The name is the FIRST command word: ``f`` and ``f --flag`` and
-    ``f x=1`` are all calls, while ``echo f`` is not.  Leading environment
-    assignments are skipped, so ``FOO=1 f`` is a call too.
+    All of them, not just the first: a function called twice must have its
+    clear available at BOTH calls, or a substitution raised between them is
+    never cleared and a valid step is rejected.
 
-    Matching the LAST word instead missed every call that carries an
-    argument, which left the body's literal credited to the parent whenever
-    the argument-bearing call ran as a pipeline stage.
+    The name is the FIRST command word: ``f`` and ``f --flag`` and ``f x=1``
+    are all calls, while ``echo f`` is not.  Leading environment assignments
+    are skipped, so ``FOO=1 f`` is a call too.  Matching the LAST word
+    instead missed every call carrying an argument, which left the body's
+    literal credited to the parent whenever such a call ran as a stage.
     """
-    for index in range(body_index + 1, len(pairs)):
-        segment, _separator = pairs[index]
-        words = _command_words(_masked_quotes(segment))
-        if name in words[:1]:
-            return index
-    return None
+    return [
+        index
+        for index in range(body_index + 1, len(pairs))
+        if name in _command_words(_masked_quotes(pairs[index][0]))[:1]
+    ]
 
 
 def _command_words(segment: str) -> list[str]:
@@ -9582,6 +9791,77 @@ def _advance_export_tracking(
             exported[name] = value
 
 
+def _cleared_literals(
+    command: str, executable: str, names: set[str]
+) -> dict[str, str]:
+    """The literal each cleared name is given by *command*.
+
+    The caller's make-option checks read this value, so it has to survive the
+    body's clear: an empty placeholder made ``export MAKEFLAGS=-n`` invisible
+    and a dry-run make certified a step the direct form rejects (verified: the
+    same script rejects when the literal is written at top level).
+    """
+    literals: dict[str, str] = {}
+    for name in names:
+        value = _assigned_literal_value(command, executable, name)
+        if value is not None:
+            literals[name] = value
+    return literals
+
+
+def _assigned_literal_value(
+    command: str, executable: str, name: str
+) -> str | None:
+    """The literal *name* is assigned in *command*, or None if it is cut."""
+    state = _make_relevant_export_state(command, {})
+    if state is None:
+        return None
+    names, values = state
+    if name not in names:
+        return None
+    value = values.get(name)
+    if value is None or "`" in value:
+        return None
+    return value
+
+
+def _apply_body_clear(
+    pair_index: int,
+    body_clears: dict[int, tuple[tuple[int, int, int], dict[str, str]]],
+    tracker: _TaintTracker,
+    exported: dict[str, str],
+) -> None:
+    """Apply a called function body's clear, which becomes real AT THE CALL.
+
+    Both halves are needed and neither is enough.  Unmarking the taint
+    without refreshing the export view leaves the make reading the unresolved
+    sentinel, so the docs-check loses its prerequisite; refreshing the view
+    alone would leave the name marked, and refreshing it before the call would
+    clear a make that runs in between.
+    """
+    recorded = body_clears.get(pair_index)
+    if recorded is None:
+        return
+    body_span, literals = recorded
+    if not literals:
+        return
+    names = set(literals)
+    # Only the names the body cleared AFTER its last cut may be unmarked.  A
+    # body can assign twice -- clear, then cut again -- and the later cut is
+    # what the make inherits, so unmarking it here would certify a make that
+    # receives the substitution (verified in bash: the parent holds the cut
+    # result in that order).
+    still_cut = tracker.recut_in_body(body_span, names)
+    cleared = names - still_cut
+    if not cleared:
+        return
+    tracker.clear_at(pair_index, cleared)
+    # The body's own literal, not a placeholder: the make-option checks read
+    # this value, and an empty one made `export MAKEFLAGS=-n` invisible.
+    for name in cleared:
+        exported[name] = literals[name]
+
+
 def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     """Classify each live, unmasked segment of one step.
 
@@ -9603,7 +9883,7 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
     # assignment (the live view) clears it.  Folding per command position
     # keeps the state in force at each make invocation, so a later
     # literal cannot clear the taint for an earlier make (fail closed).
-    taints, clears, export_events = _substitution_taint_events(step)
+    taints, clears, export_events, body_clears = _substitution_taint_events(step)
     tracker = _TaintTracker(taints, clears, export_events)
     # The step environment already marks every name it sets as exported:
     # bash hands the environment to each command, so a later plain
@@ -9629,6 +9909,7 @@ def _pip_step_scan(step: str | dict) -> list[tuple[int, bool, bool]]:
         if _segment_abandons_repo_root(segment):
             cwd_at_root = False
         _advance_export_tracking(segment, assigned, export_names, exported)
+        _apply_body_clear(pair_index, body_clears, tracker, exported)
         tracker.mark(exported, export_names)
         if not _pip_prerequisite_position(segment, retry_trusted, masked):
             continue
@@ -9686,6 +9967,41 @@ class _TaintTracker:
                 self._tainted |= self._taints[event_index]
             if event_index in self._clears:
                 self._tainted -= self._clears[event_index]
+
+    def clear_at(self, pair_index: int, names: set[str]) -> None:
+        """Unmark *names* as tainted at an already-advanced position.
+
+        Used by a called function body's clear, which becomes real at the CALL
+        rather than where the body is written.  ``advance`` has already moved
+        the cursor past this index, so the event is applied directly instead of
+        being queued.
+        """
+        self._tainted -= names
+
+    def recut_in_body(
+        self, body_span: tuple[int, int, int], names: set[str]
+    ) -> set[str]:
+        """Which of *names* a cut INSIDE this body followed with another cut.
+
+        A body may assign twice -- clear, then cut again -- and the later cut
+        is what the make inherits, so a clear moved to the call must not unmark
+        it.  The bound is the body's own index RANGE: a cut outside it is a
+        different statement and does not survive this body's clear.
+        """
+        first, last, cleared_at = body_span
+        # ORDER decides, not membership.  A cut before the body's own clear is
+        # superseded by that clear; a cut strictly after it is what the make
+        # inherits.  The bound is strict because the clearing statement's own
+        # pair carries the clear, not a surviving cut.
+        return {
+            name
+            for name in names
+            if any(
+                name in marks
+                for index, marks in self._taints.items()
+                if first <= index <= last and index > cleared_at
+            )
+        }
 
     def mark(self, exported: dict[str, str], export_names: set[str]) -> None:
         """Stamp the unresolved sentinel onto every tainted export."""
