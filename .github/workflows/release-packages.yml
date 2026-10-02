@@ -1579,7 +1579,7 @@ jobs:
             --arch amd64 \
             --toolchain "${FUZZ_TOOLCHAIN}"
           retry 5 rustup component add --toolchain "${FUZZ_TOOLCHAIN}" rust-src
-          retry 5 cargo install cargo-fuzz --version 0.13.1 --locked
+          retry 5 cargo install cargo-fuzz --version 0.13.2 --locked
         shell: bash
 
       - name: Run fuzz qualification
