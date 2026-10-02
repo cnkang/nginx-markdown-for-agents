@@ -27,10 +27,12 @@ cd "${REPO_ROOT}"
 # sees worktree-vs-index, so a file whose UNFORMATTED blob is already staged
 # would be missing from the snapshot and stay unformatted in the commit.
 #
-# The filter is ACM, not M: an ADDED Rust file is just as unformatted as a
+# The filter is ACMR, not M: an ADDED Rust file is just as unformatted as a
 # modified one, and `M` alone let a brand-new file through the snapshot while
 # cargo fmt fixed only the worktree -- the commit then carried the unformatted
-# blob and the hook still exited 0.
+# blob and the hook still exited 0. `R` is needed because git reports a rename
+# under R alone: the new path matches no other filter, so a renamed Rust file
+# was invisible to the snapshot entirely.
 #
 # A temp file, not an associative array: macOS ships bash 3.2, which has no
 # `declare -A`, and this hook must behave the same on a developer Mac and on CI.
@@ -49,7 +51,7 @@ while IFS= read -r -d '' path; do
         clean=0
     fi
     printf '%s\0%s\0%s\0' "${sum}" "${clean}" "${path}" >>"${snapshot}"
-done < <(git diff HEAD --name-only --diff-filter=ACM -z -- '*.rs')
+done < <(git diff HEAD --name-only --diff-filter=ACMR -z -- '*.rs')
 
 # Every crate the Make target checks, formatted the same way.
 cargo fmt --manifest-path components/rust-converter/Cargo.toml --all
