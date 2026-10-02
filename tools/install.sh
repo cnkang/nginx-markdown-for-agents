@@ -8,7 +8,7 @@ set -euo pipefail
 #   VERSION=v0.9.2
 #   WORKDIR="$(mktemp -d)" && trap 'rm -rf "$WORKDIR"' EXIT
 #   curl -fsSL -o "$WORKDIR/installer.sh" \
-#     "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-installer-${VERSION}.sh"
+#     "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh"
 #   sudo env VERSION="${VERSION}" bash "$WORKDIR/installer.sh"
 #
 # Do not download into a shared /tmp name and then run it with sudo: an
