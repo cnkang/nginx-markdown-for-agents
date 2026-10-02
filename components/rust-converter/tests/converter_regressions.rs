@@ -202,6 +202,34 @@ fn option_labels_survive_the_link_and_code_extractors() {
     assert!(bare.contains("RED CHOICE"), "{bare:?}");
 }
 
+/// The extractors must apply the shared input-type normalization, so an
+/// uppercase `type` follows the same policy as the ordinary traversal.
+///
+/// `normalize_input_type` lowercases the attribute; without it the extractors
+/// looked the raw value up and treated `type="BUTTON"` as an unknown type, which
+/// suppressed a description the ordinary path emits.
+#[test]
+fn an_uppercase_input_type_follows_the_ordinary_policy_in_the_extractors() {
+    let lower = convert_html(b"<p><a href=\"/x\"><input type=\"button\" value=\"GO\"></a></p>");
+    let upper = convert_html(b"<p><a href=\"/x\"><input type=\"BUTTON\" value=\"GO\"></a></p>");
+    assert!(
+        lower.contains("GO") && upper.contains("GO"),
+        "case must not change the policy: lower={lower:?} upper={upper:?}"
+    );
+
+    // And the suppressed types stay suppressed whatever their case.
+    for html in [
+        "<p><a href=\"/x\"><input type=\"PASSWORD\" value=\"SEKRIT\"></a></p>",
+        "<p><a href=\"/x\"><input type=\"Hidden\" value=\"SEKRIT\"></a></p>",
+    ] {
+        let out = convert_html(html.as_bytes());
+        assert!(
+            !out.contains("SEKRIT"),
+            "a suppressed type leaked through in a different case: {out:?}"
+        );
+    }
+}
+
 /// A textarea outside those containers keeps the existing suppression, so the
 /// new guard must not change the ordinary path.
 #[test]
@@ -212,3 +240,5 @@ fn a_bare_textarea_default_is_still_suppressed() {
         "the ordinary traversal regressed: {out:?}"
     );
 }
+
+// scenario marker

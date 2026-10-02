@@ -30,7 +30,7 @@ use super::traversal::{
     append_str_with_context, with_reserved_working_set,
 };
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
-use crate::security::is_form_state_subtree;
+use crate::security::{is_form_state_subtree, normalize_input_type};
 
 /// The approved description of a form control, or `""` when it has none.
 ///
@@ -47,15 +47,18 @@ fn form_control_description(node: &Handle) -> String {
         return String::new();
     };
     // `input` is keyed by `type`; the others use their tag name as the type.
+    // The raw attribute goes through the shared normalizer, exactly as the
+    // ordinary traversal does, so an uppercase `type="BUTTON"` follows the same
+    // policy here and stops diverging from it.
     let control_type = if name.local.as_ref() == "input" {
-        attrs
+        let raw_type = attrs
             .borrow()
             .iter()
             .find(|attribute| {
                 attribute.name.ns.is_empty() && attribute.name.local.as_ref() == "type"
             })
-            .map(|attribute| attribute.value.to_string())
-            .unwrap_or_else(|| "text".to_string())
+            .map(|attribute| attribute.value.to_string());
+        normalize_input_type(raw_type.as_deref())
     } else {
         name.local.to_string()
     };
