@@ -519,6 +519,16 @@ impl IncrementalEmitter {
     pub(crate) fn resident_collector_bytes(&self) -> usize {
         self.link_text
             .capacity()
+            // `link_code_spans` is heap too. Each entry is 16 bytes on a 64-bit
+            // target while the shortest span it describes is 3 bytes of label
+            // text, so a label full of short spans can hold several times the
+            // metadata of the text itself. The ledger must see it or the
+            // bounded-memory contract is quietly wrong.
+            .saturating_add(
+                self.link_code_spans
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(usize, usize)>()),
+            )
             .saturating_add(self.code_block_buffer.capacity())
             .saturating_add(self.inline_code_buffer.capacity())
             .saturating_add(self.code_fence_lang.as_ref().map_or(0, String::capacity))
@@ -1943,6 +1953,36 @@ mod tests {
                 emitter.link_text
             );
         }
+    }
+
+    /// The memory ledger must see the span metadata.
+    ///
+    /// `link_code_spans` is a heap `Vec<(usize, usize)>`: 16 bytes per entry on a
+    /// 64-bit target, while the shortest span it describes is 3 bytes of label
+    /// text (`\`x\``). A label full of short spans can therefore hold several times
+    /// the metadata of the text, and a ledger that counted only `link_text` would
+    /// under-report the emitter's real footprint.
+    #[test]
+    fn the_span_metadata_is_charged_to_the_memory_ledger() {
+        let budget = MemoryBudget::for_total(64 * 1024);
+        let mut emitter = IncrementalEmitter::new(&budget);
+        emitter.in_link = true;
+
+        let before = emitter.resident_collector_bytes();
+        // 200 spans of 3 bytes each: 600 bytes of text, 3200 bytes of metadata.
+        for _ in 0..200 {
+            emitter.append_link_code_span("`", "x");
+        }
+        let after = emitter.resident_collector_bytes();
+        let spans = emitter.link_code_spans.len();
+        let metadata = spans * std::mem::size_of::<(usize, usize)>();
+
+        assert_eq!(spans, 200);
+        assert!(
+            after.saturating_sub(before) >= metadata,
+            "the ledger grew by {} but the span metadata alone is {metadata}",
+            after.saturating_sub(before)
+        );
     }
 
     /// The same call with room to spare must still emit the span intact.
