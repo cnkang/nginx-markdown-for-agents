@@ -75,6 +75,20 @@ def test_the_hook_restages_what_it_reformatted() -> None:
     assert re.search(r"git commit.*again|run 'git commit' again", text), (
         "the hook re-stages but does not tell the contributor to retry"
     )
+    # The snapshot must be taken before formatting, and it must cover staged
+    # changes too. `git diff` alone compares worktree against index, so a file
+    # whose unformatted blob is ALREADY staged is invisible to it and would stay
+    # unformatted in the commit -- the original defect.
+    assert re.search(r"git diff HEAD --name-only", text), (
+        "the snapshot selector must be `git diff HEAD`, or a file whose "
+        "unformatted blob is already staged escapes the re-stage"
+    )
+    fmt_at = text.index("cargo fmt --manifest-path")
+    snap_at = text.index("git hash-object")
+    assert snap_at < fmt_at, (
+        "the snapshot is taken after cargo fmt has already rewritten the files, "
+        "so it can never detect a formatter edit"
+    )
 
 
 def test_the_hook_script_is_executable() -> None:
