@@ -22,8 +22,7 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: v0.9.2 is not yet published. Use release-tag downloads
-> after publication. Verify checksums and signatures before installing prebuilt
+> Publication status: the project published 0.9.2 on 2026-10-03. Verify checksums and signatures before installing prebuilt
 > packages. Helm repository publication stays separate from this release.
 
 Choose the upgrade method matching your deployment:

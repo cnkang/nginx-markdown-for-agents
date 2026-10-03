@@ -36,7 +36,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** This sequence targets the official `v0.9.2` release tag. v0.9.2 is not yet published. Use these downloads after publication. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
+> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-03. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any

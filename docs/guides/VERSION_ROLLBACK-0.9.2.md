@@ -13,7 +13,7 @@ release. 0.9.2 is a breaking release (see
 on-disk data migration. Rolling back the module binary restores the 0.9.1
 directive surface only after the configuration is also restored. The 0.9.2
 20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
-v0.9.2 is not yet published. Use its release-tag artifacts after publication.
+The project published v0.9.2 on 2026-10-03. Use its release-tag artifacts.
 
 | Target | Section |
 |--------|---------|
