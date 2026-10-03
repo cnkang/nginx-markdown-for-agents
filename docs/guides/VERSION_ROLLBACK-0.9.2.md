@@ -13,7 +13,7 @@ release. 0.9.2 is a breaking release (see
 on-disk data migration. Rolling back the module binary restores the 0.9.1
 directive surface only after the configuration is also restored. The 0.9.2
 20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
-The v0.9.2 tag carries the release artifacts. The project ships them with the GitHub Release.
+v0.9.2 is not yet published. Use its release-tag artifacts after publication.
 
 | Target | Section |
 |--------|---------|
@@ -664,6 +664,7 @@ after the rollback restart. A graceful reload preserves them.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: rollback overview and artifact-availability wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-19 | Kang | Release preparation: clarified the rollback overview for the v0.9.2 release candidate |

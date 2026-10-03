@@ -9,12 +9,11 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current release line. It shipped on 2026-10-02 after the
-  merge and the candidate-bound gates passed. The release consolidates the
-  v0.9.1 baseline and resets compatibility.
-- 0.9.1 is the previous release (2026-07-29).
-- Version metadata is 0.9.2. The release shipped its tag, assets, and
-  checksums.
+- v0.9.2 is the current development line, targeting release on 2026-10-03.
+  It consolidates the v0.9.1 baseline and resets compatibility.
+- v0.9.1 is the latest published stable release (2026-07-29).
+- Version metadata is 0.9.2. Use the release tag, assets, and checksums
+  after publication.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
@@ -51,8 +50,8 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Release Evidence
 
-v0.9.2 shipped once the merge landed, the exact branch head passed the
-release-gates-check-092 evidence chain, and the team reviewed the release
+Publish v0.9.2 only after the merge lands, the exact branch head passes the
+release-gates-check-092 evidence chain, and maintainers review the release
 artifacts. Passing local gates alone does not declare
 a published stable release.
 
@@ -65,9 +64,8 @@ for the current plan, not an active release objective.
 
 ## v1.0 Contract Freeze
 
-With v0.9.2 published, v1.0 preparation is a stabilization
-phase rather
-than another baseline reset.
+After v0.9.2 publication, v1.0 preparation becomes a stabilization phase
+rather than another baseline reset.
 
 ### Freeze Rules
 
@@ -156,6 +154,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-10-02 | Hermes | Release finalization: the release date corrected to the finalization day; the tag had never been pushed, so the date was still that of an abandoned first attempt |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: current release state and evidence wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |
