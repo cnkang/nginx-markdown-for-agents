@@ -167,7 +167,11 @@ def test_the_benchmark_step_rejects_an_unusable_baseline_version(
         "the step must not benchmark a version the baselines do not describe"
     )
     selected_file = tmp_path / "out.txt"
-    wrote_anything = selected_file.exists() and selected_file.read_text().strip()
+    # `bool(...)` because the `and` yields the file's text, not a bool, when the
+    # file exists: the name should match what it holds.
+    wrote_anything = bool(
+        selected_file.exists() and selected_file.read_text().strip()
+    )
     assert not wrote_anything, "no benchmark version may be selected"
 
 
