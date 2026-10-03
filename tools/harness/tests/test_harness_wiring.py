@@ -9,6 +9,7 @@ uses when it cannot scan at all.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -264,7 +265,17 @@ def test_the_harness_job_provisions_the_pinned_rust_toolchain() -> None:
     names = [step.get("name") for step in job["steps"]]
     assert "Set up Rust toolchain" in names, names
     setup = next(s for s in job["steps"] if s.get("name") == "Set up Rust toolchain")
-    assert setup["with"]["toolchain"] == "1.98.1"
+    # The channel is no longer spelled out here: the workflow calls the local
+    # resolver action, which reads rust-toolchain.toml. The provisioning is still
+    # pinned -- to the repository's single source -- so check that instead of a
+    # literal that the resolver is meant to have removed.
+    assert setup["uses"] == "./.github/actions/setup-rust", setup
+    resolver = REPO_ROOT / "tools/ci/rust_toolchain_channel.sh"
+    expected = subprocess.run(
+        ["bash", str(resolver)], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert expected, "the resolver reported no channel"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", expected), expected
     # A detector asks rustfmt for a check, so the components are part of the
     # provisioning: without them a rustup proxy would fetch one mid-test.
     components = {
