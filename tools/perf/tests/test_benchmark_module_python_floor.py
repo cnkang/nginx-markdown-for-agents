@@ -5,17 +5,24 @@ The release gate runs ``run_module_benchmark.sh`` inside the pinned
 reaches that container, so a module using a newer language or library feature
 compiles and passes locally and then fails the gate after hours of builds.
 
-This parses the module with the oldest grammar available locally rather than
-importing it, so the check itself runs on any interpreter and still catches the
-constructs that need 3.10+ (``dataclass(slots=...)``, PEP 604 unions in
-annotations evaluated at runtime, and so on).
+It parses the module with ``ast`` rather than importing it, so the check itself
+runs on any interpreter and needs no 3.9 to exist locally.
+
+Scope, stated exactly: this enforces the ONE construct that actually broke the
+gate -- ``@dataclass(slots=...)``. It does not attempt to police every 3.10+
+feature. PEP 604 unions need no check because the module carries
+``from __future__ import annotations``, which defers all annotations; a future
+``match``, ``itertools.pairwise`` or ``zip(strict=)`` would slip past. Widening
+the coverage is a judgement call for whoever adds such a construct, not
+something this test pretends to do.
 """
 
 from __future__ import annotations
 
 import ast
 import pathlib
-from typing import Any
+import re
+from typing import Any, TypeGuard
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 PERF_MODULE = REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
@@ -25,14 +32,46 @@ RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 PY310_ONLY_CALLS = {"slots": "dataclass(slots=...) needs Python 3.10"}
 
 
-def _container_is_el9() -> bool:
-    """Confirm the benchmark really runs in an EL9 container with python3."""
+def _is_named_call(node: ast.AST, name: str) -> TypeGuard[ast.Call]:
+    """True when `node` is a call to `name`, bare or attribute-qualified.
+
+    Both `@dataclass(...)` and `@dataclasses.dataclass(...)` name the same
+    thing. Matching only the bare form would let a later `import dataclasses`
+    refactor walk straight past every guard in this file.
+
+    Declared as a TypeGuard so callers can reach `.keywords` and `.lineno`.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == name
+    if isinstance(func, ast.Attribute):
+        return func.attr == name
+    return False
+
+
+# The digest whose `python3` this whole file exists for: EL9 ships 3.9, which is
+# why `@dataclass(slots=...)` could not be used. Matching the exact digest rather
+# than the `almalinux@sha256:` prefix means an image bump FAILS this test instead
+# of silently keeping it green while the 3.9 constraint no longer holds.
+KNOWN_EL9_DIGEST = "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
+
+
+def _container_is_el9() -> None:
+    """Confirm the benchmark still runs in the exact EL9 image this pins."""
     text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert "almalinux@sha256:" in text, (
-        "the pinned benchmark container image changed; re-check which python "
-        "the release gate runs against before trusting this test"
+    match = re.search(r"almalinux@sha256:([0-9a-f]{64})", text)
+    assert match is not None, (
+        "no pinned almalinux image found in the release workflow; the benchmark "
+        "may have moved off the EL9 image this guard assumes"
     )
-    return True
+    assert match.group(1) == KNOWN_EL9_DIGEST, (
+        f"the benchmark image is now {match.group(1)[:12]}, but this guard is "
+        f"written for {KNOWN_EL9_DIGEST[:12]} (EL9, python3 3.9). Check that "
+        "image's python version, then update this constant and whatever the new "
+        "interpreter allows or forbids."
+    )
 
 
 def test_the_benchmark_module_has_no_python_310_only_constructs() -> None:
@@ -42,12 +81,8 @@ def test_the_benchmark_module_has_no_python_310_only_constructs() -> None:
 
     offenders: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
         # @dataclass(...) -- the decorator call itself
-        is_dataclass = isinstance(func, ast.Name) and func.id == "dataclass"
-        if not is_dataclass:
+        if not _is_named_call(node, "dataclass"):
             continue
         for keyword in node.keywords:
             if keyword.arg in PY310_ONLY_CALLS:
@@ -69,10 +104,7 @@ def _decorator_kwargs(class_node: ast.ClassDef, decorator_name: str) -> dict[str
     test that means to require `frozen=True`.
     """
     for decorator in class_node.decorator_list:
-        if not isinstance(decorator, ast.Call):
-            continue
-        func = decorator.func
-        if isinstance(func, ast.Name) and func.id == decorator_name:
+        if _is_named_call(decorator, decorator_name):
             return {
                 kw.arg: _literal(kw.value)
                 for kw in decorator.keywords
