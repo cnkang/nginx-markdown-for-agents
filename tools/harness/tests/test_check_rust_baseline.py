@@ -80,6 +80,80 @@ def test_valid_repository_contract_passes(tmp_path: Path) -> None:
     assert errors == []
 
 
+def _write_resolver_fixture(root: Path) -> None:
+    """A fixture whose stable jobs declare the channel through the resolver."""
+    _write_valid_fixture(root)
+    for path in EXPECTED_BASELINE_ACTION_WORKFLOWS:
+        _write(
+            root / path,
+            "steps:\n  - uses: ./.github/actions/setup-rust\n"
+            "    with:\n      components: rustfmt,clippy\n",
+        )
+    for path in EXPECTED_OBSERVATION_ACTION_WORKFLOWS:
+        _write(
+            root / path,
+            "steps:\n  - uses: ./.github/actions/setup-rust\n"
+            "  - uses: dtolnay/rust-toolchain@sha\n"
+            "    with:\n      toolchain: nightly\n",
+        )
+
+
+def test_resolver_declared_workflows_pass(tmp_path: Path) -> None:
+    """The workflows no longer spell out the channel; that still has to pass."""
+    _write_resolver_fixture(tmp_path)
+
+    exact, msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert exact == "1.97.0"
+    assert msrv == "1.97"
+    assert errors == []
+
+
+def test_resolver_does_not_hide_a_wrong_literal_next_to_it(tmp_path: Path) -> None:
+    """The resolver supplies the exact channel; a stray literal must still fail."""
+    _write_resolver_fixture(tmp_path)
+    workflow = tmp_path / EXPECTED_BASELINE_ACTION_WORKFLOWS[0]
+    workflow.write_text(
+        "steps:\n  - uses: ./.github/actions/setup-rust\n"
+        "  - uses: dtolnay/rust-toolchain@sha\n"
+        "    with:\n      toolchain: 1.96.0\n",
+        encoding="utf-8",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("1.96.0" in error for error in errors), errors
+
+
+def test_resolver_does_not_excuse_an_unrelated_nightly_job(tmp_path: Path) -> None:
+    """A nightly channel in a baseline workflow is still a drift."""
+    _write_resolver_fixture(tmp_path)
+    workflow = tmp_path / EXPECTED_BASELINE_ACTION_WORKFLOWS[1]
+    workflow.write_text(
+        "steps:\n  - uses: ./.github/actions/setup-rust\n"
+        "  - uses: dtolnay/rust-toolchain@sha\n"
+        "    with:\n      toolchain: nightly\n",
+        encoding="utf-8",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("nightly" in error for error in errors), errors
+
+
+def test_workflow_without_any_declaration_still_fails(tmp_path: Path) -> None:
+    """Removing both the literal and the resolver call must not pass."""
+    _write_resolver_fixture(tmp_path)
+    workflow = tmp_path / EXPECTED_BASELINE_ACTION_WORKFLOWS[0]
+    workflow.write_text("steps:\n  - run: make test\n", encoding="utf-8")
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any(
+        "missing required toolchain declaration" in error for error in errors
+    ), errors
+
+
 def test_workflow_inventory_matches_independent_expected_paths() -> None:
     """The fixture oracle does not move when the detector inventory drifts."""
     assert baseline.BASELINE_ACTION_WORKFLOWS == (
