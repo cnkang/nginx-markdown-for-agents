@@ -68,9 +68,7 @@ jobs:
             zlib1g-dev
 
       - name: Set up Rust toolchain for native qualification
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: 1.98.1
+        uses: ./.github/actions/setup-rust
 
       - name: Install cluster tooling
         run: |

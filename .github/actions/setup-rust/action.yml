@@ -1,0 +1,41 @@
+name: Set up Rust from rust-toolchain.toml
+description: >-
+  Install the stable Rust toolchain pinned by rust-toolchain.toml, then delegate
+  to dtolnay/rust-toolchain for the actual install.
+author: nginx-markdown-for-agents
+
+inputs:
+  components:
+    description: Comma-separated extra components to install
+    required: false
+  targets:
+    description: Comma-separated target triples to install
+    required: false
+
+outputs:
+  channel:
+    description: The channel read from rust-toolchain.toml
+    value: ${{ steps.read.outputs.channel }}
+
+runs:
+  using: composite
+  steps:
+    # rust-toolchain.toml is the single source of truth for the stable channel.
+    # dtolnay/rust-toolchain cannot read it (its `toolchain` input is required
+    # and the action drives rustup from that input alone), so the channel is read
+    # here and handed over. Bumping rust-toolchain.toml now moves CI with it,
+    # instead of relying on 21 hand-edited literals staying in step.
+    - id: read
+      name: Read the pinned channel
+      shell: bash
+      run: |
+        channel="$(bash "${GITHUB_ACTION_PATH}/../../tools/ci/rust_toolchain_channel.sh")"
+        echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+        echo "Using the channel pinned in rust-toolchain.toml: ${channel}"
+
+    - name: Install the pinned toolchain
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ steps.read.outputs.channel }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
