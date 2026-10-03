@@ -1192,13 +1192,22 @@ jobs:
         id: bench-nginx
         env:
           NGINX_VERSIONS: ${{ needs.prepare.outputs.nginx_versions }}
+          # The evidence gate fails closed when the run's `nginx_version` or a
+          # critical scenario's `metrics.input_bytes` differ from the checked-in
+          # baseline, so the baseline owns the benchmark choice. Reading the
+          # version back out of it replaces "take the first amd64 entry in the
+          # matrix", which drifted away from the baseline and made every run
+          # incomparable.
+          BASELINE_NGINX_VERSION: >-
+            $(python3 tools/perf/baseline_nginx_version.py
+            --baseline-dir perf/baselines
+            --require-glob 'module-baseline-*.json')
         run: |
-          # Select the oldest (first) release-blocking NGINX version that
-          # has an amd64 artifact as the canonical benchmark runtime.
-          # Using a single, explicit version avoids the filename
-          # collision that occurs when multiple module-so-*-amd64
-          # artifacts are merged into the same directory (they all
-          # contain build/nginx and
+          # Benchmark on the NGINX version the checked-in perf baselines
+          # recorded, not the first amd64 entry in the matrix. A single,
+          # explicit version also avoids the filename collision that occurs
+          # when multiple module-so_*-amd64 artifacts are merged into the same
+          # directory (they all contain build/nginx and
           # build/ngx_http_markdown_filter_module.so).
           #
           # The matrix is read through the single normalization entry point
@@ -1230,8 +1239,22 @@ jobs:
               and e.get('libc') == 'glibc'
               and e.get('release_blocking') is True
           }
-          print(next((v for v in versions if v in amd64), '') if versions else '')
-          " "${NGINX_VERSIONS}")"
+          # The baseline decides. `amd64` is the set of versions this workflow
+          # can actually produce an amd64 artifact for, so a baseline recorded
+          # on a version outside it is unsatisfiable here and must fail loudly
+          # rather than silently benchmarking something else.
+          required = sys.argv[2].strip() if len(sys.argv) > 2 else ''
+          if required and required not in amd64:
+              sys.stderr.write(
+                  f'ERROR: perf baselines require NGINX {required}, which has no '
+                  'amd64 artifact in the release matrix.\n'
+              )
+              sys.exit(1)
+          if versions and required and required in versions:
+              print(required)
+          else:
+              print(next((v for v in versions if v in amd64), '') if versions else '')
+          " "${NGINX_VERSIONS}" "${BASELINE_NGINX_VERSION}")"
           if [[ -z "${BENCH_VERSION}" ]]; then
             echo "ERROR: No NGINX versions resolved for benchmark" >&2
             exit 1
