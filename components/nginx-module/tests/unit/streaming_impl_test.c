@@ -732,10 +732,16 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
  * Stub for ngx_alloc.  Direct malloc(3) wrapper ignoring the log argument.
  * Used by streaming code for off-pool allocations.
  */
+static int g_owned_alloc_fail_once;
+
 void *
 ngx_alloc(size_t size, ngx_log_t *log)
 {
     UNUSED(log);
+    if (g_owned_alloc_fail_once) {
+        g_owned_alloc_fail_once = 0;
+        return NULL;
+    }
     return malloc(size);
 }
 
@@ -4886,6 +4892,7 @@ test_streaming_gap_branches(void)
 
     ctx.eligible = 1;
     ctx.headers_forwarded = 1;
+    conf.limits.streaming_buffer = 256 * 1024;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x36;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
@@ -7940,6 +7947,11 @@ test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
 {
     ngx_http_request_t  r;
     ngx_pool_t          pool;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t read_event;
     ngx_buf_t           src_mem;
     ngx_buf_t           src_file;
     ngx_chain_t         in1;
@@ -7957,7 +7969,8 @@ test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
     memset(&src_file, 0, sizeof(src_file));
     memset(&in1, 0, sizeof(in1));
     memset(&in2, 0, sizeof(in2));
-    r.pool = &pool;
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log,
+                          &read_event);
 
     /* Source: a memory buffer that lies about its bounds (start/end
      * point into an unrelated arena) and carries storage-ownership
@@ -7996,7 +8009,8 @@ test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
     in2.buf = &src_file;
     in2.next = NULL;
 
-    cloned = ngx_http_markdown_streaming_clone_chain_deep(&r, &in1);
+    cloned = ngx_http_markdown_streaming_clone_chain_deep(
+        &r, &ctx, &conf, &in1);
     TEST_ASSERT(cloned != NULL && cloned->buf != NULL,
         "clone: memory-backed chain must clone");
     TEST_ASSERT(cloned->next != NULL && cloned->next->buf != NULL,
@@ -8044,13 +8058,231 @@ test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
     TEST_ASSERT(cloned->next->next == NULL,
         "clone: chain length must match the source");
 
-    ngx_free(cloned->buf->pos);
-    ngx_free(cloned->buf);
-    ngx_free(cloned->next->buf);
-    ngx_free((void *) cloned->next);
-    ngx_free((void *) cloned);
+    cloned->buf->pos = cloned->buf->last;
+    cloned->next->buf->file_pos = 192;
+    ngx_http_markdown_streaming_copy_collect(&ctx);
+    TEST_ASSERT(ctx.streaming.pending_input.copies.head->active,
+        "partially consumed file windows must keep the entire owner alive");
+    cloned->next->buf->file_pos = cloned->next->buf->file_last;
+    ngx_http_markdown_streaming_copy_collect(&ctx);
+    TEST_ASSERT(!ctx.streaming.pending_input.copies.head->active,
+        "mixed memory and file storage becomes reusable only after consumption");
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
 
     TEST_PASS("clone_chain_deep rebases bounds and drops source ownership");
+}
+
+/* Normal downstream consumption and backpressure for lifecycle tests. */
+static ngx_chain_t *g_copy_test_held;
+static ngx_int_t g_copy_test_rc;
+static ngx_flag_t g_copy_test_consume;
+static size_t g_copy_test_bytes;
+
+static ngx_int_t
+copy_test_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    UNUSED(r);
+    if (in != NULL) {
+        g_copy_test_held = in;
+    }
+    if (g_copy_test_consume) {
+        for (ngx_chain_t *cl = g_copy_test_held; cl != NULL; cl = cl->next) {
+            if (cl->buf->memory) {
+                g_copy_test_bytes += cl->buf->last - cl->buf->pos;
+                cl->buf->pos = cl->buf->last;
+            }
+            if (cl->buf->in_file) {
+                cl->buf->file_pos = cl->buf->file_last;
+            }
+        }
+        g_copy_test_held = NULL;
+    }
+    return g_copy_test_rc;
+}
+
+/* Response length can exceed the resident budget without retaining copies. */
+static void
+test_failopen_copy_and_queue_storage_reused_after_drain(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t buf = {0};
+    ngx_chain_t in = {0};
+    ngx_chain_t *first = NULL;
+    u_char payload[] = "continued";
+    size_t resident = 0;
+    uint32_t error = ERROR_SUCCESS;
+    ngx_int_t rc;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    conf.limits.streaming_buffer = 512;
+    ctx.streaming.completion.failopen_active = 1;
+    ctx.headers_forwarded = 1;
+    in.buf = &buf;
+    buf.memory = 1;
+    g_copy_test_bytes = 0;
+    ngx_http_next_body_filter = copy_test_body_filter;
+
+    for (unsigned i = 0; i < 64; i++) {
+        buf.pos = payload;
+        buf.last = payload + sizeof(payload) - 1;
+        g_copy_test_rc = NGX_AGAIN;
+        g_copy_test_consume = 0;
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            &r, &ctx, &conf, &in, &error);
+        TEST_ASSERT(rc == NGX_OK && error == ERROR_SUCCESS,
+            "normal pending input must queue within its budget");
+        rc = ngx_http_markdown_streaming_handle_null_input_pending(
+            &r, &ctx, &conf);
+        TEST_ASSERT(rc == NGX_AGAIN && buf.pos == buf.last,
+            "queued input must transfer into independent pending storage");
+        TEST_ASSERT(memcmp(g_copy_test_held->buf->pos, payload,
+                          sizeof(payload) - 1) == 0,
+            "abandoning original input must preserve pending bytes");
+        if (i == 0) {
+            first = g_copy_test_held;
+            resident = ctx.streaming.pending_input.copies.bytes;
+        }
+        TEST_ASSERT(g_copy_test_held == first
+                    && ctx.streaming.pending_input.copies.bytes == resident,
+            "payload and chain metadata must reuse the same allocation");
+        g_copy_test_rc = NGX_OK;
+        g_copy_test_consume = 1;
+        rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+        TEST_ASSERT(rc == NGX_OK && ctx.streaming.pending_output == NULL,
+            "NULL resume must drain pending delivery");
+    }
+    TEST_ASSERT(g_copy_test_bytes == 64 * (sizeof(payload) - 1),
+        "all normal response bytes must be delivered exactly once");
+    TEST_ASSERT(g_copy_test_bytes > conf.limits.streaming_buffer
+                && resident <= conf.limits.streaming_buffer,
+        "response length must not be treated as a cumulative copy quota");
+    TEST_ASSERT(g_alloc_chain_call_count == 1
+                && ctx.streaming.pending_input.free != NULL,
+        "queued chain nodes must stop allocating after the first cycle");
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
+    TEST_ASSERT(ctx.streaming.pending_input.copies.bytes == 0
+                && ctx.streaming.pending_input.copies.head == NULL,
+        "request cleanup must release all owned copy storage");
+    free(ctx.streaming.pending_input.free);
+    ngx_http_next_body_filter = ngx_http_next_body_filter_stub;
+    TEST_PASS("fail-open payload and queue storage stay bounded after drains");
+}
+
+/* A successful filter return may still leave buffer positions unconsumed. */
+static void
+test_failopen_copy_retention_and_budget(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t buf = {0};
+    ngx_chain_t in = {0};
+    ngx_chain_t *held;
+    u_char payload[] = "normal body";
+    ngx_int_t rc;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    ctx.headers_forwarded = 1;
+    in.buf = &buf;
+    buf.memory = 1;
+    buf.pos = payload;
+    buf.last = payload + sizeof(payload) - 1;
+    g_copy_test_rc = NGX_OK;
+    g_copy_test_consume = 0;
+    ngx_http_next_body_filter = copy_test_body_filter;
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, &in);
+    held = g_copy_test_held;
+    TEST_ASSERT(rc == NGX_OK && ctx.streaming.pending_input.copies.head->active,
+        "NGX_OK must not permit reuse of unconsumed bytes");
+    conf.limits.streaming_buffer = ctx.streaming.pending_input.copies.bytes;
+    buf.pos = payload;
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, &in);
+    TEST_ASSERT(rc == NGX_ERROR && buf.pos == payload,
+        "live storage limit must reject before consuming new input");
+    TEST_ASSERT(g_copy_test_held == held
+                && memcmp(held->buf->pos, payload, sizeof(payload) - 1) == 0,
+        "a rejected copy must not mutate retained output");
+    held->buf->pos = held->buf->last;
+    g_copy_test_consume = 1;
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, &in);
+    TEST_ASSERT(rc == NGX_OK && !ctx.streaming.pending_input.copies.head->active,
+        "consumed storage must support the next successful delivery");
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
+    ngx_http_next_body_filter = ngx_http_next_body_filter_stub;
+    TEST_PASS("fail-open copies retain unconsumed data and enforce live budget");
+}
+
+static void
+test_failopen_copy_allocation_failure_and_cleanup(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t buf = {0};
+    ngx_chain_t in = {0};
+    ngx_chain_t *copy;
+    u_char payload[] = "normal body";
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    buf.pos = payload;
+    buf.last = payload + sizeof(payload) - 1;
+    in.buf = &buf;
+    g_pool_cleanup_fail_once = 1;
+    copy = ngx_http_markdown_streaming_clone_chain_deep(&r, &ctx, &conf, &in);
+    TEST_ASSERT(copy == NULL && ctx.streaming.pending_input.copies.bytes == 0,
+        "cleanup registration failure must precede heap allocation");
+    g_owned_alloc_fail_once = 1;
+    copy = ngx_http_markdown_streaming_clone_chain_deep(&r, &ctx, &conf, &in);
+    TEST_ASSERT(copy == NULL && ctx.streaming.pending_input.copies.bytes == 0,
+        "heap allocation failure must leave the ownership list empty");
+    copy = ngx_http_markdown_streaming_clone_chain_deep(&r, &ctx, &conf, &in);
+    TEST_ASSERT(copy != NULL && pool.cleanups != NULL,
+        "copy cleanup must work independently of streaming initialization");
+    copy->buf->pos = copy->buf->last;
+    {
+        u_char larger[256] = {0};
+
+        buf.pos = larger;
+        buf.last = larger + sizeof(larger);
+        g_owned_alloc_fail_once = 1;
+        copy = ngx_http_markdown_streaming_clone_chain_deep(
+            &r, &ctx, &conf, &in);
+        TEST_ASSERT(copy == NULL && ctx.streaming.pending_input.copies.bytes == 0,
+            "failed growth must release consumed storage without stale owners");
+        copy = ngx_http_markdown_streaming_clone_chain_deep(
+            &r, &ctx, &conf, &in);
+        TEST_ASSERT(copy != NULL && copy->buf->last - copy->buf->pos == 256,
+            "a larger normal batch must allocate bounded replacement storage");
+    }
+    copy->next = copy;
+    pool.cleanups->handler(pool.cleanups->data);
+    TEST_ASSERT(ctx.streaming.pending_input.copies.head == NULL
+                && ctx.streaming.pending_input.copies.bytes == 0,
+        "cleanup must use owner metadata despite downstream link mutation");
+    pool.cleanups->handler(pool.cleanups->data);
+    TEST_ASSERT(ctx.streaming.pending_input.copies.head == NULL,
+        "owned copy cleanup must be idempotent");
+    TEST_PASS("fail-open copy allocation failures and owner cleanup are safe");
 }
 
 /*
@@ -8121,6 +8353,9 @@ main(void)
     test_abandon_pending_after_fatal_releases_pending_header_output();
     test_finalize_pending_result_keeps_buffered_liveness();
     test_clone_chain_deep_rebases_bounds_and_drops_source_ownership();
+    test_failopen_copy_and_queue_storage_reused_after_drain();
+    test_failopen_copy_retention_and_budget();
+    test_failopen_copy_allocation_failure_and_cleanup();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

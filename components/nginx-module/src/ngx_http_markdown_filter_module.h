@@ -1531,8 +1531,15 @@ typedef struct {
         struct {
             ngx_chain_t              *head;
             ngx_chain_t              *tail;
+            ngx_chain_t              *free;
             size_t                    bytes;
             ngx_uint_t                links;
+            /* Explicit owners for bounded, reusable fail-open copies. */
+            struct {
+                struct ngx_http_markdown_failopen_copy_s *head;
+                size_t                    bytes;
+                ngx_flag_t                cleanup_registered;
+            } copies;
         } pending_input;
 
         /*

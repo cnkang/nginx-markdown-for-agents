@@ -129,6 +129,14 @@ exception the decision engine returns the internal default reject status
 `fail_closed` or `status <code>`, the module rejects the
 request and returns the configured reject status.
 
+After a streaming response switches to pass-through, queued body copies use
+reusable storage. The module applies `streaming_buffer` to this retained
+storage, including chain and buffer metadata. It reuses a copy only after
+the downstream filter consumes its memory and file ranges. This limit bounds
+resident copies rather than cumulative response bytes. If the next copy
+would exceed the limit, the module returns an error before consuming that
+input. A response whose headers were already sent cannot change its status.
+
 The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
 0.9.1 used. The 256 KiB value appeared only in the removed `balanced` and
 `streaming_first` profiles. Operators who explicitly pinned those profiles
