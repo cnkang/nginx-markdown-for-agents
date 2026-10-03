@@ -158,9 +158,10 @@ int main(void) {
     return 0;
 }'
     # Honor NGINX's configured search paths even without pkg-config metadata.
+    # Disable debug output: Darwin dsymutil cannot inspect /dev/null.
     if echo "$ngx_markdown_brotli_test" \
        | ${CC:-cc} ${CFLAGS:-} ${NGX_CC_OPT:-} \
-           $ngx_markdown_brotli_cflags -x c - -o /dev/null \
+           $ngx_markdown_brotli_cflags -g0 -x c - -o /dev/null \
            ${NGX_LD_OPT:-} $ngx_markdown_brotli_libs >/dev/null 2>&1; then
         ngx_markdown_brotli_found=yes
     fi
