@@ -8072,6 +8072,52 @@ test_clone_chain_deep_rebases_bounds_and_drops_source_ownership(void)
     TEST_PASS("clone_chain_deep rebases bounds and drops source ownership");
 }
 
+/* Multiple memory ranges must remain disjoint from flexible-array metadata. */
+static void
+test_failopen_copy_multiple_memory_ranges(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t bufs[2] = {0};
+    ngx_chain_t links[2] = {0};
+    u_char first[] = "first normal range";
+    u_char second[] = "second normal range";
+    ngx_chain_t *copy;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    bufs[0].pos = first;
+    bufs[0].last = first + sizeof(first) - 1;
+    bufs[1].pos = second;
+    bufs[1].last = second + sizeof(second) - 1;
+    bufs[1].last_buf = 1;
+    links[0].buf = &bufs[0];
+    links[0].next = &links[1];
+    links[1].buf = &bufs[1];
+    copy = ngx_http_markdown_streaming_clone_chain_deep(
+        &r, &ctx, &conf, links);
+    TEST_ASSERT(copy != NULL && copy->next != NULL,
+        "both memory ranges must have independent buffer metadata");
+    TEST_ASSERT(memcmp(copy->buf->pos, first, sizeof(first) - 1) == 0
+                && memcmp(copy->next->buf->pos, second,
+                          sizeof(second) - 1) == 0,
+        "all ranges must retain their byte-exact independent copies");
+    copy->buf->pos[0] = 'F';
+    TEST_ASSERT(first[0] == 'f' && copy->next->buf->pos[0] == 's',
+        "writing a copied range must not overlap source or sibling bytes");
+    TEST_ASSERT(copy->buf->last == copy->next->buf->pos
+                && copy->next->next == NULL
+                && copy->next->buf->last_buf,
+        "payload ranges must follow metadata without corrupting chain flags");
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
+    TEST_PASS("flexible-array copies preserve disjoint memory ranges");
+}
+
 /* Normal downstream consumption and backpressure for lifecycle tests. */
 static ngx_chain_t *g_copy_test_held;
 static ngx_int_t g_copy_test_rc;
@@ -8353,6 +8399,7 @@ main(void)
     test_abandon_pending_after_fatal_releases_pending_header_output();
     test_finalize_pending_result_keeps_buffered_liveness();
     test_clone_chain_deep_rebases_bounds_and_drops_source_ownership();
+    test_failopen_copy_multiple_memory_ranges();
     test_failopen_copy_and_queue_storage_reused_after_drain();
     test_failopen_copy_retention_and_budget();
     test_failopen_copy_allocation_failure_and_cleanup();

@@ -41,6 +41,7 @@ typedef struct ngx_http_markdown_failopen_copy_s {
     size_t                                   size;
     size_t                                   count;
     ngx_flag_t                               active;
+    ngx_http_markdown_failopen_entry_t        entries[];
 } ngx_http_markdown_failopen_copy_t;
 
 /* Pool cleanup owns the allocation list, never downstream chain topology. */
@@ -74,7 +75,7 @@ ngx_http_markdown_streaming_copy_collect(ngx_http_markdown_ctx_t *ctx)
         if (!copy->active) {
             continue;
         }
-        entry = (ngx_http_markdown_failopen_entry_t *) (copy + 1);
+        entry = copy->entries;
         for (i = 0; i < copy->count; i++) {
             if ((entry[i].memory_payload
                  && entry[i].buf.pos != entry[i].buf.last)
@@ -4268,7 +4269,7 @@ ngx_http_markdown_streaming_clone_chain_deep(
     ngx_buf_t    *b;
     ngx_chain_t  *source;
     size_t        count = 0, size = sizeof(ngx_http_markdown_failopen_copy_t);
-    size_t        len, limit;
+    size_t        len, limit, index = 0;
     u_char       *payload;
     ngx_http_markdown_failopen_copy_t  *copy;
     ngx_http_markdown_failopen_entry_t *entry;
@@ -4299,18 +4300,18 @@ ngx_http_markdown_streaming_clone_chain_deep(
         return NULL;
     }
     copy->count = count;
-    entry = (ngx_http_markdown_failopen_entry_t *) (copy + 1);
+    entry = copy->entries;
     ngx_memzero(entry, count * sizeof(*entry));
-    payload = (u_char *) (entry + count);
+    payload = (u_char *) &copy->entries[count];
 
     for (; in != NULL; in = in->next) {
         if (in->buf == NULL) {
             continue;
         }
+        entry = &copy->entries[index++];
         cl = &entry->chain;
         b = &entry->buf;
         entry->file_payload = in->buf->in_file;
-        entry++;
         /* A file-backed buffer cannot be deep-cloned by copying payload
          * bytes (the data lives in the file, not in pos..last).  The
          * ngx_file_t reference is owned by the original producer, but
@@ -4358,7 +4359,7 @@ ngx_http_markdown_streaming_clone_chain_deep(
             && in->buf->last > in->buf->pos)
         {
             b->pos = payload;
-            (entry - 1)->memory_payload = 1;
+            entry->memory_payload = 1;
             payload += in->buf->last - in->buf->pos;
             ngx_memcpy(b->pos, in->buf->pos, in->buf->last - in->buf->pos);
             b->last = b->pos + (in->buf->last - in->buf->pos);
