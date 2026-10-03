@@ -48,16 +48,15 @@ typedef struct ngx_http_markdown_failopen_copy_s {
 static void
 ngx_http_markdown_streaming_copy_cleanup(void *data)
 {
-    ngx_http_markdown_ctx_t           *ctx = data;
-    ngx_http_markdown_failopen_copy_t *copy, *next;
+    ngx_http_markdown_ctx_t *ctx = data;
 
-    for (copy = ctx->streaming.pending_input.copies.head; copy != NULL;
-         copy = next)
-    {
-        next = copy->next;
+    while (ctx->streaming.pending_input.copies.head != NULL) {
+        ngx_http_markdown_failopen_copy_t *copy =
+            ctx->streaming.pending_input.copies.head;
+
+        ctx->streaming.pending_input.copies.head = copy->next;
         ngx_free(copy);
     }
-    ctx->streaming.pending_input.copies.head = NULL;
     ctx->streaming.pending_input.copies.bytes = 0;
 }
 
@@ -65,17 +64,17 @@ ngx_http_markdown_streaming_copy_cleanup(void *data)
 static void
 ngx_http_markdown_streaming_copy_collect(ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_http_markdown_failopen_copy_t  *copy;
-    ngx_http_markdown_failopen_entry_t *entry;
-    size_t                             i;
+    size_t i;
 
-    for (copy = ctx->streaming.pending_input.copies.head; copy != NULL;
-         copy = copy->next)
+    for (ngx_http_markdown_failopen_copy_t *copy =
+             ctx->streaming.pending_input.copies.head;
+         copy != NULL; copy = copy->next)
     {
+        const ngx_http_markdown_failopen_entry_t *entry = copy->entries;
+
         if (!copy->active) {
             continue;
         }
-        entry = copy->entries;
         for (i = 0; i < copy->count; i++) {
             if ((entry[i].memory_payload
                  && entry[i].buf.pos != entry[i].buf.last)
@@ -97,7 +96,8 @@ ngx_http_markdown_streaming_copy_acquire(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     size_t size, size_t limit)
 {
-    ngx_http_markdown_failopen_copy_t  *copy, **slot;
+    ngx_http_markdown_failopen_copy_t  *copy;
+    ngx_http_markdown_failopen_copy_t **slot;
     ngx_pool_cleanup_t                *cln;
 
     if (size > limit) {
@@ -4267,16 +4267,18 @@ ngx_http_markdown_streaming_clone_chain_deep(
     ngx_chain_t  **tail = &head;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
-    ngx_chain_t  *source;
-    size_t        count = 0, size = sizeof(ngx_http_markdown_failopen_copy_t);
-    size_t        len, limit, index = 0;
+    size_t        count = 0;
+    size_t        size = sizeof(ngx_http_markdown_failopen_copy_t);
+    size_t        len;
+    size_t        limit;
+    size_t        index = 0;
     u_char       *payload;
     ngx_http_markdown_failopen_copy_t  *copy;
     ngx_http_markdown_failopen_entry_t *entry;
 
     limit = ctx->effective_conf != NULL
         ? ctx->effective_conf->streaming_buffer : conf->limits.streaming_buffer;
-    for (source = in; source != NULL; source = source->next) {
+    for (ngx_chain_t *source = in; source != NULL; source = source->next) {
         if (source->buf == NULL) {
             continue;
         }
