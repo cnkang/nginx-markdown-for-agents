@@ -226,7 +226,7 @@ def test_every_workflow_toolchain_step_goes_through_the_resolver():
 def test_resolver_matches_the_manifest():
     """The script and the manifest must not be able to drift either."""
     text = MANIFEST.read_text(encoding="utf-8")
-    match = re.search(r'^\s*channel\s*=\s*"([^"]+)"', text, re.M)
+    match = re.search(r"^\s*channel\s*=\s*['\"]([^'\"]+)['\"]", text, re.M)
     assert match, f"no channel in {MANIFEST.name}"
     resolved = subprocess.run(
         ["bash", str(RESOLVER)], capture_output=True, text=True, check=True
