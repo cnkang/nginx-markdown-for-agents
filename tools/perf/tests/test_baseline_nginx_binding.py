@@ -114,19 +114,31 @@ def _benchmark_step_body() -> str:
 def test_the_benchmark_step_rejects_an_unusable_baseline_version(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A run that cannot build the baseline's version must fail, not fall back."""
+    """A run that cannot build the baseline's version must fail, not fall back.
+
+    The step computes `BASELINE_NGINX_VERSION` itself, so the scenario is
+    produced by pointing the resolver at baselines recorded on a version this run
+    does not build. Injecting the variable in the environment would be ignored.
+    """
     script = tmp_path / "step.sh"
-    script.write_text(_benchmark_step_body(), encoding="utf-8")
+    body = _benchmark_step_body()
+    other_dir = tmp_path / "baselines-other"
+    other_dir.mkdir()
+    _write_baseline(other_dir, "module-baseline-091.json", "nginx/1.31.5")
+    script.write_text(
+        body.replace("--baseline-dir perf/baselines", f"--baseline-dir {other_dir}"),
+        encoding="utf-8",
+    )
     versions = json.dumps(["1.24.0", "1.26.3"])
 
     result = subprocess.run(
         ["bash", str(script)],
         capture_output=True,
         text=True,
+        cwd=REPO_ROOT,
         env={
             **os.environ,
             "NGINX_VERSIONS": versions,
-            "BASELINE_NGINX_VERSION": "1.30.4",
             "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
         },
     )
@@ -166,6 +178,7 @@ def test_the_benchmark_step_rejects_an_unresolvable_baseline(
         ["bash", str(script)],
         capture_output=True,
         text=True,
+        cwd=REPO_ROOT,
         env={
             **os.environ,
             "NGINX_VERSIONS": versions,
@@ -252,10 +265,10 @@ def test_the_benchmark_step_selects_the_baseline_version(tmp_path: pathlib.Path)
         ["bash", str(script)],
         capture_output=True,
         text=True,
+        cwd=REPO_ROOT,
         env={
             **os.environ,
             "NGINX_VERSIONS": versions,
-            "BASELINE_NGINX_VERSION": env_version,
             "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
         },
     )
