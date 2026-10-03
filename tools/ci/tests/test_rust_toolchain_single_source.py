@@ -70,6 +70,36 @@ def test_action_reads_the_channel_instead_of_pinning_one():
     assert "steps.read.outputs.channel" in toolchain, toolchain
 
 
+def test_action_script_path_resolves_from_the_action_directory():
+    """The literal ../ count was wrong by one, and no other test could see it.
+
+    Every test here runs from the repo root, so a path expressed relative to
+    GITHUB_ACTION_PATH looked fine while resolving to `.github` instead of the
+    checkout -- CI would have failed in the first step of the first job. This
+    resolves the path the way the action does and requires it to be the file.
+    """
+    doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+    steps = [
+        step
+        for step in doc["runs"]["steps"]
+        if "rust_toolchain_channel.sh" in (step.get("run") or "")
+    ]
+    assert len(steps) == 1, f"expected one resolver step, found {len(steps)}"
+
+    match = re.search(r'\$\{GITHUB_ACTION_PATH\}(/[^"]+)rust_toolchain_channel\.sh',
+                      steps[0]["run"])
+    assert match, f"no GITHUB_ACTION_PATH reference: {steps[0]['run']!r}"
+
+    # `resolve()` normalises the `..` segments the way the shell would.
+    resolved = (
+        ACTION.parent / match.group(1).lstrip("/") / "rust_toolchain_channel.sh"
+    ).resolve()
+    assert resolved == RESOLVER, (
+        f"the action would run {resolved}, but the resolver is {RESOLVER}"
+    )
+    assert resolved.is_file(), f"{resolved} does not exist"
+
+
 def test_action_keeps_its_pinned_action_sha():
     """The delegated action itself stays SHA-pinned: only the channel is dynamic."""
     doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))

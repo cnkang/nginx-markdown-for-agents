@@ -29,7 +29,7 @@ runs:
       name: Read the pinned channel
       shell: bash
       run: |
-        channel="$(bash "${GITHUB_ACTION_PATH}/../../tools/ci/rust_toolchain_channel.sh")"
+        channel="$(bash "${GITHUB_ACTION_PATH}/../../../tools/ci/rust_toolchain_channel.sh")"
         echo "channel=${channel}" >> "$GITHUB_OUTPUT"
         echo "Using the channel pinned in rust-toolchain.toml: ${channel}"
 
