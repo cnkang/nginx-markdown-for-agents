@@ -225,7 +225,7 @@ impl StreamingConverter {
     ///
     /// * [`new`](Self::new) — constructs with the default 4.0 chars/token ratio.
     /// * [`TokenEstimator::with_chars_per_token`](crate::token_estimator::TokenEstimator::with_chars_per_token) —
-    ///   the full-buffer/incremental equivalent.
+    ///   the full-buffer equivalent.
     pub fn with_chars_per_token(
         options: ConversionOptions,
         budget: MemoryBudget,

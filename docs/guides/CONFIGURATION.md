@@ -210,7 +210,8 @@ DOM-noise rules.
 ## Metrics and diagnostics
 
 You expose metrics by placing `markdown_metrics` in a location, commonly
-protected by loopback or an explicit access policy:
+restricted to loopback by the handler. Native NGINX access rules can narrow
+that boundary further:
 
 ```nginx
 location = /markdown-metrics {

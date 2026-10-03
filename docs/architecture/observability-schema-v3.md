@@ -37,7 +37,7 @@ endpoint. The response carries seven required top-level fields plus an optional
 - `worker`: `pid` and `scope="worker-local"`
 - `build`: source SHA, NGINX/Rust versions, and feature list
 - `configuration`: static digest, effective values, and per-field sources
-- `runtime`: worker-local `inflight` and `pending_output`, plus the bounded
+- `runtime`: `diagnostics_recording`, worker-local `inflight` and `pending_output`, plus the bounded
   `module_metrics` counters used by local performance evidence collection
 - `recent_decisions`: bounded worker-local decision entries
 
@@ -46,10 +46,11 @@ top-level fields are the ones this schema names, plus the optional `extensions`
 object. A release publishes additive state inside `extensions`, which accepts
 any keys. Consumers must ignore keys they do not recognise: a release adds
 state there instead of adding a top-level field. The handler is
-read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body
-length without sending a body, and other methods return 405. The handler
-itself accepts only loopback peers (`127.0.0.1` and `::1`) and denies missing
-or unknown peer addresses before rendering. Configure native NGINX access
+read-only: the endpoint accepts GET and HEAD. HEAD computes the complete body
+length without sending a body. Other methods from authorized peers return 405.
+The handler accepts IPv4 loopback (`127.0.0.0/8`), IPv4-mapped IPv6 loopback
+(`::ffff:127.0.0.0/104`), and `::1`. It denies missing, unknown, and non-loopback
+peers before checking the method. Configure native NGINX access
 controls on the diagnostics location to narrow that boundary further, for
 example:
 
@@ -68,8 +69,8 @@ cannot broaden the built-in loopback boundary.
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
 rollback-mutation fields are not part of v3.
 
-The optional `runtime.module_metrics` object is a structured evidence bridge,
-not a second public metrics surface. When present, it carries exact integer
+The required `runtime.module_metrics` object is a structured evidence bridge,
+not a second public metrics surface. It carries exact integer
 counters for streaming requests, pre-commit fail-open decisions, and copied
 output. The benchmark adapter fails closed when the object is absent rather
 than inferring these values from unrelated Prometheus labels.

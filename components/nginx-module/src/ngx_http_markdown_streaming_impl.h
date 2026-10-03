@@ -4187,29 +4187,6 @@ ngx_http_markdown_streaming_init_handle(
 
 
 /*
- * Forward original upstream bytes after a Pre-Commit streaming fail-open.
- *
- * The replay buffer contains a copy of all original upstream bytes consumed
- * during Pre-Commit.  On fail-open, we build an output chain from the
- * replay buffer data (module-owned memory) plus the current unconsumed
- * input chain, then forward it downstream.
- *
- * This approach avoids depending on upstream ngx_buf_t* pointer stability
- * across filter chain invocations, which is fragile in complex filter
- * chains, temporary buffer, compression, or subrequest scenarios.
- *
- * On NGX_AGAIN from the downstream filter, the output chain is saved as
- * ctx->streaming.pending_output and the request buffered flag is set,
- * consistent with send_output()'s backpressure contract (Rule 1).
- * resume_pending() will re-submit the chain when downstream is writable.
- *
- * Returns:
- *   NGX_OK/NGX_AGAIN/NGX_DONE - status from the downstream body filter
- *   NGX_ERROR                  - allocation or header-forwarding failure
- */
-
-
-/*
  * Clone chain link structures into request pool memory.
  *
  * Each link is newly allocated; the buf pointer is copied (shared)
@@ -4222,10 +4199,9 @@ ngx_http_markdown_streaming_init_handle(
  * body filter's transient input), but still shares the underlying
  * ngx_buf_t.  In the NGINX filter chain, the buf data is typically
  * stable within a request (pool-allocated by upstream or copy
- * filter), making shared bufs safe for pending chains.  If a future
- * filter chain configuration introduces transient buf data that is
- * invalidated between body_filter invocations, upgrade this to
- * clone_chain_deep() which also copies buf data into request pool.
+ * filter).  Queued continuation input uses clone_chain_deep() instead:
+ * it copies payload and metadata into bounded reusable storage, with
+ * separate pool-lifetime metadata for empty control buffers.
  *
  * Returns the head of the cloned chain, or NULL on allocation failure.
  */
@@ -4606,6 +4582,19 @@ static void
 ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
     ngx_http_markdown_ctx_t *ctx);
 
+/*
+ * Forward pre-commit replay bytes plus the current unconsumed input.
+ * The replay buffer owns earlier source bytes; cloned links preserve
+ * the current input's buffer references for downstream consumption.
+ *
+ * On NGX_AGAIN, send_failopen_chain() retains the submitted chain as
+ * downstream-owned pending output.  resume_pending() calls downstream
+ * with NULL to drain it; resubmitting that chain would duplicate bytes.
+ * Later input waits in the bounded, independently owned continuation queue.
+ *
+ * Returns NGX_OK, NGX_AGAIN, or NGX_DONE from downstream, or NGX_ERROR
+ * on allocation or header-forwarding failure.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,

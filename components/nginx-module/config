@@ -178,8 +178,8 @@ int main(void) {
 fi
 
 # Keep the C compilation surface aligned with the Cargo feature set explicitly.
-# Rust 1.97 uses LLVM 22, whose LTO archives are not guaranteed to be readable
-# by the system nm.  Symbol probing can therefore silently disable matching C
+# Rust LTO archives may use newer bitcode than the system nm can read.
+# Symbol probing can therefore silently disable matching C
 # paths even though the Rust exports are present.  The contract accepts Cargo
 # feature names as a comma-separated list, plus the canonical `default` and
 # `none` values.  An unset value means Cargo defaults.

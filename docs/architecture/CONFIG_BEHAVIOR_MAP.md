@@ -58,13 +58,13 @@ flowchart LR
 | Behavior | Enables or disables Markdown conversion for the current context; can be static or variable-driven |
 | Lifecycle impact | Header filter entry decision; cached per request before body processing begins |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
-| Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. Because `markdown_filter` accepts NGINX variables, operators can combine it with `map` directives to implement User-Agent-based bot targeting — for example, rewriting the Accept header for known AI crawlers so they receive Markdown automatically. See the bot-targeted conversion examples in [../guides/DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based). |
+| Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. Combine a User-Agent `map` with `markdown_filter $variable` and `markdown_accept force` to target selected bots. The module does not rewrite the upstream Accept header. See [bot-targeted conversion](../guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based). |
 
 ### `markdown_accept`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Extends content negotiation so wildcard `Accept` values can trigger Markdown conversion |
+| Behavior | Selects `strict` negotiation, `wildcard` negotiation, or `force` conversion without requiring a Markdown Accept value |
 | Lifecycle impact | Header-phase negotiation decision before eligibility checks |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_accept.c`, `components/nginx-module/src/ngx_http_markdown_request_impl.h` |
 | Practical note | Use this only when wildcard clients should really receive Markdown; it broadens the set of requests entering the conversion path. |
@@ -155,7 +155,7 @@ flowchart LR
 |--------|--------|
 | Behavior | Enables removal of known navigation, layout, and other page noise during conversion |
 | Lifecycle impact | Rust converter options and HTML traversal/output shaping |
-| Implementation areas | `components/rust-converter/src/converter.rs`, `components/rust-converter/src/pruning.rs` |
+| Implementation areas | `components/rust-converter/src/converter.rs`, `components/rust-converter/src/converter/pruning.rs` |
 | Practical note | Disable it when the page's structural content is more important than compact agent-oriented output. |
 
 ### Removed custom-selector directives
@@ -171,7 +171,7 @@ Built-in noise reduction remains controlled by `markdown_prune_noise`.
 |--------|--------|
 | Behavior | Sets the shared-memory region used for bounded module metrics |
 | Lifecycle impact | HTTP configuration merge and worker metrics initialization |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_metrics.c`, `components/nginx-module/src/ngx_http_markdown_config_core_impl.h` |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_module_state_impl.h`, `components/nginx-module/src/ngx_http_markdown_config_core_impl.h` |
 | Practical note | Configure it in `http`; too small a region fails configuration or metrics initialization rather than silently growing. |
 
 ### Removed runtime dynconf directives
@@ -294,6 +294,7 @@ Those are the knobs most directly reflected in the conversion options passed thr
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.1 | 2026-07-14 | Codex | Make markdown_streaming the sole public processing-path selector and document removal of non-semantic flavor values |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

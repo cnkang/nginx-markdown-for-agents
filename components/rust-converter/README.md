@@ -30,7 +30,7 @@ cargo build --release
 cargo test --all
 
 # Run short fuzz smoke checks (requires nightly + cargo-fuzz)
-make test-rust-fuzz-smoke
+make -C ../.. test-rust-fuzz-smoke
 
 # Generate the C header
 cbindgen --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
@@ -87,6 +87,7 @@ fuzz/
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-08-07 | Kang | Refreshed version reference to the current 0.9.x line |
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.6.2 | 2026-05-08 | Kang | Updated version reference to current release line |

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document covers building and smoke-testing the project on macOS, including:
+This document covers building and smoke-testing the project on macOS and Linux, including:
 
 - the Rust conversion library (`components/rust-converter`)
 - the generated C header (`markdown_converter.h`)
@@ -12,12 +12,18 @@ For runtime deployment and NGINX integration, see `INSTALLATION.md` and `CONFIGU
 
 ## Supported Build Environment
 
-The top-level `Makefile` currently targets macOS on:
+The top-level `Makefile` detects the operating system, architecture, and Linux
+libc to select the Rust target:
 
-- Apple Silicon (`arm64` -> `aarch64-apple-darwin`)
-- Intel (`x86_64` -> `x86_64-apple-darwin`)
+| Host | Architecture | Rust target |
+|------|--------------|-------------|
+| macOS | Apple Silicon (`arm64`) | `aarch64-apple-darwin` |
+| macOS | Intel (`x86_64`) | `x86_64-apple-darwin` |
+| Linux glibc | `aarch64` / `x86_64` | `aarch64-unknown-linux-gnu` / `x86_64-unknown-linux-gnu` |
+| Linux musl | `aarch64` / `x86_64` | `aarch64-unknown-linux-musl` / `x86_64-unknown-linux-musl` |
 
-The build script selects the target automatically from `uname -m`.
+Install the matching Rust target with `rustup target add` if necessary.
+Use `RUST_TARGET` only when you need an explicit build target.
 
 ## Prerequisites
 
@@ -54,6 +60,10 @@ cbindgen --version
 ```bash
 xcode-select --install
 ```
+
+Linux builds require a C compiler, Make, and the headers for enabled native
+libraries. See [source-build prerequisites](INSTALLATION.md#6-secondary-manual-source-build)
+for the platform commands.
 
 ## Quick Start
 
@@ -337,6 +347,7 @@ After building successfully:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-09-17 | Hermes | Corrected the frozen contract artifact count to six and added pre-lts-status.json to the enumerated list |
 | 0.9.2 | 2026-08-24 | Kang | Clarified that only the six frozen contract artifacts may be committed under artifacts/release/0.9.2 |
 | 0.9.2 | 2026-08-15 | Hermes | State explicitly that Git ignores generated evidence under artifacts/ |

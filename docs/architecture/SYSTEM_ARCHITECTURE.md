@@ -265,8 +265,9 @@ set. The module shares `markdown_limits streaming_buffer=` between the
 converter's resident working set and the pre-commit replay buffer. Before the
 module commits any Markdown output, it can replay the original HTML from that
 bounded buffer if conversion fails.
-After commit, failures are terminal because the response representation has
-already changed.
+After commit, the module cannot restore the HTML representation. A later gzip
+member failure can still finish the remaining Markdown safely. Other failures
+that prevent a safe finish abort the response.
 
 ### Streaming FFI Contract
 The C side passes streaming chunks, EOF state, flush thresholds, and budget
