@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 PERF_MODULE = REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
@@ -60,15 +61,33 @@ def test_the_benchmark_module_has_no_python_310_only_constructs() -> None:
     )
 
 
-def _decorator_kwargs(class_node: ast.ClassDef, decorator_name: str) -> set[str]:
-    """Return the keyword names passed to a named decorator on a class."""
+def _decorator_kwargs(class_node: ast.ClassDef, decorator_name: str) -> dict[str, Any]:
+    """Return each keyword passed to a named decorator, mapped to its value.
+
+    Literals are unwrapped to Python values so a caller can assert the VALUE,
+    not merely that the keyword is present: `frozen=False` must not satisfy a
+    test that means to require `frozen=True`.
+    """
     for decorator in class_node.decorator_list:
         if not isinstance(decorator, ast.Call):
             continue
         func = decorator.func
         if isinstance(func, ast.Name) and func.id == decorator_name:
-            return {kw.arg for kw in decorator.keywords if kw.arg}
-    return set()
+            return {
+                kw.arg: _literal(kw.value)
+                for kw in decorator.keywords
+                if kw.arg is not None
+            }
+    return {}
+
+
+def _literal(node: ast.expr) -> Any:
+    """Best-effort unwrap of a decorator keyword value."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
 
 
 def _find_class(tree: ast.AST, name: str) -> ast.ClassDef | None:
@@ -83,6 +102,7 @@ def test_the_dataclass_is_still_frozen() -> None:
     tree = ast.parse(PERF_MODULE.read_text(encoding="utf-8"), filename=str(PERF_MODULE))
     node = _find_class(tree, "ScenarioResultInput")
     assert node is not None, "ScenarioResultInput is missing from the module"
-    assert "frozen" in _decorator_kwargs(node, "dataclass"), (
-        "ScenarioResultInput must stay frozen=True"
+    assert _decorator_kwargs(node, "dataclass").get("frozen") is True, (
+        "ScenarioResultInput must stay frozen=True, not merely mention the "
+        "keyword: frozen=False would satisfy a presence-only check"
     )
