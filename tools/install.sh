@@ -1064,7 +1064,13 @@ verify_release_signature() {
     return 1
   fi
 
-  verify_out="$(GNUPGHOME="$gpg_home" "$GPG_BIN" --batch --status-fd=1 --verify "$signature" "$manifest" 2>/dev/null || true)"
+  # VALIDSIG describes cryptographic validity even when GPG rejects an
+  # expired signature. Require successful verification before checking the pin.
+  if ! verify_out="$(GNUPGHOME="$gpg_home" "$GPG_BIN" --batch --status-fd=1 --verify "$signature" "$manifest" 2>/dev/null)"; then
+    "$RM_BIN" -rf "$gpg_home" || true
+    _json_error_message="Release signature verification failed; gpg rejected the signature."
+    return 1
+  fi
   "$RM_BIN" -rf "$gpg_home" || true
 
   validsig="$(printf '%s\n' "$verify_out" | "$AWK_BIN" '$2 == "VALIDSIG" { print toupper($3); exit }')"
