@@ -666,7 +666,11 @@ def _hey_performance(content: str) -> tuple[float, float, float, float] | None:
     )
 
 
-@dataclass(frozen=True, slots=True)
+# No `slots=True`: the release gate runs this module inside the pinned
+# almalinux (EL9) image whose `python3` is 3.9, and the `slots` parameter only
+# exists from 3.10. The dataclass is constructed once per benchmark scenario, so
+# the memory the slots would save is irrelevant next to losing the gate.
+@dataclass(frozen=True)
 class ScenarioResultInput:
     """Inputs needed to build one benchmark scenario result."""
 
