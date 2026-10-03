@@ -1538,6 +1538,8 @@ typedef struct {
             struct {
                 struct ngx_http_markdown_failopen_copy_s *head;
                 size_t                    bytes;
+                /* Empty control metadata has request-pool lifetime. */
+                size_t                    control_bytes;
                 ngx_flag_t                cleanup_registered;
             } copies;
         } pending_input;

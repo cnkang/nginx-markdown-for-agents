@@ -58,6 +58,17 @@ ngx_http_markdown_streaming_copy_cleanup(void *data)
         ngx_free(copy);
     }
     ctx->streaming.pending_input.copies.bytes = 0;
+    ctx->streaming.pending_input.copies.control_bytes = 0;
+}
+
+/* Empty ranges cannot signal when downstream releases control metadata. */
+static ngx_flag_t
+ngx_http_markdown_streaming_copy_needs_control_storage(const ngx_buf_t *buf)
+{
+    if (buf->in_file) {
+        return buf->file_pos == buf->file_last;
+    }
+    return ngx_http_markdown_buf_len_safe(buf) == 0;
 }
 
 /* NGX_OK alone does not mean that every buffer has been consumed. */
@@ -4241,15 +4252,52 @@ ngx_http_markdown_streaming_clone_chain_links(
     return head;
 }
 
+/* Size heap payload owners and durable control metadata before allocation. */
+static ngx_int_t
+ngx_http_markdown_streaming_copy_layout(ngx_chain_t *in, size_t limit,
+    size_t *size, size_t *count, size_t *control_size)
+{
+    size_t len;
+
+    *size = sizeof(ngx_http_markdown_failopen_copy_t);
+    *count = 0;
+    *control_size = 0;
+    for (; in != NULL; in = in->next) {
+        if (in->buf == NULL) {
+            continue;
+        }
+        len = in->buf->in_file ? 0 : ngx_http_markdown_buf_len_safe(in->buf);
+        if (*size > limit
+            || sizeof(ngx_http_markdown_failopen_entry_t) > limit - *size)
+        {
+            return NGX_ERROR;
+        }
+        *size += sizeof(ngx_http_markdown_failopen_entry_t);
+        if (len > limit - *size) {
+            return NGX_ERROR;
+        }
+        *size += len;
+        if (ngx_http_markdown_streaming_copy_needs_control_storage(in->buf)) {
+            if (sizeof(ngx_buf_t) > limit - *size) {
+                return NGX_ERROR;
+            }
+            *size += sizeof(ngx_buf_t);
+            *control_size += sizeof(ngx_buf_t);
+        }
+        (*count)++;
+    }
+    return *count != 0 ? NGX_OK : NGX_ERROR;
+}
+
 /*
- * Deep-clone a chain into request pool memory: each link AND its
- * ngx_buf_t are newly allocated, and the buf data (pos..last) is copied
- * into request-pool memory.  The clone therefore has INDEPENDENT pos/last
+ * Deep-clone chain links, payload buffers and data into reusable storage.
+ * Empty control buffers use separate request-pool metadata because their
+ * ranges cannot signal consumption.  The clone has INDEPENDENT pos/last
  * pointers, so advancing pos on the original chain (abandon_input) can
  * never corrupt a pending_output that references the clone.
  *
  * Terminal flags (last_buf / last_in_chain) and the memory flag are
- * preserved.  Payload buffers (pos < last) are copied into pool memory
+ * preserved.  Payload buffers (pos < last) are copied into owned memory
  * and are memory-backed; zero-length buffers keep VALID shared bounds
  * (pos == last) and control sentinels (NULL pos/last) stay non-memory,
  * so downstream sizing logic never sees invalid bounds.
@@ -4267,39 +4315,45 @@ ngx_http_markdown_streaming_clone_chain_deep(
     ngx_chain_t  **tail = &head;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
-    size_t        count = 0;
-    size_t        size = sizeof(ngx_http_markdown_failopen_copy_t);
-    size_t        len;
+    size_t        count;
+    size_t        size;
+    size_t        control_size;
     size_t        limit;
     size_t        index = 0;
     u_char       *payload;
+    ngx_buf_t    *controls = NULL;
     ngx_http_markdown_failopen_copy_t  *copy;
     ngx_http_markdown_failopen_entry_t *entry;
 
     limit = ctx->effective_conf != NULL
         ? ctx->effective_conf->streaming_buffer : conf->limits.streaming_buffer;
-    for (ngx_chain_t *source = in; source != NULL; source = source->next) {
-        if (source->buf == NULL) {
-            continue;
-        }
-        len = source->buf->in_file ? 0
-            : ngx_http_markdown_buf_len_safe(source->buf);
-        if (size > limit || sizeof(*entry) > limit - size) {
-            return NULL;
-        }
-        size += sizeof(*entry);
-        if (len > limit - size) {
-            return NULL;
-        }
-        size += len;
-        count++;
-    }
-    if (count == 0) {
+    if (ngx_http_markdown_streaming_copy_layout(
+            in, limit, &size, &count, &control_size) != NGX_OK)
+    {
         return NULL;
     }
-    copy = ngx_http_markdown_streaming_copy_acquire(r, ctx, size, limit);
+    if (ctx->streaming.pending_input.copies.control_bytes > limit
+        || control_size > limit
+            - ctx->streaming.pending_input.copies.control_bytes)
+    {
+        return NULL;
+    }
+    limit -= ctx->streaming.pending_input.copies.control_bytes + control_size;
+    copy = ngx_http_markdown_streaming_copy_acquire(
+        r, ctx, size - control_size, limit);
     if (copy == NULL) {
         return NULL;
+    }
+    if (control_size != 0) {
+        /* Postpone filters may retain these after NGX_OK.  Pool lifetime
+         * keeps their flags stable while payload owners remain reusable. */
+        controls = ngx_pcalloc(r->pool, control_size);
+        if (controls == NULL) {
+            copy->count = 0;
+            copy->active = 0;
+            return NULL;
+        }
+        ctx->streaming.pending_input.copies.control_bytes += control_size;
     }
     copy->count = count;
     entry = copy->entries;
@@ -4313,7 +4367,11 @@ ngx_http_markdown_streaming_clone_chain_deep(
         entry = &copy->entries[index++];
         cl = &entry->chain;
         b = &entry->buf;
-        entry->file_payload = in->buf->in_file;
+        if (ngx_http_markdown_streaming_copy_needs_control_storage(in->buf)) {
+            b = controls++;
+        }
+        /* Durable controls do not participate in owner collection. */
+        entry->file_payload = (b == &entry->buf && in->buf->in_file);
         /* A file-backed buffer cannot be deep-cloned by copying payload
          * bytes (the data lives in the file, not in pos..last).  The
          * ngx_file_t reference is owned by the original producer, but

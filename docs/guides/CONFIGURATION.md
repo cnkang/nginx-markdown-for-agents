@@ -133,7 +133,10 @@ After a streaming response switches to pass-through, queued body copies use
 reusable storage. The module applies `streaming_buffer` to this retained
 storage, including chain and buffer metadata. It reuses a copy only after
 the downstream filter consumes its memory and file ranges. This limit bounds
-resident copies rather than cumulative response bytes. If the next copy
+resident copies rather than cumulative response bytes. Zero-length control
+buffers keep separate metadata until the request ends because empty ranges
+cannot confirm downstream consumption. This metadata also counts toward the
+limit. If the next copy
 would exceed the limit, the module returns an error before consuming that
 input. A response whose headers were already sent cannot change its status.
 

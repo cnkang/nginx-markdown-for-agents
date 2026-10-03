@@ -8146,6 +8146,149 @@ copy_test_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     return g_copy_test_rc;
 }
 
+/* Postpone filters copy links but retain control buffers after NGX_OK. */
+static void
+test_failopen_control_metadata_retained(ngx_flag_t file_backed,
+    ngx_int_t downstream_rc)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t bufs[3] = {0};
+    ngx_chain_t links[3] = {0};
+    ngx_buf_t *held;
+    ngx_buf_t *held_sync;
+    ngx_buf_t *later;
+    u_char payload[256] = {0};
+    ngx_int_t rc;
+    size_t control_bytes;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    ctx.headers_forwarded = 1;
+    bufs[0].memory = 1;
+    bufs[0].pos = payload;
+    bufs[0].last = payload + 8;
+    bufs[1].flush = 1;
+    bufs[1].in_file = file_backed;
+    links[0].buf = &bufs[0];
+    links[0].next = &links[1];
+    links[1].buf = &bufs[1];
+    links[1].next = &links[2];
+    bufs[2].sync = 1;
+    links[2].buf = &bufs[2];
+    g_copy_test_rc = downstream_rc;
+    g_copy_test_consume = 0;
+    ngx_http_next_body_filter = copy_test_body_filter;
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, links);
+    TEST_ASSERT(rc == downstream_rc && g_copy_test_held->next != NULL,
+        "mixed payload and control input must reach the retaining filter");
+    held = g_copy_test_held->next->buf;
+    held_sync = g_copy_test_held->next->next->buf;
+    TEST_ASSERT(held_sync == held + 1 && held_sync->sync
+                && !held_sync->flush,
+        "multiple controls must have disjoint stable buffer metadata");
+    TEST_ASSERT(held->flush && held->in_file == file_backed,
+        "memory and file control flags must survive the initial handoff");
+    g_copy_test_rc = NGX_OK;
+    g_copy_test_consume = 1;
+    if (downstream_rc == NGX_AGAIN) {
+        rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+        TEST_ASSERT(rc == NGX_OK && ctx.streaming.pending_output == NULL,
+            "backpressured mixed input must resume through NULL");
+    } else {
+        g_copy_test_held->buf->pos = g_copy_test_held->buf->last;
+        ngx_http_markdown_streaming_copy_collect(&ctx);
+    }
+    TEST_ASSERT(!ctx.streaming.pending_input.copies.head->active,
+        "consumed payload storage must remain reusable beside controls");
+    TEST_ASSERT(ctx.streaming.pending_input.copies.control_bytes
+                == 2 * sizeof(ngx_buf_t),
+        "request-lifetime control metadata must count toward the budget");
+
+    links[0].next = NULL;
+    links[1].next = NULL;
+    bufs[0].pos = payload;
+    bufs[0].last = payload + sizeof(payload);
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, links);
+    TEST_ASSERT(rc == NGX_OK && held->flush && !held->sync
+                && held->in_file == file_backed && held_sync->sync,
+        "growing payload storage must not free retained control metadata");
+    bufs[1].flush = 0;
+    bufs[1].sync = 1;
+    bufs[1].in_file = 0;
+    g_copy_test_consume = 0;
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, &links[1]);
+    TEST_ASSERT(rc == NGX_OK && g_copy_test_held->buf != held,
+        "subsequent controls must receive independent stable metadata");
+    later = g_copy_test_held->buf;
+    TEST_ASSERT(held->flush && !held->sync && later->sync && !later->flush
+                && held_sync->sync && !held_sync->flush,
+        "reusing payload owners must not overwrite earlier control flags");
+    control_bytes = ctx.streaming.pending_input.copies.control_bytes;
+    conf.limits.streaming_buffer = control_bytes
+        + sizeof(ngx_http_markdown_failopen_copy_t)
+        + sizeof(ngx_http_markdown_failopen_entry_t);
+    rc = ngx_http_markdown_streaming_continue_failopen_input(
+        &r, &ctx, &conf, &links[1]);
+    TEST_ASSERT(rc == NGX_ERROR
+                && ctx.streaming.pending_input.copies.control_bytes
+                   == control_bytes && held->flush && later->sync,
+        "control metadata must fail closed at the shared resident budget");
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
+    TEST_ASSERT(ctx.streaming.pending_input.copies.control_bytes == 0,
+        "request teardown must clear the control storage accounting");
+    free(held);
+    free(later);
+    g_copy_test_held = NULL;
+    ngx_http_next_body_filter = ngx_http_next_body_filter_stub;
+    TEST_PASS("retained controls survive payload owner growth and reuse");
+}
+
+/* Failed control allocation must leave the reusable owner unsubmitted. */
+static void
+test_failopen_control_allocation_failure(void)
+{
+    ngx_http_request_t r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t pool;
+    ngx_connection_t conn;
+    ngx_log_t log;
+    ngx_event_t event;
+    ngx_buf_t buf = {0};
+    ngx_chain_t in = {0};
+    ngx_chain_t *copy;
+    ngx_buf_t *control;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &event);
+    buf.flush = 1;
+    in.buf = &buf;
+    g_pcalloc_fail_once = 1;
+    copy = ngx_http_markdown_streaming_clone_chain_deep(&r, &ctx, &conf, &in);
+    TEST_ASSERT(copy == NULL
+                && ctx.streaming.pending_input.copies.control_bytes == 0
+                && !ctx.streaming.pending_input.copies.head->active,
+        "failed control allocation must not reserve metadata or live output");
+    copy = ngx_http_markdown_streaming_clone_chain_deep(&r, &ctx, &conf, &in);
+    TEST_ASSERT(copy != NULL && copy->buf->flush
+                && ctx.streaming.pending_input.copies.control_bytes
+                   == sizeof(ngx_buf_t),
+        "retry must reuse the owner and account successful control storage");
+    control = copy->buf;
+    ngx_http_markdown_streaming_copy_cleanup(&ctx);
+    free(control);
+    TEST_PASS("control allocation failure leaves safe reusable storage");
+}
+
 /* Response length can exceed the resident budget without retaining copies. */
 static void
 test_failopen_copy_and_queue_storage_reused_after_drain(void)
@@ -8400,6 +8543,11 @@ main(void)
     test_finalize_pending_result_keeps_buffered_liveness();
     test_clone_chain_deep_rebases_bounds_and_drops_source_ownership();
     test_failopen_copy_multiple_memory_ranges();
+    test_failopen_control_metadata_retained(0, NGX_OK);
+    test_failopen_control_metadata_retained(1, NGX_OK);
+    test_failopen_control_metadata_retained(0, NGX_AGAIN);
+    test_failopen_control_metadata_retained(1, NGX_AGAIN);
+    test_failopen_control_allocation_failure();
     test_failopen_copy_and_queue_storage_reused_after_drain();
     test_failopen_copy_retention_and_budget();
     test_failopen_copy_allocation_failure_and_cleanup();
