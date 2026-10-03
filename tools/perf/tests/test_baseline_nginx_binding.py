@@ -29,7 +29,8 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-packages.yml"
 BASELINE_DIR = REPO_ROOT / "perf" / "baselines"
 
 _spec = importlib.util.spec_from_file_location("baseline_nginx_version", RESOLVER)
-assert _spec and _spec.loader
+assert _spec is not None, f"cannot load a spec for {RESOLVER}"
+assert _spec.loader is not None, f"no loader for {RESOLVER}"
 resolver = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(resolver)
 
@@ -63,7 +64,8 @@ def test_baselines_disagreeing_fail_and_name_both_versions(tmp_path: pathlib.Pat
         resolver.resolve(tmp_path, "module-baseline-*.json")
 
     message = str(excinfo.value)
-    assert "1.24.0" in message and "1.30.4" in message, message
+    assert "1.24.0" in message, f"the message omits one version: {message}"
+    assert "1.30.4" in message, f"the message omits one version: {message}"
 
 
 def test_an_unreadable_baseline_is_ignored_not_fatal(tmp_path: pathlib.Path) -> None:
@@ -115,9 +117,10 @@ def _benchmark_step_body() -> str:
         for step in job.get("steps") or []:
             if step.get("name") == "Determine canonical benchmark NGINX version":
                 body = step.get("run")
-    assert isinstance(body, str) and body.strip(), (
-        "could not find the benchmark-version step body in the workflow"
+    assert isinstance(body, str), (
+        f"the benchmark-version step has no run body: {body!r}"
     )
+    assert body.strip(), "the benchmark-version step body is empty"
     assert "baseline_nginx_version.py" in body, (
         "the extracted step body has no resolver call; the workflow changed "
         "shape and these tests would run the wrong script"
@@ -163,9 +166,9 @@ def test_the_benchmark_step_rejects_an_unusable_baseline_version(
     assert result.returncode != 0, (
         "the step must not benchmark a version the baselines do not describe"
     )
-    assert not (tmp_path / "out.txt").exists() or not (
-        tmp_path / "out.txt"
-    ).read_text().strip(), "no benchmark version may be selected"
+    selected_file = tmp_path / "out.txt"
+    wrote_anything = selected_file.exists() and selected_file.read_text().strip()
+    assert not wrote_anything, "no benchmark version may be selected"
 
 
 def test_the_benchmark_step_rejects_an_unresolvable_baseline(
