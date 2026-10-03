@@ -57,6 +57,15 @@ CURRENT_BUILD_DOCS = (
 )
 EXACT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 ACTION_TOOLCHAIN_RE = re.compile(r"^\s*toolchain:\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
+# The stable channel is no longer written into the workflows: they call the local
+# composite action, which resolves rust-toolchain.toml and hands the result to
+# dtolnay/rust-toolchain. A workflow that calls it therefore still declares the
+# exact channel -- indirectly, and from the same single source this check reads.
+# The leading `-` is legal YAML: a step may be written `- uses: ...` instead of
+# putting the dash on a preceding `- name:` line.
+RESOLVER_ACTION_USES_RE = re.compile(
+    r"^\s*(?:-\s*)?uses:\s*\./\.github/actions/setup-rust\s*$", re.MULTILINE
+)
 RELEASE_TOOLCHAIN_RE = re.compile(
     r"^\s*RUST_TOOLCHAIN:\s*['\"]?([^'\"\s#]+)", re.MULTILINE
 )
@@ -127,6 +136,10 @@ def _check_workflow_group(
         if content is None:
             continue
         versions = pattern.findall(content)
+        if expected != "nightly" and RESOLVER_ACTION_USES_RE.search(content):
+            # Declared through the resolver, which pins the same channel. Any
+            # literal that remains is checked against `expected` below.
+            versions = list(versions) + [expected]
         if not versions:
             errors.append(f"{relative_path}: missing required {label} declaration")
             continue
@@ -160,10 +173,16 @@ def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> N
     """Observation workflows use the exact channel, plus optional nightly."""
     for relative_path in OBSERVATION_ACTION_WORKFLOWS:
         content = _read_text(root, relative_path, errors)
-        if content is not None:
-            _check_observation_versions(
-                relative_path, ACTION_TOOLCHAIN_RE.findall(content), exact, errors
-            )
+        if content is None:
+            continue
+        versions = ACTION_TOOLCHAIN_RE.findall(content)
+        if RESOLVER_ACTION_USES_RE.search(content):
+            # The stable channel comes from the resolver, which reads
+            # rust-toolchain.toml -- the same source `exact` came from. Any
+            # literal here is a channel set on its own (the fuzz job), and
+            # _check_observation_versions still holds it to exact-or-nightly.
+            versions = list(versions) + [exact]
+        _check_observation_versions(relative_path, versions, exact, errors)
 
 
 RUST_IMAGE_RE = re.compile(r"(?<![\w.-])rust:([A-Za-z0-9._${}-]+)")
@@ -531,7 +550,14 @@ def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
         content = _read_text(root, relative_path, errors)
         if content is None:
             continue
-        installs_rust = "dtolnay/rust-toolchain" in content or "RUST_TOOLCHAIN:" in content
+        # The resolver action is now a third way to install Rust. Without it
+        # here, a new workflow that installs through the composite action alone
+        # would look unclassified and escape this check.
+        installs_rust = (
+            "dtolnay/rust-toolchain" in content
+            or "RUST_TOOLCHAIN:" in content
+            or RESOLVER_ACTION_USES_RE.search(content) is not None
+        )
         if installs_rust and relative_path not in known:
             errors.append(
                 f"{relative_path}: Rust-installing workflow is not classified by "
