@@ -70,6 +70,78 @@ def test_action_reads_the_channel_instead_of_pinning_one():
     assert "steps.read.outputs.channel" in toolchain, toolchain
 
 
+def _resolver_with_manifest(tmp_path, manifest: str) -> subprocess.CompletedProcess:
+    """Run the resolver against a manifest we control, not the repo's."""
+    (tmp_path / "rust-toolchain.toml").write_text(manifest, encoding="utf-8")
+    script = tmp_path / "resolver.sh"
+    script.write_text(
+        RESOLVER.read_text(encoding="utf-8").replace(
+            'REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"',
+            f'REPO_ROOT="{tmp_path}"',
+        ),
+        encoding="utf-8",
+    )
+    return subprocess.run(["bash", str(script)], capture_output=True, text=True)
+
+
+@pytest.mark.parametrize(
+    "manifest, expected",
+    [
+        ('[toolchain]\nchannel = "1.98.1"\n', "1.98.1"),
+        # TOML allows single quotes; the resolver must not only accept the one
+        # spelling this repository happens to use.
+        ("[toolchain]\nchannel = '1.98.1'\n", "1.98.1"),
+        # A trailing comment is legal TOML.
+        ('[toolchain]\nchannel = "1.98.1" # stable\n', "1.98.1"),
+        # Leading whitespace and a component list after the channel.
+        ('[toolchain]\n  channel   =   "1.99.0"\nprofile = "minimal"\n', "1.99.0"),
+    ],
+    ids=["double-quoted", "single-quoted", "with-comment", "extra-whitespace"],
+)
+def test_resolver_accepts_valid_toml_spellings(tmp_path, manifest, expected):
+    result = _resolver_with_manifest(tmp_path, manifest)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+@pytest.mark.parametrize(
+    "manifest, reason",
+    [
+        ('[toolchain]\nchannel = "nightly-2026-09-21"\n', "a dated nightly"),
+        ('[toolchain]\nchannel = "stable"\n', "a floating channel"),
+        ('[toolchain]\nchannel = "beta"\n', "a pre-release channel"),
+        ('[toolchain]\nchannel = "1.98"\n', "a two-component version"),
+        ('[toolchain]\nchannel = "path/to/toolchain"\n', "a path"),
+    ],
+    ids=["nightly", "stable", "beta", "two-component", "path"],
+)
+def test_resolver_refuses_anything_but_a_stable_version(tmp_path, manifest, reason):
+    """A non-stable channel here would build the stable pipeline on the wrong
+    toolchain without saying so. The fuzz path pins its own nightly and does not
+    come through this script, so nothing legitimate is rejected."""
+    result = _resolver_with_manifest(tmp_path, manifest)
+    assert result.returncode != 0, (
+        f"the resolver accepted {reason}: {result.stdout.strip()!r}"
+    )
+    assert "not a stable version" in result.stderr, result.stderr
+
+
+def test_resolver_does_not_die_on_sigpipe_from_head(tmp_path):
+    """`sed | head -1` can hand sed a SIGPIPE under `pipefail`.
+
+    The real manifest is four lines so it never triggers, but a repo that grows
+    the file would see the resolver start failing for an unrelated reason.
+    """
+    manifest = "[toolchain]\n" + "".join(
+        f'# filler line {n}\n' for n in range(500)
+    ) + 'channel = "1.98.1"\n'
+    result = _resolver_with_manifest(tmp_path, manifest)
+    assert result.returncode == 0, (
+        f"a large manifest broke the resolver: {result.stderr}"
+    )
+    assert result.stdout.strip() == "1.98.1"
+
+
 def test_action_script_path_resolves_from_the_action_directory():
     """The literal ../ count was wrong by one, and no other test could see it.
 
