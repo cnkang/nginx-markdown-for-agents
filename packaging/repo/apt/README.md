@@ -1,5 +1,7 @@
 # nginx-markdown-for-agents APT Repository
 
+> v0.9.2 was published on 2026-10-03. Use release-tag downloads.
+
 This is the APT package repository for `nginx-module-markdown-for-agents`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal
 clients.
@@ -229,7 +231,7 @@ gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 **Canonical release verification**: for the published release, download the
 exact versioned GitHub Release artifact first, verify the release signature
 over `SHA256SUMS.asc`, then check the downloaded artifacts against the
-checksums file — all in the same directory. The example below uses the v0.9.2
+checksums file — all in the same directory. The example below uses the published v0.9.2
 release assets. Asset names follow the canonical
 `nginx-module-markdown-for-agents_<ver>_nginx-<nginx-ver>_<arch>.deb` form —
 list the exact names with `gh release view v0.9.2 --json assets`:

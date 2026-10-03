@@ -29,6 +29,153 @@ typedef struct {
 } ngx_http_markdown_pending_terminal_t;
 
 
+typedef struct {
+    ngx_chain_t  chain;
+    ngx_buf_t    buf;
+    ngx_flag_t   memory_payload;
+    ngx_flag_t   file_payload;
+} ngx_http_markdown_failopen_entry_t;
+
+typedef struct ngx_http_markdown_failopen_copy_s {
+    struct ngx_http_markdown_failopen_copy_s *next;
+    size_t                                   size;
+    size_t                                   count;
+    ngx_flag_t                               active;
+    ngx_http_markdown_failopen_entry_t        entries[];
+} ngx_http_markdown_failopen_copy_t;
+
+/* Pool cleanup owns the allocation list, never downstream chain topology. */
+static void
+ngx_http_markdown_streaming_copy_cleanup(void *data)
+{
+    ngx_http_markdown_ctx_t *ctx = data;
+
+    while (ctx->streaming.pending_input.copies.head != NULL) {
+        ngx_http_markdown_failopen_copy_t *copy =
+            ctx->streaming.pending_input.copies.head;
+
+        ctx->streaming.pending_input.copies.head = copy->next;
+        ngx_free(copy);
+    }
+    ctx->streaming.pending_input.copies.bytes = 0;
+    ctx->streaming.pending_input.copies.control_bytes = 0;
+}
+
+/* Empty ranges cannot signal when downstream releases control metadata. */
+static ngx_flag_t
+ngx_http_markdown_streaming_copy_needs_control_storage(const ngx_buf_t *buf)
+{
+    if (buf->in_file) {
+        return buf->file_pos == buf->file_last;
+    }
+    return ngx_http_markdown_buf_len_safe(buf) == 0;
+}
+
+/* NGX_OK alone does not mean that every buffer has been consumed. */
+static void
+ngx_http_markdown_streaming_copy_collect(ngx_http_markdown_ctx_t *ctx)
+{
+    size_t i;
+
+    for (ngx_http_markdown_failopen_copy_t *copy =
+             ctx->streaming.pending_input.copies.head;
+         copy != NULL; copy = copy->next)
+    {
+        const ngx_http_markdown_failopen_entry_t *entry = copy->entries;
+
+        if (!copy->active) {
+            continue;
+        }
+        for (i = 0; i < copy->count; i++) {
+            if ((entry[i].memory_payload
+                 && entry[i].buf.pos != entry[i].buf.last)
+                || (entry[i].file_payload
+                    && entry[i].buf.file_pos != entry[i].buf.file_last))
+            {
+                break;
+            }
+        }
+        if (i == copy->count) {
+            copy->active = 0;
+        }
+    }
+}
+
+/* Reuse consumed storage; the budget covers metadata as well as payload. */
+static ngx_http_markdown_failopen_copy_t *
+ngx_http_markdown_streaming_copy_acquire(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    size_t size, size_t limit)
+{
+    ngx_http_markdown_failopen_copy_t  *copy;
+    ngx_http_markdown_failopen_copy_t **slot;
+    ngx_pool_cleanup_t                *cln;
+
+    if (size > limit) {
+        return NULL;
+    }
+    if (!ctx->streaming.pending_input.copies.cleanup_registered) {
+        cln = ngx_pool_cleanup_add(r->pool, 0);
+        if (cln == NULL) {
+            return NULL;
+        }
+        cln->handler = ngx_http_markdown_streaming_copy_cleanup;
+        cln->data = ctx;
+        ctx->streaming.pending_input.copies.cleanup_registered = 1;
+    }
+    ngx_http_markdown_streaming_copy_collect(ctx);
+    for (copy = ctx->streaming.pending_input.copies.head; copy != NULL;
+         copy = copy->next)
+    {
+        if (!copy->active && copy->size >= size
+            && ctx->streaming.pending_input.copies.bytes <= limit) {
+            copy->active = 1;
+            return copy;
+        }
+    }
+    slot = &ctx->streaming.pending_input.copies.head;
+    while (*slot != NULL) {
+        copy = *slot;
+        if (copy->active) {
+            slot = &copy->next;
+            continue;
+        }
+        *slot = copy->next;
+        ctx->streaming.pending_input.copies.bytes -= copy->size;
+        ngx_free(copy);
+    }
+    if (ctx->streaming.pending_input.copies.bytes > limit - size) {
+        return NULL;
+    }
+    copy = ngx_alloc(size, r->connection->log);
+    if (copy == NULL) {
+        return NULL;
+    }
+    copy->next = ctx->streaming.pending_input.copies.head;
+    copy->size = size;
+    copy->count = 0;
+    copy->active = 1;
+    ctx->streaming.pending_input.copies.head = copy;
+    ctx->streaming.pending_input.copies.bytes += size;
+    return copy;
+}
+
+/* Queued input links are module-owned and can be reused after cloning. */
+static void
+ngx_http_markdown_streaming_recycle_input(
+    ngx_http_markdown_ctx_t *ctx, ngx_chain_t *chain)
+{
+    ngx_chain_t *next;
+
+    while (chain != NULL) {
+        next = chain->next;
+        chain->buf = NULL;
+        chain->next = ctx->streaming.pending_input.free;
+        ctx->streaming.pending_input.free = chain;
+        chain = next;
+    }
+}
+
 /* Forward declarations */
 static ngx_flag_t ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc);
 static void ngx_http_markdown_streaming_record_send_delivery(
@@ -1101,8 +1248,14 @@ ngx_http_markdown_streaming_pending_input_enqueue_remainder(
             continue;
         }
 
-        link = ngx_alloc_chain_link(r->pool);
+        link = ctx->streaming.pending_input.free;
+        if (link != NULL) {
+            ctx->streaming.pending_input.free = link->next;
+        } else {
+            link = ngx_alloc_chain_link(r->pool);
+        }
         if (link == NULL) {
+            ngx_http_markdown_streaming_recycle_input(ctx, head);
             if (out_error_code != NULL) {
                 *out_error_code = ERROR_MEMORY_LIMIT;
             }
@@ -1916,6 +2069,7 @@ ngx_http_markdown_streaming_resume_pending(
 
     /* Backpressure resume: pending drain completed */
     if (ngx_http_markdown_streaming_delivery_ok(rc)) {
+        ngx_http_markdown_streaming_copy_collect(ctx);
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
@@ -4033,29 +4187,6 @@ ngx_http_markdown_streaming_init_handle(
 
 
 /*
- * Forward original upstream bytes after a Pre-Commit streaming fail-open.
- *
- * The replay buffer contains a copy of all original upstream bytes consumed
- * during Pre-Commit.  On fail-open, we build an output chain from the
- * replay buffer data (module-owned memory) plus the current unconsumed
- * input chain, then forward it downstream.
- *
- * This approach avoids depending on upstream ngx_buf_t* pointer stability
- * across filter chain invocations, which is fragile in complex filter
- * chains, temporary buffer, compression, or subrequest scenarios.
- *
- * On NGX_AGAIN from the downstream filter, the output chain is saved as
- * ctx->streaming.pending_output and the request buffered flag is set,
- * consistent with send_output()'s backpressure contract (Rule 1).
- * resume_pending() will re-submit the chain when downstream is writable.
- *
- * Returns:
- *   NGX_OK/NGX_AGAIN/NGX_DONE - status from the downstream body filter
- *   NGX_ERROR                  - allocation or header-forwarding failure
- */
-
-
-/*
  * Clone chain link structures into request pool memory.
  *
  * Each link is newly allocated; the buf pointer is copied (shared)
@@ -4068,10 +4199,9 @@ ngx_http_markdown_streaming_init_handle(
  * body filter's transient input), but still shares the underlying
  * ngx_buf_t.  In the NGINX filter chain, the buf data is typically
  * stable within a request (pool-allocated by upstream or copy
- * filter), making shared bufs safe for pending chains.  If a future
- * filter chain configuration introduces transient buf data that is
- * invalidated between body_filter invocations, upgrade this to
- * clone_chain_deep() which also copies buf data into request pool.
+ * filter).  Queued continuation input uses clone_chain_deep() instead:
+ * it copies payload and metadata into bounded reusable storage, with
+ * separate pool-lifetime metadata for empty control buffers.
  *
  * Returns the head of the cloned chain, or NULL on allocation failure.
  */
@@ -4098,15 +4228,52 @@ ngx_http_markdown_streaming_clone_chain_links(
     return head;
 }
 
+/* Size heap payload owners and durable control metadata before allocation. */
+static ngx_int_t
+ngx_http_markdown_streaming_copy_layout(ngx_chain_t *in, size_t limit,
+    size_t *size, size_t *count, size_t *control_size)
+{
+    size_t len;
+
+    *size = sizeof(ngx_http_markdown_failopen_copy_t);
+    *count = 0;
+    *control_size = 0;
+    for (; in != NULL; in = in->next) {
+        if (in->buf == NULL) {
+            continue;
+        }
+        len = in->buf->in_file ? 0 : ngx_http_markdown_buf_len_safe(in->buf);
+        if (*size > limit
+            || sizeof(ngx_http_markdown_failopen_entry_t) > limit - *size)
+        {
+            return NGX_ERROR;
+        }
+        *size += sizeof(ngx_http_markdown_failopen_entry_t);
+        if (len > limit - *size) {
+            return NGX_ERROR;
+        }
+        *size += len;
+        if (ngx_http_markdown_streaming_copy_needs_control_storage(in->buf)) {
+            if (sizeof(ngx_buf_t) > limit - *size) {
+                return NGX_ERROR;
+            }
+            *size += sizeof(ngx_buf_t);
+            *control_size += sizeof(ngx_buf_t);
+        }
+        (*count)++;
+    }
+    return *count != 0 ? NGX_OK : NGX_ERROR;
+}
+
 /*
- * Deep-clone a chain into request pool memory: each link AND its
- * ngx_buf_t are newly allocated, and the buf data (pos..last) is copied
- * into request-pool memory.  The clone therefore has INDEPENDENT pos/last
+ * Deep-clone chain links, payload buffers and data into reusable storage.
+ * Empty control buffers use separate request-pool metadata because their
+ * ranges cannot signal consumption.  The clone has INDEPENDENT pos/last
  * pointers, so advancing pos on the original chain (abandon_input) can
  * never corrupt a pending_output that references the clone.
  *
  * Terminal flags (last_buf / last_in_chain) and the memory flag are
- * preserved.  Payload buffers (pos < last) are copied into pool memory
+ * preserved.  Payload buffers (pos < last) are copied into owned memory
  * and are memory-backed; zero-length buffers keep VALID shared bounds
  * (pos == last) and control sentinels (NULL pos/last) stay non-memory,
  * so downstream sizing logic never sees invalid bounds.
@@ -4116,25 +4283,71 @@ ngx_http_markdown_streaming_clone_chain_links(
 static ngx_chain_t *
 ngx_http_markdown_streaming_clone_chain_deep(
     ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in)
 {
     ngx_chain_t  *head = NULL;
     ngx_chain_t  **tail = &head;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
+    size_t        count;
+    size_t        size;
+    size_t        control_size;
+    size_t        limit;
+    size_t        index = 0;
+    u_char       *payload;
+    ngx_buf_t    *controls = NULL;
+    ngx_http_markdown_failopen_copy_t  *copy;
+    ngx_http_markdown_failopen_entry_t *entry;
+
+    limit = ctx->effective_conf != NULL
+        ? ctx->effective_conf->streaming_buffer : conf->limits.streaming_buffer;
+    if (ngx_http_markdown_streaming_copy_layout(
+            in, limit, &size, &count, &control_size) != NGX_OK)
+    {
+        return NULL;
+    }
+    if (ctx->streaming.pending_input.copies.control_bytes > limit
+        || control_size > limit
+            - ctx->streaming.pending_input.copies.control_bytes)
+    {
+        return NULL;
+    }
+    limit -= ctx->streaming.pending_input.copies.control_bytes + control_size;
+    copy = ngx_http_markdown_streaming_copy_acquire(
+        r, ctx, size - control_size, limit);
+    if (copy == NULL) {
+        return NULL;
+    }
+    if (control_size != 0) {
+        /* Postpone filters may retain these after NGX_OK.  Pool lifetime
+         * keeps their flags stable while payload owners remain reusable. */
+        controls = ngx_pcalloc(r->pool, control_size);
+        if (controls == NULL) {
+            copy->count = 0;
+            copy->active = 0;
+            return NULL;
+        }
+        ctx->streaming.pending_input.copies.control_bytes += control_size;
+    }
+    copy->count = count;
+    entry = copy->entries;
+    ngx_memzero(entry, count * sizeof(*entry));
+    payload = (u_char *) &copy->entries[count];
 
     for (; in != NULL; in = in->next) {
         if (in->buf == NULL) {
             continue;
         }
-        cl = ngx_alloc_chain_link(r->pool);
-        if (cl == NULL) {
-            return NULL;
+        entry = &copy->entries[index++];
+        cl = &entry->chain;
+        b = &entry->buf;
+        if (ngx_http_markdown_streaming_copy_needs_control_storage(in->buf)) {
+            b = controls++;
         }
-        b = ngx_calloc_buf(r->pool);
-        if (b == NULL) {
-            return NULL;
-        }
+        /* Durable controls do not participate in owner collection. */
+        entry->file_payload = (b == &entry->buf && in->buf->in_file);
         /* A file-backed buffer cannot be deep-cloned by copying payload
          * bytes (the data lives in the file, not in pos..last).  The
          * ngx_file_t reference is owned by the original producer, but
@@ -4181,29 +4394,15 @@ ngx_http_markdown_streaming_clone_chain_deep(
         if (in->buf->pos != NULL && in->buf->last != NULL
             && in->buf->last > in->buf->pos)
         {
-            b->pos = ngx_pnalloc(r->pool, in->buf->last - in->buf->pos);
-            if (b->pos == NULL) {
-                return NULL;
-            }
+            b->pos = payload;
+            entry->memory_payload = 1;
+            payload += in->buf->last - in->buf->pos;
             ngx_memcpy(b->pos, in->buf->pos, in->buf->last - in->buf->pos);
             b->last = b->pos + (in->buf->last - in->buf->pos);
             /* Payload bytes were copied: the clone is memory-backed. */
             b->memory = 1;
-            /*
-             * Carry the source's `temporary` bit forward instead of forcing
-             * it.  `temporary` is a downstream *behavior* hint ("this
-             * content may still be rewritten"), not an ownership marker:
-             * the clone already owns independent pool storage, so it is
-             * writable either way, and the only consumer that branches on
-             * the flag is the writer/filter chain deciding whether it may
-             * mutate bytes in place.  Forcing temporary=1 would invite a
-             * downstream filter to rewrite a clone whose bytes can still be
-             * shared with a retained sibling buffer (the fail-open clone
-             * shares ngx_buf_t metadata with the upstream chain); forcing 0
-             * would needlessly block legitimate in-place rewriting.  The
-             * source flag is the accurate answer in both directions, so it
-             * is preserved verbatim rather than re-derived from the copy.
-             */
+            /* Preserve the source's downstream rewrite permission;
+             * allocator ownership is tracked separately in the copy list. */
             b->temporary = in->buf->temporary;
         } else if (in->buf->pos != NULL && in->buf->last != NULL
                    && in->buf->last == in->buf->pos)
@@ -4227,7 +4426,7 @@ ngx_http_markdown_streaming_clone_chain_deep(
         b->sync = in->buf->sync;
         /* Preserve only metadata that describes the request-level
          * relationship, not the source storage layout.  The clone owns
-         * freshly allocated storage, so its bounds must be rebased onto
+         * owned storage, so its bounds must be rebased onto
          * that allocation; copying the source start/end would break the
          * start <= pos <= last <= end invariant because those pointers
          * refer to the ORIGINAL arena.  mmap/recycled/last_shadow/
@@ -4383,6 +4582,19 @@ static void
 ngx_http_markdown_streaming_failopen_mark_chain_forwarded(
     ngx_http_markdown_ctx_t *ctx);
 
+/*
+ * Forward pre-commit replay bytes plus the current unconsumed input.
+ * The replay buffer owns earlier source bytes; cloned links preserve
+ * the current input's buffer references for downstream consumption.
+ *
+ * On NGX_AGAIN, send_failopen_chain() retains the submitted chain as
+ * downstream-owned pending output.  resume_pending() calls downstream
+ * with NULL to drain it; resubmitting that chain would duplicate bytes.
+ * Later input waits in the bounded, independently owned continuation queue.
+ *
+ * Returns NGX_OK, NGX_AGAIN, or NGX_DONE from downstream, or NGX_ERROR
+ * on allocation or header-forwarding failure.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r,
@@ -4846,6 +5058,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_continue_failopen_input(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *input_chain)
 {
     ngx_flag_t    last_buf;
@@ -4862,7 +5075,7 @@ ngx_http_markdown_streaming_continue_failopen_input(
         }
     }
 
-    /* Deep-clone the chain into request-pool memory before handing off:
+    /* Deep-clone into bounded, reusable storage before handing off:
      * body-filter input links are transient (owned by the filter chain
      * invocation), and send_failopen_chain stores the chain as
      * pending_output on NGX_AGAIN, which outlives this invocation.  The
@@ -4875,7 +5088,8 @@ ngx_http_markdown_streaming_continue_failopen_input(
     {
         ngx_chain_t  *cloned;
 
-        cloned = ngx_http_markdown_streaming_clone_chain_deep(r, input_chain);
+        cloned = ngx_http_markdown_streaming_clone_chain_deep(
+            r, ctx, conf, input_chain);
         if (cloned == NULL && input_chain != NULL) {
             return NGX_ERROR;
         }
@@ -4898,6 +5112,7 @@ ngx_http_markdown_streaming_continue_failopen_input(
     }
 
     ngx_http_markdown_streaming_abandon_input(original_chain);
+    ngx_http_markdown_streaming_copy_collect(ctx);
     if (last_buf) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
         /*
@@ -5107,8 +5322,10 @@ ngx_http_markdown_streaming_handle_null_input_pending(
     ctx->streaming.pending_input.bytes = 0;
     ctx->streaming.pending_input.links = 0;
     if (ctx->streaming.completion.failopen_active) {
-        return ngx_http_markdown_streaming_continue_failopen_input(
-            r, ctx, input_chain);
+        rc = ngx_http_markdown_streaming_continue_failopen_input(
+            r, ctx, conf, input_chain);
+        ngx_http_markdown_streaming_recycle_input(ctx, input_chain);
+        return rc;
     }
     rc = ngx_http_markdown_streaming_process_chain(
         r, ctx, conf, input_chain, &last_buf, &fallback_cl);
@@ -5872,7 +6089,7 @@ ngx_http_markdown_streaming_body_filter(
         }
         if (ctx->streaming.completion.failopen_active) {
             return ngx_http_markdown_streaming_continue_failopen_input(
-                r, ctx, in);
+                r, ctx, conf, in);
         }
         return NGX_OK;
     }

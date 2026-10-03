@@ -1219,6 +1219,18 @@ def _v092_is_pending() -> bool:
     )
 
 
+def _v092_release_date() -> str:
+    """Return the 0.9.2 date from the CHANGELOG heading.
+
+    The published date moves whenever the release is re-finalized, so pinning a
+    literal here made an ordinary date correction fail this suite.
+    """
+    changelog = (docs_checker.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    match = re.search(r"^## \[0\.9\.2\] - (\d{4}-\d{2}-\d{2})\s*$", changelog, re.M)
+    assert match is not None, "CHANGELOG has no dated 0.9.2 heading"
+    return match.group(1)
+
+
 def test_v092_pending_helper_handles_missing_changelog(tmp_path, monkeypatch):
     """A missing changelog means the v0.9.2 release is not pending."""
     monkeypatch.setattr(docs_checker, "ROOT", tmp_path)
@@ -1321,7 +1333,7 @@ def test_implementation_plan_scopes_historical_pending_labels():
     if pending:
         assert "WI-8 publication section below show the current state" in intro
     else:
-        assert "0.9.2 shipped on 2026-10-02" in intro
+        assert f"0.9.2 shipped on {_v092_release_date()}" in intro
     published_word_present = any(
         word in intro.lower() for word in ("published", "released")
     )

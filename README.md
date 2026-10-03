@@ -7,9 +7,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current line: v0.9.2 shipped on 2026-10-02 as the latest public stable
-> release. It is the final breaking release before v1.0. The v0.9.2 tag,
-> package assets, and checksums are on the project's GitHub Releases page.
+> Current development line: v0.9.2, with a target release date of 2026-10-03.
+> It is the final planned breaking release before v1.0. v0.9.1 remains the
+> latest published stable release. Use v0.9.2 package downloads after publication.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
 HTML pages that you already serve. Clients that send `Accept: text/markdown`
@@ -46,10 +46,15 @@ brew tap cnkang/nginx-markdown
 brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
+Dynamic modules must match the exact NGINX version they load into. Check
+`nginx -v` before selecting a package or building from source.
+
 ### 2. Enable Markdown on a location
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
+
+events {}
 
 http {
     upstream backend {
@@ -83,15 +88,10 @@ when the result differs.
 
 ## 0.9.2 configuration essentials
 
-0.9.2 freezes the public configuration at 20 active directives. The seven
-highlighted retired names (a commonly used subset: five convergence names plus
-`markdown_profile` and `markdown_streaming_zero_copy`) are no longer registered
-and fail `nginx -t` with
-NGINX's standard `unknown directive` error. This list is a subset: see
-[CHANGELOG.md](CHANGELOG.md) for the complete removal inventory (14 removed
-active directives, 19 deleted migration stubs, 5 directives folded into
-`markdown_limits`, and 5 convergence removals). Configure the
-behavior explicitly so `nginx -T` shows the settings that operators selected.
+0.9.2 freezes the public configuration at 20 active directives. Removed
+directives fail `nginx -t` with NGINX's standard `unknown directive` error.
+Use the [migration guide](docs/guides/MIGRATION-0.9.2.md) to replace them.
+Configure behavior explicitly so `nginx -T` shows your selected settings.
 
 ```nginx
 http {
@@ -113,10 +113,9 @@ http {
 ```
 
 - `markdown_streaming off` selects full-buffer conversion. `auto` prefers
-  streaming for every response that clears the eligibility gates. A response
-  that is eligible for conversion but cannot stream, the module converts with the
-  full-buffer engine instead, and it passes a response that is not eligible for
-  conversion through unchanged. `force` requests streaming after the same checks pass.
+  streaming for every response that clears the eligibility gates. Eligible
+  responses that cannot stream use the full-buffer engine. Ineligible responses
+  pass through unchanged. `force` requests streaming after the same checks pass.
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use
@@ -169,15 +168,10 @@ eligibility checks still apply.
 0.9.2 is a breaking release. Read the
 [release notes](docs/releases/0.9.2-release-notes.md) before upgrading.
 
-- 0.9.2 freezes 20 active directives. The seven highlighted retired names —
-  a commonly used subset of the removal inventory, spanning the five
-  convergence names plus `markdown_profile` and
-  `markdown_streaming_zero_copy` — are no longer registered, so `nginx -t`
-  reports NGINX's standard
-  `unknown directive` error and [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)
-  names the replacement for each. Profiles, OTel, per-path metrics, shadow
-  mode, and other removed legacy directives are no longer active. Run
-  `nginx -t` after migration.
+- Profiles, OTel, per-path metrics, shadow mode, and retired directives no
+  longer exist in the active configuration. The
+  [migration guide](docs/guides/MIGRATION-0.9.2.md) maps removed settings to
+  replacements. Run `nginx -t` after migration.
 - The convergence removed runtime dynamic configuration files, watchers,
   dry-run promotion, and last-known-good snapshots. Move desired values to static
   directives and apply them through a validated reload or restart.
@@ -281,6 +275,7 @@ installation-specific details.
 | Understand features | [Features index](docs/features/README.md), [Decompression](docs/features/DECOMPRESSION.md), [Streaming](docs/features/STREAMING_COMPATIBILITY.md) |
 | Understand architecture | [Architecture index](docs/architecture/README.md), [System Architecture](docs/architecture/SYSTEM_ARCHITECTURE.md) |
 | Validate or contribute | [Testing index](docs/testing/README.md), [Harness index](docs/harness/README.md) |
+| Contribute or report a vulnerability | [Contributing](CONTRIBUTING.md), [Security policy](SECURITY.md) |
 
 ## Development and validation
 
@@ -299,6 +294,16 @@ Documentation and repository-contract changes also require:
 make docs-check
 make harness-check
 ```
+
+Before submitting a change, run the complete local gate set and push profile:
+
+```bash
+make test-all
+make pre-push-check
+```
+
+`test-all` reports platform-dependent skips explicitly. Runtime E2E and
+coverage have separate targets: `test-all-e2e` and `test-all-coverage`.
 
 Runtime integration and native E2E checks require a real NGINX binary. Set
 `NGINX_BIN=/absolute/path/to/nginx` when NGINX is not on `PATH`. See the
@@ -330,6 +335,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 0.9.2 | 2026-10-03 | Update release target, simplify migration guidance, and document complete validation |
 | 0.9.2 | 2026-09-30 | Finalized the entry point for the v0.9.2 stable release (publication date and status). |
 | 0.9.2 | 2026-09-01 | Reorganized the entry point around the 0.9.2 contract and linked canonical guides. |
 

@@ -46,9 +46,10 @@
 //!
 //! # Safety
 //!
-//! All functions in this module are `unsafe` (either explicitly or by
-//! accepting raw pointers). Each function's `# Safety` doc section
-//! specifies the preconditions the C caller must uphold.
+//! Exports that dereference caller-provided pointers are `unsafe`. Their
+//! `# Safety` sections specify the preconditions the C caller must uphold.
+//! ABI accessors and handle creation are safe Rust entrypoints. Returned
+//! handles still require release through the matching cleanup export.
 
 use std::panic;
 use std::ptr;

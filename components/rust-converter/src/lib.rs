@@ -32,9 +32,10 @@
 //!
 //! # Safety
 //!
-//! All FFI functions are marked `unsafe` and include comprehensive safety
-//! documentation. Memory allocated by Rust must be freed by Rust via the
-//! provided cleanup functions.
+//! FFI functions that dereference caller-provided pointers are `unsafe` and
+//! document their safety requirements. ABI accessors and handle creation do
+//! not require unsafe Rust calls. Memory allocated by Rust must be released
+//! through the provided Rust cleanup functions.
 
 // Module declarations
 pub mod charset;

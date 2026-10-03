@@ -87,7 +87,7 @@ Recommended operator practices:
 - run supported versions of NGINX and Rust toolchains
 - keep resource limits and timeouts enabled
 - review authenticated-request and cache settings carefully
-- expose the metrics endpoint only to trusted networks
+- keep metrics and diagnostics on loopback, and restrict any management relay
 - treat metrics as instance-wide shared counters when setting alerts or dashboards
 - apply normal least-privilege controls to NGINX workers and deployment environments
 
@@ -113,6 +113,7 @@ Nightly GitHub Actions coverage lives in `.github/workflows/nightly-fuzz.yml`.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (passive voice) |
 | 0.9.1 | 2026-07-19 | Kang | Update supported version line to 0.9.x |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |

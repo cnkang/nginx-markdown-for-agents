@@ -5,7 +5,7 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-10-02
+## [0.9.2] - 2026-10-03
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, records the removal and historical disposition of the experimental OTel
@@ -103,6 +103,15 @@ before/after examples.
 
 ### Fixed
 
+- Streaming fail-open continuations now reuse bounded retained storage.
+  `streaming_buffer` limits payload copies and metadata, including durable
+  control buffers. Copies remain valid until downstream consumes their memory
+  and file ranges. Budget failures reject new input before consuming it.
+- Release installation rejects unsuccessful GPG verification even when the
+  status output also contains a matching `VALIDSIG` fingerprint.
+- Brotli capability detection honors NGINX compiler and linker search paths.
+  The probe disables debug output to avoid macOS `dsymutil` errors on
+  `/dev/null`. Module builds retain their configured debug flags.
 - The module now suppresses upstream response trailers after an
   HTML-to-Markdown representation change. `headers_out.trailers` is an independent list
   that HTTP/2/3 and chunked encodings emit without an HTTP/1.1 `Trailer`

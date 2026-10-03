@@ -111,8 +111,7 @@ git checkout -b feature/your-feature-name
 4. Run tests locally:
    ```bash
    # Rust tests
-   cd components/rust-converter
-   cargo test --all
+   cargo test --manifest-path components/rust-converter/Cargo.toml --all
 
    # NGINX module tests
    make -C components/nginx-module/tests unit
@@ -121,11 +120,10 @@ git checkout -b feature/your-feature-name
 5. Ensure code formatting:
    ```bash
    # Rust formatting
-   cd components/rust-converter
-   cargo fmt --all
+   cargo fmt --manifest-path components/rust-converter/Cargo.toml --all
 
    # Check Rust code
-   cargo clippy --all-targets --all-features
+   cargo clippy --manifest-path components/rust-converter/Cargo.toml --all-targets --all-features
    ```
 
 ## Coding Standards
@@ -338,7 +336,7 @@ Builds pre-compiled module binaries for every full-support entry in `tools/relea
 The workflow:
 1. Resolves the build matrix from `tools/release-matrix.json` (full-support entries only).
 2. Builds each NGINX version × OS type × architecture combination via `tools/build_release.sh`.
-3. Runs a completeness check (`tools/release/completeness_check.py`) to verify that every expected matrix entry produced an artifact.
+3. Runs a completeness check (`tools/release/matrix/completeness_check.py`) to verify that every expected matrix entry produced an artifact.
 4. On release events, publishes all `.tar.gz` artifacts and a grouped version manifest to the GitHub Release.
 
 ## Documentation
@@ -455,6 +453,7 @@ Thank you for contributing to NGINX Markdown for Agents!
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (passive voice, Latin abbreviations) |
 | 0.9.1 | 2026-07-14 | Kang | Raised the final pre-1.0 Rust baseline to 1.97.0+ |
 | 0.8.3 | 2026-06-26 | Kang | Updated Rust version requirement to 1.91.0+ |

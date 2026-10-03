@@ -962,7 +962,7 @@ typedef struct {
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
-    ngx_uint_t   accept_policy;        /* markdown_accept strict|force (default: strict) */
+    ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
     ngx_http_markdown_policy_cfg_t policy;
 
     struct {
@@ -979,7 +979,7 @@ typedef struct {
      */
     struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
-        size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
+        size_t       max_size;             /* markdown_limits decompressed_size (default: 10m) */
         ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT = 10000ms) */
         size_t       parser_budget;        /* parser memory budget */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
@@ -1531,8 +1531,17 @@ typedef struct {
         struct {
             ngx_chain_t              *head;
             ngx_chain_t              *tail;
+            ngx_chain_t              *free;
             size_t                    bytes;
             ngx_uint_t                links;
+            /* Explicit owners for bounded, reusable fail-open copies. */
+            struct {
+                struct ngx_http_markdown_failopen_copy_s *head;
+                size_t                    bytes;
+                /* Empty control metadata has request-pool lifetime. */
+                size_t                    control_bytes;
+                ngx_flag_t                cleanup_registered;
+            } copies;
         } pending_input;
 
         /*

@@ -15,7 +15,7 @@ The module is responsible for:
 - buffering and preparing upstream response bodies
 - handling content negotiation and response headers
 - applying request and configuration policy inside NGINX
-- calling the Rust converter through a stable FFI boundary
+- calling the Rust converter through the bundled internal FFI boundary
 
 In practice, this layer decides whether a request stays as HTML, becomes
 Markdown, or fails according to configured policy.
@@ -88,6 +88,7 @@ For the full directive reference, see [../../docs/guides/CONFIGURATION.md](../..
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-08-07 | Kang | 25-directive convergence, unified limits keys, metrics freeze, removed streaming threshold directive, refreshed source layout and document history |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, verified directive accuracy against code, added update tracking section |

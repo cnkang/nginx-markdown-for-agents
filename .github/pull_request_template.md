@@ -32,7 +32,7 @@
 ## Documentation
 
 - [ ] Documentation and code comments updated
-- [ ] All docs/comments in English
+- [ ] Canonical docs and code comments in English; Chinese README synchronized
 - [ ] C code follows NGINX coding style
 
 ## Checklist

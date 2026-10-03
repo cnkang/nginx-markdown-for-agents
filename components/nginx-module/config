@@ -157,9 +157,12 @@ int main(void) {
     if (s) BrotliDecoderDestroyInstance(s);
     return 0;
 }'
+    # Honor NGINX's configured search paths even without pkg-config metadata.
+    # Disable debug output: Darwin dsymutil cannot inspect /dev/null.
     if echo "$ngx_markdown_brotli_test" \
-       | ${CC:-cc} $ngx_markdown_brotli_cflags -x c - -o /dev/null \
-           $ngx_markdown_brotli_libs >/dev/null 2>&1; then
+       | ${CC:-cc} ${CFLAGS:-} ${NGX_CC_OPT:-} \
+           $ngx_markdown_brotli_cflags -g0 -x c - -o /dev/null \
+           ${NGX_LD_OPT:-} $ngx_markdown_brotli_libs >/dev/null 2>&1; then
         ngx_markdown_brotli_found=yes
     fi
 
@@ -175,8 +178,8 @@ int main(void) {
 fi
 
 # Keep the C compilation surface aligned with the Cargo feature set explicitly.
-# Rust 1.97 uses LLVM 22, whose LTO archives are not guaranteed to be readable
-# by the system nm.  Symbol probing can therefore silently disable matching C
+# Rust LTO archives may use newer bitcode than the system nm can read.
+# Symbol probing can therefore silently disable matching C
 # paths even though the Rust exports are present.  The contract accepts Cargo
 # feature names as a comma-separated list, plus the canonical `default` and
 # `none` values.  An unset value means Cargo defaults.

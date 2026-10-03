@@ -7,9 +7,9 @@
 > HTML 进，Markdown 出。
 > 客户端请求时返回，或者由你决定何时提供。
 
-> 当前版本线：v0.9.2 已于 2026-10-02 正式发布，是最新公开稳定版本。
-> 这是 v1.0 前最后一次破坏性版本。v0.9.2 的 tag、安装包资源与校验和
-> 已发布在项目的 GitHub Releases 页面。
+> 当前版本线：v0.9.2 已于 2026-10-03 正式发布，是最新公开稳定版本。
+> 这是 v1.0 前最后一次计划内的破坏性版本。
+> 安装包可通过 release 标签下载。
 
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
 表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
@@ -44,10 +44,15 @@ brew tap cnkang/nginx-markdown
 brew install cnkang/nginx-markdown/nginx-markdown-module
 ```
 
+动态模块必须与加载它的 NGINX 精确版本一致。选择安装包或从源码构建前，
+请使用 `nginx -v` 检查版本。
+
 ### 2. 在一个 location 上启用 Markdown
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
+
+events {}
 
 http {
     upstream backend {
@@ -79,10 +84,10 @@ HTML 响应。如果结果不符合预期，请查看[安装故障排查指南](
 
 ## 0.9.2 配置要点
 
-0.9.2 将公共配置冻结为 20 条有效指令；所列七个退役名称（五个收敛名称加上
-`markdown_profile` 与 `markdown_streaming_zero_copy`）已不再注册，`nginx -t` 会以
-NGINX 标准的 `unknown directive` 报错，替换目标见 [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
-请显式配置行为，使 `nginx -T` 能展示运维人员选择的设置。
+0.9.2 将公共配置冻结为 20 条有效指令。已移除的指令会使 `nginx -t`
+报告 NGINX 标准的 `unknown directive` 错误。
+请按照[迁移指南](docs/guides/MIGRATION-0.9.2.md)替换这些指令。
+请显式配置行为，使 `nginx -T` 能展示你选择的设置。
 
 ```nginx
 http {
@@ -153,11 +158,8 @@ curl -sS -D - -o /dev/null \
 
 0.9.2 是破坏性发布。升级前请阅读[发布说明](docs/releases/0.9.2-release-notes.md)。
 
-- 0.9.2 冻结 20 条有效指令。所列七个退役名称——移除清单中的常用子集，即五个收敛名称加上
-  `markdown_profile` 与 `markdown_streaming_zero_copy`——已不再注册，`nginx -t` 会以 NGINX
-  标准的 `unknown directive` 报错，替换目标见
-  [MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md)。
-  profile、OTel、按路径指标、shadow mode 和其他旧指令不再是有效配置。
+- profile、OTel、按路径指标、shadow mode 和已退役指令不再属于有效配置。
+  [迁移指南](docs/guides/MIGRATION-0.9.2.md)列出了旧设置的替换方式。
   迁移后运行 `nginx -t`。
 - 运行时动态配置文件、watcher、dry-run 提升和 last-known-good 快照已移除。
   请把需要的值迁移到静态指令，再通过验证后的 reload 或 restart 应用。
@@ -256,6 +258,7 @@ curl -sS -D - -o /dev/null \
 | 了解功能 | [功能索引](docs/features/README.md)、[解压缩](docs/features/DECOMPRESSION.md)、[流式转换](docs/features/STREAMING_COMPATIBILITY.md) |
 | 了解架构 | [架构索引](docs/architecture/README.md)、[系统架构](docs/architecture/SYSTEM_ARCHITECTURE.md) |
 | 验证或贡献 | [测试索引](docs/testing/README.md)、[Harness 索引](docs/harness/README.md) |
+| 参与贡献或报告漏洞 | [贡献指南](CONTRIBUTING.md)、[安全政策](SECURITY.md) |
 
 ## 开发与验证
 
@@ -274,6 +277,16 @@ make test-e2e-rust
 make docs-check
 make harness-check
 ```
+
+提交变更前，请运行完整的本地门禁和推送检查：
+
+```bash
+make test-all
+make pre-push-check
+```
+
+`test-all` 会明确报告与平台有关的跳过项。运行时 E2E 和覆盖率使用独立目标：
+`test-all-e2e` 和 `test-all-coverage`。
 
 运行时集成测试和 native E2E 检查需要真实的 NGINX 二进制文件。
 如果 NGINX 不在 `PATH` 中，请设置 `NGINX_BIN=/absolute/path/to/nginx`。
@@ -302,6 +315,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 0.9.2 | 2026-10-03 | 同步发布目标日期、中英文结构、迁移说明与完整验证命令 |
 | 0.9.2 | 2026-09-30 | 将入口文档定稿为 v0.9.2 正式发布状态（发布日期与状态）。 |
 | 0.9.2 | 2026-09-01 | 围绕 0.9.2 合同重组入口文档，并链接规范指南。 |
 
