@@ -111,6 +111,74 @@ def _benchmark_step_body() -> str:
     return "\n".join(lines)
 
 
+def test_the_benchmark_step_rejects_an_unusable_baseline_version(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A run that cannot build the baseline's version must fail, not fall back."""
+    script = tmp_path / "step.sh"
+    script.write_text(_benchmark_step_body(), encoding="utf-8")
+    versions = json.dumps(["1.24.0", "1.26.3"])
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "NGINX_VERSIONS": versions,
+            "BASELINE_NGINX_VERSION": "1.30.4",
+            "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        },
+    )
+
+    assert result.returncode != 0, (
+        "the step must not benchmark a version the baselines do not describe"
+    )
+    assert not (tmp_path / "out.txt").exists() or not (
+        tmp_path / "out.txt"
+    ).read_text().strip(), "no benchmark version may be selected"
+
+
+def test_the_benchmark_step_rejects_an_unresolvable_baseline(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A baseline directory with no readable version fails the step.
+
+    The step computes `BASELINE_NGINX_VERSION` itself, so this runs the real
+    body against a baseline directory that yields nothing rather than injecting
+    an empty environment variable. An empty version used to mean "fall back to
+    the matrix", which benchmarks an environment no baseline describes.
+    """
+    script = tmp_path / "step.sh"
+    script.write_text(_benchmark_step_body(), encoding="utf-8")
+    empty_dir = tmp_path / "baselines"
+    empty_dir.mkdir()
+    versions = json.dumps(["1.24.0", "1.26.3", "1.30.4"])
+
+    # Redirect the resolver at the empty directory the way the workflow's own
+    # flags allow, by rewriting the resolver invocation in the extracted body.
+    body = script.read_text(encoding="utf-8").replace(
+        "--baseline-dir perf/baselines", f"--baseline-dir {empty_dir}"
+    )
+    script.write_text(body, encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "NGINX_VERSIONS": versions,
+            "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        },
+    )
+
+    assert result.returncode != 0, (
+        "an unreadable baseline must fail the step; falling back to the matrix "
+        "would compare against an environment no baseline describes"
+    )
+
+
 def test_the_workflow_benchmark_step_uses_the_resolver() -> None:
     """The step must call the resolver, not re-derive the version itself."""
     text = WORKFLOW.read_text(encoding="utf-8")
@@ -122,9 +190,36 @@ def test_the_workflow_benchmark_step_uses_the_resolver() -> None:
         "selecting the first amd64 matrix entry drifts away from the baseline "
         "and makes the evidence gate reject its own comparison"
     )
-    # The matrix selector survives only as the no-baseline fallback.
-    assert "next((v for v in versions if v in amd64)" in step, (
-        "the matrix fallback should remain for a repository with no baseline"
+    assert "next((v for v in versions if v in amd64)" not in step, (
+        "the matrix-first selector must be gone, not merely deprioritised: "
+        "with it as a fallback an unreadable baseline silently benchmarks an "
+        "environment no baseline describes"
+    )
+
+
+def test_the_resolver_is_invoked_in_the_step_body_not_in_env() -> None:
+    """A workflow `env:` value is a literal; Actions never runs it.
+
+    A command substitution in `env:` reaches the step as its own text, so the
+    selector would compare against a command string instead of a version and
+    reject every run. The resolver therefore has to be called from `run:`.
+    """
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index("- name: Determine canonical benchmark NGINX version")
+    end = text.index("- name:", start + 10)
+    step = text[start:end]
+
+    env_block = step.split("run: |", 1)[0]
+    assert "$(" not in env_block, (
+        "env: values are literals in GitHub Actions, so a command substitution "
+        "there never executes; call the resolver from the step body instead"
+    )
+    run_block = step.split("run: |", 1)[1]
+    expected = (
+        'BASELINE_NGINX_VERSION="$(python3 tools/perf/baseline_nginx_version.py'
+    )
+    assert expected in run_block, (
+        "the step body must assign the resolver output to BASELINE_NGINX_VERSION"
     )
 
 
