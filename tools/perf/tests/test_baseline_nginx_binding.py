@@ -21,6 +21,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 RESOLVER = REPO_ROOT / "tools" / "perf" / "baseline_nginx_version.py"
@@ -99,16 +100,32 @@ def test_the_checked_in_baselines_all_agree() -> None:
 
 
 def _benchmark_step_body() -> str:
-    """Return the shell body of the benchmark-version step, as CI runs it."""
-    text = WORKFLOW.read_text(encoding="utf-8")
-    start = text.index("- name: Determine canonical benchmark NGINX version")
-    body_at = text.index("run: |", start) + len("run: |")
-    lines: list[str] = []
-    for line in text[body_at:].splitlines():
-        if line.strip() and not line.startswith(" " * 10):
-            break
-        lines.append(line[10:] if line.startswith(" " * 10) else line)
-    return "\n".join(lines)
+    """Return the shell body of the benchmark-version step, as CI runs it.
+
+    Read through the YAML parser instead of slicing text on an indent count. A
+    hand-rolled count breaks the moment the job is re-indented, and the embedded
+    python is indented deeper than the surrounding shell, so guessing the body
+    width shifts it and fails with a syntax error that says nothing about the
+    real cause. The assertions catch a workflow whose shape changed enough that
+    the step no longer holds what these tests exercise.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    body = None
+    for job in (workflow.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            if step.get("name") == "Determine canonical benchmark NGINX version":
+                body = step.get("run")
+    assert isinstance(body, str) and body.strip(), (
+        "could not find the benchmark-version step body in the workflow"
+    )
+    assert "baseline_nginx_version.py" in body, (
+        "the extracted step body has no resolver call; the workflow changed "
+        "shape and these tests would run the wrong script"
+    )
+    assert '"${NGINX_VERSIONS}"' in body, (
+        "could not extract the benchmark step body: it ends before the selector"
+    )
+    return body
 
 
 def test_the_benchmark_step_rejects_an_unusable_baseline_version(
