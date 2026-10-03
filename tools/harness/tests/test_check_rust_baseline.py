@@ -154,6 +154,46 @@ def test_workflow_without_any_declaration_still_fails(tmp_path: Path) -> None:
     ), errors
 
 
+def test_nightly_workflow_must_declare_nightly_not_ride_the_resolver(
+    tmp_path: Path,
+) -> None:
+    """The resolver pins the stable channel, so it cannot satisfy a nightly group.
+
+    Nothing routes a nightly job through it today, which is why the guard exists
+    untested: without `expected != "nightly"`, such a workflow would report the
+    synthetic stable version as its nightly declaration and pass.
+    """
+    _write_valid_fixture(tmp_path)
+    workflow = tmp_path / EXPECTED_NIGHTLY_ACTION_WORKFLOWS[0]
+    workflow.write_text(
+        "steps:\n  - uses: ./.github/actions/setup-rust\n", encoding="utf-8"
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any("nightly" in error for error in errors), errors
+
+
+def test_resolver_only_workflow_is_still_classified_as_installing_rust(
+    tmp_path: Path,
+) -> None:
+    """A new workflow that installs through the resolver must not escape the
+    inventory check, which used to key on the action name and the env var."""
+    _write_resolver_fixture(tmp_path)
+    newcomer = tmp_path / ".github/workflows/new-perf.yml"
+    newcomer.parent.mkdir(parents=True, exist_ok=True)
+    newcomer.write_text(
+        "jobs:\n  build:\n    steps:\n      - uses: ./.github/actions/setup-rust\n",
+        encoding="utf-8",
+    )
+
+    _exact, _msrv, errors = baseline.collect_errors(tmp_path)
+
+    assert any(
+        "new-perf.yml" in error and "not classified" in error for error in errors
+    ), errors
+
+
 def test_workflow_inventory_matches_independent_expected_paths() -> None:
     """The fixture oracle does not move when the detector inventory drifts."""
     assert baseline.BASELINE_ACTION_WORKFLOWS == (

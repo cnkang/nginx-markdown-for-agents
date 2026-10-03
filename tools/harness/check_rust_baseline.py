@@ -550,7 +550,14 @@ def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
         content = _read_text(root, relative_path, errors)
         if content is None:
             continue
-        installs_rust = "dtolnay/rust-toolchain" in content or "RUST_TOOLCHAIN:" in content
+        # The resolver action is now a third way to install Rust. Without it
+        # here, a new workflow that installs through the composite action alone
+        # would look unclassified and escape this check.
+        installs_rust = (
+            "dtolnay/rust-toolchain" in content
+            or "RUST_TOOLCHAIN:" in content
+            or RESOLVER_ACTION_USES_RE.search(content) is not None
+        )
         if installs_rust and relative_path not in known:
             errors.append(
                 f"{relative_path}: Rust-installing workflow is not classified by "
