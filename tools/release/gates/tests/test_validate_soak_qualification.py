@@ -643,6 +643,53 @@ def test_fixtures_are_world_readable_under_a_restrictive_umask(
         assert mode & 0o044, f"{scenario_id} unreadable under umask 0077: {oct(mode)}"
 
 
+def test_default_runtime_dir_walks_the_whole_ancestor_chain(
+    monkeypatch, tmp_path
+):
+    """The default branch must not name just two directories.
+
+    mkdir(parents=True) on the runtime root can invent ancestors of its own, so
+    granting traversal on the root and the leaf leaves the real blocker behind:
+    a 0700 directory in between that only the chain walk reaches.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT",
+                        tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.delenv("SOAK_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator, "tempfile", types.SimpleNamespace(
+        mkdtemp=lambda prefix, dir: str(tmp_path / "build" / "soak-runtime" / "markdown-soak-chain"),
+    ))
+
+    # Track which helper the branch used. A single list would accept either,
+    # so the two are recorded separately.
+    chains: list[Path] = []
+    direct: list[Path] = []
+    monkeypatch.setattr(
+        validator, "_grant_worker_traversal_chain",
+        lambda directory: chains.append(Path(directory)),
+    )
+    monkeypatch.setattr(
+        validator, "_grant_worker_traversal",
+        lambda *dirs: direct.extend(Path(d) for d in dirs),
+    )
+
+    runtime = validator._runtime_directory()
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    assert chains == [runtime], {
+        "chain": [str(d) for d in chains],
+        "direct": [str(d) for d in direct],
+        "msg": "the default branch must walk the chain, not name two directories",
+    }
+    assert not direct, {
+        "direct": [str(d) for d in direct],
+        "msg": "naming the root and the leaf leaves invented ancestors blocked",
+    }
+
+
 def test_configured_runtime_dir_gets_traversal_on_every_ancestor(
     monkeypatch, tmp_path
 ):
@@ -682,6 +729,7 @@ def test_traversal_chain_stops_at_the_repository_root(monkeypatch, tmp_path):
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
 
     outside = tmp_path.parent
+    original_mode = outside.stat().st_mode & 0o777
     outside.chmod(0o700)
     try:
         validator._grant_worker_traversal_chain(tmp_path)
@@ -690,7 +738,9 @@ def test_traversal_chain_stops_at_the_repository_root(monkeypatch, tmp_path):
             "msg": "an ancestor above the repository was made traversable",
         }
     finally:
-        outside.chmod(0o755)
+        # Restore whatever it was rather than a guessed mode, so the test leaves
+        # the surrounding directory exactly as it found it.
+        outside.chmod(original_mode)
 
 
 def test_corpus_root_is_reachable_by_the_unprivileged_worker(

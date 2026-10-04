@@ -1122,8 +1122,10 @@ def _runtime_directory() -> pathlib.Path:
         tempfile.mkdtemp(prefix="markdown-soak-", dir=runtime_root)
     )
     # Both layers block the worker: mkdtemp makes the per-run directory 0700
-    # and the runtime root is 0700 too, so traversal has to be granted on each.
-    _grant_worker_traversal(runtime_root, runtime_dir)
+    # and the runtime root is 0700 too. mkdir(parents=True) can also invent
+    # ancestors above the root, so walk the whole chain rather than naming two
+    # directories that may not be the ones in the way.
+    _grant_worker_traversal_chain(runtime_dir)
     return runtime_dir
 
 
