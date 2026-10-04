@@ -1060,7 +1060,6 @@ def test_ready_failure_omits_absent_pieces_without_trailing_separator(
 
 def test_wait_for_ready_reports_a_non_200_status(monkeypatch):
     """A responding-but-refusing NGINX must surface its status code."""
-    import io
     import urllib.request as urlreq
 
     class FakeResponse:
