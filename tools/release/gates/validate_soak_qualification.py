@@ -1141,19 +1141,18 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
             purpose="soak NGINX startup log",
         )
         nginx_log.parent.mkdir(parents=True, exist_ok=True)
-        _startup_log_handle = nginx_log.open("w", encoding="utf-8")
-        nginx = subprocess.Popen(
-            [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
-            stdout=_startup_log_handle,
-            stderr=subprocess.STDOUT,
-            # Own session, so _stop_nginx can signal the worker along with the
-            # master instead of leaving it holding the listen socket.
-            start_new_session=True,
-        )
-        # The handle belongs to the child; closing our copy right after spawn
-        # is safe (the child keeps its own descriptor) and means the log is
-        # readable and no descriptor leaks if the readiness branch is taken.
-        _startup_log_handle.close()
+        # The context manager closes our copy whether Popen succeeds or raises;
+        # the child keeps its own descriptor, so closing here is safe and leaves
+        # the log readable for the failure path.
+        with nginx_log.open("w", encoding="utf-8") as startup_log:
+            nginx = subprocess.Popen(
+                [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
+                stdout=startup_log,
+                stderr=subprocess.STDOUT,
+                # Own session, so _stop_nginx can signal the worker along with
+                # the master instead of leaving it holding the listen socket.
+                start_new_session=True,
+            )
     except Exception:
         # Any failure after the runtime directory exists must not leave it
         # behind; remove it before re-raising.
