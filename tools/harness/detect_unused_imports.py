@@ -167,6 +167,14 @@ class _ScopeScanner(ast.NodeVisitor):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             self.annotation_names |= _annotation_tokens(node.value)
 
+    def visit_Global(self, node: ast.Global) -> None:
+        # `global sys` inside a function rebinds the module-level name, so the
+        # import is used by that function rather than shadowed by it.
+        self.module_loads.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self._sink().update(node.names)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         # Decorators, defaults, parameters and the return annotation are all
         # evaluated in the enclosing scope, so a type named only there keeps
@@ -245,8 +253,30 @@ class _ScopeScanner(ast.NodeVisitor):
     def visit_Constant(self, node: ast.Constant) -> None:
         # A bare string constant is data. String *annotations* are recorded by
         # _record_annotation at the point the annotation is visited, so
-        # `msg = "sys"` cannot keep a dead import alive.
+        # `msg = "sys"` cannot keep a dead import alive. `__all__` entries are
+        # recorded by visit_Assign because a re-export is a real reference.
         self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        # `__all__ = ["name"]` re-exports name: the string is a reference.
+        if self._is_dunder_all(node):
+            self._record_annotation_targets(node.value)
+        self.generic_visit(node)
+
+    @staticmethod
+    def _is_dunder_all(node: ast.Assign) -> bool:
+        if not isinstance(node.value, (ast.List, ast.Tuple)):
+            return False
+        return any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        )
+
+    def _record_annotation_targets(self, node: ast.AST | None) -> None:
+        if not isinstance(node, (ast.List, ast.Tuple)):
+            return
+        for element in node.elts:
+            if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                self.annotation_names.add(element.value)
 
 
 def _annotation_tokens(text: str) -> set[str]:
@@ -321,6 +351,37 @@ def _outer_binding_survives(
     )
 
 
+def _type_checking_imports(tree: ast.AST) -> set[str]:
+    """Names imported under ``if TYPE_CHECKING:`` or ``if typing.TYPE_CHECKING:``.
+
+    Those imports exist for a type checker rather than at runtime, so they are
+    never "used" by any load. Reporting them would reject the standard
+    pattern for breaking an import cycle.
+    """
+    names: set[str] = set()
+
+    def guard_is_type_checking(test: ast.expr) -> bool:
+        target = test
+        if isinstance(target, ast.UnaryOp) and isinstance(target.op, ast.Not):
+            target = target.operand
+        # `TYPE_CHECKING` is a bare Name; `typing.TYPE_CHECKING` ends in an
+        # Attribute whose attr is the same identifier.
+        if isinstance(target, ast.Name):
+            return target.id == "TYPE_CHECKING"
+        if isinstance(target, ast.Attribute):
+            return target.attr == "TYPE_CHECKING"
+        return False
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If) or not guard_is_type_checking(node.test):
+            continue
+        for inner in ast.walk(node):
+            if not isinstance(inner, (ast.Import, ast.ImportFrom)):
+                continue
+            names.update(_bound_names(inner))
+    return names
+
+
 def collect_errors(root: Path) -> list[str]:
     errors: list[str] = []
     for path in _iter_python_files(root):
@@ -336,7 +397,7 @@ def collect_errors(root: Path) -> list[str]:
         scanner = _ScopeScanner(functions)
         scanner.visit(tree)
         module_imports, nested = _partition_imports(tree, functions)
-        loads = _all_loads(scanner, functions)
+        loads = _all_loads(scanner, functions) | _type_checking_imports(tree)
 
         # Rule 1: a module-level import nothing loads anywhere.
         for name in sorted(module_imports):

@@ -109,6 +109,39 @@ CASES: dict[str, tuple[str, bool, str]] = {
         True,
         "an ordinary string is data, not a reference to the binding",
     ),
+    "dunder_all_reexport": (
+        "from helpers import compute\n\n__all__ = ['compute']\n",
+        False,
+        "__all__ entries are references; the import is a re-export",
+    ),
+    "type_checking_import": (
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n"
+        "    import json\n\nprint('x')\n",
+        False,
+        "a TYPE_CHECKING import exists for the type checker, never for a load",
+    ),
+    "qualified_type_checking_import": (
+        "import typing\n\nif typing.TYPE_CHECKING:\n    import json\n\nprint('x')\n",
+        False,
+        "typing.TYPE_CHECKING is the same guard",
+    ),
+    "global_rebind": (
+        "import sys\n\n\ndef f():\n    global sys\n    import sys\n"
+        "    return sys.argv\n",
+        False,
+        "`global sys` rebinds the module-level name rather than shadowing it",
+    ),
+    "conditional_import_fallback": (
+        "try:\n    import ujson as json\nexcept ImportError:\n    import json\n"
+        "\nprint(json.dumps({}))\n",
+        False,
+        "a fallback import is loaded through the bound alias",
+    ),
+    "comprehension_use": (
+        "import os\n\nnames = [os.sep for _ in range(3)]\n",
+        False,
+        "a comprehension body resolves to the module-level import",
+    ),
 }
 
 
