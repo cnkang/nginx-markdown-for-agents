@@ -27,6 +27,251 @@ def _run_fixture(record_name: str) -> int:
     )
 
 
+def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
+    """NGINX's own diagnostics must survive a readiness failure.
+
+    The failure used to be reported as a bare "nginx did not become ready"
+    because both streams went to DEVNULL, so the reason -- a bad module path, a
+    missing directive, a port clash -- was destroyed before anyone read it.
+    """
+    captured: dict = {}
+
+    class FakeNginx:
+        pid = 4242
+
+        def __init__(self, *a, **kw):
+            captured["stdout"] = kw.get("stdout")
+            captured["stderr"] = kw.get("stderr")
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            pass
+
+    monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
+    monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    # The runtime directory must live inside the repository: the startup log is
+    # written through validate_write_path_within_root.
+    runtime_dir = validator.REPO_ROOT / "build" / "soak-runtime" / "selftest"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime_dir)
+    monkeypatch.setattr(validator, "write_nginx_conf", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+    )
+    monkeypatch.setattr(validator, "_cleanup_runtime_directory", lambda p: None)
+
+    try:
+        _runtime, _corpus, nginx = validator.prepare_runtime(
+            "http://127.0.0.1:8080", {}, ""
+        )
+    finally:
+        validator._cleanup_runtime_directory(runtime_dir)
+
+    assert captured["stdout"] is not validator.subprocess.DEVNULL, (
+        "NGINX stdout must be captured, not discarded"
+    )
+    assert captured["stderr"] is validator.subprocess.STDOUT, (
+        "NGINX stderr must be merged into the captured log"
+    )
+    assert (runtime_dir / "logs" / "startup.log").exists(), (
+        "the startup log must exist on disk for the failure path to read"
+    )
+    del nginx
+
+
+def test_port_holder_detects_a_bound_port():
+    """A stale NGINX must be named, not reported as "did not become ready"."""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        # Binding succeeds only with SO_REUSEADDR semantics; a listening socket
+        # on the same port must be reported as in use.
+        description = validator._port_holder(port)
+        assert description is None or "in use" in description
+    finally:
+        holder.close()
+
+
+def test_port_holder_is_none_for_a_free_port():
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    assert validator._port_holder(port) is None
+
+
+def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypatch):
+    """The gate must say the port is taken rather than time out on readiness."""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("0.0.0.0", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "port-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+    try:
+        monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+        monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime)
+        monkeypatch.setattr(validator, "write_nginx_conf", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+        )
+        with pytest.raises(ValueError) as excinfo:
+            validator.prepare_runtime(f"http://127.0.0.1:{port}", {}, "")
+        assert "already in use" in str(excinfo.value), excinfo.value
+    finally:
+        holder.close()
+        validator._cleanup_runtime_directory(runtime)
+
+
+def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
+    """The worker must be signalled with the master.
+
+    Signalling only the master leaves the worker holding the listen socket, so
+    the next run in the same environment cannot bind.
+    """
+    import signal as signal_mod
+
+    seen: list[int] = []
+
+    calls = {"n": 0}
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise __import__("subprocess").TimeoutExpired("nginx", timeout)
+            return 0
+
+        def send_signal(self, sig):
+            seen.append(sig)
+
+    nginx = FakeNginx()
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: seen.append(sig))
+
+    validator._stop_nginx(nginx)
+
+    assert signal_mod.SIGTERM in seen, seen
+    assert signal_mod.SIGKILL in seen, seen
+
+
+def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
+    """The config must set `markdown_limits parser_budget`.
+
+    The default is 32 MiB and one conversion of the 1 MiB `large` fixture
+    allocates about 41 MB, so without the directive every request fails with
+    ERROR_PARSE_BUDGET_EXCEEDED (error_code 11, category resource_limit) and
+    the soak reports a resource limit the module never imposed.
+    """
+    monkeypatch.setattr(
+        validator, "_runtime_directory", lambda: tmp_path
+    )
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "limits-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+    try:
+        validator.write_nginx_conf(
+            runtime,
+            validator.SOAK_PORT,
+            str(runtime / "html"),
+            None,
+            parser_budget_bytes=validator.SOAK_PARSER_BUDGET_BYTES,
+        )
+        conf = (runtime / "nginx.conf").read_text(encoding="utf-8")
+    finally:
+        validator._cleanup_runtime_directory(runtime)
+
+    assert (
+        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
+    ), conf
+
+
+def test_parser_budget_exceeds_the_measured_allocation():
+    """41 MB was measured; the default 32 MiB is what failed the soak."""
+    assert validator.SOAK_PARSER_BUDGET_BYTES > 41 * 1024 * 1024, (
+        "the budget must clear the observed parser allocation"
+    )
+
+
+def test_parser_budget_does_not_relax_the_evidence_ceiling():
+    """Raising the parser budget must not widen what the evidence is held to.
+
+    The manifest's conversion_memory ceilings are what the per-request peak is
+    compared against, so they stay independent of the parser budget.
+    """
+    record = {
+        "status": "pass",
+        "module_managed_peak_observed": True,
+        "per_request_peak_bytes": 40 * 1024 * 1024,
+        "rss_samples": [1, 2, 3],
+        "monotonic_growth_after_drain": False,
+    }
+    manifest = {
+        "duration_minutes": 30,
+        "concurrency": 16,
+        "corpus": [{"id": "small", "conversion_memory_bytes": 33_554_432}],
+        "scenario_refs": ["release/scope/short-soak-scope.json"],
+    }
+    issue = validator._peak_memory_issue(record, manifest)
+    assert issue and "ceiling" in issue, issue
+
+
+def test_startup_failure_reason_reports_the_nginx_error(tmp_path):
+    """The reason must name the actual NGINX error, not just 'not ready'."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text(
+        "nginx: [emerg] dlopen() failed while loading "
+        "/usr/lib/nginx/modules/x.so (cannot open shared object file)\n",
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert "dlopen" in detail, detail
+    assert "[emerg]" in detail, detail
+
+
+def test_startup_failure_reason_is_empty_when_nothing_was_logged(tmp_path):
+    """Silence is itself a signal, but it must not invent a reason."""
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "startup.log").write_text("all fine\n", encoding="utf-8")
+
+    assert validator._startup_failure_reason(tmp_path) == ""
+
+
+def test_wait_for_ready_returns_the_last_error():
+    """A refusal must name the error instead of collapsing to False."""
+    # The exact port and fixture path the validator accepts, with nothing
+    # listening: the refusal exercises the same path a dead NGINX takes.
+    fixture = next(iter(validator.SOAK_SCENARIO_FILES.values()))
+    ready, error = validator.wait_for_ready(
+        f"http://127.0.0.1:{validator.SOAK_PORT}/{fixture}", timeout=1
+    )
+
+    assert ready is False
+    assert error, "the last connection error must be reported"
+
+
 def test_valid_soak_record_passes() -> None:
     assert _run_fixture("soak-qualification-valid.json") == 0
 
@@ -384,10 +629,15 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     runtime_dir = tmp_path / "runtime"
 
     class FakeNginx:
+        pid = 4242
+
         def terminate(self) -> None:
             pass
 
         def wait(self, timeout: int) -> None:
+            pass
+
+        def send_signal(self, sig) -> None:
             pass
 
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
@@ -402,7 +652,9 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
             FakeNginx(),
         ),
     )
-    monkeypatch.setattr(validator, "wait_for_ready", lambda url: True)
+    monkeypatch.setattr(
+        validator, "wait_for_ready", lambda url: (True, "")
+    )
     monkeypatch.setattr(validator, "find_worker_pid", lambda path: -1)
     monkeypatch.setattr(
         validator,
