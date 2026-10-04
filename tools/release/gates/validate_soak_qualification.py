@@ -1209,12 +1209,26 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
         # missing process and a permission failure.
         try:
             os.killpg(os.getpgid(nginx.pid), sig)
+            return
+        except ProcessLookupError:
+            # Already reaped: nothing to signal.
+            return
         except OSError:
-            # Already reaped, or the group is gone: fall back to the process.
-            try:
-                nginx.send_signal(sig)
-            except OSError:
-                pass
+            # The group is gone or not ours; fall back to the single process.
+            pass
+        try:
+            nginx.send_signal(sig)
+        except ProcessLookupError:
+            return
+        except OSError as exc:
+            # A permission failure means NGINX keeps running and keeps holding
+            # the listen socket. Staying silent would leave the next run to
+            # fail on a port conflict with no hint why.
+            print(
+                f"WARNING: could not signal NGINX ({sig}): {exc}; "
+                "a stale process may still hold the soak port",
+                file=sys.stderr,
+            )
 
     _signal_group(signal.SIGTERM)
     try:
