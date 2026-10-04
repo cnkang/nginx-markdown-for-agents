@@ -133,6 +133,32 @@ def test_port_holder_probe_mirrors_nginx_reuseaddr():
     assert socket.SO_REUSEADDR in seen, seen
 
 
+def test_port_holder_probes_only_ipv4():
+    """The generated config is `listen <port>;` -- IPv4 wildcard only.
+
+    Probing IPv6 as well would report an occupied v6 socket as a conflict for a
+    port NGINX binds regardless, aborting a run that would have served fine.
+    """
+    import socket
+
+    created: list[int] = []
+    real_socket = socket.socket
+
+    class RecordingSocket(real_socket):  # type: ignore[misc,valid-type]
+        def __init__(self, family=socket.AF_INET, *a, **kw):
+            created.append(family)
+            super().__init__(family, *a, **kw)
+
+    try:
+        socket.socket = RecordingSocket  # type: ignore[assignment]
+        validator._port_holder(0)
+    finally:
+        socket.socket = real_socket  # type: ignore[assignment]
+
+    assert created, "no probe socket was created"
+    assert all(f == socket.AF_INET for f in created), created
+
+
 def test_port_holder_is_none_for_a_free_port():
     import socket
 
@@ -178,8 +204,10 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     """
     import signal as signal_mod
 
-    seen: list[int] = []
-
+    # Tracked separately: the fallback also records into `fallback`, so a
+    # single list would let a run that skipped killpg entirely still pass.
+    group: list[int] = []
+    fallback: list[int] = []
     calls = {"n": 0}
 
     class FakeNginx:
@@ -192,16 +220,17 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
             return 0
 
         def send_signal(self, sig):
-            seen.append(sig)
+            fallback.append(sig)
 
     nginx = FakeNginx()
     monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: seen.append(sig))
+    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: group.append(sig))
 
     validator._stop_nginx(nginx)
 
-    assert signal_mod.SIGTERM in seen, seen
-    assert signal_mod.SIGKILL in seen, seen
+    assert signal_mod.SIGTERM in group, {"group": group, "fallback": fallback}
+    assert signal_mod.SIGKILL in group, {"group": group, "fallback": fallback}
+    assert not fallback, "killpg succeeded; the per-process fallback should not run"
 
 
 def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
@@ -337,15 +366,23 @@ def test_startup_failure_reason_is_empty_when_nothing_was_logged(tmp_path):
 
 def test_wait_for_ready_returns_the_last_error():
     """A refusal must name the error instead of collapsing to False."""
-    # The exact port and fixture path the validator accepts, with nothing
-    # listening: the refusal exercises the same path a dead NGINX takes.
+    # Mock the connection so the outcome does not depend on whether something
+    # happens to be listening on SOAK_PORT while this test runs.
+    import urllib.error
+    import urllib.request
+
+    def refuse(*a, **kw):
+        raise urllib.error.URLError("mocked refusal")
+
     fixture = next(iter(validator.SOAK_SCENARIO_FILES.values()))
-    ready, error = validator.wait_for_ready(
-        f"http://127.0.0.1:{validator.SOAK_PORT}/{fixture}", timeout=1
-    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(urllib.request, "urlopen", refuse)
+        ready, error = validator.wait_for_ready(
+            f"http://127.0.0.1:{validator.SOAK_PORT}/{fixture}", timeout=1
+        )
 
     assert ready is False
-    assert error, "the last connection error must be reported"
+    assert "mocked refusal" in error, error
 
 
 def test_valid_soak_record_passes() -> None:

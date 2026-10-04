@@ -1171,18 +1171,20 @@ def _port_holder(port: int) -> str | None:
     """
     import socket
 
-    for family in (socket.AF_INET, socket.AF_INET6):
-        probe = socket.socket(family, socket.SOCK_STREAM)
-        # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
-        # TIME_WAIT binds fine for it. Without this the probe would refuse a
-        # port NGINX can actually use and abort a run that would have worked.
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            probe.bind(("" if family == socket.AF_INET6 else "0.0.0.0", port))
-        except OSError:
-            return "port %d is already in use" % port
-        finally:
-            probe.close()
+    # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
+    # Probing IPv6 as well would report an occupied v6 socket as a conflict for
+    # a port NGINX can bind regardless.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
+    # TIME_WAIT binds fine for it. Without this the probe would refuse a port
+    # NGINX can actually use and abort a run that would have worked.
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("0.0.0.0", port))
+    except OSError:
+        return "port %d is already in use" % port
+    finally:
+        probe.close()
     return None
 
 
