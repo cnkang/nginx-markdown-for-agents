@@ -1206,13 +1206,15 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     import signal
 
     def _signal_group(sig: int) -> None:
+        # ProcessLookupError is an OSError subclass, so OSError covers both a
+        # missing process and a permission failure.
         try:
             os.killpg(os.getpgid(nginx.pid), sig)
-        except (OSError, ProcessLookupError):
+        except OSError:
             # Already reaped, or the group is gone: fall back to the process.
             try:
                 nginx.send_signal(sig)
-            except (OSError, ProcessLookupError):
+            except OSError:
                 pass
 
     _signal_group(signal.SIGTERM)

@@ -98,7 +98,8 @@ def test_port_holder_detects_a_bound_port():
     port = holder.getsockname()[1]
     try:
         description = validator._port_holder(port)
-        assert description is not None and "in use" in description, description
+        assert description is not None, "a listening port must be reported"
+        assert "in use" in description, description
     finally:
         holder.close()
 
@@ -300,7 +301,8 @@ def test_parser_budget_does_not_relax_the_evidence_ceiling():
         "scenario_refs": ["release/scope/short-soak-scope.json"],
     }
     issue = validator._peak_memory_issue(record, manifest)
-    assert issue and "ceiling" in issue, issue
+    assert issue is not None, "a peak over the ceiling must be reported"
+    assert "ceiling" in issue, issue
 
 
 def test_prepare_runtime_wires_the_parser_budget_into_the_config(
