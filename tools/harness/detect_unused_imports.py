@@ -351,34 +351,34 @@ def _outer_binding_survives(
     )
 
 
+def _is_type_checking_guard(test: ast.expr) -> bool:
+    """True for ``TYPE_CHECKING``, ``typing.TYPE_CHECKING``, or ``not`` of one."""
+    target = test
+    if isinstance(target, ast.UnaryOp) and isinstance(target.op, ast.Not):
+        target = target.operand
+    # `TYPE_CHECKING` is a bare Name; `typing.TYPE_CHECKING` ends in an
+    # Attribute whose attr is the same identifier.
+    if isinstance(target, ast.Name):
+        return target.id == "TYPE_CHECKING"
+    if isinstance(target, ast.Attribute):
+        return target.attr == "TYPE_CHECKING"
+    return False
+
+
 def _type_checking_imports(tree: ast.AST) -> set[str]:
     """Names imported under ``if TYPE_CHECKING:`` or ``if typing.TYPE_CHECKING:``.
 
     Those imports exist for a type checker rather than at runtime, so they are
-    never "used" by any load. Reporting them would reject the standard
-    pattern for breaking an import cycle.
+    never "used" by any load. Reporting them would reject the standard pattern
+    for breaking an import cycle.
     """
     names: set[str] = set()
-
-    def guard_is_type_checking(test: ast.expr) -> bool:
-        target = test
-        if isinstance(target, ast.UnaryOp) and isinstance(target.op, ast.Not):
-            target = target.operand
-        # `TYPE_CHECKING` is a bare Name; `typing.TYPE_CHECKING` ends in an
-        # Attribute whose attr is the same identifier.
-        if isinstance(target, ast.Name):
-            return target.id == "TYPE_CHECKING"
-        if isinstance(target, ast.Attribute):
-            return target.attr == "TYPE_CHECKING"
-        return False
-
     for node in ast.walk(tree):
-        if not isinstance(node, ast.If) or not guard_is_type_checking(node.test):
+        if not isinstance(node, ast.If) or not _is_type_checking_guard(node.test):
             continue
         for inner in ast.walk(node):
-            if not isinstance(inner, (ast.Import, ast.ImportFrom)):
-                continue
-            names.update(_bound_names(inner))
+            if isinstance(inner, (ast.Import, ast.ImportFrom)):
+                names.update(_bound_names(inner))
     return names
 
 
