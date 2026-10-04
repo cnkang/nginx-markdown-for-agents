@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import types
 from pathlib import Path
 
@@ -607,6 +608,89 @@ def test_write_nginx_conf_grants_traversal_on_the_runtime_dir(
         "recorded": [str(d) for d in recorded],
         "msg": "the directory holding nginx.conf must be traversable",
     }
+
+
+def test_fixtures_are_world_readable_under_a_restrictive_umask(
+    monkeypatch, tmp_path
+):
+    """A 0077 umask must not leave the fixtures at 0600.
+
+    write_bytes inherits the umask, so every fixture would be unreadable to the
+    unprivileged worker and NGINX would answer 403 for all of them.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    # Capture the real umask before any patching, then set a restrictive one so
+    # mkdir and write_bytes both produce owner-only paths.
+    set_umask = os.umask
+    original = set_umask(0o077)
+    try:
+        runtime = tmp_path / "markdown-soak-umask"
+        runtime.mkdir()
+        runtime.chmod(0o700)
+        (runtime / "html").mkdir()
+        (runtime / "html").chmod(0o700)
+        manifest = {"corpus": [{"id": "small"}, {"id": "medium"}, {"id": "large"}]}
+
+        corpus = validator.build_corpus(runtime, manifest)
+    finally:
+        set_umask(original)
+
+    for scenario_id, name in corpus.items():
+        mode = (runtime / "html" / name).stat().st_mode & 0o777
+        assert mode & 0o044, f"{scenario_id} unreadable under umask 0077: {oct(mode)}"
+
+
+def test_configured_runtime_dir_gets_traversal_on_every_ancestor(
+    monkeypatch, tmp_path
+):
+    """SOAK_RUNTIME_DIR must be traversable too, not just the default path.
+
+    The configured branch calls mkdir(parents=True), so it can invent ancestors
+    that are 0700 under a restrictive umask; without a chain grant the worker
+    cannot reach the corpus and NGINX returns 403.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    recorded: list[Path] = []
+    monkeypatch.setattr(
+        validator, "_grant_worker_traversal",
+        lambda *dirs: recorded.extend(Path(d) for d in dirs),
+    )
+
+    configured = tmp_path / "build" / "soak" / "run"
+    monkeypatch.setenv("SOAK_RUNTIME_DIR", str(configured))
+
+    runtime = validator._runtime_directory()
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    granted = [Path(d) for d in recorded]
+    for expected in (runtime, runtime.parent, runtime.parent.parent):
+        assert expected in granted, {
+            "granted": [str(d) for d in granted],
+            "missing": str(expected),
+            "msg": "every invented ancestor must be traversable",
+        }
+
+
+def test_traversal_chain_stops_at_the_repository_root(monkeypatch, tmp_path):
+    """Nothing above the checkout may be touched."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+
+    outside = tmp_path.parent
+    outside.chmod(0o700)
+    try:
+        validator._grant_worker_traversal_chain(tmp_path)
+        assert not outside.stat().st_mode & 0o001, {
+            "mode": oct(outside.stat().st_mode & 0o777),
+            "msg": "an ancestor above the repository was made traversable",
+        }
+    finally:
+        outside.chmod(0o755)
 
 
 def test_corpus_root_is_reachable_by_the_unprivileged_worker(

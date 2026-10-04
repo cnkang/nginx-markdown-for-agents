@@ -804,6 +804,10 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
     # under the usual 0022 but 0700 under a restrictive 0077. Pin it so the
     # unprivileged worker can list and read it regardless of the environment.
     corpus_dir.chmod(0o755 | (corpus_dir.stat().st_mode & 0o700))
+    for entry in manifest["corpus"]:
+        # write_bytes inherits the umask too, so a 0077 umask leaves every
+        # fixture at 0600 and NGINX answers 403 for all of them.
+        (corpus_dir / SOAK_SCENARIO_FILES[entry["id"]]).chmod(0o644)
     return corpus
 
 
@@ -1058,6 +1062,43 @@ def _git_head_sha() -> str:
     return result.stdout.strip()
 
 
+def _grant_worker_traversal(*directories: pathlib.Path) -> None:
+    """Give the unprivileged worker traversal without granting listing.
+
+    A worker that cannot traverse into the runtime directory gets a bare 403
+    from NGINX with no usable diagnosis, because the fixture itself is
+    readable. Traversal-only (0o711) lets the worker open a file it already
+    knows the name of while leaving the directory unlistable and unwritable.
+    """
+    for directory in directories:
+        try:
+            mode = directory.stat().st_mode
+        except OSError:
+            continue
+        current = mode & 0o777
+        wanted = current | 0o711
+        if current != wanted:
+            directory.chmod(wanted)
+
+
+def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
+    """Grant traversal on `directory` and each ancestor up to the repository.
+
+    Only directories inside the repository are touched, and only the execute
+    bit is added, so nothing above the checkout changes and no directory
+    becomes listable.
+    """
+    root = REPO_ROOT.resolve()
+    current = directory.resolve()
+    chain: list[pathlib.Path] = []
+    while True:
+        chain.append(current)
+        if current == root or current.parent == current:
+            break
+        current = current.parent
+    _grant_worker_traversal(*chain)
+
+
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
     configured = os.environ.get("SOAK_RUNTIME_DIR")
@@ -1067,6 +1108,9 @@ def _runtime_directory() -> pathlib.Path:
         )
         runtime_dir.mkdir(parents=True, exist_ok=True)
         runtime_dir.chmod(0o700)
+        # mkdir only creates the leaf; every ancestor it had to invent is 0700
+        # too when the umask is restrictive, so grant traversal along the chain.
+        _grant_worker_traversal_chain(runtime_dir)
         return runtime_dir
 
     runtime_root = validate_write_path_within_root(
@@ -1100,25 +1144,6 @@ def nginx_worker_user() -> str | None:
             continue
         return candidate
     return None
-
-
-def _grant_worker_traversal(*directories: pathlib.Path) -> None:
-    """Give the unprivileged worker traversal without granting listing.
-
-    A worker that cannot traverse into the runtime directory gets a bare 403
-    from NGINX with no usable diagnosis, because the fixture itself is
-    readable. Traversal-only (0o711) lets the worker open a file it already
-    knows the name of while leaving the directory unlistable and unwritable.
-    """
-    for directory in directories:
-        try:
-            mode = directory.stat().st_mode
-        except OSError:
-            continue
-        current = mode & 0o777
-        wanted = current | 0o711
-        if current != wanted:
-            directory.chmod(wanted)
 
 
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
