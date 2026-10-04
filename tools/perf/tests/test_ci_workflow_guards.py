@@ -479,14 +479,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _make_dry_run(target: str) -> str:
+def _make_dry_run(target: str, *variables: str) -> str:
     """Return the dry-run recipe text for a make target.
 
     Runs ``make -n`` so the guards reflect the actual commands make would
     execute without needing NGINX_BIN or other environment prerequisites.
+    Extra ``NAME=value`` arguments are passed through to make.
     """
     result = subprocess.run(
-        ["make", "-n", target],
+        ["make", "-n", target, *variables],
         cwd=_repo_root(),
         capture_output=True,
         text=True,
@@ -515,6 +516,90 @@ def _blocking_evidence_invocations(text: str) -> list[tuple[int, str]]:
         if m:
             invocations.append((i, m.group(1)))
     return invocations
+
+
+def _gate_report_overrides(text: str) -> dict[str, str | None]:
+    """Map each blocking baseline version to the report it was handed.
+
+    A gate is "overridden" when the invocation is preceded by an
+    ``EVIDENCE_GATE_BENCHMARK_REPORT=`` assignment, either on the same logical
+    command (backslash-continued) or on the line directly above it.  The
+    variable is quoted, so an unexpanded make expansion arrives as ``""`` and
+    means "measure your own report" -- the same as no assignment at all.
+    Returns None for such a gate.
+    """
+    overrides: dict[str, str | None] = {}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.search(
+            r"release-perf-evidence-blocking\s+BASELINE_VERSION=([0-9]+)", line
+        )
+        if not m:
+            continue
+        version = m.group(1)
+
+        # Walk back over a backslash-continued prefix to its first line.
+        start = i
+        while start > 0 and lines[start - 1].rstrip().endswith("\\"):
+            start -= 1
+
+        report: str | None = None
+        for j in range(start, i + 1):
+            rm = re.search(
+                r"EVIDENCE_GATE_BENCHMARK_REPORT\s*=\s*\"?([^\"\\\s]*)\"?", lines[j]
+            )
+            if rm and rm.group(1):
+                report = rm.group(1)
+        overrides[version] = report
+    return overrides
+
+
+def test_release_workflow_gates_share_one_candidate_report() -> None:
+    """The 091 and 092 gates must read the same measurement.
+
+    The 091 gate otherwise measures its own report against today's corpus, while
+    the baseline records the fixture as 0.9.1 shipped it.  tables.html gained
+    align attributes in 64eed148 and grew from 2164 to 2248 bytes, so the
+    environment fingerprint still matches and the gate fails only on the fixture
+    -- comparing regression percentages across two different fixtures.
+    """
+    workflow = (
+        _repo_root() / ".github" / "workflows" / "release-packages.yml"
+    ).read_text(encoding="utf-8")
+    overrides = _gate_report_overrides(workflow)
+
+    assert "091" in overrides, f"no 091 gate found; got {sorted(overrides)}"
+    assert "092" in overrides, f"no 092 gate found; got {sorted(overrides)}"
+
+    assert overrides["091"] is not None, (
+        "the 0.9.1 gate measures its own report; it must be handed the "
+        "candidate report so both gates compare one measurement"
+    )
+    assert overrides["091"] == overrides["092"], (
+        f"the gates disagree on the report: 091={overrides['091']!r} "
+        f"092={overrides['092']!r}"
+    )
+
+
+def test_make_092_gate_hands_one_report_to_both_baselines() -> None:
+    """The local canonical gate must not reintroduce the same divergence.
+
+    Driven with a value for CANDIDATE_BENCHMARK_REPORT: left unset, make
+    expands it to "" for both gates, so "both are None" would pass without the
+    override existing at all.
+    """
+    overrides = _gate_report_overrides(
+        _make_dry_run(
+            "release-gates-check-092-canonical",
+            "CANDIDATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json",
+        )
+    )
+    assert overrides.get("091") is not None, (
+        f"the make 0.9.1 gate measures its own report: {overrides}"
+    )
+    assert overrides.get("091") == overrides.get("092"), (
+        f"the make gate measures two different reports: {overrides}"
+    )
 
 
 def test_make_092_canonical_runs_blocking_evidence_with_both_baselines() -> None:

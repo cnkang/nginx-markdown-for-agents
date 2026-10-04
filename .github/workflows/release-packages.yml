@@ -1528,7 +1528,24 @@ jobs:
           # historical 0.9.1 evidence must pass before candidate 0.9.2
           # evidence.  NGINX_BIN is module-enabled and the helper refuses
           # to skip module evidence when it is present.
-          make release-perf-evidence-blocking BASELINE_VERSION=091
+          #
+          # Both gates read the same candidate report.  Without the override
+          # the 0.9.1 gate measures its own report, which is measured against
+          # today's corpus -- tables.html gained align attributes in 64eed148
+          # and grew from 2164 to 2248 bytes -- and then compares that against a
+          # baseline recorded when the fixture was 2164.  The environment
+          # fingerprint (platform, load generator, NGINX version) still matches,
+          # so the mismatch is the fixture alone and the gate correctly refuses
+          # to compute regression percentages across it.
+          #
+          # Re-measuring a "0.9.1 baseline" on the current corpus would not make
+          # it historical evidence: the checked-in baseline records the fixture
+          # as 0.9.1 shipped it, and the current tree is not 0.9.1.  Measuring
+          # this candidate once and comparing it against both baselines is the
+          # question the gate actually asks -- has the candidate regressed
+          # against either historical reference point?
+          EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
+            make release-perf-evidence-blocking BASELINE_VERSION=091
           EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
             make release-perf-evidence-blocking BASELINE_VERSION=092
           # Short-soak qualification against the module-enabled EL9 nginx

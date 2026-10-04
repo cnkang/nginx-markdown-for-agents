@@ -1387,7 +1387,8 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	$(MAKE) test-production-examples-e2e-smoke
 	$(MAKE) complexity-check
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
-	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
+	EVIDENCE_GATE_BENCHMARK_REPORT="$(CANDIDATE_BENCHMARK_REPORT)" \
+		$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
 		python3 -m pytest tools/perf/tests/ -q --tb=short $(PYTEST_JOBS); \
 	else \
