@@ -92,16 +92,45 @@ def test_port_holder_detects_a_bound_port():
     import socket
 
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    holder.bind(("127.0.0.1", 0))
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("0.0.0.0", 0))
     holder.listen(1)
     port = holder.getsockname()[1]
     try:
-        # Binding succeeds only with SO_REUSEADDR semantics; a listening socket
-        # on the same port must be reported as in use.
         description = validator._port_holder(port)
-        assert description is None or "in use" in description
+        assert description is not None and "in use" in description, description
     finally:
         holder.close()
+
+
+def test_port_holder_probe_mirrors_nginx_reuseaddr():
+    """The probe must bind the way NGINX binds.
+
+    NGINX sets SO_REUSEADDR on its listen socket, so a port left in TIME_WAIT
+    binds fine for it. A probe without the flag refuses that same port and
+    aborts a run that would have succeeded. Asserted directly because a
+    behavioural test cannot see it: with the flag set, binding an unbound port
+    succeeds either way.
+    """
+    import socket
+
+    seen: list[int] = []
+    real_socket = socket.socket
+
+    class RecordingSocket(real_socket):  # type: ignore[misc,valid-type]
+        def setsockopt(self, level, optname, value, *a):
+            seen.append(optname)
+            return super().setsockopt(level, optname, value, *a)
+
+    # The validator imports socket inside the function, so patch the module
+    # attribute it resolves at call time.
+    try:
+        socket.socket = RecordingSocket  # type: ignore[assignment]
+        validator._port_holder(0)
+    finally:
+        socket.socket = real_socket  # type: ignore[assignment]
+
+    assert socket.SO_REUSEADDR in seen, seen
 
 
 def test_port_holder_is_none_for_a_free_port():
@@ -233,6 +262,53 @@ def test_parser_budget_does_not_relax_the_evidence_ceiling():
     }
     issue = validator._peak_memory_issue(record, manifest)
     assert issue and "ceiling" in issue, issue
+
+
+def test_prepare_runtime_wires_the_parser_budget_into_the_config(
+    tmp_path, monkeypatch
+):
+    """The budget must reach the written config through prepare_runtime.
+
+    Testing `write_nginx_conf` directly misses this: the other prepare_runtime
+    tests monkeypatch it away, so dropping the keyword argument at the call site
+    reverted every request to the 32 MiB default -- the exact failure this
+    change fixes -- while all tests stayed green.
+    """
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "wiring-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    class FakeNginx:
+        pid = 4242
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            pass
+
+    monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime)
+    monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
+    monkeypatch.setattr(
+        validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+    )
+    try:
+        validator.prepare_runtime(
+            f"http://127.0.0.1:{validator.SOAK_PORT}", {"corpus": []}, ""
+        )
+        conf = (runtime / "nginx.conf").read_text(encoding="utf-8")
+    finally:
+        validator._cleanup_runtime_directory(runtime)
+
+    assert f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in (
+        conf
+    ), conf
 
 
 def test_startup_failure_reason_reports_the_nginx_error(tmp_path):
