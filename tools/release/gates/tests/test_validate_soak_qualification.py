@@ -204,6 +204,102 @@ def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypa
         validator._cleanup_runtime_directory(runtime)
 
 
+def _signal_fallback_nginx(captured: list[int]):
+    """A master whose group signal fails, so only the per-process path runs."""
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            captured.append(sig)
+
+    return FakeNginx()
+
+
+def test_stop_nginx_reports_a_permission_failure(tmp_path, monkeypatch, capsys):
+    """A signal we could not deliver must be reported, not swallowed.
+
+    Silently ignoring a permission failure leaves NGINX running and still holding
+    the listen socket, so the next run fails to bind with nothing pointing back
+    here.
+    """
+    import signal as signal_mod
+
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    # getpgid fails, so the group signal cannot be used at all.
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+
+    def denied(sig):
+        raise PermissionError("operation not permitted")
+
+    nginx.send_signal = denied  # type: ignore[method-assign]
+
+    validator._stop_nginx(nginx)
+
+    err = capsys.readouterr().err
+    assert "could not signal NGINX" in err, {"stderr": err}
+    assert str(signal_mod.SIGTERM) in err or "PermissionError" in err, {
+        "stderr": err
+    }
+
+
+def test_stop_nginx_is_silent_when_the_process_is_already_gone(
+    tmp_path, monkeypatch, capsys
+):
+    """A missing process is not a failure: nothing was left running."""
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+
+    def gone(sig):
+        raise ProcessLookupError("no such process")
+
+    nginx.send_signal = gone  # type: ignore[method-assign]
+
+    validator._stop_nginx(nginx)
+
+    err = capsys.readouterr().err
+    assert "could not signal NGINX" not in err, {"stderr": err}
+
+
+def test_stop_nginx_still_signals_the_process_when_the_group_is_unknown(
+    tmp_path, monkeypatch
+):
+    """Losing the group id must not skip the only signal we have left.
+
+    An early return here would leave both the master and its workers running
+    whenever the group cannot be resolved.
+    """
+    import signal as signal_mod
+
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(ProcessLookupError())
+    )
+    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: None)
+
+    validator._stop_nginx(nginx)
+
+    # SIGTERM and the unconditional final SIGKILL both have to reach the process.
+    assert signal_mod.SIGTERM in captured, {"signals": captured}
+    assert signal_mod.SIGKILL in captured, {
+        "signals": captured,
+        "msg": "the group is unknown, so the process signal is the only teardown",
+    }
+
+
 def test_stop_nginx_kills_a_surviving_worker_after_a_clean_master_exit(
     tmp_path, monkeypatch
 ):
