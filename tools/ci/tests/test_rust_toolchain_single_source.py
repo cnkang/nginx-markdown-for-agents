@@ -10,7 +10,6 @@ resolved channel through, CI would build on a version nobody pinned.
 import pathlib
 import re
 import subprocess
-import sys
 
 import pytest
 import yaml

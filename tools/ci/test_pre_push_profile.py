@@ -99,7 +99,6 @@ def test_shared_declaration_is_strict() -> None:
 
 def test_main_executes_shared_gate_and_propagates_failure(monkeypatch, capsys, tmp_path):
     """A real subprocess proves the runner consumes the JSON declaration."""
-    import sys
     command = [sys.executable, "-c", "import sys; print('gate executed'); sys.exit(7)"]
     path = tmp_path / "tools/ci/pre_push_gates.json"
     path.parent.mkdir(parents=True)
