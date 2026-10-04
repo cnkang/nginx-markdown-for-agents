@@ -251,6 +251,37 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     assert not fallback, "killpg succeeded; the per-process fallback should not run"
 
 
+def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
+    """The leak fix needs its own regression assertion.
+
+    Stubbing the cleanup out, or weakening the prefix/parent guard, left every
+    other test green while the soak tests quietly accumulated directories under
+    build/soak-runtime.
+    """
+    runtime_root = validator.SOAK_RUNTIME_ROOT
+    runtime = runtime_root / "markdown-soak-cleanup-regression"
+    runtime.mkdir(parents=True, exist_ok=True)
+    (runtime / "marker").write_text("x", encoding="utf-8")
+
+    validator._cleanup_runtime_directory(runtime)
+
+    assert not runtime.exists(), "a prefixed runtime directory must be removed"
+
+
+def test_cleanup_leaves_an_unprefixed_directory_intact() -> None:
+    """The guard is a safety limit: it must not delete outside its own scope."""
+    runtime_root = validator.SOAK_RUNTIME_ROOT
+    other = runtime_root / "not-a-soak-runtime"
+    other.mkdir(parents=True, exist_ok=True)
+    try:
+        validator._cleanup_runtime_directory(other)
+        assert other.exists(), "a directory without the prefix must be left alone"
+    finally:
+        import shutil as _shutil
+
+        _shutil.rmtree(other, ignore_errors=True)
+
+
 def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
     """The config must set `markdown_limits parser_budget`.
 
