@@ -31,6 +31,7 @@ import json
 import math
 import os
 import pathlib
+import pwd
 import re
 import shutil
 import subprocess
@@ -739,8 +740,15 @@ def write_nginx_conf(
     limits_line = ""
     if parser_budget_bytes:
         limits_line = f"markdown_limits parser_budget={int(parser_budget_bytes)};"
+    # When the master is root, NGINX drops its workers to `nobody`. Pin that
+    # identity explicitly so the soak exercises the same privilege separation a
+    # real deployment does, and so the directories it must read are prepared
+    # for exactly that user.
+    worker_user = nginx_worker_user()
+    user_line = f"user {worker_user};\n" if worker_user else ""
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
-    conf = f"""worker_processes 1;
+    _grant_worker_traversal(validated_runtime_dir)
+    conf = f"""{user_line}worker_processes 1;
 daemon off;
 error_log {runtime_text}/logs/error.log notice;
 pid {runtime_text}/nginx.pid;
@@ -792,6 +800,10 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
         )
         corpus_path.write_bytes(payload[:size])
         corpus[scenario_id] = name
+    # mkdir creates the document root with the process umask, which is 0755
+    # under the usual 0022 but 0700 under a restrictive 0077. Pin it so the
+    # unprivileged worker can list and read it regardless of the environment.
+    corpus_dir.chmod(0o755 | (corpus_dir.stat().st_mode & 0o700))
     return corpus
 
 
@@ -1062,9 +1074,51 @@ def _runtime_directory() -> pathlib.Path:
     )
     runtime_root.mkdir(parents=True, exist_ok=True)
     runtime_root.chmod(0o700)
-    return pathlib.Path(
+    runtime_dir = pathlib.Path(
         tempfile.mkdtemp(prefix="markdown-soak-", dir=runtime_root)
     )
+    # Both layers block the worker: mkdtemp makes the per-run directory 0700
+    # and the runtime root is 0700 too, so traversal has to be granted on each.
+    _grant_worker_traversal(runtime_root, runtime_dir)
+    return runtime_dir
+
+
+def nginx_worker_user() -> str | None:
+    """Return the unprivileged user NGINX's workers run as, if it will drop.
+
+    NGINX only honours the ``user`` directive when the master starts as root;
+    it then runs the workers as that user instead of root. Pinning the identity
+    keeps that drop explicit and reproducible rather than implicit, and keeps
+    the soak from running workers as root the way the master did.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return None
+    for candidate in ("nobody", "nginx"):
+        try:
+            pwd.getpwnam(candidate)
+        except KeyError:
+            continue
+        return candidate
+    return None
+
+
+def _grant_worker_traversal(*directories: pathlib.Path) -> None:
+    """Give the unprivileged worker traversal without granting listing.
+
+    A worker that cannot traverse into the runtime directory gets a bare 403
+    from NGINX with no usable diagnosis, because the fixture itself is
+    readable. Traversal-only (0o711) lets the worker open a file it already
+    knows the name of while leaving the directory unlistable and unwritable.
+    """
+    for directory in directories:
+        try:
+            mode = directory.stat().st_mode
+        except OSError:
+            continue
+        current = mode & 0o777
+        wanted = current | 0o711
+        if current != wanted:
+            directory.chmod(wanted)
 
 
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:

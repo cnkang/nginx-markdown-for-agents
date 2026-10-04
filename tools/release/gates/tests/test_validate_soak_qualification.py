@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -427,6 +428,220 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
         "fallback": fallback,
     }
     assert not fallback, "killpg succeeded; the per-process fallback should not run"
+
+
+def test_worker_user_is_pinned_only_when_the_master_is_root(monkeypatch):
+    """A root master must run its workers unprivileged, by name.
+
+    NGINX drops worker privileges only for a super-user master. Without an
+    explicit `user` the drop is implicit and the directories it reads were never
+    prepared for it, which produced a bare 403 with no usable diagnosis.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+
+    assert validator.nginx_worker_user() == "nobody"
+
+
+def test_worker_user_is_absent_for_a_non_root_master(monkeypatch):
+    """A non-root master cannot drop privileges, so no directive is emitted."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
+
+    assert validator.nginx_worker_user() is None
+
+
+def test_worker_user_falls_back_to_nginx_when_nobody_is_absent(monkeypatch):
+    """Some images ship `nginx` but not `nobody`; either is acceptable."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+
+    def lookup(name):
+        if name == "nobody":
+            raise KeyError(name)
+        return object()
+
+    monkeypatch.setattr(validator.pwd, "getpwnam", lookup)
+
+    assert validator.nginx_worker_user() == "nginx"
+
+
+def test_grant_worker_traversal_adds_execute_without_listing(tmp_path):
+    """Traversal must be added without turning the directory listable.
+
+    Granting 0o755 would let the worker enumerate the runtime tree, which the
+    0700 mode exists to prevent.
+    """
+    target = tmp_path / "markdown-soak-x"
+    target.mkdir()
+    target.chmod(0o700)
+
+    validator._grant_worker_traversal(target)
+
+    mode = target.stat().st_mode & 0o777
+    assert mode & 0o111, f"the worker cannot traverse: {oct(mode)}"
+    assert not mode & 0o044, f"the directory became readable: {oct(mode)}"
+    assert not mode & 0o022, f"the directory became writable: {oct(mode)}"
+
+
+def test_grant_worker_traversal_is_idempotent(tmp_path):
+    """Re-running must not accumulate permission bits."""
+    target = tmp_path / "markdown-soak-y"
+    target.mkdir()
+    target.chmod(0o700)
+
+    validator._grant_worker_traversal(target)
+    first = target.stat().st_mode & 0o777
+    validator._grant_worker_traversal(target)
+
+    assert target.stat().st_mode & 0o777 == first
+
+
+def test_grant_worker_traversal_tolerates_a_missing_directory(tmp_path):
+    """A path that cannot be stat'ed must not abort the setup."""
+    validator._grant_worker_traversal(tmp_path / "absent")
+
+
+def test_generated_config_pins_the_worker_user_when_root(monkeypatch, tmp_path):
+    """The config must name the worker user the directories were prepared for."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    runtime = tmp_path / "markdown-soak-conf"
+    (runtime / "logs").mkdir(parents=True)
+    so = tmp_path / "module.so"
+    so.write_bytes(b"")
+
+    validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
+
+    conf = (runtime / "nginx.conf").read_text()
+    assert conf.startswith("user nobody;"), conf[:120]
+
+
+def test_generated_config_omits_the_user_directive_when_not_root(
+    monkeypatch, tmp_path
+):
+    """A non-root master keeps the previous behaviour: no `user` line."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    runtime = tmp_path / "markdown-soak-conf2"
+    (runtime / "logs").mkdir(parents=True)
+    so = tmp_path / "module.so"
+    so.write_bytes(b"")
+
+    validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
+
+    conf = (runtime / "nginx.conf").read_text()
+    assert not conf.startswith("user "), conf[:120]
+    assert "worker_processes 1;" in conf
+
+
+def test_prepare_runtime_grants_traversal_on_every_ancestor(
+    monkeypatch, tmp_path
+):
+    """Each ancestor the worker must cross needs traversal, not just the leaf.
+
+    The 403 came from a readable fixture behind a 0700 parent: NGINX logs
+    `open() ... failed (13: Permission denied)` with no hint which ancestor
+    blocked it. Asserting the traversal on the runtime root and the per-run
+    directory keeps that failure from returning.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    recorded: list[Path] = []
+    monkeypatch.setattr(
+        validator, "_grant_worker_traversal",
+        lambda *dirs: recorded.extend(Path(d) for d in dirs),
+    )
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator, "tempfile", types.SimpleNamespace(
+        mkdtemp=lambda prefix, dir: str(tmp_path / "build" / "soak-runtime" / "markdown-soak-pinned"),
+    ))
+
+    runtime = validator._runtime_directory()
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    assert runtime in [Path(d) for d in recorded], {
+        "recorded": [str(d) for d in recorded],
+        "msg": "the per-run directory must be traversable",
+    }
+    root = validator.SOAK_RUNTIME_ROOT
+    assert root in [Path(d) for d in recorded], {
+        "recorded": [str(d) for d in recorded],
+        "msg": "the runtime root must be traversable",
+    }
+
+
+def test_write_nginx_conf_grants_traversal_on_the_runtime_dir(
+    monkeypatch, tmp_path
+):
+    """The generated config's own directory must be traversable too."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+
+    recorded: list[Path] = []
+    monkeypatch.setattr(
+        validator, "_grant_worker_traversal",
+        lambda *dirs: recorded.extend(Path(d) for d in dirs),
+    )
+
+    runtime = tmp_path / "markdown-soak-conf3"
+    (runtime / "logs").mkdir(parents=True)
+    so = tmp_path / "module.so"
+    so.write_bytes(b"")
+
+    validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
+
+    assert runtime in [Path(d) for d in recorded], {
+        "recorded": [str(d) for d in recorded],
+        "msg": "the directory holding nginx.conf must be traversable",
+    }
+
+
+def test_corpus_root_is_reachable_by_the_unprivileged_worker(
+    monkeypatch, tmp_path
+):
+    """The document root must be listable and readable, or NGINX returns 403.
+
+    mkdtemp makes the enclosing directory 0700, so a readable fixture is still
+    unreachable: every lookup has to traverse each ancestor by name.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    runtime = tmp_path / "markdown-soak-corpus"
+    runtime.mkdir()
+    runtime.chmod(0o700)
+    # A restrictive umask is what made the document root 0700; force that here so
+    # the assertion is about the fix, not about the ambient environment.
+    (runtime / "html").mkdir(exist_ok=True)
+    (runtime / "html").chmod(0o700)
+    manifest = {"corpus": [{"id": "small"}, {"id": "medium"}, {"id": "large"}]}
+
+    corpus = validator.build_corpus(runtime, manifest)
+
+    docroot = runtime / "html"
+    docroot_mode = docroot.stat().st_mode & 0o777
+    assert docroot_mode & 0o055, f"document root not readable: {oct(docroot_mode)}"
+    for scenario_id, name in corpus.items():
+        fixture_mode = (docroot / name).stat().st_mode & 0o777
+        assert fixture_mode & 0o004, (
+            f"{scenario_id} fixture is not world-readable: {oct(fixture_mode)}"
+        )
 
 
 def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
