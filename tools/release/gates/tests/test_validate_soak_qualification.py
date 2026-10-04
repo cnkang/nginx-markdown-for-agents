@@ -29,6 +29,62 @@ def _run_fixture(record_name: str) -> int:
     )
 
 
+def test_nginx_is_started_in_its_own_session(monkeypatch, tmp_path):
+    """NGINX must get a new session, or the group-kill design breaks.
+
+    Without `start_new_session=True` the child shares the test runner's process
+    group, so `os.getpgid(nginx.pid)` returns the group leader's id and the
+    SIGTERM/SIGKILL aimed at "NGINX's group" could reach unrelated processes.
+    Every `_stop_nginx` test stubs `getpgid`/`killpg`, so none of them observes
+    the real spawn arguments -- removing the flag left the whole suite green.
+    """
+    recorded: dict = {}
+
+    class FakePopen:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    def fake_popen(args, **kwargs):
+        recorded["args"] = args
+        recorded["kwargs"] = kwargs
+        return FakePopen()
+
+    runtime = tmp_path / "markdown-soak-session"
+    (runtime / "logs").mkdir(parents=True)
+    module_so = tmp_path / "module.so"
+    module_so.write_bytes(b"")
+
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(validator.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(validator, "_port_holder", lambda port: None)
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url, **k: (True, ""))
+    monkeypatch.setattr(validator, "_stop_nginx", lambda nginx: None)
+
+    nginx_bin = tmp_path / "nginx"
+    nginx_bin.write_bytes(b"")
+    nginx_bin.chmod(0o755)
+    monkeypatch.setattr(validator, "_validated_nginx_binary", lambda: nginx_bin)
+
+    validator.prepare_runtime("http://127.0.0.1:19200",
+                              {"corpus": [{"id": "small"}]}, str(module_so))
+
+    assert recorded["kwargs"].get("start_new_session") is True, {
+        "kwargs": sorted(recorded["kwargs"]),
+        "msg": "NGINX must be started in its own session",
+    }
+
+    validator._cleanup_runtime_directory(runtime)
+
+
 def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     """NGINX's own diagnostics must survive a readiness failure.
 
