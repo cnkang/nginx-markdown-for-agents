@@ -1204,18 +1204,27 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     """
     import signal
 
+    # Resolve the group once, while the master is certainly still alive. Once
+    # it exits, getpgid(nginx.pid) fails and the surviving workers -- which hold
+    # the listen socket -- would never be signalled.
+    try:
+        pgid = os.getpgid(nginx.pid)
+    except OSError:
+        pgid = None
+
     def _signal_group(sig: int) -> None:
         # ProcessLookupError is an OSError subclass, so OSError covers both a
         # missing process and a permission failure.
-        try:
-            os.killpg(os.getpgid(nginx.pid), sig)
-            return
-        except ProcessLookupError:
-            # Already reaped: nothing to signal.
-            return
-        except OSError:
-            # The group is gone or not ours; fall back to the single process.
-            pass
+        if pgid is not None:
+            try:
+                os.killpg(pgid, sig)
+                return
+            except ProcessLookupError:
+                # The whole group is gone; nothing left to signal.
+                return
+            except OSError:
+                # Not ours, or the group is gone: fall back to the process.
+                pass
         try:
             nginx.send_signal(sig)
         except ProcessLookupError:
@@ -1234,11 +1243,15 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     try:
         nginx.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        _signal_group(signal.SIGKILL)
-        try:
-            nginx.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
+        pass
+    # Unconditional, not just on timeout: the master can honour SIGTERM and
+    # exit while a worker lingers. Either way the group gets a final SIGKILL so
+    # no survivor keeps the listen socket bound.
+    _signal_group(signal.SIGKILL)
+    try:
+        nginx.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:

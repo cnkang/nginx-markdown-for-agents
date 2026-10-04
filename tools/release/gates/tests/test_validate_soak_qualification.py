@@ -204,6 +204,88 @@ def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypa
         validator._cleanup_runtime_directory(runtime)
 
 
+def test_stop_nginx_kills_a_surviving_worker_after_a_clean_master_exit(
+    tmp_path, monkeypatch
+):
+    """A worker that outlives the master must still get signalled.
+
+    The master usually honours SIGTERM and exits promptly, so `wait()` returns
+    without a timeout. Gating the final SIGKILL on that timeout let the worker
+    survive and keep the listen socket, which is what made the next run fail to
+    bind. This test keeps `wait()` on the happy path, which is the case the
+    timeout-based test above never exercises.
+    """
+    import signal as signal_mod
+
+    group: list[tuple[int, int]] = []
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0  # the master exits cleanly on SIGTERM
+
+        def send_signal(self, sig):
+            raise AssertionError("the group signal should not need a fallback")
+
+    nginx = FakeNginx()
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: group.append((pgid, sig))
+    )
+
+    validator._stop_nginx(nginx)
+
+    expected_pgid = nginx.pid + 1
+    assert (expected_pgid, signal_mod.SIGTERM) in group, {"group": group}
+    assert (expected_pgid, signal_mod.SIGKILL) in group, {
+        "group": group,
+        "msg": "a surviving worker keeps the listen socket without the final SIGKILL",
+    }
+
+
+def test_stop_nginx_resolves_the_group_before_the_master_exits(tmp_path, monkeypatch):
+    """The pgid must be read while the master is alive, not after it exits.
+
+    Reading it lazily meant a master that exited on SIGTERM made every later
+    signal fall back to the single process, so the workers were never reached.
+    """
+    seen: list[int] = []
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            # getpgid(nginx.pid) starts failing once the master is reaped.
+            return 0
+
+        def send_signal(self, sig):
+            seen.append(-sig)
+
+    nginx = FakeNginx()
+    lookups = {"n": 0}
+
+    def fake_getpgid(pid):
+        lookups["n"] += 1
+        return pid + 1
+
+    monkeypatch.setattr(validator.os, "getpgid", fake_getpgid)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: sent.append((pgid, sig))
+    )
+
+    validator._stop_nginx(nginx)
+
+    assert lookups["n"] == 1, {
+        "lookups": lookups["n"],
+        "msg": "getpgid must be resolved once, before any signal",
+    }
+    assert len(sent) == 2, {"sent": sent, "fallback": seen}
+    assert all(pgid == nginx.pid + 1 for pgid, _ in sent), {"sent": sent}
+    assert not seen, "the cached pgid must be used instead of the per-process path"
+
+
 def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     """The worker must be signalled with the master.
 
