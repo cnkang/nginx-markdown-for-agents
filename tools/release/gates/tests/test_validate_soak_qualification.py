@@ -586,6 +586,59 @@ def test_startup_failure_reason_reports_the_nginx_error(tmp_path):
     assert "[emerg]" in detail, detail
 
 
+def test_startup_failure_reason_reads_the_error_log_too(tmp_path):
+    """A runtime failure only reaches error.log, so it must be consulted.
+
+    NGINX writes CLI failures (the `nginx: [emerg] ...` banner) to the captured
+    output, but runtime failures to its own error log. Dropping the second file
+    leaves every other test green while the reason goes empty.
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text("all fine\n", encoding="utf-8")
+    (logs / "error.log").write_text(
+        "2026/10/03 12:00:00 [alert] worker process exited on signal 11\n",
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert "alert" in detail, detail
+    assert "signal 11" in detail, detail
+
+
+def test_startup_failure_reason_caps_a_single_line(tmp_path):
+    """One runaway log line must not be pasted whole into the failure message."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    noise = "x" * (validator._STARTUP_LOG_MAX_BYTES + 5000)
+    (logs / "startup.log").write_text(f"nginx: [emerg] {noise}\n", encoding="utf-8")
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert len(detail) <= validator._STARTUP_LOG_MAX_BYTES, {
+        "len": len(detail),
+        "cap": validator._STARTUP_LOG_MAX_BYTES,
+    }
+
+
+def test_startup_failure_reason_caps_the_number_of_lines(tmp_path):
+    """A log with many errors must not flood the failure message."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text(
+        "".join(f"nginx: [emerg] error {i}\n" for i in range(50)),
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert detail.count("nginx:") == 3, {
+        "detail": detail,
+        "msg": "at most three reasons belong in the failure message",
+    }
+
+
 def test_startup_failure_reason_is_empty_when_nothing_was_logged(tmp_path):
     """Silence is itself a signal, but it must not invent a reason."""
     (tmp_path / "logs").mkdir()
