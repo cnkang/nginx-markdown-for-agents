@@ -48,6 +48,25 @@ def _iter_python_files(root: Path) -> list[Path]:
     )
 
 
+def _imported_as(node: ast.Import | ast.ImportFrom, name: str) -> str:
+    """Return the source spelling of a bound name, for the finding message.
+
+    ``import os.path`` binds ``os``, but the file says ``os.path``; reporting
+    ``'os'`` sends the reader looking for an import that is not written that
+    way.
+    """
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            bound = alias.asname or alias.name.split(".")[0]
+            if bound == name:
+                return f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+    else:
+        for alias in node.names:
+            if (alias.asname or alias.name) == name:
+                return f"{node.module}.{alias.name}" if node.module else alias.name
+    return name
+
+
 def _bound_names(node: ast.Import | ast.ImportFrom) -> list[str]:
     """Return the local names an import statement binds.
 
@@ -236,7 +255,7 @@ def _annotation_tokens(text: str) -> set[str]:
 
 def _partition_imports(
     tree: ast.AST, functions: list[ast.AST]
-) -> tuple[set[str], dict[str, dict[int, int]]]:
+) -> tuple[set[str], dict[str, dict[int, tuple[int, str]]]]:
     """Split imports into module-level names and per-function re-imports.
 
     Returns ``(module_level, nested)`` where ``nested`` maps a name to the
@@ -244,7 +263,7 @@ def _partition_imports(
     first such import.
     """
     module_level: set[str] = set()
-    nested: dict[str, dict[int, int]] = {}
+    nested: dict[str, dict[int, tuple[int, str]]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
@@ -257,7 +276,9 @@ def _partition_imports(
             if scope is None:
                 module_level.add(name)
             else:
-                nested.setdefault(name, {}).setdefault(id(scope), line)
+                nested.setdefault(name, {}).setdefault(
+                    id(scope), (line, _imported_as(node, name))
+                )
     return module_level, nested
 
 
@@ -271,7 +292,7 @@ def _all_loads(scanner: _ScopeScanner, functions: list[ast.AST]) -> set[str]:
 
 def _outer_binding_survives(
     name: str,
-    scopes: dict[int, int],
+    scopes: dict[int, tuple[int, str]],
     scanner: _ScopeScanner,
     functions: list[ast.AST],
 ) -> bool:
@@ -315,11 +336,11 @@ def collect_errors(root: Path) -> list[str]:
             scopes = nested[name]
             if _outer_binding_survives(name, scopes, scanner, functions):
                 continue
-            first_line = min(scopes.values())
+            first_line, spelled = min(scopes.values(), key=lambda v: v[0])
             errors.append(
-                f"{relative}: {name!r} is imported again inside a function "
-                f"(line {first_line}), shadowing the module-level import; "
-                "nothing outside that function uses the outer binding"
+                f"{relative}: {spelled!r} is imported again inside a function "
+                f"(line {first_line}), shadowing the module-level import of "
+                f"{name!r}; nothing outside that function uses the outer binding"
             )
     return errors
 
