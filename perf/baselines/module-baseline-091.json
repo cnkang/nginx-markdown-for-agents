@@ -604,6 +604,8 @@
     "source_artifact": "perf/baselines/module-baseline-091-raw.json",
     "source_artifact_sha256": "006bb70b6029a639068c50b532d1c8119c8e54b96775ff8c73e62223ba8cadc4",
     "measurement_timestamp": "2026-08-20T17:59:22Z",
-    "normalization": "none"
+    "normalization": "none",
+    "release_gate_eligible": false,
+    "release_gate_exclusion_reason": "measured against the tables.html fixture as 0.9.1 shipped it (2164 bytes); 64eed148 intentionally corrected that fixture by adding align attributes (2248 bytes), and this tree is not 0.9.1, so the recorded input_bytes can no longer be reproduced here. The 0.9.2 baseline is regenerated from the release candidate and carries the release-evidence comparison."
   }
 }

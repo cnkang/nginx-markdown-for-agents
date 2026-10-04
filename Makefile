@@ -1387,7 +1387,13 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	$(MAKE) test-production-examples-e2e-smoke
 	$(MAKE) complexity-check
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
-	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
+	# The 0.9.1 blocking-evidence prerequisite that used to sit here is gone.
+	# Its baseline records the tables.html fixture as 0.9.1 shipped it (2164
+	# bytes) while this tree carries the corrected fixture (2248 bytes), so its
+	# input_bytes cannot be reproduced and the gate returned MISSING_EVIDENCE
+	# before 092 could run. The baseline is retained and marked
+	# release_gate_eligible=false with the reason recorded, so the historical
+	# measurement stays auditable.
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
 		python3 -m pytest tools/perf/tests/ -q --tb=short $(PYTEST_JOBS); \
 	else \
@@ -1401,7 +1407,7 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 		echo "  Reusing candidate-bound 092 benchmark report: $(CANDIDATE_BENCHMARK_REPORT)"; \
 	fi
 	EVIDENCE_GATE_BENCHMARK_REPORT="$(CANDIDATE_BENCHMARK_REPORT)" \
-		$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
+			$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
 	@echo "  [3/8] Public surface and schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
