@@ -899,8 +899,6 @@ def test_soak_excludes_startup_overhead_from_executions(
     """Startup-corpus replay and the empty-input callback must not count
     toward the required-executions floor (libFuzzer reports them inside
     stat::number_of_executed_units on every launch)."""
-    import tools.release.gates.validate_fuzz_qualification as validator
-
     corpus_dir = tmp_path / "fuzz_target"
     corpus_dir.mkdir()
     (corpus_dir / "seed-a").write_bytes(b"a")
@@ -965,8 +963,6 @@ def test_target_soak_records_conflicting_statistics_as_failure(
 def test_blocking_workers_record_each_oversized_execution_failure(
         tmp_path: Path, monkeypatch) -> None:
     """An oversized counter fails each target without aborting peer records."""
-    import tools.release.gates.validate_fuzz_qualification as validator
-
     names = ("fuzz_test_a", "fuzz_test_b")
     corpus_root = tmp_path / "corpus"
     for name in names:
@@ -1076,7 +1072,6 @@ def test_blocking_workers_record_each_malformed_elapsed_failure(
 
 def test_startup_corpus_size_counts_seed_files(tmp_path: Path) -> None:
     """_startup_corpus_size counts files, and reports 0 for absent dirs."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()
@@ -1485,7 +1480,6 @@ def test_soak_chases_time_before_runs_without_a_runs_cap(
     blocking target live.  The first invocation therefore must carry only
     -max_total_time.
     """
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     calls: list[list[str]] = []
 
@@ -1522,7 +1516,6 @@ def test_soak_chases_time_before_runs_without_a_runs_cap(
 def test_soak_chases_runs_only_after_time_is_met(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     calls: list[list[str]] = []
 
@@ -1565,7 +1558,6 @@ def test_soak_fails_fast_when_the_continuation_budget_is_spent(
 ) -> None:
     """A pathologically slow target must fail with a record instead of
     consuming the release job budget until CI kills the job."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the invocation-count arithmetic
     # below stays deterministic; the production tuning is asserted by the
@@ -1607,7 +1599,6 @@ def test_soak_rejects_sub_second_continuation_budgets(
     tmp_path: Path, monkeypatch
 ) -> None:
     """A fractional leftover budget must not become -max_total_time=0."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the leftover arithmetic below
     # stays deterministic; the production tuning is asserted by the envelope
@@ -1647,7 +1638,6 @@ def test_soak_rejects_sub_second_continuation_budgets(
 
 
 def test_soak_schedule_applies_the_cap_limit(monkeypatch) -> None:
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     monkeypatch.setattr(validator.time, "monotonic", lambda: 1000.0)
 
@@ -1676,9 +1666,6 @@ def test_soak_schedule_applies_the_cap_limit(monkeypatch) -> None:
 def test_soak_stops_immediately_when_the_job_deadline_passed(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import time
-
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     calls: list[list[str]] = []
     monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path / "corpus")
@@ -1700,7 +1687,6 @@ def test_soak_continuation_budget_charges_wall_time(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Parsed fuzz time must not shrink the wall-clock continuation charge."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the invocation-count arithmetic
     # below stays deterministic; the production tuning is asserted by the
@@ -1744,9 +1730,6 @@ def test_soak_bounds_the_invocation_timeout_under_a_deadline(
 ) -> None:
     """With a shared deadline, the subprocess margin shrinks to the tight
     bound so a single overrun stays small; without one it stays generous."""
-    import time
-
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     seen_timeouts: list[int] = []
 
@@ -1781,7 +1764,6 @@ def test_soak_chase_timeout_fits_the_budget_and_exceeds_its_cap(
     """A chase's subprocess allowance must both exceed its own cap (so a
     healthy invocation is never killed at the cap) and fit the remaining
     continuation budget (so the margin cannot push past it)."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the cap arithmetic below stays
     # deterministic; the production tuning is asserted by the envelope
@@ -1839,7 +1821,6 @@ def test_soak_chase_cap_shrinks_with_the_remaining_budget(
     """When the remaining budget is small the cap shrinks so the allowance
     still fits; a leftover too small for cap plus margin never schedules a
     doomed invocation."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the cap arithmetic below stays
     # deterministic; the production tuning is asserted by the envelope
@@ -1892,7 +1873,6 @@ def test_soak_never_schedules_a_chase_without_room_for_its_margin(
     """A remaining budget that only covers the margin must fail the target
     instead of launching an invocation whose allowance would equal its cap
     (killed at the cap before it can exit)."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Pin a mid-range continuation budget so the leftover arithmetic below
     # stays deterministic; the production tuning is asserted by the envelope
@@ -1936,7 +1916,6 @@ def test_soak_credits_the_done_reported_loop_time_not_wall() -> None:
     subprocess wall time: startup/corpus replay happens before the loop
     ("Done ... in 7 second(s)" while wall was 8.46 in the traced run, so
     replay time is not credited toward the floor)."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     invocation = {
         "returncode": 0,
@@ -1998,7 +1977,6 @@ def _blocking_target_count() -> int:
 def test_fuzz_envelope_fits_the_dedicated_job_limit() -> None:
     """The fuzz envelope must leave room for setup and the single invocation
     that may still be running at expiry inside the dedicated fuzz job."""
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     total = (
         validator.SETUP_ALLOWANCE_SECONDS
@@ -2084,10 +2062,8 @@ def test_blocking_targets_run_on_an_overlapping_worker_pool(
     would deadlock the barrier (and fail via the timeout), while an
     overlapping one passes regardless of machine load.
     """
-    import threading
     import time as time_module
 
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     # Two workers, round-robin over [fast-0, fast-1, fast-2, slow]: worker 0
     # gets fast-0 and fast-2, worker 1 gets fast-1 and the slow target.  The
@@ -2441,7 +2417,6 @@ def test_join_workers_interrupt_stops_siblings_and_waits_for_cleanup() -> None:
     boundary), join within the bounded cleanup grace, and re-raise so the
     process still exits as interrupted.
     """
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     stop = threading.Event()
     sibling_finished = threading.Event()
@@ -2493,7 +2468,6 @@ def test_worker_failure_aggregates_errors_beyond_the_first(
     first re-raises and the aggregation must print every error beyond it
     (one line here) instead of swallowing them.
     """
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
     barrier = threading.Barrier(2, timeout=10)
@@ -2529,7 +2503,6 @@ def test_worker_failure_cancels_active_process_groups(monkeypatch) -> None:
     pool run (cleared once its workers are joined) so the next run starts
     clean.
     """
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
     cancelled: list[int] = []
@@ -2569,7 +2542,6 @@ def test_worker_interpreter_exit_cancels_active_process_groups(
     per-AGENTS.md consistency rule: a guard added in one branch must apply
     wherever the same stop happens).
     """
-    import tools.release.gates.validate_fuzz_qualification as validator
 
     monkeypatch.setattr(validator, "TARGET_WORKER_COUNT", 2)
     cancelled: list[int] = []

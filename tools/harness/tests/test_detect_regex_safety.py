@@ -1082,7 +1082,6 @@ class TestCLIContract:
         def _raise(*args, **kwargs):
             raise OSError("mocked read failure")
         monkeypatch.setattr(Path, "read_text", _raise)
-        from harness.detect_regex_safety import _scan_python_file
         findings, errors = _scan_python_file(f, tmp_path)
         assert len(errors) >= 1
         assert not findings
