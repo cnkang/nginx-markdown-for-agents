@@ -283,14 +283,18 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "--env NGINX_BIN=/workspace/module-runtime/nginx" in workflow
     )
     assert "libxcrypt" in workflow
-    evidence_invocations = [
-        "make release-perf-evidence-blocking BASELINE_VERSION=091",
-        "make release-perf-evidence-blocking BASELINE_VERSION=092",
-    ]
-    assert all(workflow.count(invocation) == 1 for invocation in evidence_invocations)
-    assert workflow.index(evidence_invocations[0]) < workflow.index(
-        evidence_invocations[1]
-    ), "Tag release evidence must run baseline 091 before baseline 092"
+    # 0.9.2 evidence is the only blocking performance gate. The 0.9.1
+    # prerequisite was removed: its baseline records the tables.html fixture as
+    # 0.9.1 shipped it (2164 bytes) and 64eed148 corrected the fixture to 2248
+    # bytes, so input_bytes could never match and every run stopped in
+    # MISSING_EVIDENCE before 092 was reached.
+    assert (
+        workflow.count("make release-perf-evidence-blocking BASELINE_VERSION=092")
+        == 1
+    ), "Tag release must run the 092 blocking evidence gate exactly once"
+    assert "BASELINE_VERSION=091" not in workflow, (
+        "the unrunnable 0.9.1 gate must not return to the release workflow"
+    )
     assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in workflow
 
 

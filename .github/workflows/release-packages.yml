@@ -1524,11 +1524,16 @@ jobs:
           # its probes were validated above.  Re-running ApacheBench here
           # would compare two integer-millisecond p50 samples and can turn
           # one timing bucket into a false regression.
-          # Keep the tag contract additive with the local 0.9.2 gate:
-          # historical 0.9.1 evidence must pass before candidate 0.9.2
-          # evidence.  NGINX_BIN is module-enabled and the helper refuses
-          # to skip module evidence when it is present.
-          make release-perf-evidence-blocking BASELINE_VERSION=091
+          # 0.9.2 evidence is the blocking performance gate.  The 0.9.1 gate
+          # that used to run first is gone: its baseline records the tables.html
+          # fixture as 0.9.1 shipped it (2164 bytes), and 64eed148 corrected
+          # that fixture to 2248 bytes, so its input_bytes cannot be reproduced
+          # on this tree and every run failed with MISSING_EVIDENCE before
+          # reaching 092.  The baseline is kept, marked
+          # release_gate_eligible=false with the reason recorded, so the
+          # historical measurement is still auditable.
+          # NGINX_BIN is module-enabled and the helper refuses to skip module
+          # evidence when it is present.
           EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
             make release-perf-evidence-blocking BASELINE_VERSION=092
           # Short-soak qualification against the module-enabled EL9 nginx

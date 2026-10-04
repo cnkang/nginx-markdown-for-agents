@@ -517,48 +517,75 @@ def _blocking_evidence_invocations(text: str) -> list[tuple[int, str]]:
     return invocations
 
 
-def test_make_092_canonical_runs_blocking_evidence_with_both_baselines() -> None:
-    """The canonical 092 subset must run blocking evidence for 091 and 092
-    exactly once each, in release order."""
+def test_make_092_canonical_gates_only_on_092() -> None:
+    """The canonical 092 subset gates on 092 alone.
+
+    The 0.9.1 prerequisite was removed: its baseline records the tables.html
+    fixture as 0.9.1 shipped it (2164 bytes) and 64eed148 corrected the fixture
+    to 2248 bytes, so its input_bytes cannot be reproduced on this tree and the
+    gate returned MISSING_EVIDENCE before 092 ever ran.  Re-adding it would
+    reintroduce a release that can never go green.
+    """
     invocations = _blocking_evidence_invocations(
         _make_dry_run("release-gates-check-092-canonical")
     )
     baselines = [b for _, b in invocations]
-    assert baselines == ["091", "092"], (
-        f"expected one blocking evidence run for 091 then 092, "
-        f"got {baselines}"
+    assert baselines == ["092"], (
+        f"expected only the 092 blocking evidence run, got {baselines}"
     )
 
 
-def test_make_092_gate_runs_blocking_evidence_with_both_baselines() -> None:
-    """The complete 092 gate must retain both canonical evidence invocations."""
+def test_make_092_gate_gates_only_on_092() -> None:
+    """The complete 092 gate must retain its 092 blocking invocation once."""
     invocations = _blocking_evidence_invocations(
         _make_dry_run("release-gates-check-092")
     )
     baselines = [b for _, b in invocations]
-    assert baselines.count("091") == 1, (
-        f"expected baseline 091 exactly once, got {baselines}"
-    )
     assert baselines.count("092") == 1, (
         f"expected baseline 092 exactly once, got {baselines}"
     )
+    assert "091" not in baselines, (
+        f"the 0.9.1 gate was reinstated; it cannot pass on this fixture: {baselines}"
+    )
 
 
-def test_make_092_gate_runs_091_before_092() -> None:
-    """Within the 092 gate dry-run, the 091 baseline invocation must occur
-    before the 092 baseline invocation."""
-    invocations = _blocking_evidence_invocations(
-        _make_dry_run("release-gates-check-092")
+def test_release_workflow_gates_only_on_092() -> None:
+    """The tag release job must not reintroduce the unrunnable 0.9.1 gate."""
+    workflow = (
+        _repo_root() / ".github" / "workflows" / "release-packages.yml"
+    ).read_text(encoding="utf-8")
+    invocations = _blocking_evidence_invocations(workflow)
+    baselines = [b for _, b in invocations]
+    assert "091" not in baselines, (
+        f"the release workflow still gates on 091: {baselines}"
     )
-    positions = {b: i for i, b in invocations}
-    assert "091" in positions, (
-        f"expected baseline 091 in positions, got {list(positions)}"
+    assert baselines.count("092") == 1, baselines
+
+
+def test_091_baseline_is_marked_ineligible_with_a_reason() -> None:
+    """The retained 0.9.1 baseline must say why it is excluded.
+
+    Dropping the gate call without this would leave a baseline that silently
+    looks eligible, so a future change could re-add the comparison without
+    knowing it cannot pass.
+    """
+    baseline = json.loads(
+        (
+            _repo_root() / "perf" / "baselines" / "module-baseline-091.json"
+        ).read_text(encoding="utf-8")
     )
-    assert "092" in positions, (
-        f"expected baseline 092 in positions, got {list(positions)}"
+    policy = baseline.get("baseline_policy")
+    assert isinstance(policy, dict), "the 0.9.1 baseline lost its policy block"
+    assert policy.get("release_gate_eligible") is False, (
+        "the 0.9.1 baseline must be marked ineligible while its gate is not run"
     )
-    assert positions["091"] < positions["092"], (
-        "092 blocking evidence must run after the 091 prerequisite"
+    reason = policy.get("release_gate_exclusion_reason")
+    assert isinstance(reason, str), f"the exclusion reason is not a string: {reason!r}"
+    assert reason.strip(), "an ineligible baseline must record why"
+    # The measurement itself must stay untouched: only the policy changes.
+    measured = policy.get("source_git_commit")
+    assert measured == "0847c287c1b744a3f80b7b7fe6ccf3e897223377", (
+        f"the 0.9.1 measurement provenance changed: {measured}"
     )
 
 
@@ -696,8 +723,9 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
         r"make release-perf-evidence-blocking BASELINE_VERSION=([0-9]+)",
         gate_block,
     )
-    assert invocations == ["091", "092"], (
-        "tag release-gate must run exactly 091 then 092 blocking evidence"
+    assert invocations == ["092"], (
+        "tag release-gate must run exactly the 092 blocking evidence gate; "
+        f"got {invocations}"
     )
     assert "make -C components/nginx-module/tests unit-streaming_impl" in gate_block
     assert "make -C components/nginx-module/tests unit-otel_impl" not in gate_block
