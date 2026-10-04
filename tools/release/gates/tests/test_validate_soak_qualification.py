@@ -27,6 +27,745 @@ def _run_fixture(record_name: str) -> int:
     )
 
 
+def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
+    """NGINX's own diagnostics must survive a readiness failure.
+
+    The failure used to be reported as a bare "nginx did not become ready"
+    because both streams went to DEVNULL, so the reason -- a bad module path, a
+    missing directive, a port clash -- was destroyed before anyone read it.
+    """
+    captured: dict = {}
+
+    class FakeNginx:
+        pid = 4242
+
+        def __init__(self, *a, **kw):
+            captured["stdout"] = kw.get("stdout")
+            captured["stderr"] = kw.get("stderr")
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            pass
+
+    monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
+    monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    # Port occupancy is not what this test is about; a real holder would abort
+    # the run for an unrelated reason.
+    monkeypatch.setattr(validator, "_port_holder", lambda port: None)
+    # The runtime directory must live inside the repository: the startup log is
+    # written through validate_write_path_within_root.
+    runtime_dir = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-selftest"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime_dir)
+    monkeypatch.setattr(validator, "write_nginx_conf", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+    )
+    real_cleanup = validator._cleanup_runtime_directory
+    try:
+        _runtime, _corpus, nginx = validator.prepare_runtime(
+            "http://127.0.0.1:8080", {}, ""
+        )
+        # Asserted before the cleanup below removes the directory.
+        log_exists = (runtime_dir / "logs" / "startup.log").exists()
+    finally:
+        # The real cleanup, not a no-op: the directory name carries the
+        # markdown-soak- prefix that cleanup recognises, so a stubbed cleanup
+        # would leave it behind in build/soak-runtime.
+        real_cleanup(runtime_dir)
+
+    assert captured["stdout"] is not validator.subprocess.DEVNULL, (
+        "NGINX stdout must be captured, not discarded"
+    )
+    assert captured["stderr"] is validator.subprocess.STDOUT, (
+        "NGINX stderr must be merged into the captured log"
+    )
+    assert log_exists, (
+        "the startup log must exist on disk for the failure path to read"
+    )
+    del nginx
+
+
+def test_port_holder_detects_a_bound_port():
+    """A stale NGINX must be named, not reported as "did not become ready"."""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("0.0.0.0", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        description = validator._port_holder(port)
+        assert description is not None, "a listening port must be reported"
+        assert "in use" in description, description
+    finally:
+        holder.close()
+
+
+def test_port_holder_probe_mirrors_nginx_reuseaddr():
+    """The probe must bind the way NGINX binds.
+
+    NGINX sets SO_REUSEADDR on its listen socket, so a port left in TIME_WAIT
+    binds fine for it. A probe without the flag refuses that same port and
+    aborts a run that would have succeeded. Asserted directly because a
+    behavioural test cannot see it: with the flag set, binding an unbound port
+    succeeds either way.
+    """
+    import socket
+
+    seen: list[int] = []
+    real_socket = socket.socket
+
+    class RecordingSocket(real_socket):  # type: ignore[misc,valid-type]
+        def setsockopt(self, level, optname, value, *a):
+            seen.append(optname)
+            return super().setsockopt(level, optname, value, *a)
+
+    # The validator imports socket inside the function, so patch the module
+    # attribute it resolves at call time.
+    try:
+        socket.socket = RecordingSocket  # type: ignore[assignment]
+        validator._port_holder(0)
+    finally:
+        socket.socket = real_socket  # type: ignore[assignment]
+
+    assert socket.SO_REUSEADDR in seen, seen
+
+
+def test_port_holder_probes_only_ipv4():
+    """The generated config is `listen <port>;` -- IPv4 wildcard only.
+
+    Probing IPv6 as well would report an occupied v6 socket as a conflict for a
+    port NGINX binds regardless, aborting a run that would have served fine.
+    """
+    import socket
+
+    created: list[int] = []
+    real_socket = socket.socket
+
+    class RecordingSocket(real_socket):  # type: ignore[misc,valid-type]
+        def __init__(self, family=socket.AF_INET, *a, **kw):
+            created.append(family)
+            super().__init__(family, *a, **kw)
+
+    try:
+        socket.socket = RecordingSocket  # type: ignore[assignment]
+        validator._port_holder(0)
+    finally:
+        socket.socket = real_socket  # type: ignore[assignment]
+
+    assert created, "no probe socket was created"
+    assert all(f == socket.AF_INET for f in created), created
+
+
+def test_port_holder_is_none_for_a_free_port():
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    assert validator._port_holder(port) is None
+
+
+def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypatch):
+    """The gate must say the port is taken rather than time out on readiness."""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("0.0.0.0", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-port-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+    try:
+        monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+        monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime)
+        monkeypatch.setattr(validator, "write_nginx_conf", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+        )
+        with pytest.raises(ValueError) as excinfo:
+            validator.prepare_runtime(f"http://127.0.0.1:{port}", {}, "")
+        assert "already in use" in str(excinfo.value), excinfo.value
+    finally:
+        holder.close()
+        validator._cleanup_runtime_directory(runtime)
+
+
+def _signal_fallback_nginx(captured: list[int]):
+    """A master whose group signal fails, so only the per-process path runs."""
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            captured.append(sig)
+
+    return FakeNginx()
+
+
+def test_stop_nginx_reports_a_permission_failure(tmp_path, monkeypatch, capsys):
+    """A signal we could not deliver must be reported, not swallowed.
+
+    Silently ignoring a permission failure leaves NGINX running and still holding
+    the listen socket, so the next run fails to bind with nothing pointing back
+    here.
+    """
+    import signal as signal_mod
+
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    # getpgid fails, so the group signal cannot be used at all.
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+
+    def denied(sig):
+        raise PermissionError("operation not permitted")
+
+    nginx.send_signal = denied  # type: ignore[method-assign]
+
+    validator._stop_nginx(nginx)
+
+    err = capsys.readouterr().err
+    assert "could not signal NGINX" in err, {"stderr": err}
+    assert str(signal_mod.SIGTERM) in err or "PermissionError" in err, {
+        "stderr": err
+    }
+
+
+def test_stop_nginx_is_silent_when_the_process_is_already_gone(
+    tmp_path, monkeypatch, capsys
+):
+    """A missing process is not a failure: nothing was left running."""
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+
+    def gone(sig):
+        raise ProcessLookupError("no such process")
+
+    nginx.send_signal = gone  # type: ignore[method-assign]
+
+    validator._stop_nginx(nginx)
+
+    err = capsys.readouterr().err
+    assert "could not signal NGINX" not in err, {"stderr": err}
+
+
+def test_stop_nginx_still_signals_the_process_when_the_group_is_unknown(
+    tmp_path, monkeypatch
+):
+    """Losing the group id must not skip the only signal we have left.
+
+    An early return here would leave both the master and its workers running
+    whenever the group cannot be resolved.
+    """
+    import signal as signal_mod
+
+    captured: list[int] = []
+    nginx = _signal_fallback_nginx(captured)
+
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(ProcessLookupError())
+    )
+    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: None)
+
+    validator._stop_nginx(nginx)
+
+    # SIGTERM and the unconditional final SIGKILL both have to reach the process.
+    assert signal_mod.SIGTERM in captured, {"signals": captured}
+    assert signal_mod.SIGKILL in captured, {
+        "signals": captured,
+        "msg": "the group is unknown, so the process signal is the only teardown",
+    }
+
+
+def test_stop_nginx_kills_a_surviving_worker_after_a_clean_master_exit(
+    tmp_path, monkeypatch
+):
+    """A worker that outlives the master must still get signalled.
+
+    The master usually honours SIGTERM and exits promptly, so `wait()` returns
+    without a timeout. Gating the final SIGKILL on that timeout let the worker
+    survive and keep the listen socket, which is what made the next run fail to
+    bind. This test keeps `wait()` on the happy path, which is the case the
+    timeout-based test above never exercises.
+    """
+    import signal as signal_mod
+
+    group: list[tuple[int, int]] = []
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0  # the master exits cleanly on SIGTERM
+
+        def send_signal(self, sig):
+            raise AssertionError("the group signal should not need a fallback")
+
+    nginx = FakeNginx()
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: group.append((pgid, sig))
+    )
+
+    validator._stop_nginx(nginx)
+
+    expected_pgid = nginx.pid + 1
+    assert (expected_pgid, signal_mod.SIGTERM) in group, {"group": group}
+    assert (expected_pgid, signal_mod.SIGKILL) in group, {
+        "group": group,
+        "msg": "a surviving worker keeps the listen socket without the final SIGKILL",
+    }
+
+
+def test_stop_nginx_resolves_the_group_before_the_master_exits(tmp_path, monkeypatch):
+    """The pgid must be read while the master is alive, not after it exits.
+
+    Reading it lazily meant a master that exited on SIGTERM made every later
+    signal fall back to the single process, so the workers were never reached.
+    """
+    seen: list[int] = []
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            # getpgid(nginx.pid) starts failing once the master is reaped.
+            return 0
+
+        def send_signal(self, sig):
+            seen.append(-sig)
+
+    nginx = FakeNginx()
+    lookups = {"n": 0}
+
+    def fake_getpgid(pid):
+        lookups["n"] += 1
+        return pid + 1
+
+    monkeypatch.setattr(validator.os, "getpgid", fake_getpgid)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: sent.append((pgid, sig))
+    )
+
+    validator._stop_nginx(nginx)
+
+    assert lookups["n"] == 1, {
+        "lookups": lookups["n"],
+        "msg": "getpgid must be resolved once, before any signal",
+    }
+    assert len(sent) == 2, {"sent": sent, "fallback": seen}
+    assert all(pgid == nginx.pid + 1 for pgid, _ in sent), {"sent": sent}
+    assert not seen, "the cached pgid must be used instead of the per-process path"
+
+
+def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
+    """The worker must be signalled with the master.
+
+    Signalling only the master leaves the worker holding the listen socket, so
+    the next run in the same environment cannot bind.
+    """
+    import signal as signal_mod
+
+    # Tracked separately, and the group records the pgid it was given: a test
+    # that only watched a signal list would pass even if the implementation
+    # signalled a single process instead of the group.
+    group: list[tuple[int, int]] = []
+    fallback: list[int] = []
+    calls = {"n": 0}
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise __import__("subprocess").TimeoutExpired("nginx", timeout)
+            return 0
+
+        def send_signal(self, sig):
+            fallback.append(sig)
+
+    nginx = FakeNginx()
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: group.append((pgid, sig))
+    )
+
+    validator._stop_nginx(nginx)
+
+    expected_pgid = nginx.pid + 1
+    assert (expected_pgid, signal_mod.SIGTERM) in group, {
+        "group": group,
+        "fallback": fallback,
+    }
+    assert (expected_pgid, signal_mod.SIGKILL) in group, {
+        "group": group,
+        "fallback": fallback,
+    }
+    assert not fallback, "killpg succeeded; the per-process fallback should not run"
+
+
+def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
+    """The leak fix needs its own regression assertion.
+
+    Stubbing the cleanup out, or weakening the prefix/parent guard, left every
+    other test green while the soak tests quietly accumulated directories under
+    build/soak-runtime.
+    """
+    runtime_root = validator.SOAK_RUNTIME_ROOT
+    runtime = runtime_root / "markdown-soak-cleanup-regression"
+    runtime.mkdir(parents=True, exist_ok=True)
+    (runtime / "marker").write_text("x", encoding="utf-8")
+
+    validator._cleanup_runtime_directory(runtime)
+
+    assert not runtime.exists(), "a prefixed runtime directory must be removed"
+
+
+def test_cleanup_leaves_an_unprefixed_directory_intact() -> None:
+    """The guard is a safety limit: it must not delete outside its own scope."""
+    runtime_root = validator.SOAK_RUNTIME_ROOT
+    other = runtime_root / "not-a-soak-runtime"
+    other.mkdir(parents=True, exist_ok=True)
+    try:
+        validator._cleanup_runtime_directory(other)
+        assert other.exists(), "a directory without the prefix must be left alone"
+    finally:
+        import shutil as _shutil
+
+        _shutil.rmtree(other, ignore_errors=True)
+
+
+def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
+    """The config must set `markdown_limits parser_budget`.
+
+    The default is 32 MiB and one conversion of the 1 MiB `large` fixture
+    allocates about 41 MB, so without the directive every request fails with
+    ERROR_PARSE_BUDGET_EXCEEDED (error_code 11, category resource_limit) and
+    the soak reports a resource limit the module never imposed.
+    """
+    monkeypatch.setattr(
+        validator, "_runtime_directory", lambda: tmp_path
+    )
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-limits-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+    try:
+        validator.write_nginx_conf(
+            runtime,
+            validator.SOAK_PORT,
+            str(runtime / "html"),
+            None,
+            parser_budget_bytes=validator.SOAK_PARSER_BUDGET_BYTES,
+        )
+        conf = (runtime / "nginx.conf").read_text(encoding="utf-8")
+    finally:
+        validator._cleanup_runtime_directory(runtime)
+
+    assert (
+        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
+    ), conf
+
+
+def test_parser_budget_exceeds_the_measured_allocation():
+    """41 MB was measured; the default 32 MiB is what failed the soak."""
+    assert validator.SOAK_PARSER_BUDGET_BYTES > 41 * 1024 * 1024, (
+        "the budget must clear the observed parser allocation"
+    )
+
+
+def test_parser_budget_does_not_relax_the_evidence_ceiling():
+    """Raising the parser budget must not widen what the evidence is held to.
+
+    The manifest's conversion_memory ceilings are what the per-request peak is
+    compared against, so they stay independent of the parser budget.
+    """
+    record = {
+        "status": "pass",
+        "module_managed_peak_observed": True,
+        "per_request_peak_bytes": 40 * 1024 * 1024,
+        "rss_samples": [1, 2, 3],
+        "monotonic_growth_after_drain": False,
+    }
+    manifest = {
+        "duration_minutes": 30,
+        "concurrency": 16,
+        "corpus": [{"id": "small", "conversion_memory_bytes": 33_554_432}],
+        "scenario_refs": ["release/scope/short-soak-scope.json"],
+    }
+    issue = validator._peak_memory_issue(record, manifest)
+    assert issue is not None, "a peak over the ceiling must be reported"
+    assert "ceiling" in issue, issue
+
+
+def test_prepare_runtime_wires_the_parser_budget_into_the_config(
+    tmp_path, monkeypatch
+):
+    """The budget must reach the written config through prepare_runtime.
+
+    Testing `write_nginx_conf` directly misses this: the other prepare_runtime
+    tests monkeypatch it away, so dropping the keyword argument at the call site
+    reverted every request to the 32 MiB default -- the exact failure this
+    change fixes -- while all tests stayed green.
+    """
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-wiring-selftest"
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    class FakeNginx:
+        pid = 4242
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            pass
+
+    monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime)
+    monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    # Port occupancy is not what this test is about.
+    monkeypatch.setattr(validator, "_port_holder", lambda port: None)
+    monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
+    monkeypatch.setattr(
+        validator, "_validated_nginx_binary", lambda: Path("/bin/true")
+    )
+    try:
+        validator.prepare_runtime(
+            f"http://127.0.0.1:{validator.SOAK_PORT}", {"corpus": []}, ""
+        )
+        conf = (runtime / "nginx.conf").read_text(encoding="utf-8")
+    finally:
+        validator._cleanup_runtime_directory(runtime)
+
+    assert f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in (
+        conf
+    ), conf
+
+
+def test_startup_failure_reason_reports_the_nginx_error(tmp_path):
+    """The reason must name the actual NGINX error, not just 'not ready'."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text(
+        "nginx: [emerg] dlopen() failed while loading "
+        "/usr/lib/nginx/modules/x.so (cannot open shared object file)\n",
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert "dlopen" in detail, detail
+    assert "[emerg]" in detail, detail
+
+
+def test_startup_failure_reason_reads_the_error_log_too(tmp_path):
+    """A runtime failure only reaches error.log, so it must be consulted.
+
+    NGINX writes CLI failures (the `nginx: [emerg] ...` banner) to the captured
+    output, but runtime failures to its own error log. Dropping the second file
+    leaves every other test green while the reason goes empty.
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text("all fine\n", encoding="utf-8")
+    (logs / "error.log").write_text(
+        "2026/10/03 12:00:00 [alert] worker process exited on signal 11\n",
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert "alert" in detail, detail
+    assert "signal 11" in detail, detail
+
+
+def test_startup_failure_reason_caps_a_single_line(tmp_path):
+    """One runaway log line must not be pasted whole into the failure message."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    noise = "x" * (validator._STARTUP_LOG_MAX_BYTES + 5000)
+    (logs / "startup.log").write_text(f"nginx: [emerg] {noise}\n", encoding="utf-8")
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert len(detail) <= validator._STARTUP_LOG_MAX_BYTES, {
+        "len": len(detail),
+        "cap": validator._STARTUP_LOG_MAX_BYTES,
+    }
+
+
+def test_startup_failure_reason_caps_the_number_of_lines(tmp_path):
+    """A log with many errors must not flood the failure message."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text(
+        "".join(f"nginx: [emerg] error {i}\n" for i in range(50)),
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert detail.count("nginx:") == 3, {
+        "detail": detail,
+        "msg": "at most three reasons belong in the failure message",
+    }
+
+
+def test_ready_failure_reports_the_status_and_the_nginx_log(tmp_path, monkeypatch):
+    """The readiness error must name the HTTP status *and* what NGINX logged.
+
+    The three pieces are assembled in one place: the generic reason, the poll's
+    last error, and the log detail. The individual helpers are covered, so only
+    this assembly can be verified -- dropping a piece or changing the join left
+    the suite green.
+    """
+    # tmp_path is removed by pytest; a hardcoded directory would leak.
+    runtime_dir = tmp_path / "markdown-soak-ready-error"
+    logs = runtime_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "error.log").write_text(
+        "2026/10/03 12:00:00 [emerg] bind() to 0.0.0.0:19200 failed\n",
+        encoding="utf-8",
+    )
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(validator, "prepare_runtime",
+                        lambda base, m, so: (runtime_dir, {"small": "f"}, FakeNginx()))
+    monkeypatch.setattr(validator, "wait_for_ready",
+                        lambda url: (False, "HTTP 502"))
+    monkeypatch.setattr(validator, "_stop_nginx", lambda nginx: None)
+
+    result = validator._run_soak_session("http://127.0.0.1:19200", {"concurrency": 1}, "x.so")
+
+    error = result.get("ready_error") or ""
+    assert "nginx did not become ready" in error, result
+    assert "HTTP 502" in error, {"msg": "the poll's last error must survive", "error": error}
+    assert "19200" in error, {"msg": "NGINX's own log line must survive", "error": error}
+    assert error.count(": ") >= 2, {"msg": "the pieces must be joined", "error": error}
+
+
+def test_ready_failure_omits_absent_pieces_without_trailing_separator(
+    tmp_path, monkeypatch
+):
+    """With nothing logged, the message must not trail an empty separator."""
+    runtime_dir = tmp_path / "markdown-soak-ready-nodetail"
+    (runtime_dir / "logs").mkdir(parents=True)
+    (runtime_dir / "logs" / "startup.log").write_text("all fine\n", encoding="utf-8")
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(validator, "prepare_runtime",
+                        lambda base, m, so: (runtime_dir, {"small": "f"}, FakeNginx()))
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url: (False, ""))
+    monkeypatch.setattr(validator, "_stop_nginx", lambda nginx: None)
+
+    result = validator._run_soak_session("http://127.0.0.1:19200", {"concurrency": 1}, "x.so")
+
+    error = result.get("ready_error") or ""
+    assert error == "nginx did not become ready", {"error": error}
+    assert not error.endswith(": "), {"error": error}
+
+
+def test_wait_for_ready_reports_a_non_200_status(monkeypatch):
+    """A responding-but-refusing NGINX must surface its status code."""
+    import io
+    import urllib.request as urlreq
+
+    class FakeResponse:
+        status = 502
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urlreq, "urlopen", lambda *a, **k: FakeResponse())
+
+    # A real scenario filename: the URL validator rejects anything else. The
+    # timeout stays small so the poll loop exits promptly; do not freeze the
+    # clock, or the deadline never passes and the loop spins forever.
+    ready, last_error = validator.wait_for_ready(
+        f"http://127.0.0.1:{validator.SOAK_PORT}/{validator.SOAK_SCENARIO_FILES['small']}",
+        timeout=1,
+    )
+
+    assert ready is False, {"ready": ready}
+    assert "502" in last_error, {"last_error": last_error}
+
+
+def test_startup_failure_reason_is_empty_when_nothing_was_logged(tmp_path):
+    """Silence is itself a signal, but it must not invent a reason."""
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "startup.log").write_text("all fine\n", encoding="utf-8")
+
+    assert validator._startup_failure_reason(tmp_path) == ""
+
+
+def test_wait_for_ready_returns_the_last_error():
+    """A refusal must name the error instead of collapsing to False."""
+    # Mock the connection so the outcome does not depend on whether something
+    # happens to be listening on SOAK_PORT while this test runs.
+    import urllib.error
+    import urllib.request
+
+    def refuse(*a, **kw):
+        raise urllib.error.URLError("mocked refusal")
+
+    fixture = next(iter(validator.SOAK_SCENARIO_FILES.values()))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(urllib.request, "urlopen", refuse)
+        ready, error = validator.wait_for_ready(
+            f"http://127.0.0.1:{validator.SOAK_PORT}/{fixture}", timeout=1
+        )
+
+    assert ready is False
+    assert "mocked refusal" in error, error
+
+
 def test_valid_soak_record_passes() -> None:
     assert _run_fixture("soak-qualification-valid.json") == 0
 
@@ -384,10 +1123,15 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     runtime_dir = tmp_path / "runtime"
 
     class FakeNginx:
+        pid = 4242
+
         def terminate(self) -> None:
             pass
 
         def wait(self, timeout: int) -> None:
+            pass
+
+        def send_signal(self, sig) -> None:
             pass
 
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
@@ -402,7 +1146,9 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
             FakeNginx(),
         ),
     )
-    monkeypatch.setattr(validator, "wait_for_ready", lambda url: True)
+    monkeypatch.setattr(
+        validator, "wait_for_ready", lambda url: (True, "")
+    )
     monkeypatch.setattr(validator, "find_worker_pid", lambda path: -1)
     monkeypatch.setattr(
         validator,

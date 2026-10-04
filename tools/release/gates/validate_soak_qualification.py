@@ -75,6 +75,17 @@ SOAK_METRICS_PATH = "/markdown-metrics"
 METRICS_RESPONSE_MAX_BYTES = 64 * 1024
 FLOAT_EPSILON = 1e-9
 MIN_RSS_SAMPLES = 3
+
+# `markdown_limits parser_budget` defaults to 32 MiB. One conversion of the 1
+# MiB `large` soak fixture allocates about 41 MB, so the default rejects every
+# request with ERROR_PARSE_BUDGET_EXCEEDED (error_code 11, category
+# resource_limit) -- a limit the soak never set. 64 MiB clears the observed
+# peak with room for allocator variation.
+#
+# This is independent of the manifest's conversion_memory ceilings: those are
+# what the per-request peak is measured *against*, so a larger parser budget
+# does not relax the evidence check.
+SOAK_PARSER_BUDGET_BYTES = 64 * 1024 * 1024
 PEAK_MEMORY_MISSING_ERROR = (
     "insufficient-data: module-managed per-request peak memory was not observed"
 )
@@ -632,20 +643,58 @@ def read_worker_rss(worker_pid: int) -> int:
         return -1
 
 
-def wait_for_ready(url: str, timeout: int = 30) -> bool:
+_STARTUP_LOG_MAX_BYTES = 4096
+
+
+def _startup_failure_reason(runtime_dir: pathlib.Path) -> str:
+    """Return why NGINX refused to serve, read from its own logs.
+
+    Both NGINX's captured output and its error log are consulted: the first
+    carries CLI failures (`nginx: [emerg] ...`), the second carries runtime
+    ones. Returns a short single-line reason, or "" when nothing was logged --
+    which is itself the signal that the process died before logging.
+    """
+    reasons: list[str] = []
+    for relative in (pathlib.Path("logs") / "startup.log", pathlib.Path("logs") / "error.log"):
+        path = runtime_dir / relative
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("nginx:") or "[emerg]" in stripped or "[alert]" in stripped:
+                reasons.append(stripped[:_STARTUP_LOG_MAX_BYTES])
+            if len(reasons) >= 3:
+                break
+        if len(reasons) >= 3:
+            break
+    return " | ".join(reasons)
+
+
+def wait_for_ready(url: str, timeout: int = 30) -> tuple[bool, str]:
+    """Poll ``url`` until it serves 200 or the deadline passes.
+
+    Returns ``(ready, last_error)``. The error is kept because a refusal is
+    reported as a bare "nginx did not become ready" otherwise, which says
+    nothing about whether the port was refused, the host unreachable, or the
+    response malformed.
+    """
     validated_url = _validated_local_url(url)
     deadline = time.time() + timeout
+    last_error = ""
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(validated_url, timeout=2) as response:
                 if response.status == 200:
-                    return True
-        except OSError:
+                    return True, ""
+                last_error = f"HTTP {response.status}"
+        except OSError as exc:
             # NGINX may still be starting, so transient connection failures
             # are expected while the readiness loop continues.
-            pass
+            last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(0.25)
-    return False
+    return False, last_error
 
 
 def _nginx_config_path(path: pathlib.Path, label: str) -> str:
@@ -656,7 +705,13 @@ def _nginx_config_path(path: pathlib.Path, label: str) -> str:
     return text
 
 
-def write_nginx_conf(runtime_dir: pathlib.Path, port: int, root: str, module_so: str | None) -> None:
+def write_nginx_conf(
+    runtime_dir: pathlib.Path,
+    port: int,
+    root: str,
+    module_so: str | None,
+    parser_budget_bytes: int | None = None,
+) -> None:
     validated_runtime_dir = validate_write_path_within_root(
         runtime_dir, REPO_ROOT, purpose="soak runtime directory"
     )
@@ -673,6 +728,17 @@ def write_nginx_conf(runtime_dir: pathlib.Path, port: int, root: str, module_so:
         load_line = (
             f"load_module {_nginx_config_path(validated_module, 'MODULE_SO')};"
         )
+    # `markdown_limits parser_budget` defaults to 32 MiB. The soak corpus needs
+    # more than that, and an unstated budget makes every conversion fail with
+    # ERROR_PARSE_BUDGET_EXCEEDED (error_code 11, category resource_limit),
+    # which fails the gate for a reason that has nothing to do with the module.
+    #
+    # This is deliberately independent of the manifest's conversion_memory: that
+    # ceiling is what the evidence is measured *against*, not the parser budget.
+    # Granting more parser budget than needed would not relax the check.
+    limits_line = ""
+    if parser_budget_bytes:
+        limits_line = f"markdown_limits parser_budget={int(parser_budget_bytes)};"
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     conf = f"""worker_processes 1;
 daemon off;
@@ -686,6 +752,7 @@ http {{
         listen {port};
         root {root_text};
         markdown_filter on;
+        {limits_line}
         location = /markdown-metrics {{
             markdown_metrics;
             allow 127.0.0.1;
@@ -1045,15 +1112,47 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     try:
         corpus = build_corpus(runtime_dir, manifest)
         port = int(base_url.rsplit(":", 1)[1])
-        write_nginx_conf(runtime_dir, port, str(runtime_dir / "html"), module_so or None)
+        write_nginx_conf(
+            runtime_dir,
+            port,
+            str(runtime_dir / "html"),
+            module_so or None,
+            parser_budget_bytes=SOAK_PARSER_BUDGET_BYTES,
+        )
         nginx_bin = _validated_nginx_binary()
         if nginx_bin is None:
             raise ValueError("NGINX_BIN is not a readable executable")
-        nginx = subprocess.Popen(
-            [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        # Keep NGINX's diagnostics: a readiness failure is otherwise
+        # unattributable, because `nginx: [emerg] ...` is the only place the
+        # reason appears (a bad module path, a missing directive, a port
+        # clash).  The log is read back by _startup_failure_reason() before
+        # the runtime directory is removed.
+        # A stale NGINX from an earlier run still holds the port; say so now
+        # rather than after a full readiness timeout reports it as "not ready".
+        # Checked before the log is opened so this path holds no descriptor.
+        if holder := _port_holder(port):
+            raise ValueError(
+                f"cannot start NGINX: {holder}; a previous soak run may still "
+                "be running"
+            )
+        nginx_log = validate_write_path_within_root(
+            runtime_dir / "logs" / "startup.log",
+            REPO_ROOT,
+            purpose="soak NGINX startup log",
         )
+        nginx_log.parent.mkdir(parents=True, exist_ok=True)
+        # The context manager closes our copy whether Popen succeeds or raises;
+        # the child keeps its own descriptor, so closing here is safe and leaves
+        # the log readable for the failure path.
+        with nginx_log.open("w", encoding="utf-8") as startup_log:
+            nginx = subprocess.Popen(
+                [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
+                stdout=startup_log,
+                stderr=subprocess.STDOUT,
+                # Own session, so _stop_nginx can signal the worker along with
+                # the master instead of leaving it holding the listen socket.
+                start_new_session=True,
+            )
     except Exception:
         # Any failure after the runtime directory exists must not leave it
         # behind; remove it before re-raising.
@@ -1062,12 +1161,97 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     return runtime_dir, corpus, nginx
 
 
+def _port_holder(port: int) -> str | None:
+    """Return a description of whatever is already listening on ``port``.
+
+    A stale NGINX from an interrupted run keeps the port, and the failure then
+    reads as "nginx did not become ready" for a full readiness timeout. Naming
+    the holder turns that into an actionable message. Probed with a socket
+    rather than `ss`/`lsof` so it works the same on every runner image.
+    """
+    import socket
+
+    # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
+    # Probing IPv6 as well would report an occupied v6 socket as a conflict for
+    # a port NGINX can bind regardless.
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        # A host that cannot construct the socket at all (no IPv4 stack, or a
+        # restrictive sandbox) cannot be probed. That is not a conflict: let
+        # NGINX try the bind itself rather than aborting a serviceable run.
+        return None
+    # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
+    # TIME_WAIT binds fine for it. Without this the probe would refuse a port
+    # NGINX can actually use and abort a run that would have worked.
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("0.0.0.0", port))
+    except OSError:
+        return "port %d is already in use" % port
+    finally:
+        probe.close()
+    return None
+
+
 def _stop_nginx(nginx: subprocess.Popen) -> None:
-    nginx.terminate()
+    """Stop NGINX and every process it started.
+
+    NGINX runs a master plus one worker per `worker_processes`. Signalling only
+    the master leaves the worker alive holding the listen socket, so a second
+    run in the same environment fails to bind. The child is started in its own
+    session, which makes the whole group addressable here.
+    """
+    import signal
+
+    # Resolve the group once, while the master is certainly still alive. Once
+    # it exits, getpgid(nginx.pid) fails and the surviving workers -- which hold
+    # the listen socket -- would never be signalled.
+    try:
+        pgid = os.getpgid(nginx.pid)
+    except OSError:
+        pgid = None
+
+    def _signal_group(sig: int) -> None:
+        # ProcessLookupError is an OSError subclass, so OSError covers both a
+        # missing process and a permission failure.
+        if pgid is not None:
+            try:
+                os.killpg(pgid, sig)
+                return
+            except ProcessLookupError:
+                # The whole group is gone; nothing left to signal.
+                return
+            except OSError:
+                # Not ours, or the group is gone: fall back to the process.
+                pass
+        try:
+            nginx.send_signal(sig)
+        except ProcessLookupError:
+            return
+        except OSError as exc:
+            # A permission failure means NGINX keeps running and keeps holding
+            # the listen socket. Staying silent would leave the next run to
+            # fail on a port conflict with no hint why.
+            print(
+                f"WARNING: could not signal NGINX ({sig}): {exc}; "
+                "a stale process may still hold the soak port",
+                file=sys.stderr,
+            )
+
+    _signal_group(signal.SIGTERM)
     try:
         nginx.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        nginx.kill()
+        pass
+    # Unconditional, not just on timeout: the master can honour SIGTERM and
+    # exit while a worker lingers. Either way the group gets a final SIGKILL so
+    # no survivor keeps the listen socket bound.
+    _signal_group(signal.SIGKILL)
+    try:
+        nginx.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
@@ -1095,9 +1279,14 @@ def _run_soak_session(
     ended = None
     try:
         ready_fixture = next(iter(corpus.values()), None)
-        if not ready_fixture or not wait_for_ready(
-                f"{base_url}/{ready_fixture}"):
-            ready_error = "nginx did not become ready"
+        ready, last_error = (
+            wait_for_ready(f"{base_url}/{ready_fixture}") if ready_fixture
+            else (False, "no corpus fixture to probe")
+        )
+        if not ready:
+            detail = _startup_failure_reason(runtime_dir)
+            parts = [p for p in ("nginx did not become ready", last_error, detail) if p]
+            ready_error = ": ".join(parts)
         else:
             # Do not charge NGINX startup/readiness time to the sustained-load
             # duration recorded in the qualification evidence.
