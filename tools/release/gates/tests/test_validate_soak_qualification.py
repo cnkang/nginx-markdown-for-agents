@@ -639,6 +639,104 @@ def test_startup_failure_reason_caps_the_number_of_lines(tmp_path):
     }
 
 
+def test_ready_failure_reports_the_status_and_the_nginx_log(tmp_path, monkeypatch):
+    """The readiness error must name the HTTP status *and* what NGINX logged.
+
+    The three pieces are assembled in one place: the generic reason, the poll's
+    last error, and the log detail. The individual helpers are covered, so only
+    this assembly can be verified -- dropping a piece or changing the join left
+    the suite green.
+    """
+    # tmp_path is removed by pytest; a hardcoded directory would leak.
+    runtime_dir = tmp_path / "markdown-soak-ready-error"
+    logs = runtime_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "error.log").write_text(
+        "2026/10/03 12:00:00 [emerg] bind() to 0.0.0.0:19200 failed\n",
+        encoding="utf-8",
+    )
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(validator, "prepare_runtime",
+                        lambda base, m, so: (runtime_dir, {"small": "f"}, FakeNginx()))
+    monkeypatch.setattr(validator, "wait_for_ready",
+                        lambda url: (False, "HTTP 502"))
+    monkeypatch.setattr(validator, "_stop_nginx", lambda nginx: None)
+
+    result = validator._run_soak_session("http://127.0.0.1:19200", {"concurrency": 1}, "x.so")
+
+    error = result.get("ready_error") or ""
+    assert "nginx did not become ready" in error, result
+    assert "HTTP 502" in error, {"msg": "the poll's last error must survive", "error": error}
+    assert "19200" in error, {"msg": "NGINX's own log line must survive", "error": error}
+    assert error.count(": ") >= 2, {"msg": "the pieces must be joined", "error": error}
+
+
+def test_ready_failure_omits_absent_pieces_without_trailing_separator(
+    tmp_path, monkeypatch
+):
+    """With nothing logged, the message must not trail an empty separator."""
+    runtime_dir = tmp_path / "markdown-soak-ready-nodetail"
+    (runtime_dir / "logs").mkdir(parents=True)
+    (runtime_dir / "logs" / "startup.log").write_text("all fine\n", encoding="utf-8")
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(validator, "prepare_runtime",
+                        lambda base, m, so: (runtime_dir, {"small": "f"}, FakeNginx()))
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url: (False, ""))
+    monkeypatch.setattr(validator, "_stop_nginx", lambda nginx: None)
+
+    result = validator._run_soak_session("http://127.0.0.1:19200", {"concurrency": 1}, "x.so")
+
+    error = result.get("ready_error") or ""
+    assert error == "nginx did not become ready", {"error": error}
+    assert not error.endswith(": "), {"error": error}
+
+
+def test_wait_for_ready_reports_a_non_200_status(monkeypatch):
+    """A responding-but-refusing NGINX must surface its status code."""
+    import io
+    import urllib.request as urlreq
+
+    class FakeResponse:
+        status = 502
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urlreq, "urlopen", lambda *a, **k: FakeResponse())
+
+    # A real scenario filename: the URL validator rejects anything else. The
+    # timeout stays small so the poll loop exits promptly; do not freeze the
+    # clock, or the deadline never passes and the loop spins forever.
+    ready, last_error = validator.wait_for_ready(
+        f"http://127.0.0.1:{validator.SOAK_PORT}/{validator.SOAK_SCENARIO_FILES['small']}",
+        timeout=1,
+    )
+
+    assert ready is False, {"ready": ready}
+    assert "502" in last_error, {"last_error": last_error}
+
+
 def test_startup_failure_reason_is_empty_when_nothing_was_logged(tmp_path):
     """Silence is itself a signal, but it must not invent a reason."""
     (tmp_path / "logs").mkdir()
