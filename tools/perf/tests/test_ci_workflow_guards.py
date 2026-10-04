@@ -580,9 +580,8 @@ def test_091_baseline_is_marked_ineligible_with_a_reason() -> None:
         "the 0.9.1 baseline must be marked ineligible while its gate is not run"
     )
     reason = policy.get("release_gate_exclusion_reason")
-    assert isinstance(reason, str) and reason.strip(), (
-        "an ineligible baseline must record why"
-    )
+    assert isinstance(reason, str), f"the exclusion reason is not a string: {reason!r}"
+    assert reason.strip(), "an ineligible baseline must record why"
     # The measurement itself must stay untouched: only the policy changes.
     measured = policy.get("source_git_commit")
     assert measured == "0847c287c1b744a3f80b7b7fe6ccf3e897223377", (
