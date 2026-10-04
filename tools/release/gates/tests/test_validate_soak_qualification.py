@@ -204,9 +204,10 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     """
     import signal as signal_mod
 
-    # Tracked separately: the fallback also records into `fallback`, so a
-    # single list would let a run that skipped killpg entirely still pass.
-    group: list[int] = []
+    # Tracked separately, and the group records the pgid it was given: a test
+    # that only watched a signal list would pass even if the implementation
+    # signalled a single process instead of the group.
+    group: list[tuple[int, int]] = []
     fallback: list[int] = []
     calls = {"n": 0}
 
@@ -223,13 +224,22 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
             fallback.append(sig)
 
     nginx = FakeNginx()
-    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: group.append(sig))
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: group.append((pgid, sig))
+    )
 
     validator._stop_nginx(nginx)
 
-    assert signal_mod.SIGTERM in group, {"group": group, "fallback": fallback}
-    assert signal_mod.SIGKILL in group, {"group": group, "fallback": fallback}
+    expected_pgid = nginx.pid + 1
+    assert (expected_pgid, signal_mod.SIGTERM) in group, {
+        "group": group,
+        "fallback": fallback,
+    }
+    assert (expected_pgid, signal_mod.SIGKILL) in group, {
+        "group": group,
+        "fallback": fallback,
+    }
     assert not fallback, "killpg succeeded; the per-process fallback should not run"
 
 

@@ -1127,6 +1127,14 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
         # reason appears (a bad module path, a missing directive, a port
         # clash).  The log is read back by _startup_failure_reason() before
         # the runtime directory is removed.
+        # A stale NGINX from an earlier run still holds the port; say so now
+        # rather than after a full readiness timeout reports it as "not ready".
+        # Checked before the log is opened so this path holds no descriptor.
+        if holder := _port_holder(port):
+            raise ValueError(
+                f"cannot start NGINX: {holder}; a previous soak run may still "
+                "be running"
+            )
         nginx_log = validate_write_path_within_root(
             runtime_dir / "logs" / "startup.log",
             REPO_ROOT,
@@ -1134,13 +1142,6 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
         )
         nginx_log.parent.mkdir(parents=True, exist_ok=True)
         _startup_log_handle = nginx_log.open("w", encoding="utf-8")
-        # A stale NGINX from an earlier run still holds the port; say so now
-        # rather than after a full readiness timeout reports it as "not ready".
-        if holder := _port_holder(port):
-            raise ValueError(
-                f"cannot start NGINX: {holder}; a previous soak run may still "
-                "be running"
-            )
         nginx = subprocess.Popen(
             [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
             stdout=_startup_log_handle,
@@ -1174,7 +1175,13 @@ def _port_holder(port: int) -> str | None:
     # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
     # Probing IPv6 as well would report an occupied v6 socket as a conflict for
     # a port NGINX can bind regardless.
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        # A host that cannot construct the socket at all (no IPv4 stack, or a
+        # restrictive sandbox) cannot be probed. That is not a conflict: let
+        # NGINX try the bind itself rather than aborting a serviceable run.
+        return None
     # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
     # TIME_WAIT binds fine for it. Without this the probe would refuse a port
     # NGINX can actually use and abort a run that would have worked.
