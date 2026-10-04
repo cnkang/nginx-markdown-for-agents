@@ -35,17 +35,31 @@ from lib.path_validation import validate_read_path  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+_EXCLUDED_DIRS = frozenset({
+    ".git", "build", "target", "__pycache__", ".venv", "node_modules",
+})
+
+
 def _iter_python_files(root: Path) -> list[Path]:
+    """Every Python file under ``root``, skipping generated and vendored trees.
+
+    The exclusion is applied to the path *relative to root*: a checkout that
+    happens to live under a directory named ``build`` would otherwise skip
+    itself entirely and the gate would pass on an empty scan.
+    """
     return sorted(
         path
         for path in root.rglob("*.py")
-        if ".git" not in path.parts
-        and "build" not in path.parts
-        and "target" not in path.parts
-        and "__pycache__" not in path.parts
-        and ".venv" not in path.parts
-        and "node_modules" not in path.parts
+        if not (_EXCLUDED_DIRS & set(path.relative_to(root).parts))
     )
+
+
+def _alias_spelling(prefix: str | None, alias: ast.alias) -> str:
+    """Render one import alias the way the file spells it."""
+    if alias.asname:
+        spelled = f"{prefix}.{alias.name}" if prefix else alias.name
+        return f"{spelled} as {alias.asname}"
+    return f"{prefix}.{alias.name}" if prefix else alias.name
 
 
 def _imported_as(node: ast.Import | ast.ImportFrom, name: str) -> str:
@@ -55,15 +69,13 @@ def _imported_as(node: ast.Import | ast.ImportFrom, name: str) -> str:
     ``'os'`` sends the reader looking for an import that is not written that
     way.
     """
-    if isinstance(node, ast.Import):
-        for alias in node.names:
-            bound = alias.asname or alias.name.split(".")[0]
-            if bound == name:
-                return f"{alias.name} as {alias.asname}" if alias.asname else alias.name
-    else:
-        for alias in node.names:
-            if (alias.asname or alias.name) == name:
-                return f"{node.module}.{alias.name}" if node.module else alias.name
+    prefix = None if isinstance(node, ast.Import) else node.module
+    for alias in node.names:
+        bound = alias.asname or (
+            alias.name.split(".")[0] if isinstance(node, ast.Import) else alias.name
+        )
+        if bound == name:
+            return _alias_spelling(prefix, alias)
     return name
 
 

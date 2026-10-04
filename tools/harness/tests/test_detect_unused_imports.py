@@ -143,3 +143,34 @@ def test_detector_skips_build_and_vendor_trees(tmp_path: Path) -> None:
         (directory / "sample.py").write_text("import os\n", encoding="utf-8")
 
     assert collect_errors(tmp_path) == []
+
+
+def test_detector_scans_a_checkout_that_lives_under_an_excluded_name(
+    tmp_path: Path,
+) -> None:
+    """The exclusion is about directories inside the scan root, not above it.
+
+    A checkout under ``.../build/myrepo`` used to skip every file, because the
+    check ran on the absolute path -- so the gate passed on an empty scan.
+    """
+    nested = tmp_path / "build" / "myrepo"
+    nested.mkdir(parents=True)
+    (nested / "sample.py").write_text("import os\n", encoding="utf-8")
+
+    errors = collect_errors(nested)
+
+    assert any("sample.py" in e and "os" in e for e in errors), errors
+
+
+def test_detector_still_skips_generated_files_inside_the_root(tmp_path: Path) -> None:
+    """Fixing the above must not start scanning build output."""
+    (tmp_path / "sample.py").write_text("import os\n", encoding="utf-8")
+    generated = tmp_path / "build"
+    generated.mkdir()
+    (generated / "sample.py").write_text("import os\n", encoding="utf-8")
+
+    errors = collect_errors(tmp_path)
+
+    reported = [e for e in errors if "os" in e]
+    assert len(reported) == 1, reported
+    assert "build" not in reported[0], reported
