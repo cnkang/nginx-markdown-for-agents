@@ -57,23 +57,30 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
 
     monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
     monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    # Port occupancy is not what this test is about; a real holder would abort
+    # the run for an unrelated reason.
+    monkeypatch.setattr(validator, "_port_holder", lambda port: None)
     # The runtime directory must live inside the repository: the startup log is
     # written through validate_write_path_within_root.
-    runtime_dir = validator.REPO_ROOT / "build" / "soak-runtime" / "selftest"
+    runtime_dir = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-selftest"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime_dir)
     monkeypatch.setattr(validator, "write_nginx_conf", lambda *a, **kw: None)
     monkeypatch.setattr(
         validator, "_validated_nginx_binary", lambda: Path("/bin/true")
     )
-    monkeypatch.setattr(validator, "_cleanup_runtime_directory", lambda p: None)
-
+    real_cleanup = validator._cleanup_runtime_directory
     try:
         _runtime, _corpus, nginx = validator.prepare_runtime(
             "http://127.0.0.1:8080", {}, ""
         )
+        # Asserted before the cleanup below removes the directory.
+        log_exists = (runtime_dir / "logs" / "startup.log").exists()
     finally:
-        validator._cleanup_runtime_directory(runtime_dir)
+        # The real cleanup, not a no-op: the directory name carries the
+        # markdown-soak- prefix that cleanup recognises, so a stubbed cleanup
+        # would leave it behind in build/soak-runtime.
+        real_cleanup(runtime_dir)
 
     assert captured["stdout"] is not validator.subprocess.DEVNULL, (
         "NGINX stdout must be captured, not discarded"
@@ -81,7 +88,7 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     assert captured["stderr"] is validator.subprocess.STDOUT, (
         "NGINX stderr must be merged into the captured log"
     )
-    assert (runtime_dir / "logs" / "startup.log").exists(), (
+    assert log_exists, (
         "the startup log must exist on disk for the failure path to read"
     )
     del nginx
@@ -180,7 +187,7 @@ def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypa
     holder.bind(("0.0.0.0", 0))
     holder.listen(1)
     port = holder.getsockname()[1]
-    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "port-selftest"
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-port-selftest"
     runtime.mkdir(parents=True, exist_ok=True)
     try:
         monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
@@ -255,7 +262,7 @@ def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
     monkeypatch.setattr(
         validator, "_runtime_directory", lambda: tmp_path
     )
-    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "limits-selftest"
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-limits-selftest"
     runtime.mkdir(parents=True, exist_ok=True)
     try:
         validator.write_nginx_conf(
@@ -315,7 +322,7 @@ def test_prepare_runtime_wires_the_parser_budget_into_the_config(
     reverted every request to the 32 MiB default -- the exact failure this
     change fixes -- while all tests stayed green.
     """
-    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "wiring-selftest"
+    runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-wiring-selftest"
     runtime.mkdir(parents=True, exist_ok=True)
 
     class FakeNginx:
@@ -335,6 +342,8 @@ def test_prepare_runtime_wires_the_parser_budget_into_the_config(
 
     monkeypatch.setattr(validator, "_runtime_directory", lambda: runtime)
     monkeypatch.setattr(validator, "build_corpus", lambda *a: {"small": "small.html"})
+    # Port occupancy is not what this test is about.
+    monkeypatch.setattr(validator, "_port_holder", lambda port: None)
     monkeypatch.setattr(validator.subprocess, "Popen", FakeNginx)
     monkeypatch.setattr(
         validator, "_validated_nginx_binary", lambda: Path("/bin/true")
