@@ -1356,8 +1356,11 @@ def test_the_suite_leaves_no_runtime_directory_behind() -> None:
     The conftest-level check in this package closes the gap for the ones after.
     """
     root = validator.SOAK_RUNTIME_ROOT
-    assert not root.exists() or not any(root.iterdir()), {
-        "leftover": sorted(p.name for p in root.iterdir()),
+    # Same scope as the conftest hook: only this gate's own run directories.
+    # Anything else in build/ is not ours to fail on.
+    leftover = sorted(p.name for p in root.glob("markdown-soak-*")) if root.is_dir() else []
+    assert not leftover, {
+        "leftover": leftover,
         "root": str(root),
     }
 
