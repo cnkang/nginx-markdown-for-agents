@@ -703,6 +703,77 @@ def test_worker_user_skips_a_root_nobody_and_uses_the_next_account(monkeypatch):
     assert validator.nginx_worker_user() == "nginx"
 
 
+def test_worker_identity_is_read_from_proc(monkeypatch, tmp_path):
+    """The uid comes from /proc, not from the account name."""
+    status = tmp_path / "status"
+    status.write_text(
+        "Name:\tnginx\nState:\tS (sleeping)\nUid:\t65534\t65534\t65534\t65534\n"
+        "Gid:\t65534\t65534\t65534\t65534\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(validator.pathlib, "Path", lambda p: status if "status" in str(p) else Path(str(p)))
+
+    assert validator.read_process_uid(1234) == (65534, 65534, 65534, 65534)
+
+
+def test_worker_with_a_saved_root_uid_is_not_privileged(monkeypatch):
+    """A worker whose saved-set-uid is still 0 can setuid(0) back.
+
+    NGINX's setuid() clears the effective uid but leaves the saved-set-uid
+    alone, so a name that resolves correctly can still leave the worker able to
+    regain root. All of real/effective/saved must be non-root.
+    """
+    monkeypatch.setattr(
+        validator, "read_process_uid", lambda pid: (65534, 65534, 0, 65534)
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        validator.assert_worker_dropped_privileges(1234)
+
+    assert "retains uid 0" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
+
+
+def test_worker_with_a_root_filesystem_uid_is_not_privileged(monkeypatch):
+    """The fs uid governs file access, so it must be non-root too."""
+    monkeypatch.setattr(
+        validator, "read_process_uid", lambda pid: (65534, 65534, 65534, 0)
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        validator.assert_worker_dropped_privileges(1234)
+
+    assert "retains uid 0" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
+
+
+def test_worker_identity_read_failure_is_not_assumed_safe(monkeypatch):
+    """An unreadable identity must fail, not be treated as fine."""
+    monkeypatch.setattr(validator, "read_process_uid", lambda pid: None)
+
+    with pytest.raises(ValueError) as excinfo:
+        validator.assert_worker_dropped_privileges(1234)
+
+    assert "refusing to assume" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
+
+
+def test_worker_running_as_root_fails_the_gate(monkeypatch):
+    """A worker that stayed root invalidates the soak it is supposed to model."""
+    monkeypatch.setattr(validator, "read_process_uid", lambda pid: (0, 0, 0, 0))
+
+    with pytest.raises(ValueError) as excinfo:
+        validator.assert_worker_dropped_privileges(1234)
+
+    assert "retains uid 0" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
+
+
+def test_worker_with_a_real_non_root_uid_passes(monkeypatch):
+    """The gate must accept the normal case, or it would fail every run."""
+    monkeypatch.setattr(
+        validator, "read_process_uid", lambda pid: (65534, 65534, 65534, 65534)
+    )
+
+    validator.assert_worker_dropped_privileges(1234)
+
+
 def test_grant_worker_traversal_adds_only_other_execute(
     monkeypatch, tmp_path
 ):

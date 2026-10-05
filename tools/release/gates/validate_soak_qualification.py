@@ -881,6 +881,53 @@ def _query_worker_pid(master_pid: int) -> int:
     return _find_worker_child(ps.stdout, master_pid)
 
 
+def read_process_uid(pid: int) -> tuple[int, ...] | None:
+    """Return a process's real/effective/saved/fs uids, or None if unreadable.
+
+    /proc reports the identity the kernel actually applied, so this is the only
+    check that cannot be fooled by how the ``user`` directive was written or by
+    which uid that name happens to resolve to.
+    """
+    try:
+        status = pathlib.Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in status.splitlines():
+        if line.startswith("Uid:"):
+            fields = line.split()[1:]
+            try:
+                return tuple(int(value) for value in fields)
+            except ValueError:
+                return None
+    return None
+
+
+def assert_worker_dropped_privileges(worker_pid: int) -> None:
+    """Fail unless the NGINX worker really runs as a non-root user.
+
+    The gate starts NGINX as root, so the workers are supposed to drop. Reading
+    the account name is not evidence: a `user nobody;` line whose name resolves
+    to uid 0 leaves the workers running as root, and the run would still pass.
+    """
+    uids = read_process_uid(worker_pid)
+    if uids is None:
+        raise ValueError(
+            f"cannot read the NGINX worker identity for pid {worker_pid}; "
+            "refusing to assume the workers dropped privileges"
+        )
+    # A process only needs one of these to be 0 to regain root: effective is who
+    # it is now, saved is what it can setuid() to without privilege, and fs
+    # governs file access. NGINX's setuid clears the effective uid but leaves the
+    # saved-set-uid alone, so all four are checked.
+    privileged = [index for index, uid in enumerate(uids) if uid == 0]
+    if privileged:
+        raise ValueError(
+            f"the NGINX worker {worker_pid} retains uid 0 "
+            f"(real/effective/saved/fs={uids}); the soak must exercise the same "
+            "privilege separation a deployment has"
+        )
+
+
 def find_worker_pid(runtime_dir: pathlib.Path) -> int:
     """Wait briefly for the NGINX master and return one worker PID."""
     pid_file = runtime_dir / "nginx.pid"
@@ -1476,6 +1523,10 @@ def _run_soak_session(
             # duration recorded in the qualification evidence.
             started = time.time()
             worker_pid = find_worker_pid(runtime_dir)
+            if worker_pid > 0:
+                # Confirm the separation the soak claims to exercise actually
+                # happened, rather than trusting the `user` directive.
+                assert_worker_dropped_privileges(worker_pid)
             duration = int(manifest["duration_minutes"] * 60)
             rss_series, scenario_metrics = run_load_loop(
                 corpus, worker_pid, duration, started,
