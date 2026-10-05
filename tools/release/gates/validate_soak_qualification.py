@@ -88,6 +88,9 @@ MIN_RSS_SAMPLES = 3
 # This is independent of the manifest's conversion_memory ceilings: those are
 # what the per-request peak is measured *against*, so a larger parser budget
 # does not relax the evidence check.
+# Measured full-buffer allocation for the 1 MiB fixture is ~41 MiB, so the
+# default 32 MiB budget is what made the soak fail. 64 MiB leaves headroom for
+# allocator variation rather than sitting just above the measurement.
 SOAK_PARSER_BUDGET_BYTES = 64 * 1024 * 1024
 PEAK_MEMORY_MISSING_ERROR = (
     "insufficient-data: module-managed per-request peak memory was not observed"
@@ -1433,11 +1436,11 @@ def _port_holder(port: int) -> str | None:
             except OSError as exc:
                 # Only an address-in-use is a conflict. Reporting the rest as
                 # one points the reader at a stale process when the real
-                # cause is a host that cannot hand out that address, and the
-                # follow-up bind then fails anyway.
-                if exc.errno != errno.EADDRINUSE:
-                    return None
-                return "port %d is already in use" % port
+                # cause is a host that cannot hand out that address. This
+                # address simply cannot be probed; the wildcard one still
+                # can, so keep going rather than answering early.
+                if exc.errno == errno.EADDRINUSE:
+                    return "port %d is already in use" % port
     return None
 
 

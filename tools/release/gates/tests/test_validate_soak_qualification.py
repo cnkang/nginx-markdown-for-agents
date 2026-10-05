@@ -1775,11 +1775,99 @@ def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
     ), conf
 
 
-def test_parser_budget_exceeds_the_measured_allocation():
-    """41 MB was measured; the default 32 MiB is what failed the soak."""
-    assert validator.SOAK_PARSER_BUDGET_BYTES > 41 * 1024 * 1024, (
+def test_an_unprobeable_address_does_not_hide_a_conflict_on_the_other(monkeypatch):
+    """A host that cannot bind loopback must not mask a real holder.
+
+    Giving up on the first non-EADDRINUSE error would report "no conflict" for a
+    port the wildcard bind then cannot take.
+    """
+    import socket
+
+    # A real holder on the wildcard address, so the second probe has something
+    # genuine to collide with rather than a fabricated error.
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    with holder:
+        holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        holder.bind(("0.0.0.0", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+
+        real_bind = socket.socket.bind
+
+        def bind(self, address):
+            if address[0] == "127.0.0.1":
+                raise OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")
+            return real_bind(self, address)
+
+        monkeypatch.setattr(socket.socket, "bind", bind)
+
+        assert validator._port_holder(port) is not None, {
+            "msg": "an unprobeable loopback must not hide a wildcard conflict",
+        }
+
+
+def test_peak_memory_holds_the_peak_to_the_smallest_ceiling():
+    """A run-wide peak has no scenario attribution, so the smallest budget wins.
+
+    Taking the largest would let a peak that exceeds the tightest scenario's
+    ceiling pass as long as some other scenario allowed more.
+    """
+    manifest = {
+        "corpus": [
+            {"id": "small", "conversion_memory_bytes": 32 * 1024 * 1024},
+            {"id": "large", "conversion_memory_bytes": 96 * 1024 * 1024},
+        ]
+    }
+    peak = 64 * 1024 * 1024  # fits the large budget, exceeds the small one
+
+    issue = validator._peak_memory_issue(
+        {"module_managed_peak_observed": True, "per_request_peak_bytes": peak},
+        manifest,
+    )
+
+    assert issue is not None, {
+        "peak": peak,
+        "msg": "a peak above the smallest ceiling must fail the run",
+    }
+    assert "32" in issue or "33554432" in issue, {"issue": issue}
+
+
+def test_peak_memory_passes_when_the_peak_fits_every_ceiling():
+    """The conservative rule must not reject a run that fits all budgets."""
+    manifest = {
+        "corpus": [
+            {"id": "small", "conversion_memory_bytes": 32 * 1024 * 1024},
+            {"id": "large", "conversion_memory_bytes": 96 * 1024 * 1024},
+        ]
+    }
+    peak = 16 * 1024 * 1024
+
+    assert (
+        validator._peak_memory_issue(
+            {"module_managed_peak_observed": True, "per_request_peak_bytes": peak},
+            manifest,
+        )
+        is None
+    ), {"msg": "a peak within every ceiling must pass"}
+
+
+def test_parser_budget_clears_the_measurement_with_headroom():
+    """41 MB was measured; the default 32 MiB is what failed the soak.
+
+    The budget has to clear the measurement by enough to absorb allocator
+    variation. A bound of "greater than 41 MiB" alone would accept 42 MiB, which
+    is inside the noise the headroom exists for.
+    """
+    measured = 41 * 1024 * 1024
+    assert validator.SOAK_PARSER_BUDGET_BYTES > measured, (
         "the budget must clear the observed parser allocation"
     )
+    headroom = validator.SOAK_PARSER_BUDGET_BYTES / measured
+    assert headroom >= 1.25, {
+        "headroom": round(headroom, 3),
+        "budget_mib": validator.SOAK_PARSER_BUDGET_BYTES // (1024 * 1024),
+        "msg": "the budget must leave at least 25% headroom over the measurement",
+    }
 
 
 def test_parser_budget_does_not_relax_the_evidence_ceiling():
