@@ -477,6 +477,9 @@ def test_an_address_in_use_is_still_reported_as_a_conflict():
     with holder:
         holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         holder.bind(("127.0.0.1", 0))
+        # Listen as well as bind: the conflict NGINX hits is a listening socket,
+        # and a merely bound one does not occupy the port for a second bind.
+        holder.listen(1)
         port = holder.getsockname()[1]
 
         assert validator._port_holder(port) is not None, {
