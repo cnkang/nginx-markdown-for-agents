@@ -667,7 +667,9 @@ def _startup_failure_reason(runtime_dir: pathlib.Path) -> str:
             continue
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("nginx:") or "[emerg]" in stripped or "[alert]" in stripped:
+            if stripped.startswith("nginx:") or any(
+                level in stripped for level in ("[emerg]", "[alert]", "[crit]", "[error]")
+            ):
                 reasons.append(stripped[:_STARTUP_LOG_MAX_BYTES])
             if len(reasons) >= 3:
                 break
@@ -1195,6 +1197,12 @@ def nginx_worker_user() -> str | None:
     it then runs the workers as that user instead of root. Pinning the identity
     keeps that drop explicit and reproducible rather than implicit, and keeps
     the soak from running workers as root the way the master did.
+
+    Returns None only when no privilege drop is possible or needed. A root
+    master with no unprivileged account available is an error rather than a
+    silent fallback: without a ``user`` directive the workers would keep running
+    as root, which is exactly what this gate exists to avoid, and the run would
+    still pass.
     """
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         return None
@@ -1204,7 +1212,10 @@ def nginx_worker_user() -> str | None:
         except KeyError:
             continue
         return candidate
-    return None
+    raise RuntimeError(
+        "the soak runs NGINX as root but no unprivileged account (nobody, nginx) "
+        "exists to run the workers as; refusing to start NGINX with root workers"
+    )
 
 
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
@@ -1322,20 +1333,6 @@ def _port_holder(port: int) -> str | None:
     """
     import socket
 
-    # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
-    # Probing IPv6 as well would report an occupied v6 socket as a conflict for
-    # a port NGINX can bind regardless.
-    try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    except OSError:
-        # A host that cannot construct the socket at all (no IPv4 stack, or a
-        # restrictive sandbox) cannot be probed. That is not a conflict: let
-        # NGINX try the bind itself rather than aborting a serviceable run.
-        return None
-    # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
-    # TIME_WAIT binds fine for it. Without this the probe would refuse a port
-    # NGINX can actually use and abort a run that would have worked.
-    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     # Two probes, because neither alone covers every holder:
     #   - loopback: catches a loopback or wildcard holder without this probe
     #     claiming every interface (a wildcard probe trips code-scanning);
@@ -1344,19 +1341,31 @@ def _port_holder(port: int) -> str | None:
     # NGINX generates `listen <port>;`, whose wildcard bind fails for all three,
     # so between them these two reproduce NGINX's own bind outcome. Under
     # SO_REUSEADDR neither trips on a TIME_WAIT socket, which NGINX ignores too.
+    # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
+    # Probing IPv6 as well would report an occupied v6 socket as a conflict for
+    # a port NGINX can bind regardless.
     for address in ("127.0.0.1", "0.0.0.0"):
+        # A fresh socket per address: a bound socket cannot be rebound, and the
+        # context manager closes it on both the success and failure paths.
         try:
-            # codeql[py/bind-socket-all-network-interfaces]: the loopback bind is
-            # the probe that avoids claiming every interface; the wildcard bind
-            # is what reproduces NGINX's own `listen <port>;` outcome.
-            probe.bind((address, port))  # codeql[py/bind-socket-all-network-interfaces]
+            candidate = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         except OSError:
-            return "port %d is already in use" % port
-        finally:
-            probe.close()
-            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    probe.close()
+            # A host that cannot construct the socket at all (no IPv4 stack, or
+            # a restrictive sandbox) cannot be probed. That is not a conflict:
+            # let NGINX try the bind itself rather than abort a serviceable run.
+            return None
+        with candidate:
+            # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left
+            # in TIME_WAIT binds fine for it. Without this the probe would
+            # refuse a port NGINX can actually use and abort a valid run.
+            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                # codeql[py/bind-socket-all-network-interfaces]: the loopback
+                # bind avoids claiming every interface; the wildcard bind
+                # reproduces NGINX's own `listen <port>;` outcome.
+                candidate.bind((address, port))  # codeql[py/bind-socket-all-network-interfaces]
+            except OSError:
+                return "port %d is already in use" % port
     return None
 
 

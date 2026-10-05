@@ -310,18 +310,30 @@ def test_port_probe_pins_both_bind_addresses(monkeypatch):
     """Both probe addresses are load-bearing; dropping either loses coverage."""
     bound: list[str] = []
 
+    reuseaddr: list[int] = []
+
     class FakeSocket:
         def __init__(self, family=None, type=None):
             self.closed = False
 
-        def setsockopt(self, *args):
-            pass
+        def setsockopt(self, level, optname, value, *args):
+            import socket as socket_module
+
+            if optname == socket_module.SO_REUSEADDR:
+                reuseaddr.append(value)
 
         def bind(self, address):
             bound.append(address[0])
 
         def close(self):
             self.closed = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+            return False
 
     # `socket` is imported inside _port_holder, so patch the module attribute it
     # resolves through.
@@ -334,6 +346,12 @@ def test_port_probe_pins_both_bind_addresses(monkeypatch):
         "bound": bound,
         "msg": "the loopback probe catches loopback/wildcard holders, the "
                "wildcard probe catches concrete-address holders",
+    }
+    # Both probes need SO_REUSEADDR: without it a TIME_WAIT socket would make
+    # the probe report a port NGINX can still bind, aborting a valid run.
+    assert len(reuseaddr) == 2 and all(v == 1 for v in reuseaddr), {
+        "SO_REUSEADDR": reuseaddr,
+        "msg": "each probe socket must set SO_REUSEADDR",
     }
 
 
@@ -607,6 +625,26 @@ def test_worker_user_is_absent_for_a_non_root_master(monkeypatch):
     monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
 
     assert validator.nginx_worker_user() is None
+
+
+def test_worker_user_refuses_to_run_workers_as_root(monkeypatch):
+    """A root master with no unprivileged account must fail, not fall back.
+
+    Without a `user` directive the workers would keep running as root, which is
+    exactly what the soak exists to avoid -- and the run would still pass, so the
+    gap has to be an error.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(
+        validator.pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name))
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        validator.nginx_worker_user()
+
+    assert "refusing to start NGINX with root workers" in str(excinfo.value), {
+        "msg": str(excinfo.value)[:160],
+    }
 
 
 def test_worker_user_falls_back_to_nginx_when_nobody_is_absent(monkeypatch):
@@ -1477,6 +1515,27 @@ def test_startup_failure_reason_reads_the_error_log_too(tmp_path):
 
     assert "alert" in detail, detail
     assert "signal 11" in detail, detail
+
+
+def test_startup_failure_reason_surfaces_crit_and_error_levels(tmp_path):
+    """[crit] and [error] are just as diagnostic as [emerg]/[alert].
+
+    A worker that dies with an error-level message must not produce an empty
+    reason, which would read as "NGINX logged nothing".
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text("all fine\n", encoding="utf-8")
+    (logs / "error.log").write_text(
+        "2026/10/04 12:00:00 [crit] 1#1: *1 open() \"/etc/nginx/x\" failed (2: No such file)\n"
+        "2026/10/04 12:00:01 [error] 1#1: *2 rewrite cycle aborted\n",
+        encoding="utf-8",
+    )
+
+    detail = validator._startup_failure_reason(tmp_path)
+
+    assert "crit" in detail, detail
+    assert "rewrite cycle aborted" in detail, detail
 
 
 def test_startup_failure_reason_caps_a_single_line(tmp_path):
