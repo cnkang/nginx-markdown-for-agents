@@ -1727,11 +1727,12 @@ def real_main(args: argparse.Namespace) -> int:
     base_url = f"http://127.0.0.1:{SOAK_PORT}"
     try:
         session = _run_soak_session(base_url, manifest, module_so)
-    except ValueError as exc:
-        # A failed precondition the soak refuses to run under (the worker did not
-        # drop privileges, the tree is unreachable) is a qualification failure, not
-        # a crash: the session already tore NGINX down, so record it and exit 1
-        # rather than propagating a traceback with no record written.
+    except (ValueError, RuntimeError) as exc:
+        # A failed precondition the soak refuses to run under is a qualification
+        # failure, not a crash: the worker did not drop privileges (ValueError),
+        # no unprivileged account exists to drop to (RuntimeError), or the tree is
+        # unreachable. The session already tore NGINX down, so record the reason
+        # and exit 1 rather than propagating a traceback with no record written.
         print(f"ERROR: soak failure: {exc}", file=sys.stderr)
         # A refused run has no measurements; the record still has to satisfy the
         # schema so the release evidence names the reason instead of going missing.

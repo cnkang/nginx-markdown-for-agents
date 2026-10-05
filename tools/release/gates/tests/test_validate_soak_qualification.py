@@ -1269,12 +1269,16 @@ def test_prepare_runtime_grants_traversal_on_every_ancestor(
     runtime = validator._runtime_directory()
     runtime.mkdir(parents=True, exist_ok=True)
 
-    assert runtime in [Path(d) for d in recorded], {
+    # The chmod helper resolves what it stat()s, so compare resolved paths:
+    # tmp_path is unresolved on macOS (/var -> /private/var) and would never
+    # match a resolved record.
+    recorded_resolved = {Path(d).resolve() for d in recorded}
+    assert runtime.resolve() in recorded_resolved, {
         "recorded": [str(d) for d in recorded],
         "msg": "the per-run directory must be traversable",
     }
     root = validator.SOAK_RUNTIME_ROOT
-    assert root in [Path(d) for d in recorded], {
+    assert root.resolve() in recorded_resolved, {
         "recorded": [str(d) for d in recorded],
         "msg": "the runtime root must be traversable",
     }
@@ -1420,13 +1424,52 @@ def test_configured_runtime_dir_gets_traversal_on_every_ancestor(
     runtime = validator._runtime_directory()
     runtime.mkdir(parents=True, exist_ok=True)
 
-    granted = [Path(d) for d in recorded]
+    # Resolved on both sides: the chmod helper resolves what it stat()s, and
+    # tmp_path is unresolved (/var -> /private/var on macOS).
+    granted = {Path(d).resolve() for d in recorded}
     for expected in (runtime, runtime.parent, runtime.parent.parent):
-        assert expected in granted, {
+        assert expected.resolve() in granted, {
             "granted": [str(d) for d in granted],
             "missing": str(expected),
             "msg": "every invented ancestor must be traversable",
         }
+
+
+def test_traversal_assertions_hold_on_a_symlinked_path(monkeypatch, tmp_path):
+    """The traversal chain is resolved, so the assertions must be too.
+
+    tmp_path compares equal to its resolved form on most hosts, which hides a
+    comparison that mixes resolved and unresolved paths. Putting the checkout
+    behind a symlink is what makes the two forms differ.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+
+    checkout = link / "checkout"
+    recorded: list[Path] = []
+    monkeypatch.setattr(validator, "REPO_ROOT", checkout.resolve())
+    monkeypatch.setattr(
+        validator,
+        "_grant_worker_traversal",
+        lambda *dirs: recorded.extend(Path(d) for d in dirs),
+    )
+
+    runtime = checkout / "build" / "soak-runtime" / "markdown-soak-symlink"
+    runtime.mkdir(parents=True)
+
+    validator._grant_worker_traversal_chain(runtime)
+
+    granted = {Path(d).resolve() for d in recorded}
+    assert runtime.resolve() in granted, {
+        "granted": [str(d) for d in granted],
+        "missing": str(runtime.resolve()),
+        "msg": "the per-run directory must be traversable behind a symlink",
+    }
+    assert checkout.resolve() not in granted, {
+        "msg": "the checkout root itself must keep its owner",
+    }
 
 
 def test_traversal_chain_leaves_the_checkout_untouched(monkeypatch, tmp_path):
@@ -2829,10 +2872,13 @@ def test_a_refused_soak_is_recorded_as_a_failure_not_a_traceback(
     written: list[dict] = []
     monkeypatch.setattr(validator, "load_manifest", lambda path: manifest)
     monkeypatch.setattr(validator, "handle_missing_nginx", lambda *a: None)
+    # RuntimeError, not ValueError: "no unprivileged account resolves to a
+    # non-root uid" is what a root host without nobody/nginx raises.
     monkeypatch.setattr(
         validator, "_run_soak_session",
         lambda *a: (_ for _ in ()).throw(
-            ValueError("the NGINX worker 42 retains uid 0")
+            RuntimeError("no unprivileged account (nobody, nginx) resolves to a "
+                         "non-root uid")
         ),
     )
     monkeypatch.setattr(
@@ -2854,7 +2900,7 @@ def test_a_refused_soak_is_recorded_as_a_failure_not_a_traceback(
     }
     record = written[0]
     assert record["status"] == "fail", {"status": record["status"]}
-    assert any("retains uid 0" in err for err in record["errors"]), {
+    assert any("non-root uid" in err for err in record["errors"]), {
         "errors": record["errors"],
     }
 
