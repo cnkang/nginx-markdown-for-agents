@@ -967,7 +967,6 @@ def test_traversal_chain_leaves_the_checkout_untouched(monkeypatch, tmp_path):
     runtime_root.chmod(0o700)
     nested.chmod(0o700)
 
-    assert not chowned, {"chowned": [str(p) for p in chowned]}
     # The checkout is not widened at all: the master is root and traverses it
     # anyway, so granting anything here would be pure exposure. It is left at
     # 0700 so an accidental inclusion shows up as a mode change.
@@ -1009,6 +1008,12 @@ def test_traversal_chain_leaves_the_checkout_untouched(monkeypatch, tmp_path):
     assert checkout not in touched, {
         "touched": sorted(str(p) for p in touched),
         "msg": "the checkout root must never be chmod'ed by the chain walk",
+    }
+    # Asserted *after* the walk: before the call the list is empty no matter what
+    # the walk does, so the assertion would prove nothing.
+    assert not chowned, {
+        "chowned": [str(p) for p in chowned],
+        "msg": "the chain walk must not transfer ownership of anything",
     }
 
 
