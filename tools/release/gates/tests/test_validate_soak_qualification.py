@@ -151,6 +151,10 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
         validator, "_validated_nginx_binary", lambda: Path("/bin/true")
     )
     real_cleanup = validator._cleanup_runtime_directory
+    # Seeded rather than assigned inside the try: a regression that raises before
+    # the assignment would otherwise surface as a NameError at the assertion
+    # below, which names neither the cause nor the test's intent.
+    log_exists = False
     try:
         # The runtime dir and corpus are not under test here; only what NGINX's
         # stdout is wired to. Unpacking is avoided so nothing looks accidentally
@@ -858,14 +862,17 @@ def test_stop_nginx_warns_when_the_group_survives_sigkill(monkeypatch, capsys):
 
         def __init__(self, timeouts, groups, fallback):
             # Which wait() times out is the whole point, so it has to be stated
-            # per call: 1 = after SIGTERM, 2 = after SIGKILL.
+            # per call: 1 = after SIGTERM, 2 = after SIGKILL. The timeout value
+            # is recorded too -- a grace period that collapses to zero would
+            # still pass every other assertion here.
             self._timeouts = timeouts
             self._groups = groups
             self._fallback = fallback
+            self.waits: list = []
 
         def wait(self, timeout=None):
-            self.waits = getattr(self, "waits", 0) + 1
-            if self.waits in self._timeouts:
+            self.waits.append(timeout)
+            if len(self.waits) in self._timeouts:
                 raise __import__("subprocess").TimeoutExpired("nginx", timeout)
             return 0
 
@@ -912,6 +919,11 @@ def test_stop_nginx_warns_when_the_group_survives_sigkill(monkeypatch, capsys):
             "groups": groups,
         }
         assert not fallback, {"fallback": fallback}
+        # A grace period of zero would pass every other assertion in this test.
+        assert nginx.waits == [10, 5], {
+            "msg": "SIGTERM then SIGKILL, each with its own wait budget",
+            "waits": nginx.waits,
+        }
 
 
 def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
