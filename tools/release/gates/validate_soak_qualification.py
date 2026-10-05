@@ -1100,10 +1100,11 @@ def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
     root = REPO_ROOT.resolve()
     current = directory.resolve()
     chain: list[pathlib.Path] = []
-    while True:
+    while current != root and current.parent != current:
+        # Strictly below the checkout root: the root and the directories the gate
+        # did not create must keep their owner. A validation gate has no business
+        # transferring the checkout to the worker account.
         chain.append(current)
-        if current == root or current.parent == current:
-            break
         current = current.parent
     _grant_worker_traversal(*chain)
 

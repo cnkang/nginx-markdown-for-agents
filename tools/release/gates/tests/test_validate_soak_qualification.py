@@ -819,6 +819,43 @@ def test_configured_runtime_dir_gets_traversal_on_every_ancestor(
         }
 
 
+def test_traversal_chain_never_chowns_the_checkout_root(monkeypatch, tmp_path):
+    """The checkout root and the directories above it keep their owner.
+
+    The chain walk used to append the root before breaking, so a root-run soak
+    transferred the whole checkout and build/ to the worker account -- which
+    breaks later non-root writes and trips git's dubious-ownership check.
+    """
+    # REPO_ROOT is compared against a resolved path, so point it at the resolved
+    # checkout rather than tmp_path (macOS /tmp is a symlink).
+    checkout = (tmp_path / "checkout").resolve()
+    monkeypatch.setattr(validator, "REPO_ROOT", checkout)
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    chowned: list = []
+    monkeypatch.setattr(
+        validator.os, "chown", lambda path, uid, gid: chowned.append(path)
+    )
+
+    nested = checkout / "build" / "soak-runtime" / "markdown-soak-x"
+    nested.mkdir(parents=True)
+
+    validator._grant_worker_traversal_chain(nested)
+
+    assert checkout not in chowned, {
+        "chowned": [str(p) for p in chowned],
+        "msg": "the checkout root must keep its owner",
+    }
+    assert checkout.parent not in chowned, {
+        "chowned": [str(p) for p in chowned],
+        "msg": "nothing above the checkout may change",
+    }
+    assert nested in chowned, {
+        "chowned": [str(p) for p in chowned],
+        "msg": "the directories the gate created must be reachable by the worker",
+    }
+
+
 def test_traversal_chain_stops_at_the_repository_root(monkeypatch, tmp_path):
     """Nothing above the checkout may be touched."""
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
