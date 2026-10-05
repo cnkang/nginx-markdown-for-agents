@@ -1074,6 +1074,84 @@ def test_a_worker_with_a_root_saved_gid_is_not_privileged(monkeypatch):
     assert "gid[2]" in str(excinfo.value), {"msg": str(excinfo.value)[:200]}
 
 
+def _drain_samples(monkeypatch, values: list[int]) -> None:
+    """Feed a fixed RSS sequence to measure_drain, with the sleeps removed."""
+    sequence = list(values)
+
+    def read_rss(pid):
+        return sequence.pop(0) if sequence else -1
+
+    monkeypatch.setattr(validator.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(validator, "read_worker_rss", read_rss)
+
+
+def test_a_rising_drain_past_the_margin_is_monotonic(monkeypatch):
+    """Sustained growth well past the 1 MiB margin must be reported.
+
+    measure_drain stops at MIN_RSS_SAMPLES, so the rise has to clear the margin
+    within the first three samples; anything smaller would look identical with and
+    without it.
+    """
+    _drain_samples(monkeypatch, [1000, 3000, 6000])
+
+    delta, monotonic, samples = validator.measure_drain(5150)
+
+    assert monotonic is True, {
+        "delta": delta,
+        "msg": "a drain that keeps climbing past the margin is a leak signal",
+    }
+    assert len(samples) >= validator.MIN_RSS_SAMPLES, {"samples": samples}
+
+
+def test_a_rise_inside_the_margin_is_not_monotonic(monkeypatch):
+    """Small sampling noise must not fail the run.
+
+    Without the margin, any strictly rising sequence would be flagged. This one
+    rises, but by 100 bytes, so only the margin keeps it out of the failure path.
+    """
+    _drain_samples(monkeypatch, [1000, 1050, 1100])
+
+    _, monotonic, _ = validator.measure_drain(5150)
+
+    assert monotonic is False, {
+        "msg": "noise inside the margin must not be reported as growth",
+    }
+
+
+def test_a_drain_that_flattens_is_not_monotonic(monkeypatch):
+    """A plateau is release too, even when the overall span is large.
+
+    `<=` would accept a flat sample, so a worker that stops growing between two
+    big steps would be called a leak.
+    """
+    _drain_samples(monkeypatch, [1000, 6000, 6000])
+
+    _, monotonic, _ = validator.measure_drain(5150)
+
+    assert monotonic is False, {
+        "msg": "a drain that stops growing is not monotonic growth",
+    }
+
+
+def test_a_falling_drain_is_not_monotonic(monkeypatch):
+    """Release looks like a falling sequence, not growth."""
+    _drain_samples(monkeypatch, [5000, 4200, 3600, 3000, 2600, 2200])
+
+    _, monotonic, _ = validator.measure_drain(5150)
+
+    assert monotonic is False, {"msg": "a falling drain is release, not growth"}
+
+
+def test_too_few_samples_cannot_be_called_monotonic(monkeypatch):
+    """Two points cannot establish a trend."""
+    _drain_samples(monkeypatch, [1000, 5000])
+
+    _, monotonic, samples = validator.measure_drain(5150)
+
+    assert monotonic is False, {"msg": "fewer than three samples prove nothing"}
+    assert len(samples) == 2, {"samples": samples}
+
+
 def test_a_status_without_a_gid_column_is_not_assumed_safe(monkeypatch, tmp_path):
     """Reading only the uid would pass a worker whose group is unknown.
 
