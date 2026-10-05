@@ -918,12 +918,6 @@ def read_process_ids(pid: int) -> dict[str, tuple[int, ...]] | None:
     return found if "Uid" in found and "Gid" in found else None
 
 
-def read_process_uid(pid: int) -> tuple[int, ...] | None:
-    """Return a process's real/effective/saved/fs uids, or None if unreadable."""
-    ids = read_process_ids(pid)
-    return None if ids is None else ids["Uid"]
-
-
 def assert_worker_dropped_privileges(worker_pid: int) -> None:
     """Fail unless the NGINX worker really runs as a non-root user and group.
 

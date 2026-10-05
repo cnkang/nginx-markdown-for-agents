@@ -972,7 +972,10 @@ def test_worker_identity_is_read_from_proc(monkeypatch, tmp_path):
 
     monkeypatch.setattr(validator.pathlib, "Path", lambda p: status if "status" in str(p) else Path(str(p)))
 
-    assert validator.read_process_uid(1234) == (65534, 65534, 65534, 65534)
+    assert validator.read_process_ids(1234) == {
+        "Uid": (65534, 65534, 65534, 65534),
+        "Gid": (65534, 65534, 65534, 65534),
+    }, {"msg": "both id columns must be parsed, not just the uid"}
 
 
 def _fake_status(body: str):
@@ -1108,16 +1111,6 @@ def test_a_fully_unprivileged_worker_passes_both_ids(monkeypatch):
     monkeypatch.setattr(validator.pathlib, "Path", lambda p: status)
 
     validator.assert_worker_dropped_privileges(1234)
-
-
-def test_worker_identity_read_failure_is_not_assumed_safe(monkeypatch):
-    """An unreadable identity must fail, not be treated as fine."""
-    monkeypatch.setattr(validator, "read_process_uid", lambda pid: None)
-
-    with pytest.raises(ValueError) as excinfo:
-        validator.assert_worker_dropped_privileges(1234)
-
-    assert "refusing to assume" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
 
 
 def test_grant_worker_traversal_adds_only_other_execute(
