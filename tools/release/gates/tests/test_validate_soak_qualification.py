@@ -1412,6 +1412,96 @@ def test_prepare_runtime_refuses_to_start_when_an_ancestor_blocks(
         validator._cleanup_runtime_directory(created)
 
 
+def test_a_configured_runtime_directory_is_removed(monkeypatch, tmp_path):
+    """SOAK_RUNTIME_DIR is ours to clean even though the name is not ours.
+
+    Cleanup only deletes markdown-soak-* directories so it cannot remove
+    something else, which left every run with a configured directory behind.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+    configured = tmp_path / "build" / "soak-runtime" / "ci-owned"
+    monkeypatch.setenv("SOAK_RUNTIME_DIR", str(configured))
+
+    runtime = validator._runtime_directory()
+    assert runtime.is_dir(), {"msg": "the configured directory was not created"}
+
+    validator._cleanup_runtime_directory(runtime)
+
+    assert not runtime.exists(), {
+        "leftover": str(runtime),
+        "msg": "a configured SOAK_RUNTIME_DIR must be cleaned up",
+    }
+
+
+def test_cleanup_still_refuses_directories_it_did_not_create(monkeypatch, tmp_path):
+    """Tracking the owned directory must not weaken the prefix guard."""
+    root = tmp_path / "build" / "soak-runtime"
+    root.mkdir(parents=True)
+    stranger = root / "not-ours"
+    stranger.mkdir()
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", root)
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+
+    validator._cleanup_runtime_directory(stranger)
+
+    assert stranger.is_dir(), {"msg": "cleanup must not delete an unrelated directory"}
+
+
+def test_the_load_phase_verifies_the_worker_actually_dropped_privileges(
+    monkeypatch, tmp_path
+):
+    """The session must call the identity check, not merely define it.
+
+    The helper has its own unit tests, but those pass even when the call site is
+    deleted -- the whole point of the check is that the soak refuses to run with
+    root workers, so the wiring needs its own assertion.
+    """
+    checked: list[int] = []
+    monkeypatch.setattr(
+        validator, "assert_worker_dropped_privileges", lambda pid: checked.append(pid)
+    )
+
+    runtime = tmp_path / "markdown-soak-wiring"
+    (runtime / "logs").mkdir(parents=True)
+
+    class FakeNginx:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(
+        validator, "prepare_runtime",
+        lambda base, m, so: (runtime, {"small": "small.html"}, FakeNginx()),
+    )
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url, **k: (True, ""))
+    monkeypatch.setattr(validator, "find_worker_pid", lambda d: 4242)
+    monkeypatch.setattr(validator, "run_load_loop",
+                        lambda *a, **k: ([], {"small": []}))
+    monkeypatch.setattr(validator, "measure_drain", lambda pid: (0, False, []))
+    monkeypatch.setattr(validator, "read_module_peak_memory", lambda url: 1)
+    monkeypatch.setattr(validator, "_stop_nginx", lambda n: None)
+
+    validator._run_soak_session(
+        "http://127.0.0.1:19200", {"duration_minutes": 1, "concurrency": 1}, ""
+    )
+
+    assert checked == [4242], {
+        "checked": checked,
+        "msg": "the soak must verify the worker's real identity before loading",
+    }
+
+    validator._cleanup_runtime_directory(runtime)
+
+
 def test_a_blocked_ancestor_refusal_still_removes_the_runtime_directory(
     monkeypatch, tmp_path
 ):

@@ -1207,8 +1207,16 @@ def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
     _grant_worker_traversal(*chain)
 
 
+# The directory this process created and must remove. A configured
+# SOAK_RUNTIME_DIR is not named markdown-soak-*, so the prefix rule that keeps
+# cleanup from deleting anything else would otherwise leave every run's
+# directory behind.
+_OWNED_RUNTIME_DIR: pathlib.Path | None = None
+
+
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
+    global _OWNED_RUNTIME_DIR
     configured = os.environ.get("SOAK_RUNTIME_DIR")
     if configured:
         runtime_dir = validate_write_path_within_root(
@@ -1219,6 +1227,7 @@ def _runtime_directory() -> pathlib.Path:
         # mkdir only creates the leaf; every ancestor it had to invent is 0700
         # too when the umask is restrictive, so grant traversal along the chain.
         _grant_worker_traversal_chain(runtime_dir)
+        _OWNED_RUNTIME_DIR = runtime_dir.resolve()
         return runtime_dir
 
     runtime_root = validate_write_path_within_root(
@@ -1486,8 +1495,11 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
 
 
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
-    runtime_root = SOAK_RUNTIME_ROOT.resolve()
     resolved_runtime_dir = runtime_dir.resolve()
+    if _OWNED_RUNTIME_DIR is not None and resolved_runtime_dir == _OWNED_RUNTIME_DIR:
+        shutil.rmtree(resolved_runtime_dir, ignore_errors=True)
+        return
+    runtime_root = SOAK_RUNTIME_ROOT.resolve()
     if (
         resolved_runtime_dir.name.startswith("markdown-soak-")
         and resolved_runtime_dir.parent == runtime_root
