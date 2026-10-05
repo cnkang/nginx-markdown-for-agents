@@ -654,9 +654,51 @@ def test_worker_user_falls_back_to_nginx_when_nobody_is_absent(monkeypatch):
     def lookup(name):
         if name == "nobody":
             raise KeyError(name)
-        return object()
+        return _FakePasswd()
 
     monkeypatch.setattr(validator.pwd, "getpwnam", lookup)
+
+    assert validator.nginx_worker_user() == "nginx"
+
+
+def test_worker_user_ignores_an_account_named_like_root(monkeypatch):
+    """A `nobody` that maps to uid 0 is not a privilege drop.
+
+    `setuid(0)` is a no-op, so NGINX's workers would keep running as root while
+    the gate reported that the identity had been pinned. The name is not the
+    point; the resolved uid is.
+    """
+
+    class RootNamedNobody:
+        pw_uid = 0
+        pw_gid = 0
+        pw_name = "nobody"
+
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: RootNamedNobody())
+
+    with pytest.raises(RuntimeError) as excinfo:
+        validator.nginx_worker_user()
+
+    assert "refusing to start NGINX with root workers" in str(excinfo.value), {
+        "msg": str(excinfo.value)[:160],
+    }
+
+
+def test_worker_user_skips_a_root_nobody_and_uses_the_next_account(monkeypatch):
+    """The uid check must skip to the next candidate, not give up."""
+    accounts = {"nobody": 0, "nginx": 101}
+
+    class Entry:
+        def __init__(self, uid):
+            self.pw_uid = uid
+            self.pw_gid = uid
+            self.pw_name = ""
+
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(
+        validator.pwd, "getpwnam", lambda name: Entry(accounts[name])
+    )
 
     assert validator.nginx_worker_user() == "nginx"
 

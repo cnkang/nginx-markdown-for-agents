@@ -1203,18 +1203,27 @@ def nginx_worker_user() -> str | None:
     silent fallback: without a ``user`` directive the workers would keep running
     as root, which is exactly what this gate exists to avoid, and the run would
     still pass.
+
+    The check is on the resolved uid, not the name. A container may ship an
+    account called ``nobody`` that maps to uid 0, and ``setuid(0)`` is a no-op, so
+    the workers would stay root while the gate reported success.
     """
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         return None
     for candidate in ("nobody", "nginx"):
         try:
-            pwd.getpwnam(candidate)
+            entry = pwd.getpwnam(candidate)
         except KeyError:
+            continue
+        if entry.pw_uid == 0:
+            # Named like an unprivileged account but resolves to root; NGINX's
+            # setuid would be a no-op and the workers would keep root.
             continue
         return candidate
     raise RuntimeError(
         "the soak runs NGINX as root but no unprivileged account (nobody, nginx) "
-        "exists to run the workers as; refusing to start NGINX with root workers"
+        "resolves to a non-root uid to run the workers as; refusing to start "
+        "NGINX with root workers"
     )
 
 
