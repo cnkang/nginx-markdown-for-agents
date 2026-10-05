@@ -843,7 +843,7 @@ def test_stop_nginx_resolves_the_group_before_the_master_exits(tmp_path, monkeyp
     assert not seen, "the cached pgid must be used instead of the per-process path"
 
 
-def test_stop_nginx_warns_when_the_group_survives_sigkill(tmp_path, monkeypatch, capsys):
+def test_stop_nginx_warns_when_the_group_survives_sigkill(monkeypatch, capsys):
     """An unreaped group must say so, since it may still hold the soak port.
 
     Reporting nothing here is how a wedged worker goes unnoticed: the gate
@@ -851,37 +851,29 @@ def test_stop_nginx_warns_when_the_group_survives_sigkill(tmp_path, monkeypatch,
     """
     import signal as signal_mod
 
-    signals: list[int] = []
-
     class FakeNginx:
         # Above the usual pid ceiling: the getpgid fallback uses this value as a
         # real process group id, so a plausible-looking pid could signal one.
         pid = 999_999
 
-        def __init__(self, timeouts: set[int]):
+        def __init__(self, timeouts, groups, fallback):
             # Which wait() times out is the whole point, so it has to be stated
             # per call: 1 = after SIGTERM, 2 = after SIGKILL.
             self._timeouts = timeouts
-            self.waits = 0
+            self._groups = groups
+            self._fallback = fallback
 
         def wait(self, timeout=None):
-            self.waits += 1
+            self.waits = getattr(self, "waits", 0) + 1
             if self.waits in self._timeouts:
                 raise __import__("subprocess").TimeoutExpired("nginx", timeout)
             return 0
 
         def send_signal(self, sig):
-            signals.append(sig)
-
-    def run(timeouts):
-        nginx = FakeNginx(timeouts)
-        sent: list[int] = []
-        monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
-        monkeypatch.setattr(
-            validator.os, "killpg", lambda pgid, sig: sent.append(sig)
-        )
-        validator._stop_nginx(nginx)  # type: ignore[arg-type]
-        return sent
+            # Unreachable while getpgid succeeds: the group is signalled instead.
+            # Recorded anyway so a regression that drops the group signal shows
+            # up as an entry here rather than a silently empty list.
+            self._fallback.append(sig)
 
     warning = (
         "WARNING: NGINX did not exit after SIGKILL; a process in the group "
@@ -892,16 +884,34 @@ def test_stop_nginx_warns_when_the_group_survives_sigkill(tmp_path, monkeypatch,
     # normal and the unconditional SIGKILL that follows resolves it, so a warning
     # there would be noise -- and asserting stderr is empty in that case is what
     # pins the warning to the second branch.
-    signals = run({1})
-    assert warning not in capsys.readouterr().err, {
-        "msg": "a SIGTERM timeout that SIGKILL then resolves is not an unreaped group",
-        "signals": signals,
-    }
+    # {1, 2} is the shape that actually occurs: a group that ignores SIGTERM is
+    # very unlikely to then honour SIGKILL. {1} alone pins the warning to the
+    # second branch, since there SIGKILL resolves the timeout.
+    for timeouts in ({1}, {2}, {1, 2}):
+        groups: list[tuple[int, int]] = []
+        fallback: list[int] = []
+        monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+        monkeypatch.setattr(
+            validator.os, "killpg", lambda pgid, sig: groups.append((pgid, sig))
+        )
+        nginx = FakeNginx(timeouts, groups, fallback)
+        validator._stop_nginx(nginx)  # type: ignore[arg-type]
 
-    signals = run({2})
-    err = capsys.readouterr().err
-    assert warning in err, {"stderr": err, "signals": signals}
-    assert signal_mod.SIGKILL in signals, signals
+        err = capsys.readouterr().err
+        assert (warning in err) is (2 in timeouts), {
+            "timeouts": sorted(timeouts),
+            "stderr": err,
+            "groups": groups,
+        }
+        assert [sig for _, sig in groups] == [
+            signal_mod.SIGTERM,
+            signal_mod.SIGKILL,
+        ], {"timeouts": sorted(timeouts), "groups": groups}
+        assert all(pgid == nginx.pid + 1 for pgid, _ in groups), {
+            "msg": "the group id comes from getpgid, not from the master pid",
+            "groups": groups,
+        }
+        assert not fallback, {"fallback": fallback}
 
 
 def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
