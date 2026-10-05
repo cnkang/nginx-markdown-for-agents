@@ -16,6 +16,14 @@ FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "release"
 MANIFEST = FIXTURE_DIR / "soak-qualification-manifest.json"
 
 
+class _FakePasswd:
+    """Minimal stand-in for pwd.struct_passwd with a distinctive id."""
+
+    pw_uid = 65534
+    pw_gid = 65534
+    pw_name = "nobody"
+
+
 def _run_fixture(record_name: str) -> int:
     return validator.main(
         [
@@ -495,7 +503,7 @@ def test_worker_user_is_pinned_only_when_the_master_is_root(monkeypatch):
     prepared for it, which produced a bare 403 with no usable diagnosis.
     """
     monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
-    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
 
     assert validator.nginx_worker_user() == "nobody"
 
@@ -521,22 +529,53 @@ def test_worker_user_falls_back_to_nginx_when_nobody_is_absent(monkeypatch):
     assert validator.nginx_worker_user() == "nginx"
 
 
-def test_grant_worker_traversal_adds_execute_without_listing(tmp_path):
-    """Traversal must be added without turning the directory listable.
+def test_grant_worker_traversal_hands_ownership_not_a_wider_mode(
+    monkeypatch, tmp_path
+):
+    """The traversal must come from ownership, not from 0o711.
 
-    Granting 0o755 would let the worker enumerate the runtime tree, which the
-    0700 mode exists to prevent.
+    0o711 also grants execute to group and other, which is more than the worker
+    needs and more than the 0700 mode was meant to restrict.
     """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    chowned: list = []
+    monkeypatch.setattr(
+        validator.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid))
+    )
+
     target = tmp_path / "markdown-soak-x"
     target.mkdir()
     target.chmod(0o700)
 
     validator._grant_worker_traversal(target)
 
+    assert chowned == [(target, _FakePasswd.pw_uid, _FakePasswd.pw_gid)], {
+        "chowned": [(str(p), u, g) for p, u, g in chowned],
+    }
     mode = target.stat().st_mode & 0o777
-    assert mode & 0o111, f"the worker cannot traverse: {oct(mode)}"
-    assert not mode & 0o044, f"the directory became readable: {oct(mode)}"
-    assert not mode & 0o022, f"the directory became writable: {oct(mode)}"
+    assert not mode & 0o011, f"group/other gained execute: {oct(mode)}"
+    assert mode & 0o700, f"the owner lost access: {oct(mode)}"
+
+
+def test_grant_worker_traversal_is_a_no_op_without_a_privilege_drop(
+    monkeypatch, tmp_path
+):
+    """A non-root master keeps its own access, so nothing may change."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
+    chowned: list = []
+    monkeypatch.setattr(
+        validator.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid))
+    )
+
+    target = tmp_path / "markdown-soak-y"
+    target.mkdir()
+    target.chmod(0o700)
+
+    validator._grant_worker_traversal(target)
+
+    assert not chowned, {"chowned": [str(p) for p, _, _ in chowned]}
+    assert target.stat().st_mode & 0o777 == 0o700
 
 
 def test_grant_worker_traversal_is_idempotent(tmp_path):
@@ -560,7 +599,7 @@ def test_grant_worker_traversal_tolerates_a_missing_directory(tmp_path):
 def test_generated_config_pins_the_worker_user_when_root(monkeypatch, tmp_path):
     """The config must name the worker user the directories were prepared for."""
     monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
-    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
     monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "validate_write_path_within_root",
@@ -808,7 +847,7 @@ def test_corpus_root_is_reachable_by_the_unprivileged_worker(
     unreachable: every lookup has to traverse each ancestor by name.
     """
     monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
-    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "validate_write_path_within_root",
                         lambda p, root, **k: Path(p))

@@ -1063,22 +1063,31 @@ def _git_head_sha() -> str:
 
 
 def _grant_worker_traversal(*directories: pathlib.Path) -> None:
-    """Give the unprivileged worker traversal without granting listing.
+    """Let the unprivileged worker traverse directories it must read.
 
     A worker that cannot traverse into the runtime directory gets a bare 403
     from NGINX with no usable diagnosis, because the fixture itself is
-    readable. Traversal-only (0o711) lets the worker open a file it already
-    knows the name of while leaving the directory unlistable and unwritable.
+    readable. When NGINX drops to another user, hand the traversal bit to that
+    account by ownership rather than widening the mode: 0o711 would also grant
+    execute to group and other, which is more than the worker needs and more
+    than the 0700 mode was meant to restrict.
     """
+    worker = nginx_worker_user()
+    if worker is None:
+        # No privilege drop, so the master keeps its own access.
+        return
+    try:
+        entry = pwd.getpwnam(worker)
+    except KeyError:
+        return
     for directory in directories:
         try:
-            mode = directory.stat().st_mode
+            current = directory.stat().st_mode & 0o777
+            if current & 0o700 != 0o700:
+                directory.chmod(current | 0o700)
+            os.chown(directory, entry.pw_uid, entry.pw_gid)
         except OSError:
             continue
-        current = mode & 0o777
-        wanted = current | 0o711
-        if current != wanted:
-            directory.chmod(wanted)
 
 
 def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
