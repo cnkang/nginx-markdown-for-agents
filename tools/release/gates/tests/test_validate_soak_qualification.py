@@ -56,7 +56,7 @@ def test_nginx_is_started_in_its_own_session(monkeypatch, tmp_path):
     recorded: dict = {}
 
     class FakePopen:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0
@@ -118,7 +118,7 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     captured: dict = {}
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def __init__(self, *a, **kw):
             captured["stdout"] = kw.get("stdout")
@@ -151,10 +151,16 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
         validator, "_validated_nginx_binary", lambda: Path("/bin/true")
     )
     real_cleanup = validator._cleanup_runtime_directory
+    # Seeded rather than assigned inside the try: a regression that raises before
+    # the assignment would otherwise surface as a NameError at the assertion
+    # below, which names neither the cause nor the test's intent.
+    log_exists = False
     try:
-        _runtime, _corpus, nginx = validator.prepare_runtime(
-            "http://127.0.0.1:8080", {}, ""
-        )
+        # The runtime dir and corpus are not under test here; only what NGINX's
+        # stdout is wired to. Unpacking is avoided so nothing looks accidentally
+        # used; the handle is discarded because the binary here is /bin/true,
+        # which exits immediately, so there is nothing to wait for.
+        validator.prepare_runtime("http://127.0.0.1:8080", {}, "")
         # Asserted before the cleanup below removes the directory.
         log_exists = (runtime_dir / "logs" / "startup.log").exists()
     finally:
@@ -185,8 +191,6 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     assert log_exists, (
         "the startup log must exist on disk for the failure path to read"
     )
-    # `nginx` is intentionally left bound: the finally below closes it, and
-    # deleting the name here would only hide a later accidental use.
 
 
 def test_port_holder_detects_a_bound_port():
@@ -618,7 +622,7 @@ def test_stop_nginx_terminates_before_the_final_kill(monkeypatch):
         validator.os, "killpg", lambda pgid, sig: order.append(sig)
     )
     nginx = _signal_fallback_nginx([])
-    nginx.pid = 4242
+    nginx.pid = 999_999
 
     validator._stop_nginx(nginx)
 
@@ -646,14 +650,17 @@ def test_a_failed_group_lookup_still_signals_the_group(monkeypatch):
         validator.os, "killpg", lambda pgid, sig: groups.append((pgid, sig))
     )
     nginx = _signal_fallback_nginx([])
-    nginx.pid = 4242
+    nginx.pid = 999_999
 
     validator._stop_nginx(nginx)
 
     assert groups, {
         "msg": "a failed getpgid must still signal the process group, not the master alone",
     }
-    assert all(pgid == 4242 for pgid, _ in groups), {"groups": groups}
+    # The fallback signsals nginx.pid as the group id, so the expectation has to
+    # be that value rather than a literal: a stale literal silently keeps the
+    # test green while the implementation signals a different group.
+    assert all(pgid == nginx.pid for pgid, _ in groups), {"groups": groups}
     assert any(sig == signal_mod.SIGKILL for _, sig in groups), {
         "groups": groups,
         "msg": "the group must receive the unconditional final SIGKILL",
@@ -774,7 +781,7 @@ def test_stop_nginx_kills_a_surviving_worker_after_a_clean_master_exit(
     group: list[tuple[int, int]] = []
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0  # the master exits cleanly on SIGTERM
@@ -807,7 +814,7 @@ def test_stop_nginx_resolves_the_group_before_the_master_exits(tmp_path, monkeyp
     seen: list[int] = []
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             # getpgid(nginx.pid) starts failing once the master is reaped.
@@ -840,6 +847,85 @@ def test_stop_nginx_resolves_the_group_before_the_master_exits(tmp_path, monkeyp
     assert not seen, "the cached pgid must be used instead of the per-process path"
 
 
+def test_stop_nginx_warns_when_the_group_survives_sigkill(monkeypatch, capsys):
+    """An unreaped group must say so, since it may still hold the soak port.
+
+    Reporting nothing here is how a wedged worker goes unnoticed: the gate
+    returns success while the next run cannot bind.
+    """
+    import signal as signal_mod
+
+    class FakeNginx:
+        # Above the usual pid ceiling: the getpgid fallback uses this value as a
+        # real process group id, so a plausible-looking pid could signal one.
+        pid = 999_999
+
+        def __init__(self, timeouts, groups, fallback):
+            # Which wait() times out is the whole point, so it has to be stated
+            # per call: 1 = after SIGTERM, 2 = after SIGKILL. The timeout value
+            # is recorded too -- a grace period that collapses to zero would
+            # still pass every other assertion here.
+            self._timeouts = timeouts
+            self._groups = groups
+            self._fallback = fallback
+            self.waits: list = []
+
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            if len(self.waits) in self._timeouts:
+                raise __import__("subprocess").TimeoutExpired("nginx", timeout)
+            return 0
+
+        def send_signal(self, sig):
+            # Unreachable while getpgid succeeds: the group is signalled instead.
+            # Recorded anyway so a regression that drops the group signal shows
+            # up as an entry here rather than a silently empty list.
+            self._fallback.append(sig)
+
+    warning = (
+        "WARNING: NGINX did not exit after SIGKILL; a process in the group "
+        "may still hold the soak port"
+    )
+
+    # Only the post-SIGKILL timeout is reported. Timing out on SIGTERM alone is
+    # normal and the unconditional SIGKILL that follows resolves it, so a warning
+    # there would be noise -- and asserting stderr is empty in that case is what
+    # pins the warning to the second branch.
+    # {1, 2} is the shape that actually occurs: a group that ignores SIGTERM is
+    # very unlikely to then honour SIGKILL. {1} alone pins the warning to the
+    # second branch, since there SIGKILL resolves the timeout.
+    for timeouts in ({1}, {2}, {1, 2}):
+        groups: list[tuple[int, int]] = []
+        fallback: list[int] = []
+        monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+        monkeypatch.setattr(
+            validator.os, "killpg", lambda pgid, sig: groups.append((pgid, sig))
+        )
+        nginx = FakeNginx(timeouts, groups, fallback)
+        validator._stop_nginx(nginx)  # type: ignore[arg-type]
+
+        err = capsys.readouterr().err
+        assert (warning in err) is (2 in timeouts), {
+            "timeouts": sorted(timeouts),
+            "stderr": err,
+            "groups": groups,
+        }
+        assert [sig for _, sig in groups] == [
+            signal_mod.SIGTERM,
+            signal_mod.SIGKILL,
+        ], {"timeouts": sorted(timeouts), "groups": groups}
+        assert all(pgid == nginx.pid + 1 for pgid, _ in groups), {
+            "msg": "the group id comes from getpgid, not from the master pid",
+            "groups": groups,
+        }
+        assert not fallback, {"fallback": fallback}
+        # A grace period of zero would pass every other assertion in this test.
+        assert nginx.waits == [10, 5], {
+            "msg": "SIGTERM then SIGKILL, each with its own wait budget",
+            "waits": nginx.waits,
+        }
+
+
 def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     """The worker must be signalled with the master.
 
@@ -856,7 +942,7 @@ def test_stop_nginx_signals_the_process_group(tmp_path, monkeypatch):
     calls = {"n": 0}
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             calls["n"] += 1
@@ -2276,7 +2362,7 @@ def test_a_group_that_is_already_gone_is_not_reported(monkeypatch, capsys):
         lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError()),
     )
     nginx = _signal_fallback_nginx(signalled)
-    nginx.pid = 4242
+    nginx.pid = 999_999
 
     validator._stop_nginx(nginx)
 
@@ -2302,7 +2388,7 @@ def test_a_failed_group_signal_is_reported(monkeypatch, capsys):
         lambda pgid, sig: (_ for _ in ()).throw(PermissionError("not permitted")),
     )
     nginx = _signal_fallback_nginx([])
-    nginx.pid = 4242
+    nginx.pid = 999_999
 
     validator._stop_nginx(nginx)
 
@@ -2356,7 +2442,7 @@ def test_the_load_phase_verifies_the_worker_actually_dropped_privileges(
     (runtime / "logs").mkdir(parents=True)
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0
@@ -2657,7 +2743,7 @@ def test_prepare_runtime_wires_the_parser_budget_into_the_config(
     runtime.mkdir(parents=True, exist_ok=True)
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def __init__(self, *a, **kw):
             pass
@@ -2804,7 +2890,7 @@ def test_ready_failure_reports_the_status_and_the_nginx_log(tmp_path, monkeypatc
     )
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0
@@ -2836,7 +2922,7 @@ def test_ready_failure_omits_absent_pieces_without_trailing_separator(
     (runtime_dir / "logs" / "startup.log").write_text("all fine\n", encoding="utf-8")
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0
@@ -3364,7 +3450,7 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     runtime_dir = tmp_path / "runtime"
 
     class FakeNginx:
-        pid = 4242
+        pid = 999_999
 
         def terminate(self) -> None:
             pass

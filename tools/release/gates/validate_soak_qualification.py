@@ -1536,6 +1536,8 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     try:
         nginx.wait(timeout=10)
     except subprocess.TimeoutExpired:
+        # Expected whenever a worker ignores SIGTERM; the unconditional SIGKILL
+        # below is what makes the timeout harmless.
         pass
     # Unconditional, not just on timeout: the master can honour SIGTERM and
     # exit while a worker lingers. Either way the group gets a final SIGKILL so
@@ -1544,7 +1546,14 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     try:
         nginx.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        pass
+        # Already SIGKILLed and still unreaped: a process wedged in an
+        # uninterruptible state. Report it rather than blocking the gate on
+        # wait(), and leave the group for the operating system to reap.
+        print(
+            "WARNING: NGINX did not exit after SIGKILL; a process in the group "
+            "may still hold the soak port",
+            file=sys.stderr,
+        )
 
 
 def _remove_runtime_tree(resolved_runtime_dir: pathlib.Path) -> None:
