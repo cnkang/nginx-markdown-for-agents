@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import grp
 import json
 import math
 import os
@@ -745,7 +746,16 @@ def write_nginx_conf(
     # real deployment does, and so the directories it must read are prepared
     # for exactly that user.
     worker_user = nginx_worker_user()
-    user_line = f"user {worker_user};\n" if worker_user else ""
+    user_line = ""
+    if worker_user:
+        # NGINX looks the group up by name; on a host where the worker's primary
+        # group is not called the same as the user, `user nobody;` alone fails to
+        # start. Emit the group NGINX would otherwise infer.
+        try:
+            group_name = grp.getgrgid(pwd.getpwnam(worker_user).pw_gid).gr_name
+        except KeyError:
+            group_name = worker_user
+        user_line = f"user {worker_user} {group_name};\n"
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     _grant_worker_traversal(validated_runtime_dir)
     conf = f"""{user_line}worker_processes 1;
@@ -1088,6 +1098,39 @@ def _grant_worker_traversal(*directories: pathlib.Path) -> None:
             continue
 
 
+def _unreachable_ancestor(directory: pathlib.Path) -> pathlib.Path | None:
+    """Return the first ancestor the worker could not traverse, if any.
+
+    The chain walk below stops at the checkout root on purpose: widening the
+    checkout or anything above it would be exposure, not a fix. That leaves a real
+    failure mode -- a 0700 home directory above the checkout, which is exactly
+    what a root-run CI checkout usually does not have. Name it instead of
+    letting NGINX answer 403 with no usable diagnosis.
+    """
+    if nginx_worker_user() is None:
+        return None
+    root = REPO_ROOT.resolve()
+    current = directory.resolve()
+    while current != root and current.parent != current:
+        try:
+            if not current.stat().st_mode & 0o001:
+                return current
+        except OSError:
+            return current
+        current = current.parent
+    # Above the checkout the gate must not change anything, so a blocked
+    # ancestor there is reported rather than fixed.
+    current = root
+    while current.parent != current:
+        try:
+            if not current.stat().st_mode & 0o001:
+                return current
+        except OSError:
+            return current
+        current = current.parent
+    return None
+
+
 def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
     """Grant traversal on `directory` and each ancestor up to the repository.
 
@@ -1198,6 +1241,13 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
 def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     """Create the runtime dir, corpus, nginx config, and start nginx."""
     runtime_dir = _runtime_directory()
+    blocked = _unreachable_ancestor(runtime_dir)
+    if blocked is not None:
+        raise ValueError(
+            f"the NGINX worker ({nginx_worker_user()}) cannot reach {runtime_dir}: "
+            f"{blocked} is not traversable by other; grant o+x on that directory "
+            "or place the checkout somewhere the worker can walk to"
+        )
     try:
         corpus = build_corpus(runtime_dir, manifest)
         port = int(base_url.rsplit(":", 1)[1])

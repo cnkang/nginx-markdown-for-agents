@@ -24,6 +24,12 @@ class _FakePasswd:
     pw_name = "nobody"
 
 
+class _FakeGroup:
+    """Stand-in for grp.struct_group; the name differs from the user."""
+
+    gr_name = "nogroup"
+
+
 def _run_fixture(record_name: str) -> int:
     return validator.main(
         [
@@ -615,6 +621,7 @@ def test_generated_config_pins_the_worker_user_when_root(monkeypatch, tmp_path):
     """The config must name the worker user the directories were prepared for."""
     monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
     monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    monkeypatch.setattr(validator.grp, "getgrgid", lambda gid: _FakeGroup())
     monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "validate_write_path_within_root",
@@ -628,7 +635,68 @@ def test_generated_config_pins_the_worker_user_when_root(monkeypatch, tmp_path):
     validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
 
     conf = (runtime / "nginx.conf").read_text()
-    assert conf.startswith("user nobody;"), conf[:120]
+    # The group is named explicitly: NGINX resolves it by name, and on a host
+    # where the worker's primary group is not called the same as the user,
+    # `user nobody;` alone refuses to start.
+    assert conf.startswith("user nobody nogroup;"), conf[:120]
+
+
+def test_generated_config_falls_back_to_the_user_name_for_the_group(
+    monkeypatch, tmp_path
+):
+    """An unresolvable gid must still produce a startable directive."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    monkeypatch.setattr(validator.grp, "getgrgid", lambda gid: (_ for _ in ()).throw(KeyError(gid)))
+    monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+
+    runtime = tmp_path / "markdown-soak-conf3"
+    (runtime / "logs").mkdir(parents=True)
+    so = tmp_path / "module.so"
+    so.write_bytes(b"")
+
+    validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
+
+    conf = (runtime / "nginx.conf").read_text()
+    assert conf.startswith("user nobody nobody;"), conf[:120]
+
+
+def test_unreachable_ancestor_names_the_blocked_directory(monkeypatch, tmp_path):
+    """A blocked ancestor must be named, not widened.
+
+    The chain walk deliberately stops below the checkout, so a 0700 directory
+    above it leaves the worker unable to reach the corpus. Reporting it beats a
+    bare 403 from NGINX with no usable diagnosis.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", (tmp_path / "checkout").resolve())
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+
+    # tmp_path stands in for a 0700 home directory above the checkout. Only that
+    # one object is faked: patching Path.stat globally would leak into every
+    # other test in the module.
+    blocked = tmp_path
+    real_stat = type(tmp_path).stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self == blocked:
+            class Result:
+                st_mode = 0o700
+
+            return Result()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(tmp_path), "stat", fake_stat)
+
+    nested = blocked / "checkout" / "build" / "soak-runtime"
+    nested.mkdir(parents=True)
+
+    found = validator._unreachable_ancestor(nested)
+
+    assert found == blocked, {"found": str(found) if found else None}
 
 
 def test_generated_config_omits_the_user_directive_when_not_root(
@@ -978,6 +1046,53 @@ def test_the_suite_leaves_no_runtime_directory_behind() -> None:
         "leftover": sorted(p.name for p in root.iterdir()),
         "root": str(root),
     }
+
+
+def test_prepare_runtime_refuses_to_start_when_an_ancestor_blocks(
+    monkeypatch, tmp_path
+):
+    """A blocked ancestor must stop the run before NGINX answers 403.
+
+    The chain walk deliberately stops below the checkout, so a 0700 directory
+    above it is the gate's to report, not to widen. Removing the check lets the
+    run proceed and fail later with a bare 403 that names nothing.
+    """
+    blocked = tmp_path
+    real_stat = type(tmp_path).stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self == blocked:
+            class Result:
+                st_mode = 0o700
+
+            return Result()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(tmp_path), "stat", fake_stat)
+    monkeypatch.setattr(validator, "REPO_ROOT", (blocked / "checkout").resolve())
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT",
+                        blocked / "checkout" / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    # Nothing may be started: the refusal has to happen first.
+    monkeypatch.setattr(
+        validator.subprocess, "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("NGINX was started")),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        validator.prepare_runtime("http://127.0.0.1:19200",
+                                  {"corpus": [{"id": "small"}]}, "module.so")
+
+    assert "not traversable by other" in str(excinfo.value), {
+        "msg": str(excinfo.value)[:200],
+    }
+    for created in (blocked / "checkout" / "build" / "soak-runtime").glob(
+        "markdown-soak-*"
+    ):
+        validator._cleanup_runtime_directory(created)
 
 
 def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
