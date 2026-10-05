@@ -285,6 +285,9 @@ def test_port_holder_detects_a_holder_on_a_specific_address():
         concrete = socket.gethostbyname(socket.gethostname())
     except OSError:
         pytest.skip("no resolvable non-loopback address")
+        # pytest.skip raises, but code scanning does not model that; make the
+        # control flow explicit so `concrete` is provably bound below.
+        raise
     if concrete.startswith("127."):
         pytest.skip("host resolves to loopback only")
 
@@ -2159,7 +2162,9 @@ def test_an_unprobeable_address_does_not_hide_a_conflict_on_the_other(monkeypatc
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     with holder:
         holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        holder.bind(("0.0.0.0", 0))
+        # codeql[py/bind-socket-all-network-interfaces]: the wildcard bind is
+        # what makes this a genuine wildcard conflict for the probe to find.
+        holder.bind(("0.0.0.0", 0))  # codeql[py/bind-socket-all-network-interfaces]
         holder.listen(1)
         port = holder.getsockname()[1]
 
