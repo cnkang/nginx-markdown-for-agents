@@ -1897,6 +1897,11 @@ def test_the_suite_leaves_no_runtime_directory_behind() -> None:
     This runs in definition order, so it only covers the tests defined before it.
     The conftest-level check in this package closes the gap for the ones after.
     """
+    # CI runs this module with `-n 4`, where a sibling worker's run directory can
+    # be present at this moment. Only the controller sees a settled tree.
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        pytest.skip("another xdist worker may be mid-run; the controller checks")
+
     root = validator.SOAK_RUNTIME_ROOT
     # Same scope as the conftest hook: only this gate's own run directories, and
     # only the ones this session created. A directory left by an interrupted

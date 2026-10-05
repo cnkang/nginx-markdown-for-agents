@@ -9,6 +9,7 @@ directories under build/soak-runtime.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
@@ -44,6 +45,15 @@ def _leaked_runtime_dirs() -> list[str]:
 _PRE_EXISTING = frozenset(_leaked_runtime_dirs())
 
 
+def _is_xdist_worker() -> bool:
+    """True when this process is one of several parallel pytest workers.
+
+    CI runs these tests with `-n 4`. A worker's session can overlap another
+    worker's run directory, so only the controller may judge leftovers.
+    """
+    return bool(os.environ.get("PYTEST_XDIST_WORKER"))
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Record what was already there so only new directories count as leaks."""
     global _PRE_EXISTING
@@ -55,6 +65,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Fail the session when a test leaked a runtime directory."""
     # Only directories this session created. A leftover from an interrupted run
     # is reported for visibility but is not attributed to the tests.
+    if _is_xdist_worker():
+        # Another worker's run directory may be present right now; only the
+        # controller sees a settled tree.
+        return
     created = [name for name in _leaked_runtime_dirs() if name not in (_PRE_EXISTING or ())]
     if not created:
         return
