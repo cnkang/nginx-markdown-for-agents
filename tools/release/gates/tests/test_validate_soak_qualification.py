@@ -440,10 +440,16 @@ def test_the_session_removes_its_runtime_directory_on_failure(
         validator, "assert_worker_dropped_privileges", lambda pid: None
     )
 
-    def explode(*args, **kwargs):
-        raise RuntimeError("load phase failed")
+    # A load-branch failure must not stop the session from returning a numeric
+    # window: the caller records it, and None there is not a number.
+    monkeypatch.setattr(validator, "measure_drain", lambda pid: (0, True, []))
+    monkeypatch.setattr(validator, "read_module_peak_memory", lambda url: 1)
 
-    monkeypatch.setattr(validator, "run_load_loop", explode)
+    class ExplodingLoad:
+        def __call__(self, *args, **kwargs):
+            raise RuntimeError("load phase failed")
+
+    monkeypatch.setattr(validator, "run_load_loop", ExplodingLoad())
 
     with pytest.raises(RuntimeError, match="load phase failed"):
         validator._run_soak_session(
@@ -456,6 +462,53 @@ def test_the_session_removes_its_runtime_directory_on_failure(
         "order": order,
         "msg": "NGINX must be stopped before its working tree is removed; "
         "cleaning under a running NGINX can leave files behind",
+    }
+
+
+def test_the_session_reports_a_numeric_window_when_the_load_branch_fails(
+    monkeypatch, tmp_path
+):
+    """A readiness failure still has to produce a numeric window.
+
+    The load branch never runs in that case, so `ended` stays None unless the
+    finally stamps it; the caller records the window either way.
+    """
+    runtime = tmp_path / "markdown-soak-window"
+    runtime.mkdir()
+
+    class FakeNginx:
+        pid = 6161
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    def fake_prepare(base, manifest, so):
+        return runtime, {"small": "small.html"}, FakeNginx()
+
+    monkeypatch.setattr(validator, "prepare_runtime", fake_prepare)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path)
+    monkeypatch.setattr(
+        validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
+    )
+    monkeypatch.setattr(validator, "_stop_nginx", lambda n: None)
+    monkeypatch.setattr(validator, "_cleanup_runtime_directory", lambda p: None)
+    # Readiness failure: the load branch is skipped entirely, which is the path
+    # that leaves `ended` unset.
+    monkeypatch.setattr(
+        validator, "wait_for_ready", lambda url, **k: (False, "connection refused")
+    )
+    monkeypatch.setattr(validator, "_startup_failure_reason", lambda d: "")
+
+    result = validator._run_soak_session(
+        "http://127.0.0.1:19200", {"duration_minutes": 1, "concurrency": 1}, ""
+    )
+
+    assert isinstance(result.get("ended"), (int, float)), {
+        "ended": result.get("ended"),
+        "msg": "a readiness failure must still report a numeric window",
     }
 
 
