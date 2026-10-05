@@ -154,7 +154,8 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     try:
         # The runtime dir and corpus are not under test here; only what NGINX's
         # stdout is wired to. Unpacking is avoided so nothing looks accidentally
-        # used, and the process handle is closed by the real cleanup path below.
+        # used; the handle is discarded because the binary here is /bin/true,
+        # which exits immediately, so there is nothing to wait for.
         validator.prepare_runtime("http://127.0.0.1:8080", {}, "")
         # Asserted before the cleanup below removes the directory.
         log_exists = (runtime_dir / "logs" / "startup.log").exists()
@@ -857,25 +858,49 @@ def test_stop_nginx_warns_when_the_group_survives_sigkill(tmp_path, monkeypatch,
         # real process group id, so a plausible-looking pid could signal one.
         pid = 999_999
 
+        def __init__(self, timeouts: set[int]):
+            # Which wait() times out is the whole point, so it has to be stated
+            # per call: 1 = after SIGTERM, 2 = after SIGKILL.
+            self._timeouts = timeouts
+            self.waits = 0
+
         def wait(self, timeout=None):
-            # Neither the SIGTERM wait nor the post-SIGKILL wait reaps, which is
-            # the case this test is about.
-            raise __import__("subprocess").TimeoutExpired("nginx", timeout)
+            self.waits += 1
+            if self.waits in self._timeouts:
+                raise __import__("subprocess").TimeoutExpired("nginx", timeout)
+            return 0
 
         def send_signal(self, sig):
             signals.append(sig)
 
-    nginx = FakeNginx()
-    monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
-    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: signals.append(sig))
+    def run(timeouts):
+        nginx = FakeNginx(timeouts)
+        sent: list[int] = []
+        monkeypatch.setattr(validator.os, "getpgid", lambda pid: pid + 1)
+        monkeypatch.setattr(
+            validator.os, "killpg", lambda pgid, sig: sent.append(sig)
+        )
+        validator._stop_nginx(nginx)  # type: ignore[arg-type]
+        return sent
 
-    validator._stop_nginx(nginx)  # type: ignore[arg-type]
+    warning = (
+        "WARNING: NGINX did not exit after SIGKILL; a process in the group "
+        "may still hold the soak port"
+    )
 
-    err = capsys.readouterr().err
-    assert "SIGKILL" in err and "soak port" in err, {
-        "stderr": err,
+    # Only the post-SIGKILL timeout is reported. Timing out on SIGTERM alone is
+    # normal and the unconditional SIGKILL that follows resolves it, so a warning
+    # there would be noise -- and asserting stderr is empty in that case is what
+    # pins the warning to the second branch.
+    signals = run({1})
+    assert warning not in capsys.readouterr().err, {
+        "msg": "a SIGTERM timeout that SIGKILL then resolves is not an unreaped group",
         "signals": signals,
     }
+
+    signals = run({2})
+    err = capsys.readouterr().err
+    assert warning in err, {"stderr": err, "signals": signals}
     assert signal_mod.SIGKILL in signals, signals
 
 
