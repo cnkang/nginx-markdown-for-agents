@@ -264,6 +264,79 @@ def test_port_holder_is_none_for_a_free_port():
     assert validator._port_holder(port) is None
 
 
+def test_port_holder_detects_a_holder_on_a_specific_address():
+    """A holder bound to one concrete address must still be detected.
+
+    A loopback-only probe misses this case: on Linux a loopback bind succeeds
+    alongside a listener on a concrete address, so only the wildcard probe
+    catches it. BSD-derived kernels (macOS) let *any* bind succeed there, so the
+    case is only observable on Linux -- the platform CI runs the soak on. The
+    bind-address pair itself is pinned by test_port_probe_pins_both_bind_addresses
+    so coverage does not depend on this host's kernel.
+    """
+    import socket
+    import sys
+
+    if sys.platform != "linux":
+        pytest.skip("only Linux refuses a bind alongside a concrete-address holder")
+
+    try:
+        concrete = socket.gethostbyname(socket.gethostname())
+    except OSError:
+        pytest.skip("no resolvable non-loopback address")
+    if concrete.startswith("127."):
+        pytest.skip("host resolves to loopback only")
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        holder.bind((concrete, 0))
+    except OSError as exc:
+        pytest.skip(f"cannot bind a holder to {concrete}: {exc}")
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        description = validator._port_holder(port)
+        assert description is not None, (
+            f"a holder on {concrete} must be reported; a loopback bind succeeds "
+            "alongside it, so only the wildcard probe sees this"
+        )
+        assert "in use" in description, description
+    finally:
+        holder.close()
+
+
+def test_port_probe_pins_both_bind_addresses(monkeypatch):
+    """Both probe addresses are load-bearing; dropping either loses coverage."""
+    bound: list[str] = []
+
+    class FakeSocket:
+        def __init__(self, family=None, type=None):
+            self.closed = False
+
+        def setsockopt(self, *args):
+            pass
+
+        def bind(self, address):
+            bound.append(address[0])
+
+        def close(self):
+            self.closed = True
+
+    # `socket` is imported inside _port_holder, so patch the module attribute it
+    # resolves through.
+    import socket as socket_module
+
+    monkeypatch.setattr(socket_module, "socket", lambda *a, **k: FakeSocket())
+
+    assert validator._port_holder(19200) is None
+    assert bound == ["127.0.0.1", "0.0.0.0"], {
+        "bound": bound,
+        "msg": "the loopback probe catches loopback/wildcard holders, the "
+               "wildcard probe catches concrete-address holders",
+    }
+
+
 def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypatch):
     """The gate must say the port is taken rather than time out on readiness."""
     import socket

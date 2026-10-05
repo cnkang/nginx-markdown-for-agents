@@ -1336,19 +1336,27 @@ def _port_holder(port: int) -> str | None:
     # TIME_WAIT binds fine for it. Without this the probe would refuse a port
     # NGINX can actually use and abort a run that would have worked.
     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        # Loopback, not the wildcard address. NGINX generates `listen <port>;`,
-        # which binds IPv4 wildcard, and that bind fails when a wildcard holder
-        # or a loopback holder is present -- so a loopback probe detects exactly
-        # the same conflicts, without this probe claiming every interface on
-        # the host. Verified on Linux: with a 0.0.0.0 holder both loopback and
-        # wildcard binds fail; with a 127.0.0.1 holder both fail as well; and
-        # for a TIME_WAIT socket (SO_REUSEADDR) both succeed.
-        probe.bind(("127.0.0.1", port))
-    except OSError:
-        return "port %d is already in use" % port
-    finally:
-        probe.close()
+    # Two probes, because neither alone covers every holder:
+    #   - loopback: catches a loopback or wildcard holder without this probe
+    #     claiming every interface (a wildcard probe trips code-scanning);
+    #   - wildcard: catches a holder bound to a specific non-loopback address,
+    #     which a loopback bind would miss entirely.
+    # NGINX generates `listen <port>;`, whose wildcard bind fails for all three,
+    # so between them these two reproduce NGINX's own bind outcome. Under
+    # SO_REUSEADDR neither trips on a TIME_WAIT socket, which NGINX ignores too.
+    for address in ("127.0.0.1", "0.0.0.0"):
+        try:
+            # codeql[py/bind-socket-all-network-interfaces]: the loopback bind is
+            # the probe that avoids claiming every interface; the wildcard bind
+            # is what reproduces NGINX's own `listen <port>;` outcome.
+            probe.bind((address, port))  # codeql[py/bind-socket-all-network-interfaces]
+        except OSError:
+            return "port %d is already in use" % port
+        finally:
+            probe.close()
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    probe.close()
     return None
 
 
