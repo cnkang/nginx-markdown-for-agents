@@ -1604,6 +1604,73 @@ def test_a_configured_runtime_directory_is_removed(monkeypatch, tmp_path):
     }
 
 
+def test_a_pre_existing_non_empty_runtime_directory_is_refused(
+    monkeypatch, tmp_path
+):
+    """Adopting someone else's directory would chmod it and then delete it.
+
+    Verified against the previous behaviour: a pre-existing directory with a file
+    in it was claimed as owned, chmodded to 0700 and removed with its contents.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+    monkeypatch.setattr(
+        validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
+    )
+    existing = tmp_path / "build" / "soak-runtime" / "someone-elses-data"
+    existing.mkdir(parents=True)
+    keep = existing / "IMPORTANT.txt"
+    keep.write_text("not ours", encoding="utf-8")
+    monkeypatch.setenv("SOAK_RUNTIME_DIR", str(existing))
+
+    with pytest.raises(ValueError) as excinfo:
+        validator._runtime_directory()
+
+    assert "not empty" in str(excinfo.value), {"msg": str(excinfo.value)[:140]}
+    assert keep.exists(), {"msg": "the pre-existing file must survive"}
+
+
+def test_an_empty_pre_existing_runtime_directory_is_reusable(monkeypatch, tmp_path):
+    """An empty directory left by an interrupted run is ours to reuse."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+    monkeypatch.setattr(
+        validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
+    )
+    existing = tmp_path / "build" / "soak-runtime" / "leftover"
+    existing.mkdir(parents=True)
+    monkeypatch.setenv("SOAK_RUNTIME_DIR", str(existing))
+
+    runtime = validator._runtime_directory()
+
+    assert runtime.is_dir(), {"msg": "an empty directory must be reusable"}
+    validator._cleanup_runtime_directory(runtime)
+
+
+def test_no_directory_is_created_when_the_worker_account_cannot_be_resolved(
+    monkeypatch, tmp_path
+):
+    """Account resolution fails the run, so it must not leave a directory behind."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+    monkeypatch.delenv("SOAK_RUNTIME_DIR", raising=False)
+
+    def no_account():
+        raise RuntimeError("no unprivileged account resolves to a non-root uid")
+
+    monkeypatch.setattr(validator, "nginx_worker_user", no_account)
+
+    with pytest.raises(RuntimeError):
+        validator._runtime_directory()
+
+    assert not (tmp_path / "build" / "soak-runtime").exists(), {
+        "msg": "a run that cannot start must not create the runtime tree",
+    }
+
+
 def test_cleanup_still_refuses_directories_it_did_not_create(monkeypatch, tmp_path):
     """Tracking the owned directory must not weaken the prefix guard."""
     root = tmp_path / "build" / "soak-runtime"

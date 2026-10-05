@@ -1221,11 +1221,25 @@ _OWNED_RUNTIME_DIR: pathlib.Path | None = None
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
     global _OWNED_RUNTIME_DIR
+    # Resolve the worker account first: on a root host with no unprivileged
+    # account this raises, and doing it first means no directory is created for a
+    # run that cannot start.
+    nginx_worker_user()
     configured = os.environ.get("SOAK_RUNTIME_DIR")
     if configured:
         runtime_dir = validate_write_path_within_root(
             configured, REPO_ROOT, purpose="SOAK_RUNTIME_DIR"
         )
+        # Only a directory this call created may be chmodded, traversed and
+        # later removed. A pre-existing non-empty one belongs to somebody else:
+        # adopting it would tighten its permissions and then delete it and
+        # everything in it.
+        if runtime_dir.exists() and any(runtime_dir.iterdir()):
+            raise ValueError(
+                f"SOAK_RUNTIME_DIR {runtime_dir} already exists and is not empty; "
+                "refusing to reuse and then delete a directory this gate did "
+                "not create"
+            )
         runtime_dir.mkdir(parents=True, exist_ok=True)
         runtime_dir.chmod(0o700)
         # mkdir only creates the leaf; every ancestor it had to invent is 0700
