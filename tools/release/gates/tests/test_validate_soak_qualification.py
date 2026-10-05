@@ -1944,6 +1944,34 @@ def test_a_response_within_the_cap_is_still_parsed(monkeypatch):
     assert validator.read_module_peak_memory("http://127.0.0.1:19200") == 1234
 
 
+def test_a_group_that_is_already_gone_is_not_reported(monkeypatch, capsys):
+    """A cleanly exited group is the normal case, not a failure.
+
+    NGINX exits on SIGTERM, so the final SIGKILL usually finds nothing left.
+    Treating that as an error would print a warning and fall back to signalling a
+    process that is no longer there on every single teardown.
+    """
+    signalled: list[int] = []
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: 4242)
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+    nginx = _signal_fallback_nginx(signalled)
+    nginx.pid = 4242
+
+    validator._stop_nginx(nginx)
+
+    assert capsys.readouterr().err == "", {
+        "msg": "an already-exited process group must not be reported as a failure",
+    }
+    assert signalled == [], {
+        "signals": signalled,
+        "msg": "there is nothing left to signal once the group is gone",
+    }
+
+
 def test_a_failed_group_signal_is_reported(monkeypatch, capsys):
     """Falling back to the master is not the same as the group being signalled.
 
