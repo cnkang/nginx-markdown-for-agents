@@ -1725,7 +1725,35 @@ def real_main(args: argparse.Namespace) -> int:
 
     module_so = os.environ.get("MODULE_SO", "")
     base_url = f"http://127.0.0.1:{SOAK_PORT}"
-    session = _run_soak_session(base_url, manifest, module_so)
+    try:
+        session = _run_soak_session(base_url, manifest, module_so)
+    except ValueError as exc:
+        # A failed precondition the soak refuses to run under (the worker did not
+        # drop privileges, the tree is unreachable) is a qualification failure, not
+        # a crash: the session already tore NGINX down, so record it and exit 1
+        # rather than propagating a traceback with no record written.
+        print(f"ERROR: soak failure: {exc}", file=sys.stderr)
+        # A refused run has no measurements; the record still has to satisfy the
+        # schema so the release evidence names the reason instead of going missing.
+        stamp = time.time()
+        record = _build_soak_record(
+            manifest,
+            0.0,
+            [],
+            {
+                "started": stamp,
+                "ended": stamp,
+                "rss_series": [],
+                "drain_delta": None,
+                "drain_samples": [],
+                "monotonic": False,
+                "ready_error": str(exc),
+            },
+        )
+        record["status"] = "fail"
+        record["errors"] = [str(exc)]
+        _write_record(record, args)
+        return 1
 
     per_scenario = build_scenario_metrics(session["scenario_metrics"])
     elapsed = session["ended"] - session["started"]

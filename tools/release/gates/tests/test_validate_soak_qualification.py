@@ -2767,6 +2767,98 @@ def test_soak_nginx_runs_in_foreground_for_reliable_cleanup(
     assert f"access_log {runtime_dir}/logs/access.log;" in config
 
 
+def test_a_readiness_failure_still_stops_nginx(monkeypatch, tmp_path):
+    """A failed readiness probe must not leave NGINX running.
+
+    The readiness-failure tests stub _stop_nginx out, so a mutation that skipped
+    the teardown whenever ready_error is set would leave master and worker alive
+    holding the port, with the suite still green.
+    """
+    stopped: list[object] = []
+    runtime = tmp_path / "markdown-soak-ready"
+    runtime.mkdir()
+    (runtime / "logs").mkdir()
+    (runtime / "logs" / "startup.log").write_text(
+        "nginx: [emerg] bind() failed\n", encoding="utf-8"
+    )
+
+    class FakeNginx:
+        pid = 3131
+
+        def wait(self, timeout=None):
+            return 0
+
+        def send_signal(self, sig):
+            raise ProcessLookupError
+
+    def fake_prepare(base, manifest, so):
+        return runtime, {"small": "small.html"}, FakeNginx()
+
+    monkeypatch.setattr(validator, "prepare_runtime", fake_prepare)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path)
+    monkeypatch.setattr(
+        validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
+    )
+    monkeypatch.setattr(validator, "_stop_nginx", stopped.append)
+    monkeypatch.setattr(validator, "_cleanup_runtime_directory", lambda p: None)
+    monkeypatch.setattr(
+        validator, "wait_for_ready", lambda url, **k: (False, "connection refused")
+    )
+
+    session = validator._run_soak_session(
+        "http://127.0.0.1:19200", {"duration_minutes": 1, "concurrency": 1}, ""
+    )
+
+    assert session["ready_error"], {"msg": "a failed readiness probe must be reported"}
+    assert len(stopped) == 1, {
+        "stopped": len(stopped),
+        "msg": "NGINX must be stopped after a readiness failure",
+    }
+
+
+def test_a_refused_soak_is_recorded_as_a_failure_not_a_traceback(
+    monkeypatch, tmp_path
+):
+    """A precondition the soak refuses to run under is a qualification failure.
+
+    The worker not dropping privileges is exactly that. It must produce a written
+    record with status fail and exit 1; propagating the ValueError would leave the
+    release with no evidence at all.
+    """
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    written: list[dict] = []
+    monkeypatch.setattr(validator, "load_manifest", lambda path: manifest)
+    monkeypatch.setattr(validator, "handle_missing_nginx", lambda *a: None)
+    monkeypatch.setattr(
+        validator, "_run_soak_session",
+        lambda *a: (_ for _ in ()).throw(
+            ValueError("the NGINX worker 42 retains uid 0")
+        ),
+    )
+    monkeypatch.setattr(
+        validator, "_write_record", lambda record, args: written.append(record)
+    )
+    args = type("Args", (), {
+        "manifest": str(MANIFEST),
+        "output": str(tmp_path / "record.json"),
+        "record": "record.json",
+        "git_head": False,
+    })()
+
+    rc = validator.real_main(args)
+
+    assert rc == 1, {"rc": rc, "msg": "a refused soak must exit non-zero"}
+    assert len(written) == 1, {
+        "written": len(written),
+        "msg": "a refused soak must still write its record",
+    }
+    record = written[0]
+    assert record["status"] == "fail", {"status": record["status"]}
+    assert any("retains uid 0" in err for err in record["errors"]), {
+        "errors": record["errors"],
+    }
+
+
 def test_record_output_path_rejects_external_override(tmp_path: Path) -> None:
     """Qualification records must stay under the generated output root."""
     args = type("Args", (), {
