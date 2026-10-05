@@ -529,20 +529,15 @@ def test_worker_user_falls_back_to_nginx_when_nobody_is_absent(monkeypatch):
     assert validator.nginx_worker_user() == "nginx"
 
 
-def test_grant_worker_traversal_hands_ownership_not_a_wider_mode(
+def test_grant_worker_traversal_adds_only_other_execute(
     monkeypatch, tmp_path
 ):
-    """The traversal must come from ownership, not from 0o711.
+    """Only o+x for other; group and read stay untouched.
 
-    0o711 also grants execute to group and other, which is more than the worker
-    needs and more than the 0700 mode was meant to restrict.
+    0o711 would also grant execute to group; o+rx would grant read too. Neither
+    is needed: the worker walks to a file it already knows the name of.
     """
     monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
-    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
-    chowned: list = []
-    monkeypatch.setattr(
-        validator.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid))
-    )
 
     target = tmp_path / "markdown-soak-x"
     target.mkdir()
@@ -550,12 +545,29 @@ def test_grant_worker_traversal_hands_ownership_not_a_wider_mode(
 
     validator._grant_worker_traversal(target)
 
-    assert chowned == [(target, _FakePasswd.pw_uid, _FakePasswd.pw_gid)], {
-        "chowned": [(str(p), u, g) for p, u, g in chowned],
-    }
     mode = target.stat().st_mode & 0o777
-    assert not mode & 0o011, f"group/other gained execute: {oct(mode)}"
-    assert mode & 0o700, f"the owner lost access: {oct(mode)}"
+    assert mode & 0o001, f"the worker cannot traverse: {oct(mode)}"
+    assert not mode & 0o010, f"group gained execute: {oct(mode)}"
+    assert not mode & 0o004, f"the directory became listable: {oct(mode)}"
+    assert mode & 0o700 == 0o700, f"the owner lost access: {oct(mode)}"
+
+
+def test_grant_worker_traversal_never_changes_ownership(monkeypatch, tmp_path):
+    """A validation gate must not hand a directory to the worker account."""
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    chowned: list = []
+    monkeypatch.setattr(
+        validator.os, "chown", lambda path, uid, gid: chowned.append(path)
+    )
+
+    target = tmp_path / "markdown-soak-own"
+    target.mkdir()
+    target.chmod(0o700)
+
+    validator._grant_worker_traversal(target)
+
+    assert not chowned, {"chowned": [str(p) for p in chowned]}
 
 
 def test_grant_worker_traversal_is_a_no_op_without_a_privilege_drop(
@@ -563,10 +575,6 @@ def test_grant_worker_traversal_is_a_no_op_without_a_privilege_drop(
 ):
     """A non-root master keeps its own access, so nothing may change."""
     monkeypatch.setattr(validator.os, "geteuid", lambda: 1000, raising=False)
-    chowned: list = []
-    monkeypatch.setattr(
-        validator.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid))
-    )
 
     target = tmp_path / "markdown-soak-y"
     target.mkdir()
@@ -574,7 +582,6 @@ def test_grant_worker_traversal_is_a_no_op_without_a_privilege_drop(
 
     validator._grant_worker_traversal(target)
 
-    assert not chowned, {"chowned": [str(p) for p, _, _ in chowned]}
     assert target.stat().st_mode & 0o777 == 0o700
 
 
@@ -819,12 +826,13 @@ def test_configured_runtime_dir_gets_traversal_on_every_ancestor(
         }
 
 
-def test_traversal_chain_never_chowns_the_checkout_root(monkeypatch, tmp_path):
-    """The checkout root and the directories above it keep their owner.
+def test_traversal_chain_leaves_the_checkout_untouched(monkeypatch, tmp_path):
+    """The chain must not widen anything the gate did not create.
 
-    The chain walk used to append the root before breaking, so a root-run soak
-    transferred the whole checkout and build/ to the worker account -- which
-    breaks later non-root writes and trips git's dubious-ownership check.
+    An earlier version appended the repository root before breaking and chowned
+    the chain to the worker, so a root-run soak transferred the whole checkout
+    and build/ -- breaking later non-root writes and tripping git's
+    dubious-ownership check.
     """
     # REPO_ROOT is compared against a resolved path, so point it at the resolved
     # checkout rather than tmp_path (macOS /tmp is a symlink).
@@ -837,22 +845,58 @@ def test_traversal_chain_never_chowns_the_checkout_root(monkeypatch, tmp_path):
         validator.os, "chown", lambda path, uid, gid: chowned.append(path)
     )
 
-    nested = checkout / "build" / "soak-runtime" / "markdown-soak-x"
+    # The checkout itself already exists with a normal mode; everything below it
+    # is created by the gate, so every level must end up traversable.
+    checkout.mkdir()
+    checkout.chmod(0o700)
+    runtime_root = checkout / "build" / "soak-runtime"
+    nested = runtime_root / "markdown-soak-x"
     nested.mkdir(parents=True)
+    runtime_root.chmod(0o700)
+    nested.chmod(0o700)
+
+    assert not chowned, {"chowned": [str(p) for p in chowned]}
+    # The checkout is not widened at all: the master is root and traverses it
+    # anyway, so granting anything here would be pure exposure. It is left at
+    # 0700 so an accidental inclusion shows up as a mode change.
+    assert checkout.stat().st_mode & 0o777 == 0o700, {
+        "mode": oct(checkout.stat().st_mode & 0o777),
+        "msg": "the checkout root must not be widened",
+    }
+    # build/ is created by mkdir with the ambient umask, so pin it to 0700 here:
+    # this test is about what the traversal grant changes, not about ambient
+    # modes.
+    build = checkout / "build"
+    build.chmod(0o700)
+
+    # Record exactly which directories were touched, so an off-by-one that pulls
+    # the checkout into the chain is visible rather than implied.
+    chmodded: list = []
+    real_chmod = Path.chmod
+
+    def recording_chmod(self, mode, **kwargs):
+        chmodded.append((self, mode & 0o777))
+        return real_chmod(self, mode, **kwargs)
+
+    monkeypatch.setattr(Path, "chmod", recording_chmod)
 
     validator._grant_worker_traversal_chain(nested)
 
-    assert checkout not in chowned, {
-        "chowned": [str(p) for p in chowned],
-        "msg": "the checkout root must keep its owner",
-    }
-    assert checkout.parent not in chowned, {
-        "chowned": [str(p) for p in chowned],
-        "msg": "nothing above the checkout may change",
-    }
-    assert nested in chowned, {
-        "chowned": [str(p) for p in chowned],
-        "msg": "the directories the gate created must be reachable by the worker",
+    # Every gate-created level is traversable; nothing else moves. 0700 -> 0701
+    # means: reachable by name, still unlistable, still unwritable, and group
+    # gains nothing -- which is what separates this from 0o711.
+    for created in (build, runtime_root, nested):
+        mode = created.stat().st_mode & 0o777
+        assert mode == 0o701, {
+            "path": str(created),
+            "mode": oct(mode),
+            "msg": "only o+x for other may be added to a 0700 directory",
+        }
+
+    touched = {path for path, _ in chmodded}
+    assert checkout not in touched, {
+        "touched": sorted(str(p) for p in touched),
+        "msg": "the checkout root must never be chmod'ed by the chain walk",
     }
 
 

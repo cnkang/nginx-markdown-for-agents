@@ -1066,26 +1066,24 @@ def _grant_worker_traversal(*directories: pathlib.Path) -> None:
     """Let the unprivileged worker traverse directories it must read.
 
     A worker that cannot traverse into the runtime directory gets a bare 403
-    from NGINX with no usable diagnosis, because the fixture itself is
-    readable. When NGINX drops to another user, hand the traversal bit to that
-    account by ownership rather than widening the mode: 0o711 would also grant
-    execute to group and other, which is more than the worker needs and more
-    than the 0700 mode was meant to restrict.
+    from NGINX with no usable diagnosis, because the fixture itself is readable.
+
+    Ownership is left alone: a validation gate has no business transferring a
+    directory to the worker account, and doing so would break later writes and
+    trip git's dubious-ownership check. Only execute-for-other is added, so the
+    worker can walk to a file it already knows the name of while the directory
+    stays unlistable and unwritable -- and group gains nothing, which is why
+    this is o+x rather than the o+rx of 0o711.
     """
-    worker = nginx_worker_user()
-    if worker is None:
+    if nginx_worker_user() is None:
         # No privilege drop, so the master keeps its own access.
-        return
-    try:
-        entry = pwd.getpwnam(worker)
-    except KeyError:
         return
     for directory in directories:
         try:
             current = directory.stat().st_mode & 0o777
-            if current & 0o700 != 0o700:
-                directory.chmod(current | 0o700)
-            os.chown(directory, entry.pw_uid, entry.pw_gid)
+            wanted = current | 0o001
+            if current != wanted:
+                directory.chmod(wanted)
         except OSError:
             continue
 
