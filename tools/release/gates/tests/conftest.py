@@ -15,9 +15,16 @@ import pytest
 
 _SOAK_RUNTIME_RELATIVE = ("build", "soak-runtime")
 
-# Names present when the session started. A directory left behind by an
-# interrupted earlier run is not this session's leak, and failing on it would
-# make the suite depend on whatever happened to be on disk.
+# Names present before this session ran. A directory left behind by an
+# interrupted earlier run is not this session's leak, and failing on it would make
+# the suite depend on whatever happened to be on disk.
+#
+# Captured at import, not in pytest_sessionstart: under xdist the workers import
+# and collect before their own sessionstart runs, so a baseline taken there would
+# arrive after the collection-time registration and be empty.
+# Taken at import so it is in place before any test reads it, including under
+# xdist where collection runs ahead of the worker's sessionstart hook. Assigned
+# below, once _leaked_runtime_dirs exists.
 _PRE_EXISTING: frozenset[str] | None = None
 
 
@@ -34,10 +41,14 @@ def _leaked_runtime_dirs() -> list[str]:
     return sorted(p.name for p in runtime_root.glob("markdown-soak-*"))
 
 
+_PRE_EXISTING = frozenset(_leaked_runtime_dirs())
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Record what was already there so only new directories count as leaks."""
     global _PRE_EXISTING
-    _PRE_EXISTING = frozenset(_leaked_runtime_dirs())
+    if _PRE_EXISTING is None:
+        _PRE_EXISTING = frozenset(_leaked_runtime_dirs())
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
