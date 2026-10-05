@@ -1838,6 +1838,105 @@ def test_cleanup_still_refuses_directories_it_did_not_create(monkeypatch, tmp_pa
     assert stranger.is_dir(), {"msg": "cleanup must not delete an unrelated directory"}
 
 
+def test_oversized_metrics_response_is_refused(monkeypatch):
+    """The gauge read is bounded, and the bound has to hold.
+
+    Without it a metrics endpoint answering with megabytes would be pulled into
+    memory and parsed as if it were the single gauge line.
+    """
+    captured: dict[str, int] = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size):
+            captured["size"] = size
+            # One byte more than the caller asked for: that is what makes the
+            # payload detectable as oversize.
+            return b"x" * (size + 1)
+
+    monkeypatch.setattr(validator, "_validated_metrics_url", lambda base: "http://x/m")
+    monkeypatch.setattr(
+        validator.urllib.request, "urlopen", lambda *a, **k: FakeResponse()
+    )
+
+    assert validator.read_module_peak_memory("http://127.0.0.1:19200") is None, {
+        "msg": "an oversized metrics payload must not be accepted",
+    }
+    assert captured.get("size") == validator.METRICS_RESPONSE_MAX_BYTES + 1, {
+        "read_size": captured.get("size"),
+        "max": validator.METRICS_RESPONSE_MAX_BYTES,
+        "msg": "the read must stop one byte past the cap so oversize is detectable",
+    }
+
+
+def test_an_oversized_payload_is_rejected_even_when_it_parses(monkeypatch):
+    """Size is checked before parsing, so a valid gauge past the cap is refused.
+
+    Padding the payload past the cap while keeping the real gauge line at the end
+    makes it parseable, so only the size check can reject it.
+    """
+    line = b"nginx_markdown_conversion_peak_memory_bytes 1234" + bytes([10])
+    # Gauge first so it sits inside the read window, padding after it so the
+    # payload still exceeds the cap: only the size check can reject it.
+    body = line + b"#" + b"x" * validator.METRICS_RESPONSE_MAX_BYTES
+    assert len(body) > validator.METRICS_RESPONSE_MAX_BYTES
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size):
+            # A real HTTP read honours the size it is given; the caller asks for
+            # one byte past the cap so the payload is detectable as oversize.
+            return body[:size]
+
+    monkeypatch.setattr(validator, "_validated_metrics_url", lambda base: "http://x/m")
+    monkeypatch.setattr(
+        validator.urllib.request, "urlopen", lambda *a, **k: FakeResponse()
+    )
+
+    assert validator.read_module_peak_memory("http://127.0.0.1:19200") is None, {
+        "msg": "an oversize payload must be refused even when its gauge is valid",
+    }
+
+
+def test_a_response_within_the_cap_is_still_parsed(monkeypatch):
+    """The cap is a limit, not a rejection: a normal response must still work."""
+    body = b"nginx_markdown_conversion_peak_memory_bytes 1234" + bytes([10])
+    assert len(body) <= validator.METRICS_RESPONSE_MAX_BYTES
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size):
+            return body[:size]
+
+    monkeypatch.setattr(validator, "_validated_metrics_url", lambda base: "http://x/m")
+    monkeypatch.setattr(
+        validator.urllib.request, "urlopen", lambda *a, **k: FakeResponse()
+    )
+
+    assert validator.read_module_peak_memory("http://127.0.0.1:19200") == 1234
+
+
 def test_a_failed_group_signal_is_reported(monkeypatch, capsys):
     """Falling back to the master is not the same as the group being signalled.
 
