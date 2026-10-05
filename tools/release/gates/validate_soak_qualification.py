@@ -1496,9 +1496,15 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
         except ProcessLookupError:
             # The whole group is gone; nothing left to signal.
             return
-        except OSError:
-            # Not ours, or the group is gone: fall back to the process.
-            pass
+        except OSError as group_exc:
+            # The group signal failed but the process one may still work, so this
+            # is not fatal. It is still worth saying: the workers are what hold
+            # the listen socket, and a silent failure here leaves them running.
+            print(
+                f"WARNING: could not signal the NGINX process group ({sig}): "
+                f"{group_exc}; falling back to the master process only",
+                file=sys.stderr,
+            )
         try:
             nginx.send_signal(sig)
         except ProcessLookupError:

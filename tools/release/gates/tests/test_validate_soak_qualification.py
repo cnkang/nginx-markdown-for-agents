@@ -1831,6 +1831,55 @@ def test_cleanup_still_refuses_directories_it_did_not_create(monkeypatch, tmp_pa
     assert stranger.is_dir(), {"msg": "cleanup must not delete an unrelated directory"}
 
 
+def test_a_failed_group_signal_is_reported(monkeypatch, capsys):
+    """Falling back to the master is not the same as the group being signalled.
+
+    The workers are what hold the listen socket, so a group signal that failed
+    has to be visible even when the per-process fallback succeeds.
+    """
+    monkeypatch.setattr(validator.os, "getpgid", lambda pid: 4242)
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pgid, sig: (_ for _ in ()).throw(PermissionError("not permitted")),
+    )
+    nginx = _signal_fallback_nginx([])
+    nginx.pid = 4242
+
+    validator._stop_nginx(nginx)
+
+    err = capsys.readouterr().err
+    assert "could not signal the NGINX process group" in err, {"stderr": err}
+
+
+def test_startup_diagnostics_ignore_non_fatal_levels(tmp_path):
+    """Warnings and notices are noise; only failures explain a failed startup.
+
+    A `[warn]` line in the reason would send the reader after something that did
+    not stop NGINX.
+    """
+    runtime = tmp_path / "markdown-soak-levels"
+    (runtime / "logs").mkdir(parents=True)
+    (runtime / "logs" / "startup.log").write_text(
+        "\n".join(
+            [
+                "2026/10/05 [warn] some tunable is unusual",
+                "2026/10/05 [info] using the epoll event method",
+                "2026/10/05 [notice] signal process started",
+                "2026/10/05 [emerg] bind() to 0.0.0.0:19200 failed",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    reason = validator._startup_failure_reason(runtime)
+
+    assert "bind()" in reason, {"reason": reason}
+    assert "[warn]" not in reason, {"reason": reason}
+    assert "[info]" not in reason, {"reason": reason}
+    assert "[notice]" not in reason, {"reason": reason}
+
+
 def test_the_load_phase_verifies_the_worker_actually_dropped_privileges(
     monkeypatch, tmp_path
 ):
