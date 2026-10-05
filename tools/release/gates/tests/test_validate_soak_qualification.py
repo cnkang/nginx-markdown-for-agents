@@ -152,9 +152,10 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     )
     real_cleanup = validator._cleanup_runtime_directory
     try:
-        _runtime, _corpus, nginx = validator.prepare_runtime(
-            "http://127.0.0.1:8080", {}, ""
-        )
+        # The runtime dir and corpus are not under test here; only what NGINX's
+        # stdout is wired to. Unpacking is avoided so nothing looks accidentally
+        # used, and the process handle is closed by the real cleanup path below.
+        validator.prepare_runtime("http://127.0.0.1:8080", {}, "")
         # Asserted before the cleanup below removes the directory.
         log_exists = (runtime_dir / "logs" / "startup.log").exists()
     finally:
@@ -185,8 +186,6 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     assert log_exists, (
         "the startup log must exist on disk for the failure path to read"
     )
-    # `nginx` is intentionally left bound: the finally below closes it, and
-    # deleting the name here would only hide a later accidental use.
 
 
 def test_port_holder_detects_a_bound_port():
