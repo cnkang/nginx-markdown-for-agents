@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import types
@@ -397,6 +398,154 @@ def _signal_fallback_nginx(captured: list[int]):
     return FakeNginx()
 
 
+def test_the_session_removes_its_runtime_directory_on_failure(
+    monkeypatch, tmp_path
+):
+    """The session's own cleanup must run when the load phase blows up.
+
+    prepare_runtime cleans up after itself, but the session creates nothing and
+    still owns the teardown; deleting its finally clause leaked the directory
+    with the whole suite green.
+    """
+    created = tmp_path / "build" / "soak-runtime" / "markdown-soak-session"
+    cleaned: list[Path] = []
+    monkeypatch.setattr(validator, "_cleanup_runtime_directory", cleaned.append)
+
+    class FakeNginx:
+        pid = 5150
+        send_signal = staticmethod(lambda sig: None)
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_prepare(base, manifest, so):
+        created.mkdir(parents=True, exist_ok=True)
+        return created, {"small": "small.html"}, FakeNginx()
+
+    monkeypatch.setattr(validator, "prepare_runtime", fake_prepare)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url, **k: (True, ""))
+    monkeypatch.setattr(validator, "find_worker_pid", lambda d: 5150)
+    monkeypatch.setattr(validator, "_stop_nginx", lambda n: None)
+    monkeypatch.setattr(
+        validator, "assert_worker_dropped_privileges", lambda pid: None
+    )
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("load phase failed")
+
+    monkeypatch.setattr(validator, "run_load_loop", explode)
+
+    with pytest.raises(RuntimeError, match="load phase failed"):
+        validator._run_soak_session(
+            "http://127.0.0.1:19200", {"duration_minutes": 1, "concurrency": 1}, ""
+        )
+
+    assert cleaned == [created], {
+        "cleaned": [str(p) for p in cleaned],
+        "expected": str(created),
+        "msg": "the session must remove its runtime directory even when the load fails",
+    }
+
+
+def test_a_non_conflict_bind_failure_is_not_reported_as_a_conflict(monkeypatch):
+    """Only EADDRINUSE means a conflict.
+
+    Reporting every bind error as "already in use" sends the reader looking for a
+    stale process when the port is free and the host could not hand out the
+    address at all.
+    """
+    import socket
+
+    def refuse(*args, **kwargs):
+        raise OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")
+
+    monkeypatch.setattr(socket.socket, "bind", refuse)
+
+    assert validator._port_holder(19200) is None, {
+        "msg": "a non-conflict bind error must not be reported as a port conflict",
+    }
+
+
+def test_an_address_in_use_is_still_reported_as_a_conflict():
+    """The discrimination must not swallow the real conflict."""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    with holder:
+        holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        holder.bind(("127.0.0.1", 0))
+        port = holder.getsockname()[1]
+
+        assert validator._port_holder(port) is not None, {
+            "msg": "an occupied port must still be reported",
+        }
+
+
+def test_a_runtime_tree_that_cannot_be_removed_is_reported(
+    tmp_path, monkeypatch, capsys
+):
+    """A silent cleanup failure is the one that blocks the next run."""
+    created = tmp_path / "markdown-soak-stuck"
+    created.mkdir()
+
+    def refuse(path, **kwargs):
+        raise PermissionError("Operation not permitted")
+
+    monkeypatch.setattr(validator.shutil, "rmtree", refuse)
+
+    validator._remove_runtime_tree(created)
+
+    err = capsys.readouterr().err
+    assert "could not remove the soak runtime directory" in err, {"stderr": err}
+
+
+def test_a_runtime_tree_that_cannot_be_removed_does_not_raise(tmp_path, monkeypatch):
+    """Cleanup runs on failure paths too; a raise there would mask the reason."""
+    created = tmp_path / "markdown-soak-stuck"
+    created.mkdir()
+    monkeypatch.setattr(
+        validator.shutil,
+        "rmtree",
+        lambda path, **kwargs: (_ for _ in ()).throw(PermissionError()),
+    )
+
+    validator._remove_runtime_tree(created)
+
+
+def test_a_failed_group_lookup_still_signals_the_group(monkeypatch):
+    """A session leader is its own process group, so the pid is the group id.
+
+    Falling back to signalling the master alone would leave the workers holding
+    the listen socket, which is exactly the failure this teardown exists to
+    prevent.
+    """
+    groups: list[tuple[int, int]] = []
+    import signal as signal_mod
+
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: groups.append((pgid, sig))
+    )
+    nginx = _signal_fallback_nginx([])
+    nginx.pid = 4242
+
+    validator._stop_nginx(nginx)
+
+    assert groups, {
+        "msg": "a failed getpgid must still signal the process group, not the master alone",
+    }
+    assert all(pgid == 4242 for pgid, _ in groups), {"groups": groups}
+    assert any(sig == signal_mod.SIGKILL for _, sig in groups), {
+        "groups": groups,
+        "msg": "the group must receive the unconditional final SIGKILL",
+    }
+
+
 def test_stop_nginx_reports_a_permission_failure(tmp_path, monkeypatch, capsys):
     """A signal we could not deliver must be reported, not swallowed.
 
@@ -409,9 +558,14 @@ def test_stop_nginx_reports_a_permission_failure(tmp_path, monkeypatch, capsys):
     captured: list[int] = []
     nginx = _signal_fallback_nginx(captured)
 
-    # getpgid fails, so the group signal cannot be used at all.
+    # Both the lookup and the group signal fail, so only the process remains.
     monkeypatch.setattr(
         validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pgid, sig: (_ for _ in ()).throw(PermissionError()),
     )
 
     def denied(sig):
@@ -453,10 +607,11 @@ def test_stop_nginx_is_silent_when_the_process_is_already_gone(
 def test_stop_nginx_still_signals_the_process_when_the_group_is_unknown(
     tmp_path, monkeypatch
 ):
-    """Losing the group id must not skip the only signal we have left.
+    """Losing the group signal must not skip the only signal we have left.
 
-    An early return here would leave both the master and its workers running
-    whenever the group cannot be resolved.
+    The master pid is still a usable group id here, because a child started with
+    start_new_session=True is a session leader. This covers the case where even
+    that fails, so the process signal remains the last teardown available.
     """
     import signal as signal_mod
 
@@ -466,7 +621,11 @@ def test_stop_nginx_still_signals_the_process_when_the_group_is_unknown(
     monkeypatch.setattr(
         validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(ProcessLookupError())
     )
-    monkeypatch.setattr(validator.os, "killpg", lambda pgid, sig: None)
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pgid, sig: (_ for _ in ()).throw(PermissionError()),
+    )
 
     validator._stop_nginx(nginx)
 

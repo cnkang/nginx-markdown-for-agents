@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import errno
 import grp
 import json
 import math
@@ -1429,7 +1430,13 @@ def _port_holder(port: int) -> str | None:
                 # bind avoids claiming every interface; the wildcard bind
                 # reproduces NGINX's own `listen <port>;` outcome.
                 candidate.bind((address, port))  # codeql[py/bind-socket-all-network-interfaces]
-            except OSError:
+            except OSError as exc:
+                # Only an address-in-use is a conflict. Reporting the rest as
+                # one points the reader at a stale process when the real
+                # cause is a host that cannot hand out that address, and the
+                # follow-up bind then fails anyway.
+                if exc.errno != errno.EADDRINUSE:
+                    return None
                 return "port %d is already in use" % port
     return None
 
@@ -1450,21 +1457,24 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     try:
         pgid = os.getpgid(nginx.pid)
     except OSError:
-        pgid = None
+        # The child is started with start_new_session=True, so it is a session
+        # leader and its pgid equals its pid by construction. Fall back to that
+        # rather than to signalling the master alone, which would leave the
+        # workers holding the listen socket.
+        pgid = nginx.pid
 
     def _signal_group(sig: int) -> None:
         # ProcessLookupError is an OSError subclass, so OSError covers both a
         # missing process and a permission failure.
-        if pgid is not None:
-            try:
-                os.killpg(pgid, sig)
-                return
-            except ProcessLookupError:
-                # The whole group is gone; nothing left to signal.
-                return
-            except OSError:
-                # Not ours, or the group is gone: fall back to the process.
-                pass
+        try:
+            os.killpg(pgid, sig)
+            return
+        except ProcessLookupError:
+            # The whole group is gone; nothing left to signal.
+            return
+        except OSError:
+            # Not ours, or the group is gone: fall back to the process.
+            pass
         try:
             nginx.send_signal(sig)
         except ProcessLookupError:
@@ -1494,17 +1504,34 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
         pass
 
 
+def _remove_runtime_tree(resolved_runtime_dir: pathlib.Path) -> None:
+    """Remove a runtime tree, reporting rather than swallowing a failure.
+
+    ignore_errors=True hides a tree that could not be deleted -- root-owned
+    files after a privileged run, for instance -- which is the one case where the
+    next run then fails on a leftover directory and nobody knows why.
+    """
+    try:
+        shutil.rmtree(resolved_runtime_dir)
+    except OSError as exc:
+        print(
+            f"WARNING: could not remove the soak runtime directory "
+            f"{resolved_runtime_dir}: {exc}; it will block the next run",
+            file=sys.stderr,
+        )
+
+
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
     resolved_runtime_dir = runtime_dir.resolve()
     if _OWNED_RUNTIME_DIR is not None and resolved_runtime_dir == _OWNED_RUNTIME_DIR:
-        shutil.rmtree(resolved_runtime_dir, ignore_errors=True)
+        _remove_runtime_tree(resolved_runtime_dir)
         return
     runtime_root = SOAK_RUNTIME_ROOT.resolve()
     if (
         resolved_runtime_dir.name.startswith("markdown-soak-")
         and resolved_runtime_dir.parent == runtime_root
     ):
-        shutil.rmtree(resolved_runtime_dir, ignore_errors=True)
+        _remove_runtime_tree(resolved_runtime_dir)
 
 
 def _run_soak_session(
