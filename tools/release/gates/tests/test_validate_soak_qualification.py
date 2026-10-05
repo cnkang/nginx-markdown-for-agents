@@ -1118,6 +1118,26 @@ def test_a_rise_inside_the_margin_is_not_monotonic(monkeypatch):
     }
 
 
+def test_startup_diagnostics_survive_undecodable_log_bytes(tmp_path):
+    """A log with invalid UTF-8 must still produce its reason.
+
+    Reading it strictly would raise UnicodeDecodeError and crash the gate at the
+    exact moment it is supposed to explain why NGINX refused to start.
+    """
+    runtime = tmp_path / "markdown-soak-binary-log"
+    (runtime / "logs").mkdir(parents=True)
+    (runtime / "logs" / "startup.log").write_bytes(
+        b"nginx: [emerg] bind() to 0.0.0.0:19200 failed \xff\xfe\x80\n"
+    )
+
+    reason = validator._startup_failure_reason(runtime)
+
+    assert "bind()" in reason, {
+        "reason": reason,
+        "msg": "undecodable bytes must not cost us the diagnostic",
+    }
+
+
 def test_a_drain_that_flattens_is_not_monotonic(monkeypatch):
     """A plateau is release too, even when the overall span is large.
 
