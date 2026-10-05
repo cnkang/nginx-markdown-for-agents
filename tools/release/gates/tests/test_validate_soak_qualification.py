@@ -1332,6 +1332,13 @@ def test_fixtures_are_world_readable_under_a_restrictive_umask(
     for scenario_id, name in corpus.items():
         mode = (runtime / "html" / name).stat().st_mode & 0o777
         assert mode & 0o044, f"{scenario_id} unreadable under umask 0077: {oct(mode)}"
+        # Readable is not the whole requirement: the unprivileged worker must not
+        # be able to write the corpus. Owner-write stays (the gate writes it), so
+        # it is the group/other write bits that have to be clear. A
+        # readability-only assertion lets a world-writable fixture through.
+        assert not mode & 0o022, (
+            f"{scenario_id} fixture must not be group- or world-writable: {oct(mode)}"
+        )
 
 
 def test_default_runtime_dir_walks_the_whole_ancestor_chain(
