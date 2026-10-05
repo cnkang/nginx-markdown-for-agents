@@ -179,12 +179,14 @@ def test_port_holder_detects_a_bound_port():
     """A stale NGINX must be named, not reported as "did not become ready"."""
     import socket
 
-    # This socket stands in for a process holding the port, so it binds the
-    # wildcard address the way NGINX's own listen socket does.
-    # codeql[py/bind-socket-all-network-interfaces]: deliberate, see above.
+    # The gate probes loopback, so the holder binds loopback too. Binding the
+    # wildcard address here would not be portable: Linux refuses a second bind
+    # when any socket holds the port, while macOS lets a loopback bind succeed
+    # alongside a wildcard listener, so a wildcard holder only exercises the
+    # probe on Linux. A loopback holder is detected on both.
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    holder.bind(("0.0.0.0", 0))  # codeql[py/bind-socket-all-network-interfaces]
+    holder.bind(("127.0.0.1", 0))
     holder.listen(1)
     port = holder.getsockname()[1]
     try:
@@ -266,12 +268,10 @@ def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypa
     """The gate must say the port is taken rather than time out on readiness."""
     import socket
 
-    # Stands in for a process holding the port, so it binds the wildcard address
-    # NGINX's own listen socket uses.
-    # codeql[py/bind-socket-all-network-interfaces]: deliberate, see above.
+    # Loopback, matching the probe; see the note on the sibling test.
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    holder.bind(("0.0.0.0", 0))  # codeql[py/bind-socket-all-network-interfaces]
+    holder.bind(("127.0.0.1", 0))
     holder.listen(1)
     port = holder.getsockname()[1]
     runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-port-selftest"

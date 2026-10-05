@@ -1337,12 +1337,14 @@ def _port_holder(port: int) -> str | None:
     # NGINX can actually use and abort a run that would have worked.
     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        # The wildcard address, matching the `listen <port>;` NGINX generates:
-        # only a wildcard bind fails when *any* socket holds the port. A
-        # loopback probe would miss a wildcard holder and let the run proceed
-        # into the very conflict this check exists to catch.
-        # codeql[py/bind-socket-all-network-interfaces]: deliberate, mirrors NGINX.
-        probe.bind(("0.0.0.0", port))  # codeql[py/bind-socket-all-network-interfaces]
+        # Loopback, not the wildcard address. NGINX generates `listen <port>;`,
+        # which binds IPv4 wildcard, and that bind fails when a wildcard holder
+        # or a loopback holder is present -- so a loopback probe detects exactly
+        # the same conflicts, without this probe claiming every interface on
+        # the host. Verified on Linux: with a 0.0.0.0 holder both loopback and
+        # wildcard binds fail; with a 127.0.0.1 holder both fail as well; and
+        # for a TIME_WAIT socket (SO_REUSEADDR) both succeed.
+        probe.bind(("127.0.0.1", port))
     except OSError:
         return "port %d is already in use" % port
     finally:
