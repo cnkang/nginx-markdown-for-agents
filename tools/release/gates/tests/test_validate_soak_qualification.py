@@ -409,7 +409,9 @@ def test_the_session_removes_its_runtime_directory_on_failure(
     """
     created = tmp_path / "build" / "soak-runtime" / "markdown-soak-session"
     cleaned: list[Path] = []
+    stopped: list[object] = []
     monkeypatch.setattr(validator, "_cleanup_runtime_directory", cleaned.append)
+    monkeypatch.setattr(validator, "_stop_nginx", stopped.append)
 
     class FakeNginx:
         pid = 5150
@@ -428,7 +430,6 @@ def test_the_session_removes_its_runtime_directory_on_failure(
                         lambda p, root, **k: Path(p))
     monkeypatch.setattr(validator, "wait_for_ready", lambda url, **k: (True, ""))
     monkeypatch.setattr(validator, "find_worker_pid", lambda d: 5150)
-    monkeypatch.setattr(validator, "_stop_nginx", lambda n: None)
     monkeypatch.setattr(
         validator, "assert_worker_dropped_privileges", lambda pid: None
     )
@@ -443,6 +444,12 @@ def test_the_session_removes_its_runtime_directory_on_failure(
             "http://127.0.0.1:19200", {"duration_minutes": 1, "concurrency": 1}, ""
         )
 
+    # Teardown must survive the failure: NGINX left running keeps the port, and
+    # the runtime directory left behind blocks the next run.
+    assert len(stopped) == 1, {
+        "stopped": len(stopped),
+        "msg": "the session must stop NGINX even when the load phase raises",
+    }
     assert cleaned == [created], {
         "cleaned": [str(p) for p in cleaned],
         "expected": str(created),
