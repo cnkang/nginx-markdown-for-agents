@@ -353,9 +353,13 @@ def test_port_probe_pins_both_bind_addresses(monkeypatch):
     }
     # Both probes need SO_REUSEADDR: without it a TIME_WAIT socket would make
     # the probe report a port NGINX can still bind, aborting a valid run.
-    assert len(reuseaddr) == 2 and all(v == 1 for v in reuseaddr), {
+    assert len(reuseaddr) == 2, {
         "SO_REUSEADDR": reuseaddr,
-        "msg": "each probe socket must set SO_REUSEADDR",
+        "msg": "both probe sockets must set SO_REUSEADDR",
+    }
+    assert all(value == 1 for value in reuseaddr), {
+        "SO_REUSEADDR": reuseaddr,
+        "msg": "SO_REUSEADDR must be enabled, not merely set",
     }
 
 
