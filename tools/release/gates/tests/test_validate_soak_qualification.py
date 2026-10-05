@@ -2455,9 +2455,12 @@ def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
     finally:
         validator._cleanup_runtime_directory(runtime)
 
+    # Pinned rather than derived from the constant: reading the expected value
+    # back out of the code under test passes for any budget at all, including
+    # the 32 MiB default that made the soak fail in the first place.
     assert (
-        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES} "
-        f"conversion_memory={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
+        "markdown_limits parser_budget=67108864 "
+        "conversion_memory=67108864;" in conf
     ), conf
 
 
@@ -2647,9 +2650,12 @@ def test_prepare_runtime_wires_the_parser_budget_into_the_config(
     finally:
         validator._cleanup_runtime_directory(runtime)
 
+    # Pinned rather than derived from the constant: reading the expected value
+    # back out of the code under test passes for any budget at all, including
+    # the 32 MiB default that made the soak fail in the first place.
     assert (
-        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES} "
-        f"conversion_memory={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
+        "markdown_limits parser_budget=67108864 "
+        "conversion_memory=67108864;" in conf
     ), conf
 
 
