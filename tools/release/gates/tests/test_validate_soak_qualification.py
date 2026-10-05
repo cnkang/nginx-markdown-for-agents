@@ -407,7 +407,9 @@ def _signal_fallback_nginx(captured: list[int]):
     """A master whose group signal fails, so only the per-process path runs."""
 
     class FakeNginx:
-        pid = 4242
+        # Not a real pid: when getpgid fails the code falls back to the master's
+        # pid as the group id, so os.killpg would signal a real process group.
+        pid = 999_999
 
         def wait(self, timeout=None):
             return 0
@@ -703,6 +705,13 @@ def test_stop_nginx_is_silent_when_the_process_is_already_gone(
 
     monkeypatch.setattr(
         validator.os, "getpgid", lambda pid: (_ for _ in ()).throw(PermissionError())
+    )
+    # The fallback group id is the master's pid; stub the group signal so the
+    # test cannot reach a real process group.
+    monkeypatch.setattr(
+        validator.os,
+        "killpg",
+        lambda pgid, sig: (_ for _ in ()).throw(PermissionError()),
     )
 
     def gone(sig):
@@ -1878,6 +1887,9 @@ def test_the_package_hook_fails_the_run_on_a_leak(monkeypatch, tmp_path):
     monkeypatch.setattr(hook, "_leaked_runtime_dirs", lambda: ["markdown-soak-leak"])
     session = FakeSession()
 
+    # The controller path only; under xdist the hook defers to the controller and
+    # would never report the leak this test is about.
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     hook.pytest_sessionfinish(session, 0)
 
     assert session.exitstatus != 0, {
