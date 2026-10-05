@@ -15,6 +15,11 @@ import pytest
 
 _SOAK_RUNTIME_RELATIVE = ("build", "soak-runtime")
 
+# Names present when the session started. A directory left behind by an
+# interrupted earlier run is not this session's leak, and failing on it would
+# make the suite depend on whatever happened to be on disk.
+_PRE_EXISTING: frozenset[str] | None = None
+
 
 def _leaked_runtime_dirs() -> list[str]:
     """Return any leftover markdown-soak-* directories in the real build tree."""
@@ -29,21 +34,31 @@ def _leaked_runtime_dirs() -> list[str]:
     return sorted(p.name for p in runtime_root.glob("markdown-soak-*"))
 
 
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Record what was already there so only new directories count as leaks."""
+    global _PRE_EXISTING
+    _PRE_EXISTING = frozenset(_leaked_runtime_dirs())
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Fail the session when a test leaked a runtime directory."""
-    leftover = _leaked_runtime_dirs()
-    if not leftover:
+    # Only directories this session created. A leftover from an interrupted run
+    # is reported for visibility but is not attributed to the tests.
+    created = [name for name in _leaked_runtime_dirs() if name not in (_PRE_EXISTING or ())]
+    if not created:
         return
     # Raising here would surface as an internal error rather than a test failure,
     # so the leftover is reported through the terminal reporter and the session
     # exit status is set explicitly.
     message = (
         "a test created a soak runtime directory and did not remove it: "
-        + ", ".join(leftover)
+        + ", ".join(created)
     )
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(f"ERROR: {message}", red=True, bold=True)
     else:
         print(f"ERROR: {message}")
-    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    # A session that already failed keeps its own status; do not overwrite it.
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED

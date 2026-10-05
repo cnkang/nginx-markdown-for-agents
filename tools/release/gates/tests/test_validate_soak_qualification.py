@@ -1609,9 +1609,14 @@ def test_the_suite_leaves_no_runtime_directory_behind() -> None:
     The conftest-level check in this package closes the gap for the ones after.
     """
     root = validator.SOAK_RUNTIME_ROOT
-    # Same scope as the conftest hook: only this gate's own run directories.
-    # Anything else in build/ is not ours to fail on.
-    leftover = sorted(p.name for p in root.glob("markdown-soak-*")) if root.is_dir() else []
+    # Same scope as the conftest hook: only this gate's own run directories, and
+    # only the ones this session created. A directory left by an interrupted
+    # earlier run is not a leak of this suite.
+    from tools.release.gates.tests import conftest as soak_conftest
+
+    baseline = soak_conftest._PRE_EXISTING or frozenset()
+    present = {p.name for p in root.glob("markdown-soak-*")} if root.is_dir() else set()
+    leftover = sorted(present - baseline)
     assert not leftover, {
         "leftover": leftover,
         "root": str(root),
