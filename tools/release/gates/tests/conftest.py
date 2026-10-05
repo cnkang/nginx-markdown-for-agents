@@ -31,9 +31,19 @@ def _leaked_runtime_dirs() -> list[str]:
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Fail the session when a test leaked a runtime directory."""
-    del session, exitstatus
     leftover = _leaked_runtime_dirs()
-    assert not leftover, {
-        "leftover": leftover,
-        "msg": "a test created a soak runtime directory and did not remove it",
-    }
+    if not leftover:
+        return
+    # Raising here would surface as an internal error rather than a test failure,
+    # so the leftover is reported through the terminal reporter and the session
+    # exit status is set explicitly.
+    message = (
+        "a test created a soak runtime directory and did not remove it: "
+        + ", ".join(leftover)
+    )
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(f"ERROR: {message}", red=True, bold=True)
+    else:
+        print(f"ERROR: {message}")
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED

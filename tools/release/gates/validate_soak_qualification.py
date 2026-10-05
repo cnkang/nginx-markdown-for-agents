@@ -1241,14 +1241,18 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
 def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     """Create the runtime dir, corpus, nginx config, and start nginx."""
     runtime_dir = _runtime_directory()
-    blocked = _unreachable_ancestor(runtime_dir)
-    if blocked is not None:
-        raise ValueError(
-            f"the NGINX worker ({nginx_worker_user()}) cannot reach {runtime_dir}: "
-            f"{blocked} is not traversable by other; grant o+x on that directory "
-            "or place the checkout somewhere the worker can walk to"
-        )
     try:
+        # Inside the try so the per-run directory is removed before the refusal
+        # propagates: raising here would leave the very directory we are
+        # complaining about behind.
+        blocked = _unreachable_ancestor(runtime_dir)
+        if blocked is not None:
+            raise ValueError(
+                f"the NGINX worker ({nginx_worker_user()}) cannot reach "
+                f"{runtime_dir}: {blocked} is not traversable by other; grant o+x "
+                "on that directory or place the checkout somewhere the worker can "
+                "walk to"
+            )
         corpus = build_corpus(runtime_dir, manifest)
         port = int(base_url.rsplit(":", 1)[1])
         write_nginx_conf(

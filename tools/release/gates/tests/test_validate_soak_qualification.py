@@ -977,22 +977,42 @@ def test_traversal_chain_leaves_the_checkout_untouched(monkeypatch, tmp_path):
 
 
 def test_traversal_chain_stops_at_the_repository_root(monkeypatch, tmp_path):
-    """Nothing above the checkout may be touched."""
-    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    """Nothing at or above the checkout may be widened.
 
-    outside = tmp_path.parent
-    original_mode = outside.stat().st_mode & 0o777
-    outside.chmod(0o700)
-    try:
-        validator._grant_worker_traversal_chain(tmp_path)
-        assert not outside.stat().st_mode & 0o001, {
-            "mode": oct(outside.stat().st_mode & 0o777),
-            "msg": "an ancestor above the repository was made traversable",
-        }
-    finally:
-        # Restore whatever it was rather than a guessed mode, so the test leaves
-        # the surrounding directory exactly as it found it.
-        outside.chmod(original_mode)
+    Every directory used here is created by the test under tmp_path. The earlier
+    version chmod'ed tmp_path.parent -- pytest's own ancestor, shared with every
+    other test in the run -- and only passed because the traversal grant is a
+    no-op for a non-root master.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+
+    above = tmp_path / "above"
+    above.mkdir()
+    above.chmod(0o700)
+    checkout = above / "checkout"
+    checkout.mkdir()
+    checkout.chmod(0o700)
+    nested = checkout / "build" / "soak-runtime" / "markdown-soak-x"
+    nested.mkdir(parents=True)
+    nested.chmod(0o700)
+
+    monkeypatch.setattr(validator, "REPO_ROOT", checkout.resolve())
+
+    validator._grant_worker_traversal_chain(nested)
+
+    assert not checkout.stat().st_mode & 0o001, {
+        "mode": oct(checkout.stat().st_mode & 0o777),
+        "msg": "the checkout root must not be widened",
+    }
+    assert not above.stat().st_mode & 0o001, {
+        "mode": oct(above.stat().st_mode & 0o777),
+        "msg": "an ancestor above the checkout must not be widened",
+    }
+    # The gate-created levels are traversable, or the worker cannot reach them.
+    for created in (checkout / "build", checkout / "build" / "soak-runtime", nested):
+        mode = created.stat().st_mode & 0o777
+        assert mode & 0o001, {"path": str(created), "mode": oct(mode)}
 
 
 def test_corpus_root_is_reachable_by_the_unprivileged_worker(
@@ -1028,6 +1048,35 @@ def test_corpus_root_is_reachable_by_the_unprivileged_worker(
         assert fixture_mode & 0o004, (
             f"{scenario_id} fixture is not world-readable: {oct(fixture_mode)}"
         )
+
+
+def test_the_package_hook_fails_the_run_on_a_leak(monkeypatch, tmp_path):
+    """The session hook must fail the run, not just print.
+
+    Reporting a leftover without failing leaves CI green while directories
+    accumulate, which is the regression the hook exists to prevent.
+    """
+    import tools.release.gates.tests.conftest as hook
+
+    class FakeConfig:
+        class pluginmanager:
+            @staticmethod
+            def get_plugin(name):
+                return None
+
+    class FakeSession:
+        config = FakeConfig()
+        exitstatus = 0
+
+    monkeypatch.setattr(hook, "_leaked_runtime_dirs", lambda: ["markdown-soak-leak"])
+    session = FakeSession()
+
+    hook.pytest_sessionfinish(session, 0)
+
+    assert session.exitstatus != 0, {
+        "exitstatus": session.exitstatus,
+        "msg": "a leaked runtime directory must fail the run",
+    }
 
 
 def test_the_suite_leaves_no_runtime_directory_behind() -> None:
@@ -1093,6 +1142,49 @@ def test_prepare_runtime_refuses_to_start_when_an_ancestor_blocks(
         "markdown-soak-*"
     ):
         validator._cleanup_runtime_directory(created)
+
+
+def test_a_blocked_ancestor_refusal_still_removes_the_runtime_directory(
+    monkeypatch, tmp_path
+):
+    """The refusal must not leave behind the directory it is complaining about.
+
+    The check runs inside the try for exactly this reason; raising before it
+    would leak the per-run directory on every refused run.
+    """
+    blocked = tmp_path
+    real_stat = type(tmp_path).stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self == blocked:
+            class Result:
+                st_mode = 0o700
+
+            return Result()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(tmp_path), "stat", fake_stat)
+    checkout = blocked / "checkout"
+    runtime_root = checkout / "build" / "soak-runtime"
+    monkeypatch.setattr(validator, "REPO_ROOT", checkout.resolve())
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", runtime_root)
+    monkeypatch.setattr(validator, "validate_write_path_within_root",
+                        lambda p, root, **k: Path(p))
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+    monkeypatch.setattr(
+        validator.subprocess, "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("NGINX was started")),
+    )
+
+    with pytest.raises(ValueError):
+        validator.prepare_runtime("http://127.0.0.1:19200",
+                                  {"corpus": [{"id": "small"}]}, "module.so")
+
+    assert not list(runtime_root.glob("markdown-soak-*")), {
+        "leftover": [p.name for p in runtime_root.glob("markdown-soak-*")],
+        "msg": "the refusal must clean up the directory it created",
+    }
 
 
 def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
