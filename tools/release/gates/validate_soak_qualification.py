@@ -892,50 +892,69 @@ def _query_worker_pid(master_pid: int) -> int:
     return _find_worker_child(ps.stdout, master_pid)
 
 
-def read_process_uid(pid: int) -> tuple[int, ...] | None:
-    """Return a process's real/effective/saved/fs uids, or None if unreadable.
+def read_process_ids(pid: int) -> dict[str, tuple[int, ...]] | None:
+    """Return a process's uid and gid columns from /proc, or None if unreadable.
 
-    /proc reports the identity the kernel actually applied, so this is the only
-    check that cannot be fooled by how the ``user`` directive was written or by
-    which uid that name happens to resolve to.
+    Each is the real/effective/saved/fs set the kernel actually applied, so this
+    is the only source that cannot be fooled by how the ``user`` directive was
+    written or by which ids those names happen to resolve to.
     """
     try:
         status = pathlib.Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
     except OSError:
         return None
+    found: dict[str, tuple[int, ...]] = {}
     for line in status.splitlines():
-        if line.startswith("Uid:"):
-            fields = line.split()[1:]
-            try:
-                return tuple(int(value) for value in fields)
-            except ValueError:
-                return None
-    return None
+        label, _, rest = line.partition(":")
+        key = label.strip()
+        if key not in ("Uid", "Gid"):
+            continue
+        try:
+            found[key] = tuple(int(value) for value in rest.split())
+        except ValueError:
+            return None
+    # Both columns are required: checking uid alone would pass a worker whose
+    # primary group is still root.
+    return found if "Uid" in found and "Gid" in found else None
+
+
+def read_process_uid(pid: int) -> tuple[int, ...] | None:
+    """Return a process's real/effective/saved/fs uids, or None if unreadable."""
+    ids = read_process_ids(pid)
+    return None if ids is None else ids["Uid"]
 
 
 def assert_worker_dropped_privileges(worker_pid: int) -> None:
-    """Fail unless the NGINX worker really runs as a non-root user.
+    """Fail unless the NGINX worker really runs as a non-root user and group.
 
     The gate starts NGINX as root, so the workers are supposed to drop. Reading
     the account name is not evidence: a `user nobody;` line whose name resolves
     to uid 0 leaves the workers running as root, and the run would still pass.
+
+    Both ids are checked, in all four columns. A process needs one of them to be
+    0 to regain privilege: effective is who it is now, saved is what it can
+    setuid() to without privilege, and fs governs file access. NGINX's setuid
+    clears the effective uid but leaves the saved-set-uid alone, so all four are
+    read. The group is included because a worker whose primary group is still
+    root keeps root's file access even with an unprivileged uid.
     """
-    uids = read_process_uid(worker_pid)
-    if uids is None:
+    ids = read_process_ids(worker_pid)
+    if ids is None:
         raise ValueError(
             f"cannot read the NGINX worker identity for pid {worker_pid}; "
             "refusing to assume the workers dropped privileges"
         )
-    # A process only needs one of these to be 0 to regain root: effective is who
-    # it is now, saved is what it can setuid() to without privilege, and fs
-    # governs file access. NGINX's setuid clears the effective uid but leaves the
-    # saved-set-uid alone, so all four are checked.
-    privileged = [index for index, uid in enumerate(uids) if uid == 0]
-    if privileged:
+    retained = {
+        f"{label.lower()}[{index}]": value
+        for label, values in ids.items()
+        for index, value in enumerate(values)
+        if value == 0
+    }
+    if retained:
         raise ValueError(
-            f"the NGINX worker {worker_pid} retains uid 0 "
-            f"(real/effective/saved/fs={uids}); the soak must exercise the same "
-            "privilege separation a deployment has"
+            f"the NGINX worker {worker_pid} retains privileged ids "
+            f"{sorted(retained)} (uid={ids['Uid']}, gid={ids['Gid']}); the soak "
+            "must exercise the same privilege separation a deployment has"
         )
 
 
