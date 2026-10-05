@@ -1600,17 +1600,28 @@ def test_the_default_runtime_root_is_private(monkeypatch, tmp_path):
     mkdir inherits the umask, so under a permissive one the tree holding the
     per-run directories would be world-listable unless it is hardened explicitly.
     """
+    # Both roots move into tmp_path: SOAK_RUNTIME_ROOT is bound at import, so
+    # patching only REPO_ROOT would have this test create directories in the real
+    # build tree.
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime"
+    )
     monkeypatch.setattr(
         validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
     )
 
     set_umask = os.umask
     original = set_umask(0o000)
+    runtime: Path | None = None
     try:
         runtime = validator._runtime_directory()
     finally:
         set_umask(original)
+        # Cleanup in finally: an assertion failure must not leave the directory.
+        if runtime is not None:
+            validator._cleanup_runtime_directory(runtime)
+        validator._OWNED_RUNTIME_DIR = None
 
     root = validator.SOAK_RUNTIME_ROOT.resolve()
     assert root.stat().st_mode & 0o777 == 0o700, {
@@ -1621,7 +1632,6 @@ def test_the_default_runtime_root_is_private(monkeypatch, tmp_path):
         "mode": oct(root.stat().st_mode & 0o777),
         "msg": "no group or other access on the runtime root",
     }
-    validator._cleanup_runtime_directory(runtime)
 
 
 def test_traversal_assertions_hold_on_a_symlinked_path(monkeypatch, tmp_path):
