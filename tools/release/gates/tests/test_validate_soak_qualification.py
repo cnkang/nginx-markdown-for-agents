@@ -1162,7 +1162,9 @@ def test_unreachable_ancestor_names_the_blocked_directory(monkeypatch, tmp_path)
     # tmp_path stands in for a 0700 home directory above the checkout. Only that
     # one object is faked: patching Path.stat globally would leak into every
     # other test in the module.
-    blocked = tmp_path
+    # _unreachable_ancestor walks resolved paths, so the stub has to match on
+    # the resolved form; tmp_path itself is unresolved (/var -> /private/var).
+    blocked = tmp_path.resolve()
     real_stat = type(tmp_path).stat
 
     def fake_stat(self, *args, **kwargs):
@@ -1598,7 +1600,9 @@ def test_prepare_runtime_refuses_to_start_when_an_ancestor_blocks(
     above it is the gate's to report, not to widen. Removing the check lets the
     run proceed and fail later with a bare 403 that names nothing.
     """
-    blocked = tmp_path
+    # _unreachable_ancestor walks resolved paths, so the stub has to match on
+    # the resolved form; tmp_path itself is unresolved (/var -> /private/var).
+    blocked = tmp_path.resolve()
     real_stat = type(tmp_path).stat
 
     def fake_stat(self, *args, **kwargs):
@@ -1801,7 +1805,9 @@ def test_a_blocked_ancestor_refusal_still_removes_the_runtime_directory(
     The check runs inside the try for exactly this reason; raising before it
     would leak the per-run directory on every refused run.
     """
-    blocked = tmp_path
+    # _unreachable_ancestor walks resolved paths, so the stub has to match on
+    # the resolved form; tmp_path itself is unresolved (/var -> /private/var).
+    blocked = tmp_path.resolve()
     real_stat = type(tmp_path).stat
 
     def fake_stat(self, *args, **kwargs):
