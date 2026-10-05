@@ -27,10 +27,13 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import errno
+import grp
 import json
 import math
 import os
 import pathlib
+import pwd
 import re
 import shutil
 import subprocess
@@ -85,6 +88,9 @@ MIN_RSS_SAMPLES = 3
 # This is independent of the manifest's conversion_memory ceilings: those are
 # what the per-request peak is measured *against*, so a larger parser budget
 # does not relax the evidence check.
+# Measured full-buffer allocation for the 1 MiB fixture is ~41 MiB, so the
+# default 32 MiB budget is what made the soak fail. 64 MiB leaves headroom for
+# allocator variation rather than sitting just above the measurement.
 SOAK_PARSER_BUDGET_BYTES = 64 * 1024 * 1024
 PEAK_MEMORY_MISSING_ERROR = (
     "insufficient-data: module-managed per-request peak memory was not observed"
@@ -660,10 +666,14 @@ def _startup_failure_reason(runtime_dir: pathlib.Path) -> str:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            # A log NGINX never wrote is the normal case here, not a fault;
+            # whichever file exists carries the diagnosis.
             continue
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("nginx:") or "[emerg]" in stripped or "[alert]" in stripped:
+            if stripped.startswith("nginx:") or any(
+                level in stripped for level in ("[emerg]", "[alert]", "[crit]", "[error]")
+            ):
                 reasons.append(stripped[:_STARTUP_LOG_MAX_BYTES])
             if len(reasons) >= 3:
                 break
@@ -738,9 +748,36 @@ def write_nginx_conf(
     # Granting more parser budget than needed would not relax the check.
     limits_line = ""
     if parser_budget_bytes:
-        limits_line = f"markdown_limits parser_budget={int(parser_budget_bytes)};"
+        # Set conversion_memory explicitly alongside the budget. The module
+        # clamps parser_budget down when only one side of the cross-key
+        # constraint is explicit, and that clamp is a warning the soak would
+        # never notice: the run would proceed on a budget nobody asked for.
+        limits_line = (
+            f"markdown_limits parser_budget={int(parser_budget_bytes)} "
+            f"conversion_memory={int(parser_budget_bytes)};"
+        )
+    # When the master is root, NGINX drops its workers to `nobody`. Pin that
+    # identity explicitly so the soak exercises the same privilege separation a
+    # real deployment does, and so the directories it must read are prepared
+    # for exactly that user.
+    worker_user = nginx_worker_user()
+    user_line = ""
+    if worker_user:
+        # NGINX looks the group up by name; on a host where the worker's primary
+        # group is not called the same as the user, `user nobody;` alone fails to
+        # start. Emit the group NGINX would otherwise infer.
+        try:
+            group_name = grp.getgrgid(pwd.getpwnam(worker_user).pw_gid).gr_name
+        except KeyError:
+            # The gid has no group entry. Naming the user alone lets NGINX use the
+            # account's primary gid, which is the correct fallback; repeating the
+            # user name as the group would look for a group that may not exist.
+            user_line = f"user {worker_user};\n"
+        else:
+            user_line = f"user {worker_user} {group_name};\n"
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
-    conf = f"""worker_processes 1;
+    _grant_worker_traversal(validated_runtime_dir)
+    conf = f"""{user_line}worker_processes 1;
 daemon off;
 error_log {runtime_text}/logs/error.log notice;
 pid {runtime_text}/nginx.pid;
@@ -792,6 +829,14 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
         )
         corpus_path.write_bytes(payload[:size])
         corpus[scenario_id] = name
+    # mkdir creates the document root with the process umask, which is 0755
+    # under the usual 0022 but 0700 under a restrictive 0077. Pin it so the
+    # unprivileged worker can list and read it regardless of the environment.
+    corpus_dir.chmod(0o755 | (corpus_dir.stat().st_mode & 0o700))
+    for entry in manifest["corpus"]:
+        # write_bytes inherits the umask too, so a 0077 umask leaves every
+        # fixture at 0600 and NGINX answers 403 for all of them.
+        (corpus_dir / SOAK_SCENARIO_FILES[entry["id"]]).chmod(0o644)
     return corpus
 
 
@@ -845,6 +890,66 @@ def _query_worker_pid(master_pid: int) -> int:
     if ps.returncode != 0:
         return -1
     return _find_worker_child(ps.stdout, master_pid)
+
+
+def read_process_ids(pid: int) -> dict[str, tuple[int, ...]] | None:
+    """Return a process's uid and gid columns from /proc, or None if unreadable.
+
+    Each is the real/effective/saved/fs set the kernel actually applied, so this
+    is the only source that cannot be fooled by how the ``user`` directive was
+    written or by which ids those names happen to resolve to.
+    """
+    try:
+        status = pathlib.Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    found: dict[str, tuple[int, ...]] = {}
+    for line in status.splitlines():
+        label, _, rest = line.partition(":")
+        key = label.strip()
+        if key not in ("Uid", "Gid"):
+            continue
+        try:
+            found[key] = tuple(int(value) for value in rest.split())
+        except ValueError:
+            return None
+    # Both columns are required: checking uid alone would pass a worker whose
+    # primary group is still root.
+    return found if "Uid" in found and "Gid" in found else None
+
+
+def assert_worker_dropped_privileges(worker_pid: int) -> None:
+    """Fail unless the NGINX worker really runs as a non-root user and group.
+
+    The gate starts NGINX as root, so the workers are supposed to drop. Reading
+    the account name is not evidence: a `user nobody;` line whose name resolves
+    to uid 0 leaves the workers running as root, and the run would still pass.
+
+    Both ids are checked, in all four columns. A process needs one of them to be
+    0 to regain privilege: effective is who it is now, saved is what it can
+    setuid() to without privilege, and fs governs file access. NGINX's setuid
+    clears the effective uid but leaves the saved-set-uid alone, so all four are
+    read. The group is included because a worker whose primary group is still
+    root keeps root's file access even with an unprivileged uid.
+    """
+    ids = read_process_ids(worker_pid)
+    if ids is None:
+        raise ValueError(
+            f"cannot read the NGINX worker identity for pid {worker_pid}; "
+            "refusing to assume the workers dropped privileges"
+        )
+    retained = {
+        f"{label.lower()}[{index}]": value
+        for label, values in ids.items()
+        for index, value in enumerate(values)
+        if value == 0
+    }
+    if retained:
+        raise ValueError(
+            f"the NGINX worker {worker_pid} retains privileged ids "
+            f"{sorted(retained)} (uid={ids['Uid']}, gid={ids['Gid']}); the soak "
+            "must exercise the same privilege separation a deployment has"
+        )
 
 
 def find_worker_pid(runtime_dir: pathlib.Path) -> int:
@@ -1046,15 +1151,121 @@ def _git_head_sha() -> str:
     return result.stdout.strip()
 
 
+def _grant_worker_traversal(*directories: pathlib.Path) -> None:
+    """Let the unprivileged worker traverse directories it must read.
+
+    A worker that cannot traverse into the runtime directory gets a bare 403
+    from NGINX with no usable diagnosis, because the fixture itself is readable.
+
+    Ownership is left alone: a validation gate has no business transferring a
+    directory to the worker account, and doing so would break later writes and
+    trip git's dubious-ownership check. Only execute-for-other is added, so the
+    worker can walk to a file it already knows the name of while the directory
+    stays unlistable and unwritable -- and group gains nothing, which is why
+    this is o+x rather than the o+rx of 0o711.
+    """
+    if nginx_worker_user() is None:
+        # No privilege drop, so the master keeps its own access.
+        return
+    for directory in directories:
+        try:
+            current = directory.stat().st_mode & 0o777
+            wanted = current | 0o001
+            if current != wanted:
+                directory.chmod(wanted)
+        except OSError:
+            # Best-effort: a directory we cannot inspect or widen is reported by
+            # the preflight, so skipping it here keeps the grant from aborting.
+            continue
+
+
+def _unreachable_ancestor(directory: pathlib.Path) -> pathlib.Path | None:
+    """Return the first ancestor the worker could not traverse, if any.
+
+    The chain walk below stops at the checkout root on purpose: widening the
+    checkout or anything above it would be exposure, not a fix. That leaves a real
+    failure mode -- a 0700 home directory above the checkout, which is exactly
+    what a root-run CI checkout usually does not have. Name it instead of
+    letting NGINX answer 403 with no usable diagnosis.
+    """
+    if nginx_worker_user() is None:
+        return None
+    root = REPO_ROOT.resolve()
+    current = directory.resolve()
+    while current != root and current.parent != current:
+        try:
+            if not current.stat().st_mode & 0o001:
+                return current
+        except OSError:
+            return current
+        current = current.parent
+    # Above the checkout the gate must not change anything, so a blocked
+    # ancestor there is reported rather than fixed.
+    current = root
+    while current.parent != current:
+        try:
+            if not current.stat().st_mode & 0o001:
+                return current
+        except OSError:
+            return current
+        current = current.parent
+    return None
+
+
+def _grant_worker_traversal_chain(directory: pathlib.Path) -> None:
+    """Grant traversal on `directory` and each ancestor up to the repository.
+
+    Only directories inside the repository are touched, and only the execute
+    bit is added, so nothing above the checkout changes and no directory
+    becomes listable.
+    """
+    root = REPO_ROOT.resolve()
+    current = directory.resolve()
+    chain: list[pathlib.Path] = []
+    while current != root and current.parent != current:
+        # Strictly below the checkout root: the root and the directories the gate
+        # did not create must keep their owner. A validation gate has no business
+        # transferring the checkout to the worker account.
+        chain.append(current)
+        current = current.parent
+    _grant_worker_traversal(*chain)
+
+
+# The directory this process created and must remove. A configured
+# SOAK_RUNTIME_DIR is not named markdown-soak-*, so the prefix rule that keeps
+# cleanup from deleting anything else would otherwise leave every run's
+# directory behind.
+_OWNED_RUNTIME_DIR: pathlib.Path | None = None
+
+
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
+    global _OWNED_RUNTIME_DIR
+    # Resolve the worker account first: on a root host with no unprivileged
+    # account this raises, and doing it first means no directory is created for a
+    # run that cannot start.
+    nginx_worker_user()
     configured = os.environ.get("SOAK_RUNTIME_DIR")
     if configured:
         runtime_dir = validate_write_path_within_root(
             configured, REPO_ROOT, purpose="SOAK_RUNTIME_DIR"
         )
+        # Only a directory this call created may be chmodded, traversed and
+        # later removed. A pre-existing non-empty one belongs to somebody else:
+        # adopting it would tighten its permissions and then delete it and
+        # everything in it.
+        if runtime_dir.exists() and any(runtime_dir.iterdir()):
+            raise ValueError(
+                f"SOAK_RUNTIME_DIR {runtime_dir} already exists and is not empty; "
+                "refusing to reuse and then delete a directory this gate did "
+                "not create"
+            )
         runtime_dir.mkdir(parents=True, exist_ok=True)
         runtime_dir.chmod(0o700)
+        # mkdir only creates the leaf; every ancestor it had to invent is 0700
+        # too when the umask is restrictive, so grant traversal along the chain.
+        _grant_worker_traversal_chain(runtime_dir)
+        _OWNED_RUNTIME_DIR = runtime_dir.resolve()
         return runtime_dir
 
     runtime_root = validate_write_path_within_root(
@@ -1062,8 +1273,51 @@ def _runtime_directory() -> pathlib.Path:
     )
     runtime_root.mkdir(parents=True, exist_ok=True)
     runtime_root.chmod(0o700)
-    return pathlib.Path(
+    runtime_dir = pathlib.Path(
         tempfile.mkdtemp(prefix="markdown-soak-", dir=runtime_root)
+    )
+    # Both layers block the worker: mkdtemp makes the per-run directory 0700
+    # and the runtime root is 0700 too. mkdir(parents=True) can also invent
+    # ancestors above the root, so walk the whole chain rather than naming two
+    # directories that may not be the ones in the way.
+    _grant_worker_traversal_chain(runtime_dir)
+    return runtime_dir
+
+
+def nginx_worker_user() -> str | None:
+    """Return the unprivileged user NGINX's workers run as, if it will drop.
+
+    NGINX only honours the ``user`` directive when the master starts as root;
+    it then runs the workers as that user instead of root. Pinning the identity
+    keeps that drop explicit and reproducible rather than implicit, and keeps
+    the soak from running workers as root the way the master did.
+
+    Returns None only when no privilege drop is possible or needed. A root
+    master with no unprivileged account available is an error rather than a
+    silent fallback: without a ``user`` directive the workers would keep running
+    as root, which is exactly what this gate exists to avoid, and the run would
+    still pass.
+
+    The check is on the resolved uid, not the name. A container may ship an
+    account called ``nobody`` that maps to uid 0, and ``setuid(0)`` is a no-op, so
+    the workers would stay root while the gate reported success.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return None
+    for candidate in ("nobody", "nginx"):
+        try:
+            entry = pwd.getpwnam(candidate)
+        except KeyError:
+            continue
+        if entry.pw_uid == 0:
+            # Named like an unprivileged account but resolves to root; NGINX's
+            # setuid would be a no-op and the workers would keep root.
+            continue
+        return candidate
+    raise RuntimeError(
+        "the soak runs NGINX as root but no unprivileged account (nobody, nginx) "
+        "resolves to a non-root uid to run the workers as; refusing to start "
+        "NGINX with root workers"
     )
 
 
@@ -1110,6 +1364,17 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     """Create the runtime dir, corpus, nginx config, and start nginx."""
     runtime_dir = _runtime_directory()
     try:
+        # Inside the try so the per-run directory is removed before the refusal
+        # propagates: raising here would leave the very directory we are
+        # complaining about behind.
+        blocked = _unreachable_ancestor(runtime_dir)
+        if blocked is not None:
+            raise ValueError(
+                f"the NGINX worker ({nginx_worker_user()}) cannot reach "
+                f"{runtime_dir}: {blocked} is not traversable by other; grant o+x "
+                "on that directory or place the checkout somewhere the worker can "
+                "walk to"
+            )
         corpus = build_corpus(runtime_dir, manifest)
         port = int(base_url.rsplit(":", 1)[1])
         write_nginx_conf(
@@ -1171,26 +1436,45 @@ def _port_holder(port: int) -> str | None:
     """
     import socket
 
+    # Two probes, because neither alone covers every holder:
+    #   - loopback: catches a loopback or wildcard holder without this probe
+    #     claiming every interface (a wildcard probe trips code-scanning);
+    #   - wildcard: catches a holder bound to a specific non-loopback address,
+    #     which a loopback bind would miss entirely.
+    # NGINX generates `listen <port>;`, whose wildcard bind fails for all three,
+    # so between them these two reproduce NGINX's own bind outcome. Under
+    # SO_REUSEADDR neither trips on a TIME_WAIT socket, which NGINX ignores too.
     # The generated config is `listen <port>;`, which binds IPv4 wildcard only.
     # Probing IPv6 as well would report an occupied v6 socket as a conflict for
     # a port NGINX can bind regardless.
-    try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    except OSError:
-        # A host that cannot construct the socket at all (no IPv4 stack, or a
-        # restrictive sandbox) cannot be probed. That is not a conflict: let
-        # NGINX try the bind itself rather than aborting a serviceable run.
-        return None
-    # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left in
-    # TIME_WAIT binds fine for it. Without this the probe would refuse a port
-    # NGINX can actually use and abort a run that would have worked.
-    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        probe.bind(("0.0.0.0", port))
-    except OSError:
-        return "port %d is already in use" % port
-    finally:
-        probe.close()
+    for address in ("127.0.0.1", "0.0.0.0"):
+        # A fresh socket per address: a bound socket cannot be rebound, and the
+        # context manager closes it on both the success and failure paths.
+        try:
+            candidate = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except OSError:
+            # A host that cannot construct the socket at all (no IPv4 stack, or
+            # a restrictive sandbox) cannot be probed. That is not a conflict:
+            # let NGINX try the bind itself rather than abort a serviceable run.
+            return None
+        with candidate:
+            # Mirror NGINX: its listen socket sets SO_REUSEADDR, so a port left
+            # in TIME_WAIT binds fine for it. Without this the probe would
+            # refuse a port NGINX can actually use and abort a valid run.
+            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                # codeql[py/bind-socket-all-network-interfaces]: the loopback
+                # bind avoids claiming every interface; the wildcard bind
+                # reproduces NGINX's own `listen <port>;` outcome.
+                candidate.bind((address, port))  # codeql[py/bind-socket-all-network-interfaces]
+            except OSError as exc:
+                # Only an address-in-use is a conflict. Reporting the rest as
+                # one points the reader at a stale process when the real
+                # cause is a host that cannot hand out that address. This
+                # address simply cannot be probed; the wildcard one still
+                # can, so keep going rather than answering early.
+                if exc.errno == errno.EADDRINUSE:
+                    return "port %d is already in use" % port
     return None
 
 
@@ -1210,21 +1494,30 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
     try:
         pgid = os.getpgid(nginx.pid)
     except OSError:
-        pgid = None
+        # The child is started with start_new_session=True, so it is a session
+        # leader and its pgid equals its pid by construction. Fall back to that
+        # rather than to signalling the master alone, which would leave the
+        # workers holding the listen socket.
+        pgid = nginx.pid
 
     def _signal_group(sig: int) -> None:
         # ProcessLookupError is an OSError subclass, so OSError covers both a
         # missing process and a permission failure.
-        if pgid is not None:
-            try:
-                os.killpg(pgid, sig)
-                return
-            except ProcessLookupError:
-                # The whole group is gone; nothing left to signal.
-                return
-            except OSError:
-                # Not ours, or the group is gone: fall back to the process.
-                pass
+        try:
+            os.killpg(pgid, sig)
+            return
+        except ProcessLookupError:
+            # The whole group is gone; nothing left to signal.
+            return
+        except OSError as group_exc:
+            # The group signal failed but the process one may still work, so this
+            # is not fatal. It is still worth saying: the workers are what hold
+            # the listen socket, and a silent failure here leaves them running.
+            print(
+                f"WARNING: could not signal the NGINX process group ({sig}): "
+                f"{group_exc}; falling back to the master process only",
+                file=sys.stderr,
+            )
         try:
             nginx.send_signal(sig)
         except ProcessLookupError:
@@ -1254,14 +1547,38 @@ def _stop_nginx(nginx: subprocess.Popen) -> None:
         pass
 
 
+def _remove_runtime_tree(resolved_runtime_dir: pathlib.Path) -> None:
+    """Remove a runtime tree, reporting rather than swallowing a failure.
+
+    ignore_errors=True hides a tree that could not be deleted -- root-owned
+    files after a privileged run, for instance -- which is the one case where the
+    next run then fails on a leftover directory and nobody knows why.
+    """
+    try:
+        shutil.rmtree(resolved_runtime_dir)
+    except OSError as exc:
+        print(
+            f"WARNING: could not remove the soak runtime directory "
+            f"{resolved_runtime_dir}: {exc}; it will block the next run",
+            file=sys.stderr,
+        )
+
+
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
-    runtime_root = SOAK_RUNTIME_ROOT.resolve()
+    global _OWNED_RUNTIME_DIR
     resolved_runtime_dir = runtime_dir.resolve()
+    if _OWNED_RUNTIME_DIR is not None and resolved_runtime_dir == _OWNED_RUNTIME_DIR:
+        _remove_runtime_tree(resolved_runtime_dir)
+        # Forget it: a path this run created and removed may be recreated by
+        # somebody else, and a later cleanup must not treat it as ours.
+        _OWNED_RUNTIME_DIR = None
+        return
+    runtime_root = SOAK_RUNTIME_ROOT.resolve()
     if (
         resolved_runtime_dir.name.startswith("markdown-soak-")
         and resolved_runtime_dir.parent == runtime_root
     ):
-        shutil.rmtree(resolved_runtime_dir, ignore_errors=True)
+        _remove_runtime_tree(resolved_runtime_dir)
 
 
 def _run_soak_session(
@@ -1292,6 +1609,10 @@ def _run_soak_session(
             # duration recorded in the qualification evidence.
             started = time.time()
             worker_pid = find_worker_pid(runtime_dir)
+            if worker_pid > 0:
+                # Confirm the separation the soak claims to exercise actually
+                # happened, rather than trusting the `user` directive.
+                assert_worker_dropped_privileges(worker_pid)
             duration = int(manifest["duration_minutes"] * 60)
             rss_series, scenario_metrics = run_load_loop(
                 corpus, worker_pid, duration, started,
@@ -1417,7 +1738,36 @@ def real_main(args: argparse.Namespace) -> int:
 
     module_so = os.environ.get("MODULE_SO", "")
     base_url = f"http://127.0.0.1:{SOAK_PORT}"
-    session = _run_soak_session(base_url, manifest, module_so)
+    try:
+        session = _run_soak_session(base_url, manifest, module_so)
+    except (ValueError, RuntimeError) as exc:
+        # A failed precondition the soak refuses to run under is a qualification
+        # failure, not a crash: the worker did not drop privileges (ValueError),
+        # no unprivileged account exists to drop to (RuntimeError), or the tree is
+        # unreachable. The session already tore NGINX down, so record the reason
+        # and exit 1 rather than propagating a traceback with no record written.
+        print(f"ERROR: soak failure: {exc}", file=sys.stderr)
+        # A refused run has no measurements; the record still has to satisfy the
+        # schema so the release evidence names the reason instead of going missing.
+        stamp = time.time()
+        record = _build_soak_record(
+            manifest,
+            0.0,
+            [],
+            {
+                "started": stamp,
+                "ended": stamp,
+                "rss_series": [],
+                "drain_delta": None,
+                "drain_samples": [],
+                "monotonic": False,
+                "ready_error": str(exc),
+            },
+        )
+        record["status"] = "fail"
+        record["errors"] = [str(exc)]
+        _write_record(record, args)
+        return 1
 
     per_scenario = build_scenario_metrics(session["scenario_metrics"])
     elapsed = session["ended"] - session["started"]

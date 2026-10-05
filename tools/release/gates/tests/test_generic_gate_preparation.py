@@ -6,6 +6,7 @@ fail-closed semantics and identifiable rejection reasons.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,8 +30,15 @@ def _run_gate(script: str, fixture: str, extra_args: list[str] | None = None
     ]
     if extra_args:
         cmd.extend(extra_args)
+    # The validators import helpers as `tools.release.gates.*`, which only
+    # resolves when the repository root is importable. Without this the child
+    # dies with ModuleNotFoundError and every case looks like a gate failure.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(REPO_ROOT), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
     return subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30, check=False)
+        cmd, capture_output=True, text=True, timeout=30, check=False, env=env)
 
 
 # The canonical candidate_sha used across all valid fixtures.
