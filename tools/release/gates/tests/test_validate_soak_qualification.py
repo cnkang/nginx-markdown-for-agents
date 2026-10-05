@@ -1695,6 +1695,37 @@ def test_a_configured_runtime_directory_is_removed(monkeypatch, tmp_path):
     }
 
 
+def test_cleanup_forgets_the_directory_it_removed(monkeypatch, tmp_path):
+    """A path we removed may be recreated by someone else.
+
+    Ownership has to end when the directory does. Left set, a later cleanup would
+    delete the recreated directory even though a fresh _runtime_directory now
+    refuses to create it.
+    """
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", tmp_path / "build" / "soak-runtime")
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+    monkeypatch.setattr(
+        validator, "validate_write_path_within_root", lambda p, root, **k: Path(p)
+    )
+    target = tmp_path / "build" / "soak-runtime" / "ci-owned"
+    monkeypatch.setenv("SOAK_RUNTIME_DIR", str(target))
+
+    runtime = validator._runtime_directory()
+    validator._cleanup_runtime_directory(runtime)
+
+    # Somebody else recreates the same path with their own content.
+    target.mkdir(parents=True)
+    keep = target / "IMPORTANT.txt"
+    keep.write_text("theirs", encoding="utf-8")
+
+    validator._cleanup_runtime_directory(target)
+
+    assert keep.exists(), {
+        "msg": "cleanup must not delete a path whose ownership has ended",
+    }
+
+
 def test_cleanup_will_not_reach_outside_the_runtime_root(monkeypatch, tmp_path):
     """The prefix alone is not containment.
 

@@ -1546,9 +1546,13 @@ def _remove_runtime_tree(resolved_runtime_dir: pathlib.Path) -> None:
 
 
 def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
+    global _OWNED_RUNTIME_DIR
     resolved_runtime_dir = runtime_dir.resolve()
     if _OWNED_RUNTIME_DIR is not None and resolved_runtime_dir == _OWNED_RUNTIME_DIR:
         _remove_runtime_tree(resolved_runtime_dir)
+        # Forget it: a path this run created and removed may be recreated by
+        # somebody else, and a later cleanup must not treat it as ours.
+        _OWNED_RUNTIME_DIR = None
         return
     runtime_root = SOAK_RUNTIME_ROOT.resolve()
     if (
