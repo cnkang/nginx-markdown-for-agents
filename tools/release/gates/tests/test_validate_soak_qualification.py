@@ -1686,7 +1686,9 @@ def test_the_default_runtime_root_is_private(monkeypatch, tmp_path):
         # Cleanup in finally: an assertion failure must not leave the directory.
         if runtime is not None:
             validator._cleanup_runtime_directory(runtime)
-        validator._OWNED_RUNTIME_DIR = None
+        # Through monkeypatch so the reset is undone when the test ends; a bare
+        # assignment would leak module state into every later test.
+        monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
 
     root = validator.SOAK_RUNTIME_ROOT.resolve()
     assert root.stat().st_mode & 0o777 == 0o700, {
