@@ -1695,6 +1695,30 @@ def test_a_configured_runtime_directory_is_removed(monkeypatch, tmp_path):
     }
 
 
+def test_cleanup_will_not_reach_outside_the_runtime_root(monkeypatch, tmp_path):
+    """The prefix alone is not containment.
+
+    A directory named markdown-soak-* anywhere else on the filesystem belongs to
+    somebody else; only one directly inside this run's runtime root is ours.
+    """
+    root = tmp_path / "build" / "soak-runtime"
+    root.mkdir(parents=True)
+    elsewhere = tmp_path / "somebody-else" / "markdown-soak-theirs"
+    elsewhere.mkdir(parents=True)
+    keep = elsewhere / "IMPORTANT.txt"
+    keep.write_text("not ours", encoding="utf-8")
+
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", root)
+    monkeypatch.setattr(validator, "_OWNED_RUNTIME_DIR", None, raising=False)
+
+    validator._cleanup_runtime_directory(elsewhere)
+
+    assert elsewhere.is_dir(), {
+        "msg": "cleanup must not follow the prefix outside the runtime root",
+    }
+    assert keep.exists(), {"msg": "the unrelated file must survive"}
+
+
 def test_a_pre_existing_non_empty_runtime_directory_is_refused(
     monkeypatch, tmp_path
 ):
