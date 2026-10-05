@@ -2489,6 +2489,27 @@ def test_an_unprobeable_address_does_not_hide_a_conflict_on_the_other(monkeypatc
         }
 
 
+def test_a_boolean_peak_is_not_mistaken_for_a_measurement():
+    """`True` is an int in Python, and 1 byte is under every ceiling.
+
+    Without the bool guard a record carrying `true` would be read as a 1-byte peak
+    and pass the threshold, publishing a measurement nobody measured.
+    """
+    manifest = {
+        "corpus": [{"id": "small", "conversion_memory_bytes": 32 * 1024 * 1024}]
+    }
+
+    issue = validator._peak_memory_issue(
+        {"module_managed_peak_observed": True, "per_request_peak_bytes": True},
+        manifest,
+    )
+
+    assert issue == validator.PEAK_MEMORY_MISSING_ERROR, {
+        "issue": issue,
+        "msg": "a boolean peak is missing evidence, not a 1-byte measurement",
+    }
+
+
 def test_peak_memory_holds_the_peak_to_the_smallest_ceiling():
     """A run-wide peak has no scenario attribution, so the smallest budget wins.
 
