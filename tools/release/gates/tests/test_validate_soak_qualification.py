@@ -67,7 +67,13 @@ def test_nginx_is_started_in_its_own_session(monkeypatch, tmp_path):
     module_so = tmp_path / "module.so"
     module_so.write_bytes(b"")
 
+    # SOAK_RUNTIME_ROOT is bound to the real build tree at import time, so
+    # redirect it as well: otherwise the real prepare_runtime creates a runtime
+    # directory under build/soak-runtime and nothing cleans it up -- the very
+    # leak the cleanup regression tests guard against.
+    runtime_root = tmp_path / "build" / "soak-runtime"
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "SOAK_RUNTIME_ROOT", runtime_root)
     monkeypatch.setattr(validator, "validate_write_path_within_root",
                         lambda p, root, **k: Path(p))
     monkeypatch.setattr(validator, "validate_read_path", lambda p, **k: Path(p))
@@ -90,7 +96,9 @@ def test_nginx_is_started_in_its_own_session(monkeypatch, tmp_path):
         "msg": "NGINX must be started in its own session",
     }
 
-    validator._cleanup_runtime_directory(runtime)
+    # Clean up the directory the real _runtime_directory created under tmp_path.
+    for created in runtime_root.glob("markdown-soak-*"):
+        validator._cleanup_runtime_directory(created)
 
 
 def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
@@ -952,6 +960,21 @@ def test_corpus_root_is_reachable_by_the_unprivileged_worker(
         assert fixture_mode & 0o004, (
             f"{scenario_id} fixture is not world-readable: {oct(fixture_mode)}"
         )
+
+
+def test_the_suite_leaves_no_runtime_directory_behind() -> None:
+    """No test may leave a directory in the real build tree.
+
+    SOAK_RUNTIME_ROOT is bound to build/soak-runtime at import time, so a test
+    that exercises the real prepare_runtime without redirecting it creates a
+    directory there that nothing cleans up. That is the leak this branch fixed,
+    so it is asserted rather than trusted.
+    """
+    root = validator.SOAK_RUNTIME_ROOT
+    assert not root.exists() or not any(root.iterdir()), {
+        "leftover": sorted(p.name for p in root.iterdir()),
+        "root": str(root),
+    }
 
 
 def test_cleanup_removes_a_prefixed_runtime_directory() -> None:
