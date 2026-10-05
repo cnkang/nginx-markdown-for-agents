@@ -969,6 +969,9 @@ def test_the_suite_leaves_no_runtime_directory_behind() -> None:
     that exercises the real prepare_runtime without redirecting it creates a
     directory there that nothing cleans up. That is the leak this branch fixed,
     so it is asserted rather than trusted.
+
+    This runs in definition order, so it only covers the tests defined before it.
+    The conftest-level check in this package closes the gap for the ones after.
     """
     root = validator.SOAK_RUNTIME_ROOT
     assert not root.exists() or not any(root.iterdir()), {
