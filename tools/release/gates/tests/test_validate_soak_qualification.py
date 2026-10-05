@@ -171,16 +171,20 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
     assert log_exists, (
         "the startup log must exist on disk for the failure path to read"
     )
-    del nginx
+    # `nginx` is intentionally left bound: the finally below closes it, and
+    # deleting the name here would only hide a later accidental use.
 
 
 def test_port_holder_detects_a_bound_port():
     """A stale NGINX must be named, not reported as "did not become ready"."""
     import socket
 
+    # This socket stands in for a process holding the port, so it binds the
+    # wildcard address the way NGINX's own listen socket does.
+    # codeql[py/bind-socket-all-network-interfaces]: deliberate, see above.
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    holder.bind(("0.0.0.0", 0))
+    holder.bind(("0.0.0.0", 0))  # codeql[py/bind-socket-all-network-interfaces]
     holder.listen(1)
     port = holder.getsockname()[1]
     try:
@@ -262,9 +266,12 @@ def test_prepare_runtime_refuses_to_start_on_an_occupied_port(tmp_path, monkeypa
     """The gate must say the port is taken rather than time out on readiness."""
     import socket
 
+    # Stands in for a process holding the port, so it binds the wildcard address
+    # NGINX's own listen socket uses.
+    # codeql[py/bind-socket-all-network-interfaces]: deliberate, see above.
     holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    holder.bind(("0.0.0.0", 0))
+    holder.bind(("0.0.0.0", 0))  # codeql[py/bind-socket-all-network-interfaces]
     holder.listen(1)
     port = holder.getsockname()[1]
     runtime = validator.REPO_ROOT / "build" / "soak-runtime" / "markdown-soak-port-selftest"
@@ -599,8 +606,15 @@ def test_grant_worker_traversal_is_a_no_op_without_a_privilege_drop(
     assert target.stat().st_mode & 0o777 == 0o700
 
 
-def test_grant_worker_traversal_is_idempotent(tmp_path):
-    """Re-running must not accumulate permission bits."""
+def test_grant_worker_traversal_is_idempotent(monkeypatch, tmp_path):
+    """Re-running must not accumulate permission bits.
+
+    The grant is a no-op unless NGINX drops privileges, so without forcing the
+    root path this passes vacuously on an ordinary-user runner.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+
     target = tmp_path / "markdown-soak-y"
     target.mkdir()
     target.chmod(0o700)
@@ -609,12 +623,31 @@ def test_grant_worker_traversal_is_idempotent(tmp_path):
     first = target.stat().st_mode & 0o777
     validator._grant_worker_traversal(target)
 
+    assert first == 0o701, {
+        "mode": oct(first),
+        "msg": "the grant must actually have applied",
+    }
     assert target.stat().st_mode & 0o777 == first
 
 
-def test_grant_worker_traversal_tolerates_a_missing_directory(tmp_path):
-    """A path that cannot be stat'ed must not abort the setup."""
+def test_grant_worker_traversal_tolerates_a_missing_directory(monkeypatch, tmp_path):
+    """A path that cannot be stat'ed must not abort the setup.
+
+    Forced onto the root path so the loop body actually runs; otherwise the grant
+    returns before touching the filesystem and nothing is exercised.
+    """
+    monkeypatch.setattr(validator.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(validator.pwd, "getpwnam", lambda name: _FakePasswd())
+
     validator._grant_worker_traversal(tmp_path / "absent")
+
+    # And the same call on a real directory still widens it, proving the helper
+    # is not simply returning for everything.
+    present = tmp_path / "markdown-soak-present"
+    present.mkdir()
+    present.chmod(0o700)
+    validator._grant_worker_traversal(present)
+    assert present.stat().st_mode & 0o777 == 0o701, oct(present.stat().st_mode & 0o777)
 
 
 def test_generated_config_pins_the_worker_user_when_root(monkeypatch, tmp_path):
@@ -661,7 +694,10 @@ def test_generated_config_falls_back_to_the_user_name_for_the_group(
     validator.write_nginx_conf(runtime, 19200, str(tmp_path), str(so))
 
     conf = (runtime / "nginx.conf").read_text()
-    assert conf.startswith("user nobody nobody;"), conf[:120]
+    # No group entry for the gid: name the user alone so NGINX uses its primary
+    # gid, rather than looking up a group named after the user that may not exist.
+    assert conf.startswith("user nobody;"), conf[:120]
+    assert "user nobody nobody;" not in conf, conf[:120]
 
 
 def test_unreachable_ancestor_names_the_blocked_directory(monkeypatch, tmp_path):

@@ -662,6 +662,8 @@ def _startup_failure_reason(runtime_dir: pathlib.Path) -> str:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            # A log NGINX never wrote is the normal case here, not a fault;
+            # whichever file exists carries the diagnosis.
             continue
         for line in text.splitlines():
             stripped = line.strip()
@@ -754,8 +756,12 @@ def write_nginx_conf(
         try:
             group_name = grp.getgrgid(pwd.getpwnam(worker_user).pw_gid).gr_name
         except KeyError:
-            group_name = worker_user
-        user_line = f"user {worker_user} {group_name};\n"
+            # The gid has no group entry. Naming the user alone lets NGINX use the
+            # account's primary gid, which is the correct fallback; repeating the
+            # user name as the group would look for a group that may not exist.
+            user_line = f"user {worker_user};\n"
+        else:
+            user_line = f"user {worker_user} {group_name};\n"
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     _grant_worker_traversal(validated_runtime_dir)
     conf = f"""{user_line}worker_processes 1;
@@ -1095,6 +1101,8 @@ def _grant_worker_traversal(*directories: pathlib.Path) -> None:
             if current != wanted:
                 directory.chmod(wanted)
         except OSError:
+            # Best-effort: a directory we cannot inspect or widen is reported by
+            # the preflight, so skipping it here keeps the grant from aborting.
             continue
 
 
@@ -1329,7 +1337,12 @@ def _port_holder(port: int) -> str | None:
     # NGINX can actually use and abort a run that would have worked.
     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        probe.bind(("0.0.0.0", port))
+        # The wildcard address, matching the `listen <port>;` NGINX generates:
+        # only a wildcard bind fails when *any* socket holds the port. A
+        # loopback probe would miss a wildcard holder and let the run proceed
+        # into the very conflict this check exists to catch.
+        # codeql[py/bind-socket-all-network-interfaces]: deliberate, mirrors NGINX.
+        probe.bind(("0.0.0.0", port))  # codeql[py/bind-socket-all-network-interfaces]
     except OSError:
         return "port %d is already in use" % port
     finally:
