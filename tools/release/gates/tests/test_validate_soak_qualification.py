@@ -1140,6 +1140,29 @@ def test_a_rise_inside_the_margin_is_not_monotonic(monkeypatch):
     }
 
 
+def test_startup_diagnostics_prefer_the_startup_log(tmp_path):
+    """startup.log first: it carries NGINX's CLI failures, error.log the runtime ones.
+
+    Reading them the other way round still surfaces both lines eventually, so only
+    an ordering assertion keeps the more specific diagnosis first.
+    """
+    runtime = tmp_path / "markdown-soak-order"
+    (runtime / "logs").mkdir(parents=True)
+    (runtime / "logs" / "startup.log").write_text(
+        "nginx: [emerg] bind() to 0.0.0.0:19200 failed\n", encoding="utf-8"
+    )
+    (runtime / "logs" / "error.log").write_text(
+        "2026/10/05 [error] 1#1: *1 open() /x failed\n", encoding="utf-8"
+    )
+
+    reason = validator._startup_failure_reason(runtime)
+
+    assert reason.index("bind()") < reason.index("open()"), {
+        "reason": reason,
+        "msg": "the startup-log diagnosis must come first",
+    }
+
+
 def test_startup_diagnostics_survive_undecodable_log_bytes(tmp_path):
     """A log with invalid UTF-8 must still produce its reason.
 
