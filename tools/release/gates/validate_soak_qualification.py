@@ -748,7 +748,14 @@ def write_nginx_conf(
     # Granting more parser budget than needed would not relax the check.
     limits_line = ""
     if parser_budget_bytes:
-        limits_line = f"markdown_limits parser_budget={int(parser_budget_bytes)};"
+        # Set conversion_memory explicitly alongside the budget. The module
+        # clamps parser_budget down when only one side of the cross-key
+        # constraint is explicit, and that clamp is a warning the soak would
+        # never notice: the run would proceed on a budget nobody asked for.
+        limits_line = (
+            f"markdown_limits parser_budget={int(parser_budget_bytes)} "
+            f"conversion_memory={int(parser_budget_bytes)};"
+        )
     # When the master is root, NGINX drops its workers to `nobody`. Pin that
     # identity explicitly so the soak exercises the same privilege separation a
     # real deployment does, and so the directories it must read are prepared

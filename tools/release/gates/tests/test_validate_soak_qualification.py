@@ -580,6 +580,33 @@ def test_a_runtime_tree_that_cannot_be_removed_does_not_raise(tmp_path, monkeypa
     validator._remove_runtime_tree(created)
 
 
+def test_stop_nginx_terminates_before_the_final_kill(monkeypatch):
+    """SIGTERM has to come first, or there is no graceful shutdown.
+
+    Sending the unconditional SIGKILL first makes the teardown a hard kill and
+    the SIGTERM that follows has nothing left to stop.
+    """
+    import signal as signal_mod
+
+    order: list[int] = []
+    monkeypatch.setattr(
+        validator.os, "getpgid", lambda pid: 4242
+    )
+    monkeypatch.setattr(
+        validator.os, "killpg", lambda pgid, sig: order.append(sig)
+    )
+    nginx = _signal_fallback_nginx([])
+    nginx.pid = 4242
+
+    validator._stop_nginx(nginx)
+
+    assert order[:2] == [signal_mod.SIGTERM, signal_mod.SIGKILL], {
+        "signals": [int(s) for s in order],
+        "expected": [int(signal_mod.SIGTERM), int(signal_mod.SIGKILL)],
+        "msg": "SIGTERM must precede the unconditional SIGKILL",
+    }
+
+
 def test_a_failed_group_lookup_still_signals_the_group(monkeypatch):
     """A session leader is its own process group, so the pid is the group id.
 
@@ -1899,7 +1926,8 @@ def test_generated_config_states_the_parser_budget(tmp_path, monkeypatch):
         validator._cleanup_runtime_directory(runtime)
 
     assert (
-        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
+        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES} "
+        f"conversion_memory={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
     ), conf
 
 
@@ -2066,8 +2094,9 @@ def test_prepare_runtime_wires_the_parser_budget_into_the_config(
     finally:
         validator._cleanup_runtime_directory(runtime)
 
-    assert f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES};" in (
-        conf
+    assert (
+        f"markdown_limits parser_budget={validator.SOAK_PARSER_BUDGET_BYTES} "
+        f"conversion_memory={validator.SOAK_PARSER_BUDGET_BYTES};" in conf
     ), conf
 
 
