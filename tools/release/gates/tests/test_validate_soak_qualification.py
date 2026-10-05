@@ -163,9 +163,22 @@ def test_startup_log_is_captured_instead_of_discarded(tmp_path, monkeypatch):
         # would leave it behind in build/soak-runtime.
         real_cleanup(runtime_dir)
 
+    # Not merely "not DEVNULL": stdout has to be the opened log file itself. A
+    # PIPE would satisfy a DEVNULL check while sending NGINX's diagnostics into a
+    # buffer nobody reads, and the file assertion passes because the file is
+    # created before Popen runs.
     assert captured["stdout"] is not validator.subprocess.DEVNULL, (
         "NGINX stdout must be captured, not discarded"
     )
+    assert captured["stdout"] is not validator.subprocess.PIPE, (
+        "NGINX stdout must go to the startup log, not a pipe nobody drains"
+    )
+    assert getattr(captured["stdout"], "name", None) == str(
+        runtime_dir / "logs" / "startup.log"
+    ), {
+        "stdout_name": getattr(captured["stdout"], "name", None),
+        "expected": str(runtime_dir / "logs" / "startup.log"),
+    }
     assert captured["stderr"] is validator.subprocess.STDOUT, (
         "NGINX stderr must be merged into the captured log"
     )
