@@ -121,8 +121,10 @@ jobs:
           # under the mounted workspace belongs to root.  The native NGINX build
           # below compiles the gnu converter from that same tree as the runner
           # user and cannot write the target directory's build lock, so hand the
-          # directory back before it runs.  `build/` needs no repair: this step
-          # creates it as the runner user, and later steps only read it.
+          # directory back before it runs.  Nothing else needs repair: `build/`
+          # is created here by the runner, and the module the container copies
+          # into it is root-owned but world-readable, which is all the later
+          # steps need -- they only read it.
           sudo chown -R "$(id -u):$(id -g)" components/rust-converter/target
         shell: bash
 
