@@ -24,18 +24,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GATES = REPO_ROOT / "tools" / "release" / "gates"
 
-# Scripts that import ``tools.<package>.<module>`` and therefore need the
-# repository root on sys.path, not just ``tools/``. Keep this list to the ones a
-# caller can actually run as programs; test modules are collected by pytest,
-# which already puts the rootdir on sys.path.
-_ABSOLUTE_IMPORT_SCRIPTS = [
-    GATES / "validate_release_evidence_manifest.py",
-    GATES / "generate_release_gate_manifests.py",
-    GATES / "validate_pre_lts_status.py",
-    REPO_ROOT / "tools" / "release" / "matrix" / "completeness_check.py",
-]
-
-
 def _imported_tools_modules(path: Path) -> set[str]:
     """Return the ``tools.*`` modules the file imports, lazily or not."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -88,15 +76,21 @@ def _module_body_imports_cleanly(path: Path) -> bool:
         [
             sys.executable,
             "-c",
-            "import importlib.util, sys\n"
-            "path = sys.argv[1]\n"
-            "spec = importlib.util.spec_from_file_location('probe_target', path)\n"
-            "mod = importlib.util.module_from_spec(spec)\n"
-            # Register before exec: a dataclass decorator resolves its own
-            # module through sys.modules and fails when the name is absent.
-            "sys.modules['probe_target'] = mod\n"
-            "spec.loader.exec_module(mod)\n"
-            "print('PROBE-OK')",
+            # One element per line, joined explicitly: adjacent literals are
+            # implicit concatenation, which reads as a missing comma.
+            "\n".join(
+                [
+                    "import importlib.util, sys",
+                    "path = sys.argv[1]",
+                    "spec = importlib.util.spec_from_file_location('probe_target', path)",
+                    "mod = importlib.util.module_from_spec(spec)",
+                    # Register before exec: a dataclass decorator resolves its
+                    # own module through sys.modules and fails when absent.
+                    "sys.modules['probe_target'] = mod",
+                    "spec.loader.exec_module(mod)",
+                    "print('PROBE-OK')",
+                ]
+            ),
             str(path),
         ],
         cwd=REPO_ROOT.parent,
@@ -159,6 +153,7 @@ def test_the_validator_imports_by_absolute_path_from_another_directory(tmp_path)
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        timeout=120,
         env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
     )
     assert result.returncode == 0, {
