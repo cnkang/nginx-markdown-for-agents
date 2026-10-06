@@ -30,7 +30,15 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# Both entries are needed. ``tools/`` backs the flat ``lib.*`` imports below;
+# the repository root backs the ``tools.release.gates.*`` imports that
+# format_checker_guard pulls in. Python puts the SCRIPT's directory on
+# sys.path, not the working directory, so a caller that runs this file by
+# absolute path -- the release gate runs it inside a container whose workdir is
+# the repository root -- finds neither entry and dies with
+# "No module named 'tools'" the moment a lazy import is reached.
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(REPO_ROOT))
 
 from lib.path_validation import validate_read_path  # noqa: E402
 from lib.executable_validation import resolve_approved_executable  # noqa: E402

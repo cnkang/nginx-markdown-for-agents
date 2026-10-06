@@ -28,12 +28,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 try:
     from tools.release.gates.validate_config_directives import CURRENT_LIMIT_KEYS
 except ModuleNotFoundError as exc:
     if exc.name != "tools":
         raise
-    from validate_config_directives import CURRENT_LIMIT_KEYS
+    # Bootstrap the package root so the import above resolves on its own.
+    # Python puts THIS file's directory on sys.path when the file runs as a
+    # program, and that directory does not contain the ``tools`` package, so a
+    # caller running it by absolute path from anywhere fails without this.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from tools.release.gates.validate_config_directives import CURRENT_LIMIT_KEYS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
