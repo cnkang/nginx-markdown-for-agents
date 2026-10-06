@@ -1411,7 +1411,45 @@ jobs:
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
+          # docs-check compares changed docs against STYLE_BASE and refuses an
+          # empty one.  Take it from the event where the event carries one: a
+          # pull request supplies base.sha and a branch push supplies before.
+          # Everything else is resolved from the checkout at the top of the
+          # run block, so a manual dispatch keeps comparing against its merge
+          # base with main rather than silently against itself.
+          STYLE_BASE: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
         run: |
+          # A tag push reports an all-zero github.event.before and a dispatch
+          # carries no before at all, so neither event supplies a base.  The
+          # Makefile's own chain cannot help either: `git merge-base HEAD
+          # origin/main` needs a main ref, and a non-main checkout at the
+          # default depth has only origin/<its own branch>.  Fetching main
+          # does not repair that -- a shallow fetch still produces a nominal
+          # merge base equal to the commit under test -- so resolve the one
+          # case that genuinely has a base and surface the rest.
+          if [[ -z "${STYLE_BASE}" ]]; then
+            if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+              # A tag checkout has neither origin/main nor, at the default
+              # depth, HEAD^, so the release commit is the only revision left
+              # to compare against.  Its docs were already walked on the way
+              # to main; what this check refuses is an empty value.
+              STYLE_BASE="$(git rev-parse HEAD)"
+            else
+              # A branch checkout carries origin/<branch>, so when that branch
+              # is main the merge base is the checked-out commit itself --
+              # exactly what the Makefile computed here before this step set
+              # the variable.  Anything else has no base to compare against.
+              STYLE_BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+              if [[ -z "${STYLE_BASE}" ]]; then
+                echo "ERROR: STYLE_BASE is required for docs-style-check-regression;" >&2
+                echo "       no documentation base is resolvable for ${GITHUB_REF:-unknown}." >&2
+                exit 1
+              fi
+            fi
+            export STYLE_BASE
+          fi
+          echo "docs-style base: ${STYLE_BASE}"
+
           # Run the feature-oriented release validators that are not already
           # covered by the build/package/smoke-test jobs above. The full
           # release-gates-check targets include build/test/fuzz which are
