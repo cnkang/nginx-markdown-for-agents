@@ -6,8 +6,19 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Same bootstrap as the release gates: when this file runs as a program Python
+# puts ITS directory on sys.path, which does not contain the ``tools`` package.
+# The bare-name fallback below only works if some other code already added the
+# repository root, so add it here and keep the package import as the primary
+# path.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from tools.harness.constants import (  # noqa: F401
@@ -23,7 +34,6 @@ except ModuleNotFoundError:
     )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 _KIRO_DIR = ".kiro"
 SPECS_ROOT = REPO_ROOT / _KIRO_DIR / "specs"
 POINTER_CANDIDATES = [

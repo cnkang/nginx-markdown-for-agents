@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from tools.lib.path_validation import validate_read_path
+# Imported as a module by the release workflow through ``python3 -`` heredocs,
+# where sys.path[0] is the empty string and therefore the current directory.
+# That happens to be the repository root today, but it is the caller's accident,
+# not this module's contract: run the same import from a script, or from any
+# directory but the root, and the repository root is absent from sys.path while
+# Python has put this file's own directory there instead. Bootstrap it so the
+# import resolves regardless of how the caller was launched.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.lib.path_validation import validate_read_path  # noqa: E402
 
 
 CANONICAL_FEATURE_MANIFEST: dict[str, bool] = {
