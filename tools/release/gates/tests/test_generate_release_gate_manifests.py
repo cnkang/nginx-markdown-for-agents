@@ -162,10 +162,15 @@ def test_final_evidence_accepts_the_verdict_the_perf_gate_writes(
         {"verdict": pass_verdict, "breaches": [], "results": []},
     ) == "pass"
 
-    assert _perf_status(
-        tmp_path, monkeypatch,
-        {"verdict": "NO_GO", "breaches": [{"metric": "x"}], "results": []},
-    ) == "fail"
+    # Every non-pass verdict the gate can write must stay a fail. Enumerated
+    # rather than inferred from "anything that is not GO": the defect was a
+    # comparison against a value that never occurs, so the test states the
+    # values that DO occur.
+    for other in ("NO_GO", "MISSING_EVIDENCE", "SKIPPED"):
+        assert _perf_status(
+            tmp_path, monkeypatch,
+            {"verdict": other, "breaches": [], "results": []},
+        ) == "fail", other
 
 
 def test_final_evidence_fails_the_perf_entry_without_evidence(
