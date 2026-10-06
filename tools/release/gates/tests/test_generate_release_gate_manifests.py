@@ -78,6 +78,115 @@ def _soak_status(tmp_path: Path, monkeypatch) -> str:
     )
 
 
+# Metrics inside every module-level threshold, and the config that judges them.
+# The engine, not this file, decides what the pass verdict is spelled -- the
+# generator must accept that spelling.
+_PASSING_METRICS = {
+    "p50_latency_small_pct": 1.0,
+    "p95_latency_small_pct": 1.5,
+    "p50_latency_large_pct": 5.0,
+    "ttfb_streaming_large_pct": 3.0,
+    "fallback_rate_abs": 0.02,
+    "memory_slope_pct": 0.5,
+}
+_MODULE_THRESHOLDS = {
+    "module_level": {
+        "p50_latency_small_pct": 10,
+        "p95_latency_small_pct": 15,
+        "p50_latency_large_pct": 5,
+        "ttfb_streaming_large_pct": 10,
+        "fallback_rate_abs": 0.05,
+        "memory_slope_pct": 20,
+    },
+}
+
+
+def _perf_status(tmp_path: Path, monkeypatch, pack: dict | None) -> str:
+    """Return the final evidence status for its blocking performance domain."""
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir(parents=True, exist_ok=True)
+    (schemas_dir / "final-evidence-manifest.schema.json").write_text(
+        "{}\n", encoding="utf-8")
+    (schemas_dir / "observation-state.schema.json").write_text(
+        "{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        generator, "FINAL_EVIDENCE_SCHEMA",
+        "schemas/final-evidence-manifest.schema.json")
+    monkeypatch.setattr(
+        generator, "OBSERVATION_STATE_SCHEMA",
+        "schemas/observation-state.schema.json")
+    monkeypatch.setattr(generator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        generator, "_release_state", lambda: ("0.9.2", Path("."), tmp_path))
+    if pack is not None:
+        path = tmp_path / "perf" / "reports" / "evidence-092.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(pack), encoding="utf-8")
+    evidence, _ = generator.build_final_evidence(CANDIDATE_SHA, GENERATED_AT)
+    return next(
+        entry["status"] for entry in evidence["entries"]
+        if entry["domain"] == "performance"
+    )
+
+
+def test_final_evidence_accepts_the_verdict_the_perf_gate_writes(
+    tmp_path, monkeypatch
+):
+    """The perf gate's own pass verdict must count as a pass.
+
+    The generator compared the evidence pack's verdict against ``"PASS"``, a
+    value that pack never contains: the gate writes GO / NO_GO /
+    MISSING_EVIDENCE (see tools/perf/threshold_engine.py). This blocking entry
+    therefore reported fail on every release run, even when the performance gate
+    printed ``Verdict: GO`` and exited zero.
+
+    The pass spelling comes from the engine rather than a literal here, so
+    renaming it in the engine fails this test rather than silently re-breaking
+    the release gate.
+    """
+    from tools.perf.threshold_engine import evaluate_module_level
+
+    baseline = dict(_PASSING_METRICS)
+    baseline["fallback_rate_abs"] = 0.01
+    pass_verdict = evaluate_module_level(
+        _PASSING_METRICS, baseline, _MODULE_THRESHOLDS
+    )["verdict"]
+    assert pass_verdict == generator.PERF_EVIDENCE_PASS_VERDICT, {
+        "engine": pass_verdict,
+        "generator": generator.PERF_EVIDENCE_PASS_VERDICT,
+        "why": "the generator must accept the verdict the perf gate writes",
+    }
+
+    assert _perf_status(
+        tmp_path, monkeypatch,
+        {"verdict": pass_verdict, "breaches": [], "results": []},
+    ) == "pass"
+
+    assert _perf_status(
+        tmp_path, monkeypatch,
+        {"verdict": "NO_GO", "breaches": [{"metric": "x"}], "results": []},
+    ) == "fail"
+
+
+def test_final_evidence_fails_the_perf_entry_without_evidence(
+    tmp_path, monkeypatch
+):
+    """Absent or unreadable evidence stays a fail, not a skip."""
+    assert _perf_status(tmp_path, monkeypatch, None) == "fail"
+
+    path = tmp_path / "perf" / "reports" / "evidence-092.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(generator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        generator, "_release_state", lambda: ("0.9.2", Path("."), tmp_path))
+    evidence, _ = generator.build_final_evidence(CANDIDATE_SHA, GENERATED_AT)
+    assert next(
+        entry["status"] for entry in evidence["entries"]
+        if entry["domain"] == "performance"
+    ) == "fail"
+
+
 def test_final_evidence_accepts_only_candidate_bound_soak(tmp_path, monkeypatch):
     fixture = json.loads(
         (Path(__file__).parents[4] / "tests/fixtures/release/"

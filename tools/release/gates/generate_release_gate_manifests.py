@@ -98,6 +98,12 @@ def _release_artifact_ref(filename: str) -> str:
 
 ABI_HEADER = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# The evidence pack's verdict vocabulary is defined by
+# tools/perf/threshold_engine.py: GO (all thresholds pass), NO_GO (a breach) and
+# MISSING_EVIDENCE, plus SKIPPED when the gate does not run. "GO" is the pass
+# spelling -- there is no "PASS", so comparing against one makes this entry fail
+# on every run no matter what the gate reported.
+PERF_EVIDENCE_PASS_VERDICT = "GO"
 FINAL_EVIDENCE_SCHEMA = "schemas/final-evidence-manifest.schema.json"
 OBSERVATION_STATE_SCHEMA = "schemas/observation-state.schema.json"
 SHORT_SOAK_SCOPE = "release/scope/short-soak-scope.json"
@@ -794,7 +800,8 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             )
             performance_pass = (
                 isinstance(performance_report, dict)
-                and performance_report.get("verdict") == "PASS"
+                and performance_report.get("verdict")
+                == PERF_EVIDENCE_PASS_VERDICT
             )
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             performance_pass = False
