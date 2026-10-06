@@ -117,6 +117,15 @@ jobs:
             "${RUST_BUILDER_IMAGE}" \
             sh /src/tools/ci/build_musl_module_for_e2e.sh
           test -s build/ngx_http_markdown_filter_module.so
+          # The container runs as root, so the cargo target directory it creates
+          # under the mounted workspace belongs to root.  The native NGINX build
+          # below compiles the gnu converter from that same tree as the runner
+          # user and cannot write the target directory's build lock, so hand the
+          # directory back before it runs.  Nothing else needs repair: `build/`
+          # is created here by the runner, and the module the container copies
+          # into it is root-owned but world-readable, which is all the later
+          # steps need -- they only read it.
+          sudo chown -R "$(id -u):$(id -g)" components/rust-converter/target
         shell: bash
 
       - name: Build a native NGINX binary for encoding-chain validation
