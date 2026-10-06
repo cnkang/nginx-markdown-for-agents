@@ -49,7 +49,7 @@ def _tools_parent_level() -> int:
     return len(REPO_ROOT.relative_to(GATES).parts)
 
 
-def _module_body_imports_cleanly(path: Path) -> bool:
+def _probe_result(path: Path) -> tuple[bool, str]:
     """Execute the module body from an unrelated cwd and report whether it works.
 
     This is the ONLY judgement used. Four static approximations were tried first
@@ -66,6 +66,9 @@ def _module_body_imports_cleanly(path: Path) -> bool:
     imports run -- which is precisely what the bootstrap exists for. ``__file__``
     is registered in ``sys.modules`` first because a dataclass decorator reaches
     for it; without that, a correct file fails for an unrelated reason.
+
+    Returns the verdict together with stderr, because "which script" is not
+    actionable on its own -- the import error is what tells you what to fix.
     """
     # PYTHONPATH must not reach the probe. The suite itself runs with
     # PYTHONPATH=. (that is how these gates are invoked), and an inherited value
@@ -99,7 +102,7 @@ def _module_body_imports_cleanly(path: Path) -> bool:
         timeout=120,
         env=env,
     )
-    return "PROBE-OK" in result.stdout
+    return "PROBE-OK" in result.stdout, result.stderr
 
 
 def test_every_script_importing_tools_packages_is_covered():
@@ -119,14 +122,15 @@ def test_every_script_importing_tools_packages_is_covered():
         # Executed, not inspected: every static approximation of this rule was
         # wrong in at least one direction. A clean body means the imports
         # resolve; that IS the property the gate needs.
-        if _module_body_imports_cleanly(path):
+        ok, stderr = _probe_result(path)
+        if ok:
             continue
-        uncovered.append(path)
+        # The import error travels with the finding: naming the script alone
+        # sends the reader back to the same experiment.
+        uncovered.append(f"{path.relative_to(REPO_ROOT)}\n{stderr.strip()[-400:]}")
 
     assert not uncovered, {
-        "scripts importing tools.* that fail when run from outside the root": [
-            str(p.relative_to(REPO_ROOT)) for p in uncovered
-        ],
+        "scripts importing tools.* that fail when run from outside the root": uncovered,
         "hint": "add sys.path.insert(0, str(REPO_ROOT)) before the tools.* import",
     }
 
