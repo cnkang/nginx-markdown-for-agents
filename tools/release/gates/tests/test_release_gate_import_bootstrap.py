@@ -108,28 +108,6 @@ def _module_body_imports_cleanly(path: Path) -> bool:
     return "PROBE-OK" in result.stdout
 
 
-def _is_invoked_as_a_program(path: Path) -> bool:
-    """True when something outside this file runs the script.
-
-    Scans the Makefile and the workflows rather than trusting a hand-kept list,
-    so a gate that starts calling a new script is caught by the guard instead of
-    by the runner.
-    """
-    needle = str(path.relative_to(REPO_ROOT))
-    callers = [
-        REPO_ROOT / "Makefile",
-        *sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")),
-    ]
-    for caller in callers:
-        try:
-            text = caller.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if needle in text:
-            return True
-    return False
-
-
 def test_every_script_importing_tools_packages_is_covered():
     """Any script importing ``tools.*`` must bootstrap the repository root.
 
