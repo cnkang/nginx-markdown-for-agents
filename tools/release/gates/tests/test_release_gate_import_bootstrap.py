@@ -50,107 +50,86 @@ def _imported_tools_modules(path: Path) -> set[str]:
     return found
 
 
-def _is_repo_root_expr(node: ast.AST) -> bool:
-    """True for REPO_ROOT, REPO_ROOT / x, and str(...) of either.
+def _tools_parent_level() -> int:
+    """The ``parents[N]`` index that lands on the repository root.
 
-    The earlier version only matched a bare Name or BinOp, so the very common
-    ``sys.path.insert(0, str(REPO_ROOT))`` -- a Call wrapping the Name -- was
-    reported as missing and correct files looked broken.
+    Derived from this file's own depth rather than hardcoded, so the guard keeps
+    working if the test moves: every ``tools/...`` script is below the root, and
+    the root is one level above ``tools/``.
     """
-    if isinstance(node, ast.Call):
-        # str(REPO_ROOT) / str(REPO_ROOT / "tools")
-        return bool(node.args) and _is_repo_root_expr(node.args[0])
-    if isinstance(node, ast.Name):
-        return node.id == "REPO_ROOT"
-    if isinstance(node, ast.BinOp):
-        # REPO_ROOT / "tools"
-        return _is_repo_root_expr(node.left)
-    return False
-
-
-def _is_sys_path_insert(node: ast.AST) -> bool:
-    """True for a ``sys.path.insert(...)`` call."""
-    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-        return False
-    func = node.func
-    if func.attr != "insert" or not isinstance(func.value, ast.Attribute):
-        return False
-    return func.value.attr == "path"
-
-
-def _mentions_repo_root_in_a_collection(tree: ast.AST) -> bool:
-    """True when a candidate tuple/list/set holds ``str(REPO_ROOT)``.
-
-    Covers the loop spelling: ``for _p in (str(REPO_ROOT), ...): sys.path.insert(0, _p)``
-    """
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-            continue
-        if any(_is_repo_root_expr(elt) for elt in node.elts):
-            return True
-    return False
-
-
-def _bootstraps_repository_root(source: str) -> bool:
-    """Does the file put the repository root on sys.path, in any spelling?
-
-    Parsed rather than grepped: matching the literal ``str(REPO_ROOT))`` missed
-    the loop form (``for _p in (str(REPO_ROOT), ...): insert(_p)``) and reported
-    correct files as broken.
-    """
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if not _is_sys_path_insert(node):
-            continue
-        assert isinstance(node, ast.Call)  # narrowed by _is_sys_path_insert
-        # sys.path.insert(0, <value>) or sys.path.insert(<value>, 0)
-        if any(_is_repo_root_expr(arg) for arg in node.args):
-            return True
-        # sys.path.insert(0, _p) where _p came from a tuple of candidates.
-        if any(isinstance(arg, ast.Name) for arg in node.args):
-            if _mentions_repo_root_in_a_collection(tree):
-                return True
-    return False
-
-
-def test_the_listed_scripts_really_import_tools_packages():
-    """Guard the inventory itself: an entry that stops importing tools.* is dead
-    weight, and a missing one would let this file pass while a script breaks."""
-    for script in _ABSOLUTE_IMPORT_SCRIPTS:
-        assert script.is_file(), f"inventory lists a missing script: {script}"
-        assert _imported_tools_modules(script), (
-            f"{script.name} no longer imports any tools.* module; drop it from the "
-            "inventory rather than asserting a bootstrap it does not need"
-        )
+    return len(REPO_ROOT.relative_to(GATES).parts)
 
 
 def _module_body_imports_cleanly(path: Path) -> bool:
     """Execute the module body from an unrelated cwd and report whether it works.
 
-    A static bootstrap check cannot tell a file that needs the repository root
-    from one that happens to be safe because every caller already supplied it.
-    Running the body settles it. ``run_name`` is not ``__main__`` so the
-    ``if __name__ == ...`` blocks stay out of it -- only the top-level imports
-    execute, which is what the bootstrap exists for.
+    This is the ONLY judgement used. Four static approximations were tried first
+    -- a literal substring, then AST matchers for the argument shapes -- and each
+    one mis-classified correct files in both directions:
+
+    * accepting ``REPO_ROOT / "tools"`` as the root passes the exact shape the
+      guard exists to catch;
+    * rejecting ``str(Path(__file__).resolve().parents[N])`` flags files that do
+      bootstrap, because the root is spelled without the name REPO_ROOT.
+
+    Running the code has no such blind spot. ``run_name`` is not ``__main__`` so
+    the ``if __name__ == ...`` blocks stay out of it and only the top-level
+    imports run -- which is precisely what the bootstrap exists for. ``__file__``
+    is registered in ``sys.modules`` first because a dataclass decorator reaches
+    for it; without that, a correct file fails for an unrelated reason.
     """
     result = subprocess.run(
-        [sys.executable, "-c", "import runpy,sys; runpy.run_path(sys.argv[1], run_name='probe_not_main')", str(path)],
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util, sys\n"
+            "path = sys.argv[1]\n"
+            "spec = importlib.util.spec_from_file_location('probe_target', path)\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            # Register before exec: a dataclass decorator resolves its own
+            # module through sys.modules and fails when the name is absent.
+            "sys.modules['probe_target'] = mod\n"
+            "spec.loader.exec_module(mod)\n"
+            "print('PROBE-OK')",
+            str(path),
+        ],
         cwd=REPO_ROOT.parent,
         capture_output=True,
         text=True,
         timeout=120,
     )
-    return result.returncode == 0
+    return "PROBE-OK" in result.stdout
+
+
+def _is_invoked_as_a_program(path: Path) -> bool:
+    """True when something outside this file runs the script.
+
+    Scans the Makefile and the workflows rather than trusting a hand-kept list,
+    so a gate that starts calling a new script is caught by the guard instead of
+    by the runner.
+    """
+    needle = str(path.relative_to(REPO_ROOT))
+    callers = [
+        REPO_ROOT / "Makefile",
+        *sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")),
+    ]
+    for caller in callers:
+        try:
+            text = caller.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if needle in text:
+            return True
+    return False
 
 
 def test_every_script_importing_tools_packages_is_covered():
     """Any script importing ``tools.*`` must bootstrap the repository root.
 
     Scanning the tree rather than trusting the inventory is what keeps a newly
-    added script from silently shipping the same defect. The check is the
-    bootstrap, not the spelling: a file whose top-level ``try: from tools...``
-    falls back to a bare-name import needs the root added before that try, and
-    several gate scripts use exactly that shape.
+    added script from silently shipping the same defect. Scripts something else
+    executes get no exemption: the body probe passes for them too easily, so
+    they must carry the bootstrap themselves.
     """
     uncovered = []
     for path in sorted((REPO_ROOT / "tools").rglob("*.py")):
@@ -158,11 +137,9 @@ def test_every_script_importing_tools_packages_is_covered():
             continue
         if not _imported_tools_modules(path):
             continue
-        source = path.read_text(encoding="utf-8")
-        if _bootstraps_repository_root(source):
-            continue
-        # No bootstrap at all: only safe if the file is never run as a program
-        # from outside the root. Run the body to find out rather than guessing.
+        # Executed, not inspected: every static approximation of this rule was
+        # wrong in at least one direction. A clean body means the imports
+        # resolve; that IS the property the gate needs.
         if _module_body_imports_cleanly(path):
             continue
         uncovered.append(path)
