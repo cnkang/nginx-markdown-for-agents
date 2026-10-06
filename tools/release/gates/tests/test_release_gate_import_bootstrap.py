@@ -16,6 +16,7 @@ later on the runner.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -78,6 +79,11 @@ def _module_body_imports_cleanly(path: Path) -> bool:
     is registered in ``sys.modules`` first because a dataclass decorator reaches
     for it; without that, a correct file fails for an unrelated reason.
     """
+    # PYTHONPATH must not reach the probe. The suite itself runs with
+    # PYTHONPATH=. (that is how these gates are invoked), and an inherited value
+    # would let a script with no bootstrap import successfully -- the guard would
+    # pass the exact defect it exists to catch.
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     result = subprocess.run(
         [
             sys.executable,
@@ -97,6 +103,7 @@ def _module_body_imports_cleanly(path: Path) -> bool:
         capture_output=True,
         text=True,
         timeout=120,
+        env=env,
     )
     return "PROBE-OK" in result.stdout
 
@@ -174,6 +181,7 @@ def test_the_validator_imports_by_absolute_path_from_another_directory(tmp_path)
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
     )
     assert result.returncode == 0, {
         "stdout": result.stdout,
