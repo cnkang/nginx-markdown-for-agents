@@ -2008,8 +2008,24 @@ jobs:
 
       - name: Install package signing tools
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg-sig rpm gnupg-utils
+          sudo apt-get install -y --no-install-recommends rpm gnupg-utils
+          # Either tool signs .deb files and sign-packages.sh accepts both, but
+          # no single release carries both: dpkg-sig is absent from 24.04 on,
+          # and debsigs is absent from 25.04.  Install whichever this release
+          # provides and fail only when it provides neither, so the job works
+          # on the current runner image and on the 26.04 one after the move.
+          for tool in dpkg-sig debsigs; do
+            if sudo apt-get install -y --no-install-recommends "${tool}"; then
+              break
+            fi
+          done
+          if ! command -v dpkg-sig >/dev/null 2>&1 \
+              && ! command -v debsigs >/dev/null 2>&1; then
+            echo "ERROR: neither dpkg-sig nor debsigs is installable on this release" >&2
+            exit 1
+          fi
         shell: bash
 
       - name: Sign DEB and RPM packages
