@@ -124,6 +124,7 @@ if [[ -n "$DEB_FILE" ]]; then
         pass "DEB signature check skipped (tools not available)"
     else
         workdir="$(mktemp -d)"
+        VERIFY_RC=0
         SIG_OUTPUT=""
         if ar p "$DEB_FILE" _gpgorigin > "${workdir}/sig" 2>/dev/null \
             && [[ -s "${workdir}/sig" ]]; then
@@ -132,11 +133,17 @@ if [[ -n "$DEB_FILE" ]]; then
             for signed_member in $members; do
                 ar p "$DEB_FILE" "$signed_member" >> "${workdir}/signed" 2>/dev/null
             done
-            SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1 || true)"
+            # Keep gpg's status: `|| VERIFY_RC=$?` survives `set -e` and still
+            # records the failure.  Judge on that status rather than on the
+            # message text, which gpg localises.
+            SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
+                || VERIFY_RC=$?
+        else
+            VERIFY_RC=1
         fi
         rm -rf "$workdir"
 
-        if echo "$SIG_OUTPUT" | grep -qi "Good signature"; then
+        if [[ "$VERIFY_RC" -eq 0 ]]; then
             pass "DEB package signature valid: $(basename "$DEB_FILE")"
         else
             fail "DEB package signature invalid: $(basename "$DEB_FILE")"

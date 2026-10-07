@@ -87,24 +87,19 @@ sign_deb() {
     local basename_pkg
     basename_pkg="$(basename "$pkg")"
 
-    # debsigs first: it is the tool packaged on every supported release, and
-    # it fixes the embedded signature name (_gpgorigin) that the policy and the
-    # verification instructions describe.  dpkg-sig is kept as the fallback for
-    # older hosts that still carry it, where the member is named _gpgbuilder.
-    if command -v debsigs >/dev/null 2>&1; then
-        info "Signing DEB (debsigs): $basename_pkg"
-        if ! debsigs --sign=origin -k "$KEY_ID" "$pkg"; then
-            die "debsigs failed to sign $basename_pkg"
-            return 1
-        fi
-    elif command -v dpkg-sig >/dev/null 2>&1; then
-        info "Signing DEB (dpkg-sig): $basename_pkg"
-        if ! dpkg-sig --sign builder -k "$KEY_ID" "$pkg"; then
-            die "dpkg-sig failed to sign $basename_pkg"
-            return 1
-        fi
-    else
-        die "Neither debsigs nor dpkg-sig found. Install one to sign .deb packages."
+    # debsigs is the tool every supported release packages, and it fixes the
+    # embedded signature name (_gpgorigin) that the policy, the verification
+    # step and the guides all describe.  dpkg-sig is not packaged on any of
+    # them and writes a different member and format, so the pipeline keeps a
+    # single signature format to verify.
+    if ! command -v debsigs >/dev/null 2>&1; then
+        die "debsigs not found. Install debsigs to sign .deb packages."
+        return 1
+    fi
+
+    info "Signing DEB (debsigs): $basename_pkg"
+    if ! debsigs --sign=origin -k "$KEY_ID" "$pkg"; then
+        die "debsigs failed to sign $basename_pkg"
         return 1
     fi
 

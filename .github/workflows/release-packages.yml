@@ -2015,21 +2015,10 @@ jobs:
           # names.  sign-packages.sh also passes %__gpg explicitly, so signing
           # does not depend on that alias.
           sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2
-          # sign-packages.sh accepts either tool.  Every release from 22.04
-          # through 26.04 packages debsigs, and none of them packages
-          # dpkg-sig, so the loop normally settles on debsigs; trying both
-          # keeps the step working if that changes either way, and it fails
-          # only when neither installs.
-          for tool in dpkg-sig debsigs; do
-            if sudo apt-get install -y --no-install-recommends "${tool}"; then
-              break
-            fi
-          done
-          if ! command -v dpkg-sig >/dev/null 2>&1 \
-              && ! command -v debsigs >/dev/null 2>&1; then
-            echo "ERROR: neither dpkg-sig nor debsigs is installable on this release" >&2
-            exit 1
-          fi
+          # debsigs is the DEB signing tool every supported release packages;
+          # dpkg-sig left Ubuntu after 22.04, so there is nothing to fall back
+          # to and only one signature format to verify.
+          sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2 debsigs
         shell: bash
 
       - name: Sign DEB and RPM packages

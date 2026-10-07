@@ -354,8 +354,18 @@ installing the pipeline's signing tools:
 
 ```bash
 set -euo pipefail
-# Download the signed packages and nginx-markdown-for-agents-release.asc
-# (the release public key) from the GitHub Release, then import the key:
+# Download the signed packages and nginx-markdown-for-agents-release.asc (the
+# release public key) from the GitHub Release.  Check the key's fingerprint
+# against the value published in the repository before trusting it: a key
+# shipped in the same release as the packages cannot establish the signer by
+# itself.  The signing subkey is the one that signs packages.
+expected_signing_fpr="15C792438EAA762B421E60D21E8D41E7D19A8A75"
+key_fprs="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "fpr" {print $10}')"
+if ! grep -qx "$expected_signing_fpr" <<< "$key_fprs"; then
+  echo "release key does not carry the expected signing fingerprint" >&2
+  exit 1
+fi
 gpg --import nginx-markdown-for-agents-release.asc
 
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
