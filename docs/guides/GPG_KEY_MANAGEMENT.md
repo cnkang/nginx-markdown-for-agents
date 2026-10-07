@@ -425,8 +425,14 @@ if [ "${#rpms[@]}" -eq 0 ]; then
   exit 1
 fi
 for rpm_pkg in "${rpms[@]}"; do
-  if ! rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" | grep -q "digests signatures OK"; then
+  checksig_rc=0
+  checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1)" || checksig_rc=$?
+  # Judge on rpm's exit status and the absence of a failure marker, so the
+  # exact success wording does not matter.
+  if [ "$checksig_rc" -ne 0 ] || grep -q "NOT OK" <<< "$checksig" \
+      || ! grep -qi "signature" <<< "$checksig"; then
     echo "$(basename "$rpm_pkg") signature does not verify against the release key" >&2
+    echo "$checksig" >&2
     rm -rf "$rpmdb"
     exit 1
   fi

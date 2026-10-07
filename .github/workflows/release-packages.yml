@@ -2097,7 +2097,11 @@ jobs:
           fi
           # It must also carry the fingerprint the signing policy pins, so a
           # rotation that updates one file and not the other fails here.
-          policy_fpr="$(grep -oE '[0-9A-F]{40}' release/signing-policy.json | head -1)"
+          policy_fpr="$(python3 -c "import json,re; m=re.search(r'[0-9A-F]{40}', json.load(open('release/signing-policy.json'))['artifact_types']['deb']['identity_issuer']); print(m.group(0) if m else '')")"
+          if [ -z "$policy_fpr" ]; then
+            echo "ERROR: no signing fingerprint found in release/signing-policy.json" >&2
+            exit 1
+          fi
           anchor_fprs="$(gpg --show-keys --with-colons "$anchor" \
             | awk -F: '$1 == "fpr" {print $10}')"
           if ! grep -qx "$policy_fpr" <<< "$anchor_fprs"; then
