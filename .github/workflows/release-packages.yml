@@ -2103,7 +2103,7 @@ jobs:
           status=0
           debs=(artifacts/*.deb)
           rpms=(artifacts/*.rpm)
-          if (( ${#debs[@]} == 0 && ${#rpms[@]} == 0 )); then
+          if [ "${#debs[@]}" -eq 0 ] && [ "${#rpms[@]}" -eq 0 ]; then
             echo "ERROR: no .deb or .rpm artifacts to verify" >&2
             exit 1
           fi
