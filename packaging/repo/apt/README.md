@@ -291,11 +291,42 @@ sha256sum -c SHA256SUMS.select
 ```
 
 **Per-package signatures** (only for releases whose workflow produces them,
-and not part of the canonical release verification path):
+and not part of the canonical release verification path). The `.deb` carries
+an embedded GPG signature over its `debian-binary`, `control.tar.gz` and
+`data.tar.gz` members, stored as an ar member named `_gpgorigin`:
 
 ```bash
-dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
+set -euo pipefail
+# The signing subkey that signs release artifacts, published in the repository.
+expected_signing_fpr="15C792438EAA762B421E60D21E8D41E7D19A8A75"
+workdir="$(mktemp -d)"
+shopt -s nullglob
+debs=(nginx-module-markdown-for-agents_*.deb)
+if [ "${#debs[@]}" -ne 1 ]; then
+  echo "expected exactly one matching .deb, found ${#debs[@]}" >&2
+  exit 1
+fi
+deb="${debs[0]}"
+ar p "$deb" _gpgorigin > "${workdir}/sig"
+members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+: > "${workdir}/signed"
+for signed_member in $members; do
+  ar p "$deb" "$signed_member" >> "${workdir}/signed"
+done
+# Assert the signer, not just that some signature verifies.
+if ! gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null \
+    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "; then
+  echo "signature is not from ${expected_signing_fpr}" >&2
+  rm -rf "${workdir}"
+  exit 1
+fi
+echo "OK: signature is from ${expected_signing_fpr}"
+rm -rf "${workdir}"
 ```
+
+An artifact signed by the older `dpkg-sig` tool names its member
+`_gpgbuilder` instead. See `docs/guides/GPG_KEY_MANAGEMENT.md` for the full
+recipe.
 
 ---
 

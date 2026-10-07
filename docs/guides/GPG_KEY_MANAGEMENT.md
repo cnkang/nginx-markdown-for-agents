@@ -334,7 +334,8 @@ The `release-packages.yml` workflow uses these secrets in its
 
 1. Import the private key into the CI runner's GPG keyring
 2. Configure gpg-agent for non-interactive signing
-3. Sign all `.deb` and `.rpm` packages with `dpkg-sig` and `rpm --addsign`
+3. Sign all `.deb` and `.rpm` packages with the distribution's DEB signing tool
+   (`debsigs`) and `rpm --addsign`
 4. Sign APT repository metadata (`Release.gpg`, `InRelease`)
 5. Sign YUM repository metadata (`repomd.xml.asc`)
 
@@ -347,17 +348,112 @@ Release DEB/RPM channel (see the Overview).
 
 ### Verifying CI Signing
 
-After a release build, verify signatures locally:
+After a release build, verify signatures locally. Every recipe below uses
+`gnupg` and the distribution's own tools, so a user can repeat them without
+installing the pipeline's signing tools:
 
 ```bash
-# Download signed package from GitHub Release
-# Verify DEB signature
-dpkg-sig --verify nginx-markdown-module_*.deb
+set -euo pipefail
+# Download the signed packages and nginx-markdown-for-agents-release.asc (the
+# release public key) from the GitHub Release.  Check the key file before
+# trusting it: it must carry the published signing fingerprint and hold no
+# other primary key, and a key shipped in the same release as the packages
+# cannot establish the signer by itself.  The signing subkey is the one that
+# signs packages.
+expected_signing_fpr="15C792438EAA762B421E60D21E8D41E7D19A8A75"
+key_fprs="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "fpr" {print $10}')"
+if ! grep -qx "$expected_signing_fpr" <<< "$key_fprs"; then
+  echo "release key does not carry the expected signing fingerprint" >&2
+  exit 1
+fi
+primary_count="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "pub" {n++} END {print n+0}')"
+if [ "$primary_count" -ne 1 ]; then
+  echo "release key file must hold exactly one primary key, found $primary_count" >&2
+  exit 1
+fi
+gpg --import nginx-markdown-for-agents-release.asc
+# Export only the validated key, so nothing else from the file can reach the
+# RPM database and satisfy its check.
+primary_fpr="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "pub" {want = 1; next} $1 == "fpr" && want {print $10; want = 0}')"
+gpg --armor --export "$primary_fpr" > release-key.asc
 
-# Verify RPM signature
-rpm --import gpg.key
-rpm -K nginx-markdown-module-*.rpm
+# Assert the signer on every gpg check below.  A good signature is not enough
+# when the keyring holds other keys, so require the pinned signing fingerprint.
+verify_signed_by_release_key() {
+  gpg --status-fd 1 --verify "$1" "$2" 2>/dev/null \
+    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "
+}
+
+# Verify the .deb embedded signature.  debsigs stores it as an ar member named
+# _gpgorigin covering the package's other members, which for a normal package
+# are debian-binary, control.tar.* and data.tar.*.  Every matching
+# package is checked:
+shopt -s nullglob
+debs=(nginx-module-markdown-for-agents_*.deb)
+if [ "${#debs[@]}" -eq 0 ]; then
+  echo "no .deb matching nginx-module-markdown-for-agents_*.deb in this directory" >&2
+  exit 1
+fi
+for deb in "${debs[@]}"; do
+  workdir="$(mktemp -d)"
+  ar p "$deb" _gpgorigin > "${workdir}/sig"
+  members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+  : > "${workdir}/signed"
+  for signed_member in $members; do
+    ar p "$deb" "$signed_member" >> "${workdir}/signed"
+  done
+  if ! verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed"; then
+    echo "$(basename "$deb") signature is not from ${expected_signing_fpr}" >&2
+    rm -rf "${workdir}"
+    exit 1
+  fi
+  echo "OK: $(basename "$deb") signature is from ${expected_signing_fpr}"
+  rm -rf "${workdir}"
+done
+
+# Verify each RPM header signature in a database holding only the validated
+# release key, so a signature from any other key cannot pass:
+rpmdb="$(mktemp -d)"
+rpm --dbpath "$rpmdb" --initdb
+rpm --dbpath "$rpmdb" --import release-key.asc
+rpms=(nginx-module-markdown-for-agents-*.rpm)
+if [ "${#rpms[@]}" -eq 0 ]; then
+  echo "no .rpm matching nginx-module-markdown-for-agents-*.rpm in this directory" >&2
+  rm -rf "$rpmdb"
+  exit 1
+fi
+for rpm_pkg in "${rpms[@]}"; do
+  checksig_rc=0
+  checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1)" || checksig_rc=$?
+  # Judge on rpm's exit status and the absence of a failure marker, so the
+  # exact success wording does not matter.
+  if [ "$checksig_rc" -ne 0 ] || grep -q "NOT OK" <<< "$checksig" \
+      || ! grep -qi "signature" <<< "$checksig"; then
+    echo "$(basename "$rpm_pkg") signature does not verify against the release key" >&2
+    echo "$checksig" >&2
+    rm -rf "$rpmdb"
+    exit 1
+  fi
+  echo "OK: $(basename "$rpm_pkg") signature is from the release key"
+done
+rm -rf "$rpmdb"
+
+# Verify the checksum file with the same signer assertion:
+if ! verify_signed_by_release_key SHA256SUMS.asc SHA256SUMS; then
+  echo "SHA256SUMS signature is not from ${expected_signing_fpr}" >&2
+  exit 1
+fi
+echo "OK: SHA256SUMS signature is from ${expected_signing_fpr}"
+sha256sum --check SHA256SUMS
 ```
+
+`debsigs` cannot verify its own output (`debsigs --verify` reports
+"Verify not yet implemented"), so the `gpg --verify` recipe above is the way to
+check the signature it writes. An artifact signed by the older `dpkg-sig` tool
+names its member `_gpgbuilder` instead of `_gpgorigin`.
 
 ---
 
