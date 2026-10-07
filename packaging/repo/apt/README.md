@@ -297,6 +297,8 @@ an embedded GPG signature over its `debian-binary`, `control.tar.gz` and
 
 ```bash
 set -euo pipefail
+# The signing subkey that signs release artifacts, published in the repository.
+expected_signing_fpr="15C792438EAA762B421E60D21E8D41E7D19A8A75"
 workdir="$(mktemp -d)"
 shopt -s nullglob
 debs=(nginx-module-markdown-for-agents_*.deb)
@@ -311,7 +313,10 @@ members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
 for signed_member in $members; do
   ar p "$deb" "$signed_member" >> "${workdir}/signed"
 done
-gpg --verify "${workdir}/sig" "${workdir}/signed"
+# Assert the signer, not just that some signature verifies.
+gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null \
+  | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} " \
+  && echo "OK: signature is from ${expected_signing_fpr}"
 rm -rf "${workdir}"
 ```
 

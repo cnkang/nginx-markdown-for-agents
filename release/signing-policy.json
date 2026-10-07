@@ -30,9 +30,9 @@
       "release_pipeline": "canonical tag path: musl-build and package jobs in .github/workflows/release-packages.yml -> integrity-checksums -> integrity-signature; manual rebuild path: .github/workflows/release-binaries.yml"
     },
     "deb": {
-      "signing_mechanism": "GPG embedded signature written by the DEB signing tool the supported runner images package (debsigs --sign=origin; dpkg-sig --sign builder on hosts that still carry it), using the repository signing key",
+      "signing_mechanism": "GPG embedded signature written by debsigs (--sign=origin) using the repository signing key",
       "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
-      "attachment_name": "_gpgorigin member embedded in the .deb ar archive (debsigs); _gpgbuilder on hosts that sign with dpkg-sig. No separate attachment.",
+      "attachment_name": "_gpgorigin member embedded in the .deb ar archive. No separate attachment.",
       "digest_binding": "The embedded signature covers every other member of the ar archive, in archive order, binding both the control metadata and the payload; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
         "ar p \"${DEB_ARTIFACT_PATH}\" _gpgorigin > _gpgorigin.asc",

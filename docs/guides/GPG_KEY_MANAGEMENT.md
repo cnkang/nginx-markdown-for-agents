@@ -368,6 +368,13 @@ if ! grep -qx "$expected_signing_fpr" <<< "$key_fprs"; then
 fi
 gpg --import nginx-markdown-for-agents-release.asc
 
+# Assert the signer on every gpg check below.  A good signature is not enough
+# when the keyring holds other keys, so require the pinned signing fingerprint.
+verify_signed_by_release_key() {
+  gpg --status-fd 1 --verify "$1" "$2" 2>/dev/null \
+    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "
+}
+
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
 # _gpgorigin covering every other member, in archive order:
 workdir="$(mktemp -d)"
@@ -384,15 +391,21 @@ members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
 for signed_member in $members; do
   ar p "$deb" "$signed_member" >> "${workdir}/signed"
 done
-gpg --verify "${workdir}/sig" "${workdir}/signed" # -> "Good signature from ..."
+verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed" \
+  && echo "OK: .deb signature is from ${expected_signing_fpr}"
 rm -rf "${workdir}"
 
-# Verify the RPM header signature (rpm --import needs the armored key):
-rpm --import nginx-markdown-for-agents-release.asc
-rpm -K nginx-module-markdown-for-agents-*.rpm     # -> "digests signatures OK"
+# Verify the RPM header signature in a database holding only the release key,
+# so a signature from any other key cannot pass:
+rpmdb="$(mktemp -d)"
+rpm --dbpath "$rpmdb" --initdb
+rpm --dbpath "$rpmdb" --import nginx-markdown-for-agents-release.asc
+rpm --dbpath "$rpmdb" --checksig nginx-module-markdown-for-agents-*.rpm
+rm -rf "$rpmdb"
 
-# Verify the checksum file:
-gpg --verify SHA256SUMS.asc SHA256SUMS
+# Verify the checksum file with the same signer assertion:
+verify_signed_by_release_key SHA256SUMS.asc SHA256SUMS \
+  && echo "OK: SHA256SUMS signature is from ${expected_signing_fpr}"
 sha256sum --check SHA256SUMS
 ```
 
