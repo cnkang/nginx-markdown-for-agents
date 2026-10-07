@@ -413,18 +413,25 @@ for deb in "${debs[@]}"; do
   rm -rf "${workdir}"
 done
 
-# Verify the RPM header signature in a database holding only the validated
+# Verify each RPM header signature in a database holding only the validated
 # release key, so a signature from any other key cannot pass:
 rpmdb="$(mktemp -d)"
 rpm --dbpath "$rpmdb" --initdb
 rpm --dbpath "$rpmdb" --import release-key.asc
-if ! rpm --dbpath "$rpmdb" --checksig nginx-module-markdown-for-agents-*.rpm \
-    | grep -q "digests signatures OK"; then
-  echo "RPM signature does not verify against the release key" >&2
+rpms=(nginx-module-markdown-for-agents-*.rpm)
+if [ "${#rpms[@]}" -eq 0 ]; then
+  echo "no .rpm matching nginx-module-markdown-for-agents-*.rpm in this directory" >&2
   rm -rf "$rpmdb"
   exit 1
 fi
-echo "OK: RPM signature is from the release key"
+for rpm_pkg in "${rpms[@]}"; do
+  if ! rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" | grep -q "digests signatures OK"; then
+    echo "$(basename "$rpm_pkg") signature does not verify against the release key" >&2
+    rm -rf "$rpmdb"
+    exit 1
+  fi
+  echo "OK: $(basename "$rpm_pkg") signature is from the release key"
+done
 rm -rf "$rpmdb"
 
 # Verify the checksum file with the same signer assertion:

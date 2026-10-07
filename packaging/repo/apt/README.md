@@ -314,9 +314,13 @@ for signed_member in $members; do
   ar p "$deb" "$signed_member" >> "${workdir}/signed"
 done
 # Assert the signer, not just that some signature verifies.
-gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null \
-  | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} " \
-  && echo "OK: signature is from ${expected_signing_fpr}"
+if ! gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null \
+    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "; then
+  echo "signature is not from ${expected_signing_fpr}" >&2
+  rm -rf "${workdir}"
+  exit 1
+fi
+echo "OK: signature is from ${expected_signing_fpr}"
 rm -rf "${workdir}"
 ```
 

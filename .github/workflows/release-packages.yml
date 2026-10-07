@@ -2159,10 +2159,14 @@ jobs:
           rpm --dbpath "$rpmdb" --initdb
           rpm --dbpath "$rpmdb" --import "${RUNNER_TEMP}/release-key.asc"
           for rpm_pkg in "${rpms[@]}"; do
-            checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1 || true)"
-            # Require a signature line and no failure marker, rather than one
-            # exact success wording that a later rpm could rephrase.
-            if grep -qi "signature" <<< "$checksig" && ! grep -q "NOT OK" <<< "$checksig"; then
+            checksig_rc=0
+            checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1)" || checksig_rc=$?
+            # Require rpm's own exit status, a signature line, and no failure
+            # marker, rather than one exact success wording that a later rpm
+            # could rephrase.
+            if [ "$checksig_rc" -eq 0 ] \
+                && grep -qi "signature" <<< "$checksig" \
+                && ! grep -q "NOT OK" <<< "$checksig"; then
               echo "OK: $(basename "$rpm_pkg") carries a valid signature"
             else
               echo "ERROR: $(basename "$rpm_pkg") signature does not verify" >&2
