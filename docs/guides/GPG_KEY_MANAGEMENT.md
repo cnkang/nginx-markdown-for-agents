@@ -355,10 +355,11 @@ installing the pipeline's signing tools:
 ```bash
 set -euo pipefail
 # Download the signed packages and nginx-markdown-for-agents-release.asc (the
-# release public key) from the GitHub Release.  Check the key's fingerprint
-# against the value published in the repository before trusting it: a key
-# shipped in the same release as the packages cannot establish the signer by
-# itself.  The signing subkey is the one that signs packages.
+# release public key) from the GitHub Release.  Check the key file before
+# trusting it: it must carry the published signing fingerprint and hold no
+# other primary key, and a key shipped in the same release as the packages
+# cannot establish the signer by itself.  The signing subkey is the one that
+# signs packages.
 expected_signing_fpr="15C792438EAA762B421E60D21E8D41E7D19A8A75"
 key_fprs="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
   | awk -F: '$1 == "fpr" {print $10}')"
@@ -366,7 +367,18 @@ if ! grep -qx "$expected_signing_fpr" <<< "$key_fprs"; then
   echo "release key does not carry the expected signing fingerprint" >&2
   exit 1
 fi
+primary_count="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "pub" {n++} END {print n+0}')"
+if [ "$primary_count" -ne 1 ]; then
+  echo "release key file must hold exactly one primary key, found $primary_count" >&2
+  exit 1
+fi
 gpg --import nginx-markdown-for-agents-release.asc
+# Export only the validated key, so nothing else from the file can reach the
+# RPM database and satisfy its check.
+primary_fpr="$(gpg --show-keys --with-colons nginx-markdown-for-agents-release.asc \
+  | awk -F: '$1 == "pub" {want = 1; next} $1 == "fpr" && want {print $10; want = 0}')"
+gpg --armor --export "$primary_fpr" > release-key.asc
 
 # Assert the signer on every gpg check below.  A good signature is not enough
 # when the keyring holds other keys, so require the pinned signing fingerprint.
@@ -391,21 +403,34 @@ members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
 for signed_member in $members; do
   ar p "$deb" "$signed_member" >> "${workdir}/signed"
 done
-verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed" \
-  && echo "OK: .deb signature is from ${expected_signing_fpr}"
+if ! verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed"; then
+  echo ".deb signature is not from ${expected_signing_fpr}" >&2
+  rm -rf "${workdir}"
+  exit 1
+fi
+echo "OK: .deb signature is from ${expected_signing_fpr}"
 rm -rf "${workdir}"
 
-# Verify the RPM header signature in a database holding only the release key,
-# so a signature from any other key cannot pass:
+# Verify the RPM header signature in a database holding only the validated
+# release key, so a signature from any other key cannot pass:
 rpmdb="$(mktemp -d)"
 rpm --dbpath "$rpmdb" --initdb
-rpm --dbpath "$rpmdb" --import nginx-markdown-for-agents-release.asc
-rpm --dbpath "$rpmdb" --checksig nginx-module-markdown-for-agents-*.rpm
+rpm --dbpath "$rpmdb" --import release-key.asc
+if ! rpm --dbpath "$rpmdb" --checksig nginx-module-markdown-for-agents-*.rpm \
+    | grep -q "digests signatures OK"; then
+  echo "RPM signature does not verify against the release key" >&2
+  rm -rf "$rpmdb"
+  exit 1
+fi
+echo "OK: RPM signature is from the release key"
 rm -rf "$rpmdb"
 
 # Verify the checksum file with the same signer assertion:
-verify_signed_by_release_key SHA256SUMS.asc SHA256SUMS \
-  && echo "OK: SHA256SUMS signature is from ${expected_signing_fpr}"
+if ! verify_signed_by_release_key SHA256SUMS.asc SHA256SUMS; then
+  echo "SHA256SUMS signature is not from ${expected_signing_fpr}" >&2
+  exit 1
+fi
+echo "OK: SHA256SUMS signature is from ${expected_signing_fpr}"
 sha256sum --check SHA256SUMS
 ```
 

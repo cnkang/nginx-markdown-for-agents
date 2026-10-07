@@ -2085,7 +2085,22 @@ jobs:
           mkdir -p "${GNUPGHOME}"
           chmod 700 "${GNUPGHOME}"
           trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "${GNUPGHOME}"' EXIT
-          gpg --batch --yes --import packaging/nginx-markdown-for-agents-release.asc >/dev/null 2>&1
+          anchor=packaging/nginx-markdown-for-agents-release.asc
+          # The fresh keyring and the RPM database below are pinned to this
+          # file, so it must hold exactly one primary key: anything else in it
+          # would widen what counts as a valid signer.
+          primary_count="$(gpg --show-keys --with-colons "$anchor" \
+            | awk -F: '$1 == "pub" {n++} END {print n+0}')"
+          if [ "$primary_count" -ne 1 ]; then
+            echo "ERROR: the release anchor must hold exactly one primary key, found $primary_count" >&2
+            exit 1
+          fi
+          gpg --batch --yes --import "$anchor" >/dev/null 2>&1
+          # Export only the validated key for the RPM database, so nothing else
+          # from the file can satisfy its check.
+          gpg --armor --export "$(gpg --show-keys --with-colons "$anchor" \
+            | awk -F: '$1 == "pub" {want = 1; next} $1 == "fpr" && want {print $10; want = 0}')" \
+            > "${RUNNER_TEMP}/release-key.asc"
           shopt -s nullglob
           status=0
           debs=(artifacts/*.deb)
@@ -2126,7 +2141,7 @@ jobs:
           # so a signature from any other key cannot pass.
           rpmdb="$(mktemp -d)"
           rpm --dbpath "$rpmdb" --initdb
-          rpm --dbpath "$rpmdb" --import packaging/nginx-markdown-for-agents-release.asc
+          rpm --dbpath "$rpmdb" --import "${RUNNER_TEMP}/release-key.asc"
           for rpm_pkg in "${rpms[@]}"; do
             checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1 || true)"
             if grep -q "digests signatures OK" <<< "$checksig"; then
