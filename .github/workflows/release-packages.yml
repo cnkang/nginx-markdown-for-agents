@@ -2015,11 +2015,11 @@ jobs:
           # macro invokes, so RPM signing fails without it on a release that
           # ships only gpg.
           sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2
-          # Either tool signs .deb files and sign-packages.sh accepts both, but
-          # no single release carries both: dpkg-sig is absent from 24.04 on,
-          # and debsigs is absent from 25.04.  Install whichever this release
-          # provides and fail only when it provides neither, so the job works
-          # on the current runner image and on the 26.04 one after the move.
+          # sign-packages.sh accepts either tool.  Every release from 22.04
+          # through 26.04 packages debsigs, and none of them packages
+          # dpkg-sig, so the loop normally settles on debsigs; trying both
+          # keeps the step working if that changes either way, and it fails
+          # only when neither installs.
           for tool in dpkg-sig debsigs; do
             if sudo apt-get install -y --no-install-recommends "${tool}"; then
               break
