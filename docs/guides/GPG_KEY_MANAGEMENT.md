@@ -382,9 +382,12 @@ gpg --armor --export "$primary_fpr" > release-key.asc
 
 # Assert the signer on every gpg check below.  A good signature is not enough
 # when the keyring holds other keys, so require the pinned signing fingerprint.
+# The status stream is captured rather than piped, so gpg is never cut short by
+# an early-exiting matcher, and its own exit status is required too.
 verify_signed_by_release_key() {
-  gpg --status-fd 1 --verify "$1" "$2" 2>/dev/null \
-    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "
+  status="$(gpg --status-fd 1 --verify "$1" "$2" 2>/dev/null)" || return 1
+  grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} " <<< "$status" || return 1
+  ! grep -qE "^\[GNUPG:\] (REVKEYSIG|EXPKEYSIG|EXPSIG) " <<< "$status"
 }
 
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
@@ -400,10 +403,19 @@ fi
 for deb in "${debs[@]}"; do
   workdir="$(mktemp -d)"
   ar p "$deb" _gpgorigin > "${workdir}/sig"
-  members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+  # debsigs signs debian-binary, the control archive and the data archive, in
+  # that order, so reconstruct exactly those members.
+  members="$(ar t "$deb")"
+  control_member="$(grep -m1 '^control\.tar' <<< "$members" || true)"
+  data_member="$(grep -m1 '^data\.tar' <<< "$members" || true)"
   : > "${workdir}/signed"
-  for signed_member in $members; do
-    ar p "$deb" "$signed_member" >> "${workdir}/signed"
+  for signed_member in debian-binary "$control_member" "$data_member"; do
+    if [ -z "$signed_member" ] \
+        || ! ar p "$deb" "$signed_member" >> "${workdir}/signed"; then
+      echo "$(basename "$deb") is missing member ${signed_member:-<unknown>}" >&2
+      rm -rf "${workdir}"
+      exit 1
+    fi
   done
   if ! verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed"; then
     echo "$(basename "$deb") signature is not from ${expected_signing_fpr}" >&2
