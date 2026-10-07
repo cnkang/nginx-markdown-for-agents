@@ -313,9 +313,13 @@ members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
 for signed_member in $members; do
   ar p "$deb" "$signed_member" >> "${workdir}/signed"
 done
-# Assert the signer, not just that some signature verifies.
-if ! gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null \
-    | grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} "; then
+# Assert the signer, not just that some signature verifies.  The status stream
+# is captured rather than piped, so gpg is never cut short by an early-exiting
+# matcher, and its own exit status is required too.
+status=""
+if ! status="$(gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>/dev/null)" \
+    || ! grep -q "^\[GNUPG:\] VALIDSIG ${expected_signing_fpr} " <<< "$status" \
+    || grep -qE "^\[GNUPG:\] (REVKEYSIG|EXPKEYSIG|EXPSIG) " <<< "$status"; then
   echo "signature is not from ${expected_signing_fpr}" >&2
   rm -rf "${workdir}"
   exit 1

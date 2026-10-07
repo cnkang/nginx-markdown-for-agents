@@ -130,22 +130,36 @@ if [[ -n "$DEB_FILE" ]]; then
         workdir="$(mktemp -d)"
         VERIFY_RC=0
         SIG_OUTPUT=""
+        expected_fpr="${EXPECTED_SIGNER_FPR:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
         if ar p "$DEB_FILE" _gpgorigin > "${workdir}/sig" 2>/dev/null \
             && [[ -s "${workdir}/sig" ]]; then
-            members="$(ar t "$DEB_FILE" | grep -v '^_gpgorigin$')"
+            # debsigs signs debian-binary, the control archive and the data
+            # archive, in that order, so reconstruct exactly those members and
+            # fail when one cannot be extracted.
+            members="$(ar t "$DEB_FILE")"
+            control_member="$(grep -m1 '^control\.tar' <<< "$members" || true)"
+            data_member="$(grep -m1 '^data\.tar' <<< "$members" || true)"
             : > "${workdir}/signed"
-            for signed_member in $members; do
-                ar p "$DEB_FILE" "$signed_member" >> "${workdir}/signed" 2>/dev/null
+            for signed_member in debian-binary "$control_member" "$data_member"; do
+                if [[ -z "$signed_member" ]] \
+                    || ! ar p "$DEB_FILE" "$signed_member" >> "${workdir}/signed" 2>/dev/null; then
+                    echo "  cannot extract required member: ${signed_member:-<missing>}" >&2
+                    VERIFY_RC=1
+                    break
+                fi
             done
-            # Judge on gpg's status output, not on its message text (which gpg
-            # localises) and not on the exit status alone: a good signature
-            # from an unrelated key must not pass.  Override the expected
-            # signer with EXPECTED_SIGNER_FPR when checking another release key.
-            expected_fpr="${EXPECTED_SIGNER_FPR:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
-            SIG_OUTPUT="$(gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
-                || true
-            if ! grep -q "^\[GNUPG:\] VALIDSIG ${expected_fpr} " <<< "$SIG_OUTPUT"; then
-                VERIFY_RC=1
+            # Judge on gpg's own exit status plus its status records, not on the
+            # message text (which gpg localises): a good signature from an
+            # unrelated, revoked or expired key must not pass.  Override the
+            # expected signer with EXPECTED_SIGNER_FPR for another release key.
+            if [[ "$VERIFY_RC" -eq 0 ]]; then
+                SIG_OUTPUT="$(gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
+                    || VERIFY_RC=$?
+                if [[ "$VERIFY_RC" -eq 0 ]] \
+                    && { ! grep -q "^\[GNUPG:\] VALIDSIG ${expected_fpr} " <<< "$SIG_OUTPUT" \
+                         || grep -qE "^\[GNUPG:\] (REVKEYSIG|EXPKEYSIG|EXPSIG) " <<< "$SIG_OUTPUT"; }; then
+                    VERIFY_RC=1
+                fi
             fi
         else
             VERIFY_RC=1

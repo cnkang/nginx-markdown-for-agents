@@ -35,8 +35,10 @@
       "attachment_name": "_gpgorigin member embedded in the .deb ar archive. No separate attachment.",
       "digest_binding": "The embedded signature covers the package's other members (debian-binary, control.tar.* and data.tar.* for a normal package), binding both the control metadata and the payload; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
+        "ar p \"${DEB_ARTIFACT_PATH}\" debian-binary > signed-data",
+        "ar t \"${DEB_ARTIFACT_PATH}\" | grep -m1 '^control\\.tar' | while read -r member; do ar p \"${DEB_ARTIFACT_PATH}\" \"${member}\" >> signed-data; done",
+        "ar t \"${DEB_ARTIFACT_PATH}\" | grep -m1 '^data\\.tar' | while read -r member; do ar p \"${DEB_ARTIFACT_PATH}\" \"${member}\" >> signed-data; done",
         "ar p \"${DEB_ARTIFACT_PATH}\" _gpgorigin > _gpgorigin.asc",
-        "ar t \"${DEB_ARTIFACT_PATH}\" | grep -v '^_gpgorigin$' | while read -r member; do ar p \"${DEB_ARTIFACT_PATH}\" \"${member}\"; done > signed-data",
         "gpg --status-fd 1 --verify _gpgorigin.asc signed-data | grep -q '^\\[GNUPG:\\] VALIDSIG ${RELEASE_SIGNING_FINGERPRINT} '",
         "gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q '^\\[GNUPG:\\] VALIDSIG ${RELEASE_SIGNING_FINGERPRINT} '",
         "dpkg-deb --info \"${DEB_ARTIFACT_PATH}\""
