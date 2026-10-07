@@ -2013,11 +2013,9 @@ jobs:
           # gnupg brings gpg and gpg-agent, which carries gpg-preset-passphrase;
           # gnupg2 supplies the /usr/bin/gpg2 alias that rpm's built-in %__gpg
           # names.  sign-packages.sh also passes %__gpg explicitly, so signing
-          # does not depend on that alias.
-          sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2
-          # debsigs is the DEB signing tool every supported release packages;
-          # dpkg-sig left Ubuntu after 22.04, so there is nothing to fall back
-          # to and only one signature format to verify.
+          # does not depend on that alias.  debsigs is the DEB signing tool
+          # every supported release packages: dpkg-sig left Ubuntu after 22.04,
+          # so there is nothing to fall back to and one signature format.
           sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2 debsigs
         shell: bash
 
@@ -2124,11 +2122,13 @@ jobs:
             fi
             rm -rf "$workdir"
           done
+          # Verify RPM signatures in a database that holds only the release key,
+          # so a signature from any other key cannot pass.
+          rpmdb="$(mktemp -d)"
+          rpm --dbpath "$rpmdb" --initdb
+          rpm --dbpath "$rpmdb" --import packaging/nginx-markdown-for-agents-release.asc
           for rpm_pkg in "${rpms[@]}"; do
-            # rpm names the signer only when the public key is in its own
-            # database, so import the anchor first.
-            rpm --import packaging/nginx-markdown-for-agents-release.asc
-            checksig="$(rpm --checksig "$rpm_pkg" 2>&1 || true)"
+            checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1 || true)"
             if grep -q "digests signatures OK" <<< "$checksig"; then
               echo "OK: $(basename "$rpm_pkg") carries a valid signature"
             else
@@ -2137,6 +2137,7 @@ jobs:
               status=1
             fi
           done
+          rm -rf "$rpmdb"
           exit "$status"
         shell: bash
 
