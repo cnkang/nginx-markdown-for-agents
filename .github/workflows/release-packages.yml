@@ -2127,7 +2127,8 @@ jobs:
           for deb in "${debs[@]}"; do
             workdir="$(mktemp -d)"
             # debsigs stores the signature as an ar member named _gpgorigin
-            # covering every other member, in archive order.
+            # covering the package's other members, which for a normal package
+            # are debian-binary, control.tar.* and data.tar.*.
             member=""
             if ar p "$deb" _gpgorigin > "${workdir}/sig" 2>/dev/null \
                 && [ -s "${workdir}/sig" ]; then

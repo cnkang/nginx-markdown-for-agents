@@ -388,7 +388,8 @@ verify_signed_by_release_key() {
 }
 
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
-# _gpgorigin covering every other member, in archive order.  Every matching
+# _gpgorigin covering the package's other members, which for a normal package
+# are debian-binary, control.tar.* and data.tar.*.  Every matching
 # package is checked:
 shopt -s nullglob
 debs=(nginx-module-markdown-for-agents_*.deb)
