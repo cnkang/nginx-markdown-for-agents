@@ -12,6 +12,10 @@
 #   - yum (for YUM repository cache test)
 #   - The project GPG signing key imported into the system keyring
 #
+# Environment:
+#   EXPECTED_SIGNER_FPR  Signing-subkey fingerprint a .deb must be signed by.
+#                        Defaults to the published release signing subkey.
+#
 # This script does NOT run locally on macOS. It is designed to execute
 # inside the CI container where all prerequisites are available.
 #
@@ -133,11 +137,16 @@ if [[ -n "$DEB_FILE" ]]; then
             for signed_member in $members; do
                 ar p "$DEB_FILE" "$signed_member" >> "${workdir}/signed" 2>/dev/null
             done
-            # Keep gpg's status: `|| VERIFY_RC=$?` survives `set -e` and still
-            # records the failure.  Judge on that status rather than on the
-            # message text, which gpg localises.
-            SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
-                || VERIFY_RC=$?
+            # Judge on gpg's status output, not on its message text (which gpg
+            # localises) and not on the exit status alone: a good signature
+            # from an unrelated key must not pass.  Override the expected
+            # signer with EXPECTED_SIGNER_FPR when checking another release key.
+            expected_fpr="${EXPECTED_SIGNER_FPR:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
+            SIG_OUTPUT="$(gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
+                || true
+            if ! grep -q "^\[GNUPG:\] VALIDSIG ${expected_fpr} " <<< "$SIG_OUTPUT"; then
+                VERIFY_RC=1
+            fi
         else
             VERIFY_RC=1
         fi

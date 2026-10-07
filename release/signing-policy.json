@@ -37,8 +37,8 @@
       "verification_commands": [
         "ar p \"${DEB_ARTIFACT_PATH}\" _gpgorigin > _gpgorigin.asc",
         "ar t \"${DEB_ARTIFACT_PATH}\" | grep -v '^_gpgorigin$' | while read -r member; do ar p \"${DEB_ARTIFACT_PATH}\" \"${member}\"; done > signed-data",
-        "gpg --verify _gpgorigin.asc signed-data",
-        "gpg --verify SHA256SUMS.asc SHA256SUMS",
+        "gpg --status-fd 1 --verify _gpgorigin.asc signed-data | grep -q '^\\[GNUPG:\\] VALIDSIG ${RELEASE_SIGNING_FINGERPRINT} '",
+        "gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q '^\\[GNUPG:\\] VALIDSIG ${RELEASE_SIGNING_FINGERPRINT} '",
         "dpkg-deb --info \"${DEB_ARTIFACT_PATH}\""
       ],
       "release_pipeline": "canonical 0.9.2 release-packages.yml integrity-signing step signs .deb artifacts with the packaged DEB signing tool before integrity-checksums generates SHA256SUMS; integrity-signature then signs SHA256SUMS.asc"

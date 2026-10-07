@@ -388,28 +388,30 @@ verify_signed_by_release_key() {
 }
 
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
-# _gpgorigin covering every other member, in archive order:
-workdir="$(mktemp -d)"
+# _gpgorigin covering every other member, in archive order.  Every matching
+# package is checked:
 shopt -s nullglob
 debs=(nginx-module-markdown-for-agents_*.deb)
-if [ "${#debs[@]}" -ne 1 ]; then
-  echo "expected exactly one matching .deb, found ${#debs[@]}" >&2
+if [ "${#debs[@]}" -eq 0 ]; then
+  echo "no .deb matching nginx-module-markdown-for-agents_*.deb in this directory" >&2
   exit 1
 fi
-deb="${debs[0]}"
-ar p "$deb" _gpgorigin > "${workdir}/sig"
-members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
-: > "${workdir}/signed"
-for signed_member in $members; do
-  ar p "$deb" "$signed_member" >> "${workdir}/signed"
-done
-if ! verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed"; then
-  echo ".deb signature is not from ${expected_signing_fpr}" >&2
+for deb in "${debs[@]}"; do
+  workdir="$(mktemp -d)"
+  ar p "$deb" _gpgorigin > "${workdir}/sig"
+  members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+  : > "${workdir}/signed"
+  for signed_member in $members; do
+    ar p "$deb" "$signed_member" >> "${workdir}/signed"
+  done
+  if ! verify_signed_by_release_key "${workdir}/sig" "${workdir}/signed"; then
+    echo "$(basename "$deb") signature is not from ${expected_signing_fpr}" >&2
+    rm -rf "${workdir}"
+    exit 1
+  fi
+  echo "OK: $(basename "$deb") signature is from ${expected_signing_fpr}"
   rm -rf "${workdir}"
-  exit 1
-fi
-echo "OK: .deb signature is from ${expected_signing_fpr}"
-rm -rf "${workdir}"
+done
 
 # Verify the RPM header signature in a database holding only the validated
 # release key, so a signature from any other key cannot pass:

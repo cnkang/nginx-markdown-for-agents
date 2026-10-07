@@ -2095,6 +2095,15 @@ jobs:
             echo "ERROR: the release anchor must hold exactly one primary key, found $primary_count" >&2
             exit 1
           fi
+          # It must also carry the fingerprint the signing policy pins, so a
+          # rotation that updates one file and not the other fails here.
+          policy_fpr="$(grep -oE '[0-9A-F]{40}' release/signing-policy.json | head -1)"
+          anchor_fprs="$(gpg --show-keys --with-colons "$anchor" \
+            | awk -F: '$1 == "fpr" {print $10}')"
+          if ! grep -qx "$policy_fpr" <<< "$anchor_fprs"; then
+            echo "ERROR: the release anchor does not carry the policy fingerprint $policy_fpr" >&2
+            exit 1
+          fi
           gpg --batch --yes --import "$anchor" >/dev/null 2>&1
           # Export only the validated key for the RPM database, so nothing else
           # from the file can satisfy its check.
@@ -2105,8 +2114,10 @@ jobs:
           status=0
           debs=(artifacts/*.deb)
           rpms=(artifacts/*.rpm)
-          if [ "${#debs[@]}" -eq 0 ] && [ "${#rpms[@]}" -eq 0 ]; then
-            echo "ERROR: no .deb or .rpm artifacts to verify" >&2
+          # Each type must be present: a build that silently produced none of
+          # one kind would otherwise pass unverified.
+          if [ "${#debs[@]}" -eq 0 ] || [ "${#rpms[@]}" -eq 0 ]; then
+            echo "ERROR: expected at least one .deb and one .rpm, found ${#debs[@]} and ${#rpms[@]}" >&2
             exit 1
           fi
           for deb in "${debs[@]}"; do
