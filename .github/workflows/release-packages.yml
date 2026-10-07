@@ -2088,6 +2088,69 @@ jobs:
             packaging/scripts/sign-packages.sh --require-packages -d artifacts
         shell: bash
 
+      - name: Verify signed packages
+        run: |
+          set -euo pipefail
+          # Confirm the signatures the signing step produced, against the
+          # public anchor users verify with, so a package that reaches the
+          # release unsigned stops the job here.
+          export GNUPGHOME="${RUNNER_TEMP}/verify-gnupg"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "${GNUPGHOME}"' EXIT
+          gpg --batch --yes --import packaging/nginx-markdown-for-agents-release.asc >/dev/null 2>&1
+          shopt -s nullglob
+          status=0
+          debs=(artifacts/*.deb)
+          rpms=(artifacts/*.rpm)
+          if (( ${#debs[@]} == 0 && ${#rpms[@]} == 0 )); then
+            echo "ERROR: no .deb or .rpm artifacts to verify" >&2
+            exit 1
+          fi
+          for deb in "${debs[@]}"; do
+            workdir="$(mktemp -d)"
+            # The embedded signature covers the concatenated debian-binary,
+            # control.tar.gz and data.tar.gz members; debsigs names it
+            # _gpgorigin and dpkg-sig names it _gpgbuilder.
+            ar p "$deb" debian-binary > "${workdir}/bin"
+            ar p "$deb" control.tar.gz > "${workdir}/control"
+            ar p "$deb" data.tar.gz > "${workdir}/data"
+            cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
+            member=""
+            for candidate in _gpgorigin _gpgbuilder; do
+              if ar p "$deb" "$candidate" > "${workdir}/sig" 2>/dev/null \
+                  && [[ -s "${workdir}/sig" ]]; then
+                member="$candidate"
+                break
+              fi
+            done
+            if [[ -z "$member" ]]; then
+              echo "ERROR: $(basename "$deb") has no embedded signature member" >&2
+              status=1
+            elif ! gpg --verify "${workdir}/sig" "${workdir}/signed"; then
+              echo "ERROR: $(basename "$deb") embedded signature does not verify" >&2
+              status=1
+            else
+              echo "OK: $(basename "$deb") carries a valid ${member} signature"
+            fi
+            rm -rf "$workdir"
+          done
+          for rpm_pkg in "${rpms[@]}"; do
+            # rpm names the signer only when the public key is in its own
+            # database, so import the anchor first.
+            rpm --import packaging/nginx-markdown-for-agents-release.asc
+            checksig="$(rpm --checksig "$rpm_pkg" 2>&1 || true)"
+            if grep -q "digests signatures OK" <<< "$checksig"; then
+              echo "OK: $(basename "$rpm_pkg") carries a valid signature"
+            else
+              echo "ERROR: $(basename "$rpm_pkg") signature does not verify" >&2
+              echo "$checksig" >&2
+              status=1
+            fi
+          done
+          exit "$status"
+        shell: bash
+
       - name: Upload signed packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
