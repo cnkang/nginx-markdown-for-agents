@@ -353,20 +353,27 @@ After a release build, verify signatures locally. Every recipe below uses
 installing the pipeline's signing tools:
 
 ```bash
+set -euo pipefail
 # Download the signed packages and nginx-markdown-for-agents-release.asc
 # (the release public key) from the GitHub Release, then import the key:
 gpg --import nginx-markdown-for-agents-release.asc
 
-# Verify the .deb embedded signature.  The package carries the signature as an
-# ar member (_gpgorigin from debsigs, _gpgbuilder on older dpkg-sig artifacts)
-# over the concatenated debian-binary, control.tar.gz and data.tar.gz members:
+# Verify the .deb embedded signature.  debsigs stores it as an ar member named
+# _gpgorigin covering the concatenated debian-binary, control.tar.gz and
+# data.tar.gz members:
 workdir="$(mktemp -d)"
-deb=nginx-module-markdown-for-agents_*.deb
+shopt -s nullglob
+debs=(nginx-module-markdown-for-agents_*.deb)
+if [ "${#debs[@]}" -ne 1 ]; then
+  echo "expected exactly one matching .deb, found ${#debs[@]}" >&2
+  exit 1
+fi
+deb="${debs[0]}"
 ar p "$deb" debian-binary > "${workdir}/bin"
 ar p "$deb" control.tar.gz > "${workdir}/control"
 ar p "$deb" data.tar.gz   > "${workdir}/data"
 cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
-ar p "$deb" _gpgorigin    > "${workdir}/sig"      # _gpgbuilder on dpkg-sig artifacts
+ar p "$deb" _gpgorigin    > "${workdir}/sig"
 gpg --verify "${workdir}/sig" "${workdir}/signed" # -> "Good signature from ..."
 rm -rf "${workdir}"
 
@@ -379,9 +386,10 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check SHA256SUMS
 ```
 
-`debsigs` and `dpkg-sig` embed *different* member names, and their own `--verify`
-subcommands are not interchangeable (`debsigs --verify` reports
-"Verify not yet implemented"). The `gpg --verify` recipe above works for both.
+`debsigs` cannot verify its own output (`debsigs --verify` reports
+"Verify not yet implemented"), so the `gpg --verify` recipe above is the way to
+check the signature it writes. An artifact signed by the older `dpkg-sig` tool
+names its member `_gpgbuilder` instead of `_gpgorigin`.
 
 ---
 
