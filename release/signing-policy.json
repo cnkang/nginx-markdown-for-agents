@@ -33,13 +33,10 @@
       "signing_mechanism": "GPG embedded signature written by the DEB signing tool the supported runner images package (debsigs --sign=origin; dpkg-sig --sign builder on hosts that still carry it), using the repository signing key",
       "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
       "attachment_name": "_gpgorigin member embedded in the .deb ar archive (debsigs); _gpgbuilder on hosts that sign with dpkg-sig. No separate attachment.",
-      "digest_binding": "The embedded signature covers the concatenated debian-binary, control.tar.gz and data.tar.gz members, binding both the control metadata and the payload; package sha256 also listed in SHA256SUMS",
+      "digest_binding": "The embedded signature covers every other member of the ar archive, in archive order, binding both the control metadata and the payload; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
-        "ar p \"${DEB_ARTIFACT_PATH}\" debian-binary > debian-binary",
-        "ar p \"${DEB_ARTIFACT_PATH}\" control.tar.gz > control.tar.gz",
-        "ar p \"${DEB_ARTIFACT_PATH}\" data.tar.gz > data.tar.gz",
-        "cat debian-binary control.tar.gz data.tar.gz > signed-data",
         "ar p \"${DEB_ARTIFACT_PATH}\" _gpgorigin > _gpgorigin.asc",
+        "ar t \"${DEB_ARTIFACT_PATH}\" | grep -v '^_gpgorigin$' | while read -r member; do ar p \"${DEB_ARTIFACT_PATH}\" \"${member}\"; done > signed-data",
         "gpg --verify _gpgorigin.asc signed-data",
         "gpg --verify SHA256SUMS.asc SHA256SUMS",
         "dpkg-deb --info \"${DEB_ARTIFACT_PATH}\""
