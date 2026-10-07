@@ -2140,8 +2140,13 @@ jobs:
             for signed_member in $members; do
               ar p "$deb" "$signed_member" >> "${workdir}/signed"
             done
-            if ! gpg --verify "${workdir}/sig" "${workdir}/signed"; then
-              echo "ERROR: $(basename "$deb") embedded signature does not verify" >&2
+            # Assert the signer explicitly, not just that some key verifies:
+            # gpg's status output names the signing key's fingerprint.
+            verify_output="$(gpg --status-fd 1 --verify "${workdir}/sig" "${workdir}/signed" 2>&1)" \
+              || true
+            if ! grep -q "^\[GNUPG:\] VALIDSIG ${policy_fpr} " <<< "$verify_output"; then
+              echo "ERROR: $(basename "$deb") is not signed by ${policy_fpr}" >&2
+              echo "$verify_output" >&2
               status=1
             else
               echo "OK: $(basename "$deb") carries a valid ${member} signature"
@@ -2155,7 +2160,9 @@ jobs:
           rpm --dbpath "$rpmdb" --import "${RUNNER_TEMP}/release-key.asc"
           for rpm_pkg in "${rpms[@]}"; do
             checksig="$(rpm --dbpath "$rpmdb" --checksig "$rpm_pkg" 2>&1 || true)"
-            if grep -q "digests signatures OK" <<< "$checksig"; then
+            # Require a signature line and no failure marker, rather than one
+            # exact success wording that a later rpm could rephrase.
+            if grep -qi "signature" <<< "$checksig" && ! grep -q "NOT OK" <<< "$checksig"; then
               echo "OK: $(basename "$rpm_pkg") carries a valid signature"
             else
               echo "ERROR: $(basename "$rpm_pkg") signature does not verify" >&2
