@@ -87,14 +87,25 @@ sign_deb() {
     local basename_pkg
     basename_pkg="$(basename "$pkg")"
 
-    if command -v dpkg-sig >/dev/null 2>&1; then
-        info "Signing DEB (dpkg-sig): $basename_pkg"
-        dpkg-sig --sign builder -k "$KEY_ID" "$pkg"
-    elif command -v debsigs >/dev/null 2>&1; then
+    # debsigs first: it is the tool packaged on every supported release, and
+    # it fixes the embedded signature name (_gpgorigin) that the policy and the
+    # verification instructions describe.  dpkg-sig is kept as the fallback for
+    # older hosts that still carry it, where the member is named _gpgbuilder.
+    if command -v debsigs >/dev/null 2>&1; then
         info "Signing DEB (debsigs): $basename_pkg"
-        debsigs --sign=origin -k "$KEY_ID" "$pkg"
+        if ! debsigs --sign=origin -k "$KEY_ID" "$pkg"; then
+            die "debsigs failed to sign $basename_pkg"
+            return 1
+        fi
+    elif command -v dpkg-sig >/dev/null 2>&1; then
+        info "Signing DEB (dpkg-sig): $basename_pkg"
+        if ! dpkg-sig --sign builder -k "$KEY_ID" "$pkg"; then
+            die "dpkg-sig failed to sign $basename_pkg"
+            return 1
+        fi
     else
-        die "Neither dpkg-sig nor debsigs found. Install one to sign .deb packages."
+        die "Neither debsigs nor dpkg-sig found. Install one to sign .deb packages."
+        return 1
     fi
 
     info "OK: $basename_pkg signed successfully"
@@ -112,12 +123,20 @@ sign_rpm() {
 
     if ! command -v rpm >/dev/null 2>&1; then
         die "rpm command not found. Install rpm-sign to sign .rpm packages."
+        return 1
     fi
 
     info "Signing RPM: $basename_pkg"
 
-    # Configure RPM macros for GPG signing
-    rpm --define "%_gpg_name $KEY_ID" --addsign "$pkg"
+    # Configure RPM macros for GPG signing.  %__gpg defaults to `gpg2`, a name
+    # some distributions no longer ship separately from `gpg`; point rpm at the
+    # gpg that is actually installed so signing does not depend on that alias.
+    if ! rpm --define "%_gpg_name $KEY_ID" \
+        --define "%__gpg $(command -v gpg)" \
+        --addsign "$pkg"; then
+        die "rpm --addsign failed to sign $basename_pkg"
+        return 1
+    fi
 
     info "OK: $basename_pkg signed successfully"
     return 0
