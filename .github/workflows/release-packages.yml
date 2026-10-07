@@ -2011,9 +2011,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           # gnupg brings gpg and gpg-agent, which carries gpg-preset-passphrase;
-          # gnupg2 provides the /usr/bin/gpg2 name that rpm's built-in %__gpg
-          # macro invokes, so RPM signing fails without it on a release that
-          # ships only gpg.
+          # gnupg2 supplies the /usr/bin/gpg2 alias that rpm's built-in %__gpg
+          # names.  sign-packages.sh also passes %__gpg explicitly, so signing
+          # does not depend on that alias.
           sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2
           # sign-packages.sh accepts either tool.  Every release from 22.04
           # through 26.04 packages debsigs, and none of them packages
@@ -2109,25 +2109,25 @@ jobs:
           fi
           for deb in "${debs[@]}"; do
             workdir="$(mktemp -d)"
-            # The embedded signature covers the concatenated debian-binary,
-            # control.tar.gz and data.tar.gz members; debsigs names it
-            # _gpgorigin and dpkg-sig names it _gpgbuilder.
-            ar p "$deb" debian-binary > "${workdir}/bin"
-            ar p "$deb" control.tar.gz > "${workdir}/control"
-            ar p "$deb" data.tar.gz > "${workdir}/data"
-            cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
+            # debsigs stores the signature as an ar member named _gpgorigin
+            # covering every other member, in archive order.
             member=""
-            for candidate in _gpgorigin _gpgbuilder; do
-              if ar p "$deb" "$candidate" > "${workdir}/sig" 2>/dev/null \
-                  && [[ -s "${workdir}/sig" ]]; then
-                member="$candidate"
-                break
-              fi
-            done
-            if [[ -z "$member" ]]; then
+            if ar p "$deb" _gpgorigin > "${workdir}/sig" 2>/dev/null \
+                && [ -s "${workdir}/sig" ]; then
+              member="_gpgorigin"
+            fi
+            if [ -z "$member" ]; then
               echo "ERROR: $(basename "$deb") has no embedded signature member" >&2
               status=1
-            elif ! gpg --verify "${workdir}/sig" "${workdir}/signed"; then
+              rm -rf "$workdir"
+              continue
+            fi
+            members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+            : > "${workdir}/signed"
+            for signed_member in $members; do
+              ar p "$deb" "$signed_member" >> "${workdir}/signed"
+            done
+            if ! gpg --verify "${workdir}/sig" "${workdir}/signed"; then
               echo "ERROR: $(basename "$deb") embedded signature does not verify" >&2
               status=1
             else

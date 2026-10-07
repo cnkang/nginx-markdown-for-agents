@@ -359,8 +359,7 @@ set -euo pipefail
 gpg --import nginx-markdown-for-agents-release.asc
 
 # Verify the .deb embedded signature.  debsigs stores it as an ar member named
-# _gpgorigin covering the concatenated debian-binary, control.tar.gz and
-# data.tar.gz members:
+# _gpgorigin covering every other member, in archive order:
 workdir="$(mktemp -d)"
 shopt -s nullglob
 debs=(nginx-module-markdown-for-agents_*.deb)
@@ -369,17 +368,18 @@ if [ "${#debs[@]}" -ne 1 ]; then
   exit 1
 fi
 deb="${debs[0]}"
-ar p "$deb" debian-binary > "${workdir}/bin"
-ar p "$deb" control.tar.gz > "${workdir}/control"
-ar p "$deb" data.tar.gz   > "${workdir}/data"
-cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
-ar p "$deb" _gpgorigin    > "${workdir}/sig"
+ar p "$deb" _gpgorigin > "${workdir}/sig"
+members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+: > "${workdir}/signed"
+for signed_member in $members; do
+  ar p "$deb" "$signed_member" >> "${workdir}/signed"
+done
 gpg --verify "${workdir}/sig" "${workdir}/signed" # -> "Good signature from ..."
 rm -rf "${workdir}"
 
 # Verify the RPM header signature (rpm --import needs the armored key):
 rpm --import nginx-markdown-for-agents-release.asc
-rpm -K nginx-markdown-module-*.rpm                # -> "digests signatures OK"
+rpm -K nginx-module-markdown-for-agents-*.rpm     # -> "digests signatures OK"
 
 # Verify the checksum file:
 gpg --verify SHA256SUMS.asc SHA256SUMS

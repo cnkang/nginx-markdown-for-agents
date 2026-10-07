@@ -109,11 +109,10 @@ YUM_REPO_URL="${YUM_REPO_URL:-}"
 
 # --- Step 1: Verify DEB package signature (embedded GPG signature) ---
 #
-# The embedded signature is a _gpgorigin member written by debsigs, or a
-# _gpgbuilder member written by dpkg-sig, over the concatenation of the
-# debian-binary, control.tar.gz and data.tar.gz members.  Verify it with gpg:
-# the signing tools' own verify subcommands are not portable (debsigs reports
-# "Verify not yet implemented", and dpkg-sig is no longer packaged).
+# debsigs stores the signature as an ar member named _gpgorigin covering every
+# other member, in archive order.  Verify it with gpg: debsigs cannot verify
+# its own output ("Verify not yet implemented"), and dpkg-sig -- which used a
+# different member name and format -- is no longer packaged.
 
 echo "Step 1: DEB package signature verification..." >&2
 
@@ -124,22 +123,18 @@ if [[ -n "$DEB_FILE" ]]; then
         echo "  SKIP: ar/gpg not available on this system" >&2
         pass "DEB signature check skipped (tools not available)"
     else
+        workdir="$(mktemp -d)"
         SIG_OUTPUT=""
-        for member in _gpgorigin _gpgbuilder; do
-            workdir="$(mktemp -d)"
-            if ar p "$DEB_FILE" "$member" > "${workdir}/sig" 2>/dev/null \
-                && [[ -s "${workdir}/sig" ]]; then
-                ar p "$DEB_FILE" debian-binary > "${workdir}/bin" 2>/dev/null
-                ar p "$DEB_FILE" control.tar.gz > "${workdir}/control" 2>/dev/null
-                ar p "$DEB_FILE" data.tar.gz > "${workdir}/data" 2>/dev/null
-                cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" \
-                    > "${workdir}/signed"
-                SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1 || true)"
-                rm -rf "$workdir"
-                break
-            fi
-            rm -rf "$workdir"
-        done
+        if ar p "$DEB_FILE" _gpgorigin > "${workdir}/sig" 2>/dev/null \
+            && [[ -s "${workdir}/sig" ]]; then
+            members="$(ar t "$DEB_FILE" | grep -v '^_gpgorigin$')"
+            : > "${workdir}/signed"
+            for signed_member in $members; do
+                ar p "$DEB_FILE" "$signed_member" >> "${workdir}/signed" 2>/dev/null
+            done
+            SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1 || true)"
+        fi
+        rm -rf "$workdir"
 
         if echo "$SIG_OUTPUT" | grep -qi "Good signature"; then
             pass "DEB package signature valid: $(basename "$DEB_FILE")"

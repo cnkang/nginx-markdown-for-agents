@@ -305,11 +305,12 @@ if [ "${#debs[@]}" -ne 1 ]; then
   exit 1
 fi
 deb="${debs[0]}"
-ar p "$deb" debian-binary > "${workdir}/bin"
-ar p "$deb" control.tar.gz > "${workdir}/control"
-ar p "$deb" data.tar.gz > "${workdir}/data"
-cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
 ar p "$deb" _gpgorigin > "${workdir}/sig"
+members="$(ar t "$deb" | grep -v '^_gpgorigin$')"
+: > "${workdir}/signed"
+for signed_member in $members; do
+  ar p "$deb" "$signed_member" >> "${workdir}/signed"
+done
 gpg --verify "${workdir}/sig" "${workdir}/signed"
 rm -rf "${workdir}"
 ```
