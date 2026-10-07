@@ -2010,7 +2010,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm gnupg-utils
+          # gnupg brings gpg and gpg-agent, which carries gpg-preset-passphrase;
+          # gnupg2 provides the /usr/bin/gpg2 name that rpm's built-in %__gpg
+          # macro invokes, so RPM signing fails without it on a release that
+          # ships only gpg.
+          sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2
           # Either tool signs .deb files and sign-packages.sh accepts both, but
           # no single release carries both: dpkg-sig is absent from 24.04 on,
           # and debsigs is absent from 25.04.  Install whichever this release

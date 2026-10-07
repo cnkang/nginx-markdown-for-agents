@@ -334,7 +334,8 @@ The `release-packages.yml` workflow uses these secrets in its
 
 1. Import the private key into the CI runner's GPG keyring
 2. Configure gpg-agent for non-interactive signing
-3. Sign all `.deb` and `.rpm` packages with `dpkg-sig` and `rpm --addsign`
+3. Sign all `.deb` and `.rpm` packages with the distribution's DEB signing tool
+   (`debsigs`) and `rpm --addsign`
 4. Sign APT repository metadata (`Release.gpg`, `InRelease`)
 5. Sign YUM repository metadata (`repomd.xml.asc`)
 
@@ -347,17 +348,40 @@ Release DEB/RPM channel (see the Overview).
 
 ### Verifying CI Signing
 
-After a release build, verify signatures locally:
+After a release build, verify signatures locally. Every recipe below uses
+`gnupg` and the distribution's own tools, so a user can repeat them without
+installing the pipeline's signing tools:
 
 ```bash
-# Download signed package from GitHub Release
-# Verify DEB signature
-dpkg-sig --verify nginx-markdown-module_*.deb
+# Download the signed packages and nginx-markdown-for-agents-release.asc
+# (the release public key) from the GitHub Release, then import the key:
+gpg --import nginx-markdown-for-agents-release.asc
 
-# Verify RPM signature
-rpm --import gpg.key
-rpm -K nginx-markdown-module-*.rpm
+# Verify the .deb embedded signature.  The package carries the signature as an
+# ar member (_gpgorigin from debsigs, _gpgbuilder on older dpkg-sig artifacts)
+# over the concatenated debian-binary, control.tar.gz and data.tar.gz members:
+workdir="$(mktemp -d)"
+deb=nginx-module-markdown-for-agents_*.deb
+ar p "$deb" debian-binary > "${workdir}/bin"
+ar p "$deb" control.tar.gz > "${workdir}/control"
+ar p "$deb" data.tar.gz   > "${workdir}/data"
+cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
+ar p "$deb" _gpgorigin    > "${workdir}/sig"      # _gpgbuilder on dpkg-sig artifacts
+gpg --verify "${workdir}/sig" "${workdir}/signed" # -> "Good signature from ..."
+rm -rf "${workdir}"
+
+# Verify the RPM header signature (rpm --import needs the armored key):
+rpm --import nginx-markdown-for-agents-release.asc
+rpm -K nginx-markdown-module-*.rpm                # -> "digests signatures OK"
+
+# Verify the checksum file:
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check SHA256SUMS
 ```
+
+`debsigs` and `dpkg-sig` embed *different* member names, and their own `--verify`
+subcommands are not interchangeable (`debsigs --verify` reports
+"Verify not yet implemented"). The `gpg --verify` recipe above works for both.
 
 ---
 

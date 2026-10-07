@@ -291,11 +291,24 @@ sha256sum -c SHA256SUMS.select
 ```
 
 **Per-package signatures** (only for releases whose workflow produces them,
-and not part of the canonical release verification path):
+and not part of the canonical release verification path). The `.deb` carries
+an embedded GPG signature over its `debian-binary`, `control.tar.gz` and
+`data.tar.gz` members; verify it with `gnupg` regardless of which signing tool
+wrote it:
 
 ```bash
-dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
+workdir="$(mktemp -d)"
+ar p nginx-module-markdown-for-agents_*.deb debian-binary > "${workdir}/bin"
+ar p nginx-module-markdown-for-agents_*.deb control.tar.gz > "${workdir}/control"
+ar p nginx-module-markdown-for-agents_*.deb data.tar.gz > "${workdir}/data"
+cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" > "${workdir}/signed"
+ar p nginx-module-markdown-for-agents_*.deb _gpgorigin > "${workdir}/sig"
+gpg --verify "${workdir}/sig" "${workdir}/signed"
+rm -rf "${workdir}"
 ```
+
+Use `_gpgbuilder` instead of `_gpgorigin` for artifacts signed by the older
+`dpkg-sig` tool. See `docs/guides/GPG_KEY_MANAGEMENT.md` for the full recipe.
 
 ---
 

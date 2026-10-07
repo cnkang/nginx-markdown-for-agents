@@ -5,7 +5,7 @@
 # packages, APT repository metadata, and YUM repository metadata.
 #
 # NOTE: This is a CI-only test. It requires a Linux system with:
-#   - dpkg-sig (for DEB signature verification)
+#   - ar and gpg (for DEB signature verification)
 #   - rpm (for RPM signature verification)
 #   - gpg (GnuPG) for metadata signature verification
 #   - apt-get (for APT repository update test)
@@ -107,24 +107,45 @@ YUM_REPODATA_DIR="${YUM_REPODATA_DIR:-}"
 APT_REPO_URL="${APT_REPO_URL:-}"
 YUM_REPO_URL="${YUM_REPO_URL:-}"
 
-# --- Step 1: Verify DEB package signature (dpkg-sig --verify) ---
+# --- Step 1: Verify DEB package signature (embedded GPG signature) ---
+#
+# The embedded signature is a _gpgorigin member written by debsigs, or a
+# _gpgbuilder member written by dpkg-sig, over the concatenation of the
+# debian-binary, control.tar.gz and data.tar.gz members.  Verify it with gpg:
+# the signing tools' own verify subcommands are not portable (debsigs reports
+# "Verify not yet implemented", and dpkg-sig is no longer packaged).
 
 echo "Step 1: DEB package signature verification..." >&2
 
 if [[ -n "$DEB_FILE" ]]; then
     if [[ ! -f "$DEB_FILE" ]]; then
         fail "DEB file not found: $DEB_FILE"
-    elif ! command -v dpkg-sig >/dev/null 2>&1; then
-        echo "  SKIP: dpkg-sig not available on this system" >&2
-        pass "dpkg-sig check skipped (tool not available)"
+    elif ! command -v ar >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+        echo "  SKIP: ar/gpg not available on this system" >&2
+        pass "DEB signature check skipped (tools not available)"
     else
-        SIG_OUTPUT=$(dpkg-sig --verify "$DEB_FILE" 2>&1) || SIG_OUTPUT=""
+        SIG_OUTPUT=""
+        for member in _gpgorigin _gpgbuilder; do
+            workdir="$(mktemp -d)"
+            if ar p "$DEB_FILE" "$member" > "${workdir}/sig" 2>/dev/null \
+                && [[ -s "${workdir}/sig" ]]; then
+                ar p "$DEB_FILE" debian-binary > "${workdir}/bin" 2>/dev/null
+                ar p "$DEB_FILE" control.tar.gz > "${workdir}/control" 2>/dev/null
+                ar p "$DEB_FILE" data.tar.gz > "${workdir}/data" 2>/dev/null
+                cat "${workdir}/bin" "${workdir}/control" "${workdir}/data" \
+                    > "${workdir}/signed"
+                SIG_OUTPUT="$(gpg --verify "${workdir}/sig" "${workdir}/signed" 2>&1 || true)"
+                rm -rf "$workdir"
+                break
+            fi
+            rm -rf "$workdir"
+        done
 
-        if echo "$SIG_OUTPUT" | grep -qi "GOODSIG\|good"; then
+        if echo "$SIG_OUTPUT" | grep -qi "Good signature"; then
             pass "DEB package signature valid: $(basename "$DEB_FILE")"
         else
             fail "DEB package signature invalid: $(basename "$DEB_FILE")"
-            echo "$SIG_OUTPUT" >&2
+            echo "${SIG_OUTPUT:-no embedded signature member found}" >&2
         fi
     fi
 else
