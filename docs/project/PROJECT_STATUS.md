@@ -10,8 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release 0.9.2 (published 2026-10-08)**, the project includes a
-The project includes bounded full-buffer conversion by default (`markdown_streaming off`),
+As of the **current release 0.9.2 (published 2026-10-08)**, the project includes bounded full-buffer conversion by default (`markdown_streaming off`),
 with explicit streaming opt-in,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
