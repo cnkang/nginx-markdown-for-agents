@@ -7,9 +7,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current development line: v0.9.2, with a target release date of 2026-10-03.
-> It is the final planned breaking release before v1.0. v0.9.1 remains the
-> latest published stable release. Use v0.9.2 package downloads after publication.
+> Current release line: v0.9.2, published 2026-10-08 as the latest public
+> stable release. It is the final planned breaking release before v1.0. Use
+> release-tag downloads.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
 HTML pages that you already serve. Clients that send `Accept: text/markdown`
@@ -337,6 +337,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 0.9.2 | 2026-10-08 | Unified the release date to 2026-10-08 and the published release status, and added the Ubuntu 26.04 default-repository NGINX 1.28.3 support rows |
 | 0.9.2 | 2026-10-03 | Update release target, simplify migration guidance, and document complete validation |
 | 0.9.2 | 2026-09-30 | Finalized the entry point for the v0.9.2 stable release (publication date and status). |
 | 0.9.2 | 2026-09-01 | Reorganized the entry point around the 0.9.2 contract and linked canonical guides. |

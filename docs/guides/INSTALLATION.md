@@ -36,7 +36,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-03. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
+> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-08. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any
@@ -1677,6 +1677,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and refreshed the support matrix for Ubuntu 26.04 |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: publication note flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |

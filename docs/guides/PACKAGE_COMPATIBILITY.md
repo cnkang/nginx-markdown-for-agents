@@ -397,6 +397,7 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Added the Ubuntu 26.04 default-repository NGINX 1.28.3 rows to the platform compatibility matrix |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |
 | 0.9.2 | 2026-09-17 | Hermes | Checksum-signature ownership clarified: release-packages.yml signs, release-binaries.yml never does |
 | 0.9.1 | 2026-07-28 | Codex | Clarified that compatibility-matrix coverage does not imply a published package asset; made artifact names version-neutral templates. |

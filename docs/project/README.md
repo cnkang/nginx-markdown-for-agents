@@ -1,6 +1,6 @@
 # Project Documentation
 
-> The project published v0.9.2 on 2026-10-03. Use release-tag downloads.
+> The project published v0.9.2 on 2026-10-08. Use release-tag downloads.
 
 This directory contains project-level status and maintenance-oriented documentation.
 
@@ -44,6 +44,7 @@ Use this section for repository-wide status and maintenance posture. Keep other 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
