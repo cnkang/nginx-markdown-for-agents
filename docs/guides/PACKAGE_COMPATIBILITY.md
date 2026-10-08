@@ -329,6 +329,14 @@ the module from source against your local NGINX installation.
 
 | NGINX Version | Channel | OS | libc | Arch | Artifact | Required Test Level | Tier | State | Blocking | Workflow |
 |---------------|---------|-----|------|------|----------|---------------------|------|-------|----------|----------|
+| 1.31.6 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | linux | musl | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | linux | musl | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | debian12 | glibc | arm64 | deb-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | debian12 | glibc | amd64 | deb-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.6 | mainline | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
@@ -340,6 +348,14 @@ the module from source against your local NGINX installation.
 | 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | functional-check | best-effort | pending | No | `.github/workflows/official-nginx-docker.yml` |
 | 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | linux | musl | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | linux | musl | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | debian12 | glibc | arm64 | deb-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.5 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | smoke-test | best-effort | verified | No | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | linux | musl | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
