@@ -1220,15 +1220,16 @@ def _canonical_dynamic_entry(
         entry["arch"] = arch
         entry["test_level"] = "smoke-test"
         entry["owner_workflow"] = ".github/workflows/release-packages.yml"
-        if entry.get("support_tier") is None:
-            # Existing rows that predate the tier vocabulary default to
-            # full support.  Write the canonical value: the legacy "full"
-            # alias is not a valid support_tier for the release matrix.
-            entry["support_tier"] = "supported"
-        # "Supported" is a release promise: derive the blocking flag from
-        # the retained tier so a regenerated row never contradicts its own
-        # support tier.  The policy matrix validator rejects a supported
-        # row that is not release-blocking.
+        # Normalize the retained tier through the shared alias vocabulary:
+        # a legacy "full" value must not be written back (the release
+        # matrix schema rejects it), and a row without a tier defaults to
+        # full support.  "Supported" is a release promise: derive the
+        # blocking flag from the normalized tier so a regenerated row
+        # never contradicts its own support tier.  The policy matrix
+        # validator rejects a supported row that is not release-blocking.
+        entry["support_tier"] = (
+            normalize_entry_aliases(entry).get("support_tier") or "supported"
+        )
         entry["release_blocking"] = entry["support_tier"] == "supported"
         # Refresh the binding keys with the same computed values as the
         # new-row branch so an existing row never carries stale digests.
