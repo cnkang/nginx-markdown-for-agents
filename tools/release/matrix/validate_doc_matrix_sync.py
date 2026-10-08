@@ -30,16 +30,22 @@ REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 
+# The auto-generated table lives between these markers (the same contract the
+# updater writes); they win over any heading scan when present.
+AUTO_MATRIX_MARKER_BEGIN = "<!-- BEGIN AUTO-GENERATED MATRIX -->"
+AUTO_MATRIX_MARKER_END = "<!-- END AUTO-GENERATED MATRIX -->"
+
 
 def _normalize_tier(tier: str) -> str:
     """
     Normalize a support tier string to a canonical form.
 
     In addition to trimming, lowercasing, and replacing spaces and
-    hyphens with underscores, this function maps the presentation labels
-    that INSTALLATION.md retains for historical reasons to their canonical
-    matrix tier: ``supported`` maps to ``full`` and ``best_effort`` maps
-    to ``source_only``.
+    hyphens with underscores, this function maps the presentation label
+    that INSTALLATION.md retains for historical reasons to its canonical
+    matrix tier: ``supported`` maps to ``full``.  ``best_effort`` keeps its
+    own identity so a best-effort dynamic row stays distinguishable from
+    the ``source_only`` fallback row.
 
     Returns:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
@@ -51,8 +57,6 @@ def _normalize_tier(tier: str) -> str:
     # values into the source of truth.
     if normalized == "supported":
         return "full"
-    if normalized == "best_effort":
-        return "source_only"
     return normalized
 
 
@@ -65,35 +69,31 @@ def _normalize_target(target: str) -> str:
     return canonical_arch(target)
 
 
-def _is_supported_dynamic_entry(item: dict) -> bool:
-    """Return whether an entry represents a supported packaged platform."""
+def _is_generated_dynamic_entry(item: dict) -> bool:
+    """Return whether an entry maps to a generated linux dynamic-module row.
+
+    These are the rows the auto-generated matrix table lists for every
+    supported and best-effort NGINX version on glibc and musl.
+    """
     return (
         item.get("artifact_type") == "dynamic-module"
-        and item.get("support_tier") == "supported"
+        and item.get("os") == "linux"
         and item.get("libc") in {"glibc", "musl"}
         and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
     )
 
 
-def _covered_versions(data: dict) -> set[str]:
-    """Return versions that already have supported packaged platforms."""
-    return {
-        item["nginx_version"]
-        for item in data.get("entries", [])
-        if _is_supported_dynamic_entry(item)
-    }
+def _is_source_fallback_entry(item: dict) -> bool:
+    """Return whether an entry maps to the source fallback row.
 
-
-def _is_required_source_fallback(
-    item: dict, covered_versions: set[str]
-) -> bool:
-    """Return whether an uncovered version needs its source fallback row."""
+    The document renders this row as the ``Source Only`` tier, so the
+    comparison tuple carries that display tier rather than the entry's
+    canonical ``best-effort`` tier.
+    """
     return (
         item.get("artifact_type") == "source"
-        and item.get("support_tier") == "best-effort"
         and item.get("libc") == "n/a"
         and item.get("target") == "any"
-        and item.get("nginx_version") not in covered_versions
     )
 
 
@@ -105,25 +105,32 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         path (Path): Path to the release-matrix.json file.
 
     Returns:
-        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized: trimmed, lowercased, spaces/hyphens replaced with underscores, and the supported/full and best_effort/source_only mappings applied.
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized: trimmed, lowercased, spaces/hyphens replaced with underscores, and the supported/full mapping applied.  Source fallback rows carry the ``source_only`` display tier.
     """
     validated = validate_read_path(path, purpose="doc matrix")
     with open(validated, "r", encoding="utf-8") as f:
         data = normalize_compatibility_document(json.load(f))
 
-    covered_versions = _covered_versions(data)
-    entries = []
-    entries.extend(
-        (
-            item["nginx_version"],
-            item["libc"],
-            _normalize_target(item["target"]),
-            _normalize_tier(item["support_tier"]),
-        )
-        for item in data.get("entries", [])
-        if _is_supported_dynamic_entry(item)
-        or _is_required_source_fallback(item, covered_versions)
-    )
+    entries: list[tuple[str, str, str, str]] = []
+    for item in data.get("entries", []):
+        if _is_generated_dynamic_entry(item):
+            entries.append(
+                (
+                    item["nginx_version"],
+                    item["libc"],
+                    _normalize_target(item["target"]),
+                    _normalize_tier(item["support_tier"]),
+                )
+            )
+        elif _is_source_fallback_entry(item):
+            entries.append(
+                (
+                    item["nginx_version"],
+                    "n/a",
+                    "any",
+                    "source_only",
+                )
+            )
     return sorted(entries)
 
 
@@ -177,11 +184,27 @@ def _normalize_doc_matrix_row(
     return nginx, os_type, arch, normalized_tier
 
 
-def _parse_doc_matrix_entries(
-    content: str,
-) -> list[tuple[str, str, str, str]]:
-    """Parse matrix rows from the document content."""
-    entries = []
+def _marker_block_lines(content: str):
+    """Yield the lines between the auto-generated matrix markers, if present.
+
+    The markers are the updater's generation contract, so a document that
+    carries them is parsed from the marked block.  A block whose END marker
+    is missing yields nothing and lets the heading fallback take over.
+    """
+    lines = content.splitlines()
+    begin = None
+    for index, line in enumerate(lines):
+        if AUTO_MATRIX_MARKER_BEGIN in line:
+            begin = index
+            continue
+        if begin is not None and AUTO_MATRIX_MARKER_END in line:
+            yield from lines[begin + 1 : index]
+            return
+    return
+
+
+def _heading_block_lines(content: str):
+    """Yield the lines of the heading-delimited compatibility matrix section."""
     in_matrix_section = False
 
     for line in content.splitlines():
@@ -197,6 +220,24 @@ def _parse_doc_matrix_entries(
         if not in_matrix_section:
             continue
 
+        yield line
+
+
+def _parse_doc_matrix_entries(
+    content: str,
+) -> list[tuple[str, str, str, str]]:
+    """Parse matrix rows from the document content.
+
+    The auto-generated table is read from between the updater's BEGIN/END
+    markers when they are present; a document without markers falls back to
+    the heading-delimited scan.
+    """
+    lines = list(_marker_block_lines(content))
+    if not lines:
+        lines = list(_heading_block_lines(content))
+
+    entries = []
+    for line in lines:
         row = _parse_table_row(line)
         if row is None:
             continue
