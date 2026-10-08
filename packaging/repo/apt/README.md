@@ -1,6 +1,6 @@
 # nginx-markdown-for-agents APT Repository
 
-> v0.9.2 was published on 2026-10-03. Use release-tag downloads.
+> v0.9.2 was published on 2026-10-08. Use release-tag downloads.
 
 This is the APT package repository for `nginx-module-markdown-for-agents`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal

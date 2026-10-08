@@ -36,7 +36,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-03. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
+> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-08. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
 For a system with NGINX already installed (official build), the following
 release-bound sequence downloads and authenticates the installer before any
@@ -728,86 +728,88 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 ### deb-package
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | best-effort |
-| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
-| 1.30.4 | stable | debian12 | glibc | arm64 | supported |
-| 1.30.4 | stable | debian12 | glibc | amd64 | supported |
-| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.24.0 | stable | debian12 | glibc | arm64 | supported |
-| 1.24.0 | stable | debian12 | glibc | amd64 | supported |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | verified |
+| 1.30.4 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | debian12 | glibc | amd64 | supported | pending |
+| 1.28.3 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.28.3 | stable | debian12 | glibc | amd64 | supported | pending |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported | pending |
+| 1.24.0 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.24.0 | stable | debian12 | glibc | amd64 | supported | pending |
 
 ### docker-image
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.31.5 | mainline | debian12 | glibc | arm64 | best-effort |
-| 1.31.5 | mainline | debian12 | glibc | amd64 | best-effort |
-| 1.31.5 | mainline | alpine3.24 | musl | arm64 | best-effort |
-| 1.31.5 | mainline | alpine3.24 | musl | amd64 | best-effort |
-| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
-| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.31.5 | mainline | debian12 | glibc | arm64 | best-effort | pending |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | best-effort | pending |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | best-effort | pending |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | best-effort | pending |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported | pending |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported | pending |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported | pending |
 
 ### dynamic-module
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.31.5 | mainline | linux | glibc | arm64 | best-effort |
-| 1.31.5 | mainline | linux | musl | arm64 | best-effort |
-| 1.31.5 | mainline | linux | glibc | amd64 | best-effort |
-| 1.31.5 | mainline | linux | musl | amd64 | best-effort |
-| 1.30.4 | stable | linux | glibc | arm64 | supported |
-| 1.30.4 | stable | linux | musl | arm64 | supported |
-| 1.30.4 | stable | linux | glibc | amd64 | supported |
-| 1.30.4 | stable | linux | musl | amd64 | supported |
-| 1.28.3 | stable | linux | glibc | arm64 | supported |
-| 1.28.3 | stable | linux | musl | arm64 | supported |
-| 1.28.3 | stable | linux | glibc | amd64 | supported |
-| 1.28.3 | stable | linux | musl | amd64 | supported |
-| 1.26.3 | stable | linux | glibc | arm64 | supported |
-| 1.26.3 | stable | linux | musl | arm64 | supported |
-| 1.26.3 | stable | linux | glibc | amd64 | supported |
-| 1.26.3 | stable | linux | musl | amd64 | supported |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | best-effort |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | best-effort |
-| 1.24.0 | stable | linux | glibc | arm64 | supported |
-| 1.24.0 | stable | linux | musl | arm64 | supported |
-| 1.24.0 | stable | linux | glibc | amd64 | supported |
-| 1.24.0 | stable | linux | musl | amd64 | supported |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.31.5 | mainline | linux | glibc | arm64 | best-effort | pending |
+| 1.31.5 | mainline | linux | musl | arm64 | best-effort | pending |
+| 1.31.5 | mainline | linux | glibc | amd64 | best-effort | pending |
+| 1.31.5 | mainline | linux | musl | amd64 | best-effort | pending |
+| 1.30.4 | stable | linux | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | linux | musl | arm64 | supported | pending |
+| 1.30.4 | stable | linux | glibc | amd64 | supported | pending |
+| 1.30.4 | stable | linux | musl | amd64 | supported | pending |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | best-effort | pending |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | best-effort | pending |
+| 1.28.3 | stable | linux | glibc | arm64 | supported | pending |
+| 1.28.3 | stable | linux | musl | arm64 | supported | pending |
+| 1.28.3 | stable | linux | glibc | amd64 | supported | pending |
+| 1.28.3 | stable | linux | musl | amd64 | supported | pending |
+| 1.26.3 | stable | linux | glibc | arm64 | supported | pending |
+| 1.26.3 | stable | linux | musl | arm64 | supported | pending |
+| 1.26.3 | stable | linux | glibc | amd64 | supported | pending |
+| 1.26.3 | stable | linux | musl | amd64 | supported | pending |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | best-effort | pending |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
+| 1.24.0 | stable | linux | glibc | arm64 | supported | pending |
+| 1.24.0 | stable | linux | musl | arm64 | supported | pending |
+| 1.24.0 | stable | linux | glibc | amd64 | supported | pending |
+| 1.24.0 | stable | linux | musl | amd64 | supported | pending |
 
 ### homebrew-formula
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.26.3 | stable | macos | darwin | arm64 | experimental |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.26.3 | stable | macos | darwin | arm64 | experimental | pending |
 
 ### rpm-package
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.31.5 | mainline | almalinux9 | glibc | arm64 | best-effort |
-| 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort |
-| 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
-| 1.24.0 | stable | almalinux9 | glibc | arm64 | supported |
-| 1.24.0 | stable | almalinux9 | glibc | amd64 | supported |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | best-effort | pending |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort | pending |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | supported | pending |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported | pending |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported | pending |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported | pending |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported | pending |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | supported | pending |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | supported | pending |
 
 ### source
 
-| NGINX | Channel | OS | libc | Arch | Tier |
-|-------|---------|-----|------|------|------|
-| 1.28.3 | stable | any | n/a | any | best-effort |
-| 1.26.3 | stable | any | n/a | any | best-effort |
+| NGINX | Channel | OS | libc | Arch | Tier | State |
+|-------|---------|-----|------|------|------|-------|
+| 1.28.3 | stable | any | n/a | any | best-effort | verified |
+| 1.26.3 | stable | any | n/a | any | best-effort | pending |
 <!-- END:release-matrix:installation-matrix -->
 
 ---
@@ -1675,6 +1677,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and refreshed the support matrix for Ubuntu 26.04 |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: publication note flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-21 | Hermes | Language review: confirmed passive-voice and semicolon findings rewritten in the active voice |

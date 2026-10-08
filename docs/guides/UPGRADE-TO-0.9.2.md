@@ -22,7 +22,7 @@ them with NGINX's standard `unknown directive` error, and
 0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
 this guide.
 
-> Publication status: the project published 0.9.2 on 2026-10-03. Verify checksums and signatures before installing prebuilt
+> Publication status: the project published 0.9.2 on 2026-10-08. Verify checksums and signatures before installing prebuilt
 > packages. Helm repository publication stays separate from this release.
 
 Choose the upgrade method matching your deployment:
@@ -1109,7 +1109,7 @@ commit. External FFI consumers must regenerate bindings from
 
 ```bash
 cd nginx-markdown-for-agents
-# Fetch the v0.9.2 release tag after publication.
+# Fetch the v0.9.2 release tag.
 RELEASE_TAG=v0.9.2
 git fetch --tags origin "${RELEASE_TAG}"
 # Copy EXPECTED_COMMIT from the independently authenticated release evidence.
@@ -2172,6 +2172,7 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and updated the tag-fetch comment |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: publication status and tag-guidance wording flipped to the published v0.9.2 release |
 | 0.9.2 | 2026-09-23 | Hermes | Updated status: publication pending; no release date is set |

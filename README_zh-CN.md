@@ -7,7 +7,7 @@
 > HTML 进，Markdown 出。
 > 客户端请求时返回，或者由你决定何时提供。
 
-> 当前版本线：v0.9.2 已于 2026-10-03 正式发布，是最新公开稳定版本。
+> 当前版本线：v0.9.2 已于 2026-10-08 正式发布，是最新公开稳定版本。
 > 这是 v1.0 前最后一次计划内的破坏性版本。
 > 安装包可通过 release 标签下载。
 
@@ -190,61 +190,63 @@ curl -sS -D - -o /dev/null \
 
 <!-- BEGIN:release-matrix:support-matrix -->
 
-| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
-|-------|---------|-----|------|------|----------|------|----------|
-| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | musl | amd64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | debian12 | glibc | arm64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | debian12 | glibc | amd64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | alpine3.24 | musl | arm64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | No |
-| 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | No |
-| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.28.3 | stable | any | n/a | any | source | best-effort | No |
-| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
-| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.26.3 | stable | any | n/a | any | source | best-effort | No |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
-| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
+|-------|---------|-----|------|------|----------|------|-------|----------|
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | pending | No |
+| 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | debian12 | glibc | arm64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | verified | No |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | any | n/a | any | source | best-effort | verified | No |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | pending | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | any | n/a | any | source | best-effort | pending | No |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## 文档导航
@@ -315,6 +317,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 0.9.2 | 2026-10-08 | 发布日期统一为 2026-10-08，按已发布状态表述，支持矩阵新增 Ubuntu 26.04 默认仓库 NGINX 1.28.3 条目 |
 | 0.9.2 | 2026-10-03 | 同步发布目标日期、中英文结构、迁移说明与完整验证命令 |
 | 0.9.2 | 2026-09-30 | 将入口文档定稿为 v0.9.2 正式发布状态（发布日期与状态）。 |
 | 0.9.2 | 2026-09-01 | 围绕 0.9.2 合同重组入口文档，并链接规范指南。 |

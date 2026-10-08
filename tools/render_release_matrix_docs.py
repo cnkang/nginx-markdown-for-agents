@@ -457,8 +457,8 @@ def _generate_support_matrix(
 
     lines = [
         "",
-        "| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |",
-        "|-------|---------|-----|------|------|----------|------|----------|",
+        "| NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |",
+        "|-------|---------|-----|------|------|----------|------|-------|----------|",
     ]
 
     sorted_entries = sorted(
@@ -483,6 +483,7 @@ def _generate_support_matrix(
             f"| {entry.get('arch', '')} "
             f"| {entry.get('artifact_type', '')} "
             f"| {tier} "
+            f"| {entry.get('verification_state') or 'pending'} "
             f"| {blocking} |"
         )
 
@@ -607,16 +608,16 @@ def _generate_compatibility_matrix(
     """Generate full compatibility details for docs/guides/PACKAGE_COMPATIBILITY.md.
 
     Includes all columns: NGINX version, channel, OS, libc, arch, artifact,
-    test level, tier, blocking flag, and owner workflow.
+    required test level, tier, verification state, blocking flag, and owner workflow.
     """
     lines = [
         "",
         "## Platform Compatibility Matrix",
         "",
         "| NGINX Version | Channel | OS | libc | Arch | Artifact "
-        + "| Test Level | Tier | Blocking | Workflow |",
+        + "| Required Test Level | Tier | State | Blocking | Workflow |",
         "|---------------|---------|-----|------|------|----------"
-        + "|------------|------|----------|----------|",
+        + "|---------------------|------|-------|----------|----------|",
     ]
 
     sorted_entries = sorted(
@@ -642,6 +643,7 @@ def _generate_compatibility_matrix(
             f"| {entry.get('artifact_type', '')} "
             f"| {entry.get('test_level', '')} "
             f"| {tier} "
+            f"| {entry.get('verification_state') or 'pending'} "
             f"| {blocking} "
             f"| `{entry.get('owner_workflow', '')}` |"
         )
@@ -692,8 +694,8 @@ def _generate_installation_matrix(
             (
                 f"### {atype}",
                 "",
-                "| NGINX | Channel | OS | libc | Arch | Tier |",
-                "|-------|---------|-----|------|------|------|",
+                "| NGINX | Channel | OS | libc | Arch | Tier | State |",
+                "|-------|---------|-----|------|------|------|-------|",
             )
         )
         for entry in aentries:
@@ -704,7 +706,8 @@ def _generate_installation_matrix(
                 f"| {entry.get('os', '')} "
                 f"| {entry.get('libc', '')} "
                 f"| {entry.get('arch', '')} "
-                f"| {tier} |"
+                f"| {tier} "
+                f"| {entry.get('verification_state') or 'pending'} |"
             )
         lines.append("")
 

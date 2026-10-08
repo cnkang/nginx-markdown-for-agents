@@ -48,6 +48,7 @@ MINIMAL_MATRIX: dict = {
             "support_tier": "full",
             "release_blocking": True,
             "owner_workflow": ".github/workflows/release-packages.yml",
+            "verification_state": "verified",
         }
     ],
     "additional_artifacts": [
@@ -265,8 +266,9 @@ def test_generate_support_matrix():
     """Support matrix generator produces valid table."""
     entries = _get_entries()
     result = rmd._generate_support_matrix(entries, MINIMAL_MATRIX)
-    assert "| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |" in result
+    assert "| NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |" in result
     assert "supported" in result
+    assert "verified" in result
     assert "dynamic-module" in result
     # Additional artifacts table
     assert "**Additional Artifacts:**" in result
@@ -278,7 +280,8 @@ def test_generate_compatibility_matrix():
     entries = _get_entries()
     result = rmd._generate_compatibility_matrix(entries, MINIMAL_MATRIX)
     assert "## Platform Compatibility Matrix" in result
-    assert "Test Level" in result
+    assert "Required Test Level" in result
+    assert "State" in result
     assert "Workflow" in result
     assert "### Tier Definitions" in result
     assert "**supported**" in result
@@ -290,7 +293,38 @@ def test_generate_installation_matrix():
     result = rmd._generate_installation_matrix(entries, MINIMAL_MATRIX)
     assert "## Available Packages by Platform" in result
     assert "### dynamic-module" in result
+    assert "| Tier | State |" in result
     assert "### Additional Distribution Channels" in result
+
+
+def test_pending_state_rendered_in_all_tables():
+    """A pending row renders as pending in the support, compatibility, and installation tables."""
+    entries = _get_entries()
+    pending_entry = dict(entries[0])
+    pending_entry["verification_state"] = "pending"
+    for generator in (
+        rmd._generate_support_matrix,
+        rmd._generate_compatibility_matrix,
+        rmd._generate_installation_matrix,
+    ):
+        result = generator([pending_entry], MINIMAL_MATRIX)
+        assert "| pending |" in result
+
+
+def test_missing_state_defaults_to_pending():
+    """A row without a recorded verification state renders as pending, never blank."""
+    entries = _get_entries()
+    stripped = [
+        {k: v for k, v in entry.items() if k != "verification_state"}
+        for entry in entries
+    ]
+    for generator in (
+        rmd._generate_support_matrix,
+        rmd._generate_compatibility_matrix,
+        rmd._generate_installation_matrix,
+    ):
+        result = generator(stripped, MINIMAL_MATRIX)
+        assert "| pending |" in result
 
 
 def test_generate_status_matrix():

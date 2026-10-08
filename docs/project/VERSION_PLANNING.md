@@ -9,11 +9,10 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current development line, targeting release on 2026-10-03.
+- v0.9.2 is the current release line, published 2026-10-08.
   It consolidates the v0.9.1 baseline and resets compatibility.
-- v0.9.1 is the latest published stable release (2026-07-29).
-- Version metadata is 0.9.2. Use the release tag, assets, and checksums
-  after publication.
+- v0.9.1 was the previous published stable release (2026-07-29).
+- Version metadata is 0.9.2. Use the release tag, assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
@@ -154,6 +153,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and updated the current release state |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-10-02 | Hermes | Release finalization: the release date corrected to the finalization day; the tag had never been pushed, so the date was still that of an abandoned first attempt |
 | 0.9.2 | 2026-09-30 | Kang | Release finalization: current release state and evidence wording flipped to the published v0.9.2 release |
