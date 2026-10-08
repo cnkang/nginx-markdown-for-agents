@@ -243,6 +243,31 @@ def test_parse_doc_matrix_reads_the_marker_delimited_block(tmp_path):
     ]
 
 
+def test_parse_doc_matrix_keeps_an_empty_marker_block_empty(tmp_path):
+    """A present but empty marked block does not fall back to another table.
+
+    Once the generator markers exist, the marked block is authoritative:
+    an empty block must fail validation, not silently match some
+    hand-written table elsewhere in the document.
+    """
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "<!-- END AUTO-GENERATED MATRIX -->",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == []
+
+
 def test_best_effort_dynamic_row_compares_with_best_effort_display_label(tmp_path):
     """A best-effort dynamic row maps to the Best-Effort display tier."""
     matrix_path = tmp_path / "release-matrix.json"

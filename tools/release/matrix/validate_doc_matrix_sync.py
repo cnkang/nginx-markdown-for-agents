@@ -186,12 +186,14 @@ def _normalize_doc_matrix_row(
     return nginx, os_type, arch, normalized_tier
 
 
-def _marker_block_lines(content: str):
-    """Yield the lines between the auto-generated matrix markers, if present.
+def _marker_block_lines(content: str) -> list[str] | None:
+    """Return the lines between the auto-generated matrix markers.
 
-    The markers are the updater's generation contract, so a document that
-    carries them is parsed from the marked block.  A block whose END marker
-    is missing yields nothing and lets the heading fallback take over.
+    Returns None when the document carries no BEGIN marker at all, so the
+    caller can fall back to the heading scan for hand-written documents.
+    Once the BEGIN marker is present the marked block is authoritative: an
+    empty or unterminated block returns an empty list, so validation fails
+    instead of silently matching some other table in the document.
     """
     lines = content.splitlines()
     begin = None
@@ -200,9 +202,10 @@ def _marker_block_lines(content: str):
             begin = index
             continue
         if begin is not None and AUTO_MATRIX_MARKER_END in line:
-            yield from lines[begin + 1 : index]
-            return
-    return
+            return lines[begin + 1 : index]
+    if begin is None:
+        return None
+    return []
 
 
 def _heading_block_lines(content: str):
@@ -231,12 +234,13 @@ def _parse_doc_matrix_entries(
     """Parse matrix rows from the document content.
 
     The auto-generated table is read from between the updater's BEGIN/END
-    markers when they are present; a document without markers falls back to
-    the heading-delimited scan.
+    markers when they are present (an empty marked block stays empty, so a
+    broken generated block fails validation instead of matching some other
+    table); a document without markers falls back to the heading-delimited
+    scan.
     """
-    lines = list(_marker_block_lines(content))
-    if not lines:
-        lines = list(_heading_block_lines(content))
+    marked = _marker_block_lines(content)
+    lines = marked if marked is not None else list(_heading_block_lines(content))
 
     entries = []
     for line in lines:
