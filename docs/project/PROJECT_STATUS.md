@@ -10,16 +10,16 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release 0.9.2 (published 2026-10-08)**, the project includes bounded full-buffer conversion by default (`markdown_streaming off`),
-with explicit streaming opt-in,
-Rust-first
-architecture modules for Accept negotiation, conditional requests, decision
-logic, and header plan application, unified decompression budget via
-markdown_limits (conversion_memory, parser_budget, decompressed_size, conversion_timeout, parser_timeout), read-only runtime diagnostics endpoint,
-static configuration with validated reload/restore procedures, DEB/RPM packaging pipeline, Kubernetes
-deployment examples, FFI ABI layout verification, CI supply-chain hardening,
-supplemental static security checks, report-oriented supply-chain visibility, and a
-repo-owned harness for agent workflow governance. The project has
+As of the **current release 0.9.2 (published 2026-10-08)**, the project includes bounded
+full-buffer conversion by default (`markdown_streaming off`) with explicit streaming opt-in.
+It provides Rust-first architecture modules for Accept negotiation, conditional requests,
+decision logic, and header plan application. The project enforces a unified decompression
+budget via `markdown_limits` (conversion_memory, parser_budget, decompressed_size,
+conversion_timeout, parser_timeout). The project also ships a read-only runtime diagnostics
+endpoint and static configuration with validated reload/restore procedures. The delivery
+surface includes a DEB/RPM packaging pipeline, Kubernetes deployment examples, and FFI ABI
+layout verification. CI adds supply-chain hardening, supplemental static security checks,
+and report-oriented supply-chain visibility. A repo-owned harness governs agent workflows. The project has
 implemented and tested the core feature set. The codebase includes unit, integration, E2E,
 fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
