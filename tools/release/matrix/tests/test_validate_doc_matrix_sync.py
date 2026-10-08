@@ -317,6 +317,34 @@ def test_parse_doc_matrix_keeps_an_unterminated_marker_block_empty(tmp_path):
     assert parse_doc_matrix(doc_path) == []
 
 
+def test_parse_doc_matrix_rejects_a_duplicate_begin_marker(tmp_path):
+    """A second BEGIN before the first END is malformed and stays empty.
+
+    The updater owns the block from the first BEGIN through the first END;
+    a document carrying a second BEGIN inside that span must fail
+    validation instead of reading past the malformed region.
+    """
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "| 1.0.0 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "| 1.26.3 | glibc | x86_64 | Full |",
+                "<!-- END AUTO-GENERATED MATRIX -->",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == []
+
+
 def test_best_effort_dynamic_row_compares_with_best_effort_display_label(tmp_path):
     """A best-effort dynamic row maps to the Best-Effort display tier."""
     matrix_path = tmp_path / "release-matrix.json"

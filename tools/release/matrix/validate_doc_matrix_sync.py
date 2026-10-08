@@ -195,13 +195,17 @@ def _marker_block_lines(content: str) -> list[str] | None:
     Returns None when the document carries no BEGIN marker at all, so the
     caller can fall back to the heading scan for hand-written documents.
     Once the BEGIN marker is present the marked block is authoritative: an
-    empty or unterminated block returns an empty list, so validation fails
-    instead of silently matching some other table in the document.
+    empty block, an unterminated block, or a malformed block carrying a
+    second BEGIN marker before the first END marker returns an empty list,
+    so validation fails instead of reading past the malformed region (the
+    updater owns the span from the first BEGIN through the first END).
     """
     lines = content.splitlines()
     begin = None
     for index, line in enumerate(lines):
         if AUTO_MATRIX_MARKER_BEGIN in line:
+            if begin is not None:
+                return []
             begin = index
             continue
         if begin is not None and AUTO_MATRIX_MARKER_END in line:
