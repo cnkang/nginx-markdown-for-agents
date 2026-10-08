@@ -363,7 +363,7 @@ See `examples/docker/` for Docker build examples.
 
 | Tier | Count |
 |------|-------|
-| supported | 36 |
+| supported | 52 |
 | experimental | 1 |
 | best-effort | 18 |
 
@@ -371,14 +371,30 @@ See `examples/docker/` for Docker build examples.
 
 | Entry | Workflow |
 |-------|----------|
+| 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.5 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.5 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.5 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.5 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.6 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.6 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.6 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.6 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.24.0 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
@@ -387,18 +403,10 @@ See `examples/docker/` for Docker build examples.
 | 1.26.3 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
-| 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.26.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
@@ -407,6 +415,14 @@ See `examples/docker/` for Docker build examples.
 | 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.5 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.30.5 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.30.5 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.5 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.31.6 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.31.6 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.31.6 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.31.6 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
 
 ## Summary
