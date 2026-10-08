@@ -193,6 +193,29 @@ def test_load_matrix_entries_retains_source_only_row_with_binary_coverage(tmp_pa
     ]
 
 
+def test_load_matrix_entries_excludes_non_best_effort_source_rows(tmp_path):
+    """The generator only projects best-effort source rows into the document."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.31.5",
+                        "libc": "n/a",
+                        "arch": "any",
+                        "artifact_type": "source",
+                        "support_tier": "experimental",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == []
+
+
 def test_parse_doc_matrix_reads_the_marker_delimited_block(tmp_path):
     """The auto-generated block between the markers wins over any heading."""
     doc_path = tmp_path / "INSTALLATION.md"

@@ -86,12 +86,14 @@ def _is_generated_dynamic_entry(item: dict) -> bool:
 def _is_source_fallback_entry(item: dict) -> bool:
     """Return whether an entry maps to the source fallback row.
 
-    The document renders this row as the ``Source Only`` tier, so the
-    comparison tuple carries that display tier rather than the entry's
-    canonical ``best-effort`` tier.
+    The generator only projects a best-effort source row into the document,
+    so this consumer mirrors that contract exactly.  The row renders as the
+    ``Source Only`` tier, so the comparison tuple carries that display tier
+    rather than the entry's canonical ``best-effort`` tier.
     """
     return (
         item.get("artifact_type") == "source"
+        and item.get("support_tier") == "best-effort"
         and item.get("libc") == "n/a"
         and item.get("target") == "any"
     )
