@@ -318,8 +318,13 @@ def test_missing_state_defaults_to_pending():
         {k: v for k, v in entry.items() if k != "verification_state"}
         for entry in entries
     ]
-    result = rmd._generate_support_matrix(stripped, MINIMAL_MATRIX)
-    assert "| pending |" in result
+    for generator in (
+        rmd._generate_support_matrix,
+        rmd._generate_compatibility_matrix,
+        rmd._generate_installation_matrix,
+    ):
+        result = generator(stripped, MINIMAL_MATRIX)
+        assert "| pending |" in result
 
 
 def test_generate_status_matrix():
