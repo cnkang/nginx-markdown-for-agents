@@ -190,63 +190,63 @@ curl -sS -D - -o /dev/null \
 
 <!-- BEGIN:release-matrix:support-matrix -->
 
-| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
-|-------|---------|-----|------|------|----------|------|----------|
-| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | linux | musl | amd64 | dynamic-module | best-effort | No |
-| 1.31.5 | mainline | debian12 | glibc | arm64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | debian12 | glibc | amd64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | alpine3.24 | musl | arm64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | No |
-| 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | No |
-| 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | No |
-| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | No |
-| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | best-effort | No |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.28.3 | stable | any | n/a | any | source | best-effort | No |
-| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
-| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.26.3 | stable | any | n/a | any | source | best-effort | No |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
-| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | No |
-| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | Yes |
-| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
-| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
-| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
+|-------|---------|-----|------|------|----------|------|-------|----------|
+| 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | pending | No |
+| 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.5 | mainline | debian12 | glibc | arm64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | debian12 | glibc | amd64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | alpine3.24 | musl | arm64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | pending | No |
+| 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
+| 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | verified | No |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | any | n/a | any | source | best-effort | verified | No |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | pending | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | any | n/a | any | source | best-effort | pending | No |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.24.0 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
+| 1.24.0 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## 文档导航
