@@ -292,6 +292,31 @@ def test_parse_doc_matrix_keeps_an_empty_marker_block_empty(tmp_path):
     assert parse_doc_matrix(doc_path) == []
 
 
+def test_parse_doc_matrix_keeps_an_unterminated_marker_block_empty(tmp_path):
+    """A BEGIN marker without an END marker stays authoritative and empty.
+
+    The unterminated-block path falls through to an empty list (the marked
+    block is the generator contract), so validation rejects the document
+    instead of matching an unrelated table elsewhere.
+    """
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "| 1.26.3 | glibc | x86_64 | Full |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == []
+
+
 def test_best_effort_dynamic_row_compares_with_best_effort_display_label(tmp_path):
     """A best-effort dynamic row maps to the Best-Effort display tier."""
     matrix_path = tmp_path / "release-matrix.json"
