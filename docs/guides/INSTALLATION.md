@@ -766,6 +766,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
 | 1.30.4 | stable | linux | musl | amd64 | supported |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | best-effort |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | best-effort |
 | 1.28.3 | stable | linux | glibc | arm64 | supported |
 | 1.28.3 | stable | linux | musl | arm64 | supported |
 | 1.28.3 | stable | linux | glibc | amd64 | supported |

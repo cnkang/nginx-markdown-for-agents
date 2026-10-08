@@ -229,6 +229,8 @@ installation-specific details.
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | best-effort | No |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | No |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
