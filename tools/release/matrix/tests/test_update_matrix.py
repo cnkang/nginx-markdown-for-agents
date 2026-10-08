@@ -1305,6 +1305,44 @@ def test_canonical_dynamic_entry_new_row_derives_blocking_from_tier():
     assert best_effort["release_blocking"] is False
 
 
+def test_canonical_dynamic_entry_defaults_to_supported_tier():
+    """A row without an explicit tier defaults to full support.
+
+    The default must be the canonical vocabulary value ("supported", not
+    the legacy "full" alias the schema rejects) and must stay
+    release-blocking, in both the regenerated-row and the new-row branch.
+    """
+    new_row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        }
+    )
+    assert new_row["support_tier"] == "supported"
+    assert new_row["release_blocking"] is True
+
+    existing = {
+        "nginx_version": "1.28.0",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+    }
+    regenerated = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert regenerated["support_tier"] == "supported"
+    assert regenerated["release_blocking"] is True
+
+
 def test_is_dynamic_module_entry_requires_agreeing_artifact_type():
     """Merged rows never count as dynamic-module rows against their own type.
 

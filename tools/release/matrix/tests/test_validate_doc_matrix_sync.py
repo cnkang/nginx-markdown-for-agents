@@ -216,6 +216,30 @@ def test_load_matrix_entries_excludes_non_best_effort_source_rows(tmp_path):
     assert load_matrix_entries(matrix_path) == []
 
 
+def test_load_matrix_entries_excludes_non_support_tier_dynamic_rows(tmp_path):
+    """The generator drops dynamic rows whose tier is outside the managed set."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.31.5",
+                        "os": "linux",
+                        "libc": "glibc",
+                        "arch": "amd64",
+                        "artifact_type": "dynamic-module",
+                        "support_tier": "experimental",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == []
+
+
 def test_parse_doc_matrix_reads_the_marker_delimited_block(tmp_path):
     """The auto-generated block between the markers wins over any heading."""
     doc_path = tmp_path / "INSTALLATION.md"

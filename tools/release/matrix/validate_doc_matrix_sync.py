@@ -73,11 +73,14 @@ def _is_generated_dynamic_entry(item: dict) -> bool:
     """Return whether an entry maps to a generated linux dynamic-module row.
 
     These are the rows the auto-generated matrix table lists for every
-    supported and best-effort NGINX version on glibc and musl.
+    supported and best-effort NGINX version on glibc and musl.  Rows whose
+    tier is outside the managed set are dropped by the generator and must
+    stay out of the comparison too.
     """
     return (
         item.get("artifact_type") == "dynamic-module"
         and item.get("os") == "linux"
+        and item.get("support_tier") in {"supported", "best-effort"}
         and item.get("libc") in {"glibc", "musl"}
         and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
     )

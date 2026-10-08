@@ -1222,8 +1222,9 @@ def _canonical_dynamic_entry(
         entry["owner_workflow"] = ".github/workflows/release-packages.yml"
         if entry.get("support_tier") is None:
             # Existing rows that predate the tier vocabulary default to
-            # full support (the canonical generated tier).
-            entry["support_tier"] = SUPPORT_TIER
+            # full support.  Write the canonical value: the legacy "full"
+            # alias is not a valid support_tier for the release matrix.
+            entry["support_tier"] = "supported"
         # "Supported" is a release promise: derive the blocking flag from
         # the retained tier so a regenerated row never contradicts its own
         # support tier.  The policy matrix validator rejects a supported
@@ -1243,7 +1244,7 @@ def _canonical_dynamic_entry(
         # A bare arch value (for example "aarch64" via the arch alias)
         # is not a canonical target triple; construct the full triple.
         normalized["target"] = f"{normalized_arch}-unknown-linux-{target_env}"
-    resolved_tier = normalized.get("support_tier", SUPPORT_TIER)
+    resolved_tier = normalized.get("support_tier") or "supported"
     generated = {
         "nginx_version": version,
         "nginx_channel": classify_version(version),
