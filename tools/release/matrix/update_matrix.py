@@ -1219,12 +1219,18 @@ def _canonical_dynamic_entry(
         entry["libc"] = libc
         entry["arch"] = arch
         entry["test_level"] = "smoke-test"
-        entry["release_blocking"] = False
         entry["owner_workflow"] = ".github/workflows/release-packages.yml"
-        if entry.get("support_tier") is None:
-            # Existing rows that predate the tier vocabulary default to
-            # full support (the canonical generated tier).
-            entry["support_tier"] = SUPPORT_TIER
+        # Normalize the retained tier through the shared alias vocabulary:
+        # a legacy "full" value must not be written back (the release
+        # matrix schema rejects it), and a row without a tier defaults to
+        # full support.  "Supported" is a release promise: derive the
+        # blocking flag from the normalized tier so a regenerated row
+        # never contradicts its own support tier.  The policy matrix
+        # validator rejects a supported row that is not release-blocking.
+        entry["support_tier"] = (
+            normalize_entry_aliases(entry).get("support_tier") or "supported"
+        )
+        entry["release_blocking"] = entry["support_tier"] == "supported"
         # Refresh the binding keys with the same computed values as the
         # new-row branch so an existing row never carries stale digests.
         entry["feature_manifest_digest"] = _feature_manifest_digest()
@@ -1239,6 +1245,7 @@ def _canonical_dynamic_entry(
         # A bare arch value (for example "aarch64" via the arch alias)
         # is not a canonical target triple; construct the full triple.
         normalized["target"] = f"{normalized_arch}-unknown-linux-{target_env}"
+    resolved_tier = normalized.get("support_tier") or "supported"
     generated = {
         "nginx_version": version,
         "nginx_channel": classify_version(version),
@@ -1247,9 +1254,9 @@ def _canonical_dynamic_entry(
         "arch": arch,
         "artifact_type": "dynamic-module",
         "test_level": "smoke-test",
-        "release_blocking": False,
+        "release_blocking": resolved_tier == "supported",
         "owner_workflow": ".github/workflows/release-packages.yml",
-        "support_tier": normalized.get("support_tier", SUPPORT_TIER),
+        "support_tier": resolved_tier,
         "feature_manifest_digest": _feature_manifest_digest(),
         "abi_version": _frozen_abi_version(),
     }

@@ -96,6 +96,7 @@ def test_tier_normalization_supported_display_label(tmp_path):
                 "entries": [
                     {
                         "nginx_version": "1.26.3",
+                        "os": "linux",
                         "libc": "musl",
                         "arch": "arm64",
                         "artifact_type": "dynamic-module",
@@ -153,8 +154,13 @@ def test_load_matrix_entries_retains_source_only_row(tmp_path):
     ]
 
 
-def test_load_matrix_entries_omits_redundant_source_only_row(tmp_path):
-    """A source fallback row is hidden when binary coverage exists."""
+def test_load_matrix_entries_retains_source_only_row_with_binary_coverage(tmp_path):
+    """The source fallback row is listed alongside binary coverage.
+
+    The auto-generated table keeps the Source Only row for every source
+    entry in the matrix, even when the same version also has binary rows,
+    so the comparison must retain it too.
+    """
     matrix_path = tmp_path / "release-matrix.json"
     matrix_path.write_text(
         json.dumps(
@@ -162,6 +168,7 @@ def test_load_matrix_entries_omits_redundant_source_only_row(tmp_path):
                 "entries": [
                     {
                         "nginx_version": "1.26.3",
+                        "os": "linux",
                         "libc": "glibc",
                         "arch": "amd64",
                         "artifact_type": "dynamic-module",
@@ -182,4 +189,170 @@ def test_load_matrix_entries_omits_redundant_source_only_row(tmp_path):
 
     assert load_matrix_entries(matrix_path) == [
         ("1.26.3", "glibc", "x86_64", "full"),
+        ("1.26.3", "n/a", "any", "source_only"),
     ]
+
+
+def test_load_matrix_entries_excludes_non_best_effort_source_rows(tmp_path):
+    """The generator only projects best-effort source rows into the document."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.31.5",
+                        "libc": "n/a",
+                        "arch": "any",
+                        "artifact_type": "source",
+                        "support_tier": "experimental",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == []
+
+
+def test_load_matrix_entries_excludes_non_support_tier_dynamic_rows(tmp_path):
+    """The generator drops dynamic rows whose tier is outside the managed set."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.31.5",
+                        "os": "linux",
+                        "libc": "glibc",
+                        "arch": "amd64",
+                        "artifact_type": "dynamic-module",
+                        "support_tier": "experimental",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == []
+
+
+def test_parse_doc_matrix_reads_the_marker_delimited_block(tmp_path):
+    """The auto-generated block between the markers wins over any heading."""
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 1.26.3 | glibc | x86_64 | Full |",
+                "| 1.26.3 | unlisted | unlisted | Source Only |",
+                "<!-- END AUTO-GENERATED MATRIX -->",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == [
+        ("1.26.3", "glibc", "x86_64", "full"),
+        ("1.26.3", "n/a", "any", "source_only"),
+    ]
+
+
+def test_parse_doc_matrix_keeps_an_empty_marker_block_empty(tmp_path):
+    """A present but empty marked block does not fall back to another table.
+
+    Once the generator markers exist, the marked block is authoritative:
+    an empty block must fail validation, not silently match some
+    hand-written table elsewhere in the document.
+    """
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "<!-- END AUTO-GENERATED MATRIX -->",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == []
+
+
+def test_parse_doc_matrix_keeps_an_unterminated_marker_block_empty(tmp_path):
+    """A BEGIN marker without an END marker stays authoritative and empty.
+
+    The unterminated-block path falls through to an empty list (the marked
+    block is the generator contract), so validation rejects the document
+    instead of matching an unrelated table elsewhere.
+    """
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 9.9.9 | glibc | x86_64 | Full |",
+                "<!-- BEGIN AUTO-GENERATED MATRIX -->",
+                "| 1.26.3 | glibc | x86_64 | Full |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert parse_doc_matrix(doc_path) == []
+
+
+def test_best_effort_dynamic_row_compares_with_best_effort_display_label(tmp_path):
+    """A best-effort dynamic row maps to the Best-Effort display tier."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.31.5",
+                        "os": "linux",
+                        "libc": "glibc",
+                        "arch": "amd64",
+                        "artifact_type": "dynamic-module",
+                        "support_tier": "best-effort",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    json_entries = load_matrix_entries(matrix_path)
+
+    doc_path = tmp_path / "INSTALLATION.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "## Platform Compatibility Matrix",
+                "| NGINX Version | OS Type | Architecture | Support Tier |",
+                "|---------------|---------|--------------|--------------|",
+                "| 1.31.5 | glibc | x86_64 | Best-Effort |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    doc_entries = parse_doc_matrix(doc_path)
+
+    assert json_entries == [("1.31.5", "glibc", "x86_64", "best_effort")]
+    assert not compare_matrices(json_entries, doc_entries)

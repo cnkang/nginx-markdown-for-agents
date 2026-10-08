@@ -1249,6 +1249,128 @@ def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
     # must be retained on existing rows (CRITICAL regression: it was
     # previously dropped, producing schema-invalid rows).
     assert row["support_tier"] == "supported"
+    # release_blocking is derived from the retained tier: a regenerated
+    # supported row must stay release-blocking (the policy matrix
+    # validator rejects a supported row that is not release-blocking).
+    assert row["release_blocking"] is True
+
+
+def test_canonical_dynamic_entry_existing_best_effort_row_stays_non_blocking():
+    """A regenerated best-effort row keeps release_blocking False."""
+    existing = {
+        "nginx_version": "1.31.5",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+        "support_tier": "best-effort",
+        "release_blocking": False,
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.31.5",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert row["support_tier"] == "best-effort"
+    assert row["release_blocking"] is False
+
+
+def test_canonical_dynamic_entry_new_row_derives_blocking_from_tier():
+    """A new row derives release_blocking from its resolved support tier."""
+    supported = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+            "support_tier": "full",
+        }
+    )
+    assert supported["support_tier"] == "supported"
+    assert supported["release_blocking"] is True
+
+    best_effort = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+            "support_tier": "best-effort",
+        }
+    )
+    assert best_effort["support_tier"] == "best-effort"
+    assert best_effort["release_blocking"] is False
+
+
+def test_canonical_dynamic_entry_defaults_to_supported_tier():
+    """A row without an explicit tier defaults to full support.
+
+    The default must be the canonical vocabulary value ("supported", not
+    the legacy "full" alias the schema rejects) and must stay
+    release-blocking, in both the regenerated-row and the new-row branch.
+    """
+    new_row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        }
+    )
+    assert new_row["support_tier"] == "supported"
+    assert new_row["release_blocking"] is True
+
+    existing = {
+        "nginx_version": "1.28.0",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+    }
+    regenerated = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert regenerated["support_tier"] == "supported"
+    assert regenerated["release_blocking"] is True
+
+
+def test_canonical_dynamic_entry_normalizes_legacy_full_on_existing_rows():
+    """An existing row carrying the legacy "full" alias is normalized.
+
+    The alias is not a valid canonical tier; the regenerated row must
+    write "supported" and stay release-blocking.
+    """
+    existing = {
+        "nginx_version": "1.24.0",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+        "support_tier": "full",
+        "release_blocking": True,
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.24.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert row["support_tier"] == "supported"
+    assert row["release_blocking"] is True
+
 
 def test_is_dynamic_module_entry_requires_agreeing_artifact_type():
     """Merged rows never count as dynamic-module rows against their own type.
