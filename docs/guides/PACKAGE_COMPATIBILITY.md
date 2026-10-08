@@ -327,8 +327,8 @@ the module from source against your local NGINX installation.
 
 ## Platform Compatibility Matrix
 
-| NGINX Version | Channel | OS | libc | Arch | Artifact | Test Level | Tier | State | Blocking | Workflow |
-|---------------|---------|-----|------|------|----------|------------|------|-------|----------|----------|
+| NGINX Version | Channel | OS | libc | Arch | Artifact | Required Test Level | Tier | State | Blocking | Workflow |
+|---------------|---------|-----|------|------|----------|---------------------|------|-------|----------|----------|
 | 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |

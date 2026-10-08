@@ -483,7 +483,7 @@ def _generate_support_matrix(
             f"| {entry.get('arch', '')} "
             f"| {entry.get('artifact_type', '')} "
             f"| {tier} "
-            f"| {entry.get('verification_state', '')} "
+            f"| {entry.get('verification_state') or 'pending'} "
             f"| {blocking} |"
         )
 
@@ -608,16 +608,16 @@ def _generate_compatibility_matrix(
     """Generate full compatibility details for docs/guides/PACKAGE_COMPATIBILITY.md.
 
     Includes all columns: NGINX version, channel, OS, libc, arch, artifact,
-    test level, tier, verification state, blocking flag, and owner workflow.
+    required test level, tier, verification state, blocking flag, and owner workflow.
     """
     lines = [
         "",
         "## Platform Compatibility Matrix",
         "",
         "| NGINX Version | Channel | OS | libc | Arch | Artifact "
-        + "| Test Level | Tier | State | Blocking | Workflow |",
+        + "| Required Test Level | Tier | State | Blocking | Workflow |",
         "|---------------|---------|-----|------|------|----------"
-        + "|------------|------|-------|----------|----------|",
+        + "|---------------------|------|-------|----------|----------|",
     ]
 
     sorted_entries = sorted(
@@ -643,7 +643,7 @@ def _generate_compatibility_matrix(
             f"| {entry.get('artifact_type', '')} "
             f"| {entry.get('test_level', '')} "
             f"| {tier} "
-            f"| {entry.get('verification_state', '')} "
+            f"| {entry.get('verification_state') or 'pending'} "
             f"| {blocking} "
             f"| `{entry.get('owner_workflow', '')}` |"
         )
@@ -707,7 +707,7 @@ def _generate_installation_matrix(
                 f"| {entry.get('libc', '')} "
                 f"| {entry.get('arch', '')} "
                 f"| {tier} "
-                f"| {entry.get('verification_state', '')} |"
+                f"| {entry.get('verification_state') or 'pending'} |"
             )
         lines.append("")
 
