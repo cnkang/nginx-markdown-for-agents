@@ -38,5 +38,13 @@ updates:
       include: scope
     groups:
       codeql-action:
+        applies-to: version-updates
+        # SHA-pinned sub-actions have separate dependency names.
         patterns:
           - "github/codeql-action"
+          - "github/codeql-action/*"
+      codeql-action-security:
+        applies-to: security-updates
+        patterns:
+          - "github/codeql-action"
+          - "github/codeql-action/*"
