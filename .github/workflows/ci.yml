@@ -953,7 +953,7 @@ jobs:
 
       - name: Upload performance artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-baseline-artifacts
           path: artifacts/perf
@@ -1045,14 +1045,14 @@ jobs:
 
       - name: Upload measurement report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-measurement-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
 
       - name: Upload verdict report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
@@ -1144,7 +1144,7 @@ jobs:
 
       - name: Upload coverage reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-reports
           path: coverage/
@@ -1212,21 +1212,21 @@ jobs:
 
       - name: Upload corpus report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-report-${{ steps.platform.outputs.name }}.json
           path: perf/reports/corpus-report.json
 
       - name: Upload corpus verdict
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
 
       - name: Upload before/after examples
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-examples
           path: perf/reports/examples/

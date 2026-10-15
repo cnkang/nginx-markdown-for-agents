@@ -128,21 +128,21 @@ jobs:
 
       - name: Upload measurement report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-measurement-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
 
       - name: Upload verdict report
         if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
 
       - name: Upload baseline artifact
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-baseline-${{ steps.platform.outputs.name }}.json
           path: perf/baselines/${{ steps.platform.outputs.name }}.json
@@ -174,21 +174,21 @@ jobs:
 
       - name: Upload corpus report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-report-${{ steps.platform.outputs.name }}.json
           path: perf/reports/corpus-report.json
 
       - name: Upload corpus verdict
         if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-verdict-${{ steps.platform.outputs.name }}.json
           path: perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
 
       - name: Upload before/after examples
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: corpus-examples
           path: perf/reports/examples/
@@ -397,7 +397,7 @@ jobs:
             make release-gates-check-092-canonical
 
       - name: Upload canonical module baseline
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: module-baseline-092-${{ github.sha }}
           path: |
@@ -409,7 +409,7 @@ jobs:
 
       - name: Upload debug artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: module-baseline-092-debug-${{ github.sha }}
           path: |

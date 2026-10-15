@@ -632,7 +632,7 @@ jobs:
         shell: bash
 
       - name: Upload module artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: |
@@ -678,7 +678,7 @@ jobs:
             "${MATRIX_ARCH}"
 
       - name: Upload musl module tarball
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-musl-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ matrix.nginx_version }}-musl-${{ matrix.musl_arch }}/*.tar.gz
@@ -875,7 +875,7 @@ jobs:
         shell: bash
 
       - name: Upload DEB artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.deb_filename }}
@@ -883,7 +883,7 @@ jobs:
           retention-days: 5
 
       - name: Upload RPM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
@@ -916,7 +916,7 @@ jobs:
         shell: bash
 
       - name: Upload glibc module tarball
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-glibc-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/ngx_http_markdown_filter_module-*-glibc-*.tar.gz
@@ -1685,7 +1685,7 @@ jobs:
         # and per-target raw logs are exactly what a post-mortem needs; the
         # default upload steps below only run on success paths.
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-qualification-record
           # The version comes from this workflow's own static env block,
@@ -1912,7 +1912,7 @@ jobs:
         shell: bash
 
       - name: Upload SHA256SUMS
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: checksums
           path: artifacts/SHA256SUMS
@@ -1920,7 +1920,7 @@ jobs:
           retention-days: 5
 
       - name: Upload release manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-manifest
           path: artifacts/release-manifest.json
@@ -1929,7 +1929,7 @@ jobs:
 
       - name: Upload canonical source bundle
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: source-bundle
           path: artifacts/nginx-markdown-for-agents-source-*.tar.gz
@@ -1938,7 +1938,7 @@ jobs:
 
       - name: Upload installer bootstrap assets (tag)
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-bootstrap
           path: |
@@ -2198,7 +2198,7 @@ jobs:
         shell: bash
 
       - name: Upload signed packages
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-packages
           path: artifacts/
@@ -2260,7 +2260,7 @@ jobs:
         shell: bash
 
       - name: Upload SHA256SUMS.asc
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: checksums-signature
           path: artifacts/SHA256SUMS.asc
@@ -2405,7 +2405,7 @@ jobs:
 
       - name: Upload as workflow artifacts (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-packages
           path: release-assets/
