@@ -708,7 +708,7 @@ jobs:
           persist-credentials: false
 
       - name: Download build artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: build/
@@ -948,7 +948,7 @@ jobs:
           persist-credentials: false
 
       - name: Download package artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/
@@ -1175,14 +1175,14 @@ jobs:
         # must never try to consume `signed-packages` — that artifact does
         # not exist yet when this job runs and the layout/artifact checks
         # below consume dist/.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-deb-*
           path: dist/
           merge-multiple: true
 
       - name: Download all RPM artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-rpm-*
           path: dist/
@@ -1281,7 +1281,7 @@ jobs:
         shell: bash
 
       - name: Download canonical benchmark NGINX runtime
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           # Download ONLY the canonical benchmark version's module+nginx
           # artifact.  This avoids the filename collision from
@@ -1371,7 +1371,7 @@ jobs:
         # with `if: always()`; this job only runs when that job succeeded
         # (same `if:` plus the `needs:` gate above), so a missing artifact
         # here means the producer never wrote it.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: fuzz-qualification-record
           # env.RELEASE_VERSION is this workflow's own static env value
@@ -1746,14 +1746,14 @@ jobs:
 
       - name: Download signed package artifacts (tag)
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-packages
           path: artifacts/
 
       - name: Download all DEB artifacts (workflow dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-deb-*
           path: artifacts/
@@ -1761,7 +1761,7 @@ jobs:
 
       - name: Download all RPM artifacts (workflow dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-rpm-*
           path: artifacts/
@@ -1769,7 +1769,7 @@ jobs:
 
       - name: Download all glibc module tarballs (workflow dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-glibc-module-*
           path: artifacts/
@@ -1777,7 +1777,7 @@ jobs:
 
       - name: Download all musl module tarballs (workflow dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-musl-module-*
           path: artifacts/
@@ -2000,7 +2000,7 @@ jobs:
           persist-credentials: false
 
       - name: Download package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-*
           path: artifacts/
@@ -2245,7 +2245,7 @@ jobs:
           persist-credentials: false
 
       - name: Download SHA256SUMS
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: checksums
           path: artifacts/
@@ -2312,7 +2312,7 @@ jobs:
     steps:
       - name: Download signed package artifacts (tag)
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-packages
           path: release-assets/
@@ -2320,14 +2320,14 @@ jobs:
 
       - name: Download installer bootstrap assets (tag)
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-bootstrap
           path: release-assets/
 
       - name: Download all DEB artifacts
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-deb-*
           path: release-assets/
@@ -2335,7 +2335,7 @@ jobs:
 
       - name: Download all RPM artifacts
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-rpm-*
           path: release-assets/
@@ -2343,7 +2343,7 @@ jobs:
 
       - name: Download all glibc module tarballs
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-glibc-module-*
           path: release-assets/
@@ -2351,42 +2351,42 @@ jobs:
 
       - name: Download all musl module tarballs
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-musl-module-*
           path: release-assets/
           merge-multiple: true
 
       - name: Download SHA256SUMS
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: checksums
           path: release-assets/
 
       - name: Download SHA256SUMS.asc
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: checksums-signature
           path: release-assets/
 
       - name: Download SHA256SUMS.asc (best-effort for non-tag)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: checksums-signature
           path: release-assets/
 
       - name: Download release manifest
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-manifest
           path: release-assets/
 
       - name: Download canonical source bundle
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: source-bundle
           path: release-assets/
