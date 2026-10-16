@@ -1081,8 +1081,8 @@ def test_manual_dispatch_does_not_sign() -> None:
 
 
 def test_download_artifact_pins_use_the_exact_release_label() -> None:
-    """Pinned download-artifact references carry the v8.0.1 tag comment."""
-    action_sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    """Every download-artifact reference pins v8.0.2 with its exact label."""
+    action_sha = "9000827ccba6bdab643e8b6fd33ac0654aef8333"
     workflows = (
         REPO_ROOT / ".github" / "workflows" / "release-binaries.yml",
         WORKFLOW,
@@ -1091,10 +1091,11 @@ def test_download_artifact_pins_use_the_exact_release_label() -> None:
         pinned_lines = [
             line.strip()
             for line in workflow.read_text(encoding="utf-8").splitlines()
-            if f"actions/download-artifact@{action_sha}" in line
+            if "uses: actions/download-artifact@" in line
         ]
-        assert pinned_lines
-        assert all(line.endswith("# v8.0.1") for line in pinned_lines), workflow
+        assert pinned_lines, workflow
+        expected = f"uses: actions/download-artifact@{action_sha} # v8.0.2"
+        assert all(line == expected for line in pinned_lines), workflow
 
 
 def test_helm_cluster_smoke_serializes_concurrent_runs_on_one_cluster() -> None:
