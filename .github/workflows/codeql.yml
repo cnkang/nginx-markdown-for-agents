@@ -68,7 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for C/C++
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         env:
           # Overlay databases support only build-mode: none; this job needs
           # manual tracing to analyze the compiled production sources.
@@ -104,7 +104,7 @@ jobs:
         run: ./tools/ci/build_nginx_for_codeql.sh
 
       - name: Run CodeQL analysis for C/C++
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:c-cpp"
 
@@ -124,14 +124,14 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for Rust
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: rust
           build-mode: none
           queries: security-extended,security-and-quality
 
       - name: Run CodeQL analysis for Rust
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:rust"
 
@@ -151,14 +151,14 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for Python
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: python
           build-mode: none
           queries: security-extended,security-and-quality
 
       - name: Run CodeQL analysis for Python
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:python"
 
