@@ -720,6 +720,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.5 | glibc | x86_64 | Full |
 | 1.30.5 | musl | aarch64 | Full |
 | 1.30.5 | musl | x86_64 | Full |
+| 1.30.6 | glibc | aarch64 | Best-Effort |
+| 1.30.6 | glibc | x86_64 | Best-Effort |
+| 1.30.6 | musl | aarch64 | Best-Effort |
+| 1.30.6 | musl | x86_64 | Best-Effort |
 | 1.31.5 | glibc | aarch64 | Best-Effort |
 | 1.31.5 | glibc | x86_64 | Best-Effort |
 | 1.31.5 | musl | aarch64 | Best-Effort |
@@ -728,6 +732,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.6 | glibc | x86_64 | Full |
 | 1.31.6 | musl | aarch64 | Full |
 | 1.31.6 | musl | x86_64 | Full |
+| 1.31.7 | glibc | aarch64 | Best-Effort |
+| 1.31.7 | glibc | x86_64 | Best-Effort |
+| 1.31.7 | musl | aarch64 | Best-Effort |
+| 1.31.7 | musl | x86_64 | Best-Effort |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -770,6 +778,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
+| 1.31.7 | mainline | linux | glibc | arm64 | best-effort | pending |
+| 1.31.7 | mainline | linux | musl | arm64 | best-effort | pending |
+| 1.31.7 | mainline | linux | glibc | amd64 | best-effort | pending |
+| 1.31.7 | mainline | linux | musl | amd64 | best-effort | pending |
 | 1.31.6 | mainline | linux | glibc | arm64 | supported | pending |
 | 1.31.6 | mainline | linux | musl | arm64 | supported | pending |
 | 1.31.6 | mainline | linux | glibc | amd64 | supported | pending |
@@ -778,6 +790,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.5 | mainline | linux | musl | arm64 | best-effort | pending |
 | 1.31.5 | mainline | linux | glibc | amd64 | best-effort | pending |
 | 1.31.5 | mainline | linux | musl | amd64 | best-effort | pending |
+| 1.30.6 | stable | linux | glibc | arm64 | best-effort | pending |
+| 1.30.6 | stable | linux | musl | arm64 | best-effort | pending |
+| 1.30.6 | stable | linux | glibc | amd64 | best-effort | pending |
+| 1.30.6 | stable | linux | musl | amd64 | best-effort | pending |
 | 1.30.5 | stable | linux | glibc | arm64 | supported | pending |
 | 1.30.5 | stable | linux | musl | arm64 | supported | pending |
 | 1.30.5 | stable | linux | glibc | amd64 | supported | pending |

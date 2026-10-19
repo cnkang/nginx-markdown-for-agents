@@ -365,7 +365,7 @@ See `examples/docker/` for Docker build examples.
 |------|-------|
 | supported | 52 |
 | experimental | 1 |
-| best-effort | 18 |
+| best-effort | 26 |
 
 ### Release-Blocking Entries
 

@@ -209,6 +209,10 @@ installation-specific details.
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
+| 1.31.7 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.7 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.7 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.7 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
 | 1.31.6 | mainline | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.31.6 | mainline | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.31.6 | mainline | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
@@ -228,6 +232,10 @@ installation-specific details.
 | 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | pending | No |
 | 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
+| 1.30.6 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.6 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.6 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.30.6 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
 | 1.30.5 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.30.5 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.30.5 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
