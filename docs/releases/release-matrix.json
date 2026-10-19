@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:b104010e088f70c3bd69a5374a74e4a609850564e24395a1c824755aa02720a6"
+    "sha256": "sha256:f7accff55611c6c96eaf966a792613927662c36a2a5e26e1f2cb18396cea30d6"
   },
   "entries": [
     {
@@ -904,6 +904,74 @@
       }
     },
     {
+      "nginx_version": "1.30.6",
+      "os": "linux",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.30.6",
+      "os": "linux",
+      "libc": "musl",
+      "target": "aarch64-unknown-linux-musl",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.30.6",
+      "os": "linux",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.30.6",
+      "os": "linux",
+      "libc": "musl",
+      "target": "x86_64-unknown-linux-musl",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
       "nginx_version": "1.31.5",
       "os": "debian12",
       "libc": "glibc",
@@ -1228,6 +1296,74 @@
       "verification_state": "pending",
       "support_stage": "primary",
       "date": "2026-10-08",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.31.7",
+      "os": "linux",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.31.7",
+      "os": "linux",
+      "libc": "musl",
+      "target": "aarch64-unknown-linux-musl",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.31.7",
+      "os": "linux",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
+      "source": "nginx.org",
+      "provenance": {
+        "kind": "nginx.org",
+        "reference": "https://nginx.org/en/download.html"
+      }
+    },
+    {
+      "nginx_version": "1.31.7",
+      "os": "linux",
+      "libc": "musl",
+      "target": "x86_64-unknown-linux-musl",
+      "artifact_type": "dynamic-module",
+      "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
+      "abi_version": 3,
+      "verification_state": "pending",
+      "support_stage": "best-effort",
+      "date": "2026-10-19",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
