@@ -178,6 +178,8 @@ static ngx_int_t
 ngx_http_markdown_plan_validate_entry(ngx_http_request_t *r,
     const FFIHeaderEntry *entry)
 {
+    size_t  i;
+
     (void) r;
 
     if (entry->key == NULL || entry->key_len == 0) {
@@ -186,12 +188,30 @@ ngx_http_markdown_plan_validate_entry(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    for (i = 0; i < (size_t) entry->key_len; i++) {
+        if (entry->key[i] == '\r' || entry->key[i] == '\n') {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: plan entry key contains CR/LF");
+            return NGX_ERROR;
+        }
+    }
+
     if (entry->value == NULL && entry->value_len > 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: plan entry has NULL value "
             "with non-zero length %uz",
             (size_t) entry->value_len);
         return NGX_ERROR;
+    }
+
+    if (entry->value != NULL) {
+        for (i = 0; i < (size_t) entry->value_len; i++) {
+            if (entry->value[i] == '\r' || entry->value[i] == '\n') {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "markdown: plan entry value contains CR/LF");
+                return NGX_ERROR;
+            }
+        }
     }
 
     return NGX_OK;

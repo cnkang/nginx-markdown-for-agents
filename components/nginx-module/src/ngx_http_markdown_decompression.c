@@ -1438,11 +1438,18 @@ ngx_http_markdown_decomp_collect_input(ngx_http_request_t *r,
 
     sz = ngx_http_markdown_chain_size(in);
 
-    if (sz == 0 || sz == (size_t) -1) {
+    if (sz == (size_t) -1) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompression failed, "
                      "invalid input size, category=conversion");
         return NGX_ERROR;
+    }
+
+    if (sz == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: decompression failed, "
+                     "empty compressed body, category=truncated");
+        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
     }
 
     *input_data = ngx_pnalloc(r->pool, sz);
@@ -1666,6 +1673,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     size_t                             output_size;
     size_t                             total_decompressed = 0;
     ngx_int_t                          loop_rc;
+    ngx_int_t                          collect_rc;
     int                                zrc;
     int                                window_bits;
     const ngx_http_markdown_conf_t    *conf;
@@ -1684,10 +1692,11 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     /* Collect all input data into a single buffer and validate its size
      * (shared with the brotli path via ngx_http_markdown_decomp_collect_input
      * so the two decompression backends cannot drift apart on size checks). */
-    if (ngx_http_markdown_decomp_collect_input(r, in, &input_data,
-                                               &input_size) != NGX_OK)
+    collect_rc = ngx_http_markdown_decomp_collect_input(r, in, &input_data,
+                                                        &input_size);
+    if (collect_rc != NGX_OK)
     {
-        return NGX_ERROR;
+        return collect_rc;
     }
 
     ratio_limit = ngx_http_markdown_decomp_ratio_limit(
@@ -1847,6 +1856,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t    *conf;
     ngx_http_markdown_full_brotli_alloc_ctx_t  alloc_ctx;
     ngx_int_t                   rc;
+    ngx_int_t                   collect_rc;
     size_t                      ratio_limit;
     size_t                      output_limit;
     ngx_flag_t                  ratio_limited;
@@ -1861,10 +1871,11 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     /* Collect all input data into a single buffer and validate its size
      * (shared with the zlib path via ngx_http_markdown_decomp_collect_input
      * so the two decompression backends cannot drift apart on size checks). */
-    if (ngx_http_markdown_decomp_collect_input(r, in, &input_data,
-                                               &input_size) != NGX_OK)
+    collect_rc = ngx_http_markdown_decomp_collect_input(r, in, &input_data,
+                                                        &input_size);
+    if (collect_rc != NGX_OK)
     {
-        return NGX_ERROR;
+        return collect_rc;
     }
 
     ratio_limit = ngx_http_markdown_decomp_ratio_limit(
