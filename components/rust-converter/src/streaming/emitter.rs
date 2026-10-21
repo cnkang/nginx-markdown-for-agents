@@ -677,23 +677,7 @@ impl IncrementalEmitter {
                 self.emit_list_prefix(sm)?;
             }
             StructuralContext::CodeBlock(lang) => {
-                self.code_block_depth = self.code_block_depth.saturating_add(1);
-                if self.code_block_depth > 1 {
-                    return Ok(());
-                }
-                self.emit_block_separator()?;
-                // Defer fence emission — the language may be updated by
-                // a nested <code class="language-*"> tag. We mark that
-                // we are in a code block and emit the opening fence
-                // when the first text arrives or on exit.
-                self.in_code_block = true;
-                self.code_fence_lang = lang
-                    .as_deref()
-                    .filter(|value| StructuralStateMachine::is_safe_code_fence_language(value))
-                    .map(ToOwned::to_owned);
-                self.code_block_backtick_max = 0;
-                self.code_block_trailing_backticks = 0;
-                self.code_block_buffer.clear();
+                self.handle_code_block_enter(lang)?;
             }
             StructuralContext::InlineCode => {
                 self.in_inline_code = true;
@@ -826,6 +810,28 @@ impl IncrementalEmitter {
     }
 
     // ── Exit handlers ───────────────────────────────────────────────
+
+    /// Open a code block, ignoring nested opens inside the same block.
+    fn handle_code_block_enter(&mut self, lang: &Option<String>) -> Result<(), ConversionError> {
+        self.code_block_depth = self.code_block_depth.saturating_add(1);
+        if self.code_block_depth > 1 {
+            return Ok(());
+        }
+        self.emit_block_separator()?;
+        // Defer fence emission — the language may be updated by
+        // a nested <code class="language-*"> tag. We mark that
+        // we are in a code block and emit the opening fence
+        // when the first text arrives or on exit.
+        self.in_code_block = true;
+        self.code_fence_lang = lang
+            .as_deref()
+            .filter(|value| StructuralStateMachine::is_safe_code_fence_language(value))
+            .map(ToOwned::to_owned);
+        self.code_block_backtick_max = 0;
+        self.code_block_trailing_backticks = 0;
+        self.code_block_buffer.clear();
+        Ok(())
+    }
 
     fn handle_code_block_exit(&mut self, lang: &Option<String>) -> Result<(), ConversionError> {
         if self.code_block_depth > 1 {
