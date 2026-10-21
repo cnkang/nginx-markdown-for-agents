@@ -89,7 +89,7 @@ Vary: Accept
 ```http
 Content-Type: text/markdown; charset=utf-8
 Vary: Accept
-ETag: "a1b2c3d4e5f6"
+ETag: "0123456789abcdef0123456789abcdef"
 ```
 
 **If Upstream Has Vary**:
@@ -183,7 +183,7 @@ When a client sends `If-None-Match`:
 ```http
 GET /page.html HTTP/1.1
 Accept: text/markdown
-If-None-Match: "a1b2c3d4e5f6"
+If-None-Match: "0123456789abcdef0123456789abcdef"
 ```
 
 The module:
@@ -196,7 +196,7 @@ The module:
 **304 Response**:
 ```http
 HTTP/1.1 304 Not Modified
-ETag: "a1b2c3d4e5f6"
+ETag: "0123456789abcdef0123456789abcdef"
 Vary: Accept
 ```
 
@@ -221,7 +221,7 @@ path evaluates them independently of `markdown_cache_validation` mode:
 ```http
 GET /page.html HTTP/1.1
 Accept: text/markdown
-If-Match: "a1b2c3d4e5f6"
+If-Match: "0123456789abcdef0123456789abcdef"
 ```
 
 For a converted response, the module compares `If-Match` against the
@@ -277,14 +277,14 @@ Accept: text/markdown
 # Response
 HTTP/1.1 200 OK
 Content-Type: text/markdown; charset=utf-8
-ETag: "a1b2c3d4e5f6"
+ETag: "0123456789abcdef0123456789abcdef"
 Vary: Accept
 Cache-Control: max-age=3600
 
 # Second request (within cache lifetime)
 GET /page.html
 Accept: text/markdown
-If-None-Match: "a1b2c3d4e5f6"
+If-None-Match: "0123456789abcdef0123456789abcdef"
 
 # Response
 HTTP/1.1 304 Not Modified
@@ -379,7 +379,7 @@ See [deterministic-output.md](deterministic-output.md) for details.
 curl -D - -H "Accept: text/markdown" http://localhost/page.html
 
 # Look for ETag header
-# ETag: "a1b2c3d4e5f6"
+# ETag: "0123456789abcdef0123456789abcdef"
 ```
 
 ### Test Conditional Request

@@ -240,10 +240,10 @@ sudo yum clean all
 sudo yum install <self-hosted-module-package-name>
 ```
 
-### "Nothing provides nginx-abi-X.Y" dependency error
+### "Nothing provides nginx-rX.Y.Z" dependency error
 
-The module requires a specific NGINX ABI version. Install the matching
-NGINX version from the official NGINX repository:
+The module requires the matching NGINX version capability. Install the
+matching NGINX version from the official NGINX repository:
 
 ```bash
 # Add official NGINX repository first
