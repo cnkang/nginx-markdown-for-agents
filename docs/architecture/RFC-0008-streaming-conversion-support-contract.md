@@ -138,12 +138,13 @@ replacement threshold directive and no size heuristic.
 
 In `auto` mode, every response that clears the eligibility gates and
 passes the pre-selection guards below is a **streaming candidate**. A
-policy other than `auto`/`force` (`off`) and a
-`markdown_stream_excluded_types` match are not streaming candidates: the
-module routes those responses to the bounded full-buffer engine, and a
-response that is not eligible for conversion is never converted at all. Response size is not part of the decision and there is
-no internal candidate boundary: the module treats an unknown-length response
-and a response with a known `Content-Length` alike.
+policy other than `auto`/`force` (`off`) is not a streaming candidate: the
+module routes that response to the bounded full-buffer engine. A response
+that matches `markdown_stream_excluded_types` fails eligibility and is never
+converted at all. It never reaches the path selector. Response size is not
+part of the decision and there is no internal candidate boundary: the module
+treats an unknown-length response and a response with a known `Content-Length`
+alike.
 
 A response that is **not eligible for conversion** is never converted at all:
 the module bypasses the filter and forwards the upstream response. A response
@@ -165,9 +166,10 @@ conversion eligibility:
   and each request runs on the full-buffer path
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
-- a content type matched by `markdown_stream_excluded_types` (the module
-  forwards it unchanged. The exclusion is an eligibility gate, not a
-  full-buffer route)
+
+A `markdown_stream_excluded_types` match is not a pre-selection guard. It fails
+eligibility before this selector and the module forwards the response
+unchanged.
 
 A streaming candidate is an eligible response that passes every
 pre-selection guard above, including the `markdown_streaming` policy
@@ -294,7 +296,6 @@ has NOT sent any Markdown body bytes to the client.
 Triggers for pre-commit fallback:
 
 - HTML parser determines input is unsuitable for streaming.
-- Response matches a hard-excluded content type.
 - A feature requiring full-document correctness turns on.
 - Decompression budget, parser budget, or stream state initialization fails.
 
