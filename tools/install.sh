@@ -10,7 +10,8 @@ set -euo pipefail
 #
 # Do not pipe this file from curl into a root shell, and do not run a
 # downloaded copy without verifying it against the signed manifest: an
-# on-path attacker could replace the bytes before they reach root.
+# on-path attacker could replace the bytes before they reach root. The
+# documented sequence stages the download in a private mktemp directory.
 #
 # OR (in Docker, skip root check):
 #   SKIP_ROOT_CHECK=1 bash /path/to/install.sh
