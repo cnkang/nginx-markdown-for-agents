@@ -2072,27 +2072,56 @@ fi
 helm repo update
 ```
 
-### 2. Upgrade the release
+### 2. Migrate the 0.9.1 chart values
+
+Do not use `--reuse-values`. It copies 0.9.1 defaults such as
+`markdown.maxSize`, `markdown.streaming.budget`, and `metrics.format` into the
+0.9.2 chart. The 0.9.2 schema rejects these keys before rendering.
+
+Export the values that you set:
+
+```bash
+helm get values nginx-markdown -n nginx-markdown -o yaml > values-0.9.1.yaml
+```
+
+Move supported overrides to the 0.9.2 keys:
+
+| 0.9.1 key | 0.9.2 key |
+|---|---|
+| `markdown.maxSize` | `markdown.limits.conversionMemory` |
+| `markdown.timeout` | `markdown.limits.conversionTimeout` |
+| `markdown.streaming.budget` | `markdown.limits.streamingBuffer` |
+| `metrics.format` | Remove. The endpoint is Prometheus-only. |
+| `markdown.streaming.threshold` | Remove. The 0.9.2 selector has no threshold. |
+| `markdown.streaming.shadow` | Remove. |
+| `markdown.bufferChunked` | Remove. |
+
+Write only your own overrides to `values-0.9.2.yaml`. If you had no overrides,
+omit the file and use the chart defaults.
+
+### 3. Upgrade the release
 
 ```bash
 # Use the chart source selected in Step 1.
 # In-tree chart (checked out at the 0.9.2 tag):
 # The chart requires an explicit image.repository plus tag (or digest);
 # image values live at the chart top level, not under markdown.image.
+# Omit -f values-0.9.2.yaml if you had no overrides.
 helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
-    --reuse-values \
+    -f values-0.9.2.yaml \
     --set "image.repository=<your-registry>/nginx-markdown" \
     --set image.tag=v0.9.2
 
 # Remote chart repository (added in Step 1):
 #   helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
 #       --namespace nginx-markdown \
+#       -f values-0.9.2.yaml \
 #       --set "image.repository=<your-registry>/nginx-markdown" \
 #       --set image.tag=v0.9.2
 ```
 
-### 3. Verify
+### 4. Verify
 
 ```bash
 helm status nginx-markdown --namespace nginx-markdown
