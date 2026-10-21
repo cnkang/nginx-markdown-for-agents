@@ -161,13 +161,13 @@ conversion eligibility:
   `markdown_cache_validation full` combination at configuration load
   (`nginx -t`) because the streaming path cannot generate a
   transformed-representation ETag. `markdown_streaming auto` with `full`
-  logs a warning, the module blocks streaming at runtime (reason
-  `streaming_block_full_cache_validation`), and each request runs on the
-  full-buffer path
+  logs a warning, the runtime selector reports `not_candidate` at debug level,
+  and each request runs on the full-buffer path
 - `HEAD` requests and `304 Not Modified` responses
 - a conditional-request policy that needs a complete ETag before the headers
-- a content type matched by `markdown_stream_excluded_types` (routed to the
-  bounded full-buffer engine)
+- a content type matched by `markdown_stream_excluded_types` (the module
+  forwards it unchanged. The exclusion is an eligibility gate, not a
+  full-buffer route)
 
 A streaming candidate is an eligible response that passes every
 pre-selection guard above, including the `markdown_streaming` policy
@@ -189,9 +189,10 @@ checked in this order:
 
 The pre-commit replay window is internal in 0.9.2. The removed
 `markdown_stream_precommit_buffer` directive (256k default) is gone.
-`markdown_limits streaming_buffer=<size>` (2 MiB default, 64k-1g) is the
-shared total per-request budget for the Rust streaming working set and the
-pre-commit replay window. Neither component receives a separate budget.
+`markdown_limits streaming_buffer=<size>` (2 MiB default, 64k-1g) bounds the
+Rust streaming working set and each of the two pre-commit replay buffers
+separately. Peak per-request use can reach about three times this value. No
+component receives a shared pool, and the value is not one combined total.
 
 The replay window holds raw upstream HTML bytes before the module
 commits to Markdown output. If the streaming parser determines during
@@ -204,8 +205,8 @@ budget within which the module can still safely fall back to original HTML.
 ### 2.4 Output Flush Policy
 
 Flushing is internal in 0.9.2. The removed `markdown_stream_flush_min`
-directive (16k minimum output size) is gone. The module uses an
-internal heuristic to decide when to flush pending Markdown output.
+directive (16k minimum output size) is gone. A fixed internal 16 KiB flush
+threshold still applies.
 
 #### Reserved Directive (not implemented in 0.8.0)
 
@@ -317,7 +318,9 @@ conversion or apply `markdown_error_policy` before committing headers.
 - Replay already-read raw bytes from the pre-commit replay buffer.
 - Pass through subsequent upstream body directly.
 - Preserve or restore upstream HTML response headers.
-- Metric: `nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
+- Metric: none. Pre-commit policy outcomes appear as
+  `nginx_markdown_requests_total{outcome="failed_open"}`. The module reserves
+  the `fallback` series for capability fallback.
 
 Original-HTML passthrough is available **only while the replay buffer still
 covers every upstream byte read so far** (see §3.1). When replay is
@@ -328,7 +331,8 @@ through: it must continue safe streaming conversion or apply
 #### `markdown_error_policy fail_closed`
 
 - If headers have not been sent, return 502.
-- Metric: `nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
+- Metric: none. The rejection appears as
+  `nginx_markdown_requests_total{outcome="failed_closed"}`.
 
 ### 3.2 Full-buffer Fallback
 
@@ -365,11 +369,13 @@ the parser allowance.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
 - a section 2.2 pre-selection guard routes an otherwise eligible response to
-  the bounded full-buffer engine (for example `markdown_stream_excluded_types`
-  or a policy other than `auto`/`force`). The guard selects the engine: a
-  response that fails it runs on the bounded full-buffer engine and is not a
-  streaming candidate. A response that is not eligible for conversion is
-  never converted, so it is not a fallback case either.
+  the bounded full-buffer engine (for example a policy other than `auto`/
+  `force`). The guard selects the engine: a response that fails it runs on the
+  bounded full-buffer engine and is not a streaming candidate. A
+  `markdown_stream_excluded_types` match does not reach this guard: it fails
+  eligibility and the module forwards the response unchanged. A response that
+  is not eligible for conversion is never converted, so it is not a fallback
+  case either.
 
 If the response would exceed the full-buffer **input-size** limit
 (`markdown_limits conversion_memory=`) **and the size is
@@ -401,11 +407,12 @@ classification for this normal `auto`-mode decision.
 The following scenarios bypass conversion entirely:
 
 - Response is not convertible HTML.
-- Response exceeds `markdown_limits conversion_memory=` and current policy does not allow
-  streaming to bypass this limit.
+- Response exceeds `markdown_limits conversion_memory=`. The same cumulative
+  input cap applies to both engines.
 - Response is a content type excluded from conversion entirely (the
-  content-type allowlist). A `markdown_stream_excluded_types` match does
-  not bypass: it routes to the bounded full-buffer engine (Section 2.2).
+  content-type allowlist). A `markdown_stream_excluded_types` match bypasses
+  conversion entirely as well: it fails eligibility rather than routing to the
+  full-buffer engine (Section 2.2).
 - Request did not pass Accept negotiation or UA policy.
 - Authenticated request excluded by `markdown_auth_policy deny`.
 - Upstream status code is not in the convertible range.

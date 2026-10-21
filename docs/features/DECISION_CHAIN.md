@@ -79,13 +79,15 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 
 | Order | Check | What It Evaluates | Reason Code on Failure |
 |-------|-------|--------------------|------------------------|
-| 1 | Scope enablement | Is `markdown_filter` enabled (`on`, `1`, `true`, `yes`, or a variable that resolves to a truthy value) for this request's location/server/http context? | `disabled` |
+| 1 | Scope enablement | Is `markdown_filter` enabled (literal `on`/`off`, or a complex value whose evaluated result is `1`/`0`/`on`/`off`/`yes`/`no`/`true`/`false`) for this request's location/server/http context? | `disabled` |
 | 2 | HTTP method | Is the request method `GET` or `HEAD`? Other methods (POST, PUT, DELETE, etc.) are not eligible. | `not_eligible` |
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
+| 4a | Streaming-type exclusion | Does the Content-Type match a built-in streaming exclusion (`text/event-stream`, `application/x-ndjson`, `application/stream+json`) or a `markdown_stream_excluded_types` entry? A match fails eligibility and the response passes through unchanged. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
 | 6 | Response size | When the size is known from headers (Content-Length present): is the response within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap checked before the FFI attempt; oversized input is never truncated. Responses whose size is not known at header time (chunked or missing Content-Length) enter buffering, and an overrun there is a failed conversion attempt governed by `markdown_error_policy`, not this eligibility gate. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
+| 7a | No-transform bypass | Does the upstream response carry `Cache-Control: no-transform`? The module bypasses conversion and serves the original representation. | `bypass_no_transform` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` \| `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
 
@@ -102,7 +104,8 @@ negotiation):
 
 | Condition | Reason Code |
 |-----------|-------------|
-| `Accept` explicitly rejects Markdown (`text/markdown;q=0` or a wildcard with `q=0`) | `skipped_accept_reject` |
+| `Accept` explicitly rejects Markdown (`text/markdown;q=0`) | `skipped_accept_reject` |
+| `Accept` contains only a wildcard with `q=0` and no explicit `text/markdown` entry | `skipped_accept` |
 | No `Accept` header present and `markdown_accept` is `strict` | `skipped_no_accept` |
 | `Accept` present but does not request Markdown (and not the reject case above) | `skipped_accept` |
 
@@ -144,8 +147,8 @@ failures before commit do not break client responses.
 upstream bytes, and the module keeps them in its replay buffer. When it
 can no longer reproduce them before commit (replay-buffer limit exceeded
 or data no longer available), the module MUST fail closed — returning the
-configured error status (429/503/502 via `markdown_error_policy status
-<code>`, or the `fail_closed` policy value) and recording the
+configured error status (`429`/`503` via `markdown_error_policy status
+<code>`, or `502` via the `fail_closed` policy value) and recording the
 `failed_closed` outcome. The module cannot honor a pass policy without the
 original content. This exception GOVERNS over the `pass` policy (see
 ADR-0012).
@@ -166,7 +169,9 @@ Use `fail_closed` only when you need strict guarantees that clients never receiv
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. The sub-classification appears as `reason=<code>` in decision log entries (for example `reason=timeout`, plus `event=` for the emitting site). The `nginx_markdown_requests_total` metric does not carry these sub-classifications. Its `reason` label holds only the ten frozen values (`converted`, `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`, `bypass_no_transform`, `failed_open`, `failed_closed`, `streaming_mid_flight_error`). The `category=` field in the decision log is a separate coarse error class (`conversion`, `resource_limit`, `system`, `unknown`). None of these change the primary outcome (`failed_open` or `failed_closed`), which depends solely on the `markdown_error_policy` setting.
+When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. The sub-classification appears as `reason=<code>` in decision log entries (for example `reason=timeout`, plus `event=` for the emitting site). The `nginx_markdown_requests_total` metric does not carry these sub-classifications. Its `reason` label holds only the ten frozen values (`converted`, `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`, `bypass_no_transform`, `failed_open`, `failed_closed`, `streaming_mid_flight_error`). The `category=` field in the decision log is a separate coarse error class (`conversion`, `resource_limit`, `system`, `unknown`). None of these change the primary outcome, which is `failed_open` or
+`failed_closed` for pre-commit failures and `aborted` for post-commit streaming
+failures.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|

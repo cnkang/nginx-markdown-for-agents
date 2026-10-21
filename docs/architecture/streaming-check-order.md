@@ -42,9 +42,9 @@ header_filter entry
   |      +-- method (GET/HEAD only)
   |      +-- status_code (200 only, 206->range)
   |      +-- range header
-  |      +-- unbounded streaming (text/event-stream + markdown_stream_excluded_types
-  |          route to the bounded full-buffer engine as a path-selection guard;
-  |          neither name bypasses conversion eligibility or passes through)
+  |      +-- unbounded streaming (text/event-stream and
+  |          markdown_stream_excluded_types matches fail eligibility and pass
+  |          through; the path-selection guards are never reached)
   |      +-- content_type (allowlist check)
   |      +-- max_size (historical 0.7.x name; maps to 0.9.2 conversion_memory)
   +-- 5. auth_policy check -> passthrough if deny+authenticated
