@@ -356,6 +356,11 @@ impl MarkdownConverterHandle {
         }
     }
 
+    /// Whether the current thread is the handle's creating worker thread.
+    pub(crate) fn is_thread_owner(&self) -> bool {
+        self.owner_thread == std::thread::current().id()
+    }
+
     /// Assert the NGINX worker-local ownership contract in debug builds.
     pub(crate) fn assert_thread_owner(&self) {
         debug_assert_eq!(

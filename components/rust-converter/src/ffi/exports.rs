@@ -268,8 +268,14 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
-        unsafe { (&*handle).assert_thread_owner() };
+        let owned = unsafe { (&*handle).is_thread_owner() };
+        // Release the allocation before the debug-only ownership assertion so a
+        // debug assert cannot leak the handle.
         unsafe { drop(Box::from_raw(handle)) };
+        debug_assert!(
+            owned,
+            "MarkdownConverterHandle must remain on its creating worker thread"
+        );
     }));
 }
 

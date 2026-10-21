@@ -131,11 +131,15 @@ pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
         // (data, len) corruption that would otherwise be invisible in
         // production.  Release builds keep the silent defensive behavior.
         #[cfg(debug_assertions)]
-        eprintln!(
-            "free_buffer: inconsistent (ptr, len) pair — non-NULL pointer with \
-             len == 0; leaking the allocation and clearing the pointer (caller-side \
-             corruption of an FFI result buffer)"
-        );
+        {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
+                "free_buffer: inconsistent (ptr, len) pair — non-NULL pointer with \
+                 len == 0; leaking the allocation and clearing the pointer (caller-side \
+                 corruption of an FFI result buffer)"
+            );
+        }
         *ptr_field = ptr::null_mut();
         return;
     }
