@@ -197,7 +197,13 @@ The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
    cd components/rust-converter && cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')" && cd ../..
    # Rebuild the NGINX module in the source tree that produced the running
    # binary; the copy below reads objs/ from that tree.
-   cd /path/to/nginx-build
+   : "${NGINX_BUILD_DIR:?Set NGINX_BUILD_DIR to the NGINX source tree that produced the running binary}"
+   if [[ ! -d "$NGINX_BUILD_DIR" \
+       || ! -f "$NGINX_BUILD_DIR/objs/ngx_http_markdown_filter_module.so" ]]; then
+     echo "ERROR: NGINX_BUILD_DIR must contain the rollback module under objs/" >&2
+     exit 1
+   fi
+   cd "$NGINX_BUILD_DIR"
    ```
 
 2. **Restore the matching 0.9.1 configuration, install, validate, and start:**

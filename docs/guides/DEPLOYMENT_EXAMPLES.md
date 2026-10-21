@@ -329,8 +329,10 @@ http {
 
 Full ETag-based conditional request support. Streaming stays disabled. The
 server configuration sets `markdown_streaming off`, and `markdown_cache_validation
-full` also forces the `auto` default onto the full-buffer path. The module can
-then generate a transformed ETag for the complete Markdown output.
+full` requires the full-buffer engine because the module builds the ETag from
+the complete Markdown output. It does not change the configured streaming
+policy. The module can then generate a transformed ETag for the complete
+Markdown output.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
