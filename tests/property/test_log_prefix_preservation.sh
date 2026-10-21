@@ -76,7 +76,11 @@ echo ""
 # commit diagnostics, both with the canonical `markdown:` prefix:
 # ngx_http_markdown_stream_commit_remove_representation_metadata failure
 # (+1 NGX_LOG_ERR) and the 304 headers-list rollback failure (+1 NGX_LOG_ERR).
-BASELINE_LOG_SITES=336
+# Baseline updated when new diagnostics were added for CRLF header rejection,
+# empty decompression input, and auth-variable detection. Keep this aligned
+# with the intentional log-site count; do not change it to mask an accidental
+# deletion of an existing log statement.
+BASELINE_LOG_SITES=339
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=0
