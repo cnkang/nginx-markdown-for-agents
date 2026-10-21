@@ -183,7 +183,10 @@ optimization makes this explicit at the traversal layer and avoids visiting
 child text nodes that would produce no output regardless.
 
 For `<nav>`, `<footer>`, and `<aside>`, pruning skips the entire subtree
-(element and all descendants). This stays disabled by default in 0.4.0.
+(element and all descendants). This stayed disabled by default in 0.4.0.
+Current 0.9.2 builds enable noise pruning by default through
+`markdown_prune_noise on`, and the `prune_noise_regions` Cargo feature is on
+by default.
 
 ### Elements targeted
 

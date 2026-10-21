@@ -148,12 +148,17 @@ Vary: Accept
 
 This is critical for correct caching behavior. Without it, caches might serve the wrong variant to clients.
 
-If the upstream response already has a `Vary` header, the module appends `Accept` to it:
+If the upstream response already has a `Vary` header, the module adds `Accept`
+to the existing list:
 
 ```http
 Upstream:  Vary: User-Agent
 Module:    Vary: User-Agent, Accept
 ```
+
+The module does not add a duplicate when the list already contains `Accept`.
+It also leaves `Vary: *` unchanged, because the wildcard already covers the
+request headers.
 
 ## Eligibility Rules
 
