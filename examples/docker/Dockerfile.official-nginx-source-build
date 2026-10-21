@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NGINX_IMAGE=nginx:mainline
+ARG NGINX_IMAGE=nginx:1.31.7
 ARG MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git
 ARG MODULE_REF=main
 ARG MODULE_SHA=
