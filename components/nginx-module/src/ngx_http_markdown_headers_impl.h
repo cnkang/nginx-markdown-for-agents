@@ -32,7 +32,7 @@
  */
 static ngx_int_t
 ngx_http_markdown_auth_cache_control_required(
-    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     ngx_flag_t *required)
 {
     if (required == NULL) {
