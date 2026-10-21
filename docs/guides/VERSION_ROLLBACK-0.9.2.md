@@ -164,7 +164,12 @@ The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
 5. **Start NGINX:**
 
    ```bash
-   sudo nginx
+   # Use the same supervisor that stopped the service above.
+   if [[ "${SYSTEMD_OWNS_NGINX:-0}" == "1" ]]; then
+     sudo systemctl start nginx
+   else
+     sudo nginx
+   fi
    ```
 
 ### Source Build
@@ -190,7 +195,9 @@ The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
    fi
    git checkout v0.9.1
    cd components/rust-converter && cargo build --release --target "$(rustc -vV | sed -n 's/^host: //p')" && cd ../..
-   # Rebuild NGINX module per your build procedure
+   # Rebuild the NGINX module in the source tree that produced the running
+   # binary; the copy below reads objs/ from that tree.
+   cd /path/to/nginx-build
    ```
 
 2. **Restore the matching 0.9.1 configuration, install, validate, and start:**
@@ -274,7 +281,7 @@ The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
    # The backup must contain nginx.conf, conf.d, module-enablement files,
    # and every included configuration file from the 0.9.1 deployment.
    set -euo pipefail
-   CONFIG_BACKUP="${CONFIG_BACKUP:?set the complete versioned 0.9.1 configuration directory}"
+   CONFIG_BACKUP="${CONFIG_BACKUP:-/var/backups/nginx-markdown-0.9.1/tree}"
    CONFIG_FILE="$(nginx -V 2>&1 | sed -n 's/.*--conf-path=\([^ ]*\).*/\1/p')"
    if [[ "${CONFIG_FILE}" != /*/nginx.conf \
        || ! -f "${CONFIG_BACKUP}/nginx.conf" ]]; then
@@ -391,7 +398,7 @@ Key reversions:
 | `markdown_streaming auto` | `markdown_streaming_engine auto` |
 | `markdown_streaming force` | `markdown_streaming_engine on` |
 | `markdown_flavor commonmark` | `markdown_flavor commonmark` (unchanged) |
-| `markdown_otel on` + `markdown_otel_endpoint <url>` | `markdown_otel_tracing on`; 0.9.0 has no endpoint directive, so move `<url>` to the 0.9.0 collector/native-OTel configuration before enabling tracing. Do not leave `markdown_otel_endpoint` in the restored NGINX configuration. |
+| `markdown_otel on` + `markdown_otel_endpoint <url>` | 0.9.0 keeps both `markdown_otel` and `markdown_otel_endpoint`; restore `markdown_otel_tracing on` and the endpoint value. |
 
 ### Step 3: Install 0.9.0 binary and validate
 

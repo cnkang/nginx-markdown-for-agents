@@ -5,12 +5,10 @@
 1. [Overview](#overview)
 2. [Monitoring and Metrics](#monitoring-and-metrics)
 3. [Troubleshooting](#troubleshooting)
-4. [Performance Tuning](#performance-tuning)
-5. [Upgrade Procedures](#upgrade-procedures)
-6. [Operational Checklists](#operational-checklists)
-7. [Runbooks](#runbooks)
-8. [Reason Code Reference for Operators](#reason-code-reference-for-operators)
-9. [Decision Logging](#decision-logging)
+4. [Operational Checklists](#operational-checklists)
+5. [Runbooks](#runbooks)
+6. [Reason Code Reference for Operators](#reason-code-reference-for-operators)
+7. [Decision Logging](#decision-logging)
 
 ---
 
@@ -87,9 +85,9 @@ curl --fail-with-body -H "Accept: text/plain; version=0.0.4" "$METRICS_URL"
 
 **Example Output:**
 ```text
-# HELP nginx_markdown_requests_total Requests entering the decision chain
+# HELP nginx_markdown_requests_total Total requests with terminal outcome in the module decision chain.
 # TYPE nginx_markdown_requests_total counter
-nginx_markdown_requests_total{outcome="converted",stage="delivery",reason="converted"} 1180
+nginx_markdown_requests_total{outcome="converted",stage="conversion",reason="converted"} 1180
 # TYPE nginx_markdown_conversion_duration_seconds histogram
 nginx_markdown_conversion_duration_seconds_count{engine="full_buffer"} 1180
 ```
@@ -304,8 +302,8 @@ nginx -T | grep markdown_filter
 
 If you use variable-driven enablement (`markdown_filter $some_var;`), also inspect related `map` blocks:
 ```bash
-nginx -T | sed -n '/map \\$http_accept/,/}/p'
-nginx -T | sed -n '/map \\$uri/,/}/p'
+nginx -T | sed -n '/map \$http_accept/,/}/p'
+nginx -T | sed -n '/map \$uri/,/}/p'
 ```
 
 3. **Verify response eligibility:**
@@ -442,10 +440,6 @@ cp /usr/local/nginx/sbin/nginx.backup /usr/local/nginx/sbin/nginx
 cp /usr/local/nginx/modules/ngx_http_markdown_filter_module.so.backup \
    /usr/local/nginx/modules/ngx_http_markdown_filter_module.so
 
-# Restore backup library
-cp /usr/local/lib/libnginx_markdown_converter.a.backup \
-   /usr/local/lib/libnginx_markdown_converter.a
-
 # Restore configuration (if changed)
 cp -r /usr/local/nginx/conf.backup/* /usr/local/nginx/conf/
 
@@ -477,8 +471,9 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.9.1+ | 1.98.1+ | Supported (edition 2024) |
-| 0.9.1+ | < 1.98.1 | Not supported for source builds |
+| 0.9.1 | 1.97+ | Supported for the 0.9.1 source line |
+| 0.9.2+ | 1.98+ (pinned 1.98.1) | Supported (edition 2024) |
+| 0.9.2+ | < 1.98 | Not supported for source builds |
 
 ---
 
@@ -638,11 +633,11 @@ curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/mar
 # Use histogram_quantile over nginx_markdown_conversion_duration_seconds.
 ```
 
-2. **Identify slow requests:**
+2. **Identify slow requests** (requires `error_log ... debug`):
 ```bash
 grep "conversion succeeded" /var/log/nginx/error.log | \
-  grep -o 'time=[0-9]*ms' | \
-  sed 's/time=//;s/ms//' | \
+  grep -o 'elapsed: [0-9]* ms' | \
+  sed 's/elapsed: //;s/ ms//' | \
   sort -n | tail -20
 ```
 
@@ -786,7 +781,7 @@ proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
 
 5. **Clear cache:**
 ```bash
-rm -rf /var/cache/nginx/*
+rm -rf /var/cache/nginx/markdown/*
 nginx -s reload
 ```
 
@@ -826,10 +821,10 @@ ls -lh /usr/local/nginx/modules/ngx_http_markdown_filter_module.so
 # Should exist and have correct permissions
 ```
 
-3. **Verify Rust library:**
+3. **Verify the loaded module:**
 ```bash
-ls -lh /usr/local/lib/libnginx_markdown_converter.a
-# Should exist
+sudo nginx -T 2>/dev/null | grep ngx_http_markdown_filter_module
+# Should show the load_module line
 ```
 
 4. **Check library dependencies:**
@@ -889,13 +884,13 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 2. **Check logs for decompression status:**
 ```bash
-grep -iE "markdown filter: (detected compression|decompression)" /var/log/nginx/error.log | tail -50
+grep -iE "markdown: (detected compression|decompression)" /var/log/nginx/error.log | tail -50
 # Should see: "detected compression type: gzip" and "decompression succeeded"
 ```
 
 3. **If decompression is failing, check error details:**
 ```bash
-grep -iE "markdown filter: decompression failed" /var/log/nginx/error.log | tail -20
+grep -iE "markdown: decompression failed" /var/log/nginx/error.log | tail -20
 # Look for specific error messages (invalid format, corrupted data, etc.)
 ```
 
@@ -938,11 +933,13 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 Every request that enters the module's decision chain receives a canonical
 reason code that explains the outcome. These reason codes appear in decision
-log entries using the `reason=` field and in Prometheus metrics as label
-values. The decision-log `reason=` field and the Prometheus label value use the
-same string for each reason code. Streaming path transitions use a separate
-bounded `event=` field. They are not a second reason-code taxonomy. You can
-correlate a log entry directly with a metric counter without translation. The
+log entries using the `reason=` field. Prometheus metrics carry a bounded
+`reason` label with ten values, so the log field and the metric label are not
+one-to-one: several reason codes fold into one metric label (for example
+`skipped_accept_reject` counts under `skipped_accept`). Correlate a log entry
+with the `outcome` label, and use the log `reason=` value for the specific
+cause. Streaming path transitions use a separate
+bounded `event=` field. They are not a second reason-code taxonomy. The
 request-level outcome classifications (`converted`, `failed_open`,
 `failed_closed`, `aborted`, `skipped`) appear in `nginx_markdown_requests_total` as
 `outcome` (the terminal classification) and `reason` (the outcome-specific
@@ -1010,6 +1007,22 @@ field, never a value of `category=`.
 | `resource_limit` | `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
 | `resource_limit` | `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages. |
 | `system` | `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
+
+The registry also defines these operator-visible codes:
+
+| Reason Code | Stage | Request State | Suggested Operator Action |
+|---|---|---|---|
+| `decompression_error` | `decompression` | FAILED | Inspect the upstream encoding and the [Decompression](../features/DECOMPRESSION.md) guide. |
+| `decompression_budget_exceeded` | `decompression` | FAILED | Raise `decompressed_size` or `decompression_ratio`, or check for a decompression bomb. |
+| `decompression_format_error` | `decompression` | FAILED | Check the upstream encoder and its `Content-Encoding` header. |
+| `decompression_truncated_input` | `decompression` | FAILED | Verify that the upstream transfer completed. |
+| `decompression_io_error` | `decompression` | FAILED | Check upstream connection stability. |
+| `budget_exceeded` | `parsing` | FAILED | Raise `parser_budget` or exclude heavy pages. |
+| `replay_error` | `precommit` | FAILED | Inspect the streaming buffer budget and retry the request. |
+| `encoding_header_invalid` | `decompression` | FAILED | Fix the malformed `Content-Encoding` grammar at the upstream. |
+| `header_plan_apply_error` | `precommit` | FAILED | Treat as urgent; collect logs and report a bug. |
+| `streaming_mid_flight_error` | `delivery` | FAILED (`aborted`) | Treat as urgent because the response may be truncated. |
+| `overload` | `eligibility` | SKIPPED | Raise `max_inflight` or scale workers. |
 
 ### Request States
 
