@@ -1017,16 +1017,13 @@ ngx_http_markdown_has_auth_cookies(const ngx_http_request_t *r,
  * than as request headers (for example `$remote_user` after basic auth).
  */
 static ngx_int_t
-ngx_http_markdown_variable_nonempty(ngx_http_request_t *r, const char *name)
+ngx_http_markdown_variable_nonempty(ngx_http_request_t *r, ngx_str_t *variable)
 {
-    ngx_str_t                  variable;
-    ngx_http_variable_value_t *value;
+    const ngx_http_variable_value_t *value;
 
-    variable.data = (u_char *) name;
-    variable.len = ngx_strlen(name);
-
-    value = ngx_http_get_variable(r, &variable,
-                                  ngx_hash_key_lc(variable.data, variable.len));
+    value = ngx_http_get_variable(r, variable,
+                                  ngx_hash_key_lc(variable->data,
+                                                  variable->len));
 
     return value != NULL && value->valid && !value->not_found
            && value->len > 0;
@@ -1042,7 +1039,7 @@ static ngx_int_t
 ngx_http_markdown_ssl_client_verified(ngx_http_request_t *r)
 {
     ngx_str_t                  variable = ngx_string("ssl_client_verify");
-    ngx_http_variable_value_t *value;
+    const ngx_http_variable_value_t *value;
 
     value = ngx_http_get_variable(r, &variable,
                                   ngx_hash_key_lc(variable.data, variable.len));
@@ -1067,7 +1064,7 @@ ngx_http_markdown_ssl_client_verified(ngx_http_request_t *r)
  * @return      1 if authenticated, 0 otherwise
  */
 ngx_int_t
-ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
+ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
                                    const ngx_http_markdown_conf_t *conf)
 {
     if (r == NULL) {
@@ -1086,14 +1083,14 @@ ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
 
 #ifndef NGX_HTTP_MARKDOWN_TEST_STUBS
     /* Check NGINX auth variables. The variable API does not mutate the
-     * request, so the const qualification on this entry point is preserved. */
-    if (ngx_http_markdown_variable_nonempty((ngx_http_request_t *) r,
-                                            "remote_user"))
-    {
+     * request; the non-const parameter matches the NGINX variable API. */
+    ngx_str_t remote_user = ngx_string("remote_user");
+
+    if (ngx_http_markdown_variable_nonempty(r, &remote_user)) {
         return 1;
     }
 
-    if (ngx_http_markdown_ssl_client_verified((ngx_http_request_t *) r)) {
+    if (ngx_http_markdown_ssl_client_verified(r)) {
         return 1;
     }
 #endif
