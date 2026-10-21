@@ -461,7 +461,14 @@ fn append_deflate_output(
 }
 
 /// Decompress brotli data with budget enforcement.
+///
+/// Uses the low-level stream API so the decoder can report how many input
+/// bytes remain at stream end. The reader wrapper used elsewhere returns
+/// `Ok(0)` on the first zero-output read and cannot distinguish a clean end
+/// from trailing bytes or a second concatenated stream.
 fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResult, DecompError> {
+    use brotli_decompressor::{BrotliDecompressStream, BrotliResult, BrotliState, StandardAlloc};
+
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty brotli payload: the compressed body is missing entirely, not a stream truncated mid-way"
@@ -469,9 +476,75 @@ fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompRe
         ));
     }
 
-    let decoder = brotli::Decompressor::new(input, 4096);
-    let output = read_bounded(decoder, budget, input.len(), ratio)?;
-    Ok(DecompResult { output })
+    let ratio_cap = if ratio > 0 {
+        usize::try_from((input.len() as u64).saturating_mul(ratio)).unwrap_or(usize::MAX)
+    } else {
+        usize::MAX
+    };
+
+    let mut state = BrotliState::new(
+        StandardAlloc::default(),
+        StandardAlloc::default(),
+        StandardAlloc::default(),
+    );
+    let mut available_in = input.len();
+    let mut input_offset = 0usize;
+    let mut output = Vec::new();
+    let mut buffer = vec![0u8; 8192];
+    let mut written = 0usize;
+
+    loop {
+        let remaining = budget.saturating_sub(output.len());
+        let mut available_out = buffer.len().min(remaining.max(1));
+        let mut output_offset = 0usize;
+        let result = BrotliDecompressStream(
+            &mut available_in,
+            &mut input_offset,
+            input,
+            &mut available_out,
+            &mut output_offset,
+            &mut buffer,
+            &mut written,
+            &mut state,
+        );
+
+        let produced = output_offset;
+        if produced > 0 {
+            if output.len().saturating_add(produced) > budget {
+                return Err(DecompError::BudgetExceeded);
+            }
+            if output.len().saturating_add(produced) > ratio_cap {
+                return Err(DecompError::RatioExceeded);
+            }
+            output
+                .try_reserve_exact(produced)
+                .map_err(|_| DecompError::BudgetExceeded)?;
+            output.extend_from_slice(&buffer[..produced]);
+        }
+
+        match result {
+            BrotliResult::ResultSuccess => {
+                if available_in != 0 {
+                    return Err(DecompError::FormatError(format!(
+                        "trailing data after brotli stream: {} byte(s) remain",
+                        available_in
+                    )));
+                }
+                return Ok(DecompResult { output });
+            }
+            BrotliResult::NeedsMoreOutput => continue,
+            BrotliResult::NeedsMoreInput => {
+                return Err(DecompError::TruncatedInput(
+                    "brotli stream ended before the decoder reached a final block".to_string(),
+                ));
+            }
+            BrotliResult::ResultFailure => {
+                return Err(DecompError::FormatError(
+                    "invalid brotli stream".to_string(),
+                ));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -651,6 +724,26 @@ mod tests {
         let compressed = brotli_compress(original);
         let result = decompress_bounded(&compressed, Format::Brotli, 1024, 0).unwrap();
         assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn brotli_rejects_trailing_bytes() {
+        let mut compressed = brotli_compress(b"complete brotli stream");
+        compressed.extend_from_slice(b"trailing bytes");
+
+        let result = decompress_bounded(&compressed, Format::Brotli, 1024, 0);
+
+        assert_eq!(result.unwrap_err().error_category(), 102);
+    }
+
+    #[test]
+    fn brotli_rejects_a_concatenated_second_stream() {
+        let mut compressed = brotli_compress(b"first");
+        compressed.extend_from_slice(&brotli_compress(b"second"));
+
+        let result = decompress_bounded(&compressed, Format::Brotli, 1024, 0);
+
+        assert_eq!(result.unwrap_err().error_category(), 102);
     }
 
     #[test]
