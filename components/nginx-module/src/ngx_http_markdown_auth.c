@@ -1009,12 +1009,58 @@ ngx_http_markdown_has_auth_cookies(const ngx_http_request_t *r,
     return 0;
 }
 
+#ifndef NGX_HTTP_MARKDOWN_TEST_STUBS
+/*
+ * Check whether a request variable exists and is non-empty.
+ *
+ * Used for authentication signals that NGINX exposes as variables rather
+ * than as request headers (for example `$remote_user` after basic auth).
+ */
+static ngx_int_t
+ngx_http_markdown_variable_nonempty(ngx_http_request_t *r, const char *name)
+{
+    ngx_str_t                  variable;
+    ngx_http_variable_value_t *value;
+
+    variable.data = (u_char *) name;
+    variable.len = ngx_strlen(name);
+
+    value = ngx_http_get_variable(r, &variable,
+                                  ngx_hash_key_lc(variable.data, variable.len));
+
+    return value != NULL && value->valid && !value->not_found
+           && value->len > 0;
+}
+
+/*
+ * Check whether the TLS client certificate verification succeeded.
+ *
+ * `$ssl_client_verify` is "SUCCESS" or "FAILED:<reason>" (or empty when no
+ * client certificate was presented). Only the success prefix counts.
+ */
+static ngx_int_t
+ngx_http_markdown_ssl_client_verified(ngx_http_request_t *r)
+{
+    ngx_str_t                  variable = ngx_string("ssl_client_verify");
+    ngx_http_variable_value_t *value;
+
+    value = ngx_http_get_variable(r, &variable,
+                                  ngx_hash_key_lc(variable.data, variable.len));
+
+    return value != NULL && value->valid && !value->not_found
+           && value->len >= sizeof("SUCCESS") - 1
+           && ngx_strncmp(value->data, "SUCCESS", sizeof("SUCCESS") - 1) == 0;
+}
+#endif /* NGX_HTTP_MARKDOWN_TEST_STUBS */
+
 /*
  * Check if request is authenticated
  *
  * A request is considered authenticated if it has:
  * 1. Authorization header, OR
- * 2. Authentication cookies matching configured patterns
+ * 2. Authentication cookies matching configured patterns, OR
+ * 3. A non-empty `$remote_user` (basic auth / auth_request), OR
+ * 4. `$ssl_client_verify` equal to SUCCESS (mTLS)
  *
  * @param r     The request structure
  * @param conf  Module configuration
@@ -1037,6 +1083,20 @@ ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
     if (ngx_http_markdown_has_auth_cookies(r, conf)) {
         return 1;
     }
+
+#ifndef NGX_HTTP_MARKDOWN_TEST_STUBS
+    /* Check NGINX auth variables. The variable API does not mutate the
+     * request, so the const qualification on this entry point is preserved. */
+    if (ngx_http_markdown_variable_nonempty((ngx_http_request_t *) r,
+                                            "remote_user"))
+    {
+        return 1;
+    }
+
+    if (ngx_http_markdown_ssl_client_verified((ngx_http_request_t *) r)) {
+        return 1;
+    }
+#endif
 
     return 0;
 }
