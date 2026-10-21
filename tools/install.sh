@@ -3,27 +3,14 @@ set -euo pipefail
 
 # NGINX Markdown for Agents Install Script
 #
-# Usage (private-staging bootstrap; see docs/guides/INSTALLATION.md for the
-# canonical GPG-authenticated recipe, which also authenticates the bytes).
-# The subshell keeps `set -e` and the EXIT trap out of your interactive shell:
-# pasted directly, errexit would persist and the trap would fire when that shell
-# exits.
-#   (
-#     set -e
-#     VERSION=v0.9.2
-#     WORKDIR="$(mktemp -d)" && trap 'rm -rf "$WORKDIR"' EXIT
-#     curl -fsSL -o "$WORKDIR/installer.sh" \
-#       "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh"
-#     sudo env VERSION="${VERSION}" bash "$WORKDIR/installer.sh"
-#   )
+# Usage: follow the authenticated release-bound sequence in
+# docs/guides/INSTALLATION.md#2-shortest-success-path. It downloads the
+# signed SHA256SUMS manifest, verifies the detached signature and the
+# installer hash, and only then runs this script with sudo.
 #
-# Do not download into a shared /tmp name and then run it with sudo: an
-# unprivileged local user can pre-create that file, deny the downloader write
-# access, and have root execute their bytes when the download fails.  The
-# private mktemp directory is what closes that: its name is unpredictable and
-# its mode forbids another user from pre-creating the file.  The recipe also
-# needs `set -e`, because a failed download leaves no file and `sudo bash` on a
-# missing path is what a pasted recipe would otherwise run.
+# Do not pipe this file from curl into a root shell, and do not run a
+# downloaded copy without verifying it against the signed manifest: an
+# on-path attacker could replace the bytes before they reach root.
 #
 # OR (in Docker, skip root check):
 #   SKIP_ROOT_CHECK=1 bash /path/to/install.sh

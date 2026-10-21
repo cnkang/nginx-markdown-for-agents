@@ -54,11 +54,34 @@ privileged execution, then verifies both Markdown and HTML responses:
 # pinned fingerprint below through a genuinely independent source (an HTTPS
 # page on a different domain, a web-of-trust signature, or a vendor
 # announcement) before trusting the verification.
-set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSL -o "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"; : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"
+set -euo pipefail
+RELEASE_TAG=v0.9.2
+RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
+WORKDIR="$(mktemp -d)"
+GNUPGHOME="$(mktemp -d)"
+trap 'rm -rf "${WORKDIR}" "${GNUPGHOME}"' EXIT
+curl --proto '=https' --tlsv1.2 -fsSL \
+  -o "${WORKDIR}/${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" \
+  -o "${WORKDIR}/SHA256SUMS" "${RELEASE_BASE}/SHA256SUMS" \
+  -o "${WORKDIR}/SHA256SUMS.asc" "${RELEASE_BASE}/SHA256SUMS.asc"
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"
 # The literal below is a copy of the canonical trust anchor in
 # docs/guides/GPG_KEY_MANAGEMENT.md; update it only after independently
 # authenticating the replacement fingerprint.
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import "${RELEASE_KEY_PATH}"; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"; printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -; sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+gpg --batch --homedir "${GNUPGHOME}" --import "${RELEASE_KEY_PATH}"
+VALIDSIG="$(gpg --batch --homedir "${GNUPGHOME}" --status-fd=1 \
+  --verify "${WORKDIR}/SHA256SUMS.asc" "${WORKDIR}/SHA256SUMS" 2>/dev/null \
+  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+[[ "${VALIDSIG}" == "${TRUSTED_FINGERPRINT}" ]] || exit 1
+CHECKSUM_LINE="$(awk -v file="${INSTALLER}" \
+  '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' \
+  "${WORKDIR}/SHA256SUMS")"
+printf '%s\n' "${CHECKSUM_LINE}" | (cd "${WORKDIR}" && sha256sum -c -)
+sudo env VERSION="${RELEASE_TAG}" bash "${WORKDIR}/${INSTALLER}"
+sudo nginx -t
+sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
@@ -1258,12 +1281,14 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    release asset itself is not the trust anchor.
    Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
+   set -euo pipefail
    # Set these values from a GitHub Release that lists both assets.
    RELEASE_TAG="<published-release-tag>"
    NGINX_VERSION="<nginx-version>"
    OS_TYPE="<os-type>"
    ARCH="<arch>"
-   # Obtain the key from a repository clone, never from the Release assets:
+   # The release also publishes a copy of the key; use the repository copy
+   # and authenticate the fingerprint independently.
    #   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
    RELEASE_KEY_PATH="/path/to/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
    BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
@@ -1278,8 +1303,9 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
      | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
    [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
-   grep -E "  ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}\.tar\.gz$" SHA256SUMS \
-     | sha256sum -c -
+   CHECKSUM_LINE="$(awk -v file="ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz" \
+     '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' SHA256SUMS)"
+   printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -
    ```
 5. Transfer the files to the target system and install manually, or use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 

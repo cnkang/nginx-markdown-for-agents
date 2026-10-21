@@ -132,8 +132,11 @@ repository URL exists and has passed release validation.
 ### Future YUM/DNF Repository Users (RHEL, AlmaLinux, Amazon Linux)
 
 ```bash
-# Import the GPG key
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+# Download and fingerprint-check the GPG key before importing it.
+curl -fsSL -o /tmp/nginx-markdown.key https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --with-fingerprint /tmp/nginx-markdown.key
+# Compare the printed fingerprint with the value published out-of-band.
+sudo rpm --import /tmp/nginx-markdown.key
 
 # Add the repository
 sudo tee /etc/yum.repos.d/nginx-markdown.repo <<'EOF'
