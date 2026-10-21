@@ -93,9 +93,9 @@ Config time validates `max_inflight` as an integer greater than 0
 `current >= max_inflight`. With the enforced positive bound the worker
 has always reached the configured limit at that point.
 
-1. The module records a terminal request outcome in the frozen
-   `nginx_markdown_requests_total{outcome,stage,reason}` family with
-   `reason="overload"`.
+1. The module logs `reason="overload"` and counts the request as bypassed.
+   The frozen Prometheus `requests_total` family has no `overload` series, so
+   the event is visible in the decision log and diagnostics only.
 2. The request is **not** counted in the inflight counter
 3. The configured error policy determines behavior:
    - **pass** (default): Original response passed through unmodified
@@ -111,7 +111,7 @@ surface exposes request outcomes:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions (`overload`) |
+| `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes. The frozen label set has no `overload` series. |
 
 The module aggregates counters in its shared metrics zone and exposes them at
 the configured `markdown_metrics` location. There is no separate

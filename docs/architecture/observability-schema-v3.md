@@ -49,7 +49,8 @@ state there instead of adding a top-level field. The handler is
 read-only: the endpoint accepts GET and HEAD. HEAD computes the complete body
 length without sending a body. Other methods from authorized peers return 405.
 The handler accepts IPv4 loopback (`127.0.0.0/8`), IPv4-mapped IPv6 loopback
-(`::ffff:127.0.0.0/104`), and `::1`. It denies missing, unknown, and non-loopback
+(`::ffff:127.0.0.0/104`), `::1`, and UNIX-domain socket peers (local by
+construction). It denies missing, unknown, and non-loopback
 peers before checking the method. Configure native NGINX access
 controls on the diagnostics location to narrow that boundary further, for
 example:

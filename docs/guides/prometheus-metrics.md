@@ -3,8 +3,8 @@
 This guide describes the 0.9.2 production metrics contract. The endpoint emits
 only Prometheus text exposition format 0.0.4 and exactly the ten families
 listed below. The checked-in metrics registry is the machine-readable source
-for names, types, labels, and help text. The public inventory documents the
-operator-facing surface.
+for names, types, labels, and label values. HELP text lives in the renderer. The
+public inventory documents the operator-facing surface.
 
 ## Enable the endpoint
 
@@ -141,7 +141,7 @@ python3 tools/release/gates/validate_schema_drift.py
 python3 tools/harness/detect_public_surface_drift.py
 ```
 
-The C unit target `unit-prometheus_renderer` verifies HELP/TYPE lines,
+The C unit target `unit-metrics_v1_renderer` verifies HELP/TYPE lines,
 histogram completeness, bounded labels, and known-value rendering. The
 registry gate fails if a renderer family is missing or an unregistered family
 appears.
@@ -162,7 +162,8 @@ request reasons, including `encoding_header_invalid` for malformed
 `Content-Encoding` grammar. Streaming transition details use bounded lowercase
 `event=` values in decision logs, such as `engine_streaming` and
 `streaming_convert`. They are not reason labels or Rust registry variants.
-Unknown numeric reason codes map to `internal_unknown` and get logged as errors.
+Unknown numeric reason codes have no registry key and render as `internal` in
+diagnostics or `unknown` in the decision log.
 
 ## Migration from earlier metric surfaces
 

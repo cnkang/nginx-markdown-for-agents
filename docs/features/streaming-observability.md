@@ -44,14 +44,15 @@ one `transition`/`reason` pair:
 
 | Transition | Fixed reason | Snapshot source | Contract note |
 |---|---|---|---|
-| `commit` | `converted` | `streaming.commit_total` | Counts committed streaming responses (the conversion completed and committed). |
+| `commit` | `converted` | `streaming.commit_total` | Counts streaming header commits. The body may still end through safe-finish or abort. |
 | `fallback` | `precommit_html_error` | `streaming.fallback_total` | Counts pre-commit fallback decisions. |
 | `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling (a start transition), not converted deliveries. |
 | `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts (a start transition). |
 | `resume_success` | `converted` | `perf.backpressure_resume_total` | Counts successful downstream resumes after backpressure. |
 | `resume_failure` | `streaming_mid_flight_error` | `perf.backpressure_resume_failure_total` | Independent from `abort_start`; it is not an abort counter. |
 
-Transition semantics: `commit` is the completion transition.
+Transition semantics: `commit` records the header-commit transition, not a
+completed delivery.
 `safe_finish_start` and `abort_start` are start transitions.
 `resume_success` is an intermediate successful-resume transition (it does
 not prove the conversion completed). `resume_failure` is a failure
@@ -89,8 +90,8 @@ loopback-only boundary.
 
 Streaming decisions use the canonical
 `components/rust-converter/reason_registry.toml` registry. Operator-visible
-keys are lowercase snake_case. Unknown numeric values map to
-`internal_unknown` and get logged as an error.
+keys are lowercase snake_case. Unknown numeric values have no registry key and
+render as `internal` in diagnostics or `unknown` in the decision log.
 
 When fallback or resume-failure events increase:
 
