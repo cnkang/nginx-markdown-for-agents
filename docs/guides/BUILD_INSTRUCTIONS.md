@@ -99,7 +99,7 @@ Available targets include:
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
 CI generates release and performance evidence under `artifacts/`. Git ignores
-this directory except for the six frozen 0.9.2 contract artifacts that release
+this directory. The only exceptions are the six frozen 0.9.2 contract artifacts that release
 gates require checked in (`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,pre-lts-status}.json` —
 see the `artifacts/*` whitelist in `.gitignore`). Commit only these six files.
 All other generated evidence and any local copies must never enter the
@@ -128,7 +128,7 @@ This command:
 - builds the module with a compiler wrapper
 - writes `compile_commands.json` to the repository root
 
-After generation, reload VS Code (or run the SonarQube embedded action) to switch compilation databases. Ensure the active database is:
+After generation, reload VS Code (or run the SonarQube embedded action) to switch compilation databases. Make sure that the active database is:
 
 - `<workspace>/compile_commands.json`
 
@@ -203,8 +203,8 @@ Use this when debugging Rust-side behavior.
 ### 4. Keep Cargo and NGINX Features Aligned
 
 `components/nginx-module/config` does not inspect the Rust static archive with
-`nm`. Rust 1.97 LTO archives use LLVM 22 and may not be readable by an older
-system `nm`, so archive probing could silently compile out matching C paths.
+`nm`. Rust 1.97 LTO archives use LLVM 22. An older system `nm` can fail to
+read them, so archive probing could silently compile out matching C paths.
 Instead, NGINX configuration consumes `NGX_MARKDOWN_RUST_FEATURES`:
 
 - unset or `default`: use the Cargo default features (`streaming` and
