@@ -11,8 +11,8 @@ ARG FUZZ_GID=1001
 # Install Rust nightly toolchain (required by cargo-fuzz)
 RUN rustup toolchain install nightly --profile minimal
 
-# Install cargo-fuzz
-RUN cargo +nightly install cargo-fuzz
+# Install cargo-fuzz at the version pinned by the release workflow.
+RUN cargo +nightly install cargo-fuzz --version 0.13.2 --locked
 
 # Match the GitHub-hosted runner UID/GID used for ClusterFuzzLite bind mounts.
 # The OSS-Fuzz base image keeps /src, /work, and /out as its mount contract;
