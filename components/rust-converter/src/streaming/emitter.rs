@@ -182,6 +182,11 @@ pub struct IncrementalEmitter {
     flush_threshold: usize,
     /// Whether we are currently inside a code block (`<pre>`).
     in_code_block: bool,
+    /// Nesting depth of code-block contexts. The HTML tree builder flattens
+    /// nested `<pre>` elements, but the streaming state machine can emit a
+    /// second `Enter(CodeBlock)` before the first exit. Only the outermost
+    /// enter opens a fence and only the outermost exit closes it.
+    code_block_depth: usize,
     /// Whether ordinary text should be emitted as inline-code content.
     in_inline_code: bool,
     /// Inline-code content buffered until its delimiter can be sized safely.
@@ -277,6 +282,7 @@ impl IncrementalEmitter {
             flushed: Vec::new(),
             flush_threshold: 0,
             in_code_block: false,
+            code_block_depth: 0,
             in_inline_code: false,
             inline_code_buffer: String::new(),
             inline_code_backtick_max: 0,
@@ -671,6 +677,10 @@ impl IncrementalEmitter {
                 self.emit_list_prefix(sm)?;
             }
             StructuralContext::CodeBlock(lang) => {
+                self.code_block_depth = self.code_block_depth.saturating_add(1);
+                if self.code_block_depth > 1 {
+                    return Ok(());
+                }
                 self.emit_block_separator()?;
                 // Defer fence emission — the language may be updated by
                 // a nested <code class="language-*"> tag. We mark that
@@ -818,6 +828,11 @@ impl IncrementalEmitter {
     // ── Exit handlers ───────────────────────────────────────────────
 
     fn handle_code_block_exit(&mut self, lang: &Option<String>) -> Result<(), ConversionError> {
+        if self.code_block_depth > 1 {
+            self.code_block_depth -= 1;
+            return Ok(());
+        }
+        self.code_block_depth = 0;
         let fence_len = (3usize).max(self.code_block_backtick_max.saturating_add(1));
         let effective_lang = lang
             .as_deref()
