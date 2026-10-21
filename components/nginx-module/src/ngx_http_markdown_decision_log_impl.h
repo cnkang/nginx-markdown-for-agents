@@ -287,6 +287,38 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  *   reason_code    - the reason code string for this decision
  *   error_category - optional failure sub-classification (NULL if none)
  */
+/*
+ * Replace control characters in a log value before it reaches error_log.
+ *
+ * Upstream response headers are not guaranteed to be free of control bytes
+ * after every proxy or module in the chain. A raw ESC/VT/FF can forge log
+ * lines or inject terminal escapes in a log viewer. The allocation happens
+ * only when a control byte is present.
+ */
+static ngx_str_t
+ngx_http_markdown_log_safe_value(ngx_http_request_t *r, ngx_str_t value)
+{
+    size_t   i;
+    u_char  *p;
+
+    for (i = 0; i < value.len; i++) {
+        if (value.data[i] < 0x20 || value.data[i] == 0x7f) {
+            p = ngx_pnalloc(r->pool, value.len);
+            if (p == NULL) {
+                return (ngx_str_t) ngx_string("<unprintable>");
+            }
+            for (i = 0; i < value.len; i++) {
+                p[i] = (value.data[i] < 0x20 || value.data[i] == 0x7f)
+                       ? '?' : value.data[i];
+            }
+            value.data = p;
+            return value;
+        }
+    }
+
+    return value;
+}
+
 static void
 ngx_http_markdown_log_decision_emit(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -343,7 +375,8 @@ ngx_http_markdown_log_decision_emit(ngx_http_request_t *r,
 
     /* Resolve upstream content-type. */
     if (r->headers_out.content_type.len > 0) {
-        content_type = r->headers_out.content_type;
+        content_type = ngx_http_markdown_log_safe_value(
+            r, r->headers_out.content_type);
     } else {
         content_type = empty;
     }
