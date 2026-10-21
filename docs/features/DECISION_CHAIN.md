@@ -176,9 +176,12 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Decompression](../features/DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
-| `overload` | Inflight guard rejected the request |
 | `header_plan_apply_error` | Header-plan preparation or application failed before headers were sent |
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
+
+`overload` is an eligibility-stage skip, not a failure sub-classification. The
+inflight guard rejects the request before conversion starts, and the reason
+registry classifies it with outcome `skipped`.
 
 ## Request States
 
@@ -189,7 +192,7 @@ Every request that enters the decision chain ends up in one of four mutually exc
 | NOT_ENABLED | `disabled` | Module is disabled for this scope. The request was never evaluated for eligibility. |
 | SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `skipped_conditional`, `bypass_no_transform` | Module is enabled but the request did not pass one of the eligibility checks. |
 | CONVERTED | `converted` | All checks passed and conversion succeeded. |
-| FAILED | `failed_open`, `failed_closed` | All checks passed, conversion was attempted, but it did not succeed. |
+| FAILED | `failed_open`, `failed_closed`, `streaming_mid_flight_error` | All checks passed, conversion was attempted, but it did not succeed. `streaming_mid_flight_error` terminates an already-committed streaming response as `aborted`. |
 
 Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
@@ -198,6 +201,7 @@ Operators can determine request state counts from metrics and logs:
 - CONVERTED: `nginx_markdown_requests_total{outcome="converted"}` metric (successful deliveries are additionally tracked by `nginx_markdown_conversion_deliveries_total`)
 - FAILED: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
 - FAILED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)
+- FAILED: `nginx_markdown_requests_total{outcome="aborted"}` (`streaming_mid_flight_error`)
 
 ## Reason Code Reference
 
