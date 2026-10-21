@@ -23,10 +23,11 @@ Content-Encoding header
 
 Gzip uses zlib gzip framing, and deflate first uses the zlib-wrapped RFC 1950
 format required by HTTP. If the full-buffer zlib-wrapped attempt produces a
-format error before producing output, the C and Rust full-buffer paths retry
-the same bytes as raw RFC 1951 deflate for compatibility with legacy servers
-(RFC 2616-era implementations). The streaming C path cannot replay consumed
-chunks: it sniffs the first two bytes, selects zlib framing for a valid header
+format error, the C and Rust full-buffer paths retry the same bytes as raw
+RFC 1951 deflate for compatibility with legacy servers (RFC 2616-era
+implementations). The retry discards any output from the wrapped attempt. The
+streaming C path cannot replay consumed chunks: it sniffs the first two bytes,
+selects zlib framing for a valid header
 and raw framing otherwise. A raw stream whose prefix happens to look like a
 zlib header is therefore reported as a format error in streaming mode rather
 than replayed. Deflate rejects trailing bytes. Gzip validates trailers and

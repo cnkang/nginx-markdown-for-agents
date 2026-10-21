@@ -48,7 +48,7 @@ published: "2024-01-15"
 ### Field Priority
 
 1. **title** (required per FR-15.4 for a complete record): From `<title>` tag or Open Graph
-2. **url** (required per FR-15.4 for a complete record): From canonical link or base_url
+2. **url** (required per FR-15.4 for a complete record): From the Open Graph `og:url` property, the canonical link, or base_url, in that order
 
 The `required` markers above apply only to a complete metadata record.
 `write_front_matter()` emits valid partial front matter when either field is

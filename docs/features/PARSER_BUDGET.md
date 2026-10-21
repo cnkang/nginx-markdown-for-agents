@@ -253,12 +253,12 @@ Deep nesting stays bounded by the streaming pipeline's `state_stack` budget:
   total working-set enforcement
 
 For the full-buffer path, html5ever's tree builder handles deep nesting
-according to the HTML5 spec (which defines a maximum nesting depth of 512
-for formatting elements). In this path `markdown_limits conversion_memory=`
-bounds the cumulative input bytes accepted for conversion, while
-`markdown_limits parser_budget=` bounds the estimated full-buffer working
-set through pre-parse and checkpoint checks. The live DOM tree size itself
-is not bounded by `conversion_memory`.
+according to the HTML5 parsing algorithm. The converter also enforces a
+maximum nesting depth of 1000 during security validation. In this path
+`markdown_limits conversion_memory=` bounds the cumulative input bytes
+accepted for conversion. `markdown_limits parser_budget=` bounds the estimated
+full-buffer working set through pre-parse and checkpoint checks. The live DOM
+tree size itself is not bounded by `conversion_memory`.
 
 ### 2.5 Node-Count Tracking
 
