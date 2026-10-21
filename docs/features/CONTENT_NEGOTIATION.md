@@ -54,7 +54,10 @@ Accept: text/html, text/markdown;q=0.9
 Accept: text/html, application/json, text/markdown
 ```
 
-The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are fully evaluated per RFC 9110 §12.5.1. The Rust negotiation engine (`markdown_negotiate_accept`) compares q-values across all listed media types. It applies tie-break rules (specificity, source order) to determine preference ordering. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
+The module looks for `text/markdown` in the Accept header. The module evaluates quality values (q-parameters) per RFC 9110 §12.5.1. The
+Rust negotiation engine (`markdown_negotiate_accept`) compares the q-values of
+`text/markdown` and `text/html` only. It ignores other media types. Equal
+q-values select Markdown. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
 
 ### Accept Policy
 

@@ -142,8 +142,8 @@ to context.
 
 - **Ordinary text**: the module escapes `\`, `` ` ``, `*`, `_`, `[`, `]`,
   `<`, `>`, and `~` before emitting. It also escapes line-start block
-  markers (`#`, `>`, `+`, `-`, `!`, and ordered-list periods) when they
-  could change the Markdown structure. This keeps ordinary prose such as
+  markers (`#`, `>`, `+`, `-`, `!`, `|`, `=`, and ordered-list periods) when
+  they could change the Markdown structure. This keeps ordinary prose such as
   `a-b` readable.
 
 The escape set is applied to untrusted text only. Generated syntax keeps

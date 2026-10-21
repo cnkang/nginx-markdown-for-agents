@@ -35,11 +35,22 @@ typedef struct {
         size_t       max_size;       /* limits.decompressed_size */
         ngx_msec_t   parse_timeout;  /* limits.parser_timeout */
         size_t       parser_budget;  /* limits.parser_budget */
+        ngx_flag_t   max_size_explicit;
     } decompress;
 
+    struct {
+        ngx_flag_t   diagnostics_enabled;
+        ngx_flag_t   metrics_enabled;
+    } ops;
+
     ngx_http_markdown_limits_t limits;
-    ngx_http_markdown_stream_cfg_t stream;
-    ngx_http_markdown_ops_cfg_t ops;
+
+    struct {
+        ngx_uint_t   policy;
+        ngx_array_t *excluded_types;
+        size_t       budget;
+    } stream;
+
     ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
 ```
@@ -70,11 +81,13 @@ phase. When both keys are explicitly configured, `nginx -t` fails if
 `parser_timeout` exceeds `conversion_timeout`. When only one side is explicit, the merge step
 clamps the parser value down to the effective conversion bound.
 
-`streaming_buffer` is the total per-request streaming working-set and
-pre-commit replay budget. It is not merely a transport chunk size. A value
-that is too small for the converter's resident state can produce a fail-open
-decision with the public `budget_exceeded` reason. The internal
-`streaming_budget_exceeded` event is not a canonical public reason code.
+`streaming_buffer` bounds the Rust streaming working set and each of the two
+pre-commit replay buffers separately. It is not a single shared total, and peak
+per-request use can reach about three times this value. It is not merely a
+transport chunk size. A value that is too small for the converter's resident
+state can produce a fail-open decision with the public
+`memory_budget_exceeded` reason. The internal `streaming_budget_exceeded` event
+is not a canonical public reason code.
 
 The defaults are `30s`, `10s`, `64m`, `32m`, `2m`, `10m`, `100`, and `64`, in
 the order shown in the example.

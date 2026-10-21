@@ -85,7 +85,7 @@ FFI interface updated to support charset detection:
   - `content_type: *const u8` - Pointer to Content-Type header string
   - `content_type_len: usize` - Length of Content-Type string
 
-- `markdown_convert` function will use these fields when fully implemented
+- `markdown_convert` passes these fields to the charset cascade on every conversion
 
 ## Usage Examples
 
@@ -113,7 +113,7 @@ let charset = detect_charset(Some("text/html; charset=ISO-8859-1"), html);
 assert_eq!(charset, "ISO-8859-1");
 ```
 
-### C API (Future)
+### C API
 
 ```c
 // Set up options with Content-Type

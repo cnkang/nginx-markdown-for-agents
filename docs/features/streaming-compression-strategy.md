@@ -10,7 +10,9 @@ full-buffer decompression.
 
 In 0.9.2, gzip, deflate, and Brotli responses are eligible for streaming
 decompression when `markdown_streaming force` or `auto` selects streaming,
-automatic decompression turns on, and cache validation is not `full`.
+automatic decompression turns on, cache validation is not `full`, and the
+response carries a single non-identity encoding layer. The module decodes chains
+with more than one non-identity layer on the bounded full-buffer path.
 The `auto` route follows the `markdown_streaming` policy and the hard
 compatibility gates. It applies no size heuristic, and there is no
 operator-facing threshold directive.
@@ -147,7 +149,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 | `markdown_auto_decompress` | Controls whether the module attempts decompression at all. Default: `on`. When off, compressed responses pass through unconverted. |
 | `markdown_limits decompressed_size=<size>` | Maximum decompressed output size. Prevents decompression bombs. |
 | `markdown_limits decompression_ratio=<N>` | Maximum decompression expansion ratio. |
-| `markdown_limits streaming_buffer=<size>` | Total per-request streaming working-set and pre-commit replay budget. It is not a transport chunk size. |
+| `markdown_limits streaming_buffer=<size>` | Bounds the Rust streaming working set and each of the two pre-commit replay buffers separately. Peak per-request use can reach about three times this value. It is not a transport chunk size. |
 
 ## Operator Guidance
 

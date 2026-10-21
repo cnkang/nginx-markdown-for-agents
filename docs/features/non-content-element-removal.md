@@ -17,9 +17,12 @@ The converter removes the following non-content elements and their entire conten
 2. **`<style>` tags**: CSS styling that is not relevant for text content
 3. **`<noscript>` tags**: Fallback content for browsers without JavaScript
 
+In addition, the module prunes `<nav>`, `<footer>`, and `<aside>` subtrees by
+default through `markdown_prune_noise on`. It does not prune `<header>`.
+
 ### Code Location
 
-File: `components/rust-converter/src/converter.rs`
+File: `components/rust-converter/src/converter/traversal.rs`
 
 ```rust
 // Elements to skip (non-content)
@@ -54,7 +57,7 @@ The implementation includes comprehensive unit tests:
 5. **`test_nested_non_content_removal`**: Tests removal of non-content elements nested within other elements
 6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, and so on)
 7. **`test_style_in_head_removal`**: Tests removal of style tags in the `<head>` section
-8. **`test_inline_script_removal`**: Tests removal of `on*` event-handler attributes from elements (for example, a button's `onclick`). The separate script-element test covers tag removal.
+8. **`test_inline_script_removal`**: Verifies that the module removes inline `<script>` element content. The security-validator tests cover `on*` attribute stripping.
 9. **`test_content_preservation_around_non_content`**: Verifies that content before and after non-content elements stays preserved correctly
 
 ### Test Results
@@ -126,11 +129,11 @@ End
 
 ## Future Enhancements
 
-The current implementation focuses on the three core non-content elements.
-Inline event-handler removal is already complete. The list below records it
-only as a historical implementation note:
+The current implementation covers the three core non-content elements and the
+default noise regions. Inline event-handler removal is already complete. The
+list below records the remaining items only as a historical implementation note:
 
-1. **Navigation elements**: `<nav>`, `<header>`, `<footer>` (optional for v1, mentioned in design)
+1. **Navigation elements**: The module does not prune `<header>`; it prunes `<nav>`, `<footer>`, and `<aside>` by default
 2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
 3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`. This is not a future item.
 
