@@ -359,10 +359,22 @@ impl MarkdownConverter {
         }
         let content_start = output.len();
         self.extract_code_content(node, output, depth, ctx.as_deref_mut())?;
-        let normalized = normalize_inline_code_newlines(&output[content_start..]);
-        if let Cow::Owned(normalized) = normalized {
-            output.truncate(content_start);
-            append_str_with_context(output, &normalized, &mut ctx)?;
+        if output[content_start..].contains(['\r', '\n']) {
+            let content_len = output.len().saturating_sub(content_start);
+            // The normalization allocates a copy of the content and a
+            // replacement string before the original slice is truncated.
+            // Charge both temporary buffers to the conversion budget first.
+            with_reserved_working_set(
+                output,
+                &mut ctx,
+                content_len.saturating_mul(2),
+                |output, ctx| {
+                    let content = output[content_start..].to_owned();
+                    let normalized = normalize_inline_code_newlines(&content).into_owned();
+                    output.truncate(content_start);
+                    append_str_with_context(output, &normalized, ctx)
+                },
+            )?;
         }
         if padded {
             append_char_with_context(output, ' ', &mut ctx)?;
