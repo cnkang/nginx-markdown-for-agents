@@ -186,10 +186,11 @@ or abort handling rather than replaying the upstream body.
 policy strict for staged rollout so browsers sending `*/*` are not converted
 unexpectedly. `markdown_auth_policy` and `markdown_auth_cookies` prevent
 conversion of authenticated content according to the configured policy.
-The detection uses the `Authorization` header and the configured cookie names.
-It does not detect mTLS, `auth_request`, or other upstream authentication. For
-those deployments, select the conversion scope with an explicit
-`markdown_filter` map or set the cache policy at the upstream.
+The detection uses the `Authorization` header, the configured cookie names, a
+non-empty `$remote_user`, and `$ssl_client_verify` equal to `SUCCESS`. It does
+not detect `auth_request` outcomes that expose none of these, or other upstream
+authentication. For those deployments, select the conversion scope with an
+explicit `markdown_filter` map or set the cache policy at the upstream.
 
 `markdown_content_types` controls general conversion eligibility.
 `markdown_stream_excluded_types` is an eligibility-level exclusion. A response
