@@ -39,7 +39,7 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
   a practical sizing floor for typical deployments — not a hard upper
   bound, see `markdown_limits conversion_memory`)
 
-Your distro may ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
+Your distribution can ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
 
 ### Do I need to rebuild NGINX?
 
@@ -60,7 +60,7 @@ Yes, for selected Linux targets, the project publishes pre-compiled dynamic modu
 
 However, NGINX dynamic modules are version-specific:
 - The binary must match your `nginx -v` version exactly
-- Release assets may group by major.minor for readability, but you must still use the exact patch version
+- Release assets can group by major.minor for readability, but you must still use the exact patch version
 - If your version is not published yet, build from source or switch to one of the available pre-built versions
 
 ### Does it work with Docker?
@@ -156,10 +156,10 @@ module prefers the bounded streaming engine for every eligible response,
 independent of response size. A response that is eligible for conversion but
 blocked from streaming uses the full-buffer engine. A response that is not
 eligible for conversion passes through unchanged. `markdown_streaming force`
-prefers streaming for every eligible response **when no hard blocker applies**
-— `markdown_cache_validation full` is a hard blocker that routes to full-buffer
-regardless of the streaming policy (and combining `force` with `full` fails
-during `nginx -t`). See
+prefers streaming for every eligible response when no hard blocker applies.
+`markdown_cache_validation full` is a hard blocker that routes to full-buffer
+regardless of the streaming policy. Combining `force` with `full` fails
+during `nginx -t`. See
 [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and
 [ADR-0023](architecture/ADR/0023-single-streaming-policy.md) for the current
 single-policy contract (ADR-0007 records the superseded v0.6.0 reasoning).
@@ -201,14 +201,14 @@ If you want the simplest first rollout, you can temporarily disable upstream com
 
 ### Does it work with CDNs?
 
-Yes, but you may need to:
-1. Ensure the CDN passes through the `Accept` header
+Yes. Do these steps when necessary:
+1. Make sure that the CDN passes through the `Accept` header
 2. Configure the CDN to cache different variants based on `Accept`
 3. The module automatically handles upstream compression from CDNs
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`). This happens as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget comes from `markdown_limits decompressed_size=<size>` and `decompression_ratio=<N>`. The module applies these limits to prevent zip-bomb amplification. This covers all three common encodings.
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`). This happens as part of the conversion path through the `markdown_auto_decompress` directive (default: on). The decompression budget comes from `markdown_limits decompressed_size=<size>` and `decompression_ratio=<N>`. The module applies these limits to prevent zip-bomb amplification. This covers all three common encodings.
 
 Decoding runs in both processing paths: the full-buffer path and the
 streaming path (members stream through gzip/deflate/Brotli decoders with
@@ -254,7 +254,7 @@ For operational guidance, see [Operations Guide](guides/OPERATIONS.md).
 
 Common causes:
 1. **Module not enabled**: Check `markdown_filter on;` is set
-2. **Missing Accept header**: Ensure client sends `Accept: text/markdown`
+2. **Missing Accept header**: Make sure that the client sends `Accept: text/markdown`
 3. **Variable map mismatch** (when using `markdown_filter $var`):
    - Exact `map $http_accept` strings often miss real-world multi-value `Accept` headers
    - Use regex map rules for `Accept` matching
@@ -297,7 +297,7 @@ Common issues:
 
 ### Why is caching not working correctly?
 
-Ensure your cache key includes the `Accept` header:
+Make sure that your cache key includes the `Accept` header:
 
 ```nginx
 proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
@@ -322,7 +322,7 @@ Yes, the module includes multiple security protections:
 
 No, the module only converts HTML to Markdown. It does not expose information that is not already present in the HTML response. The module changes response headers as part of conversion, including setting `Content-Type` to `text/markdown`, updating `ETag`, and adding `Cache-Control: private` for authenticated responses. These header changes reflect the converted content, not new information.
 
-### Should I convert authenticated requests?
+### When do I convert authenticated requests?
 
 You can, but consider:
 - Use `markdown_auth_policy deny;` to skip authenticated requests
@@ -333,7 +333,7 @@ See [Configuration Guide](guides/CONFIGURATION.md) for the canonical directive s
 
 ### How do I secure the metrics endpoint?
 
-The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location. This further restricts access and makes the intended policy obvious in configuration:
+The handler already enforces localhost-only access. In practice, keep explicit NGINX `allow`/`deny` rules on the metrics location. This further restricts access and makes the intended policy obvious in configuration:
 
 ```nginx
 location /markdown-metrics {
@@ -512,7 +512,7 @@ Yes. Keep the copyright notice and license text in source and binary redistribut
 
 ## Roadmap
 
-### Where should I look for future direction?
+### Where can I find future direction?
 
 Use the roadmap section in [README](../README.md#roadmap) for broad project direction. Check the issue tracker for current feature requests and discussion.
 

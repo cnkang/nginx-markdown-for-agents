@@ -38,9 +38,10 @@ This guide covers every supported installation method. Methods range from a sing
 
 > **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-08. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
-For a system with NGINX already installed (official build), the following
-release-bound sequence downloads and authenticates the installer before any
-privileged execution, then verifies both Markdown and HTML responses:
+This sequence applies to a system with NGINX already installed (official
+build). The release-bound sequence downloads and authenticates the installer
+before any privileged execution. It then verifies both Markdown and HTML
+responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
@@ -150,10 +151,10 @@ The install script performs the following automatically:
 
 - Default behavior: installation fails when the selected artifact cannot pass
   authentication against the release's signed `SHA256SUMS` manifest. The
-  installer downloads `SHA256SUMS` and `SHA256SUMS.asc` from the same release,
-  verifies the detached signature with the pinned public key embedded in the
-  installer, binds the artifact hash to its exact entry in the verified
-  manifest, and cross-checks the manifest digest against the release API digest
+  installer downloads `SHA256SUMS` and `SHA256SUMS.asc` from the same release.
+  It verifies the detached signature with the pinned public key embedded in the
+  installer. It binds the artifact hash to its exact entry in the verified
+  manifest. It also cross-checks the manifest digest against the release API digest
   when one is present. The standalone installer does not trust a public key
   downloaded from the same release. If the signature, key, manifest, or
   fingerprint trust material is missing, the installer fails closed and does
@@ -1090,7 +1091,7 @@ module is not binary compatible
 **Root Cause:**
 NGINX dynamic modules require an exact version match. A module built for NGINX 1.26.2 will not load on NGINX 1.26.3. The pre-built binary does not exist for your exact NGINX version.
 
-Another common variant is a **stale previously-installed module** that `load_module` still loads. In that case `nginx -t` may fail with:
+Another common variant is a **stale previously-installed module** that `load_module` still loads. In that case `nginx -t` can fail with:
 
 ```text
 module ".../ngx_http_markdown_filter_module.so" version 1024000 instead of 1028003
@@ -1207,7 +1208,7 @@ The user installed a glibc-linked binary on a musl-based system (for example Alp
 4. Re-run the install script — it auto-detects the libc type from `nginx -V`
    metadata. Use the authenticated release-bound sequence in [Shortest
    Success Path](#2-shortest-success-path).
-5. If the auto-detection fails, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions to ensure native libc linkage.
+5. If the auto-detection fails, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions to make sure that the build uses native libc linkage.
 
 ---
 
@@ -1314,7 +1315,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    from [Shortest Success Path](#2-shortest-success-path), and report the
    release-gate failure if verification of the signed manifest still fails.
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
-4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact may need to be re-published.
+4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact can require re-publication.
 5. Do not bypass verification for a published release. If the release lacks an
    independently authenticated fingerprint or digest, withhold installation and
    report the release-gate failure. The install-script emergency switch cannot
@@ -1325,7 +1326,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
 #### SOP 7: Content Negotiation Not Triggering
 
 **Symptom:**
-Requests that should return Markdown are returning HTML instead. The response has `Content-Type: text/html` even though the client sends `Accept: text/markdown`.
+Requests that must return Markdown are returning HTML instead. The response has `Content-Type: text/html` even though the client sends `Accept: text/markdown`.
 
 **Root Cause:**
 The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, it passes the original response through unchanged.
@@ -1347,7 +1348,7 @@ The eligibility requirements are:
    ```bash
    grep -r 'markdown_filter' /etc/nginx/
    ```
-   Ensure `markdown_filter on;` is set in the relevant context.
+   Make sure that `markdown_filter on;` is set in the relevant context.
 2. Verify the request includes the correct `Accept` header:
    ```bash
    curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
@@ -1371,7 +1372,7 @@ The eligibility requirements are:
 #### SOP 8: Upstream Response Not Eligible
 
 **Symptom:**
-The module loads and `markdown_filter on` is set, but specific pages are not converting. Other pages may convert correctly.
+The module loads and `markdown_filter on` is set, but specific pages are not converting. Other pages can convert correctly.
 
 **Root Cause:**
 The upstream response for those pages does not meet the eligibility criteria. Common reasons:
@@ -1385,7 +1386,7 @@ The upstream response for those pages does not meet the eligibility criteria. Co
    ```bash
    curl -sD - -o /dev/null http://localhost/path/to/page
    ```
-2. Verify the status code is `200 OK`. If the upstream returns a redirect, the final response after following redirects may have a different status.
+2. Verify the status code is `200 OK`. If the upstream returns a redirect, the final response after following redirects can have a different status.
 3. Verify the `Content-Type` header is `text/html`:
    ```bash
    curl -sI http://localhost/path/to/page | grep -i content-type
@@ -1398,7 +1399,7 @@ The upstream response for those pages does not meet the eligibility criteria. Co
 #### SOP 9: Compression / Decompression Issues
 
 **Symptom:**
-The module fails to convert responses that the upstream compressed. The error log may show conversion failures. Alternatively, the response passes through as HTML despite meeting all other eligibility requirements.
+The module fails to convert responses that the upstream compressed. The error log can show conversion failures. Alternatively, the response passes through as HTML despite meeting all other eligibility requirements.
 
 **Root Cause:**
 The upstream server sends a compressed response (gzip, brotli, or deflate). The module supports automatic gzip, Brotli, and deflate decompression. Conversion failures can happen when the module's built-in decompression is not enabled or not handling the encoding correctly. It can also happen when NGINX's own compression interacts with the module's pipeline.
@@ -1440,12 +1441,12 @@ sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 
 ### Alpine Linux (musl)
 
-The install script auto-detects musl-based systems. The module root path may differ between distributions:
+The install script auto-detects musl-based systems. The module root path can differ between distributions:
 
 - Debian/Ubuntu: `/usr/lib/nginx/modules`
 - Alpine: `/usr/lib/nginx/modules` or `/etc/nginx/modules`
 
-The install script handles this automatically via `nginx -V` metadata. Ensure you are using the `musl` variant of the pre-built binary (the install script selects this for you).
+The install script handles this automatically through `nginx -V` metadata. Make sure that you use the `musl` variant of the pre-built binary (the install script selects this for you).
 
 ### Docker Containers
 
@@ -1469,7 +1470,7 @@ macOS has no pre-built binary path in `tools/install.sh`, so use either:
 - [Manual Source Build](#6-secondary-manual-source-build), or
 - Homebrew tap installation (see [4.1 Convenience: Homebrew Tap (macOS)](#41-convenience-homebrew-tap-macos)).
 
-For Apple Silicon (M1/M2/M3), ensure you build the Rust library for the correct target:
+For Apple Silicon (M1/M2/M3), make sure that you build the Rust library for the correct target:
 
 ```bash
 cd components/rust-converter
@@ -1597,8 +1598,8 @@ sudo nginx -s reload
 
 **Possible Causes:**
 
-1. Module disabled — ensure `markdown_filter on;` is set.
-2. `Accept` header missing — ensure the request includes `Accept: text/markdown`.
+1. Module disabled — make sure that `markdown_filter on;` is set.
+2. `Accept` header missing — make sure that the request includes `Accept: text/markdown`.
 3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_limits conversion_memory=<size>`.
 4. Check NGINX error log for details:
    ```bash

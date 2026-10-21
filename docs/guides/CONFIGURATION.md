@@ -109,7 +109,7 @@ in the `http` context. The other `markdown_limits` keys inherit through
 
 `parser_timeout` is a cooperative parser-work allowance, not a preemptive
 wall-clock interrupt. The converter checks it at parser and traversal
-checkpoints and at finalization. An uninterruptible parser operation may
+checkpoints and at finalization. An uninterruptible parser operation can
 overshoot the configured value. Upstream stalls do not consume this allowance.
 
 The bounds are cumulative where the decoder has multiple gzip members. The
@@ -143,7 +143,7 @@ input. A response whose headers were already sent cannot change its status.
 The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
 0.9.1 used. The 256 KiB value appeared only in the removed `balanced` and
 `streaming_first` profiles. Operators who explicitly pinned those profiles
-should set `markdown_limits streaming_buffer=256k` to retain that behavior.
+must set `markdown_limits streaming_buffer=256k` to retain that behavior.
 
 ## Streaming policy
 
@@ -238,7 +238,7 @@ the ten frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
 and bounded runtime state. Its built-in access boundary is loopback-only.
-Native NGINX `allow`/`deny` or authentication directives may narrow that
+Native NGINX `allow`/`deny` or authentication directives can narrow that
 boundary but cannot broaden it. It accepts only `GET` and `HEAD`.
 
 ## Runtime configuration changes

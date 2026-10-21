@@ -35,7 +35,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 ### Maintenance and Validation Notes
 
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
-- Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
+- Metric field names in this guide must match the current metrics renderer in `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`.
 - The built-in metrics endpoint returns the frozen Prometheus exposition.
   Send an explicit Prometheus `Accept` header. See
   [Prometheus Metrics Guide](prometheus-metrics.md).
@@ -57,8 +57,8 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 The endpoint emits exactly the ten bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
-request outcomes, conversion attempts and successful deliveries, the duration
-histogram, byte counters, streaming and decompression events, the
+request outcomes, conversion attempts, and successful deliveries. Also monitor
+the duration histogram, byte counters, streaming events, decompression events, the
 `nginx_markdown_conversion_peak_memory_bytes` run-wide conversion peak-memory gauge (streaming + full-buffer), and
 `build_info`. The diagnostics endpoint (`markdown_diagnostics`)
 additionally exposes the per-worker in-flight counter. Do not derive
@@ -75,7 +75,7 @@ conversion_duration_seconds_count <= sum(conversion_attempts_total)
 
 ### Accessing Metrics
 
-#### Via HTTP Endpoint
+#### Through the HTTP Endpoint
 
 ```bash
 # Optional: override if your metrics endpoint uses a different path
@@ -152,8 +152,8 @@ Configure alerts based on these thresholds:
 | Module crash | Worker restart detected | Page on-call engineer |
 
 The system-error alert pins the shipped reason label
-(`outcome="aborted",reason="streaming_mid_flight_error"`): the aborted family
-covers delivery aborts, and matching on `outcome="aborted"` alone would silently
+(`outcome="aborted",reason="streaming_mid_flight_error"`). The aborted family
+covers delivery aborts. Matching on `outcome="aborted"` alone would silently
 widen the alert if another abort reason is ever published. Use the filtered
 expression when you add or rename alert rules.
 
@@ -508,8 +508,8 @@ Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/
 ### Daily Operations Checklist
 
 - [ ] Check metrics dashboard for anomalies
-- [ ] Review failure rate (should be < 5%)
-- [ ] Check conversion latency (p95 should be < 100ms)
+- [ ] Review the failure rate (target: below 5%)
+- [ ] Check conversion latency (target p95: below 100 ms)
 - [ ] Verify no critical alerts
 - [ ] Review error log for new issues
 - [ ] Check system resource usage (CPU, memory, disk)
@@ -520,7 +520,7 @@ Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/
 
 - [ ] Review performance trends over past week
 - [ ] Analyze failure patterns and categories
-- [ ] Check cache hit rate (should be > 80%)
+- [ ] Check the cache hit rate (target: above 80%)
 - [ ] Review slow conversion logs
 - [ ] Verify backup procedures working
 - [ ] Update documentation if needed
@@ -855,7 +855,7 @@ ldd /usr/local/nginx/modules/ngx_http_markdown_filter_module.so
    make
    sudo make install
    ```
-   - If the missing symbol is `_markdown_convert` (Rust FFI), ensure the dynamic module link step includes the Rust converter static library. Use the repository's current `components/nginx-module/config` (older versions may only populate `CORE_LIBS`, which is insufficient for dynamic-module linkage).
+   - If the missing symbol is `_markdown_convert` (Rust FFI), make sure that the dynamic module link step includes the Rust converter static library. Use the repository's current `components/nginx-module/config` (older versions may only populate `CORE_LIBS`, which is insufficient for dynamic-module linkage).
 
    **If version mismatch:**
    ```bash
@@ -877,7 +877,7 @@ nginx -s reload
 
 **Trigger:** Markdown requests fail conversion due to upstream/CDN compressed HTML (rare with automatic decompression)
 
-**Severity:** Medium (automatic decompression should handle most cases)
+**Severity:** Medium (automatic decompression handles most cases)
 
 **Steps:**
 
@@ -926,7 +926,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 6. **If issues persist:**
 - Verify that the module supports the compression format (gzip, deflate, br). The module supports these three formats. Check the upstream Content-Encoding header.
-- Check whether compressed data might have corruption. Corrupted streams fail decompression. A partial transfer often causes this. Verify the upstream transfer completed. Compare the received size with Content-Length.
+- Check whether the compressed data has corruption. Corrupted streams fail decompression. A partial transfer often causes this. Verify the upstream transfer completed. Compare the received size with Content-Length.
 - Review error logs for specific decompression error codes
 - Consider reporting the issue with sample data
 
@@ -958,7 +958,7 @@ For the full decision chain model (check order, flowchart, and outcome determina
 
 ### Reason Code Table
 
-The table below maps each reason code to its internal enum, error category, request state, and description. It also lists the action you should take when you see it.
+The table below maps each operator-visible terminal reason code to its request state, description, and suggested action.
 
 | Reason Code | Request State | Description | Suggested Operator Action |
 |---|---|---|---|
@@ -1236,7 +1236,7 @@ The module maps decision outcomes to NGINX log levels so that NGINX's own `error
 This means:
 - If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries (including streaming failures) regardless of `markdown_log_verbosity`.
 - If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear. The module emits streaming non-failure entries at `info` level.
-- For full decision logging visibility (including non-terminal streaming events), ensure `error_log` is at `info` level or lower.
+- For full decision logging visibility (including non-terminal streaming events), make sure that `error_log` is at `info` level or lower.
 
 ### Parsing Decision Log Entries
 

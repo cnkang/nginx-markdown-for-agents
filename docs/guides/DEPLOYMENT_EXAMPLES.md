@@ -327,10 +327,10 @@ http {
 
 #### Strict cache validation — CDN / caching proxy
 
-Full ETag-based conditional request support. Streaming stays disabled: the
-server configuration sets `markdown_streaming off` (`markdown_cache_validation
-full` also forces the `auto` default onto the full-buffer path), so the
-module can generate a transformed ETag for the complete Markdown output.
+Full ETag-based conditional request support. Streaming stays disabled. The
+server configuration sets `markdown_streaming off`, and `markdown_cache_validation
+full` also forces the `auto` default onto the full-buffer path. The module can
+then generate a transformed ETag for the complete Markdown output.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -402,7 +402,7 @@ http {
 
 #### Mixed explicit policies per location
 
-Different paths can use different explicit policies via NGINX inheritance:
+Different paths can use different explicit policies through NGINX inheritance:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -555,8 +555,8 @@ location / {
 
 ### PHP (`php-fpm`) deployments
 
-- PHP pages are commonly served from `location ~ \.php$` via `fastcgi_pass`
-- If you only enable `markdown_filter on;` in `location /`, PHP requests may end up in another location block and stay unconverted
+- PHP pages are commonly served from `location ~ \.php$` through `fastcgi_pass`
+- If you only enable `markdown_filter on;` in `location /`, PHP requests can end up in another location block and stay unconverted
 - Prefer enabling in the PHP location (or `server` scope)
 
 ### PHP application-level compression can interfere
