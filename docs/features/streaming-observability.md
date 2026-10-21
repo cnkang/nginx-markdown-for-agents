@@ -15,7 +15,7 @@ observability comes through:
 
 | Family | Labels | Meaning |
 |---|---|---|
-| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Streaming lifecycle events. The fixed transition allowlist maps `commit` to completion, `safe_finish_start`/`abort_start` to start, and retains `fallback`, `resume_success`, and `resume_failure`. |
+| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Streaming lifecycle events. The fixed transition allowlist maps `commit` to the header-commit transition, `safe_finish_start`/`abort_start` to start, and retains `fallback`, `resume_success`, and `resume_failure`. |
 | `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
 | `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
 | `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |

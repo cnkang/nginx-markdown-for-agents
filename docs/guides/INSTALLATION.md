@@ -966,7 +966,7 @@ Content-Type: text/html
 Confirms the module initialized in worker processes:
 
 ```bash
-tail /var/log/nginx/error.log | grep "markdown filter"
+grep "markdown:" /var/log/nginx/error.log
 ```
 
 Look for initialization messages such as:

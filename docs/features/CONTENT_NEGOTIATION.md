@@ -160,8 +160,8 @@ Module:    Vary: User-Agent, Accept
 ```
 
 The module does not add a duplicate when the list already contains `Accept`.
-It also leaves `Vary: *` unchanged, because the wildcard already covers the
-request headers.
+It also leaves `Vary: *` unchanged. The wildcard tells caches not to reuse the stored
+response without successful revalidation. It does not list request headers.
 
 ## Eligibility Rules
 
