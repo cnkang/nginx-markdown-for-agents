@@ -622,7 +622,7 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 }
 
 ngx_int_t
-ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
+ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
     UNUSED(r);
