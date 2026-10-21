@@ -299,6 +299,7 @@ static ngx_str_t
 ngx_http_markdown_log_safe_value(ngx_http_request_t *r, ngx_str_t value)
 {
     size_t   i;
+    size_t   j;
     u_char  *p;
 
     for (i = 0; i < value.len; i++) {
@@ -307,9 +308,9 @@ ngx_http_markdown_log_safe_value(ngx_http_request_t *r, ngx_str_t value)
             if (p == NULL) {
                 return (ngx_str_t) ngx_string("<unprintable>");
             }
-            for (i = 0; i < value.len; i++) {
-                p[i] = (value.data[i] < 0x20 || value.data[i] == 0x7f)
-                       ? '?' : value.data[i];
+            for (j = 0; j < value.len; j++) {
+                p[j] = (value.data[j] < 0x20 || value.data[j] == 0x7f)
+                       ? '?' : value.data[j];
             }
             value.data = p;
             return value;
