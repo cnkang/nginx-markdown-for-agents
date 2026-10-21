@@ -133,10 +133,13 @@ repository URL exists and has passed release validation.
 
 ```bash
 # Download and fingerprint-check the GPG key before importing it.
-curl -fsSL -o /tmp/nginx-markdown.key https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --with-fingerprint /tmp/nginx-markdown.key
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+curl -fsSL -o "$WORKDIR/nginx-markdown.key" \
+  https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --with-fingerprint "$WORKDIR/nginx-markdown.key"
 # Compare the printed fingerprint with the value published out-of-band.
-sudo rpm --import /tmp/nginx-markdown.key
+sudo rpm --import "$WORKDIR/nginx-markdown.key"
 
 # Add the repository
 sudo tee /etc/yum.repos.d/nginx-markdown.repo <<'EOF'

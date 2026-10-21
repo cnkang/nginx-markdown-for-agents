@@ -17,11 +17,14 @@ normal clients.
 ### 1. Import the GPG signing key
 
 ```bash
-curl -fsSL -o /tmp/nginx-markdown.key https://pkg.example.com/nginx-markdown/gpg.key
-gpg --show-keys --with-fingerprint /tmp/nginx-markdown.key
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+curl -fsSL -o "$WORKDIR/nginx-markdown.key" \
+  https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --with-fingerprint "$WORKDIR/nginx-markdown.key"
 # Compare the printed fingerprint with the value published out-of-band.
 # Do not import the key until the fingerprint matches.
-sudo install -m 0644 /tmp/nginx-markdown.key \
+sudo install -m 0644 "$WORKDIR/nginx-markdown.key" \
   /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 ```
