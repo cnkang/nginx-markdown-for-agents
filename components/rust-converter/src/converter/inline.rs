@@ -31,6 +31,7 @@ use super::traversal::{
 };
 use super::{ConversionContext, ConversionError, Handle, MarkdownConverter, NodeData};
 use crate::security::{is_form_state_subtree, normalize_input_type};
+use std::borrow::Cow;
 
 /// The approved description of a form control, or `""` when it has none.
 ///
@@ -154,6 +155,20 @@ fn check_measurement_checkpoint(
         context.check_timeout()?;
     }
     Ok(())
+}
+
+/// Normalize line endings inside an inline code span.
+///
+/// CommonMark converts line endings in a code span to spaces and does not
+/// allow a blank line inside one. Emitting a raw CR/LF would therefore close
+/// the surrounding paragraph and leave the span unclosed, so the following
+/// entity-decoded text could become raw HTML in a downstream renderer.
+fn normalize_inline_code_newlines(text: &str) -> Cow<'_, str> {
+    if text.contains(['\r', '\n']) {
+        Cow::Owned(text.replace("\r\n", " ").replace(['\r', '\n'], " "))
+    } else {
+        Cow::Borrowed(text)
+    }
 }
 
 impl MarkdownConverter {
@@ -342,7 +357,13 @@ impl MarkdownConverter {
         if padded {
             append_char_with_context(output, ' ', &mut ctx)?;
         }
+        let content_start = output.len();
         self.extract_code_content(node, output, depth, ctx.as_deref_mut())?;
+        let normalized = normalize_inline_code_newlines(&output[content_start..]);
+        if let Cow::Owned(normalized) = normalized {
+            output.truncate(content_start);
+            append_str_with_context(output, &normalized, &mut ctx)?;
+        }
         if padded {
             append_char_with_context(output, ' ', &mut ctx)?;
         }
