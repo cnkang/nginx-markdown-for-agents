@@ -164,11 +164,27 @@ fn check_measurement_checkpoint(
 /// the surrounding paragraph and leave the span unclosed, so the following
 /// entity-decoded text could become raw HTML in a downstream renderer.
 fn normalize_inline_code_newlines(text: &str) -> Cow<'_, str> {
-    if text.contains(['\r', '\n']) {
-        Cow::Owned(text.replace("\r\n", " ").replace(['\r', '\n'], " "))
-    } else {
-        Cow::Borrowed(text)
+    if !text.contains(['\r', '\n']) {
+        return Cow::Borrowed(text);
     }
+
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                normalized.push(' ');
+            }
+            '\n' => normalized.push(' '),
+            _ => normalized.push(ch),
+        }
+    }
+
+    Cow::Owned(normalized)
 }
 
 impl MarkdownConverter {
@@ -361,20 +377,15 @@ impl MarkdownConverter {
         self.extract_code_content(node, output, depth, ctx.as_deref_mut())?;
         if output[content_start..].contains(['\r', '\n']) {
             let content_len = output.len().saturating_sub(content_start);
-            // The normalization allocates a copy of the content and a
-            // replacement string before the original slice is truncated.
-            // Charge both temporary buffers to the conversion budget first.
-            with_reserved_working_set(
-                output,
-                &mut ctx,
-                content_len.saturating_mul(2),
-                |output, ctx| {
-                    let content = output[content_start..].to_owned();
-                    let normalized = normalize_inline_code_newlines(&content).into_owned();
-                    output.truncate(content_start);
-                    append_str_with_context(output, &normalized, ctx)
-                },
-            )?;
+            // Normalization allocates one replacement string. The original
+            // slice stays borrowed until the replacement is complete, so
+            // charge that single temporary buffer before allocating it.
+            with_reserved_working_set(output, &mut ctx, content_len, |output, ctx| {
+                let normalized =
+                    normalize_inline_code_newlines(&output[content_start..]).into_owned();
+                output.truncate(content_start);
+                append_str_with_context(output, &normalized, ctx)
+            })?;
         }
         if padded {
             append_char_with_context(output, ' ', &mut ctx)?;
