@@ -81,8 +81,8 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
-The first request should return `Content-Type: text/markdown`. The second
-request should keep the upstream HTML response. Use the
+The first request returns `Content-Type: text/markdown`. The second
+request keeps the upstream HTML response. Use the
 [installation troubleshooting guide](docs/guides/INSTALLATION.md#10-troubleshooting)
 when the result differs.
 

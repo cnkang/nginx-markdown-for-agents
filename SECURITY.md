@@ -35,7 +35,7 @@ When reporting, include:
 - impact assessment
 - whether the issue is already publicly known
 
-Response times are best effort for this maintainer-run project and may be slower during holidays or periods of limited availability.
+Response times are best effort for this maintainer-run project and can be slower during holidays or periods of limited availability.
 
 We will try to:
 
@@ -75,12 +75,12 @@ Please give maintainers reasonable time to investigate and ship a fix before pub
 When the team confirms a report:
 
 - the team fixes critical issues in a patch release when feasible
-- lower-severity fixes may wait for the next planned release
-- release notes and `CHANGELOG.md` should document the fix, and may include CVE references when appropriate
+- lower-severity fixes can wait for the next planned release
+- release notes and `CHANGELOG.md` must document the fix and can include CVE references when appropriate
 
 ## Operational Expectations
 
-This project processes **untrusted upstream HTML**. Operators should treat it as a security-sensitive component in the request path.
+This project processes **untrusted upstream HTML**. Operators must treat it as a security-sensitive component in the request path.
 
 Recommended operator practices:
 

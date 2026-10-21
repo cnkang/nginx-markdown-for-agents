@@ -27,7 +27,7 @@ This project follows a professional and respectful code of conduct. Please:
 
 ### Prerequisites
 
-Before contributing, ensure you have:
+Before you contribute, make sure that you have:
 
 - Rust 1.98.1 or higher
 - NGINX 1.24.0 or higher (source code for module development)
@@ -66,7 +66,7 @@ Before contributing, ensure you have:
 
 If you plan to maintain harness-related surfaces (`AGENTS.md`,
 `docs/harness/`, `tools/harness/`, harness CI wiring), install the local helper
-skill so your IDE/agent can route and verify changes consistently.
+skill. The skill helps your IDE or agent route and verify changes consistently.
 
 From the repository root:
 
@@ -117,7 +117,7 @@ git checkout -b feature/your-feature-name
    make -C components/nginx-module/tests unit
    ```
 
-5. Ensure code formatting:
+5. Check code formatting:
    ```bash
    # Rust formatting
    cargo fmt --manifest-path components/rust-converter/Cargo.toml --all
@@ -169,7 +169,7 @@ pub fn convert_html_to_markdown(html: &str, options: ConversionOptions) -> Resul
 - Use NGINX memory management functions
 - Handle errors appropriately
 - Add comprehensive comments
-- Ensure thread safety
+- Make sure that the code is thread-safe
 
 **Example:**
 ```c
@@ -236,8 +236,8 @@ Fixes #456
 ### Release-Candidate Close-Out
 
 During the release-candidate close-out phase, keep each follow-up commit to
-one topic. Squash a series of fixups for the same topic into one commit before
-you push, so the candidate history reads as a sequence of complete changes.
+one topic. Squash the fixups for the same topic into one commit before you
+push. The candidate history then reads as a sequence of complete changes.
 
 Do not rewrite a multi-topic commit that is already on the candidate branch.
 A rewrite would invalidate the candidate SHA that release evidence binds to,
@@ -371,7 +371,7 @@ All contributions must include appropriate documentation:
 
 ### Pull Request Process
 
-1. **Ensure all tests pass:**
+1. **Make sure that all tests pass:**
    ```bash
    make test-all
    ```
