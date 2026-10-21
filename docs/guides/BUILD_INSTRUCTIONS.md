@@ -203,8 +203,8 @@ Use this when debugging Rust-side behavior.
 ### 4. Keep Cargo and NGINX Features Aligned
 
 `components/nginx-module/config` does not inspect the Rust static archive with
-`nm`. Rust 1.97 LTO archives use LLVM 22. An older system `nm` can fail to
-read them, so archive probing could silently compile out matching C paths.
+`nm`. Legacy Rust 1.97 LTO archives use LLVM 22. An older system `nm` can fail
+to read them, so archive probing could silently compile out matching C paths.
 Instead, NGINX configuration consumes `NGX_MARKDOWN_RUST_FEATURES`:
 
 - unset or `default`: use the Cargo default features (`streaming` and

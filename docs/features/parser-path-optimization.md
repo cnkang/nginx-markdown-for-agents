@@ -219,16 +219,17 @@ All other elements return `Traverse` and get normal handling.
 ### Feature flag: `prune_noise_regions`
 
 Semantic noise region pruning (`<nav>`, `<footer>`, `<aside>`) sits behind
-the `prune_noise_regions` Cargo feature flag. In 0.4.0 release builds, this
-feature stays disabled by default. You can enable it at compile time for
-benchmarking and corpus diff collection:
+the `prune_noise_regions` Cargo feature flag. The 0.4.0 release kept this
+feature disabled by default. The 0.9.2 release enables it by default, together
+with `markdown_prune_noise on`. You can enable it explicitly in a custom build
+for benchmarking and corpus diff collection:
 
 ```bash
 cargo test --features prune_noise_regions
 ```
 
-Promotion to default-on requires benchmark evidence demonstrating clear benefit
-with acceptable false-kill risk, reviewed during a future release cycle.
+The 0.4.0 release deferred default-on promotion until benchmark evidence
+showed a clear benefit with acceptable false-kill risk.
 
 ### Known limitations
 
@@ -487,9 +488,8 @@ The following items are explicitly out of scope for 0.4.0:
 - **Configurable pruning rules** — Operator-facing directives to control which
   elements the module prunes.
 - **Optimization of the html5ever parsing phase** — Step 1 of the pipeline stays untouched.
-- **Promotion of semantic pruning to default-on** — `<nav>`, `<footer>`,
-  `<aside>` pruning remains behind a feature flag until evidence and rollout
-  posture support promotion.
+- **Promotion of semantic pruning to default-on** — Deferred in 0.4.0. The
+  0.9.2 release enables it by default.
 - **New NGINX configuration directives** for optimization control.
 - **Optimization-specific metrics or logging** — No new reason codes or
   decision logging for optimization paths.
