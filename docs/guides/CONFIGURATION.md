@@ -173,7 +173,10 @@ Otherwise it uses bounded full-buffer decompression.
 
 `markdown_cache_validation full` requires complete converted output before
 headers and therefore selects full-buffer. `ims_only` or `off` permits
-streaming when the other gates pass. The module commits streaming headers
+streaming when the other gates pass. `full` uses the transformed ETag with
+`If-None-Match`. The converted representation has no source `Last-Modified`,
+so `If-Modified-Since` does not produce a 304 for converted output. It applies
+to pass-through responses only. The module commits streaming headers
 before the first converted body buffer, so post-commit errors use safe-finish
 or abort handling rather than replaying the upstream body.
 
@@ -183,12 +186,17 @@ or abort handling rather than replaying the upstream body.
 policy strict for staged rollout so browsers sending `*/*` are not converted
 unexpectedly. `markdown_auth_policy` and `markdown_auth_cookies` prevent
 conversion of authenticated content according to the configured policy.
+The detection uses the `Authorization` header and the configured cookie names.
+It does not detect mTLS, `auth_request`, or other upstream authentication. For
+those deployments, select the conversion scope with an explicit
+`markdown_filter` map or set the cache policy at the upstream.
 
 `markdown_content_types` controls general conversion eligibility.
-`markdown_stream_excluded_types` is an additional streaming-only exclusion.
-An excluded type may still use full-buffer conversion when otherwise eligible.
-Built-in streaming exclusions include event-stream and newline-delimited JSON
-media types.
+`markdown_stream_excluded_types` is an eligibility-level exclusion. A response
+whose Content-Type matches an excluded type bypasses conversion entirely. The
+module logs the request as `not_eligible`, even when `markdown_streaming` is
+`off`. Do not list a type that you also want the full-buffer engine to convert.
+Built-in exclusions cover event-stream and newline-delimited JSON media types.
 
 `markdown_trusted_proxies` is an explicit CIDR allowlist for forwarded URL
 headers. The module ignores forwarded headers from an untrusted peer. For a
