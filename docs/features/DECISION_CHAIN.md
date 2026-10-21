@@ -86,7 +86,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
 | 6 | Response size | When the size is known from headers (Content-Length present): is the response within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap checked before the FFI attempt; oversized input is never truncated. Responses whose size is not known at header time (chunked or missing Content-Length) enter buffering, and an overrun there is a failed conversion attempt governed by `markdown_error_policy`, not this eligibility gate. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
-| 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` \| `wildcard` \| `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
+| 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` \| `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
 
 ### Accept negotiation outcomes
@@ -106,7 +106,6 @@ negotiation):
 | No `Accept` header present and `markdown_accept` is `strict` | `skipped_no_accept` |
 | `Accept` present but does not request Markdown (and not the reject case above) | `skipped_accept` |
 
-When `markdown_accept` is `wildcard`, `text/*` and `*/*` also qualify for conversion.
 When `markdown_accept` is `force`, the module attempts conversion regardless of the `Accept` header.
 
 ## First-Failing-Check Rule

@@ -113,7 +113,7 @@ http {
   `force` 会在同样的检查通过后请求流式转换。
 - `markdown_limits` 限制转换内存、处理时间、解压、流式缓冲区和并发工作量。
 - `markdown_accept strict` 适合分阶段上线。只有在明确需要时才使用
-  `wildcard` 或 `force`。
+  `force`。
 - `markdown_error_policy` 决定转换失败时透传原响应，或返回指定状态码。
 
 完整指令表见[配置参考](docs/guides/CONFIGURATION.md)。修改现有 0.9.1
