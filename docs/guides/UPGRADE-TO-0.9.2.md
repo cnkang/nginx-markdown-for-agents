@@ -348,9 +348,11 @@ sudo cp -a "${NGINX_CONF_DIR}/." "${STAGED_ROOT}/"
 # Apply the deterministic part of MIGRATION-0.9.2.md to the STAGED COPY:
 # remove the seven retired directive names that 0.9.2 no longer
 # registers (five convergence names, plus markdown_profile and
-# markdown_streaming_zero_copy).  The remaining migration items are
-# consumer-side (reason integers, diagnostics schema) and need no
-# config edit.  The staged
+# markdown_streaming_zero_copy).  The other removed 0.9.1 directives
+# (for example markdown_max_size, markdown_timeout, and
+# markdown_conditional_requests) also need a configuration edit; see the
+# removal table in MIGRATION-0.9.2.md.  The reason-integer and
+# diagnostics-schema items are consumer-side and need no config edit.  The staged
 # tree is a disposable copy: edit in place WITHOUT .bak backups, so no
 # stale backup file can be scanned below, counted as a second
 # load_module entry, or loaded by a wildcard include during nginx -t.
@@ -399,7 +401,8 @@ fi
 # Validate with the staged prefix as well as the staged file, so every
 # relative include resolves inside the staged tree and the active tree stays
 # untouched.
-sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
+sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf" \
+  || { echo "ERROR: staged configuration failed validation" >&2; exit 1; }
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
 # tree now (before the module swap): remove the seven retired
 # directive names that 0.9.2 no longer registers.  The active
@@ -720,15 +723,10 @@ restore_pre_migration_tree() {
     echo "NOTE: the previous configuration tree was preserved as ${PREVIOUS_TARGET}; remove it once the upgrade is confirmed"
   fi
 }
-# The active configuration was already migrated; the OLD module is still
-# installed.  Validate the migrated configuration against the old module
-# BEFORE stopping NGINX: a failure here must restore the pre-migration
-# tree so the pair stays consistent.
-if ! sudo nginx -t; then
-  echo "ERROR: the migrated configuration fails validation against the old module; restoring the pre-migration tree" >&2
-  restore_pre_migration_tree
-  exit 1
-fi
+# The active configuration was already migrated and the staged copy passed
+# validation with the 0.9.2 module. Do not validate the migrated active tree
+# with the old module: the new markdown_limits keys are unknown to it, so the
+# check would always fail and trigger an unnecessary restore.
 # systemd-managed host: verify the RUNNING nginx process is actually
 # owned by nginx.service before restarting through systemd.  A unit
 # file existing on disk is not proof of ownership — the process may be
@@ -1086,7 +1084,6 @@ replacement.
 |--------|-------|-------|
 | ABI version | 1 | 3 |
 | `MarkdownOptions` size (LP64) | 128 bytes | 96 bytes |
-| `FFIDynconfResult` | Present (72 bytes) | Removed |
 | FFI exports | 36 | 38 |
 
 A 0.9.1 module linked against the 0.9.2 archive (or the reverse) fails the
@@ -1099,7 +1096,8 @@ The prebuilt module archive carries the matching pair. Source builders who
 vendor the Rust archive separately must rebuild both halves from the same
 commit. External FFI consumers must regenerate bindings from
 `components/rust-converter/include/markdown_converter.h` at 0.9.2, because
-`MarkdownOptions` tail fields moved down by 32 bytes and nine exports are gone.
+`MarkdownOptions` tail fields moved down by 32 bytes. The release removed six
+exports and added eight (36 → 38).
 
 ---
 
@@ -1403,7 +1401,8 @@ fi
 # Validate with the staged prefix as well as the staged file, so every
 # relative include resolves inside the staged tree and the active tree stays
 # untouched.
-sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf"
+sudo nginx -t -p "${STAGED_ROOT}/" -c "${STAGED_ROOT}/nginx.conf" \
+  || { echo "ERROR: staged configuration failed validation" >&2; exit 1; }
 # Staged validation succeeded.  Apply the SAME migration to the ACTIVE
 # tree now (before the module swap): remove the seven retired directive
 # names that 0.9.2 no longer registers.  The active load_module entry
@@ -2082,6 +2081,7 @@ helm repo update
 # image values live at the chart top level, not under markdown.image.
 helm upgrade nginx-markdown ./charts/nginx-markdown \
     --namespace nginx-markdown \
+    --reuse-values \
     --set "image.repository=<your-registry>/nginx-markdown" \
     --set image.tag=v0.9.2
 
@@ -2135,7 +2135,7 @@ curl -s http://localhost/nginx-markdown/diagnostics \
     | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-v = d.get("version")
+v = d.get("product_version")
 assert v == "0.9.2", f"version={v!r}"
 recent = d.get("recent_decisions")
 assert isinstance(recent, list), f"recent_decisions is not a list: {type(recent).__name__}"
