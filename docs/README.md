@@ -11,6 +11,7 @@ This directory contains the maintained documentation supporting that landing pag
 | If you want to... | Start here |
 |-------------------|------------|
 | Understand the project quickly | [../README.md](../README.md) |
+| Find answers to common questions | [FAQ.md](FAQ.md) |
 | Install or deploy the module | [guides/README.md](guides/README.md) |
 | Configure directives and behavior | [guides/CONFIGURATION.md](guides/CONFIGURATION.md) |
 | Audit the public surface before the 1.0 freeze | [architecture/PUBLIC_SURFACE_INVENTORY.md](architecture/PUBLIC_SURFACE_INVENTORY.md) |
