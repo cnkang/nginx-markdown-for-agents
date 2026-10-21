@@ -298,17 +298,13 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
 static ngx_str_t
 ngx_http_markdown_log_safe_value(ngx_http_request_t *r, ngx_str_t value)
 {
-    size_t   i;
-    size_t   j;
-    u_char  *p;
-
-    for (i = 0; i < value.len; i++) {
+    for (size_t i = 0; i < value.len; i++) {
         if (value.data[i] < 0x20 || value.data[i] == 0x7f) {
-            p = ngx_pnalloc(r->pool, value.len);
+            u_char *p = ngx_pnalloc(r->pool, value.len);
             if (p == NULL) {
                 return (ngx_str_t) ngx_string("<unprintable>");
             }
-            for (j = 0; j < value.len; j++) {
+            for (size_t j = 0; j < value.len; j++) {
                 p[j] = (value.data[j] < 0x20 || value.data[j] == 0x7f)
                        ? '?' : value.data[j];
             }
