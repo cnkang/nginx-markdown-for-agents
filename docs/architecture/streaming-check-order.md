@@ -114,16 +114,16 @@ the request passes through without ever reaching the streaming path selector.
   (step 4) since only `text/html` (or user-configured types) passes.
 - **Defense-in-depth**: `ngx_http_markdown_stream_type_excluded()` provides an
   explicit hard-exclusion function covering all three types. The streaming
-  engine selector also has a check, but eligibility rejects these types before
-  the selector runs.
-- **Ordering**: The content_type allowlist rejects them at step 4. Even if
-  a user configures `markdown_content_types application/x-ndjson`, the
-  `ngx_http_markdown_is_streaming()` check (step 4) catches
-  user-configured `markdown_stream_excluded_types` before the streaming engine
-  selector runs.
-- **Verdict**: CONFIRMED -- the content_type allowlist excludes them
-  implicitly before streaming, and `stream_type_excluded()` excludes them
-  explicitly for defense-in-depth.
+  engine selector also has a check, but eligibility rejects `text/event-stream`
+  before the selector runs.
+- **Ordering**: The default content-type allowlist rejects these JSON types at
+  step 4. If a user explicitly allows one with `markdown_content_types` and does
+  not add it to `markdown_stream_excluded_types`, eligibility passes and the
+  selector routes the response to full-buffer conversion. The response is not
+  passed through unchanged and it never uses the streaming engine.
+- **Verdict**: CONFIRMED -- the default allowlist excludes them implicitly
+  before streaming. The selector keeps them on the full-buffer path when a user
+  explicitly allows them.
 
 ### Resource limits -- size_limit (Requirement 1) -- PASS
 

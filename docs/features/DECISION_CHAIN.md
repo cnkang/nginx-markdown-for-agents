@@ -88,7 +88,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 2 | HTTP method | Is the request method `GET` or `HEAD`? Other methods (POST, PUT, DELETE, etc.) are not eligible. | `not_eligible` |
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
-| 4a | Streaming-type exclusion | Does the Content-Type match a built-in streaming exclusion (`text/event-stream`, `application/x-ndjson`, `application/stream+json`) or a `markdown_stream_excluded_types` entry? A match fails eligibility and the response passes through unchanged. | `not_eligible` |
+| 4a | Streaming-type exclusion | Does the Content-Type match `text/event-stream` or a `markdown_stream_excluded_types` entry? A match fails eligibility and the response passes through unchanged. The `application/x-ndjson` and `application/stream+json` built-ins act at the path selector: they reach this check only when `markdown_content_types` allows them, and they then select full-buffer conversion. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
 | 6 | Response size | When the size is known from headers (Content-Length present): is the response within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap checked before the FFI attempt; oversized input is never truncated. Responses whose size is not known at header time (chunked or missing Content-Length) enter buffering, and an overrun there is a failed conversion attempt governed by `markdown_error_policy`, not this eligibility gate. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
@@ -174,9 +174,12 @@ Use `fail_closed` only when you need strict guarantees that clients never receiv
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. The sub-classification appears as `reason=<code>` in decision log entries (for example `reason=timeout`, plus `event=` for the emitting site). The `nginx_markdown_requests_total` metric does not carry these sub-classifications. Its `reason` label holds only the ten frozen values (`converted`, `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`, `bypass_no_transform`, `failed_open`, `failed_closed`, `streaming_mid_flight_error`). The `category=` field in the decision log is a separate coarse error class (`conversion`, `resource_limit`, `system`, `unknown`). None of these change the primary outcome, which is `failed_open` or
-`failed_closed` for pre-commit failures and `aborted` for post-commit streaming
-failures.
+When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. The sub-classification appears as `reason=<code>` in decision log entries (for example `reason=timeout`, plus `event=` for the emitting site). The `nginx_markdown_requests_total` metric does not carry these sub-classifications. Its `reason` label holds only the ten frozen values (`converted`, `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`, `bypass_no_transform`, `failed_open`, `failed_closed`, `streaming_mid_flight_error`). The `category=` field in the decision log is a separate coarse error class (`conversion`, `resource_limit`, `system`, `unknown`). None of these change the pre-commit outcome, which is `failed_open` or
+`failed_closed` according to `markdown_error_policy`. A post-commit streaming
+error has three possible outcomes. A successful safe finish records
+`converted`. A definitive terminal delivery failure records `failed_closed`.
+A delivered protocol-safe abort records `aborted` with
+`streaming_mid_flight_error`.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|
