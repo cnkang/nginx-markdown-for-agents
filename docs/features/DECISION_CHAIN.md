@@ -45,13 +45,17 @@ flowchart TD
     F -->|Other non-200| G["not_eligible"]
     F -->|Yes| H{"Range<br/>request?"}
     H -->|Yes| I["not_eligible"]
-    H -->|No| J{"Content-Type<br/>text/html?"}
+    H -->|No| H2{"Streaming type<br/>excluded?"}
+    H2 -->|Yes| H3["not_eligible"]
+    H2 -->|No| J{"Content-Type<br/>text/html?"}
     J -->|No| K["not_eligible"]
     J -->|Yes| L{"Size within<br/>budget?"}
     L -->|No| M["not_eligible"]
     L -->|Yes| N{"Auth policy<br/>denies request?"}
     N -->|Yes| O["not_eligible"]
-    N -->|No| P{"Accept header<br/>requests MD?"}
+    N -->|No| N2{"Cache-Control<br/>no-transform?"}
+    N2 -->|Yes| N3["bypass_no_transform"]
+    N2 -->|No| P{"Accept header<br/>requests MD?"}
     P -->|Rejects (q=0)| Q["skipped_accept_reject"]
     P -->|No header (strict)| R["skipped_no_accept"]
     P -->|No match| S["skipped_accept"]
@@ -59,6 +63,7 @@ flowchart TD
     T -->|Success| U["converted"]
     T -->|Failure + pass| V["failed_open"]
     T -->|Failure + fail_closed| W["failed_closed"]
+    T -->|Post-commit streaming failure| X["aborted"]
 ```
 
 > **Note on eligibility granularity.** Checks 2 through 5 and check 7

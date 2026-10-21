@@ -104,7 +104,8 @@ the request passes through without ever reaching the streaming path selector.
   `ngx_http_markdown_is_streaming()` called from `check_eligibility()`.
 - **Code**: Hardcoded prefix match against `text/event-stream`.
 - **Ordering**: Executes at step 4, inside eligibility check.
-- **Additional**: Also checked in `select_processing_path()` Rule 5 as defense-in-depth.
+- **Additional**: `select_processing_path()` retains a defense-in-depth check,
+  but eligibility rejects this type first.
 - **Verdict**: CONFIRMED -- runs before streaming (double-guarded).
 
 ### Hard exclusions -- application/x-ndjson, application/stream+json (Requirement 4) -- PASS
@@ -113,13 +114,13 @@ the request passes through without ever reaching the streaming path selector.
   (step 4) since only `text/html` (or user-configured types) passes.
 - **Defense-in-depth**: `ngx_http_markdown_stream_type_excluded()` provides an
   explicit hard-exclusion function covering all three types. The streaming
-  engine selector (Rule 6 in `select_processing_path`) also checks
-  `markdown_stream_excluded_types` exclusion list.
+  engine selector also has a check, but eligibility rejects these types before
+  the selector runs.
 - **Ordering**: The content_type allowlist rejects them at step 4. Even if
   a user configures `markdown_content_types application/x-ndjson`, the
   `ngx_http_markdown_is_streaming()` check (step 4) catches
-  user-configured `markdown_stream_excluded_types`, and the streaming engine selector
-  (step 9, Rule 6) provides a final defense layer.
+  user-configured `markdown_stream_excluded_types` before the streaming engine
+  selector runs.
 - **Verdict**: CONFIRMED -- the content_type allowlist excludes them
   implicitly before streaming, and `stream_type_excluded()` excludes them
   explicitly for defense-in-depth.
@@ -161,18 +162,22 @@ the request passes through without ever reaching the streaming path selector.
 streaming-specific guards AFTER all security checks pass:
 
 1. Engine == off -> full-buffer
-2. HEAD request -> full-buffer
-3. 304 Not Modified -> full-buffer
-4. conditional_requests full_support -> full-buffer
-5. text/event-stream -> full-buffer (defense-in-depth, already excluded at step 4)
-6. `markdown_stream_excluded_types` match -> full-buffer (defense-in-depth)
-7. `markdown_front_matter on` -> full-buffer (the module assembles the front matter from
-   the completed metadata set)
+2. `markdown_front_matter on` -> full-buffer (the module assembles the front
+   matter from the completed metadata set)
+3. HEAD request -> full-buffer
+4. 304 Not Modified -> full-buffer
+5. conditional_requests full_support -> full-buffer
+6. text/event-stream -> full-buffer. This guard is defense-in-depth because
+   eligibility rejects the type first.
+7. `markdown_stream_excluded_types` match -> full-buffer. This guard is
+   defense-in-depth because eligibility rejects the type first.
 8. Policy == force -> streaming
 9. Policy == auto -> streaming, independent of response size and transfer mode
 
 These are path-selection decisions, not security gates -- the security gates
-all executed earlier in the pipeline.
+all executed earlier in the pipeline. A request that matches an excluded
+content type normally stops at step 4, so rules 6 and 7 remain unreachable
+defense-in-depth.
 
 ---
 
