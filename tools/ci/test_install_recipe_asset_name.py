@@ -46,7 +46,10 @@ def test_usage_recipe_uses_a_private_staging_directory() -> None:
     """The header must not reintroduce a predictable shared download path."""
     text = INSTALL_SH.read_text(encoding="utf-8")
 
-    assert "private" in text.lower() and "mktemp" in text, (
+    assert "private" in text.lower(), (
+        "the header lost the private staging guidance"
+    )
+    assert "mktemp" in text, (
         "the header lost the private staging guidance"
     )
     assert not re.search(r'-o\s+"?/tmp/', text), (
