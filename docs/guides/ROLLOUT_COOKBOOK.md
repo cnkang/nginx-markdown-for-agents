@@ -72,7 +72,7 @@ Confirm the module loads and the converter initializes:
 ```bash
 nginx -t
 sudo tail -20 /var/log/nginx/error.log | grep markdown
-# Expected: "markdown filter: converter initialized"
+# Expected: "markdown: converter initialized"
 ```
 
 ### Verify Metrics Endpoint

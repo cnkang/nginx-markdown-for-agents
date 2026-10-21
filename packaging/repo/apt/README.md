@@ -90,8 +90,8 @@ sudo nginx -t && sudo systemctl reload nginx
 ```bash
 # Confirm the module loads and the directive parses (dynamic modules do
 # not appear in `nginx -V` — that output reflects the build, not runtime
-# load_module).  Use the doctor or an explicit load test instead:
-nginx-markdown-doctor
+# load_module).  Run the doctor from a repository clone:
+bash tools/doctor/nginx-markdown-doctor.sh
 
 # Or manually: create a temp config with load_module + markdown_filter on,
 # then `nginx -t -c <tmp.conf>`.
@@ -395,8 +395,10 @@ The project documents key rotation in its
 ## NGINX ABI Compatibility
 
 Each package in this repository targets a specific NGINX version.
-The package declares an ABI dependency (`nginx-abi-X.Y`) to prevent
-installation on incompatible NGINX builds.
+The DEB declares an exact version range (`nginx (>= X.Y.Z)`,
+`nginx (<< X.Y.(Z+1))`). The RPM requires the matching
+`nginx-rX.Y.Z` capability. The pre-install script also enforces the exact
+version.
 
 If you encounter dependency errors:
 

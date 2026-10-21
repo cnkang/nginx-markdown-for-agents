@@ -464,7 +464,7 @@ After enabling the module and reloading NGINX:
 
 ```bash
 sudo tail -20 /usr/local/nginx/logs/error.log | grep markdown
-# Expected: "markdown filter: converter initialized"
+# Expected: "markdown: converter initialized"
 ```
 
 ### 2. Verify Markdown Conversion
@@ -590,8 +590,8 @@ location ~* \.md$ {
 | Returns HTML instead of Markdown | Module not enabled or Accept header missing | [Details](OPERATIONS.md#issue-1-conversion-not-occurring) |
 | High failure rate | Resource limits or malformed HTML | [Details](OPERATIONS.md#issue-2-high-failure-rate) |
 | Slow response times | Conversion timeout or high system load | [Details](OPERATIONS.md#issue-3-slow-conversion-performance) |
-| Module won't load | Missing dependencies or version mismatch | [Details](INSTALLATION.md#troubleshooting) |
-| Cache returns wrong content | Cache key misconfiguration | [Details](OPERATIONS.md#issue-5-incorrect-cache-behavior) |
+| Module won't load | Missing dependencies or version mismatch | [Details](INSTALLATION.md#10-troubleshooting) |
+| Cache returns wrong content | Cache key misconfiguration | [Details](OPERATIONS.md#runbook-4-cache-serving-wrong-variant) |
 
 Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 
