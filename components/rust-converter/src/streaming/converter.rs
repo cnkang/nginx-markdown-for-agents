@@ -1823,6 +1823,23 @@ mod tests {
         out
     }
 
+    #[test]
+    fn nested_pre_keeps_one_code_block() {
+        let html = b"<pre>AAA<pre>BBB</pre>CCC</pre>";
+        let output = convert_with_splits(html, &[1]);
+        let text = String::from_utf8(output).expect("utf-8");
+
+        assert_eq!(
+            text.matches("```").count(),
+            2,
+            "one opening and one closing fence expected: {text:?}"
+        );
+        assert!(
+            text.contains("AAABBBCCC"),
+            "nested pre content must stay in one block: {text:?}"
+        );
+    }
+
     /// Like `convert_with_splits`, but returns the error code instead of
     /// panicking, for fixtures that are invalid UTF-8 under the strict
     /// (fail-closed) contract.
