@@ -14,7 +14,7 @@ mid-parse interruption and the alternative budget mechanisms used.
 
 ### 1.1 HTML Parser Library
 
-The Rust converter uses **html5ever 0.38** (Mozilla's Servo project) as its
+The Rust converter uses **html5ever 0.39** (Mozilla's Servo project) as its
 HTML parser. Two parsing paths exist:
 
 | Path | API | Use Case |
@@ -22,7 +22,7 @@ HTML parser. Two parsing paths exist:
 | Full-buffer | `parse_document(RcDom, opts).one(input)` | Default path; builds complete DOM tree |
 | Streaming | `html5ever::tokenizer::Tokenizer<TokenSinkAdapter>` | Opt-in streaming path; token-level processing |
 
-The full-buffer path uses `markup5ever_rcdom 0.38` for DOM tree representation.
+The full-buffer path uses `markup5ever_rcdom 0.39` for DOM tree representation.
 
 ### 1.2 Does html5ever Support Cooperative Cancellation?
 
@@ -220,7 +220,10 @@ responsiveness (worst-case detection latency of ~1-10 ms for typical HTML).
 #### Worst-Case Timeout Overshoot
 
 Since the full-buffer `parse_document().one()` call offers no interruption,
-the actual timeout overshoot depends on input size:
+the actual timeout overshoot depends on input size. With the default
+`parser_budget` of 32 MiB, the module rejects inputs above roughly 4.8 MB
+before parsing, so the 5-10 MB row applies only after an operator raises that
+budget.
 
 | Input Size | Approximate Parse Time | Overshoot Risk |
 |------------|----------------------|----------------|

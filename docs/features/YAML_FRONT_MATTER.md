@@ -28,7 +28,7 @@ It focuses on converter behavior and output shape. For NGINX directive syntax an
    - Properly escapes YAML special characters
 
 2. **`write_yaml_string()`** - Escapes YAML special characters
-   - Escapes: `"`, `\`, `\n`, `\r`, `\t`
+   - Escapes: `"`, `\`, `\n`, `\r`, `\t`, and any remaining C0/C1 control character as `\uXXXX`
    - Wraps values in double quotes for safety
 
 ### YAML Format

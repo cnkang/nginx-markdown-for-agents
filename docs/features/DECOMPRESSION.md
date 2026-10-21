@@ -76,7 +76,8 @@ limits and error paths release auxiliary storage.
 
 ## Error classification
 
-The decoder reports four bounded failure reasons:
+The decoder has five failure reasons. The module reports ratio violations under
+the `budget_exceeded` metric label.
 
 | Reason | Meaning |
 | --- | --- |

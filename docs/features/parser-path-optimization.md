@@ -269,11 +269,12 @@ back to the normal path. There is no partial fast path.
 
 ### Qualification criteria
 
-A document qualifies when both conditions are met:
+A document qualifies when all three conditions are met:
 
 1. Every element node uses a tag in the `FAST_PATH_ELEMENTS` set, or is a
    prunable element (handled by `should_prune` returning non-`Traverse`).
 2. The maximum DOM nesting depth does not exceed `FAST_PATH_MAX_DEPTH` (15).
+3. The pre-scan visits at most `FAST_PATH_MAX_NODES` (10,000) nodes.
 
 Non-element nodes (text, comments, doctypes, processing instructions) are
 always allowed.
@@ -348,14 +349,14 @@ additional tree walk. That is why the caller must provide the hint externally.
 
 The 0.4 estimate applies to the initial traversal buffer when an input-size
 hint is available. It is not applied again to the fused normalizer. When the
-fused path activates, `converter.rs` passes the actual traversal output length
-(`output.len()`) to `FusedNormalizer::new`, so the normalizer starts with the
-already-converted Markdown size rather than an estimate of it:
+fused path activates, `converter.rs` passes the traversal buffer capacity
+(`output.capacity()`) to `FusedNormalizer::try_new`, so the normalizer starts
+with room for at least the already-converted Markdown output:
 
 | Stage | Capacity source |
 |-------|-----------------|
 | Initial traversal | `estimate_output_capacity(input_size_hint)` when the full-buffer input hint exceeds `LARGE_BODY_THRESHOLD`. Otherwise the default 1 KB |
-| Fused normalizer | Actual traversal output length (`output.len()`) |
+| Fused normalizer | Traversal buffer capacity (`output.capacity()`) |
 
 The traversal code clamps its estimate to 4 KB–4 MB. The fused normalizer's
 capacity is not subject to that estimate because the complete traversal output

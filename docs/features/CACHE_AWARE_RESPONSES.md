@@ -66,10 +66,12 @@ HTML Response
 The module generates ETags as quoted strings:
 
 ```http
-ETag: "a1b2c3d4e5f6"
+ETag: "0123456789abcdef0123456789abcdef"
 ```
 
-The module computes the ETag value from the Markdown output using a hash function. The same HTML input always produces the same ETag (deterministic output).
+The module computes the ETag value from the Markdown output with BLAKE3 (first
+128 bits as lowercase hex, 32 hex characters). The same HTML input always
+produces the same ETag (deterministic output).
 
 ### Vary Header Behavior
 
