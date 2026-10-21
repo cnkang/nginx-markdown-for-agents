@@ -80,11 +80,11 @@ Content-Type: text/html
 
 The install script auto-enables `markdown_filter on` and wires the `load_module` directive. When automatic wiring completes successfully, you do not need to edit the configuration manually. If the installer reports manual actions, follow its instructions to finish the wiring. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
 
-The installation host must provide Bash, curl, tar, and the standard
+The installation host must provide Bash, curl, tar, python3, and the standard
 release-verification utilities used by the script, including `awk`, `gpg`,
 and `tar`. Debian/Ubuntu hosts can install `gawk` and `gnupg2`. Alpine hosts
-can install `gawk` and `gnupg`. The installer validates these commands before
-it performs any privileged operation.
+can install `gawk`, `gnupg`, and `python3`. The installer validates these
+commands before it performs any privileged operation.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 
@@ -137,7 +137,7 @@ By default, the installer requires a release-signed `SHA256SUMS` manifest and re
 
 The install script performs the following automatically:
 
-1. Detects your NGINX version, OS type (glibc/musl), and architecture from `nginx -V` metadata.
+1. Detects the NGINX version from `nginx -V`, the libc flavor from the host, and the architecture from `uname -m`.
 2. Downloads the correct pre-built binary from GitHub Releases.
 3. Verifies the SHA-256 checksum of the downloaded binary.
 4. Copies the `.so` file to the NGINX modules directory.
@@ -251,7 +251,7 @@ This follows the official-image multi-stage pattern:
 
 ### Platform-Specific Build Notes
 
-- **Alpine-based** official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
+- **Alpine-based** official images ship the matching NGINX source tree at `/usr/src/nginx-<version>`. When that tree is absent, the Dockerfile downloads the matching tarball.
 - **Debian-based** official images do not currently provide a matching `nginx-dev` package. The Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
 - In all cases, the runtime stage keeps the official `nginx` image and adds
   only the module, example content, and the non-root runtime configuration.
@@ -972,7 +972,7 @@ tail /var/log/nginx/error.log | grep "markdown filter"
 Look for initialization messages such as:
 
 ```text
-[info] markdown filter: converter initialized in worker process (pid: ...)
+[info] markdown: converter initialized in worker process (pid: ...)
 ```
 
 #### 5. Metrics Endpoint (When Enabled)
@@ -1249,11 +1249,11 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    ```
 4. If the system is air-gapped, manually download the binary, signed
    manifest, and signature on a connected machine. The release public key
-   lives in the git repository (`packaging/nginx-markdown-for-agents-release.asc`)
-   rather than among the Release assets. Transfer it from a clone of the
-   repository along with the other files, and confirm the key's fingerprint
-   through an independently authenticated channel before importing it. The
-   release asset itself is not the trust anchor.
+   lives in the git repository (`packaging/nginx-markdown-for-agents-release.asc`).
+   The release also publishes a copy, but that copy is not a trust anchor.
+   Transfer the repository copy along with the other files, and confirm the
+   key's fingerprint through an independently authenticated channel before
+   importing it.
    Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    set -euo pipefail
@@ -1479,7 +1479,7 @@ cargo build --target aarch64-apple-darwin --release
 
 ### CI Verification
 
-The [`install-verify.yml`](../../.github/workflows/install-verify.yml) CI workflow runs weekly and validates the install script across the full platform matrix defined in `tools/release-matrix.json`. This provides confidence that the primary install path works on all supported combinations of NGINX version, OS type, and architecture.
+The [`install-verify.yml`](../../.github/workflows/install-verify.yml) CI workflow runs weekly and exercises a representative subset of the platform matrix defined in `tools/release-matrix.json`. The subset contains the lower bound, the latest stable, and the latest upstream version per libc/arch. It does not cover every matrix entry.
 
 ---
 
@@ -1608,7 +1608,7 @@ sudo nginx -s reload
 
 ### Issue: Conversion Timeout
 
-**Error Log:** `markdown filter: conversion timeout exceeded`
+**Error Log:** `markdown: conversion timeout exceeded`
 
 **Solution:**
 ```nginx

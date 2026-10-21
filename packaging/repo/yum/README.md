@@ -201,15 +201,15 @@ The project documents key rotation in its
 ## NGINX ABI Compatibility
 
 The packages in this repository are built against specific NGINX versions.
-Each RPM declares a `Requires: nginx-abi-X.Y` dependency to prevent
-installation on incompatible NGINX builds.
+Each RPM requires the matching `nginx-rX.Y.Z` capability and
+`nginx >= X.Y.Z` to prevent installation on incompatible NGINX builds.
 
 If you encounter dependency errors:
 
 1. Verify your NGINX version: `nginx -V`
-2. Check the package requires a matching ABI version:
+2. Check the package requires a matching NGINX version:
    ```bash
-   rpm -qpR nginx-module-markdown-for-agents-*.rpm | grep nginx-abi
+   rpm -qpR nginx-module-markdown-for-agents-*.rpm | grep 'nginx-r'
    ```
 3. See the [troubleshooting guide](../../../docs/guides/PACKAGE_INSTALLATION.md)
 
