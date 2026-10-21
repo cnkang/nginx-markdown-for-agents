@@ -60,10 +60,12 @@ truncated final input rather than treating it as a successful partial response.
 
 ## Commit and backpressure boundary
 
-Before the module commits headers, a replay or resource failure can fall back to
-the bounded full-buffer path when the error policy permits it. After commit,
-the original body cannot replay: the module starts safe-finish or aborts
-the response according to the terminal error path.
+Before the module commits headers, a capability fallback
+(`ERROR_STREAMING_FALLBACK`) can return the response to the bounded full-buffer
+path regardless of policy. Replay and resource failures follow the error
+policy: `pass` replays the original HTML, and `fail_closed` rejects. After
+commit, the original body cannot replay: the module starts safe-finish or
+aborts the response according to the terminal error path.
 
 `NGX_AGAIN` suspends delivery and preserves ownership of pending buffers. It
 does not increment delivery counters, clear terminal latches, or finalize the
