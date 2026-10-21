@@ -173,17 +173,25 @@ pub(super) fn append_link_destination(
     })
 }
 
-/// Append a Markdown link title while escaping its two delimiter characters.
+/// Append a Markdown link title while escaping its delimiter characters.
+///
+/// A title cannot contain a blank line. Replacing CR/LF with a space keeps the
+/// title inside its quotes; leaving them raw would let an entity-decoded
+/// newline close the image syntax and expose following text as raw Markdown.
 pub(super) fn append_markdown_title(
     output: &mut String,
     title: &str,
     ctx: &mut Option<&mut ConversionContext>,
 ) -> Result<(), ConversionError> {
     for ch in title.chars() {
-        if matches!(ch, '\\' | '"') {
-            append_char_with_context(output, '\\', ctx)?;
+        match ch {
+            '\r' | '\n' => append_char_with_context(output, ' ', ctx)?,
+            '\\' | '"' => {
+                append_char_with_context(output, '\\', ctx)?;
+                append_char_with_context(output, ch, ctx)?;
+            }
+            _ => append_char_with_context(output, ch, ctx)?,
         }
-        append_char_with_context(output, ch, ctx)?;
     }
     Ok(())
 }

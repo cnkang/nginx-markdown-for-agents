@@ -3194,6 +3194,43 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_code_newline_cannot_break_out() {
+        let html = b"<p><code>x&#10;&#10;&#60;img src=x onerror=alert(1)&#62;</code></p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+
+        assert!(
+            !result.contains("\n\n"),
+            "a blank line escaped the code span: {result:?}"
+        );
+        assert_eq!(
+            result.matches('`').count() % 2,
+            0,
+            "the inline code span must stay closed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_image_title_newline_cannot_break_out() {
+        let html = b"<p><img src=\"/a.png\" alt=\"a\" title=\"x&#10;&#10;&#60;img src=x onerror=alert(1)&#62;\"></p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let result = MarkdownConverter::new()
+            .convert(&dom)
+            .expect("Conversion failed");
+
+        assert!(
+            !result.contains("\n\n"),
+            "a blank line escaped the image title: {result:?}"
+        );
+        assert!(
+            result.contains("![a](/a.png \"x <img src=x onerror=alert(1)>\")"),
+            "the title must stay on one quoted line: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_multiple_inline_code() {
         let html = b"<p>Compare <code>foo</code> and <code>bar</code>.</p>";
         let dom = parse_html(html).expect("Parse failed");
