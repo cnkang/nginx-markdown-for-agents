@@ -64,10 +64,10 @@ flowchart LR
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Selects `strict` negotiation, `wildcard` negotiation, or `force` conversion without requiring a Markdown Accept value |
+| Behavior | Selects `strict` negotiation or `force` conversion without requiring a Markdown Accept value |
 | Lifecycle impact | Header-phase negotiation decision before eligibility checks |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_accept.c`, `components/nginx-module/src/ngx_http_markdown_request_impl.h` |
-| Practical note | Use this only when wildcard clients should really receive Markdown; it broadens the set of requests entering the conversion path. |
+| Practical note | Use `force` only in a scope that must always return Markdown, or with a variable-driven `markdown_filter` that selects the clients to convert. It broadens the set of requests that enter the conversion path. |
 
 ## Resource and Failure Controls
 

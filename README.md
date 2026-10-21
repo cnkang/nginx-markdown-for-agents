@@ -119,7 +119,7 @@ http {
 - `markdown_limits` bounds conversion memory, time, decompression, streaming
   buffers, and concurrent work.
 - `markdown_accept strict` is a safe default for staged rollout. Use
-  `wildcard` or `force` only when that behavior is intentional.
+  `force` only when that behavior is intentional.
 - `markdown_error_policy` controls whether conversion errors pass through or
   return a configured status.
 
