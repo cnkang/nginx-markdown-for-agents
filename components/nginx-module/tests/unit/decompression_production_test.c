@@ -1025,8 +1025,9 @@ test_gzip_empty_input_error(void)
     out = NULL;
 
     TEST_ASSERT(ngx_http_markdown_decompress(&r,
-                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, NULL, &out) == NGX_ERROR,
-                "empty gzip input should return generic error");
+                NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, NULL, &out)
+                == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+                "empty gzip input should classify as truncated input");
 }
 
 static void
