@@ -231,10 +231,10 @@ validated reload or restart.
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Prevents selected media types from entering the streaming path |
-| Lifecycle impact | Header-phase streaming eligibility branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
-| Practical note | Excluded responses may still use bounded full-buffer conversion when other eligibility checks pass. |
+| Behavior | Excludes selected media types from conversion eligibility |
+| Lifecycle impact | Header-phase eligibility gate before streaming selection |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
+| Practical note | A matching response bypasses conversion entirely and is logged as `not_eligible`. Do not list a type that the full-buffer engine must still convert. |
 
 ### `markdown_auto_decompress`
 
