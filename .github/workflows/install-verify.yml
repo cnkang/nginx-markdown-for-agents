@@ -478,6 +478,12 @@ jobs:
 
           # Add nginx.org official signing key and repository
           curl -fsSL https://nginx.org/keys/nginx_signing.key | ${SUDO} gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+          # The key is the only authenticator for the HTTP package repository,
+          # so pin its fingerprint before trusting it.
+          gpg --show-keys --with-colons /usr/share/keyrings/nginx-archive-keyring.gpg \
+            | awk -F: '$1 == "fpr" { print $10; exit }' \
+            | grep -qx '573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62' \
+            || { echo "::error::nginx.org signing key fingerprint mismatch" >&2; exit 1; }
           CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
           # Detect distro: nginx.org uses packages/debian/ for Debian,
           # packages/ubuntu/ for Ubuntu.  ID is "debian" or "ubuntu".
@@ -496,7 +502,7 @@ jobs:
           else
             REPO_CHANNEL="mainline/"
           fi
-          echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/${REPO_CHANNEL}${REPO_DISTRO}/ ${CODENAME} nginx" \
+          echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/${REPO_CHANNEL}${REPO_DISTRO}/ ${CODENAME} nginx" \
             | ${SUDO} tee /etc/apt/sources.list.d/nginx.list > /dev/null
           # Pin nginx.org packages above distro packages
           printf 'Package: nginx*\nPin: origin nginx.org\nPin-Priority: 900\n' \

@@ -17,8 +17,16 @@ normal clients.
 ### 1. Import the GPG signing key
 
 ```bash
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+curl -fsSL -o /tmp/nginx-markdown.key https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --with-fingerprint /tmp/nginx-markdown.key
+# Compare the printed fingerprint with the value published out-of-band.
+# Do not import the key until the fingerprint matches.
+sudo rpm --import /tmp/nginx-markdown.key
 ```
+
+> Every later `rpm --import` example assumes this downloaded key was
+> fingerprint-checked. Never import a key served only by the same repository
+> it signs.
 
 ### 2. Add the repository
 
