@@ -69,7 +69,7 @@ NGINX `http` → `server` → `location` configuration merging.
 | `markdown_prune_noise` | `http, server, location` | Remove configured page noise | `on`, `off` | `on` |
 | `markdown_auto_decompress` | `http, server, location` | Convert compressed upstream bodies | `on`, `off` | `on` |
 | `markdown_diagnostics` | `location` | Expose diagnostics JSON | `on`, `off` | `off` |
-| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from streaming | media-type list | `none` |
+| `markdown_stream_excluded_types` | `http, server, location` | Exclude types from conversion eligibility | media-type list | `none` |
 
 The public metric endpoint is Prometheus-only. There is no active
 `markdown_metrics_format` directive.
@@ -163,8 +163,9 @@ write `markdown_streaming auto` (or `force`) to opt back in. The
 `markdown_filter` directive controls conversion, not this policy, so the
 full-buffer default still converts.
 
-Streaming is still blocked by full cache validation, excluded content types,
-unsupported encodings, and build-time feature boundaries. For compressed
+Streaming is still blocked by full cache validation and unsupported encodings.
+A content type listed in `markdown_stream_excluded_types` is not converted at
+all, and `markdown_streaming` does not change that. For compressed
 responses, conversion requires `markdown_auto_decompress on`. Brotli
 uses the streaming decoder only when built with the feature enabled.
 Otherwise it uses bounded full-buffer decompression.

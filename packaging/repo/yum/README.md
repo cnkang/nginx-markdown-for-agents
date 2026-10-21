@@ -21,7 +21,9 @@ curl -fsSL -o /tmp/nginx-markdown.key https://pkg.example.com/nginx-markdown/gpg
 gpg --show-keys --with-fingerprint /tmp/nginx-markdown.key
 # Compare the printed fingerprint with the value published out-of-band.
 # Do not import the key until the fingerprint matches.
-sudo rpm --import /tmp/nginx-markdown.key
+sudo install -m 0644 /tmp/nginx-markdown.key \
+  /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 ```
 
 > Every later `rpm --import` example assumes this downloaded key was
@@ -38,7 +40,7 @@ name=nginx-markdown-for-agents
 baseurl=https://pkg.example.com/nginx-markdown/yum/
 enabled=1
 gpgcheck=1
-gpgkey=https://pkg.example.com/nginx-markdown/gpg.key
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 repo_gpgcheck=1
 sslverify=1
 ```
@@ -147,7 +149,7 @@ repo/yum/
 ### Importing the Key
 
 ```bash
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 ```
 
 ### Verifying Package Signatures
@@ -182,7 +184,7 @@ When you rotate the signing key:
 4. Users should re-import the key:
 
 ```bash
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 ```
 
 5. Old packages remain verifiable with the old key during the transition
@@ -216,7 +218,7 @@ If you encounter dependency errors:
 
 ```bash
 # Import the signing key
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 
 # Retry installation
 sudo yum install <self-hosted-module-package-name>
@@ -228,7 +230,7 @@ This may indicate package tampering or an outdated key:
 
 ```bash
 # Re-import the latest key
-sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nginx-markdown
 
 # Clean YUM cache and retry
 sudo yum clean all
