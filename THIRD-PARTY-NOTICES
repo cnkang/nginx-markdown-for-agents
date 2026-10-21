@@ -191,7 +191,16 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-13. serde 1.0.228
+13. brotli-decompressor 6.0.0 (Rust crate)
+    https://github.com/dropbox/rust-brotli-decompressor
+    License: BSD-3-Clause OR MIT
+    Copyright (c) 2016 Dropbox, Inc.
+
+    Licensed under the BSD 3-Clause License or the MIT license, at your option.
+
+--------------------------------------------------------------------------------
+
+14. serde 1.0.228
     https://github.com/serde-rs/serde
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The serde-rs Developers
@@ -206,7 +215,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-14. serde_json 1.0.154 (development/test dependency only)
+15. serde_json 1.0.154 (development/test dependency only)
     https://github.com/serde-rs/json
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The serde-rs Developers
@@ -220,7 +229,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-15. proptest 1.12.0 (development/test dependency only)
+16. proptest 1.12.0 (development/test dependency only)
     https://github.com/proptest-rs/proptest
     License: MIT OR Apache-2.0
     Copyright (c) 2016 FullContact, Inc
@@ -234,7 +243,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-16. libc 0.2.190 (development/test dependency only)
+17. libc 0.2.190 (development/test dependency only)
     https://github.com/rust-lang/libc
     License: MIT OR Apache-2.0
     Copyright (c) The Rust Project Developers
@@ -248,7 +257,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-17. toml 1.1.6+spec-1.1.0 (development/test dependency only)
+18. toml 1.1.6+spec-1.1.0 (development/test dependency only)
     https://github.com/toml-rs/toml
     License: MIT OR Apache-2.0
     Copyright (c) Individual contributors
@@ -266,7 +275,7 @@ Section C: Build-Time Tool Dependencies (not distributed in binary)
 
 ================================================================================
 
-18. cbindgen 0.29.4
+19. cbindgen 0.29.4
     https://github.com/mozilla/cbindgen
     License: MPL-2.0
     Copyright (c) Mozilla Corporation
