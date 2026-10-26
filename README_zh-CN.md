@@ -192,6 +192,10 @@ curl -sS -D - -o /dev/null \
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
+| 1.31.8 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.8 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.8 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.8 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
