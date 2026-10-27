@@ -143,9 +143,20 @@ def test_update_matrix_installs_dependencies_before_projection() -> None:
     steps = _workflow_data("update-matrix.yml")["jobs"]["update-matrix"]["steps"]
     install = _step_by_name(steps, "Install matrix validation dependencies")
     projection = _step_by_name(steps, "Generate release-contract matrix projection")
+    repo_root = Path(__file__).resolve().parents[4]
+    release_requirements = (repo_root / "requirements-release.txt").read_text(
+        encoding="utf-8"
+    )
+    pins = {
+        line.strip().split("==", 1)[0].lower(): line.strip().split("==", 1)[1]
+        for line in release_requirements.splitlines()
+        if "==" in line
+    }
 
     assert install["run"] == (
-        "python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2"
+        "python3 -m pip install "
+        f"'jsonschema[format]=={pins['jsonschema[format]']}' "
+        f"PyYAML=={pins['pyyaml']}"
     )
     assert steps.index(install) < steps.index(projection)
 

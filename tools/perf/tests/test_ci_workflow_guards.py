@@ -44,6 +44,17 @@ def _ci_workflow_data() -> dict[str, object]:
     return data
 
 
+def _requirement_version(repo_root: Path, filename: str, package: str) -> str:
+    """Return the exact pin for ``package`` from a requirements file."""
+    requirement_file = repo_root / filename
+    prefix = f"{package}=="
+    for line in requirement_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith(prefix.lower()):
+            return stripped.split("==", 1)[1].strip()
+    raise AssertionError(f"{package} is not pinned in {requirement_file}")
+
+
 def _workflow_trigger_paths(workflow: dict[str, object], event: str) -> set[str]:
     """Return paths for one top-level pull_request or push trigger."""
     triggers = workflow.get("on", workflow.get(True))
@@ -165,22 +176,80 @@ def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
     )
     assert version_match is not None
     jsonschema_version = version_match.group(1)
+    brotli_version = _requirement_version(
+        repo_root, "requirements-perf.txt", "Brotli"
+    )
+    pyyaml_version = _requirement_version(
+        repo_root, "requirements-release.txt", "PyYAML"
+    )
 
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
     assert "python3 -m pip install --requirement requirements-release.txt" in workflow
     # The preflight must assert every pinned version the gate relies on:
     # brotli and PyYAML from the start, plus jsonschema, whose transitive
-    # closure is the newest entry in requirements-release.txt.
+    # closure is the newest entry in requirements-release.txt.  Each expected
+    # value is read from the requirements file, so a partial bump cannot
+    # desynchronize the release gate from the installed pins.
     assert "version(\"jsonschema\")" in workflow
     assert "jsonschema.__version__" not in workflow
+    assert f'"{brotli_version} {pyyaml_version} "*' in workflow
+    assert (
+        f"requires Brotli=={brotli_version} and PyYAML=={pyyaml_version}"
+        in workflow
+    )
     assert f"requires jsonschema=={jsonschema_version}" in workflow
-    assert "Brotli==1.2.0" in (repo_root / "requirements-perf.txt").read_text(
-        encoding="utf-8"
-    )
-    assert "PyYAML==6.0.2" in (repo_root / "requirements-release.txt").read_text(
-        encoding="utf-8"
-    )
     assert jsonschema_requirement in release_requirements.splitlines()
+
+
+def test_requirements_files_agree_on_shared_pins() -> None:
+    """Shared pins must not diverge between requirements files."""
+    repo_root = Path(__file__).resolve().parents[3]
+    observed: dict[str, set[str]] = {}
+    for filename in ("requirements-dev.txt", "requirements-release.txt"):
+        for package in ("jsonschema[format]", "pyyaml"):
+            version = _requirement_version(repo_root, filename, package)
+            observed.setdefault(package.lower(), set()).add(version)
+
+    divergent = {
+        package: sorted(versions)
+        for package, versions in observed.items()
+        if len(versions) != 1
+    }
+    assert not divergent, f"requirements files disagree on shared pins: {divergent}"
+
+
+def test_ci_python_pins_match_requirements_files() -> None:
+    """CI install lines must carry the pins declared in requirements files.
+
+    The docs-check and unit-test jobs install a subset of the Python
+    dependencies directly.  Duplicated literals drifted from the requirements
+    files before, so every direct pin is now bound to its source of truth.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    ci = _ci_workflow_text()
+    jsonschema_version = _requirement_version(
+        repo_root, "requirements-release.txt", "jsonschema[format]"
+    )
+    pyyaml_version = _requirement_version(
+        repo_root, "requirements-release.txt", "PyYAML"
+    )
+    pytest_version = _requirement_version(repo_root, "requirements-dev.txt", "pytest")
+    xdist_version = _requirement_version(
+        repo_root, "requirements-dev.txt", "pytest-xdist"
+    )
+
+    assert (
+        f"'jsonschema[format]=={jsonschema_version}' PyYAML=={pyyaml_version}" in ci
+    )
+    assert (
+        f"pytest=={pytest_version} pytest-xdist=={xdist_version} "
+        f"PyYAML=={pyyaml_version}" in ci
+    )
+
+    sonar = (
+        repo_root / ".github" / "workflows" / "sonarcloud.yml"
+    ).read_text(encoding="utf-8")
+    assert f"pytest=={pytest_version} pytest-xdist=={xdist_version}" in sonar
 
 
 def test_release_gate_installs_checksum_pinned_helm_in_order() -> None:

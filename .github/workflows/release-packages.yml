@@ -1156,13 +1156,13 @@ jobs:
             echo "ERROR: jsonschema [format] extras are not installed; the date-time format checker is missing" >&2
             exit 1
           }
-          [[ "${dependency_versions}" == "1.2.0 6.0.2 "* ]] || {
-            echo "ERROR: release gate requires Brotli==1.2.0 and PyYAML==6.0.2, found ${dependency_versions}" >&2
+          [[ "${dependency_versions}" == "1.2.1 6.0.3 "* ]] || {
+            echo "ERROR: release gate requires Brotli==1.2.1 and PyYAML==6.0.3, found ${dependency_versions}" >&2
             exit 1
           }
           jsonschema_version="${dependency_versions##* }"
-          [[ "${jsonschema_version}" == "4.23.0" ]] || {
-            echo "ERROR: release gate requires jsonschema==4.23.0, found ${jsonschema_version}" >&2
+          [[ "${jsonschema_version}" == "4.26.0" ]] || {
+            echo "ERROR: release gate requires jsonschema==4.26.0, found ${jsonschema_version}" >&2
             exit 1
           }
           echo "Python release dependencies ${dependency_versions} are available."

@@ -275,7 +275,7 @@ jobs:
           python-version: '3.14.6'
 
       - name: Install documentation dependencies
-        run: python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2
+        run: python3 -m pip install 'jsonschema[format]==4.26.0' PyYAML==6.0.3
 
       - name: Validate docs
         env:
@@ -326,7 +326,7 @@ jobs:
       - name: Install test dependencies
         run: >-
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install pytest==9.0.3 pytest-xdist==3.8.0 PyYAML==6.0.2 lizard==1.23.0 complexipy==6.0.1
+          python3 -m pip install pytest==9.1.1 pytest-xdist==3.8.0 PyYAML==6.0.3 lizard==1.23.0 complexipy==6.0.1
 
       - name: Install shellcheck
         run: |

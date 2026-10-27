@@ -1,4 +1,4 @@
 # Dependencies required by the tag-only release validation job.
 -r requirements-perf.txt
-jsonschema[format]==4.23.0
-PyYAML==6.0.2
+jsonschema[format]==4.26.0
+PyYAML==6.0.3

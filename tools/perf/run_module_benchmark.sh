@@ -484,8 +484,8 @@ if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then
   if ! BROTLI_VERSION="$("$RESOLVED_PYTHON3" -c 'import brotli; print(brotli.__version__)' 2>/dev/null)"; then
     die "Python Brotli package is required for brotli-streaming-first; install requirements-perf.txt"
   fi
-  if [[ "$BROTLI_VERSION" != "1.2.0" ]]; then
-    die "Python Brotli version must be 1.2.0, found $BROTLI_VERSION"
+  if [[ "$BROTLI_VERSION" != "1.2.1" ]]; then
+    die "Python Brotli version must be 1.2.1, found $BROTLI_VERSION"
   fi
   log "Python Brotli: $BROTLI_VERSION"
 fi
