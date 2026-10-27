@@ -246,7 +246,7 @@ Regeneration path: run the `nightly-perf.yml` workflow with
 `workflow_dispatch` and `bootstrap_module_baseline=true` (do not also set
 `bootstrap_baseline=true`). The job builds the canonical NGINX version
 natively on `ubuntu-24.04` (x86_64) with Brotli support (`libbrotli-dev`
-plus the pinned Python `Brotli==1.2.0`), produces all eight scenarios in one
+plus the pinned Python `Brotli==1.2.1`), produces all eight scenarios in one
 consistent environment, finalizes the baseline from the retained raw report
 (computing the raw SHA-256 and taking the measurement timestamp from
 `module_benchmark.timestamp`), validates the result against the evidence

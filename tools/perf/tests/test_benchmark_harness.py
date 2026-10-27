@@ -1707,6 +1707,14 @@ class TestNginxConfigGeneration:
     def test_preflight_requires_pinned_python_brotli(self):
         """The blocking chunked Brotli scenario must fail before serving requests."""
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+        requirements = (REPO_ROOT / "requirements-perf.txt").read_text(
+            encoding="utf-8"
+        )
+        brotli_version = next(
+            line.strip().split("==", 1)[1]
+            for line in requirements.splitlines()
+            if line.strip().lower().startswith("brotli==")
+        )
 
         assert (
             'if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then'
@@ -1714,7 +1722,8 @@ class TestNginxConfigGeneration:
         )
         assert "import brotli; print(brotli.__version__)" in script_content
         assert "requirements-perf.txt" in script_content
-        assert '"$BROTLI_VERSION" != "1.2.0"' in script_content
+        assert f'"$BROTLI_VERSION" != "{brotli_version}"' in script_content
+        assert f"Python Brotli version must be {brotli_version}" in script_content
 
     def test_generated_config_directives(self):
         """Verify generated config has correct directives, no legacy ones, and no local mime.types."""

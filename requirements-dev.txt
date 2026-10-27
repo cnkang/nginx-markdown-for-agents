@@ -6,9 +6,9 @@
 #          pytest tools/release/matrix/tests/
 #          pytest tests/property/
 -r requirements-perf.txt
-hypothesis==6.135.2
-jsonschema[format]==4.23.0
-prometheus-client==0.25.0
-pytest==9.0.3
+hypothesis==6.170.12
+jsonschema[format]==4.26.0
+prometheus-client==0.26.0
+pytest==9.1.1
 pytest-xdist==3.8.0
-pyyaml==6.0.2
+pyyaml==6.0.3
