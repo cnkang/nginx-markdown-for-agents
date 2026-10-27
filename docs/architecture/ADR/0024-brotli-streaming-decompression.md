@@ -308,8 +308,8 @@ text relocations, and a local `BrotliDecoderDecompressStream` symbol.
 `components/nginx-module/config` retries the probe with `-lbrotlicommon` when
 the first link fails. pkg-config reports `Requires.private: libbrotlicommon`
 only for `--static`, so a static-only install would otherwise fail to link.
-The Homebrew formula keeps a dynamic dependency and requires Brotli 1.2.1,
-because Homebrew already ships the fixed release.
+The Homebrew formula vendors the same checksum-pinned resource and links it
+statically, because a host Homebrew Brotli can lag the fixed release.
 
 ## Document Updates
 

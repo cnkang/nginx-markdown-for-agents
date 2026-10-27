@@ -354,10 +354,10 @@ Compile the module from source when you use a custom NGINX build or a platform w
   full-buffer decoder. The capability gate reports the actual build state
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
-Official Linux modules bundle the Brotli decoder, so the host needs no Brotli
-package. A custom build links the host library at build time and runtime, so
-it must provide a release with the CVE-2026-111497 fix. The fixed releases
-are 1.0.10, 1.1.1, and 1.2.1 and later.
+Official Linux modules and the Homebrew formula bundle the Brotli decoder, so
+the host needs no Brotli package. A custom build links the host library at
+build time and runtime, so it must provide a release with the CVE-2026-111497
+fix. The fixed releases are 1.0.10, 1.1.1, and 1.2.1 and later.
 
 ### Platform-Specific Prerequisites
 
