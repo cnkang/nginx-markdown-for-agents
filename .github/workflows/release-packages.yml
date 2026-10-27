@@ -1052,6 +1052,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history is required to resolve a merge base against origin/main
+          # when this job runs on a non-main branch (shallow checkouts have no
+          # common ancestor and make STYLE_BASE unresolvable).
+          fetch-depth: 0
 
       - name: Set up Python for release gates
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -1463,12 +1467,10 @@ jobs:
         run: |
           # A tag push reports an all-zero github.event.before and a dispatch
           # carries no before at all, so neither event supplies a base.  The
-          # Makefile's own chain cannot help either: `git merge-base HEAD
-          # origin/main` needs a main ref, and a non-main checkout at the
-          # default depth has only origin/<its own branch>.  Fetching main
-          # does not repair that -- a shallow fetch still produces a nominal
-          # merge base equal to the commit under test -- so resolve the one
-          # case that genuinely has a base and surface the rest.
+          # Makefile's own chain needs a main ref; this job now checks out full
+          # history (fetch-depth: 0) and fetches origin/main on demand, so a
+          # non-main dispatch can still resolve a merge base.  A tag checkout
+          # has neither origin/main nor HEAD^, so it compares against itself.
           if [[ -z "${STYLE_BASE}" ]]; then
             if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
               # A tag checkout has neither origin/main nor, at the default
@@ -1480,7 +1482,12 @@ jobs:
               # A branch checkout carries origin/<branch>, so when that branch
               # is main the merge base is the checked-out commit itself --
               # exactly what the Makefile computed here before this step set
-              # the variable.  Anything else has no base to compare against.
+              # the variable.  On any other branch, fetch origin/main (full
+              # history, see fetch-depth above) so a merge base can resolve
+              # instead of failing the release gate on a non-main dispatch.
+              if ! git rev-parse --verify origin/main >/dev/null 2>&1; then
+                git fetch --no-tags origin main:refs/remotes/origin/main
+              fi
               STYLE_BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
               if [[ -z "${STYLE_BASE}" ]]; then
                 echo "ERROR: STYLE_BASE is required for docs-style-check-regression;" >&2
