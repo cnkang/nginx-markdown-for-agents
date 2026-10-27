@@ -159,8 +159,9 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
   `markdown_cache_validation full`.
 - **Brotli upstreams, streaming desired**: Same as gzip/deflate — use
   `markdown_streaming force` with `markdown_auto_decompress on`. Brotli streaming is
-  active in official release artifacts. Custom builds must have `libbrotlidec`
-  available (see Build Compatibility below).
+  active in official release artifacts. Official Linux modules bundle the fixed
+  decoder. Custom builds must have a patched `libbrotlidec` available (see Build
+  Compatibility below).
 - **Brotli upstreams, Brotli-disabled build**: The module routes responses to bounded
   full-buffer decompression via the Rust FFI path. No streaming TTFB benefit.
 - **Budget tuning**: Set `markdown_limits decompressed_size=<size>` and
@@ -169,8 +170,12 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 
 ## Build Compatibility
 
-Brotli streaming requires `libbrotlidec` at build time and runtime. The
-`NGX_MARKDOWN_BROTLI_STREAMING` environment variable controls detection:
+Brotli streaming requires `libbrotlidec` at build time. Official Linux
+modules statically link Brotli 1.2.1 and need no Brotli library at runtime.
+A custom build links the host `libbrotlidec` at build time and runtime, so it
+must provide a release with the CVE-2026-111497 fix. The fixed releases are
+1.0.10, 1.1.1, and 1.2.1 and later. The `NGX_MARKDOWN_BROTLI_STREAMING`
+environment variable controls detection:
 
 - `on` (default in release artifacts): probe and link. Fail if missing.
 - `auto`: probe silently. Enable if available, fall back to full-buffer if not.

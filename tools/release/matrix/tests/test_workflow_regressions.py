@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -443,3 +444,85 @@ def test_install_paths_provide_installer_runtime_dependencies() -> None:
         encoding="utf-8"
     )
     assert "apt-get install -y --no-install-recommends curl gawk python3" in workflow_test
+
+
+def test_release_build_bundles_pinned_brotli_decoder() -> None:
+    """Official Linux builds must bundle the fixed Brotli decoder.
+
+    AlmaLinux 9 and Alpine 3.20 carry no fixed Brotli package for
+    CVE-2026-111497, so a dynamic link would ship the vulnerable host copy
+    to those targets.
+    """
+    text = _workflow_text("release-packages.yml")
+    repo_root = Path(__file__).resolve().parents[4]
+    checksums = (repo_root / "packaging" / "checksums.sha256").read_text(
+        encoding="utf-8"
+    )
+    versions = re.findall(r"^\S+\s+brotli-(\S+)$", checksums, re.MULTILINE)
+    assert versions, "packaging/checksums.sha256 must pin the Brotli archive"
+    assert len(set(versions)) == 1, f"multiple Brotli pins: {versions}"
+    brotli_version = versions[0]
+
+    script = (
+        repo_root / "packaging" / "scripts" / "build-brotli-static.sh"
+    ).read_text(encoding="utf-8")
+    assert f'VERSION="{brotli_version}"' in script
+
+    workflow = _workflow_data("release-packages.yml")
+    steps = workflow["jobs"]["build"]["steps"]
+    install = _step_by_name(steps, "Install build dependencies")["run"]
+    assert re.search(r"^\s+cmake \\$", install, re.MULTILINE) is not None
+    assert "brotli-devel" not in install
+    assert "./packaging/scripts/build-brotli-static.sh" in text
+    assert "PKG_CONFIG_PATH: /usr/local/lib/pkgconfig" in text
+    assert (
+        '--with-ld-opt="-Wl,--exclude-libs,'
+        'libbrotlidec.a:libbrotlicommon.a"' in text
+    )
+    # The ALL form would also hide the Rust FFI exports the gate verifies.
+    assert "--exclude-libs,ALL" not in text
+    assert "NEEDED.*libbrotli(dec|common)" in text
+    assert '$5 == "LOCAL"' in text
+
+
+def test_release_dockerfiles_bundle_pinned_brotli_decoder() -> None:
+    """The local release image paths must bundle the decoder too."""
+    repo_root = Path(__file__).resolve().parents[4]
+    for name in ("Dockerfile.glibc", "Dockerfile.musl"):
+        dockerfile = (
+            repo_root / "tools" / "build_release" / name
+        ).read_text(encoding="utf-8")
+        assert (
+            "COPY packaging/scripts/build-brotli-static.sh "
+            "/src/packaging/scripts/build-brotli-static.sh" in dockerfile
+        ), name
+        assert "/src/packaging/scripts/build-brotli-static.sh\n" in dockerfile, name
+        assert "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig" in dockerfile, name
+        assert (
+            "--with-ld-opt=\"-Wl,--exclude-libs,"
+            "libbrotlidec.a:libbrotlicommon.a\"" in dockerfile
+        ), name
+        assert "brotli-devel" not in dockerfile, name
+        assert "brotli-dev" not in dockerfile, name
+
+
+def test_package_metadata_drops_host_brotli_dependency() -> None:
+    """Packages must not require a host Brotli library they no longer link."""
+    repo_root = Path(__file__).resolve().parents[4]
+    nfpm = (repo_root / "packaging" / "nfpm" / "nfpm.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "libbrotli1" not in nfpm
+    assert '"libbrotli"' not in nfpm
+
+    formula = (
+        repo_root
+        / "packaging"
+        / "homebrew"
+        / "nginx-markdown-module.rb"
+    ).read_text(encoding="utf-8")
+    # Homebrew rejects arbitrary version floors on depends_on, so the formula
+    # keeps the dependency unversioned and its test enforces the CVE floor.
+    assert 'depends_on "brotli"' in formula
+    assert "CVE-2026-111497" in formula
+    assert 'brotli_version >= Version.new("1.2.1")' in formula

@@ -34,6 +34,12 @@ e6f20b644a17a643f059ae6467a1971fe2811587d025e071068753a1f1e3b3c3  nginx-1.31.4
 e951607d534836624bd36b6b45a71dbfb055237deae3738da6bbf3270dada279  nginx-1.31.5
 974ed5298a5e398e008704ed5db284e655fc270c596493dbccada452448fc9f1  nginx-1.31.6
 
+# --- Brotli decoder source (statically linked into official Linux modules) ---
+# Obtained from: https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz
+# Upstream publishes no source tarball asset with the release, so the tag
+# archive is the canonical source. 1.2.1 fixes CVE-2026-111497.
+98d35d11a78dc453aebb7d10c3748f3f73ff78c8267c0dc697b8631f67bf7e8f  brotli-1.2.1
+
 # --- nFPM tool binaries (Linux x86_64) ---
 # Obtained from: https://github.com/goreleaser/nfpm/releases/download/v2.46.3/checksums.txt
 9170d25ea056d7329def38134b2bcad98d02d221f8331610dcd619e84d28c565  nfpm-2.46.3-linux-x86_64

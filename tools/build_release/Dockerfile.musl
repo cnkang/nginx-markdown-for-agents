@@ -6,6 +6,7 @@ FROM ${OS_BASE}
 ARG TARGETARCH
 
 COPY packaging/checksums.sha256 /src/packaging/checksums.sha256
+COPY packaging/scripts/build-brotli-static.sh /src/packaging/scripts/build-brotli-static.sh
 COPY packaging/scripts/install-verified-rustup.sh /src/packaging/scripts/install-verified-rustup.sh
 COPY packaging/scripts/verify-checksum.sh /src/packaging/scripts/verify-checksum.sh
 
@@ -28,12 +29,12 @@ RUN set -eux; \
         bash \
         build-base \
         ca-certificates \
+        cmake \
         curl \
         linux-headers \
         openssl-dev \
         pcre-dev \
         python3 \
-        brotli-dev \
         zlib-dev; \
     arch="${TARGETARCH:-$(uname -m)}"; \
     case "${arch}" in \
@@ -41,7 +42,8 @@ RUN set -eux; \
         arm64|aarch64) rustup_arch=arm64 ;; \
         *) echo "unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
-    chmod +x /src/packaging/scripts/install-verified-rustup.sh \
+    chmod +x /src/packaging/scripts/build-brotli-static.sh \
+        /src/packaging/scripts/install-verified-rustup.sh \
         /src/packaging/scripts/verify-checksum.sh; \
     /src/packaging/scripts/install-verified-rustup.sh \
         --arch "${rustup_arch}" \
@@ -137,18 +139,31 @@ WORKDIR /src
 RUN rm -rf components/rust-converter/target \
     && make build
 
+# Bundle the pinned Brotli decoder. Alpine 3.20 has no fixed Brotli package
+# for CVE-2026-111497, so a dynamic link would inherit the vulnerable host
+# copy on every target host.
+RUN /src/packaging/scripts/build-brotli-static.sh
+
 WORKDIR /build/nginx-${NGINX_VERSION}
 ENV NGX_MARKDOWN_BROTLI_STREAMING=on \
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
     NGX_MARKDOWN_BUILD_KIND=${NGX_MARKDOWN_BUILD_KIND} \
     NGX_MARKDOWN_SOURCE_SHA=${NGX_MARKDOWN_SOURCE_SHA} \
     NGX_MARKDOWN_RUST_VERSION=${NGX_MARKDOWN_RUST_VERSION} \
     NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST=${NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST}
-RUN ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \
+# --exclude-libs hides only the bundled Brotli archives. --exclude-libs,ALL
+# would also hide the Rust FFI exports that the release gate verifies.
+RUN ./configure --with-compat \
+    --add-dynamic-module=/src/components/nginx-module \
+    --with-ld-opt="-Wl,--exclude-libs,libbrotlidec.a:libbrotlicommon.a" \
     && make modules \
     && mkdir /out \
     && cp objs/ngx_http_markdown_filter_module.so /out/ngx_http_markdown_filter_module.so \
-    && echo "--- Verifying libbrotlidec NEEDED entry ---" \
-    && readelf -d /out/ngx_http_markdown_filter_module.so | grep -Eq 'NEEDED.*libbrotlidec\.so' \
-    && echo "--- libbrotlidec NEEDED entry confirmed ---"
+    && echo "--- Verifying static Brotli linkage ---" \
+    && ! readelf -d /out/ngx_http_markdown_filter_module.so \
+        | grep -Eq 'NEEDED.*libbrotli(dec|common)\.so' \
+    && readelf -sW /out/ngx_http_markdown_filter_module.so \
+        | awk '$NF == "BrotliDecoderDecompressStream" && $5 == "LOCAL" {found=1} END {exit !found}' \
+    && echo "--- static Brotli linkage confirmed ---"
 
 USER 65532:65532

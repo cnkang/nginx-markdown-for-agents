@@ -247,8 +247,7 @@ build_module() {
     cat > "$dockerfile" <<DOCKERFILE
 FROM almalinux:9@sha256:3a3fa7f043b142bc8008c8b308d39b47d2c84008addcd52f9f9a7a82d2a90474 AS builder
 RUN dnf install -y \\
-    gcc make ca-certificates curl-minimal pcre2-devel zlib-devel openssl-devel \\
-    brotli-devel \\
+    gcc make ca-certificates cmake curl-minimal pcre2-devel zlib-devel openssl-devel \\
     tar gzip findutils which \\
     && dnf clean all
 
@@ -281,23 +280,35 @@ RUN curl -fsSL -o /tmp/nginx.tar.gz "https://nginx.org/download/nginx-\${NGINX_V
 COPY . /src
 WORKDIR /src
 
+# Bundle the pinned Brotli decoder. AlmaLinux 9 has no fixed Brotli package
+# for CVE-2026-111497, so a dynamic link would inherit the vulnerable copy.
+RUN bash /src/packaging/scripts/build-brotli-static.sh
+
 # Build Rust converter with explicit target so output path matches NGINX config detection
 RUN RUST_TARGET=\$(cat /tmp/rust_target.txt) \\
     && cd components/rust-converter \\
     && cargo build --release --target "\${RUST_TARGET}"
 
 # Build NGINX module (config auto-detects target triple from uname)
-ENV NGX_MARKDOWN_BROTLI_STREAMING=on
+ENV NGX_MARKDOWN_BROTLI_STREAMING=on \\
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+# --exclude-libs hides only the bundled Brotli archives; --exclude-libs,ALL
+# would also hide the Rust FFI exports the release gate verifies.
 RUN cd /tmp/nginx-\${NGINX_VERSION} \\
-    && ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \\
+    && ./configure --with-compat \\
+        --add-dynamic-module=/src/components/nginx-module \\
+        --with-ld-opt="-Wl,--exclude-libs,libbrotlidec.a:libbrotlicommon.a" \\
     && make modules
 
-# Copy output and verify the exact libbrotlidec NEEDED entry
+# Copy output and verify static Brotli linkage
 RUN mkdir -p /output \\
     && cp /tmp/nginx-\${NGINX_VERSION}/objs/ngx_http_markdown_filter_module.so /output/ \\
-    && echo "--- Verifying libbrotlidec NEEDED entry ---" \\
-    && readelf -d /output/ngx_http_markdown_filter_module.so | grep -Eq 'NEEDED.*libbrotlidec\\.so' \\
-    && echo "--- libbrotlidec NEEDED entry confirmed ---"
+    && echo "--- Verifying static Brotli linkage ---" \\
+    && ! readelf -d /output/ngx_http_markdown_filter_module.so \\
+        | grep -Eq 'NEEDED.*libbrotli(dec|common)\\.so' \\
+    && readelf -sW /output/ngx_http_markdown_filter_module.so \\
+        | awk '\$NF == "BrotliDecoderDecompressStream" && \$5 == "LOCAL" {found=1} END {exit !found}' \\
+    && echo "--- static Brotli linkage confirmed ---"
 
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS packager
 ENV DEBIAN_FRONTEND=noninteractive

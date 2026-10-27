@@ -157,14 +157,25 @@ int main(void) {
     if (s) BrotliDecoderDestroyInstance(s);
     return 0;
 }'
+    # A static-only Brotli install has no shared object, and pkg-config
+    # reports `Requires.private: libbrotlicommon` only for --static.  Try the
+    # common archive as a fallback so a bundled static decoder still links.
     # Honor NGINX's configured search paths even without pkg-config metadata.
     # Disable debug output: Darwin dsymutil cannot inspect /dev/null.
-    if echo "$ngx_markdown_brotli_test" \
-       | ${CC:-cc} ${CFLAGS:-} ${NGX_CC_OPT:-} \
-           $ngx_markdown_brotli_cflags -g0 -x c - -o /dev/null \
-           ${NGX_LD_OPT:-} $ngx_markdown_brotli_libs >/dev/null 2>&1; then
-        ngx_markdown_brotli_found=yes
-    fi
+    for ngx_markdown_brotli_candidate in \
+        "$ngx_markdown_brotli_libs" \
+        "$ngx_markdown_brotli_libs -lbrotlicommon"
+    do
+        if echo "$ngx_markdown_brotli_test" \
+           | ${CC:-cc} ${CFLAGS:-} ${NGX_CC_OPT:-} \
+               $ngx_markdown_brotli_cflags -g0 -x c - -o /dev/null \
+               ${NGX_LD_OPT:-} $ngx_markdown_brotli_candidate \
+               >/dev/null 2>&1; then
+            ngx_markdown_brotli_libs="$ngx_markdown_brotli_candidate"
+            ngx_markdown_brotli_found=yes
+            break
+        fi
+    done
 
     if [ "$ngx_markdown_brotli_found" = "yes" ]; then
         CFLAGS="$CFLAGS -DNGX_HTTP_BROTLI${ngx_markdown_brotli_cflags:+ $ngx_markdown_brotli_cflags}"
