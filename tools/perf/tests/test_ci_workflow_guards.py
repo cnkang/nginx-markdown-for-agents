@@ -22,6 +22,11 @@ CANDIDATE_SHA_BINDING = 'CANDIDATE_SHA="$(git -c safe.directory=/workspace rev-p
 BENCHMARK_CONTAINER_MARKER = "bash -se <<'CONTAINER_SCRIPT'"
 BENCHMARK_SCRIPT = "tools/perf/run_module_benchmark.sh"
 
+# GitHub Actions references must pin a full commit SHA because version tags
+# remain mutable between runs.  The guard checks the pin shape instead of one
+# literal SHA so a dependency bump does not invalidate the release gate.
+SHA_PINNED_ACTION_RE = re.compile(r"[^@\s]+@[0-9a-f]{40}")
+
 
 def _benchmark_container_script(workflow: str) -> str:
     """The heredoc block of the benchmark container step."""
@@ -53,6 +58,17 @@ def _requirement_version(repo_root: Path, filename: str, package: str) -> str:
         if stripped.lower().startswith(prefix.lower()):
             return stripped.split("==", 1)[1].strip()
     raise AssertionError(f"{package} is not pinned in {requirement_file}")
+
+
+def _release_gate_step(repo_root: Path, name: str) -> dict[str, object]:
+    """Return one named step from the release packages release-gate job."""
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["release-gate"]["steps"]
+    return next(item for item in steps if item.get("name") == name)
 
 
 def _workflow_trigger_paths(workflow: dict[str, object], event: str) -> set[str]:
@@ -183,7 +199,13 @@ def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
         repo_root, "requirements-release.txt", "PyYAML"
     )
 
-    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
+    setup_python = _release_gate_step(repo_root, "Set up Python for release gates")
+    uses = setup_python["uses"]
+    assert isinstance(uses, str)
+    assert uses.startswith("actions/setup-python@")
+    assert SHA_PINNED_ACTION_RE.fullmatch(uses), (
+        f"release-gate setup-python must pin a full commit SHA, got {uses!r}"
+    )
     assert "python3 -m pip install --requirement requirements-release.txt" in workflow
     # The preflight must assert every pinned version the gate relies on:
     # brotli and PyYAML from the start, plus jsonschema, whose transitive
