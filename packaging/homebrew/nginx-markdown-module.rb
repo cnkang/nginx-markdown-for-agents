@@ -77,6 +77,17 @@ class NginxMarkdownModule < Formula
       system "cmake", "--build", "build"
       system "cmake", "--install", "build"
     end
+
+    # Fail the install when the decoder that the link uses is below the fixed
+    # release. Read the version from the vendored pkg-config metadata instead
+    # of assuming the resource URL says what the build produced.
+    brotli_pkgconfig = brotli_prefix/"lib/pkgconfig/libbrotlidec.pc"
+    odie "Bundled Brotli pkg-config metadata is missing" unless brotli_pkgconfig.exist?
+    brotli_version = brotli_pkgconfig.read[/^Version:\s*(\S+)$/, 1]
+    odie "Bundled Brotli version is missing" if brotli_version.nil?
+    if Version.new(brotli_version) < Version.new("1.2.1")
+      odie "Bundled Brotli #{brotli_version} is affected by CVE-2026-111497"
+    end
     ENV["PKG_CONFIG_PATH"] = "#{brotli_prefix}/lib/pkgconfig"
 
     system "make", "build"
