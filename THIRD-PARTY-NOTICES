@@ -191,7 +191,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-13. brotli-decompressor 6.0.0 (Rust crate)
+13. brotli-decompressor 6.0.1 (Rust crate)
     https://github.com/dropbox/rust-brotli-decompressor
     License: BSD-3-Clause OR MIT
     Copyright (c) 2016 Dropbox, Inc.
@@ -243,7 +243,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-17. libc 0.2.190 (development/test dependency only)
+17. libc 0.2.191 (development/test dependency only)
     https://github.com/rust-lang/libc
     License: MIT OR Apache-2.0
     Copyright (c) The Rust Project Developers
