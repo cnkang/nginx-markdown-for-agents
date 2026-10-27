@@ -1469,14 +1469,13 @@ jobs:
           # carries no before at all, so neither event supplies a base.  The
           # Makefile's own chain needs a main ref; this job now checks out full
           # history (fetch-depth: 0) and fetches origin/main on demand, so a
-          # non-main dispatch can still resolve a merge base.  A tag checkout
-          # has neither origin/main nor HEAD^, so it compares against itself.
+          # non-main dispatch can still resolve a merge base.  A tag release
+          # intentionally compares against HEAD itself rather than a merge base.
           if [[ -z "${STYLE_BASE}" ]]; then
             if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-              # A tag checkout has neither origin/main nor, at the default
-              # depth, HEAD^, so the release commit is the only revision left
-              # to compare against.  Its docs were already walked on the way
-              # to main; what this check refuses is an empty value.
+              # A tag release intentionally uses HEAD as its base rather than a
+              # merge base: the release commit's docs were already walked on the
+              # way to main.  What this check refuses is an empty STYLE_BASE.
               STYLE_BASE="$(git rev-parse HEAD)"
             else
               # A branch checkout carries origin/<branch>, so when that branch
