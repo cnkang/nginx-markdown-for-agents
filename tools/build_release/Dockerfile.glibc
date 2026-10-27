@@ -137,13 +137,12 @@ COPY tools/lib /src/tools/lib
 COPY tools/release/gates/verify_build_capabilities.py /src/tools/release/gates/verify_build_capabilities.py
 
 WORKDIR /src
+# Bundle the pinned Brotli decoder in the same layer as the module build.
+# The AlmaLinux 9 brotli package has no fix for CVE-2026-111497, so a dynamic
+# link would inherit the vulnerable host copy on every target host.
 RUN rm -rf components/rust-converter/target \
-    && make build
-
-# Bundle the pinned Brotli decoder. The AlmaLinux 9 brotli package has no
-# fix for CVE-2026-111497, so a dynamic link would inherit the vulnerable
-# host copy on every target host.
-RUN /src/packaging/scripts/build-brotli-static.sh
+    && make build \
+    && /src/packaging/scripts/build-brotli-static.sh
 
 WORKDIR /build/nginx-${NGINX_VERSION}
 ENV NGX_MARKDOWN_BROTLI_STREAMING=on \
