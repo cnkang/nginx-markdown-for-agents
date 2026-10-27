@@ -288,9 +288,33 @@ implementation adds no runtime configuration key or default:
 
 Kang
 
+## Addendum (2026-10-27): bundled decoder for official Linux artifacts
+
+CVE-2026-111497 is an out-of-bounds write in the Brotli decoder that affects
+1.0.3 through 1.2.0. Upstream fixed it in 1.0.10, 1.1.1, and 1.2.1. The
+AlmaLinux 9 and Alpine 3.20 release bases did not carry a fixed Brotli
+package, so a module that linked the host `libbrotlidec` would load the
+vulnerable copy on those hosts.
+
+Official Linux modules now build Brotli 1.2.1 from the checksum-pinned source
+archive and link the decoder statically. `packaging/nfpm/nfpm.yaml` no longer
+declares `libbrotli1` or `libbrotli`. The link uses
+`-Wl,--exclude-libs,libbrotlidec.a:libbrotlicommon.a` so the bundled symbols
+stay local. The narrower form keeps the Rust FFI exports visible to the
+release symbol gate, unlike `--exclude-libs,ALL`. The release workflow checks
+three properties on the built module: no shared Brotli `NEEDED` entry, no
+text relocations, and a local `BrotliDecoderDecompressStream` symbol.
+
+`components/nginx-module/config` retries the probe with `-lbrotlicommon` when
+the first link fails. pkg-config reports `Requires.private: libbrotlicommon`
+only for `--static`, so a static-only install would otherwise fail to link.
+The Homebrew formula keeps a dynamic dependency and requires Brotli 1.2.1,
+because Homebrew already ships the fixed release.
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-10-27 | Kang | Added an addendum for the statically linked Brotli 1.2.1 decoder in official Linux artifacts (CVE-2026-111497) |
 | 0.9.2 | 2026-09-07 | Kang | Reworded the Brotli precondition to active voice (the build defines NGX_HTTP_BROTLI); no behavior change |
 | 0.9.1 | 2026-07-17 | Kang | Initial ADR for Brotli streaming decompression promotion |

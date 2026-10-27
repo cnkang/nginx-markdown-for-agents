@@ -163,3 +163,64 @@ def test_pkg_config_search_paths_still_enable_brotli(tmp_path, mode):
     arguments = log.read_text().splitlines()
     assert INCLUDE_FLAG in arguments
     assert LIBRARY_FLAG in arguments
+
+
+@pytest.mark.parametrize("mode", ["on", "auto"])
+def test_static_only_install_links_brotlicommon(tmp_path, mode):
+    """A static-only Brotli install needs the common archive after the decoder.
+
+    pkg-config reports the common archive only for --static, so the probe has
+    to retry with ``-lbrotlicommon`` when no shared object can supply it.
+    """
+    block = probe_block()
+    compiler = tmp_path / "compiler"
+    log = tmp_path / "compiler.args"
+    compiler.write_text(r'''#!/bin/sh
+printf '%s\n' "$@" > "$PROBE_LOG"
+previous=""
+for argument in "$@"; do
+    if [ "$previous" = "-lbrotlidec" ] \
+       && [ "$argument" = "-lbrotlicommon" ]; then
+        exit 0
+    fi
+    previous="$argument"
+done
+exit 1
+''')
+    compiler.chmod(0o755)
+    pkg_config = tmp_path / "pkg-config"
+    pkg_config.write_text("""#!/bin/sh
+case "$1" in
+    --exists) exit 0 ;;
+    --cflags) printf '%s\\n' '-I/fixture/brotli/include' ;;
+    --libs) printf '%s\\n' '-L/fixture/brotli/lib -lbrotlidec' ;;
+    *) exit 1 ;;
+esac
+""")
+    pkg_config.chmod(0o755)
+    script = tmp_path / "probe.sh"
+    script.write_text(r'''
+set -eu
+ngx_module_libs=""
+''' + block + r'''
+printf 'found=%s\ncflags=%s\nlibs=%s\n' \
+    "$ngx_markdown_brotli_found" "$CFLAGS" "$ngx_module_libs"
+''')
+    env = os.environ.copy()
+    for name in ("NGX_CC_OPT", "NGX_LD_OPT", "CFLAGS"):
+        env.pop(name, None)
+    env.update(CC=str(compiler), PROBE_LOG=str(log), CFLAGS="",
+               NGX_MARKDOWN_BROTLI_STREAMING=mode,
+               PATH=str(tmp_path) + os.pathsep + env["PATH"])
+    result = subprocess.run(["sh", str(script)], env=env, capture_output=True,
+                            text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "found=yes" in result.stdout
+    assert "-DNGX_HTTP_BROTLI" in result.stdout
+    assert (
+        "libs= -L/fixture/brotli/lib -lbrotlidec -lbrotlicommon\n"
+        in result.stdout
+    )
+    # The decoder archive must precede the common archive it depends on.
+    arguments = log.read_text().splitlines()
+    assert arguments.index("-lbrotlidec") < arguments.index("-lbrotlicommon")

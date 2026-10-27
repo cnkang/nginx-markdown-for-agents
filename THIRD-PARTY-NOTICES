@@ -68,7 +68,8 @@ Section A: C / NGINX Module Dependencies
 
 --------------------------------------------------------------------------------
 
-3.  Brotli (optional, when NGX_HTTP_BROTLI is enabled)
+3.  Brotli 1.2.1 (official Linux modules bundle it; optional when
+    NGX_HTTP_BROTLI is enabled)
     https://github.com/google/brotli
     License: MIT
     Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors

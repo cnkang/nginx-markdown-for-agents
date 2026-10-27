@@ -681,8 +681,10 @@ REPO
 
         # --- RPM: Install module package ---
         info "Installing module package: ${PACKAGE_FILE}"
-        # Use the distro package manager so dependencies such as libbrotli
-        # are resolved from the configured repositories before installation.
+        # Use the distro package manager so declared dependencies are
+        # resolved from the configured repositories before installation.
+        # Official Linux modules bundle their Brotli decoder, so libbrotli is
+        # not among those dependencies.
         if command -v dnf >/dev/null 2>&1; then
             dnf install -y "${PACKAGE_FILE}" >>"${INSTALL_LOG}" 2>&1 \
                 || die "dnf install failed for ${PACKAGE_FILE}"

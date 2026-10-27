@@ -25,6 +25,9 @@ class NginxMarkdownModule < Formula
 
   depends_on "cbindgen" => :build
   depends_on "pkgconf" => :build
+  # The build links the Homebrew Brotli decoder. Homebrew does not support an
+  # arbitrary version floor here, and the formula test below rejects any
+  # Brotli older than 1.2.1, the first release with the CVE-2026-111497 fix.
   depends_on "brotli"
   depends_on "nginx"
   depends_on "pcre2"
@@ -113,6 +116,9 @@ class NginxMarkdownModule < Formula
     module_path = lib/"nginx/modules/ngx_http_markdown_filter_module.so"
     assert_path_exists module_path
     assert_match "libbrotlidec", shell_output("otool -L #{module_path}")
+    brotli_version = Formula["brotli"].version
+    assert brotli_version >= Version.new("1.2.1"),
+           "brotli #{brotli_version} is affected by CVE-2026-111497"
     nginx_version = Formula["nginx"].version.to_s
     assert_match(/\A\d+\.\d+\.\d+\z/, nginx_version)
     assert_match(%r{nginx/#{Regexp.escape(nginx_version)}\s*\z},

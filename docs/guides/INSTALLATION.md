@@ -341,7 +341,7 @@ Compile the module from source when you use a custom NGINX build or a platform w
 | **Make** | 3.81+ | Build automation |
 | **PCRE** | 8.0+ | Regular expression library (NGINX dependency) |
 | **zlib** | 1.2.0+ | gzip/deflate support and NGINX dependency |
-| **libbrotlidec** | 1.0.9+ | Brotli decoder library (required for the C-side streaming Brotli path. The Rust converter always includes Brotli decoding) |
+| **libbrotlidec** | 1.0.10, 1.1.1, or 1.2.1+ | Brotli decoder library (required for the C-side streaming Brotli path. CVE-2026-111497 affects 1.0.3 through 1.2.0. Official Linux modules bundle 1.2.1. The Rust converter always includes Brotli decoding) |
 | **OpenSSL** | 1.0.2+ | SSL/TLS support (optional, for HTTPS) |
 
 **Development Headers Required:**
@@ -353,6 +353,11 @@ Compile the module from source when you use a custom NGINX build or a platform w
   C-side library still supports the Brotli encoding through the bounded
   full-buffer decoder. The capability gate reports the actual build state
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
+
+Official Linux modules bundle the Brotli decoder, so the host needs no Brotli
+package. A custom build links the host library at build time and runtime, so
+it must provide a release with the CVE-2026-111497 fix. The fixed releases
+are 1.0.10, 1.1.1, and 1.2.1 and later.
 
 ### Platform-Specific Prerequisites
 
