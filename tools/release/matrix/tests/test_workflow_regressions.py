@@ -535,4 +535,8 @@ def test_package_metadata_drops_host_brotli_dependency() -> None:
     assert 'resource "brotli" do' in formula
     assert "brotli/archive/refs/tags/v1.2.1.tar.gz" in formula
     assert f'sha256 "{brotli_sha.group(1)}"' in formula
+    # The install flow reads the version from the vendored pkg-config file the
+    # link uses, so a downgraded resource cannot install silently.
+    assert "lib/pkgconfig/libbrotlidec.pc" in formula
+    assert 'Version.new(brotli_version) < Version.new("1.2.1")' in formula
     assert 'refute_match "libbrotlidec"' in formula
