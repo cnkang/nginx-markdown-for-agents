@@ -515,6 +515,14 @@ def test_package_metadata_drops_host_brotli_dependency() -> None:
     assert "libbrotli1" not in nfpm
     assert '"libbrotli"' not in nfpm
 
+    checksums = (repo_root / "packaging" / "checksums.sha256").read_text(
+        encoding="utf-8"
+    )
+    brotli_sha = re.search(
+        r"^([0-9a-f]{64})\s+brotli-1\.2\.1$", checksums, re.MULTILINE
+    )
+    assert brotli_sha is not None, "checksums must pin brotli-1.2.1"
+
     formula = (
         repo_root
         / "packaging"
@@ -522,7 +530,9 @@ def test_package_metadata_drops_host_brotli_dependency() -> None:
         / "nginx-markdown-module.rb"
     ).read_text(encoding="utf-8")
     # Homebrew rejects arbitrary version floors on depends_on, so the formula
-    # keeps the dependency unversioned and its test enforces the CVE floor.
-    assert 'depends_on "brotli"' in formula
-    assert "CVE-2026-111497" in formula
-    assert 'brotli_version >= Version.new("1.2.1")' in formula
+    # vendors the fixed decoder as a resource and links it statically.
+    assert 'depends_on "brotli"' not in formula
+    assert 'resource "brotli" do' in formula
+    assert "brotli/archive/refs/tags/v1.2.1.tar.gz" in formula
+    assert f'sha256 "{brotli_sha.group(1)}"' in formula
+    assert 'refute_match "libbrotlidec"' in formula

@@ -171,11 +171,12 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 ## Build Compatibility
 
 Brotli streaming requires `libbrotlidec` at build time. Official Linux
-modules statically link Brotli 1.2.1 and need no Brotli library at runtime.
-A custom build links the host `libbrotlidec` at build time and runtime, so it
-must provide a release with the CVE-2026-111497 fix. The fixed releases are
-1.0.10, 1.1.1, and 1.2.1 and later. The `NGX_MARKDOWN_BROTLI_STREAMING`
-environment variable controls detection:
+modules and the Homebrew formula statically link Brotli 1.2.1 and need no
+Brotli library at runtime. A custom build links the host `libbrotlidec` at
+build time and runtime, so it must provide a release with the
+CVE-2026-111497 fix. The fixed releases are 1.0.10, 1.1.1, and 1.2.1 and
+later. The `NGX_MARKDOWN_BROTLI_STREAMING` environment variable controls
+detection:
 
 - `on` (default in release artifacts): probe and link. Fail if missing.
 - `auto`: probe silently. Enable if available, fall back to full-buffer if not.
