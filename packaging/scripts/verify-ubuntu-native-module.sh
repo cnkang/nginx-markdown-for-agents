@@ -355,6 +355,8 @@ for field in (
     "build_args_digest",
     "module_sha256",
     "rust_version",
+    "brotli_version",
+    "brotli_linkage",
 ):
     if field in provenance:
         payload[field] = provenance[field]

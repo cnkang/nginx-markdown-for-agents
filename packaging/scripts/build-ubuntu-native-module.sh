@@ -21,6 +21,9 @@
 #   --install-deps            Install build dependencies with apt-get
 #   --negative-control        Also build a module without --with-compat, for
 #                             the binary compatibility rejection test
+#   --release                 Embed the release build identity (source commit,
+#                             Rust version, feature manifest digest) instead of
+#                             the development identity
 #   --expected-revision REV   Fail when the installed NGINX package differs
 #   --help                    Show this help
 #
@@ -43,6 +46,7 @@ OUT_DIR=""
 INSTALL_DEPS="no"
 NEGATIVE_CONTROL="no"
 EXPECTED_REVISION=""
+RELEASE_IDENTITY="no"
 
 usage() {
     sed -n '2,32p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
@@ -86,6 +90,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --negative-control)
             NEGATIVE_CONTROL="yes"
+            shift
+            ;;
+        --release)
+            RELEASE_IDENTITY="yes"
             shift
             ;;
         --help)
@@ -273,6 +281,45 @@ cargo build --release --locked --target "${RUST_TARGET}" \
     --config profile.release.lto=false
 
 # --------------------------------------------------------------------- compile
+# Brotli is a hard requirement on this path.  The Ubuntu package declares a
+# dependency on the fixed libbrotli1, so a silent auto-detect fallback would
+# publish a package that promises decoder support and does not have it.  `on`
+# turns a missing decoder into a build failure.
+export NGX_MARKDOWN_BROTLI_STREAMING=on
+
+# A published distro artifact must not carry the development identity: the
+# diagnostics document is how an operator proves which source commit produced
+# the module.  Compute the release identity here so the caller cannot pass an
+# inconsistent tuple.
+if [[ "${RELEASE_IDENTITY}" == "yes" ]]; then
+    RELEASE_SOURCE_SHA="$(git -c "safe.directory=${REPO_ROOT}" -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ ! "${RELEASE_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+        die "cannot resolve the source commit for a release build"
+    fi
+    RELEASE_MANIFEST="$(sed -n 's/^RELEASE_VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
+        "${REPO_ROOT}/tools/release/matrix/normalize_matrix.py" | head -n 1)"
+    if [[ ! "${RELEASE_MANIFEST}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        die "cannot resolve the release line for the feature manifest"
+    fi
+    FEATURE_MANIFEST="${REPO_ROOT}/artifacts/release/${RELEASE_MANIFEST}/official-build-feature-manifest.json"
+    [[ -f "${FEATURE_MANIFEST}" ]] || die "feature manifest not found: ${FEATURE_MANIFEST}"
+    export NGX_MARKDOWN_BUILD_KIND=release
+    export NGX_MARKDOWN_SOURCE_SHA="${RELEASE_SOURCE_SHA}"
+    export NGX_MARKDOWN_RUST_VERSION="${RUST_VERSION}"
+    export NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST="$(
+        python3 - "${FEATURE_MANIFEST}" <<'PY'
+import hashlib
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+print("sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
+PY
+    )"
+    info "release identity ${RELEASE_SOURCE_SHA} rust ${RUST_VERSION}"
+fi
+
 cd "${WORK_DIR}/nginx-src"
 NGX_ARGS_FILE="${WORK_DIR}/configure-args.txt"
 NGX_ARGS=()
@@ -297,16 +344,34 @@ MODULE_PATH="${WORK_DIR}/nginx-src/objs/ngx_http_markdown_filter_module.so"
 MODULE_SHA256="$(sha256sum "${MODULE_PATH}" | awk '{print $1}')"
 BUILD_ARGS_DIGEST="sha256:$(sha256sum "${NGX_ARGS_FILE}" | awk '{print $1}')"
 
+# ------------------------------------------------------------- decoder audit
+# This path links the distribution decoder on purpose so Ubuntu security
+# updates reach it.  Record the exact decoder the build used and refuse an
+# artifact whose decoder support silently disappeared, because the DEB
+# declares a libbrotli1 dependency that would then be a false promise.
+BROTLI_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1 2>/dev/null || true)"
+[[ -n "${BROTLI_VERSION}" ]] || die "libbrotli1 is not installed; cannot bind the decoder"
+if readelf -d "${MODULE_PATH}" 2>/dev/null | grep -Eq 'NEEDED.*libbrotli(dec|common)\.so'; then
+    BROTLI_LINKAGE="dynamic"
+else
+    BROTLI_LINKAGE="absent"
+fi
+[[ "${BROTLI_LINKAGE}" == "dynamic" ]] || \
+    die "module has no dynamic Brotli decoder; refusing a degraded release artifact"
+info "linked decoder libbrotli1 ${BROTLI_VERSION} (${BROTLI_LINKAGE})"
+
 install -m 0644 "${MODULE_PATH}" \
     "${OUT_DIR}/ngx_http_markdown_filter_module.so"
 
 python3 - "${OUT_DIR}/ubuntu-native-build.json" "${MODULE_SHA256}" \
     "${BUILD_ARGS_DIGEST}" "${INSTALLED_REVISION}" "${SOURCE_SHA256}" \
-    "${ABI_PROVIDE}" "${RUST_VERSION}" "${SUITE}" "${ARCH}" <<'PY'
+    "${ABI_PROVIDE}" "${RUST_VERSION}" "${SUITE}" "${ARCH}" \
+    "${BROTLI_VERSION}" "${BROTLI_LINKAGE}" <<'PY'
 import json
 import sys
 
-(path, module_sha, args_digest, revision, source_sha, abi, rust, suite, arch) = sys.argv[1:]
+(path, module_sha, args_digest, revision, source_sha, abi, rust, suite, arch,
+ brotli_version, brotli_linkage) = sys.argv[1:]
 payload = {
     "schema_version": 1,
     "source_kind": "ubuntu-default-repo",
@@ -323,6 +388,8 @@ payload = {
     "module_sha256": module_sha,
     "rust_version": rust,
     "features": ["streaming", "prune_noise_regions"],
+    "brotli_version": brotli_version,
+    "brotli_linkage": brotli_linkage,
 }
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)

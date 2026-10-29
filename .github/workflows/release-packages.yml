@@ -1147,6 +1147,7 @@ jobs:
             --arch "${MATRIX_ARCH}" \
             --out dist/ubuntu-native \
             --install-deps \
+            --release \
             --negative-control \
             --expected-revision "${MATRIX_REVISION}"
         shell: bash
@@ -1221,7 +1222,12 @@ jobs:
               exit 1
               ;;
           esac
-          BROTLI_MIN_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1 | sed 's/^[0-9]*://')"
+          BROTLI_MIN_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1)"
+          # Compare the full version, including any epoch.  Stripping the
+          # epoch before the comparison silently changes the meaning of the
+          # guard after an epoch bump: dpkg treats the epoch as the most
+          # significant field, and a stripped value can compare lower than
+          # the package that is actually installed.
           if ! dpkg --compare-versions "${BROTLI_MIN_VERSION}" ge "${BROTLI_FIXED_FLOOR}"; then
             echo "ERROR: libbrotli1 ${BROTLI_MIN_VERSION} is below the fixed release ${BROTLI_FIXED_FLOOR}" >&2
             exit 1
