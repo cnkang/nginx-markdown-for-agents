@@ -178,8 +178,24 @@ def _read_ledger(
     return module_sha, ledger
 
 
+def _reject_reported_build_failure(ledger: dict[str, Any]) -> None:
+    """Refuse a ledger that reports a failed build.
+
+    The composer supplies the build class, so a reported failure would
+    otherwise disappear when the list is filtered.
+    """
+    reported = [
+        test for test in ledger.get("tests", []) if test.get("name") == "build"
+    ]
+    if any(test.get("status") != "PASS" for test in reported):
+        raise ComposeError(
+            "ledger reports a non-passing build test; refusing to compose"
+        )
+
+
 def _test_ledger(ledger: dict[str, Any], module_sha: str) -> tuple[list[dict], dict]:
     """Return the test list with the build class added, plus its totals."""
+    _reject_reported_build_failure(ledger)
     tests = [test for test in ledger.get("tests", []) if test.get("name") != "build"]
     present = {test.get("name") for test in tests}
     missing = [name for name in VERIFIER_TEST_CLASSES if name not in present]
@@ -316,7 +332,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
+    # NOSONAR suppression for pythonsecurity:S2083: the path above passed
+    # validate_write_path_within_root against the repository root, which
+    # rejects a '..' component and any target that resolves outside the tree.
+    # CLI input therefore cannot select a write outside the checkout.
+    target.write_text(  # NOSONAR
         json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(f"wrote {target}")

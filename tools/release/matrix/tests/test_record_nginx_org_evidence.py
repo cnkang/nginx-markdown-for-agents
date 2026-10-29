@@ -155,3 +155,32 @@ def test_invalid_source_sha_is_rejected(tmp_path):
 
     with pytest.raises(composer.ComposeError, match="40 lowercase hex"):
         _compose(root, build, ledger, source_sha="not-a-sha")
+
+
+def test_main_refuses_an_output_path_outside_the_repository(tmp_path):
+    """The composer must not write outside the checkout."""
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    out = tmp_path / "outside.json"
+
+    with pytest.raises(ValueError, match="escapes root"):
+        composer.validate_write_path_within_root(out, root=root)
+
+
+def test_main_refuses_a_traversal_output_path():
+    with pytest.raises(ValueError, match="traversal"):
+        composer.validate_write_path_within_root(
+            "docs/../outside.json", root=composer.REPO_ROOT
+        )
+
+
+def test_a_failed_build_entry_is_not_filtered_into_a_pass(tmp_path):
+    """The composer supplies the build class, so a reported failure must win."""
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    payload = json.loads(ledger.read_text(encoding="utf-8"))
+    payload["tests"].append({"name": "build", "status": "FAIL", "detail": "compile"})
+    ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(composer.ComposeError, match="non-passing build"):
+        _compose(root, build, ledger)

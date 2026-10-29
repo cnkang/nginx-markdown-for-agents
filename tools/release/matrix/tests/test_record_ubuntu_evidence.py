@@ -137,3 +137,29 @@ def test_declared_totals_are_not_copied(tmp_path):
     record = _compose(_build(tmp_path), ledger)
 
     assert record["pass"] == 6
+
+
+def test_writer_refuses_an_output_path_outside_the_repository(tmp_path):
+    """The composer must not write outside the checkout."""
+    with pytest.raises(ValueError, match="escapes root"):
+        composer.validate_write_path_within_root(
+            tmp_path / "outside.json", root=composer.REPO_ROOT
+        )
+
+
+def test_writer_refuses_a_traversal_output_path():
+    with pytest.raises(ValueError, match="traversal"):
+        composer.validate_write_path_within_root(
+            "docs/../outside.json", root=composer.REPO_ROOT
+        )
+
+
+def test_a_failed_build_entry_is_not_filtered_into_a_pass(tmp_path):
+    """The composer supplies the build class, so a reported failure must win."""
+    ledger = _ledger(tmp_path)
+    payload = json.loads(ledger.read_text(encoding="utf-8"))
+    payload["tests"].append({"name": "build", "status": "FAIL", "detail": "compile"})
+    ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(composer.ComposeError, match="non-passing build"):
+        _compose(_build(tmp_path), ledger)
