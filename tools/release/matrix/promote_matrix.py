@@ -148,21 +148,7 @@ def _demote_superseded(
 
     changed: list[dict[str, Any]] = []
     for entry in entries:
-        version = entry.get("nginx_version")
-        if not isinstance(version, str) or version in promoted_versions:
-            continue
-        # A distro row is bound to one package revision, so a newer upstream
-        # patch does not supersede it.  A manual row is a maintainer decision.
-        if entry.get("source") == "ubuntu-default-repo":
-            continue
-        if entry.get("managed_by") == "manual":
-            continue
-        newest = newest_by_track.get(_track(version))
-        if newest is None:
-            continue
-        if _version_tuple(version) >= _version_tuple(newest):
-            continue
-        if entry.get("support_tier") != "supported":
+        if not _is_superseded(entry, promoted_versions, newest_by_track):
             continue
         entry["support_tier"] = "best-effort"
         entry["support_stage"] = "best-effort"
@@ -170,6 +156,31 @@ def _demote_superseded(
         entry["release_blocking"] = False
         changed.append(entry)
     return changed
+
+
+def _is_superseded(
+    entry: dict[str, Any],
+    promoted_versions: set[str],
+    newest_by_track: dict[str, str],
+) -> bool:
+    """Return whether a newer promoted patch replaces this supported row.
+
+    A distro row is bound to one package revision, so an upstream patch does
+    not supersede it.  A manual row is a maintainer decision.
+    """
+    if entry.get("managed_by") == "manual":
+        return False
+    if entry.get("source") == "ubuntu-default-repo":
+        return False
+    if entry.get("support_tier") != "supported":
+        return False
+    version = entry.get("nginx_version")
+    if not isinstance(version, str) or version in promoted_versions:
+        return False
+    newest = newest_by_track.get(_track(version))
+    if newest is None:
+        return False
+    return _version_tuple(version) < _version_tuple(newest)
 
 
 def build_promoted_matrix(

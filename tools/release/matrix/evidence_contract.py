@@ -329,7 +329,22 @@ def _normalized_arch(entry: dict[str, Any]) -> str | None:
     return raw
 
 
-_UBUNTU_REVISION_IN_REFERENCE_RE = re.compile(r"\d+\.\d+\.\d+-\d+ubuntu[\d.]+$")
+def _looks_like_ubuntu_revision(value: str) -> bool:
+    """Return whether a path segment carries an Ubuntu package revision.
+
+    A deterministic check keeps the test free of a backtracking regex: the
+    value must be ``X.Y.Z-NubuntuM`` with numeric parts.
+    """
+    upstream, separator, rest = value.partition("-")
+    if not separator or "ubuntu" not in rest:
+        return False
+    components = upstream.split(".")
+    if len(components) != 3 or not all(part.isdigit() for part in components):
+        return False
+    revision, _, suffix = rest.partition("ubuntu")
+    return revision.isdigit() and bool(suffix) and all(
+        character.isdigit() or character == "." for character in suffix
+    )
 
 
 def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
@@ -346,9 +361,10 @@ def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     reference = provenance.get("reference") if isinstance(provenance, dict) else None
     if not isinstance(reference, str) or not reference:
         return True
-    if not _UBUNTU_REVISION_IN_REFERENCE_RE.search(reference):
+    revision_in_reference = reference.rstrip("/").rsplit("/", 1)[-1]
+    if not _looks_like_ubuntu_revision(revision_in_reference):
         return True
-    return reference.rstrip("/").rsplit("/", 1)[-1] == record["nginx_package_revision"]
+    return revision_in_reference == record["nginx_package_revision"]
 
 
 def record_covers_entry(record: dict[str, Any], entry: dict[str, Any]) -> bool:
