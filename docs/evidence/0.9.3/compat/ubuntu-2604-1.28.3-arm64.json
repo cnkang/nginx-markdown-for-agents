@@ -1,8 +1,8 @@
 {
   "abi_provide": "nginx-abi-1.28.3-1",
   "arch": "arm64",
-  "build_args_digest": "sha256:3831b9f5a9eb6b5d886375dec3ddeb7f93f3c3e08dd0e6e6ec55a45389d087bc",
-  "commit_sha": "46333ac7b7255560e40da33fdf66ce4873150514",
+  "build_args_digest": "sha256:b0f217dc1fb006a87b69f8e7978bc45a06466d002bd22968f84b3b442bb76b41",
+  "commit_sha": "4f8cc722eb09d3707653d9480df2309c478967b6",
   "date": "2026-10-29",
   "distro": "ubuntu-26.04",
   "distro_version": "26.04",
@@ -12,10 +12,9 @@
     "prune_noise_regions"
   ],
   "libc": "glibc",
-  "module_sha256": "8f929fd78cee056c5551b157bba6b71bda10a45cbfc9c0fdfdc7f8d6a5e7a2d3",
+  "module_sha256": "120e9273141b6a602f10e6d13c9def1b2acff181e8e8eb97fa7e72a58635b97f",
   "nginx_package_revision": "1.28.3-2ubuntu1.12",
   "nginx_version": "1.28.3",
-  "notes": "",
   "pass": 6,
   "rust_version": "1.98.1",
   "schema_version": 1,
@@ -26,7 +25,7 @@
   "target_identity": "ubuntu-default-repo:1.28.3-2ubuntu1.12:ubuntu-26.04:arm64",
   "tests": [
     {
-      "detail": "module sha256 8f929fd78cee056c",
+      "detail": "module sha256 120e9273141b6a60",
       "name": "build",
       "status": "PASS"
     },
@@ -36,17 +35,17 @@
       "status": "PASS"
     },
     {
-      "detail": "200",
+      "detail": "HTTP 200",
       "name": "request_passthrough",
       "status": "PASS"
     },
     {
-      "detail": "200",
+      "detail": "HTTP 200",
       "name": "request_markdown",
       "status": "PASS"
     },
     {
-      "detail": "head=200 reload=ok",
+      "detail": "HEAD 200, reload PASS",
       "name": "lifecycle",
       "status": "PASS"
     },
@@ -56,6 +55,6 @@
       "status": "PASS"
     }
   ],
-  "verified_by": "local-container:macOS-Docker arm64",
-  "workflow_run_url": ""
+  "verified_by": "ci:release-packages/ubuntu-native",
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/40829511878"
 }
