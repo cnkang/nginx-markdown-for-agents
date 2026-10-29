@@ -1087,8 +1087,10 @@ jobs:
       - name: Install checkout prerequisites
         run: |
           apt-get update -qq
+          # curl is required later by the verified Rust installer; install it
+          # here so the first step that needs it can run.
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            --no-install-recommends ca-certificates git
+            --no-install-recommends ca-certificates curl git
         shell: bash
 
       - name: Checkout
