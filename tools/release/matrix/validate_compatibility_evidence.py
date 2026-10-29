@@ -32,6 +32,7 @@ REPO_ROOT = SCRIPT_DIR.parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 sys.path.insert(0, str(SCRIPT_DIR))
 from lib.path_validation import validate_read_path  # noqa: E402
+from normalize_matrix import RELEASE_VERSION  # noqa: E402
 from evidence_contract import (  # noqa: E402
     EvidenceError,
     is_promotable,
@@ -41,7 +42,9 @@ from evidence_contract import (  # noqa: E402
 )
 
 DEFAULT_MATRIX = REPO_ROOT / "tools" / "release-matrix.json"
-DEFAULT_EVIDENCE_DIR = REPO_ROOT / "docs" / "evidence" / "0.9.3" / "compat"
+# The evidence directory follows the active release line, so a version bump
+# moves it without another edit here.
+DEFAULT_EVIDENCE_DIR = REPO_ROOT / "docs" / "evidence" / RELEASE_VERSION / "compat"
 
 
 def _load_matrix(path: pathlib.Path) -> dict[str, Any]:
