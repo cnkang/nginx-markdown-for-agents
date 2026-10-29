@@ -19,6 +19,7 @@ Exit codes:
 import json
 import re
 import tomllib
+import os
 import sys
 from pathlib import Path
 
@@ -29,7 +30,10 @@ if str(REPO_ROOT) not in sys.path:
 from tools.lib.path_validation import validate_read_path  # noqa: E402
 from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
-EXPECTED_VERSION = "0.9.2"
+# The 0.9.2 gate also runs on later 0.9.x trees.  A caller that validates a
+# newer release line passes the active version, so a legitimate version bump
+# does not fail a prior-version gate (AGENTS Rule 13).
+EXPECTED_VERSION = os.environ.get("RELEASE_GATE_EXPECTED_VERSION", "0.9.2")
 # The pre-LTS convergence retired invalid_dynconf and degraded_snapshot and
 # compacted the survivors (23->21 .. 26->24), leaving 25 canonical reason
 # codes (see reason_registry.toml "One-time discriminant renumber").

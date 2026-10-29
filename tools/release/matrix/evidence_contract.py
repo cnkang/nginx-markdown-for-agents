@@ -211,14 +211,20 @@ def _validate_features(record: dict[str, Any], errors: list[str]) -> None:
         errors.append("features must contain non-empty strings")
 
 
-def _validate_tests(record: dict[str, Any], errors: list[str]) -> None:
-    """Validate the test ledger and its declared totals."""
-    tests = record.get("tests")
-    if not isinstance(tests, list) or not tests:
-        errors.append("tests must be a non-empty list")
-        return
-    seen: set[str] = set()
+def _required_test_classes(record: dict[str, Any]) -> set[str]:
+    """Return the test classes a record for this source kind must carry."""
+    required = set(REQUIRED_TEST_CLASSES)
+    if record.get("source_kind") == "ubuntu-default-repo":
+        required |= set(DISTRO_REQUIRED_TEST_CLASSES)
+    return required
+
+
+def _collect_test_counts(
+    tests: list[Any], errors: list[str]
+) -> tuple[dict[str, int], set[str]]:
+    """Validate each test entry and return status counts and names."""
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
+    seen: set[str] = set()
     for index, test in enumerate(tests):
         if not isinstance(test, dict):
             errors.append(f"tests[{index}] must be an object")
@@ -235,21 +241,28 @@ def _validate_tests(record: dict[str, Any], errors: list[str]) -> None:
             errors.append(f"duplicate test name {name}")
         seen.add(name)
         counts[status] += 1
+    return counts, seen
 
-    required = set(REQUIRED_TEST_CLASSES)
-    if record.get("source_kind") == "ubuntu-default-repo":
-        required |= set(DISTRO_REQUIRED_TEST_CLASSES)
-    missing = sorted(required - seen)
-    if missing:
-        errors.append(f"missing required test classes: {', '.join(missing)}")
 
-    for key, expected in (
-        ("pass", counts["PASS"]),
-        ("fail", counts["FAIL"]),
-        ("skip", counts["SKIP"]),
-    ):
+def _validate_totals(record: dict[str, Any], counts: dict[str, int], errors: list[str]) -> None:
+    """Check the declared totals against the test ledger."""
+    for key in ("pass", "fail", "skip"):
+        expected = counts[key.upper()]
         if record.get(key) != expected:
             errors.append(f"{key} is {record.get(key)!r} but the tests list has {expected}")
+
+
+def _validate_tests(record: dict[str, Any], errors: list[str]) -> None:
+    """Validate the test ledger, its required classes, and its totals."""
+    tests = record.get("tests")
+    if not isinstance(tests, list) or not tests:
+        errors.append("tests must be a non-empty list")
+        return
+    counts, seen = _collect_test_counts(tests, errors)
+    missing = sorted(_required_test_classes(record) - seen)
+    if missing:
+        errors.append(f"missing required test classes: {', '.join(missing)}")
+    _validate_totals(record, counts, errors)
 
 
 def validate_record(record: dict[str, Any]) -> list[str]:

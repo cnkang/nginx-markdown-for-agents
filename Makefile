@@ -1421,7 +1421,8 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
-	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+	RELEASE_GATE_EXPECTED_VERSION=$(RELEASE_LINE) \
+		PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
 	@echo "  [6/8] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
 	@echo "  [7/8] Official build feature manifest"
