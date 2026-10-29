@@ -82,14 +82,11 @@ def _compose(
     return composer.compose(
         build_dir=build,
         ledger_path=ledger,
-        version="1.30.6",
-        libc="glibc",
-        arch="arm64",
+        identity=("1.30.6", "glibc", "arm64"),
         verified_by="local:test",
         workflow_run_url="",
         repo_root=root,
         source_sha=source_sha,
-        date="2026-10-29",
         **kw,
     )
 

@@ -49,6 +49,14 @@ from lib.path_validation import (  # noqa: E402
 from evidence_contract import validate_record  # noqa: E402
 
 FEATURES = ["prune_noise_regions", "streaming"]
+# Test classes the verifier must produce.  "build" is added below from the
+# artifact digest, because the verifier only sees an already-built module.
+VERIFIER_TEST_CLASSES: tuple[str, ...] = (
+    "load",
+    "request_markdown",
+    "request_passthrough",
+    "lifecycle",
+)
 BUILD_KIND = "release"
 BROTLI_MODE = "static-1.2.1"
 
@@ -147,20 +155,11 @@ def _build_args_digest(
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def compose(
-    *,
-    build_dir: pathlib.Path,
-    ledger_path: pathlib.Path,
-    version: str,
-    libc: str,
-    arch: str,
-    verified_by: str,
-    workflow_run_url: str,
-    repo_root: pathlib.Path = REPO_ROOT,
-    source_sha: str | None = None,
-    date: str | None = None,
-) -> dict[str, Any]:
-    """Return a contract-ready record for one nginx.org target."""
+def _read_ledger(
+    build_dir: pathlib.Path, ledger_path: pathlib.Path, identity: tuple[str, str, str]
+) -> tuple[str, dict[str, Any]]:
+    """Return the module digest and the ledger, after identity checks."""
+    version, libc, arch = identity
     module = validate_read_path(
         build_dir / "ngx_http_markdown_filter_module.so", purpose="release module"
     )
@@ -169,7 +168,6 @@ def compose(
             encoding="utf-8"
         )
     )
-
     if ledger.get("nginx_version") != version:
         raise ComposeError("ledger was produced for a different NGINX version")
     if ledger.get("libc") != libc or ledger.get("arch") != arch:
@@ -177,6 +175,47 @@ def compose(
     module_sha = _sha256_file(module)
     if ledger.get("module_sha256") != module_sha:
         raise ComposeError("ledger module digest does not match the built module")
+    return module_sha, ledger
+
+
+def _test_ledger(ledger: dict[str, Any], module_sha: str) -> tuple[list[dict], dict]:
+    """Return the test list with the build class added, plus its totals."""
+    tests = [test for test in ledger.get("tests", []) if test.get("name") != "build"]
+    present = {test.get("name") for test in tests}
+    missing = [name for name in VERIFIER_TEST_CLASSES if name not in present]
+    if missing:
+        raise ComposeError(f"ledger is missing required test classes: {missing}")
+    if any(test.get("status") != "PASS" for test in tests):
+        raise ComposeError("ledger contains a non-passing test; refusing to compose")
+    tests.insert(
+        0,
+        {"name": "build", "status": "PASS", "detail": f"module sha256 {module_sha[:16]}"},
+    )
+    counts = {
+        status: sum(1 for test in tests if test["status"] == status)
+        for status in ("PASS", "FAIL", "SKIP")
+    }
+    return tests, counts
+
+
+def compose(
+    *,
+    build_dir: pathlib.Path,
+    ledger_path: pathlib.Path,
+    identity: tuple[str, str, str],
+    verified_by: str,
+    workflow_run_url: str,
+    execution: str = "native",
+    repo_root: pathlib.Path = REPO_ROOT,
+    source_sha: str | None = None,
+) -> dict[str, Any]:
+    """Return a contract-ready record for one nginx.org target.
+
+    ``identity`` is ``(nginx_version, libc, arch)``.
+    """
+    version, libc, arch = identity
+    module_sha, ledger = _read_ledger(build_dir, ledger_path, identity)
+    tests, counts = _test_ledger(ledger, module_sha)
 
     rust_version = _rust_version(repo_root)
     commit = source_sha if source_sha is not None else _git_head(repo_root)
@@ -207,14 +246,19 @@ def compose(
         "module_sha256": module_sha,
         "rust_version": rust_version,
         "features": list(FEATURES),
-        "tests": ledger["tests"],
-        "pass": ledger["pass"],
-        "fail": ledger["fail"],
-        "skip": ledger["skip"],
+        "tests": tests,
+        "pass": counts["PASS"],
+        "fail": counts["FAIL"],
+        "skip": counts["SKIP"],
         "workflow_run_url": workflow_run_url,
         "commit_sha": commit,
-        "date": date if date is not None else _today(),
+        "date": _today(),
         "verified_by": verified_by,
+        # A load and request run under user-mode emulation is still a real
+        # execution, but it is weaker evidence than a native run.  Record
+        # which one produced this file instead of leaving the reader to
+        # guess from the architecture.
+        "execution_environment": execution,
     }
 
 
@@ -233,6 +277,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--arch", choices=("amd64", "arm64"), required=True)
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--source-sha", default=None)
+    parser.add_argument(
+        "--execution",
+        choices=("native", "emulated"),
+        default="native",
+        help="whether the build and verification ran natively",
+    )
     parser.add_argument("--verified-by", default="local:release-agent")
     parser.add_argument("--workflow-run-url", default="")
     return parser
@@ -244,11 +294,10 @@ def main(argv: list[str] | None = None) -> int:
         record = compose(
             build_dir=args.build_dir,
             ledger_path=args.ledger,
-            version=args.nginx_version,
-            libc=args.libc,
-            arch=args.arch,
+            identity=(args.nginx_version, args.libc, args.arch),
             verified_by=args.verified_by,
             workflow_run_url=args.workflow_run_url,
+            execution=args.execution,
             source_sha=args.source_sha,
         )
     except (OSError, KeyError, ComposeError, ValueError) as exc:
