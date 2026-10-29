@@ -76,21 +76,24 @@ builds. The two packages conflict because they own the same module file.
    page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` from
    the same release.
 
-2. Verify the `SHA256SUMS` signature against the published fingerprint:
+2. Verify the `SHA256SUMS` signature before you verify the checksum. Read the
+   expected fingerprint from [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md)
+   through a channel other than the release download page:
 
    ```bash
    RELEASE_KEY_PATH=packaging/nginx-markdown-for-agents-release.asc
-   TRUSTED_FINGERPRINT="<fingerprint from GPG_KEY_MANAGEMENT.md>"
+   TRUSTED_FINGERPRINT="<signing-subkey fingerprint from GPG_KEY_MANAGEMENT.md>"
    GNUPGDIR="$(mktemp -d)"
    gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
-   gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+   SIGNING_FPR="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
      --verify SHA256SUMS.asc SHA256SUMS \
-     | awk '$2 == "VALIDSIG" { print toupper($3); exit }'
+     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+   test "${SIGNING_FPR}" = "${TRUSTED_FINGERPRINT}"
    ```
 
-   The value must equal the fingerprint in
-   [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md). Import the key from the git
-   repository, not from the release assets.
+   The last command fails when the signature is missing or comes from another
+   key. The key file itself is not an independent channel. Only the
+   fingerprint comparison establishes the signer.
 
 3. Verify the checksum:
 
@@ -98,13 +101,36 @@ builds. The two packages conflict because they own the same module file.
    sha256sum -c SHA256SUMS --ignore-missing
    ```
 
-4. Install the package:
+4. Remove the manual load line when you installed the module by hand in
+   Section 5. The package loads the same module through
+   `/etc/nginx/modules-enabled/`. NGINX aborts with `module ... is already
+   loaded` when two load lines name the same module.
+
+   Test the configuration before you change the file:
+
+   ```bash
+   sudo nginx -t
+   ```
+
+   The test must pass. Comment out or delete the `load_module` line in
+   `/etc/nginx/nginx.conf`. Then confirm that no load line for the module
+   remains:
+
+   ```bash
+   sudo grep -n '^[[:space:]]*load_module' /etc/nginx/nginx.conf
+   ```
+
+   The output must not list `ngx_http_markdown_filter_module`. Keep the
+   `markdown_filter` directives. The package provides the same module, so the
+   directives stay valid after the install.
+
+5. Install the package:
 
    ```bash
    sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb
    ```
 
-5. Confirm that NGINX accepts the configuration:
+6. Confirm that NGINX accepts the configuration:
 
    ```bash
    sudo nginx -t
@@ -114,6 +140,27 @@ The package depends on `nginx-abi-<version>-<n>`, on `nginx-common`, and on a
 fixed `libbrotli1`. If a later NGINX security update changes the ABI, apt
 cannot keep the module installed. Apt removes the module and the enabled snippet. NGINX then starts without the
 filter. This is the fail-closed path.
+
+**A failed installation.** The post-install script adds one entry under
+`/etc/nginx`: the link `/etc/nginx/modules-enabled/50-mod-markdown.conf`. The
+script does not run `nginx -t`. The script does not reload or restart NGINX.
+A failed install therefore leaves the running process unchanged. When
+`/etc/nginx/modules-enabled` is absent, the script changes nothing.
+
+Uncomment the manual `load_module` line from step 4 when you had one. Delete
+the link, then test the configuration:
+
+```bash
+sudo rm -f /etc/nginx/modules-enabled/50-mod-markdown.conf
+sudo nginx -t
+```
+
+The test must pass before you start or reload NGINX. Remove the package when
+apt reports it as installed:
+
+```bash
+sudo apt-get remove nginx-module-markdown-for-agents-ubuntu
+```
 
 ## 4. Enable the module
 
@@ -199,7 +246,9 @@ or when you build your own NGINX package.
      --suite "${SUITE}"
    ```
 
-6. Install the module file:
+6. Remove `nginx-module-markdown-for-agents-ubuntu` first when the package is
+   present. Two load lines for the same module stop NGINX. Then install the
+   module file:
 
    ```bash
    sudo install -m 0644 \
@@ -212,6 +261,16 @@ or when you build your own NGINX package.
    ```nginx
    load_module modules/ngx_http_markdown_filter_module.so;
    ```
+
+8. Test the configuration, then reload NGINX:
+
+   ```bash
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+   The test must pass before the reload. A failure names the module path or the
+   ABI mismatch.
 
 ## 6. Handle a security update
 
@@ -242,18 +301,42 @@ or when you build your own NGINX package.
       sudo apt-get remove nginx-module-markdown-for-agents-ubuntu
       ```
 
-   b. Remove every `markdown_filter` directive that you added in Section 4.
+      Skip this step when you built the module from source in Section 5. That
+      path installs no package.
+
+      The removal script deletes
+      `/etc/nginx/modules-enabled/50-mod-markdown.conf` before it deletes the
+      module file. The link needs no manual cleanup. The script deletes the
+      link only when it points at
+      `/usr/share/nginx/modules-available/mod-markdown.conf`. Delete a link
+      that points elsewhere, or a copy of the snippet, by hand:
+
+      ```bash
+      sudo rm -f /etc/nginx/modules-enabled/50-mod-markdown.conf
+      ```
+
+   b. Disable the manual load line from Section 5 when it is still active.
+      Comment out or delete this line in `/etc/nginx/nginx.conf`:
+
+      ```nginx
+      load_module modules/ngx_http_markdown_filter_module.so;
+      ```
+
+      That module no longer matches the updated NGINX binary. NGINX fails to
+      start while the load line stays active.
+
+   c. Remove every `markdown_filter` directive that you added in Section 4.
       Comment the line out, or delete it, in each server block. NGINX starts
       without the filter only when no `markdown_filter` directive remains. A
       remaining directive fails the test with `unknown directive`.
 
-   c. Test the configuration, then start NGINX:
+   d. Test the configuration, then start NGINX:
 
       ```bash
       sudo nginx -t && sudo systemctl start nginx
       ```
 
-   d. Install or build a module for the new revision. Section 3 and
+   e. Install or build a module for the new revision. Section 3 and
       Section 5 give the two paths.
 
 Never copy a module from another Ubuntu release. Never keep a module that
