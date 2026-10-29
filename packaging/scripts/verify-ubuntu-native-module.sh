@@ -179,6 +179,23 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+# Refuse to run over a host that already carries any of the paths this script
+# owns.  The cleanup trap removes what it created, and an ownership mistake
+# would delete a real module or site configuration.
+refuse_existing() {
+    local path="$1"
+    if [[ -e "${path}" || -L "${path}" ]]; then
+        die "${path} already exists; run this script on a clean host or remove that path first"
+    fi
+}
+refuse_existing "${MODULE_DIR}/ngx_http_markdown_filter_module.so"
+refuse_existing "${ENABLED_LINK}"
+refuse_existing "${SITE_AVAILABLE}"
+refuse_existing "${SITE_ENABLED}"
+refuse_existing "${DOCUMENT_ROOT}"
+# The distro default site is a known package path, not a conflict: the script
+# moves it aside and restores it in cleanup, tracked by DEFAULT_SITE_MOVED.
+
 mkdir -p "${MODULE_DIR}" "${DOCUMENT_ROOT}"
 MODULE_INSTALLED="yes"
 install -m 0644 "${MODULE_PATH}" \
@@ -279,8 +296,14 @@ if [[ -n "${INCOMPATIBLE_PATH}" ]]; then
         "${MODULE_DIR}/ngx_http_markdown_filter_module.so"
     if nginx -t >"${TEST_DIR}/nginx-t-incompatible.log" 2>&1; then
         record negative_abi_rejected FAIL "incompatible module loaded"
+    elif grep -qi "not binary compatible" "${TEST_DIR}/nginx-t-incompatible.log"; then
+        # Only the compatibility rejection proves the check is real.  Any
+        # other failure (a broken configuration, a missing file) is not
+        # evidence that NGINX compared module signatures.
+        record negative_abi_rejected PASS "rejected: not binary compatible"
     else
-        record negative_abi_rejected PASS "rejected"
+        record negative_abi_rejected FAIL \
+            "nginx -t failed for another reason: $(tail -1 "${TEST_DIR}/nginx-t-incompatible.log")"
     fi
     install -m 0644 "${MODULE_PATH}" \
         "${MODULE_DIR}/ngx_http_markdown_filter_module.so"

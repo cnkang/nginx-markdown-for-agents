@@ -39,7 +39,9 @@ case "${1:-configure}" in
             info "nginx-common is not configured; run 'nginx -t' after you enable the module"
             exit 0
         fi
-        if [[ ! -e "${MODULES_ENABLED_LINK}" ]]; then
+        # Skip an existing entry of any kind, including a dangling symlink:
+        # the link is present, so the operator's state stays as it is.
+        if [[ ! -e "${MODULES_ENABLED_LINK}" && ! -L "${MODULES_ENABLED_LINK}" ]]; then
             ln -s "${MODULES_AVAILABLE}" "${MODULES_ENABLED_LINK}"
         fi
         info "module enabled through ${MODULES_ENABLED_LINK}"
