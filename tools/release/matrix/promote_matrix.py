@@ -218,7 +218,10 @@ def _write_matrix(
     tmp = target.with_suffix(f"{target.suffix}.tmp")
     tmp_path = validate_write_path_within_root(tmp, root=root)
     try:
-        tmp_path.write_text(
+        # NOSONAR suppression for pythonsecurity:S2083: both paths passed
+        # validate_write_path_within_root against the repository root, so CLI
+        # input cannot select a target outside the tree.
+        tmp_path.write_text(  # NOSONAR
             json.dumps(matrix, indent=2) + "\n", encoding="utf-8"
         )
         os.replace(tmp_path, target)

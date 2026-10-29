@@ -51,10 +51,10 @@ def test_promotion_sets_the_release_promise() -> None:
 
 
 def test_record_without_a_row_is_refused() -> None:
+    matrix = _matrix(_row(arch="arm64"))
+    records = [_record()]
     with pytest.raises(PromotionError, match="covers no matrix row"):
-        build_promoted_matrix(
-            _matrix(_row(arch="arm64")), [_record()], demote_superseded=False
-        )
+        build_promoted_matrix(matrix, records, demote_superseded=False)
 
 
 def test_manual_row_is_never_overwritten() -> None:
@@ -67,14 +67,16 @@ def test_manual_row_is_never_overwritten() -> None:
         )
     )
     record = _ubuntu_record()
+    records = [record]
     with pytest.raises(PromotionError, match="managed_by=manual"):
-        build_promoted_matrix(matrix, [record], demote_superseded=False)
+        build_promoted_matrix(matrix, records, demote_superseded=False)
 
 
 def test_container_rows_are_not_promoted_by_evidence() -> None:
     matrix = _matrix(_row(artifact_type="docker-image"))
+    records = [_record()]
     with pytest.raises(PromotionError, match="covers no matrix row"):
-        build_promoted_matrix(matrix, [_record()], demote_superseded=False)
+        build_promoted_matrix(matrix, records, demote_superseded=False)
 
 
 def test_superseded_patch_is_demoted_without_losing_its_row() -> None:
@@ -126,10 +128,9 @@ def test_promotion_is_idempotent() -> None:
 
 def test_invalid_record_is_refused() -> None:
     matrix = _matrix(_row())
+    records = [_record(module_sha256="short")]
     with pytest.raises(PromotionError, match="is not promotable"):
-        build_promoted_matrix(
-            matrix, [_record(module_sha256="short")], demote_superseded=False
-        )
+        build_promoted_matrix(matrix, records, demote_superseded=False)
 
 
 def _write_evidence(path: Path, **overrides) -> Path:
