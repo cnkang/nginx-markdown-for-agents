@@ -385,8 +385,8 @@ the module from source against your local NGINX installation.
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
@@ -410,8 +410,8 @@ the module from source against your local NGINX installation.
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | pending | Yes | `.github/workflows/official-nginx-docker.yml` |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | stable | linux | musl | arm64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |
 | 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | pending | Yes | `.github/workflows/release-packages.yml` |

@@ -280,8 +280,8 @@ installation-specific details.
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | supported | verified | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | verified | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | best-effort | pending | No |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
@@ -305,8 +305,8 @@ installation-specific details.
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | supported | verified | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | verified | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | pending | No |
 | 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |

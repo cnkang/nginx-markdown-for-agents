@@ -405,7 +405,7 @@ See `examples/docker/` for Docker build examples.
 | 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.24.0 ubuntu-24.04 glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 ubuntu-24.04 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
@@ -418,7 +418,7 @@ See `examples/docker/` for Docker build examples.
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.28.3 ubuntu-26.04 glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 ubuntu-26.04 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
