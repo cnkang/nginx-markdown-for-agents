@@ -160,11 +160,9 @@ def test_invalid_source_sha_is_rejected(tmp_path):
 def test_main_refuses_an_output_path_outside_the_repository(tmp_path):
     """The composer must not write outside the checkout."""
     root = _repo(tmp_path)
-    build, ledger = _module_and_ledger(tmp_path)
-    out = tmp_path / "outside.json"
 
     with pytest.raises(ValueError, match="escapes root"):
-        composer.validate_write_path_within_root(out, root=root)
+        composer.validate_write_path_within_root(tmp_path / "outside.json", root=root)
 
 
 def test_main_refuses_a_traversal_output_path():
