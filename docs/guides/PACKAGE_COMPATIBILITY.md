@@ -38,10 +38,13 @@ below X.Y.Z — the floor is not version-scoped across epochs. The `%pre`
 scriptlet performs the exact-version check at install time. RPM therefore rejects a
 same-version package that does not provide the expected NGINX package ABI
 capability before installation.
-**The project verifies runtime compatibility only for the exact NGINX versions
-listed in the build matrix below**. Loading the module on any other NGINX version
-will fail with a version mismatch before signature checks. Install the
-package only on the NGINX version matching the artifact filename.
+**The project verifies runtime compatibility only for the exact NGINX builds
+listed in the build matrix below**. NGINX checks the binary compatibility
+signature at load time. The signature covers the version number and the
+configure options that affect the ABI. A module for another build therefore
+fails with `module is not binary compatible`, even when the version string
+looks the same. Install the package only on the NGINX build that matches the
+artifact filename.
 
 ---
 
@@ -91,7 +94,8 @@ The module is built and verified for multiple NGINX releases and platforms. For 
 Each package filename encodes the full version and platform information to
 prevent accidental use of an incompatible package:
 
-- **DEB**: `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb`
+- **DEB (nginx.org)**: `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb`
+- **DEB (Ubuntu native)**: `nginx-module-markdown-for-agents-ubuntu_{version}_ubuntu-{suite}_nginx-{package_revision}_{arch}.deb`
 - **RPM**: `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm`
 
 Filename template:
@@ -140,15 +144,19 @@ The following NGINX variants are **not supported** by prebuilt packages:
 
 | Environment | Reason |
 |-------------|--------|
-| Distribution-provided NGINX (apt/yum default) | Compiled with different configure options; signature mismatch likely |
+| Distribution-provided NGINX that has no project artifact | Compiled with different configure options, so the signature differs |
+| Distribution-provided NGINX with a new package revision | The revision can change the ABI. Rebuild or reinstall the module |
 | Vendor-patched NGINX | Modified source may alter ABI or internal structs |
 | OpenResty | Includes LuaJIT patches and additional modules that change the binary signature |
 | Tengine | Fork with significant internal changes incompatible with upstream ABI |
 | Custom-compiled NGINX | Unknown configure options produce unpredictable signatures |
 
-If you are running any of the above, you must build the module from source
-against your specific NGINX source tree and configuration (see the
-"Building from Source" section below).
+Ubuntu 24.04 LTS and Ubuntu 26.04 LTS have a dedicated native artifact family.
+See [UBUNTU-LTS-NGINX-COMPATIBILITY.md](UBUNTU-LTS-NGINX-COMPATIBILITY.md).
+
+For every other environment in the table, build the module from source against
+your specific NGINX source tree and configuration. See the "Building from
+Source" section below.
 
 ### How to Identify Your NGINX Source
 

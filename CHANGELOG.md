@@ -5,6 +5,58 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - Unreleased
+
+Compatibility maintenance release. 0.9.3 makes the current nginx.org stable and
+mainline releases supported and release blocking. It adds Ubuntu 24.04 and
+Ubuntu 26.04 native NGINX to the supported surface. It adds an evidence-gated
+promotion path, so a version can become supported only with recorded build,
+load, and request evidence.
+
+0.9.3 is not a breaking release. The 20 active directives, their defaults, the
+HTTP representation, the metrics and diagnostics contracts, the reason-code
+registry, and the FFI ABI version 3 do not change.
+
+### Added
+
+- Ubuntu-native module build for Ubuntu 24.04 LTS and Ubuntu 26.04 LTS, on
+  amd64 and arm64. The build uses the Canonical source package, the
+  `nginx -V` configure arguments, and the distribution ABI.
+- `nginx-module-markdown-for-agents-ubuntu` DEB package. It depends on
+  `nginx-abi-<version>-<n>`, so an ABI-changing security update cannot leave
+  the module loaded against an incompatible binary.
+- `packaging/scripts/build-ubuntu-native-module.sh` and
+  `packaging/scripts/verify-ubuntu-native-module.sh`.
+- `tools/release/matrix/promote_matrix.py`, an evidence-gated promotion tool.
+- `tools/release/matrix/validate_compatibility_evidence.py` and
+  `make compatibility-evidence-check`.
+- `docs/guides/COMPATIBILITY-SUPPORT-POLICY.md`,
+  `docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md`, and
+  `docs/guides/UPGRADE-TO-0.9.3.md`.
+- A package-name pattern in the release manifest generator for the
+  Ubuntu-native DEB, with the suite and package revision in the name.
+
+### Changed
+
+- The release matrix promotes nginx.org 1.30.6 (stable) and 1.31.8 (mainline)
+  to supported and release blocking for glibc and musl on both architectures.
+- Superseded patches 1.30.4, 1.30.5, 1.31.6, and 1.31.7 keep their rows and
+  their published assets. They become best-effort and stop blocking a release.
+- The auto-update policy rejects a discovered version that is release
+  blocking.
+- `packaging/matrix.yaml` points at the canonical release matrix instead of
+  listing its own version set.
+- The nFPM checksum table contains the `linux-arm64` binary.
+
+### Fixed
+
+- `packaging/checksums.sha256` contains the SHA-256 values for
+  `nginx-1.30.6` and `nginx-1.31.8`. The maintainer checked both values against
+  the nginx.org signing key.
+- `docs/guides/PACKAGE_COMPATIBILITY.md` now states that NGINX rejects an
+  incompatible module at the binary compatibility signature, not at a version
+  string comparison.
+
 ## [0.9.2] - 2026-10-08
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping

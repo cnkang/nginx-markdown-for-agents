@@ -1,0 +1,250 @@
+# Ubuntu LTS NGINX Compatibility
+
+This guide explains how the Markdown filter module runs on the NGINX package
+that Canonical ships in the Ubuntu archive. The module is built from the
+Ubuntu source package for the release you run. It is not the nginx.org build.
+
+**Scope**: Ubuntu 24.04 LTS (Noble) and Ubuntu 26.04 LTS (Resolute), amd64 and
+arm64.
+
+**Status**: Verified for the releases and package revisions in the support
+matrix. Run `bash tools/doctor/nginx-markdown-doctor.sh` to check your host.
+
+## 1. Why the Ubuntu build is different
+
+Ubuntu compiles NGINX with its own configure options and its own security
+patches. The result has a different binary compatibility signature from an
+nginx.org build of the same upstream version.
+
+NGINX compares that signature when it loads a dynamic module. A module built
+against nginx.org `1.24.0` does not load on the Ubuntu `1.24.0` package. The
+reverse is also true. The version string is not enough to decide
+compatibility.
+
+Ubuntu also changes the package revision when it backports a security fix. A
+revision change can keep the ABI, or it can change the ABI. Only a load test
+on the exact revision shows which one happened. Ubuntu published
+[USN-8563-2](https://ubuntu.com/security/notices/USN-8563-2) and
+[USN-8563-4](https://ubuntu.com/security/notices/USN-8563-4) after such a
+change affected external modules.
+
+## 2. Check your host
+
+1. Read the installed NGINX package revision:
+
+   ```bash
+   dpkg-query -W -f='${Version}\n' nginx
+   ```
+
+2. Read the ABI capability that the package provides:
+
+   ```bash
+   dpkg-query -W -f='${Provides}\n' nginx
+   ```
+
+   The output contains a token such as `nginx-abi-1.24.0-1`.
+
+3. Read the configure arguments:
+
+   ```bash
+   nginx -V 2>&1 | tr ' ' '\n' | grep -E 'with-compat|modules-path'
+   ```
+
+   Ubuntu builds include `--with-compat`. That option is necessary for a
+   third-party module to load.
+
+4. Compare the revision with the support matrix:
+
+   ```bash
+   python3 - <<'PY'
+   import json
+   matrix = json.load(open("tools/release-matrix.json"))
+   for entry in matrix["entries"]:
+       if entry.get("source") == "ubuntu-default-repo":
+           print(entry["nginx_version"], entry["os"], entry["arch"],
+                 entry["support_tier"], entry["verification_state"])
+   PY
+   ```
+
+## 3. Install the Ubuntu-native package
+
+The package name is `nginx-module-markdown-for-agents-ubuntu`. It is not the
+same package as `nginx-module-markdown-for-agents`, which targets nginx.org
+builds. The two packages conflict because they own the same module file.
+
+1. Download the package for your suite and architecture from the release
+   page after publication.
+
+2. Verify the checksum:
+
+   ```bash
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
+3. Install the package:
+
+   ```bash
+   sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb
+   ```
+
+4. Confirm that NGINX accepts the configuration:
+
+   ```bash
+   sudo nginx -t
+   ```
+
+The package depends on `nginx-abi-<version>-<n>`, on `nginx-common`, and on a
+fixed `libbrotli1`. If a later NGINX security update changes the ABI, apt
+cannot keep the module installed. Apt removes the module and the enabled snippet. NGINX then starts without the
+filter. This is the fail-closed path.
+
+## 4. Enable the module
+
+The package installs a snippet at
+`/usr/share/nginx/modules-available/mod-markdown.conf`. The post-install
+script links the snippet into `/etc/nginx/modules-enabled/`. The Ubuntu
+`nginx.conf` includes that directory at the main context.
+
+The module loads with `markdown_filter` set to `off`. Loading the module does
+not change the response for any request until you enable the filter.
+
+To enable the filter for one server, add this line to the server block:
+
+```nginx
+markdown_filter on;
+```
+
+To confirm the result, run these commands:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+curl -sD - -o /dev/null -H 'Accept: text/markdown' http://localhost/
+```
+
+The response must contain `Content-Type: text/markdown` and a `Vary: Accept`
+header.
+
+## 5. Build from source on Ubuntu
+
+Use this path when your package revision is newer than the verified revision,
+or when you build your own NGINX package.
+
+1. Install the build dependencies:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y nginx nginx-dev build-essential dpkg-dev \
+     libpcre2-dev zlib1g-dev libssl-dev libbrotli-dev pkg-config git
+   ```
+
+2. Build the module against the installed NGINX:
+
+   ```bash
+   sudo bash packaging/scripts/build-ubuntu-native-module.sh \
+     --suite 24.04 --arch amd64 --out dist/ubuntu-native --install-deps
+   ```
+
+   The script reads the configure arguments from `nginx -V`, retrieves the
+   matching source package, and compiles the module. It fails when the source
+   revision differs from the installed binary revision.
+
+3. Verify the module:
+
+   ```bash
+   sudo bash packaging/scripts/verify-ubuntu-native-module.sh \
+     --module dist/ubuntu-native/ngx_http_markdown_filter_module.so \
+     --out dist/ubuntu-native/ubuntu-native-ledger.json \
+     --suite 24.04
+   ```
+
+4. Install the module file:
+
+   ```bash
+   sudo install -m 0644 \
+     dist/ubuntu-native/ngx_http_markdown_filter_module.so \
+     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   ```
+
+5. Add the load directive to the main context of `/etc/nginx/nginx.conf`:
+
+   ```nginx
+   load_module modules/ngx_http_markdown_filter_module.so;
+   ```
+
+## 6. Handle a security update
+
+1. Read the NGINX changelog before you upgrade:
+
+   ```bash
+   apt-get changelog nginx
+   ```
+
+2. Upgrade the system:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get upgrade
+   ```
+
+3. Test the configuration:
+
+   ```bash
+   sudo nginx -t
+   ```
+
+4. Do these steps when the test fails with a module error:
+
+   a. Remove the module package:
+
+      ```bash
+      sudo apt-get remove nginx-module-markdown-for-agents-ubuntu
+      ```
+
+   b. Start NGINX without the filter:
+
+      ```bash
+      sudo nginx -t && sudo systemctl start nginx
+      ```
+
+   c. Install or build a module for the new revision. Section 3 and
+      Section 5 give the two paths.
+
+Never copy a module from another Ubuntu release. Never keep a module that
+fails the load test.
+
+## 7. Roll back
+
+A rollback to a module for the **same** NGINX ABI is safe. A rollback across
+an ABI change is not possible, because the old module cannot load.
+
+1. Stop the new module version:
+
+   ```bash
+   sudo apt-get install --reinstall nginx-module-markdown-for-agents-ubuntu=<previous-version>
+   ```
+
+2. Test and reload:
+
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+Keep a copy of the previous package file when you upgrade. The support matrix
+records the exact package revisions that this project verified.
+
+## 8. Evidence and limits
+
+The project records one evidence file per verified target under
+`docs/evidence/<release>/compat/`. Each file contains the package revision,
+the ABI provide, the source digest, the module checksum, the configure
+argument digest, and every test result.
+
+Limits:
+
+- Ubuntu moves package revisions without notice. A revision that is newer than
+  the recorded one needs a new build and a new load test.
+- The verified architecture set is amd64 and arm64. Other architectures are
+  not supported.
+- The module links the Ubuntu `libbrotli1` decoder. The package requires the
+  revision that contains the decoder fix for CVE-2026-111497.

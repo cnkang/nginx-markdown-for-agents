@@ -23,6 +23,9 @@
 
 ## 1. Overview
 
+0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
+published. Use the v0.9.3 release-tag downloads after publication.
+
 The NGINX Markdown filter module enables AI agents to retrieve web content in Markdown format through HTTP content negotiation. When a client sends `Accept: text/markdown`, the module converts the upstream HTML response to Markdown on the fly. Browsers and normal clients continue to receive HTML unchanged.
 
 The project consists of two main components:

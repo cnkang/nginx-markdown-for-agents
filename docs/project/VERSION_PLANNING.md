@@ -9,8 +9,10 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current release line, published 2026-10-08.
+- v0.9.2 is the current published release line (2026-10-08).
   It consolidates the v0.9.1 baseline and resets compatibility.
+- v0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not
+  yet published. Use the v0.9.3 release-tag downloads after publication.
 - v0.9.1 was the previous published stable release (2026-07-29).
 - Version metadata is 0.9.2. Use the release tag, assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.

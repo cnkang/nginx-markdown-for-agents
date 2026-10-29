@@ -25,6 +25,16 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
+### Current Release Line 0.9.3
+
+0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
+published. The release makes the current nginx.org stable and mainline
+releases supported and release blocking, and it adds Ubuntu 24.04 and Ubuntu
+26.04 native NGINX to the supported surface. It does not change a directive,
+a default value, or a frozen contract. See the
+[0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
+[compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
+
 ### Current Release Line 0.9.2
 
 **Status:** Stable release, published 2026-10-08. 0.9.1 was the previous
