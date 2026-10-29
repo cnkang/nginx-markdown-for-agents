@@ -139,6 +139,10 @@ def _demote_superseded(
     Distro rows are excluded: one Ubuntu row binds to one package revision, so
     an upstream patch does not supersede it.  Manual rows are excluded too,
     because their tier is a maintainer decision.
+
+    The verification state is left untouched.  Demotion is a support decision,
+    not evidence: writing ``verified`` here would claim a build record that
+    does not exist, and the evidence gate rejects a verified row without one.
     """
     newest_by_track: dict[str, str] = {}
     for version in promoted_versions:
@@ -153,7 +157,6 @@ def _demote_superseded(
             continue
         entry["support_tier"] = "best-effort"
         entry["support_stage"] = "best-effort"
-        entry["verification_state"] = "verified"
         entry["release_blocking"] = False
         changed.append(entry)
     return changed

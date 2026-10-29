@@ -111,7 +111,8 @@ def test_superseded_patch_is_demoted_without_losing_its_row() -> None:
     assert old["support_tier"] == "best-effort"
     assert old["support_stage"] == "best-effort"
     assert old["release_blocking"] is False
-    assert old["verification_state"] == "verified"
+    # Demotion is not evidence.  The row had no record, so it stays pending.
+    assert old["verification_state"] == "pending"
     assert "demote superseded patch 1.30.5 to best-effort" in summary
 
 
@@ -624,3 +625,48 @@ def test_atomic_replace_swaps_a_temp_file_beside_the_target(
     assert swaps[0][1] == matrix_path.resolve()
     assert not list(root.rglob("*.tmp")), "a temp file survived the write"
     assert _entry_state(matrix_path) == "verified"
+
+
+def test_demotion_does_not_claim_verification_without_a_record() -> None:
+    """Demoting a patch is a support decision, not evidence.
+
+    The evidence gate rejects a verified row that no record covers, so the
+    demotion path must not write ``verified`` for a row that never had one.
+    """
+    superseded = _row(
+        nginx_version="1.30.5",
+        support_tier="supported",
+        support_stage="primary",
+        release_blocking=True,
+        verification_state="pending",
+    )
+    current = _row(nginx_version="1.30.6")
+    matrix = _matrix(superseded, current)
+
+    promoted, _ = build_promoted_matrix(
+        matrix, [_record()], demote_superseded=True
+    )
+
+    assert promoted["entries"][0]["support_tier"] == "best-effort"
+    assert promoted["entries"][0]["release_blocking"] is False
+    assert promoted["entries"][0]["verification_state"] == "pending"
+
+
+def test_demotion_preserves_an_existing_verification() -> None:
+    """A row that already had a record keeps its verified state."""
+    superseded = _row(
+        nginx_version="1.30.5",
+        support_tier="supported",
+        support_stage="primary",
+        release_blocking=True,
+        verification_state="verified",
+    )
+    current = _row(nginx_version="1.30.6")
+    matrix = _matrix(superseded, current)
+
+    promoted, _ = build_promoted_matrix(
+        matrix, [_record()], demote_superseded=True
+    )
+
+    assert promoted["entries"][0]["support_tier"] == "best-effort"
+    assert promoted["entries"][0]["verification_state"] == "verified"
