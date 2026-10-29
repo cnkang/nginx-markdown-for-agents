@@ -1122,13 +1122,24 @@ jobs:
           echo "raw_version=${VERSION}" >> "$GITHUB_OUTPUT"
         shell: bash
 
+      - name: Install Rust toolchain
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          bash ./packaging/scripts/install-verified-rustup.sh \
+            --arch "${MATRIX_ARCH}" \
+            --toolchain "${RUST_TOOLCHAIN}"
+          echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
+          "${HOME}/.cargo/bin/rustc" --version
+        shell: bash
+
       - name: Build module against the Ubuntu NGINX package
         env:
           MATRIX_SUITE: ${{ matrix.suite }}
           MATRIX_ARCH: ${{ matrix.arch }}
           MATRIX_REVISION: ${{ matrix.package_revision }}
         run: |
-          bash packaging/scripts/build-ubuntu-native-module.sh \
+          bash ./packaging/scripts/build-ubuntu-native-module.sh \
             --suite "${MATRIX_SUITE}" \
             --arch "${MATRIX_ARCH}" \
             --out dist/ubuntu-native \
@@ -1141,7 +1152,7 @@ jobs:
         env:
           MATRIX_SUITE: ${{ matrix.suite }}
         run: |
-          bash packaging/scripts/verify-ubuntu-native-module.sh \
+          bash ./packaging/scripts/verify-ubuntu-native-module.sh \
             --module dist/ubuntu-native/ngx_http_markdown_filter_module.so \
             --incompatible dist/ubuntu-native/ngx_http_markdown_filter_module.incompatible.so \
             --provenance dist/ubuntu-native/ubuntu-native-build.json \

@@ -110,10 +110,11 @@ if [[ -n "${PROVENANCE_PATH}" && ! -f "${PROVENANCE_PATH}" ]]; then
     die "provenance file not found: ${PROVENANCE_PATH}"
 fi
 [[ -r /etc/os-release ]] || die "/etc/os-release is missing"
-# shellcheck disable=SC1091
-. /etc/os-release
-if [[ -n "${SUITE}" && "${VERSION_ID:-}" != "${SUITE}" ]]; then
-    die "host is Ubuntu ${VERSION_ID:-unknown} but --suite is ${SUITE}"
+# Read the field instead of sourcing the file: a sourced file is opaque to
+# the release-workflow scanner, which then fails closed.
+DISTRO_VERSION_ID="$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '"')"
+if [[ -n "${SUITE}" && "${DISTRO_VERSION_ID}" != "${SUITE}" ]]; then
+    die "host is Ubuntu ${DISTRO_VERSION_ID:-unknown} but --suite is ${SUITE}"
 fi
 
 case "$(uname -m)" in
@@ -288,7 +289,7 @@ else
 fi
 
 python3 - "${LEDGER_PATH}" "${TEST_DIR}/ledger.tsv" "${PROVENANCE_PATH}" \
-    "${SUITE:-${VERSION_ID:-unknown}}" "${ARCH}" <<'PY'
+    "${SUITE:-${DISTRO_VERSION_ID:-unknown}}" "${ARCH}" <<'PY'
 import datetime
 import json
 import os

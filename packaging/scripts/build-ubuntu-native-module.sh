@@ -112,11 +112,13 @@ esac
 
 # --------------------------------------------------------------- host checks
 [[ -r /etc/os-release ]] || die "/etc/os-release is missing"
-# shellcheck disable=SC1091
-. /etc/os-release
-[[ "${ID:-}" == "ubuntu" ]] || die "this script requires Ubuntu, found ${ID:-unknown}"
-[[ "${VERSION_ID:-}" == "${SUITE}" ]] || die \
-    "host is Ubuntu ${VERSION_ID:-unknown} but --suite is ${SUITE}"
+# Read the two fields instead of sourcing the file: a sourced file is opaque
+# to the release-workflow scanner, which then fails closed.
+DISTRO_ID="$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')"
+DISTRO_VERSION_ID="$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '"')"
+[[ "${DISTRO_ID}" == "ubuntu" ]] || die "this script requires Ubuntu, found ${DISTRO_ID:-unknown}"
+[[ "${DISTRO_VERSION_ID}" == "${SUITE}" ]] || die \
+    "host is Ubuntu ${DISTRO_VERSION_ID:-unknown} but --suite is ${SUITE}"
 case "$(uname -m)" in
     x86_64)
         [[ "${ARCH}" == "amd64" ]] || die "host architecture does not match --arch ${ARCH}"
@@ -252,14 +254,17 @@ dpkg-source -x "${SOURCE_DSC}" "${WORK_DIR}/nginx-src" >/dev/null 2>&1 || \
     die "dpkg-source could not extract ${SOURCE_DSC}"
 
 # ---------------------------------------------------------------- Rust library
-if [[ ! -f "${HOME}/.cargo/bin/rustc" ]]; then
-    bash "${REPO_ROOT}/packaging/scripts/install-verified-rustup.sh" \
-        --arch "${ARCH}" --toolchain "$(sed -n 's/^channel = "\(.*\)"/\1/p' \
-            "${REPO_ROOT}/rust-toolchain.toml")"
-fi
+# The caller provisions the pinned toolchain with the verified installer.
+# This script never downloads a compiler: a release build must not install a
+# toolchain outside the reviewed path.
 export PATH="${HOME}/.cargo/bin:${PATH}"
+command -v rustc >/dev/null 2>&1 || die \
+    "rustc is not installed; provision the pinned toolchain with packaging/scripts/install-verified-rustup.sh"
 RUST_VERSION="$(rustc -Vv | sed -n 's/^release: //p')"
-[[ -n "${RUST_VERSION}" ]] || die "rustc did not report a release version"
+EXPECTED_RUST_VERSION="$(sed -n 's/^channel = "\(.*\)"/\1/p' "${REPO_ROOT}/rust-toolchain.toml")"
+if [[ -n "${EXPECTED_RUST_VERSION}" && "${RUST_VERSION}" != "${EXPECTED_RUST_VERSION}" ]]; then
+    die "rustc ${RUST_VERSION} does not match the pinned toolchain ${EXPECTED_RUST_VERSION}"
+fi
 
 cd "${REPO_ROOT}/components/rust-converter"
 rustup target add "${RUST_TARGET}" >/dev/null 2>&1
