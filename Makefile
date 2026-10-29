@@ -1566,6 +1566,7 @@ matrix-promote:
 		--demote-superseded
 	python3 tools/release/matrix/generate_release_contract_matrix.py --write
 	python3 tools/render_release_matrix_docs.py --write
+	python3 tools/release/matrix/render_legacy_platform_table.py
 	$(MAKE) release-matrix-check
 	$(MAKE) compatibility-evidence-check
 	@echo "  Release Matrix Promotion: PASSED"
