@@ -534,6 +534,10 @@ def test_ubuntu_native_build_requires_a_dynamic_decoder() -> None:
     ).read_text(encoding="utf-8")
     assert "export NGX_MARKDOWN_BROTLI_STREAMING=on" in script
     assert "BROTLI_LINKAGE" in script
+    # The decoder entry point lives in libbrotlidec.  A module that links only
+    # libbrotlicommon cannot decode, so the predicate must name the decoder.
+    assert "NEEDED.*libbrotlidec\\.so" in script
+    assert "libbrotli(dec|common)" not in script
     assert "refusing a degraded release artifact" in script
 
     verify = (

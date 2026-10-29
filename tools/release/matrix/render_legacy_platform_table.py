@@ -45,50 +45,42 @@ DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 
 # The legacy table predates the architecture field on every artifact family.
-# It described the binary cross-product, which the linux dynamic-module rows
+# It describes the binary cross-product, which the linux dynamic-module rows
 # still carry.
 _LEGACY_ARTIFACT = "dynamic-module"
 _LEGACY_OS = "linux"
-_LEGACY_PAIRS = (
-    ("glibc", "aarch64"),
-    ("glibc", "x86_64"),
-    ("musl", "aarch64"),
-    ("musl", "x86_64"),
-)
+# The legacy table spells the architectures in GCC triple form.
+_LEGACY_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}
 
 
 def legacy_entries(matrix: dict[str, Any]) -> list[dict[str, str]]:
-    """Return the rows the legacy table must show, derived from the matrix."""
-    tiers: dict[str, str] = {}
+    """Return the rows the legacy table must show, derived from the matrix.
+
+    One row per linux dynamic-module entry.  The table must not invent a
+    libc or architecture pair that the matrix does not carry: a version that
+    ships only one architecture would otherwise claim four.
+    """
+    seen: dict[tuple[str, str, str], str] = {}
     for entry in matrix["entries"]:
         if entry.get("artifact_type") != _LEGACY_ARTIFACT:
             continue
         if entry.get("os") != _LEGACY_OS:
             continue
         version = entry.get("nginx_version")
+        libc = entry.get("libc")
+        arch = _LEGACY_ARCH.get(str(entry.get("arch")))
         tier = entry.get("support_tier")
-        if not isinstance(version, str) or not isinstance(tier, str):
+        if not isinstance(version, str) or arch is None or not isinstance(tier, str):
             continue
-        previous = tiers.get(version)
-        if previous is not None and previous != tier:
-            raise ValueError(
-                f"{version} has conflicting linux module tiers: "
-                f"{previous} and {tier}"
-            )
-        tiers[version] = tier
+        key = (version, str(libc), arch)
+        if key in seen:
+            raise ValueError(f"duplicate linux module row for {key}")
+        seen[key] = tier
 
-    rows: list[dict[str, str]] = []
-    for version, tier in tiers.items():
-        for os_type, arch in _LEGACY_PAIRS:
-            rows.append(
-                {
-                    "nginx": version,
-                    "os_type": os_type,
-                    "arch": arch,
-                    "support_tier": tier,
-                }
-            )
-    return rows
+    return [
+        {"nginx": version, "os_type": libc, "arch": arch, "support_tier": tier}
+        for (version, libc, arch), tier in seen.items()
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:

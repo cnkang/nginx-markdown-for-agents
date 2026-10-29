@@ -716,10 +716,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.28.3 | glibc | x86_64 | Supported |
 | 1.28.3 | musl | aarch64 | Supported |
 | 1.28.3 | musl | x86_64 | Supported |
-| 1.30.4 | glibc | aarch64 | Best-Effort |
-| 1.30.4 | glibc | x86_64 | Best-Effort |
-| 1.30.4 | musl | aarch64 | Best-Effort |
-| 1.30.4 | musl | x86_64 | Best-Effort |
+| 1.30.4 | glibc | aarch64 | Supported |
+| 1.30.4 | glibc | x86_64 | Supported |
+| 1.30.4 | musl | aarch64 | Supported |
+| 1.30.4 | musl | x86_64 | Supported |
 | 1.30.5 | glibc | aarch64 | Best-Effort |
 | 1.30.5 | glibc | x86_64 | Best-Effort |
 | 1.30.5 | musl | aarch64 | Best-Effort |
@@ -760,8 +760,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.5 | stable | debian12 | glibc | arm64 | best-effort | pending |
 | 1.30.5 | stable | debian12 | glibc | amd64 | best-effort | pending |
 | 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
-| 1.30.4 | stable | debian12 | glibc | arm64 | best-effort | pending |
-| 1.30.4 | stable | debian12 | glibc | amd64 | best-effort | pending |
+| 1.30.4 | stable | debian12 | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | debian12 | glibc | amd64 | supported | pending |
 | 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | supported | verified |
 | 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | supported | verified |
 | 1.28.3 | stable | debian12 | glibc | arm64 | supported | pending |
@@ -814,10 +814,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.5 | stable | linux | musl | arm64 | best-effort | pending |
 | 1.30.5 | stable | linux | glibc | amd64 | best-effort | pending |
 | 1.30.5 | stable | linux | musl | amd64 | best-effort | pending |
-| 1.30.4 | stable | linux | glibc | arm64 | best-effort | pending |
-| 1.30.4 | stable | linux | musl | arm64 | best-effort | pending |
-| 1.30.4 | stable | linux | glibc | amd64 | best-effort | pending |
-| 1.30.4 | stable | linux | musl | amd64 | best-effort | pending |
+| 1.30.4 | stable | linux | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | linux | musl | arm64 | supported | pending |
+| 1.30.4 | stable | linux | glibc | amd64 | supported | pending |
+| 1.30.4 | stable | linux | musl | amd64 | supported | pending |
 | 1.28.3 | stable | linux | glibc | arm64 | supported | pending |
 | 1.28.3 | stable | linux | musl | arm64 | supported | pending |
 | 1.28.3 | stable | linux | glibc | amd64 | supported | pending |
@@ -847,8 +847,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | best-effort | pending |
 | 1.30.5 | stable | almalinux9 | glibc | arm64 | best-effort | pending |
 | 1.30.5 | stable | almalinux9 | glibc | amd64 | best-effort | pending |
-| 1.30.4 | stable | almalinux9 | glibc | arm64 | best-effort | pending |
-| 1.30.4 | stable | almalinux9 | glibc | amd64 | best-effort | pending |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | supported | pending |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | supported | pending |
 | 1.28.3 | stable | almalinux9 | glibc | arm64 | supported | pending |
 | 1.28.3 | stable | almalinux9 | glibc | amd64 | supported | pending |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | supported | pending |

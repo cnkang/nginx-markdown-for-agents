@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import pathlib
 
 import pytest
 
@@ -27,8 +26,20 @@ def _module(version: str, tier: str, **overrides):
     return entry
 
 
+def _four_pairs(version: str, tier: str):
+    return [
+        _module(version, tier, libc=libc, arch=arch)
+        for libc, arch in (
+            ("glibc", "arm64"),
+            ("glibc", "amd64"),
+            ("musl", "arm64"),
+            ("musl", "amd64"),
+        )
+    ]
+
+
 def test_one_row_per_libc_and_architecture_pair():
-    rows = renderer.legacy_entries(_matrix(_module("1.30.6", "supported")))
+    rows = renderer.legacy_entries(_matrix(*_four_pairs("1.30.6", "supported")))
 
     assert len(rows) == 4
     assert {(r["os_type"], r["arch"]) for r in rows} == {
@@ -52,12 +63,22 @@ def test_rows_outside_the_linux_module_family_are_ignored():
     assert {r["nginx"] for r in rows} == {"1.30.6"}
 
 
-def test_conflicting_tiers_for_one_version_are_rejected():
-    with pytest.raises(ValueError, match="conflicting"):
+def test_a_version_with_one_architecture_does_not_invent_the_others():
+    """The table must describe the matrix, not a fixed cross-product."""
+    rows = renderer.legacy_entries(
+        _matrix(_module("1.30.6", "supported", arch="arm64"))
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["arch"] == "aarch64"
+
+
+def test_a_duplicate_matrix_row_is_rejected():
+    with pytest.raises(ValueError, match="duplicate"):
         renderer.legacy_entries(
             _matrix(
                 _module("1.30.6", "supported"),
-                _module("1.30.6", "best-effort", libc="musl"),
+                _module("1.30.6", "supported"),
             )
         )
 
@@ -74,7 +95,7 @@ def test_renderer_rewrites_the_marker_block(tmp_path, monkeypatch):
     )
     matrix = tmp_path / "matrix.json"
     matrix.write_text(
-        json.dumps(_matrix(_module("1.30.6", "supported"))), encoding="utf-8"
+        json.dumps(_matrix(*_four_pairs("1.30.6", "supported"))), encoding="utf-8"
     )
     monkeypatch.setattr(renderer, "DOC_PATH", doc)
     monkeypatch.setattr(renderer, "MATRIX_PATH", matrix)
@@ -100,7 +121,7 @@ def test_check_reports_a_stale_block(tmp_path, monkeypatch):
     )
     matrix = tmp_path / "matrix.json"
     matrix.write_text(
-        json.dumps(_matrix(_module("1.30.6", "supported"))), encoding="utf-8"
+        json.dumps(_matrix(*_four_pairs("1.30.6", "supported"))), encoding="utf-8"
     )
     monkeypatch.setattr(renderer, "DOC_PATH", doc)
     monkeypatch.setattr(renderer, "MATRIX_PATH", matrix)

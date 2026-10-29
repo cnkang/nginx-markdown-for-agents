@@ -351,7 +351,7 @@ BUILD_ARGS_DIGEST="sha256:$(sha256sum "${NGX_ARGS_FILE}" | awk '{print $1}')"
 # declares a libbrotli1 dependency that would then be a false promise.
 BROTLI_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1 2>/dev/null || true)"
 [[ -n "${BROTLI_VERSION}" ]] || die "libbrotli1 is not installed; cannot bind the decoder"
-if readelf -d "${MODULE_PATH}" 2>/dev/null | grep -Eq 'NEEDED.*libbrotli(dec|common)\.so'; then
+if readelf -d "${MODULE_PATH}" 2>/dev/null | grep -Eq 'NEEDED.*libbrotlidec\.so'; then
     BROTLI_LINKAGE="dynamic"
 else
     BROTLI_LINKAGE="absent"

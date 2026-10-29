@@ -101,20 +101,29 @@ builds. The two packages conflict because they own the same module file.
    sha256sum -c SHA256SUMS --ignore-missing
    ```
 
-4. Remove the manual load line when you installed the module by hand in
-   Section 5. The package loads the same module through
-   `/etc/nginx/modules-enabled/`. NGINX aborts with `module ... is already
-   loaded` when two load lines name the same module.
-
-   Test the configuration before you change the file:
+4. Install the package. Do not remove the manual load line yet.
 
    ```bash
-   sudo nginx -t
+   sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb
    ```
 
-   The test must pass. Comment out or delete the `load_module` line in
-   `/etc/nginx/nginx.conf`. Then confirm that no load line for the module
-   remains:
+5. Confirm that the package enabled the module:
+
+   ```bash
+   test -L /etc/nginx/modules-enabled/50-mod-markdown.conf && echo link-present
+   ```
+
+   The output must read `link-present`. When it does not, the package did not
+   enable the module. Keep the manual `load_module` line from Section 5 and
+   follow Section 4 by hand.
+
+6. Remove the manual load line when you installed the module by hand in
+   Section 5 and the link is present. The package now loads the same module
+   through `/etc/nginx/modules-enabled/`. NGINX aborts with `module ... is
+   already loaded` when two load lines name the same module.
+
+   Comment out or delete the `load_module` line in `/etc/nginx/nginx.conf`.
+   Then confirm that no load line for the module remains:
 
    ```bash
    sudo grep -n '^[[:space:]]*load_module' /etc/nginx/nginx.conf
@@ -122,19 +131,14 @@ builds. The two packages conflict because they own the same module file.
 
    The output must not list `ngx_http_markdown_filter_module`. Keep the
    `markdown_filter` directives. The package provides the same module, so the
-   directives stay valid after the install.
+   directives stay valid.
 
-5. Install the package:
-
-   ```bash
-   sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb
-   ```
-
-6. Confirm that NGINX accepts the configuration:
+7. Confirm that NGINX accepts the configuration:
 
    ```bash
    sudo nginx -t
    ```
+
 
 The package depends on `nginx-abi-<version>-<n>`, on `nginx-common`, and on a
 fixed `libbrotli1`. If a later NGINX security update changes the ABI, apt
@@ -147,7 +151,7 @@ script does not run `nginx -t`. The script does not reload or restart NGINX.
 A failed install therefore leaves the running process unchanged. When
 `/etc/nginx/modules-enabled` is absent, the script changes nothing.
 
-Uncomment the manual `load_module` line from step 4 when you had one. Delete
+Uncomment the manual `load_module` line from step 6 when you had one. Delete
 the link, then test the configuration:
 
 ```bash
