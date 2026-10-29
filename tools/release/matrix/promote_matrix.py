@@ -234,7 +234,7 @@ def build_promoted_matrix(
 
 
 @contextlib.contextmanager
-def _exclusive_lock(path: pathlib.Path):
+def _exclusive_lock(path: pathlib.Path, *, root: pathlib.Path = REPO_ROOT):
     """Hold an exclusive lock on the matrix file for a whole promotion.
 
     The read, the compute, and the replace must be one transaction: two
@@ -243,7 +243,9 @@ def _exclusive_lock(path: pathlib.Path):
     sidecar ``.lock`` file makes the lock portable (``flock`` on POSIX,
     ``msvcrt.locking`` on Windows) and keeps it out of the matrix itself.
     """
-    lock_path = path.with_suffix(f"{path.suffix}.lock")
+    lock_path = validate_write_path_within_root(
+        path.with_suffix(f"{path.suffix}.lock"), root=root
+    )
     handle = open(lock_path, "a+b")
     try:
         if os.name == "nt":  # pragma: no cover - exercised on Windows only
@@ -339,7 +341,7 @@ def main(
     args = _parser().parse_args(argv)
     try:
         _write_target = validate_write_path_within_root(args.matrix, root=repo_root)
-        with _exclusive_lock(_write_target):
+        with _exclusive_lock(_write_target, root=repo_root):
             matrix = _load_matrix(args.matrix)
             records = _collect_records(args.evidence, args.evidence_dir)
             original = json.dumps(matrix, indent=2)
