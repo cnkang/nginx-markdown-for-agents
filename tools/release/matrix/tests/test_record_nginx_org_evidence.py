@@ -182,3 +182,34 @@ def test_a_failed_build_entry_is_not_filtered_into_a_pass(tmp_path):
 
     with pytest.raises(composer.ComposeError, match="non-passing build"):
         _compose(root, build, ledger)
+
+
+def test_main_refuses_an_outside_root_output(tmp_path, capsys):
+    """Exercise the refusal through the CLI, not only the validator."""
+    _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    out = tmp_path / "outside.json"
+
+    rc = composer.main(
+        [
+            "--build-dir",
+            str(build),
+            "--ledger",
+            str(ledger),
+            "--nginx-version",
+            "1.30.6",
+            "--libc",
+            "glibc",
+            "--arch",
+            "arm64",
+            "--out",
+            str(out),
+            "--source-sha",
+            COMMIT,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "escapes root" in captured.err
+    assert not out.exists()

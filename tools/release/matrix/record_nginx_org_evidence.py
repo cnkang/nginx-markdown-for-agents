@@ -60,7 +60,7 @@ VERIFIER_TEST_CLASSES: tuple[str, ...] = (
 BUILD_KIND = "release"
 BROTLI_MODE = "static-1.2.1"
 
-_CHECKSUM_LINE_RE = re.compile(r"^([0-9a-f]{64})  (nginx-\d+\.\d+\.\d+)$")
+_CHECKSUM_LINE_RE = re.compile(r"^([0-9a-f]{64}) {2}(nginx-\d+\.\d+\.\d+)$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 

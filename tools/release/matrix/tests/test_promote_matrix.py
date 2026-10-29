@@ -248,7 +248,7 @@ def _promoted_matrix_file(path: Path) -> Path:
     return path
 
 
-@pytest.fixture()
+@pytest.fixture
 def repo_workdir() -> Iterator[Path]:
     """Yield a throwaway directory inside the repository root.
 

@@ -102,8 +102,9 @@ def test_failed_test_in_the_ledger_is_refused(tmp_path):
     payload["tests"][0]["status"] = "FAIL"
     ledger.write_text(json.dumps(payload), encoding="utf-8")
 
+    build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="non-passing"):
-        _compose(_build(tmp_path), ledger)
+        _compose(build, ledger)
 
 
 def test_missing_verifier_class_is_refused(tmp_path):
@@ -112,22 +113,25 @@ def test_missing_verifier_class_is_refused(tmp_path):
     payload["tests"] = [t for t in payload["tests"] if t["name"] != "lifecycle"]
     ledger.write_text(json.dumps(payload), encoding="utf-8")
 
+    build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="missing required test classes"):
-        _compose(_build(tmp_path), ledger)
+        _compose(build, ledger)
 
 
 def test_build_and_ledger_revision_disagreement_is_refused(tmp_path):
     ledger = _ledger(tmp_path, nginx_package_revision="1.24.0-2ubuntu7.18")
 
+    build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="disagree on nginx_package_revision"):
-        _compose(_build(tmp_path), ledger)
+        _compose(build, ledger)
 
 
 def test_module_digest_disagreement_is_refused(tmp_path):
     ledger = _ledger(tmp_path, module_sha256="f" * 64)
 
+    build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="module digest"):
-        _compose(_build(tmp_path), ledger)
+        _compose(build, ledger)
 
 
 def test_declared_totals_are_not_copied(tmp_path):
@@ -161,5 +165,55 @@ def test_a_failed_build_entry_is_not_filtered_into_a_pass(tmp_path):
     payload["tests"].append({"name": "build", "status": "FAIL", "detail": "compile"})
     ledger.write_text(json.dumps(payload), encoding="utf-8")
 
+    build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="non-passing build"):
-        _compose(_build(tmp_path), ledger)
+        _compose(build, ledger)
+
+
+def test_main_refuses_an_outside_root_output(tmp_path, capsys):
+    """Exercise the refusal through the CLI, not only the validator."""
+    build = _build(tmp_path)
+    ledger = _ledger(tmp_path)
+    out = tmp_path / "outside.json"
+
+    rc = composer.main(
+        [
+            "--build",
+            str(build),
+            "--ledger",
+            str(ledger),
+            "--out",
+            str(out),
+            "--source-sha",
+            COMMIT,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "escapes root" in captured.err
+    assert not out.exists()
+
+
+def test_main_refuses_a_traversal_output(tmp_path, capsys):
+    """A '..' component is rejected before the path is resolved."""
+    build = _build(tmp_path)
+    ledger = _ledger(tmp_path)
+
+    rc = composer.main(
+        [
+            "--build",
+            str(build),
+            "--ledger",
+            str(ledger),
+            "--out",
+            "docs/../outside.json",
+            "--source-sha",
+            COMMIT,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "traversal" in captured.err
+    assert not (composer.REPO_ROOT.parent / "outside.json").exists()

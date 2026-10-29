@@ -74,13 +74,13 @@ def test_a_version_with_one_architecture_does_not_invent_the_others():
 
 
 def test_a_duplicate_matrix_row_is_rejected():
+    matrix = _matrix(
+        _module("1.30.6", "supported"),
+        _module("1.30.6", "supported"),
+    )
+
     with pytest.raises(ValueError, match="duplicate"):
-        renderer.legacy_entries(
-            _matrix(
-                _module("1.30.6", "supported"),
-                _module("1.30.6", "supported"),
-            )
-        )
+        renderer.legacy_entries(matrix)
 
 
 def test_renderer_rewrites_the_marker_block(tmp_path, monkeypatch):
@@ -105,7 +105,8 @@ def test_renderer_rewrites_the_marker_block(tmp_path, monkeypatch):
     body = doc.read_text(encoding="utf-8")
     assert "| 1.30.6 | glibc | aarch64 | Supported |" in body
     assert "| old | table |" not in body
-    assert body.startswith("intro\n") and body.endswith("tail\n")
+    assert body.startswith("intro\n")
+    assert body.endswith("tail\n")
 
     assert renderer.main(["--check"]) == 0
 
