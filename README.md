@@ -10,7 +10,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > Current release line: v0.9.2, published 2026-10-08 as the latest public
 > stable release. v0.9.3 is a compatibility maintenance release candidate:
 > 0.9.3 is not yet published. Use the v0.9.3 release-tag downloads after
-> publication. It is the final planned breaking release before v1.0. Use
+> publication. v0.9.2 is the final planned breaking release before v1.0. Use
 > release-tag downloads.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
@@ -173,10 +173,10 @@ without a change. The release does not add, remove, or rename a directive.
 - The release targets stable 1.30.6 and mainline 1.31.8 for glibc and musl,
   on amd64 and arm64. A row becomes supported when the release workflow
   records build, load, and request evidence for it.
-- The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX
-  through the `nginx-markdown-for-agents-ubuntu` package. That package depends on
-  the Ubuntu ABI, so an ABI-changing security update cannot leave the module
-  loaded against an incompatible binary.
+- The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX on
+  arm64 through the `nginx-module-markdown-for-agents-ubuntu` package. That
+  package depends on the Ubuntu ABI, so an ABI-changing security update cannot
+  leave the module loaded against an incompatible binary.
 - A new promotion path ties a supported row to a recorded evidence file. The
   weekly discovery job still adds a new version as best-effort and pending.
 

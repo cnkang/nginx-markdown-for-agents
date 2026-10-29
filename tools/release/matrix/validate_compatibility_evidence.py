@@ -59,10 +59,16 @@ def _record_problems(
     records: list[tuple[pathlib.Path, dict[str, Any]]],
     *,
     require_ci: bool = False,
+    candidate_sha: str = "",
 ) -> list[str]:
     """Return contract violations for every record."""
     problems: list[str] = []
     for path, record in records:
+        if candidate_sha and record.get("commit_sha") != candidate_sha:
+            problems.append(
+                f"{path.name}: record was produced for commit "
+                f"{record.get('commit_sha')}, not the candidate {candidate_sha}"
+            )
         for error in validate_record(record):
             problems.append(f"{path.name}: {error}")
         if not is_promotable(record):
@@ -127,9 +133,12 @@ def validate(
     *,
     require_blocking: bool = False,
     require_ci: bool = False,
+    candidate_sha: str = "",
 ) -> list[str]:
     """Return every evidence-contract and matrix-binding violation."""
-    problems = _record_problems(records, require_ci=require_ci)
+    problems = _record_problems(
+        records, require_ci=require_ci, candidate_sha=candidate_sha
+    )
     entries = matrix["entries"]
     problems.extend(_verified_without_record(entries, records))
     if require_blocking:
@@ -153,6 +162,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="require a CI-produced record (used at the release stage)",
     )
+    parser.add_argument(
+        "--candidate-sha",
+        default="",
+        help="require every record to name this commit (release stage)",
+    )
     return parser
 
 
@@ -173,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         records,
         require_blocking=args.require_blocking,
         require_ci=args.require_ci,
+        candidate_sha=args.candidate_sha,
     )
     if problems:
         for problem in problems:

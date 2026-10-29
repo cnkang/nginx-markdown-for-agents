@@ -38,15 +38,21 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    ```
 
 3. Download the package for that version and architecture from the release
-   page after publication.
+   page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` too.
 
-4. Verify the checksum:
+4. Verify the signature of `SHA256SUMS` before the checksum. Use the key from
+   the git repository and the fingerprint in
+   [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md). A `VALIDSIG` line must name
+   that fingerprint. [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md) has the
+   complete command block, including the `TRUSTED_FINGERPRINT` check.
+
+5. Verify the checksum:
 
    ```bash
    sha256sum -c SHA256SUMS --ignore-missing
    ```
 
-5. Remove the old package and install the new one:
+6. Remove the old package and install the new one:
 
    ```bash
    sudo apt-get remove nginx-module-markdown-for-agents
@@ -56,7 +62,7 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    The package name stays the same across module versions. The NGINX version
    in the filename must match your installed NGINX.
 
-6. Test and reload:
+7. Test and reload:
 
    ```bash
    sudo nginx -t && sudo systemctl reload nginx

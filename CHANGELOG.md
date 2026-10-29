@@ -38,11 +38,14 @@ registry, and the FFI ABI version 3 do not change.
 
 ### Changed
 
-- The release matrix promotes nginx.org 1.30.6 (stable) and 1.31.8 (mainline)
-  to supported and release blocking for glibc and musl on both architectures,
-  with the evidence record that the release workflow writes for each target.
+- nginx.org 1.30.6 (stable) and 1.31.8 (mainline) are the targets of this
+  release. The promotion to supported and release blocking is pending the
+  evidence record for each target, because the release workflow builds only
+  rows that are already supported. The matrix does not list them as supported
+  yet.
 - Superseded patches 1.30.4, 1.30.5, 1.31.6, and 1.31.7 keep their rows and
-  their published assets. They become best-effort and stop blocking a release.
+  their published assets. The demotion to best-effort runs in the same
+  promotion step as the pending promotion above.
 - The auto-update policy rejects a discovered version that is release
   blocking.
 - `packaging/matrix.yaml` points at the canonical release matrix instead of

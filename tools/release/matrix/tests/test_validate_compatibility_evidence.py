@@ -110,3 +110,19 @@ def test_cli_reports_a_missing_record_directory(tmp_path: Path) -> None:
         ]
     )
     assert rc_main == 1
+
+
+def test_candidate_sha_binding_is_enforced(tmp_path: Path) -> None:
+    """A record for an older commit cannot support the frozen candidate."""
+    records = [_write(tmp_path, "a.json", _record())]
+    assert validate(_matrix(_row()), records) == []
+
+    problems = validate(
+        _matrix(_row()), records, candidate_sha="e" * 40
+    )
+    assert any("not the candidate" in problem for problem in problems)
+
+    problems = validate(
+        _matrix(_row()), records, candidate_sha=records[0][1]["commit_sha"]
+    )
+    assert problems == []

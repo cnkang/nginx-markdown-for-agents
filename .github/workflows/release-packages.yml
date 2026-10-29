@@ -197,6 +197,7 @@ jobs:
               }
               for e in data.get("entries", [])
               if e.get("owner_workflow") == owner
+              and e.get("source") == "nginx.org"
               and e.get("support_tier") == "supported"
               and e.get("libc") == "glibc"
               and e.get("release_blocking") is True
@@ -1208,8 +1209,21 @@ jobs:
           fi
           # The package depends on the fixed decoder version that this suite
           # installs, so a host cannot run the module against a decoder that
-          # still carries CVE-2026-111497.
+          # still carries CVE-2026-111497.  Refuse to build when the archive
+          # still serves a vulnerable decoder.
+          case "${MATRIX_SUITE}" in
+            24.04) BROTLI_FIXED_FLOOR="1.1.0-2ubuntu0.1" ;;
+            26.04) BROTLI_FIXED_FLOOR="1.2.0-3ubuntu0.1" ;;
+            *)
+              echo "ERROR: no Brotli security floor is defined for Ubuntu ${MATRIX_SUITE}" >&2
+              exit 1
+              ;;
+          esac
           BROTLI_MIN_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1 | sed 's/^[0-9]*://')"
+          if ! dpkg --compare-versions "${BROTLI_MIN_VERSION}" ge "${BROTLI_FIXED_FLOOR}"; then
+            echo "ERROR: libbrotli1 ${BROTLI_MIN_VERSION} is below the fixed release ${BROTLI_FIXED_FLOOR}" >&2
+            exit 1
+          fi
           UBUNTU_RELEASE="1ubuntu${MATRIX_SUITE}"
           DEB_FILENAME="nginx-module-markdown-for-agents-ubuntu_${PKG_VERSION}_ubuntu-${MATRIX_SUITE}_nginx-${MATRIX_REVISION}_${MATRIX_ARCH}.deb"
           mkdir -p build
@@ -1719,6 +1733,7 @@ jobs:
           RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_GATE_EXPECTED_CARGO_VERSION: ${{ env.RELEASE_VERSION }}
+          RELEASE_GATE_EXPECTED_VERSION: ${{ env.RELEASE_VERSION }}
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
@@ -1784,6 +1799,15 @@ jobs:
           python3 tools/release/gates/validate_fuzz_packaging.py
           python3 tools/release/gates/validate_release_metadata.py \
             --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
+          # Compatibility evidence must cover every release-blocking row
+          # before a tag publishes.  A dispatch keeps the CI-only rule so a
+          # dry run can exercise the pipeline while rows are still pending.
+          EVIDENCE_ARGS=(--require-ci)
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            EVIDENCE_ARGS+=(--require-blocking --candidate-sha "${GITHUB_SHA}")
+          fi
+          PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
+            "${EVIDENCE_ARGS[@]}"
           # Run the 0.9.2-specific blocking checks that complete the current
           # release contract above.
           python3 tools/harness/detect_public_surface_drift.py
@@ -2282,12 +2306,13 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    needs: [smoke-test, release-gate, musl-build, ubuntu-native, official-docker-release-gate, rc-release-gates, fuzz-qualification]
     if: >-
       github.event_name == 'push'
       && github.ref_type == 'tag'
       && needs.rc-release-gates.result == 'success'
       && needs.fuzz-qualification.result == 'success'
+      && needs.ubuntu-native.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -2656,7 +2681,10 @@ jobs:
           path: release-assets/
           merge-multiple: true
 
-      - name: Download Ubuntu-native DEB artifacts
+      # A tag release takes the signed copy from signed-packages; downloading
+      # the unsigned artifact here would replace those bytes.
+      - name: Download Ubuntu-native DEB artifacts (workflow dispatch)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pkg-deb-ubuntu-*

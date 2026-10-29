@@ -174,3 +174,42 @@ def test_write_mode_then_check_mode_passes(tmp_path: Path) -> None:
         )
         == 0
     )
+
+
+def test_superseded_demotion_skips_distro_rows() -> None:
+    """A distro row is bound to one package revision, not to an upstream patch."""
+    distro_row = _row(
+        nginx_version="1.24.0",
+        os="ubuntu-24.04",
+        artifact_type="deb-package",
+        source="ubuntu-default-repo",
+        support_tier="supported",
+        release_blocking=True,
+    )
+    matrix = _matrix(
+        distro_row,
+        _row(nginx_version="1.30.5", support_tier="supported",
+             release_blocking=True),
+        _row(nginx_version="1.30.6"),
+    )
+    promoted, _ = build_promoted_matrix(
+        matrix, [_record()], demote_superseded=True
+    )
+    assert promoted["entries"][0]["support_tier"] == "supported"
+    assert promoted["entries"][0]["release_blocking"] is True
+
+
+def test_superseded_demotion_skips_manual_rows() -> None:
+    """A manual pin keeps its tier and its blocking flag."""
+    manual_row = _row(
+        nginx_version="1.30.5",
+        managed_by="manual",
+        support_tier="supported",
+        release_blocking=True,
+    )
+    matrix = _matrix(manual_row, _row(nginx_version="1.30.6"))
+    promoted, _ = build_promoted_matrix(
+        matrix, [_record()], demote_superseded=True
+    )
+    assert promoted["entries"][0]["support_tier"] == "supported"
+    assert promoted["entries"][0]["release_blocking"] is True

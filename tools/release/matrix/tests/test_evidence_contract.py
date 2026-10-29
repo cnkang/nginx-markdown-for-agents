@@ -181,3 +181,43 @@ def test_ubuntu_record_covers_only_its_suite() -> None:
     assert not record_covers_entry(
         _ubuntu_record(), {**row, "os": "ubuntu-26.04"}
     )
+
+
+def test_ubuntu_record_requires_the_pinned_revision_in_provenance() -> None:
+    """A row that names a revision must name the one the record verified."""
+    base_row = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+    }
+    record = _ubuntu_record()
+    pinned = {
+        **base_row,
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19",
+        },
+    }
+    assert record_covers_entry(record, pinned)
+
+    stale = {
+        **base_row,
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.17",
+        },
+    }
+    assert not record_covers_entry(record, stale)
+
+
+def test_ubuntu_record_accepts_a_placeholder_provenance() -> None:
+    """A row without a revision yet can still be promoted from a record."""
+    row = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+        "provenance": {"kind": "ubuntu-default-repo", "reference": "ubuntu:24.04"},
+    }
+    assert record_covers_entry(_ubuntu_record(), row)

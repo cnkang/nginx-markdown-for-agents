@@ -1066,12 +1066,17 @@ def test_a_non_success_candidate_result_blocks_tag_signing() -> None:
         "smoke-test": "success",
         "release-gate": "success",
         "musl-build": "success",
+        "ubuntu-native": "success",
         "official-docker-release-gate": "success",
         "fuzz-qualification": "success",
     }
     assert _signing_allowed({**green, "rc-release-gates": "success"}) is True
     for outcome in ("failure", "cancelled", "skipped"):
         assert _signing_allowed({**green, "rc-release-gates": outcome}) is False
+    # Signing must also wait for the Ubuntu-native artifacts.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _signing_allowed({**green, "ubuntu-native": outcome,
+                                 "rc-release-gates": "success"}) is False
     # A failed or missing fuzz qualification must not start protected
     # signing either.
     for outcome in ("failure", "cancelled", "skipped"):

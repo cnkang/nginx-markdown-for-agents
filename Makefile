@@ -1538,11 +1538,13 @@ release-matrix-check:
 # compatibility-evidence-check: Validate every compatibility evidence record
 # and bind each verified matrix row to a record. Fail-closed on a missing
 # record, a malformed record, or a record with a failed or skipped test.
+# Pass CANDIDATE_SHA=<sha> to require every record to name that commit.
 # Classification: BLOCKING
 .PHONY: compatibility-evidence-check
 compatibility-evidence-check:
 	@echo "=== Compatibility Evidence Check ==="
-	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py
+	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
+		$(if $(CANDIDATE_SHA),--candidate-sha "$(CANDIDATE_SHA)",)
 	PYTHONPATH=. python3 -m pytest \
 		tools/release/matrix/tests/test_evidence_contract.py \
 		tools/release/matrix/tests/test_validate_compatibility_evidence.py \

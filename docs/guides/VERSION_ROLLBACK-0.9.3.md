@@ -18,10 +18,12 @@ the NGINX ABI did not change.
    dpkg-query -W -f='${Provides}\n' nginx | tr ',' '\n' | grep nginx-abi
    ```
 
-3. Find the same two values in the record of the version you want to return
-   to. When both values match, the old module can load. When either value
-   differs, the old module cannot load, and the only options are a rebuild or
-   a return of the NGINX package.
+3. Find the ABI capability of the version you want to return to in its
+   evidence record. The ABI provide decides loadability:
+   - When the ABI provide matches, the old module can load. A newer package
+     revision can keep the same ABI, so the revision does not have to match.
+     Run `sudo nginx -t` before you reload.
+   - When the ABI provide differs, the old module cannot load. Use section 4.
 
 ## 2. Roll back a DEB installation
 

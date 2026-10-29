@@ -329,19 +329,43 @@ def _normalized_arch(entry: dict[str, Any]) -> str | None:
     return raw
 
 
+_UBUNTU_REVISION_IN_REFERENCE_RE = re.compile(r"\d+\.\d+\.\d+-\d+ubuntu[\d.]+$")
+
+
+def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
+    """Check a distro row's pinned revision against the record.
+
+    A row that already names an Ubuntu package revision must name the one this
+    record verified.  A row that still carries a placeholder (``ubuntu:24.04``)
+    passes here, because the promotion writes the verified reference; the
+    verification gate then requires the pinned form.
+    """
+    if record["source_kind"] != "ubuntu-default-repo":
+        return True
+    provenance = entry.get("provenance")
+    reference = provenance.get("reference") if isinstance(provenance, dict) else None
+    if not isinstance(reference, str) or not reference:
+        return True
+    if not _UBUNTU_REVISION_IN_REFERENCE_RE.search(reference):
+        return True
+    return reference.rstrip("/").rsplit("/", 1)[-1] == record["nginx_package_revision"]
+
+
 def record_covers_entry(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     """Return whether one record verifies one matrix entry.
 
-    The match is deliberately strict on version, libc, architecture, and host
-    OS.  A generic Linux glibc row is verified by an nginx.org record whose
-    host is ``linux``; a distro row is verified only by a record from that
-    exact suite.
+    The match is deliberately strict on version, libc, architecture, host OS,
+    and a pinned distro revision.  A generic Linux glibc row is verified by an
+    nginx.org record whose host is ``linux``; a distro row is verified only by
+    a record from that exact suite.
     """
     if entry.get("nginx_version") != record["nginx_version"]:
         return False
     if entry.get("libc") != record["libc"]:
         return False
     if _normalized_arch(entry) != record["arch"]:
+        return False
+    if not _provenance_matches(record, entry):
         return False
     return entry.get("os") == record["distro"]
 

@@ -133,7 +133,12 @@ def _refused_manual_rows(
 def _demote_superseded(
     entries: list[dict[str, Any]], promoted_versions: set[str]
 ) -> list[dict[str, Any]]:
-    """Demote supported patches that a newer patch in the same track replaces."""
+    """Demote supported patches that a newer patch in the same track replaces.
+
+    Distro rows are excluded: one Ubuntu row binds to one package revision, so
+    an upstream patch does not supersede it.  Manual rows are excluded too,
+    because their tier is a maintainer decision.
+    """
     newest_by_track: dict[str, str] = {}
     for version in promoted_versions:
         track = _track(version)
@@ -145,6 +150,12 @@ def _demote_superseded(
     for entry in entries:
         version = entry.get("nginx_version")
         if not isinstance(version, str) or version in promoted_versions:
+            continue
+        # A distro row is bound to one package revision, so a newer upstream
+        # patch does not supersede it.  A manual row is a maintainer decision.
+        if entry.get("source") == "ubuntu-default-repo":
+            continue
+        if entry.get("managed_by") == "manual":
             continue
         newest = newest_by_track.get(_track(version))
         if newest is None:

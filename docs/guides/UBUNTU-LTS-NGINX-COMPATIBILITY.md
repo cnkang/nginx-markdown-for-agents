@@ -73,21 +73,38 @@ same package as `nginx-module-markdown-for-agents`, which targets nginx.org
 builds. The two packages conflict because they own the same module file.
 
 1. Download the package for your suite and architecture from the release
-   page after publication.
+   page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` from
+   the same release.
 
-2. Verify the checksum:
+2. Verify the `SHA256SUMS` signature against the published fingerprint:
+
+   ```bash
+   RELEASE_KEY_PATH=packaging/nginx-markdown-for-agents-release.asc
+   TRUSTED_FINGERPRINT="<fingerprint from GPG_KEY_MANAGEMENT.md>"
+   GNUPGDIR="$(mktemp -d)"
+   gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
+   gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+     --verify SHA256SUMS.asc SHA256SUMS \
+     | awk '$2 == "VALIDSIG" { print toupper($3); exit }'
+   ```
+
+   The value must equal the fingerprint in
+   [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md). Import the key from the git
+   repository, not from the release assets.
+
+3. Verify the checksum:
 
    ```bash
    sha256sum -c SHA256SUMS --ignore-missing
    ```
 
-3. Install the package:
+4. Install the package:
 
    ```bash
    sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb
    ```
 
-4. Confirm that NGINX accepts the configuration:
+5. Confirm that NGINX accepts the configuration:
 
    ```bash
    sudo nginx -t
@@ -138,10 +155,22 @@ or when you build your own NGINX package.
      libpcre2-dev zlib1g-dev libssl-dev libbrotli-dev pkg-config git
    ```
 
-2. Build the module against the installed NGINX:
+2. Provision the pinned Rust toolchain, and make it visible to root:
 
    ```bash
-   sudo bash packaging/scripts/build-ubuntu-native-module.sh \
+   bash packaging/scripts/install-verified-rustup.sh --arch amd64 --toolchain 1.98.1
+   sudo env PATH="$(dirname "$(command -v cargo)"):${PATH}" rustc --version
+   ```
+
+   The build script does not download a compiler. It reads `rust-toolchain.toml`
+   and stops when `rustc` is missing or is a different version. A `sudo` shell
+   does not inherit your `~/.cargo/bin` path, so run the build with an explicit
+   `PATH` or provision the toolchain for root.
+
+3. Build the module against the installed NGINX:
+
+   ```bash
+   sudo -E env PATH="${PATH}" bash packaging/scripts/build-ubuntu-native-module.sh \
      --suite 24.04 --arch amd64 --out dist/ubuntu-native --install-deps
    ```
 
@@ -149,7 +178,7 @@ or when you build your own NGINX package.
    matching source package, and compiles the module. It fails when the source
    revision differs from the installed binary revision.
 
-3. Verify the module:
+4. Verify the module:
 
    ```bash
    sudo bash packaging/scripts/verify-ubuntu-native-module.sh \
@@ -158,7 +187,7 @@ or when you build your own NGINX package.
      --suite 24.04
    ```
 
-4. Install the module file:
+5. Install the module file:
 
    ```bash
    sudo install -m 0644 \
@@ -166,7 +195,7 @@ or when you build your own NGINX package.
      /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
-5. Add the load directive to the main context of `/etc/nginx/nginx.conf`:
+6. Add the load directive to the main context of `/etc/nginx/nginx.conf`:
 
    ```nginx
    load_module modules/ngx_http_markdown_filter_module.so;
