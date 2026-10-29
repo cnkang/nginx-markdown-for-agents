@@ -1185,7 +1185,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          ABI_PROVIDE="$(dpkg-query -W -f='\${Provides}' nginx | tr ',' '\n' \
+          # Single quotes stop the shell from expanding ${Provides}; a
+          # backslash inside single quotes would reach dpkg as literal text.
+          ABI_PROVIDE="$(dpkg-query -W -f='${Provides}' nginx | tr ',' '\n' \
             | sed 's/^ *//' | grep '^nginx-abi-' | head -1)"
           NGINX_ABI_VERSION="${ABI_PROVIDE#nginx-abi-}"
           if [[ -z "${NGINX_ABI_VERSION}" ]]; then
@@ -1195,7 +1197,7 @@ jobs:
           # The package depends on the fixed decoder version that this suite
           # installs, so a host cannot run the module against a decoder that
           # still carries CVE-2026-111497.
-          BROTLI_MIN_VERSION="$(dpkg-query -W -f='\${Version}' libbrotli1 | sed 's/^[0-9]*://')"
+          BROTLI_MIN_VERSION="$(dpkg-query -W -f='${Version}' libbrotli1 | sed 's/^[0-9]*://')"
           UBUNTU_RELEASE="1ubuntu${{ matrix.suite }}"
           DEB_FILENAME="nginx-module-markdown-for-agents-ubuntu_${PKG_VERSION}_ubuntu-${{ matrix.suite }}_nginx-${MATRIX_REVISION}_${MATRIX_ARCH}.deb"
           mkdir -p build
