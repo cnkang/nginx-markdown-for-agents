@@ -252,6 +252,7 @@ def test_any_non_success_candidate_result_blocks_publication() -> None:
     """Neither failure, cancellation nor a skip may publish the tag."""
     green = {
         "musl-build": "success",
+        "ubuntu-native": "success",
         "integrity-checksums": "success",
         "release-gate": "success",
         "official-docker-release-gate": "success",
@@ -265,6 +266,10 @@ def test_any_non_success_candidate_result_blocks_publication() -> None:
     # may publish the tag.
     for outcome in ("failure", "cancelled", "skipped"):
         assert _publish_allowed({**green, "fuzz-qualification": outcome,
+                                 "rc-release-gates": "success"}) is False
+    # The Ubuntu-native job publishes artifacts, so it is a candidate gate.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _publish_allowed({**green, "ubuntu-native": outcome,
                                  "rc-release-gates": "success"}) is False
 
 
