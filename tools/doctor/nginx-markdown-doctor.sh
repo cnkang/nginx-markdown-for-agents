@@ -19,6 +19,12 @@ set -euo pipefail
 readonly DOCTOR_VERSION="0.9.3"
 readonly SCHEMA_VERSION=1
 readonly MODULE_FILENAME="ngx_http_markdown_filter_module.so"
+# Check identifiers, so the emitted report and every branch share one name.
+readonly CHECK_NGINX_VERSION="nginx_version"
+readonly CHECK_CONFIG_VALID="config_valid"
+readonly CHECK_MODULE_SIGNATURE="module_signature"
+readonly CHECK_RUST_LINKAGE="rust_linkage"
+readonly CHECK_RUST_TOOLCHAIN="rust_toolchain"
 
 # Default module search paths (common locations)
 readonly -a DEFAULT_MODULE_PATHS=(
@@ -254,13 +260,13 @@ check_nginx_version() {
     # an omitted binary remains an environment-dependent skip.
     if [[ -z "$nginx_bin" ]]; then
         if [[ $NGINX_BIN_INVALID -eq 1 ]]; then
-            emit_check "nginx_version" "fail" \
+            emit_check "$CHECK_NGINX_VERSION" "fail" \
                 "explicit nginx executable is missing or not executable" \
                 '{"binary":"'"$(json_escape "$NGINX_BIN_REQUESTED")"'"}'
         elif [[ -z "$NGINX_BIN_REQUESTED" ]]; then
-            emit_check "nginx_version" "skip" "nginx binary not specified (--nginx-bin empty)"
+            emit_check "$CHECK_NGINX_VERSION" "skip" "nginx binary not specified (--nginx-bin empty)"
         else
-            emit_check "nginx_version" "skip" "nginx executable not found or not executable" \
+            emit_check "$CHECK_NGINX_VERSION" "skip" "nginx executable not found or not executable" \
                 '{"binary":"'"$(json_escape "$NGINX_BIN_REQUESTED")"'"}'
         fi
         return 0
@@ -277,14 +283,14 @@ check_nginx_version() {
     fi
 
     if [[ -z "$version" ]]; then
-        emit_check "nginx_version" "fail" "could not parse nginx version" \
+        emit_check "$CHECK_NGINX_VERSION" "fail" "could not parse nginx version" \
             '{"raw_output":"'"$(json_escape "$version_output")"'"}'
         return 0
     fi
 
     DETECTED_NGINX_VERSION="$version"
 
-    emit_check "nginx_version" "pass" "nginx version ${version} detected" \
+    emit_check "$CHECK_NGINX_VERSION" "pass" "nginx version ${version} detected" \
         '{"path":"'"$(json_escape "$nginx_bin")"'","version":"'"$version"'"}'
     return 0
 }
@@ -336,7 +342,7 @@ check_config_valid() {
 
     # If nginx_bin is empty string, skip
     if [[ -z "$nginx_bin" ]]; then
-        emit_check "config_valid" "skip" "nginx executable unavailable"
+        emit_check "$CHECK_CONFIG_VALID" "skip" "nginx executable unavailable"
         return
     fi
 
@@ -346,7 +352,7 @@ check_config_valid() {
     # be pre-created by another process).
     local tmp_dir
     tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/doctor-nginx-XXXXXX") || {
-        emit_check "config_valid" "fail" "could not create temp config directory"
+        emit_check "$CHECK_CONFIG_VALID" "fail" "could not create temp config directory"
         return
     }
     local tmp_conf="${tmp_dir}/nginx.conf"
@@ -359,7 +365,7 @@ check_config_valid() {
     # would misparse or that could alter the test's behavior.
     if [[ "$tmp_dir" == *[!A-Za-z0-9_./-]* ]]; then
         rm -rf "$tmp_dir"
-        emit_check "config_valid" "fail" \
+        emit_check "$CHECK_CONFIG_VALID" "fail" \
             "TMPDIR contains characters unsafe for nginx config"
         return
     fi
@@ -380,7 +386,7 @@ check_config_valid() {
             || "$FOUND_MODULE_PATH" == *\\* ]]
         then
             _check_config_valid_cleanup
-            emit_check "config_valid" "fail" \
+            emit_check "$CHECK_CONFIG_VALID" "fail" \
                 "module path contains characters unsafe for nginx config"
             return
         fi
@@ -405,7 +411,7 @@ ${markdown_directive}
 CONF
     then
         _check_config_valid_cleanup
-        emit_check "config_valid" "fail" "could not write temp config file"
+        emit_check "$CHECK_CONFIG_VALID" "fail" "could not write temp config file"
         return
     fi
 
@@ -418,12 +424,12 @@ CONF
 
     if [[ $test_rc -eq 0 ]]; then
         if [[ -n "$FOUND_MODULE_PATH" ]]; then
-            emit_check "config_valid" "pass" "nginx config syntax OK (module loaded, directive parsed)"
+            emit_check "$CHECK_CONFIG_VALID" "pass" "nginx config syntax OK (module loaded, directive parsed)"
         else
-            emit_check "config_valid" "pass" "nginx config syntax OK (minimal config, module not found)"
+            emit_check "$CHECK_CONFIG_VALID" "pass" "nginx config syntax OK (minimal config, module not found)"
         fi
     else
-        emit_check "config_valid" "fail" "nginx -t failed (exit ${test_rc})" \
+        emit_check "$CHECK_CONFIG_VALID" "fail" "nginx -t failed (exit ${test_rc})" \
             '{"exit_code":'"$test_rc"',"output":"'"$(json_escape "$test_output")"'"}' \
             "Check nginx error log for details or run nginx -t manually"
     fi
@@ -478,13 +484,13 @@ check_configure_args() {
 # Check 5: dynamic module signature
 check_module_signature() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
-        emit_check "module_signature" "skip" "module .so not found, cannot check signature"
+        emit_check "$CHECK_MODULE_SIGNATURE" "skip" "module .so not found, cannot check signature"
         return 0
     fi
 
     # Check if nm is available
     if ! command -v nm >/dev/null 2>&1; then
-        emit_check "module_signature" "skip" "nm not available (install binutils)" \
+        emit_check "$CHECK_MODULE_SIGNATURE" "skip" "nm not available (install binutils)" \
             '' \
             "Install binutils to enable module signature verification"
         return 0
@@ -495,15 +501,15 @@ check_module_signature() {
     nm_output=$(nm -D "$FOUND_MODULE_PATH" 2>/dev/null || nm "$FOUND_MODULE_PATH" 2>/dev/null || true)
 
     if [[ -z "$nm_output" ]]; then
-        emit_check "module_signature" "skip" "could not read symbols from module"
+        emit_check "$CHECK_MODULE_SIGNATURE" "skip" "could not read symbols from module"
         return 0
     fi
 
     if printf '%s\n' "$nm_output" | grep -q "ngx_http_markdown_filter_module"; then
-        emit_check "module_signature" "pass" "ngx_http_markdown_filter_module symbol found" \
+        emit_check "$CHECK_MODULE_SIGNATURE" "pass" "ngx_http_markdown_filter_module symbol found" \
             '{"symbol":"ngx_http_markdown_filter_module","found":true}'
     else
-        emit_check "module_signature" "fail" "ngx_http_markdown_filter_module symbol not found" \
+        emit_check "$CHECK_MODULE_SIGNATURE" "fail" "ngx_http_markdown_filter_module symbol not found" \
             '{"symbol":"ngx_http_markdown_filter_module","found":false}' \
             "The module file may be corrupt or built for a different nginx version"
     fi
@@ -513,13 +519,13 @@ check_module_signature() {
 # Check 6: Rust converter linkage
 check_rust_linkage() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
-        emit_check "rust_linkage" "skip" "module .so not found, cannot check Rust linkage"
+        emit_check "$CHECK_RUST_LINKAGE" "skip" "module .so not found, cannot check Rust linkage"
         return 0
     fi
 
     # Check if nm is available
     if ! command -v nm >/dev/null 2>&1; then
-        emit_check "rust_linkage" "skip" "nm not available (install binutils)"
+        emit_check "$CHECK_RUST_LINKAGE" "skip" "nm not available (install binutils)"
         return 0
     fi
 
@@ -527,7 +533,7 @@ check_rust_linkage() {
     nm_output=$(nm -D "$FOUND_MODULE_PATH" 2>/dev/null || nm "$FOUND_MODULE_PATH" 2>/dev/null || true)
 
     if [[ -z "$nm_output" ]]; then
-        emit_check "rust_linkage" "skip" "could not read symbols from module"
+        emit_check "$CHECK_RUST_LINKAGE" "skip" "could not read symbols from module"
         return 0
     fi
 
@@ -548,10 +554,10 @@ check_rust_linkage() {
     done
 
     if [[ $found_count -gt 0 ]]; then
-        emit_check "rust_linkage" "pass" "Rust FFI symbols found (${found_count} exports)" \
+        emit_check "$CHECK_RUST_LINKAGE" "pass" "Rust FFI symbols found (${found_count} exports)" \
             '{"found_count":'"$found_count"',"symbols":['"$rust_symbols"']}'
     else
-        emit_check "rust_linkage" "warn" "no Rust FFI symbols found in module" \
+        emit_check "$CHECK_RUST_LINKAGE" "warn" "no Rust FFI symbols found in module" \
             '{"found_count":0}' \
             "Module may be missing Rust converter linkage or built without FFI exports"
     fi
@@ -628,13 +634,26 @@ _rust_toolchain_details() {
     return 0
 }
 
+_rust_toolchain_json() {
+    # Build the rust_toolchain details payload.
+    # $1 rustc version literal (null, or a quoted JSON string)
+    # $2 MSRV floor
+    # $3 msrv_ok literal (true, false, or null)
+    # $4 repository_checkout literal
+    # $5 symlink_chain_bounded literal
+    # $6 pinned channel literal (null, or a quoted JSON string)
+    # $7 expected pinned channel
+    printf '{"rustc_version":%s,"msrv":"%s","msrv_ok":%s,"repository_checkout":%s,"symlink_chain_bounded":%s,"pinned_channel":%s,"pinned_channel_expected":"%s"}' \
+        "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+}
+
 check_rust_toolchain() {
     local msrv_floor="1.98"          # Cargo.toml rust-version (MSRV floor)
     local expected_msrv="1.98.1"     # rust-toolchain.toml channel (exact pin)
 
     if ! command -v rustc >/dev/null 2>&1; then
-        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
-            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        emit_check "$CHECK_RUST_TOOLCHAIN" "skip" "rustc not available (install Rust via rustup)" \
+            "$(_rust_toolchain_json null "$msrv_floor" null false null null "$expected_msrv")"
         return 0
     fi
 
@@ -645,9 +664,9 @@ check_rust_toolchain() {
         # An unreadable version is a warning, not a fail: the verdict is
         # "cannot verify MSRV", matching the below-MSRV branch severity so
         # an unreadable rustc does not block a healthy toolchain report.
-        emit_check "rust_toolchain" "warn" \
+        emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
             "rustc version could not be determined; MSRV verification skipped" \
-            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+            "$(_rust_toolchain_json null "$msrv_floor" null false null null "$expected_msrv")"
         return 0
     fi
     local msrv_ok="false"
@@ -660,9 +679,9 @@ check_rust_toolchain() {
     # caller's current directory and report a repository toolchain as active.
     local doctor_source
     if ! doctor_source=$(_resolve_doctor_source "${BASH_SOURCE[0]:-}"); then
-        emit_check "rust_toolchain" "fail" \
+        emit_check "$CHECK_RUST_TOOLCHAIN" "fail" \
             "doctor script symlink chain exceeds 40 hops" \
-            '{"rustc_version":"'"$(json_escape "$rustc_version")"'","msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+            "$(_rust_toolchain_json "\"$(json_escape "$rustc_version")\"" "$msrv_floor" null false false null "$expected_msrv")"
         return 0
     fi
 
@@ -696,13 +715,13 @@ check_rust_toolchain() {
         # The MSRV verdict still applies without a checkout; only the
         # pinned-channel validation needs repository metadata.
         if [[ "$msrv_ok" == "true" ]]; then
-            emit_check "rust_toolchain" "warn" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
                 "rustc ${rustc_version} meets MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" true false null null "$escaped_expected_msrv")"
         else
-            emit_check "rust_toolchain" "warn" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
                 "rustc ${rustc_version} below MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":false,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" false false null null "$escaped_expected_msrv")"
         fi
         return 0
     fi
@@ -719,29 +738,29 @@ check_rust_toolchain() {
 
     if [[ "$msrv_ok" == "true" ]]; then
         if [[ "$toolchain_file_exists" != "true" ]]; then
-            emit_check "rust_toolchain" "warn" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is missing" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" true true true null "$escaped_expected_msrv")" \
                 "Add rust-toolchain.toml with channel = \"${expected_msrv}\" for reproducible release builds"
         elif [[ -z "$toolchain_file" ]]; then
-            emit_check "rust_toolchain" "warn" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml has no channel" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" true true true null "$escaped_expected_msrv")" \
                 "Set channel = \"${expected_msrv}\" in rust-toolchain.toml"
         elif [[ "$pinned_ok" == "true" ]]; then
-            emit_check "rust_toolchain" "pass" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "pass" \
                 "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":"'"$escaped_toolchain_file"'","pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" true true true "\"$escaped_toolchain_file\"" "$escaped_expected_msrv")"
         else
-            emit_check "rust_toolchain" "warn" \
+            emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is not pinned to ${expected_msrv}" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":"'"$escaped_toolchain_file"'","pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" true true true "\"$escaped_toolchain_file\"" "$escaped_expected_msrv")" \
                 "Set channel = \"${expected_msrv}\" in rust-toolchain.toml for reproducible release builds"
         fi
     else
-        emit_check "rust_toolchain" "warn" \
+        emit_check "$CHECK_RUST_TOOLCHAIN" "warn" \
             "rustc ${rustc_version:-unknown} is below the MSRV floor ${msrv_floor}" \
-            '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":false,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+            "$(_rust_toolchain_json "\"$escaped_rustc_version\"" "$escaped_msrv_floor" false true true null "$escaped_expected_msrv")" \
             "Install Rust ${msrv_floor} or newer (rustup toolchain install ${expected_msrv})"
     fi
     return 0
@@ -875,10 +894,10 @@ check_package_type() {
     fi
 
     # Check if running in Docker
-    if [[ -z "$DETECTED_PKG_TYPE" ]]; then
-        if [[ -f /.dockerenv ]] || grep -q "docker\|containerd" /proc/1/cgroup 2>/dev/null; then
-            DETECTED_PKG_TYPE="docker"
-        fi
+    if [[ -z "$DETECTED_PKG_TYPE" ]] \
+        && { [[ -f /.dockerenv ]] \
+            || grep -q "docker\|containerd" /proc/1/cgroup 2>/dev/null; }; then
+        DETECTED_PKG_TYPE="docker"
     fi
 
     # Check if built from source (nginx -V shows --prefix but no package)
@@ -1008,7 +1027,8 @@ main() {
                 exit 0
                 ;;
             *)
-                msg "error: unknown option '$1'"
+                local unknown_option="$1"
+                msg "error: unknown option '${unknown_option}'"
                 usage
                 exit 2
                 ;;
