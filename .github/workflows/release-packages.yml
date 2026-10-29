@@ -1262,40 +1262,16 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-
-          build = json.loads(Path("dist/ubuntu-native/ubuntu-native-build.json").read_text())
-          ledger = json.loads(Path("dist/ubuntu-native/ubuntu-native-ledger.json").read_text())
-          record = dict(build)
-          record.update(ledger)
-          # The ledger covers load, request, lifecycle, and the incompatible
-          # control. Add the build result so the record satisfies every
-          # required test class in the evidence contract.
-          tests = [t for t in record["tests"] if t["name"] != "build"]
-          tests.insert(0, {
-              "name": "build",
-              "status": "PASS",
-              "detail": f"module sha256 {build['module_sha256'][:16]}",
-          })
-          record["tests"] = tests
-          counts = {s: sum(1 for t in tests if t["status"] == s)
-                    for s in ("PASS", "FAIL", "SKIP")}
-          record["pass"] = counts["PASS"]
-          record["fail"] = counts["FAIL"]
-          record["skip"] = counts["SKIP"]
-          record["target_identity"] = (
-              f"ubuntu-default-repo:{build['nginx_package_revision']}:"
-              f"{build['distro']}:{build['arch']}"
-          )
-          record["commit_sha"] = os.environ["CANDIDATE_SHA"]
-          record["workflow_run_url"] = os.environ["RUN_URL"]
-          record["verified_by"] = "ci:release-packages/ubuntu-native"
-          out = Path("dist/ubuntu-native/compatibility-evidence.json")
-          out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-          print(out)
-          PY
+          # The composer is unit tested and recomputes the totals from the
+          # test ledger, so a ledger with a failed check cannot be written as
+          # a passing record.
+          python3 tools/release/matrix/record_ubuntu_evidence.py \
+            --build dist/ubuntu-native/ubuntu-native-build.json \
+            --ledger dist/ubuntu-native/ubuntu-native-ledger.json \
+            --out dist/ubuntu-native/compatibility-evidence.json \
+            --source-sha "${CANDIDATE_SHA}" \
+            --verified-by "ci:release-packages/ubuntu-native" \
+            --workflow-run-url "${RUN_URL}"
         shell: bash
 
       - name: Upload Ubuntu-native package and evidence
