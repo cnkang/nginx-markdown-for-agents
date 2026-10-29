@@ -20,7 +20,14 @@ import datetime as _datetime
 import json
 import pathlib
 import re
+import sys
 from typing import Any, Iterable
+
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+_REPO_ROOT = _SCRIPT_DIR.parents[2]
+if str(_REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "tools"))
+from lib.path_validation import validate_read_path  # noqa: E402
 
 SCHEMA_VERSION = 1
 
@@ -90,7 +97,8 @@ class EvidenceError(ValueError):
 def load_record(path: pathlib.Path) -> dict[str, Any]:
     """Read one evidence record from disk."""
     try:
-        with path.open(encoding="utf-8") as handle:
+        validated = validate_read_path(path, purpose="compatibility evidence record")
+        with validated.open(encoding="utf-8") as handle:
             record = json.load(handle)
     except OSError as exc:
         raise EvidenceError(f"cannot read evidence record {path}: {exc}") from exc

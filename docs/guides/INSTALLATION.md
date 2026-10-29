@@ -761,7 +761,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
 | 1.30.5 | stable | debian12 | glibc | arm64 | supported | pending |
 | 1.30.5 | stable | debian12 | glibc | amd64 | supported | pending |
-| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | verified |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported | pending |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported | pending |
 | 1.28.3 | stable | debian12 | glibc | arm64 | supported | pending |
@@ -816,7 +816,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | stable | linux | musl | arm64 | supported | pending |
 | 1.30.4 | stable | linux | glibc | amd64 | supported | pending |
 | 1.30.4 | stable | linux | musl | amd64 | supported | pending |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | best-effort | pending |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | supported | verified |
 | 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | best-effort | pending |
 | 1.28.3 | stable | linux | glibc | arm64 | supported | pending |
 | 1.28.3 | stable | linux | musl | arm64 | supported | pending |
@@ -826,7 +826,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.26.3 | stable | linux | musl | arm64 | supported | pending |
 | 1.26.3 | stable | linux | glibc | amd64 | supported | pending |
 | 1.26.3 | stable | linux | musl | amd64 | supported | pending |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | best-effort | pending |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | supported | verified |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | best-effort | pending |
 | 1.24.0 | stable | linux | glibc | arm64 | supported | pending |
 | 1.24.0 | stable | linux | musl | arm64 | supported | pending |
@@ -862,7 +862,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
-| 1.28.3 | stable | any | n/a | any | best-effort | verified |
+| 1.28.3 | stable | any | n/a | any | best-effort | pending |
 | 1.26.3 | stable | any | n/a | any | best-effort | pending |
 <!-- END:release-matrix:installation-matrix -->
 

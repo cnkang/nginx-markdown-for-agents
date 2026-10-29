@@ -1,0 +1,61 @@
+{
+  "abi_provide": "nginx-abi-1.28.3-1",
+  "arch": "arm64",
+  "build_args_digest": "sha256:3831b9f5a9eb6b5d886375dec3ddeb7f93f3c3e08dd0e6e6ec55a45389d087bc",
+  "commit_sha": "46333ac7b7255560e40da33fdf66ce4873150514",
+  "date": "2026-10-29",
+  "distro": "ubuntu-26.04",
+  "distro_version": "26.04",
+  "fail": 0,
+  "features": [
+    "streaming",
+    "prune_noise_regions"
+  ],
+  "libc": "glibc",
+  "module_sha256": "8f929fd78cee056c5551b157bba6b71bda10a45cbfc9c0fdfdc7f8d6a5e7a2d3",
+  "nginx_package_revision": "1.28.3-2ubuntu1.12",
+  "nginx_version": "1.28.3",
+  "notes": "",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:79b9d602dd8c16ce0c2d459a43a9d837f59930345e7909edb107a7dde1a94acf",
+  "source_kind": "ubuntu-default-repo",
+  "source_reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12",
+  "target_identity": "ubuntu-default-repo:1.28.3-2ubuntu1.12:ubuntu-26.04:arm64",
+  "tests": [
+    {
+      "detail": "module sha256 8f929fd78cee056c",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "head=200 reload=ok",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "rejected",
+      "name": "negative_abi_rejected",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "local-container:macOS-Docker arm64",
+  "workflow_run_url": ""
+}
