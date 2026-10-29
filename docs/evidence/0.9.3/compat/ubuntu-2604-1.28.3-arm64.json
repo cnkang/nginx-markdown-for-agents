@@ -1,8 +1,10 @@
 {
   "abi_provide": "nginx-abi-1.28.3-1",
   "arch": "arm64",
+  "brotli_linkage": "dynamic",
+  "brotli_version": "1.2.0-3ubuntu0.1",
   "build_args_digest": "sha256:b0f217dc1fb006a87b69f8e7978bc45a06466d002bd22968f84b3b442bb76b41",
-  "commit_sha": "4f8cc722eb09d3707653d9480df2309c478967b6",
+  "commit_sha": "035cda2c50c32fb111040a2d55865c179978fd28",
   "date": "2026-10-29",
   "distro": "ubuntu-26.04",
   "distro_version": "26.04",
@@ -12,7 +14,7 @@
     "prune_noise_regions"
   ],
   "libc": "glibc",
-  "module_sha256": "120e9273141b6a602f10e6d13c9def1b2acff181e8e8eb97fa7e72a58635b97f",
+  "module_sha256": "d53c7fe83f114fba5e454d3483771a52d9627d66f65db3ded0ba385000ccc20e",
   "nginx_package_revision": "1.28.3-2ubuntu1.12",
   "nginx_version": "1.28.3",
   "pass": 6,
@@ -25,7 +27,7 @@
   "target_identity": "ubuntu-default-repo:1.28.3-2ubuntu1.12:ubuntu-26.04:arm64",
   "tests": [
     {
-      "detail": "module sha256 120e9273141b6a60",
+      "detail": "module sha256 d53c7fe83f114fba",
       "name": "build",
       "status": "PASS"
     },
@@ -50,11 +52,11 @@
       "status": "PASS"
     },
     {
-      "detail": "rejected",
+      "detail": "rejected: not binary compatible",
       "name": "negative_abi_rejected",
       "status": "PASS"
     }
   ],
-  "verified_by": "ci:release-packages/ubuntu-native",
-  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/40829511878"
+  "verified_by": "local:release-agent",
+  "workflow_run_url": ""
 }

@@ -38,14 +38,15 @@ registry, and the FFI ABI version 3 do not change.
 
 ### Changed
 
-- nginx.org 1.30.6 (stable) and 1.31.8 (mainline) are the targets of this
-  release. The promotion to supported and release blocking is pending the
-  evidence record for each target, because the release workflow builds only
-  rows that are already supported. The matrix does not list them as supported
-  yet.
+- The release supports nginx.org 1.30.6 (stable) and 1.31.8 (mainline) as
+  release-blocking targets for glibc and musl on amd64 and arm64. A build,
+  load, and request record backs each of the eight rows.
+- The release supports Ubuntu 24.04 and Ubuntu 26.04 on amd64 and arm64 as
+  release-blocking targets. Each row records the package revision, the ABI
+  provide, and the decoder it linked.
 - Superseded patches 1.30.4, 1.30.5, 1.31.6, and 1.31.7 keep their rows and
-  their published assets. The demotion to best-effort runs in the same
-  promotion step as the pending promotion above.
+  their published assets. They are best-effort and no longer release
+  blocking. A demotion makes no verification claim.
 - The auto-update policy rejects a discovered version that is release
   blocking.
 - `packaging/matrix.yaml` points at the canonical release matrix instead of
@@ -60,6 +61,27 @@ registry, and the FFI ABI version 3 do not change.
 - `docs/guides/PACKAGE_COMPATIBILITY.md` now states that NGINX rejects an
   incompatible module at the binary compatibility signature, not at a version
   string comparison.
+- `promote_matrix.py` keeps its sidecar lock file. Removing the file after the
+  unlock let a waiter and a newcomer lock different inodes, so two promotions
+  could enter the critical section at once and one could be lost. The tool also
+  skips the lock for `--check` and `--dry-run`, so a read-only checkout can
+  report matrix state.
+- `promote_matrix.py` no longer marks a demoted row `verified`. A demotion is
+  a support decision, and the evidence gate rejects a verified row that no
+  record covers.
+- `evidence_contract.py` rejects an Ubuntu row with no provenance reference. A
+  row flagged verified with no pinned package revision no longer passes as
+  covered evidence. The `ubuntu:<suite>` placeholder now has to match the
+  row's own suite.
+- The Ubuntu-native build embeds the release build identity instead of the
+  development default, requires a dynamic Brotli decoder, and records the
+  linked `libbrotli1` version. A missing decoder now fails the build.
+- The Ubuntu package step compares the full `libbrotli1` version, including any
+  epoch, before it writes the dependency floor.
+- `docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md` tells a reader who installed
+  the module by hand to remove the manual `load_module` line before installing
+  the DEB and before the security-update recovery. It also states what package
+  removal cleans up.
 
 ## [0.9.2] - 2026-10-08
 
