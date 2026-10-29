@@ -82,7 +82,12 @@ nginx -V 2>&1 | tr ' ' '\n' | grep -qx -- '--with-compat' || \
     die "host nginx was not built with --with-compat"
 
 PREFIX="$(mktemp -d "${TMPDIR:-/tmp}/verify-nginx-org.XXXXXX")"
+# mktemp creates 0700.  The official nginx images run worker processes as an
+# unprivileged user, so a 0700 prefix makes every document unreadable and the
+# whole request phase fails for a reason unrelated to the module.
+chmod 755 "${PREFIX}"
 mkdir -p "${PREFIX}/logs" "${PREFIX}/www" "${PREFIX}/modules"
+chmod 755 "${PREFIX}/logs" "${PREFIX}/www" "${PREFIX}/modules"
 
 MODULE_BASENAME="ngx_http_markdown_filter_module.so"
 install -m 0644 "${MODULE_PATH}" "${PREFIX}/modules/${MODULE_BASENAME}"
