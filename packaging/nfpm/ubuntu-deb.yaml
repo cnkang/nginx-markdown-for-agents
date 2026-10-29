@@ -1,0 +1,78 @@
+# packaging/nfpm/ubuntu-deb.yaml
+#
+# Ubuntu-native DEB package for the Markdown filter module.
+#
+# This recipe is NOT the nginx.org package. It targets the NGINX build that
+# Canonical ships in the Ubuntu archive, and it depends on that build through
+# the distro ABI virtual package. The module is compiled from the matching
+# Ubuntu source package with the configure arguments recorded by `nginx -V`,
+# so the NGINX binary compatibility signature matches the installed binary.
+#
+# Required environment variables:
+#   PKG_VERSION          Project version (for example 0.9.3)
+#   UBUNTU_RELEASE       Debian revision suffix (for example 1ubuntu24.04)
+#   NFPM_ARCH            amd64 or arm64
+#   NGINX_ABI_VERSION    Distro ABI provide (for example 1.24.0-1)
+#   BROTLI_MIN_VERSION   Fixed libbrotli1 floor for this suite
+#
+# Usage:
+#   nfpm package --config packaging/nfpm/ubuntu-deb.yaml --packager deb \
+#     --target "dist/${DEB_FILENAME}"
+#
+# The package name differs from the nginx.org package on purpose. Both
+# packages own /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so, so
+# they declare a conflict instead of silently replacing each other.
+
+name: "nginx-module-markdown-for-agents-ubuntu"
+arch: "${NFPM_ARCH}"
+platform: "linux"
+version: "${PKG_VERSION}"
+release: "${UBUNTU_RELEASE}"
+section: web
+priority: optional
+maintainer: "nginx-markdown-for-agents maintainers"
+description: |
+  NGINX module that serves Markdown to AI agents.
+  Built for the NGINX package in the Ubuntu archive. The package depends on
+  the distro ABI virtual package, so an ABI-changing NGINX security update
+  cannot leave this module loaded against an incompatible binary.
+vendor: "NGINX Markdown for Agents Contributors"
+homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
+license: "BSD-2-Clause"
+
+overrides:
+  deb:
+    depends:
+      - "nginx-abi-${NGINX_ABI_VERSION}"
+      - "nginx-common"
+      - "libbrotli1 (>= ${BROTLI_MIN_VERSION})"
+    conflicts:
+      - "nginx-module-markdown-for-agents"
+    recommends:
+      - "nginx"
+
+contents:
+  - src: "./build/ngx_http_markdown_filter_module.so"
+    dst: "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+    file_info:
+      mode: 0644
+
+  # Ubuntu convention: the module snippet lives in modules-available, and the
+  # package enables it with a modules-enabled symlink. The filter itself is
+  # off by default, so enabling the module does not change request handling.
+  - src: "./packaging/nfpm/modules-available/mod-markdown-ubuntu.conf"
+    dst: "/usr/share/nginx/modules-available/mod-markdown.conf"
+    type: config|noreplace
+
+  - src: "./LICENSE"
+    dst: "/usr/share/doc/nginx-markdown-for-agents-ubuntu/LICENSE"
+
+  - src: "./packaging/docs/README.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents-ubuntu/README.md"
+
+  - src: "./docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md"
+    dst: "/usr/share/doc/nginx-markdown-for-agents-ubuntu/UBUNTU-LTS-NGINX-COMPATIBILITY.md"
+
+scripts:
+  postinstall: "./packaging/nfpm/scripts/ubuntu-postinstall.sh"
+  preremove: "./packaging/nfpm/scripts/ubuntu-preremove.sh"
