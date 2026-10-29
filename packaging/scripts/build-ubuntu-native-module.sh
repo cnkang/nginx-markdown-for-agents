@@ -145,7 +145,10 @@ trap cleanup EXIT HUP INT TERM
 enable_source_repositories() {
     local sources_file="/etc/apt/sources.list.d/ubuntu.sources"
     [[ -f "${sources_file}" ]] || die "deb822 source list is missing: ${sources_file}"
-    if grep -q "deb-src" "${sources_file}"; then
+    # Check for an active Types line, not a comment: the stock Ubuntu file
+    # explains the deb-src option in a comment, and a substring match would
+    # skip the rewrite and make `apt-get source` fail.
+    if grep -qE "^Types:.*deb-src" "${sources_file}"; then
         return 0
     fi
     python3 - "${sources_file}" <<'PY'
@@ -232,7 +235,10 @@ print(f"configure arguments: {len(args)} tokens")
 PY
 
 cd "${WORK_DIR}"
-apt-get source --download-only nginx >/dev/null 2>&1 || die "apt-get source nginx failed"
+if ! apt-get source --download-only nginx >"${WORK_DIR}/apt-source.log" 2>&1; then
+    tail -20 "${WORK_DIR}/apt-source.log" >&2
+    die "apt-get source nginx failed"
+fi
 SOURCE_DSC="$(ls -1 nginx_*.dsc 2>/dev/null | head -1)"
 [[ -n "${SOURCE_DSC}" ]] || die "no nginx source package was downloaded"
 SOURCE_REVISION="$(sed -n 's/^Version: //p' "${SOURCE_DSC}" | head -1)"
