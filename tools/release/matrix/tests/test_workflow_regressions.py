@@ -506,6 +506,51 @@ def test_release_dockerfiles_bundle_pinned_brotli_decoder() -> None:
         assert "brotli-dev" not in dockerfile, name
 
 
+def test_ubuntu_native_build_embeds_the_release_identity() -> None:
+    """A published distro artifact must not carry the development identity."""
+    workflow = _workflow_data("release-packages.yml")
+    steps = workflow["jobs"]["ubuntu-native"]["steps"]
+    build = _step_by_name(steps, "Build module against the Ubuntu NGINX package")
+    assert "--release" in build["run"]
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script = (
+        repo_root / "packaging" / "scripts" / "build-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    for variable in (
+        "NGX_MARKDOWN_BUILD_KIND=release",
+        "NGX_MARKDOWN_SOURCE_SHA",
+        "NGX_MARKDOWN_RUST_VERSION",
+        "NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST",
+    ):
+        assert variable in script, variable
+
+
+def test_ubuntu_native_build_requires_a_dynamic_decoder() -> None:
+    """A missing decoder must fail the build, not degrade the artifact."""
+    repo_root = Path(__file__).resolve().parents[4]
+    script = (
+        repo_root / "packaging" / "scripts" / "build-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    assert "export NGX_MARKDOWN_BROTLI_STREAMING=on" in script
+    assert "BROTLI_LINKAGE" in script
+    assert "refusing a degraded release artifact" in script
+
+    verify = (
+        repo_root / "packaging" / "scripts" / "verify-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    assert '"brotli_version"' in verify
+    assert '"brotli_linkage"' in verify
+
+
+def test_ubuntu_package_compares_the_full_libbrotli_version() -> None:
+    """Stripping the epoch changes the meaning of the security floor check."""
+    text = _workflow_text("release-packages.yml")
+    assert "sed 's/^[0-9]*://'" not in text
+    assert "BROTLI_MIN_VERSION=\"$(dpkg-query -W -f='${Version}' libbrotli1)\"" in text
+    assert 'dpkg --compare-versions "${BROTLI_MIN_VERSION}" ge "${BROTLI_FIXED_FLOOR}"' in text
+
+
 def test_package_metadata_drops_host_brotli_dependency() -> None:
     """Packages must not require a host Brotli library they no longer link."""
     repo_root = Path(__file__).resolve().parents[4]
