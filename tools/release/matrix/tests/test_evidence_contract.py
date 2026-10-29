@@ -176,6 +176,10 @@ def test_ubuntu_record_covers_only_its_suite() -> None:
         "os": "ubuntu-24.04",
         "libc": "glibc",
         "arch": "amd64",
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": "ubuntu:24.04",
+        },
     }
     assert record_covers_entry(_ubuntu_record(), row)
     assert not record_covers_entry(
@@ -264,3 +268,111 @@ def test_record_rejects_a_malformed_reference() -> None:
         },
     }
     assert not record_covers_entry(_ubuntu_record(), row)
+
+
+def _ubuntu_row(**overrides) -> dict:
+    """Return a promoted Ubuntu matrix row, as the matrix carries it."""
+    row = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "deb-package",
+        "source": "ubuntu-default-repo",
+        "support_tier": "supported",
+        "verification_state": "verified",
+        "release_blocking": True,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_verified_ubuntu_row_without_provenance_is_not_covered() -> None:
+    """A verified row with no pinned revision is a promise, not evidence."""
+    row = _ubuntu_row()
+    assert "provenance" not in row
+    assert not record_covers_entry(_ubuntu_record(), row)
+
+
+def test_verified_ubuntu_row_with_empty_provenance_is_not_covered() -> None:
+    assert not record_covers_entry(_ubuntu_record(), _ubuntu_row(provenance={}))
+
+
+def test_verified_ubuntu_row_with_empty_reference_is_not_covered() -> None:
+    for reference in ("", "   "):
+        row = _ubuntu_row(
+            provenance={"kind": "ubuntu-default-repo", "reference": reference}
+        )
+        assert not record_covers_entry(_ubuntu_record(), row), reference
+
+
+def test_verified_ubuntu_row_with_non_string_reference_is_not_covered() -> None:
+    for reference in (None, 24.04, ["ubuntu:24.04"], {"url": "ubuntu:24.04"}):
+        row = _ubuntu_row(
+            provenance={"kind": "ubuntu-default-repo", "reference": reference}
+        )
+        assert not record_covers_entry(_ubuntu_record(), row), reference
+
+
+def test_verified_ubuntu_row_with_non_object_provenance_is_not_covered() -> None:
+    for provenance in (None, [], "ubuntu:24.04", 42):
+        assert not record_covers_entry(
+            _ubuntu_record(), _ubuntu_row(provenance=provenance)
+        ), provenance
+
+
+def test_ubuntu_placeholder_is_covered_when_it_matches_the_row_suite() -> None:
+    row = _ubuntu_row(
+        provenance={"kind": "ubuntu-default-repo", "reference": "ubuntu:24.04"}
+    )
+    assert record_covers_entry(_ubuntu_record(), row)
+
+
+def test_ubuntu_placeholder_for_another_suite_is_not_covered() -> None:
+    """A 26.04 placeholder cannot stand in for a 24.04 row."""
+    row = _ubuntu_row(
+        provenance={"kind": "ubuntu-default-repo", "reference": "ubuntu:26.04"}
+    )
+    assert not record_covers_entry(_ubuntu_record(), row)
+
+
+def test_ubuntu_placeholder_reads_the_row_distro_version() -> None:
+    """An explicit distro_version is the row's suite when it agrees with os."""
+    matching = _ubuntu_row(
+        distro_version="24.04",
+        provenance={"kind": "ubuntu-default-repo", "reference": "ubuntu:24.04"},
+    )
+    assert record_covers_entry(_ubuntu_record(), matching)
+
+
+def test_ubuntu_placeholder_rejects_an_ambiguous_row_suite() -> None:
+    """A distro_version that contradicts the os suffix matches no placeholder.
+
+    The row still names the record's os, so only the row-suite derivation keeps
+    the placeholder from being accepted.
+    """
+    contradictory = _ubuntu_row(
+        distro_version="26.04",
+        provenance={"kind": "ubuntu-default-repo", "reference": "ubuntu:24.04"},
+    )
+    assert contradictory["os"] == _ubuntu_record()["distro"]
+    assert not record_covers_entry(_ubuntu_record(), contradictory)
+
+
+def test_pinned_reference_is_bound_to_the_record_revision() -> None:
+    """The pinned URL must name exactly the revision the record verified."""
+    equal = _ubuntu_row(
+        provenance={
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19/",
+        }
+    )
+    assert record_covers_entry(_ubuntu_record(), equal)
+
+    other = _ubuntu_row(
+        provenance={
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.17",
+        }
+    )
+    assert not record_covers_entry(_ubuntu_record(), other)

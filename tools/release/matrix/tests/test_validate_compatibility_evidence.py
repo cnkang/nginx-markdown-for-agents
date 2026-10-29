@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tools.release.matrix.tests.test_evidence_contract import _record
+from tools.release.matrix.tests.test_evidence_contract import _record, _ubuntu_record
 from tools.release.matrix.validate_compatibility_evidence import (
     main,
     validate,
@@ -126,3 +126,37 @@ def test_candidate_sha_binding_is_enforced(tmp_path: Path) -> None:
         _matrix(_row()), records, candidate_sha=records[0][1]["commit_sha"]
     )
     assert problems == []
+
+
+def test_pinned_row_with_a_different_revision_is_verified_without_record(
+    tmp_path: Path,
+) -> None:
+    """A row pinned to another revision must not be laundered through the gate."""
+    records = [_write(tmp_path, "ubuntu.json", _ubuntu_record())]
+    stale = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "deb-package",
+        "support_tier": "supported",
+        "verification_state": "verified",
+        "release_blocking": True,
+        "source": "ubuntu-default-repo",
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.17",
+        },
+    }
+    problems = validate(_matrix(stale), records)
+    assert len(problems) == 1, problems
+    assert "verified without a matching evidence record" in problems[0]
+
+    pinned = {
+        **stale,
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": records[0][1]["source_reference"],
+        },
+    }
+    assert validate(_matrix(pinned), records) == []

@@ -352,28 +352,61 @@ def _is_suite_placeholder(value: str) -> bool:
     prefix, separator, suite = value.partition(":")
     if not separator or prefix != "ubuntu":
         return False
-    major, dot, minor = suite.partition(".")
-    return bool(dot) and major.isdigit() and minor.isdigit()
+    return bool(_DISTRO_VERSION_RE.match(suite))
+
+
+def _row_suite(entry: dict[str, Any]) -> str | None:
+    """Return the Ubuntu suite a matrix row belongs to, or ``None``.
+
+    Matrix rows name their suite as ``os: ubuntu-24.04``; a row may also carry
+    an explicit ``distro_version``.  The placeholder is compared against the
+    row, never against the record, so a ``ubuntu:26.04`` placeholder cannot
+    stand in for a 24.04 row.  A row that declares no Ubuntu suite, or whose
+    ``distro_version`` contradicts its ``os`` suffix, is ambiguous and matches
+    no placeholder at all.
+    """
+    os_name = entry.get("os")
+    if not isinstance(os_name, str) or not os_name.startswith("ubuntu-"):
+        return None
+    suite = os_name[len("ubuntu-") :]
+    if not _DISTRO_VERSION_RE.match(suite):
+        return None
+    declared = entry.get("distro_version")
+    if declared is not None and declared != suite:
+        return None
+    return suite
 
 
 def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     """Check a distro row's pinned revision against the record.
 
-    A row that names an Ubuntu package revision must name the one this record
-    verified.  A row that still carries the suite placeholder
-    (``ubuntu:24.04``) passes, because the promotion writes the verified
-    reference.  Any other value is rejected instead of being read as a match.
+    An upstream row is not revision-pinned, so it is covered without a pin.
+    A distro row is accepted only when its provenance pins the exact package
+    revision the record verified:
+
+    * a full URL whose final path segment is ``X.Y.Z-NubuntuM`` must equal
+      ``record['nginx_package_revision']``;
+    * the pre-promotion ``ubuntu:<suite>`` placeholder stands in for the
+      promotion only when ``<suite>`` is the row's own suite;
+    * a missing ``provenance``, a non-object ``provenance``, or a missing,
+      empty, or non-string ``reference`` is a rejection.  A row flagged
+      ``verified`` with no pinned revision is a promise with no evidence
+      behind it, so it must never be read as a match.
     """
     if record["source_kind"] != "ubuntu-default-repo":
         return True
     provenance = entry.get("provenance")
-    reference = provenance.get("reference") if isinstance(provenance, dict) else None
-    if not isinstance(reference, str) or not reference:
-        return True
-    segment = reference.rstrip("/").rsplit("/", 1)[-1]
+    if not isinstance(provenance, dict):
+        return False
+    reference = provenance.get("reference")
+    if not isinstance(reference, str) or not reference.strip():
+        return False
+    segment = reference.strip().rstrip("/").rsplit("/", 1)[-1]
     if _looks_like_ubuntu_revision(segment):
         return segment == record["nginx_package_revision"]
-    return _is_suite_placeholder(segment)
+    if _is_suite_placeholder(segment):
+        return segment.partition(":")[2] == _row_suite(entry)
+    return False
 
 
 def _source_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
