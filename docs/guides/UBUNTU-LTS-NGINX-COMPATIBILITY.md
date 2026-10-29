@@ -147,7 +147,18 @@ header.
 Use this path when your package revision is newer than the verified revision,
 or when you build your own NGINX package.
 
-1. Install the build dependencies:
+1. Read the suite and the architecture of the host:
+
+   ```bash
+   ARCH="$(dpkg --print-architecture)"
+   SUITE="$(sed -n 's/^VERSION_ID="\{0,1\}\([0-9.]*\)"\{0,1\}/\1/p' /etc/os-release)"
+   printf 'suite=%s arch=%s\n' "${SUITE}" "${ARCH}"
+   ```
+
+   Use these values in the steps below. The script refuses an architecture
+   that differs from the host.
+
+2. Install the build dependencies:
 
    ```bash
    sudo apt-get update
@@ -155,10 +166,11 @@ or when you build your own NGINX package.
      libpcre2-dev zlib1g-dev libssl-dev libbrotli-dev pkg-config git
    ```
 
-2. Provision the pinned Rust toolchain, and make it visible to root:
+3. Provision the pinned Rust toolchain for the host architecture, and make it
+   visible to root:
 
    ```bash
-   bash packaging/scripts/install-verified-rustup.sh --arch amd64 --toolchain 1.98.1
+   bash packaging/scripts/install-verified-rustup.sh --arch "${ARCH}" --toolchain 1.98.1
    sudo env PATH="$(dirname "$(command -v cargo)"):${PATH}" rustc --version
    ```
 
@@ -167,27 +179,27 @@ or when you build your own NGINX package.
    does not inherit your `~/.cargo/bin` path, so run the build with an explicit
    `PATH` or provision the toolchain for root.
 
-3. Build the module against the installed NGINX:
+4. Build the module against the installed NGINX:
 
    ```bash
    sudo -E env PATH="${PATH}" bash packaging/scripts/build-ubuntu-native-module.sh \
-     --suite 24.04 --arch amd64 --out dist/ubuntu-native --install-deps
+     --suite "${SUITE}" --arch "${ARCH}" --out dist/ubuntu-native --install-deps
    ```
 
    The script reads the configure arguments from `nginx -V`, retrieves the
    matching source package, and compiles the module. It fails when the source
    revision differs from the installed binary revision.
 
-4. Verify the module:
+5. Verify the module:
 
    ```bash
    sudo bash packaging/scripts/verify-ubuntu-native-module.sh \
      --module dist/ubuntu-native/ngx_http_markdown_filter_module.so \
      --out dist/ubuntu-native/ubuntu-native-ledger.json \
-     --suite 24.04
+     --suite "${SUITE}"
    ```
 
-5. Install the module file:
+6. Install the module file:
 
    ```bash
    sudo install -m 0644 \
@@ -195,7 +207,7 @@ or when you build your own NGINX package.
      /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
-6. Add the load directive to the main context of `/etc/nginx/nginx.conf`:
+7. Add the load directive to the main context of `/etc/nginx/nginx.conf`:
 
    ```nginx
    load_module modules/ngx_http_markdown_filter_module.so;

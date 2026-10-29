@@ -1544,6 +1544,7 @@ release-matrix-check:
 compatibility-evidence-check:
 	@echo "=== Compatibility Evidence Check ==="
 	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
+		--evidence-dir "docs/evidence/$(RELEASE_LINE)/compat" \
 		$(if $(CANDIDATE_SHA),--candidate-sha "$(CANDIDATE_SHA)",)
 	PYTHONPATH=. python3 -m pytest \
 		tools/release/matrix/tests/test_evidence_contract.py \
