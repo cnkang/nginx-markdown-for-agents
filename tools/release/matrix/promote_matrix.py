@@ -242,6 +242,14 @@ def _exclusive_lock(path: pathlib.Path, *, root: pathlib.Path = REPO_ROOT):
     same matrix and the second write would drop the first promotion.  The
     sidecar ``.lock`` file makes the lock portable (``flock`` on POSIX,
     ``msvcrt.locking`` on Windows) and keeps it out of the matrix itself.
+
+    The sidecar is intentionally persistent and is never unlinked.  Unlinking
+    it reintroduces the race it exists to prevent: a process that already
+    opened the old inode keeps waiting on a file no new process can see, while
+    a third process creates a fresh inode and locks that, so two promoters sit
+    in the critical section at once and one promotion is lost.  The kernel
+    drops ``flock`` when the holding process dies, so a lock file left behind
+    by a killed promoter is harmless.
     """
     lock_path = validate_write_path_within_root(
         path.with_suffix(f"{path.suffix}.lock"), root=root
@@ -270,8 +278,8 @@ def _exclusive_lock(path: pathlib.Path, *, root: pathlib.Path = REPO_ROOT):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
-            with contextlib.suppress(OSError):
-                lock_path.unlink()
+            # The lock file stays: see the docstring.  Removing it here would
+            # let a waiter and a newcomer lock different inodes at once.
 
 
 def _write_matrix(
@@ -335,13 +343,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _promotion_lock(
+    matrix: pathlib.Path, *, read_only: bool, root: pathlib.Path
+) -> contextlib.AbstractContextManager[None]:
+    """Return the lock a run needs over ``matrix``.
+
+    Only a run that can write takes the lock, so ``--check`` and ``--dry-run``
+    work in a checkout nobody can write to: creating the sidecar there would
+    fail before the matrix was even read.  The write target is validated only
+    on that branch, because it guards a write that read-only modes never make.
+    Traversal is still rejected for every mode by ``_load_matrix``.
+    """
+    if read_only:
+        return contextlib.nullcontext()
+    target = validate_write_path_within_root(matrix, root=root)
+    return _exclusive_lock(target, root=root)
+
+
 def main(
     argv: list[str] | None = None, *, repo_root: pathlib.Path = REPO_ROOT
 ) -> int:
     args = _parser().parse_args(argv)
     try:
-        _write_target = validate_write_path_within_root(args.matrix, root=repo_root)
-        with _exclusive_lock(_write_target, root=repo_root):
+        lock = _promotion_lock(
+            args.matrix,
+            read_only=args.check or args.dry_run,
+            root=repo_root,
+        )
+        with lock:
             matrix = _load_matrix(args.matrix)
             records = _collect_records(args.evidence, args.evidence_dir)
             original = json.dumps(matrix, indent=2)

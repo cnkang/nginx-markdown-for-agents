@@ -139,8 +139,11 @@ venv/
 .venv/
 .sonar/
 
-# Matrix updater transient artifact
+# Matrix updater transient artifacts.  The promotion lock
+# (tools/release-matrix.json.lock) is deliberately permanent: unlinking it
+# would let two promoters lock different inodes, so it is never committed.
 matrix-diff.json
+*.json.lock
 
 # Security and supply-chain scan outputs
 trivy-results.txt
