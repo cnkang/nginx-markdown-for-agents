@@ -132,7 +132,9 @@ def _refused_manual_rows(
 
 
 def _demote_superseded(
-    entries: list[dict[str, Any]], promoted_versions: set[str]
+    entries: list[dict[str, Any]],
+    promoted_versions: set[str],
+    keep_previous: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Demote supported patches that a newer patch in the same track replaces.
 
@@ -153,7 +155,9 @@ def _demote_superseded(
 
     changed: list[dict[str, Any]] = []
     for entry in entries:
-        if not _is_superseded(entry, promoted_versions, newest_by_track):
+        if not _is_superseded(
+            entry, promoted_versions, newest_by_track, keep_previous
+        ):
             continue
         entry["support_tier"] = "best-effort"
         entry["support_stage"] = "best-effort"
@@ -166,6 +170,7 @@ def _is_superseded(
     entry: dict[str, Any],
     promoted_versions: set[str],
     newest_by_track: dict[str, str],
+    keep_previous: frozenset[str] = frozenset(),
 ) -> bool:
     """Return whether a newer promoted patch replaces this supported row.
 
@@ -181,6 +186,8 @@ def _is_superseded(
     version = entry.get("nginx_version")
     if not isinstance(version, str) or version in promoted_versions:
         return False
+    if version in keep_previous:
+        return False
     newest = newest_by_track.get(_track(version))
     if newest is None:
         return False
@@ -192,6 +199,7 @@ def build_promoted_matrix(
     records: list[dict[str, Any]],
     *,
     demote_superseded: bool,
+    keep_previous: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], list[str]]:
     """Return the promoted matrix and a human-readable change summary."""
     entries = matrix["entries"]
@@ -227,7 +235,7 @@ def build_promoted_matrix(
         )
 
     if demote_superseded:
-        demoted = _demote_superseded(entries, promoted_versions)
+        demoted = _demote_superseded(entries, promoted_versions, keep_previous)
         demoted_versions = sorted(
             {entry["nginx_version"] for entry in demoted}, key=_version_tuple
         )
@@ -341,6 +349,13 @@ def _parser() -> argparse.ArgumentParser:
         help="demote supported patches replaced by a promoted patch",
     )
     mode = parser.add_mutually_exclusive_group()
+    parser.add_argument(
+        "--keep-previous",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="do not demote this superseded patch (repeatable)",
+    )
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--check", action="store_true")
     return parser
@@ -381,6 +396,7 @@ def main(
                 matrix,
                 records,
                 demote_superseded=args.demote_superseded,
+                keep_previous=frozenset(args.keep_previous),
             )
             return _finish(args, promoted, original, summary, repo_root)
     except (OSError, ValueError, EvidenceError, PromotionError) as exc:

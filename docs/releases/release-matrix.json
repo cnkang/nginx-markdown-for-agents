@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:a193a4cadbf6703905f228a3995582bf32db524818de219580925fe1b5888beb"
+    "sha256": "sha256:52022af84d7abbaf3090bd457f0e422580da00ce1026bf4e96580a7ee4932b54"
   },
   "entries": [
     {
@@ -618,7 +618,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -635,7 +635,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -652,7 +652,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -669,7 +669,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -686,7 +686,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -721,7 +721,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -738,7 +738,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {
@@ -755,7 +755,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-09-07",
       "source": "nginx.org",
       "provenance": {

@@ -1561,9 +1561,13 @@ compatibility-evidence-check:
 .PHONY: matrix-promote
 matrix-promote:
 	@echo "=== Release Matrix Promotion ($(RELEASE_LINE)) ==="
+	# 1.30.4 stays supported: the checked-in perf baselines were measured on
+	# that runtime, and the benchmark job downloads its module artifact.  A
+	# demotion would leave the perf gate with nothing to run.
 	python3 tools/release/matrix/promote_matrix.py \
 		--evidence-dir docs/evidence/$(RELEASE_LINE)/compat \
-		--demote-superseded
+		--demote-superseded \
+		--keep-previous 1.30.4
 	python3 tools/release/matrix/generate_release_contract_matrix.py --write
 	python3 tools/render_release_matrix_docs.py --write
 	python3 tools/release/matrix/render_legacy_platform_table.py

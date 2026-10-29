@@ -373,9 +373,9 @@ See `examples/docker/` for Docker build examples.
 
 | Tier | Count |
 |------|-------|
-| supported | 40 |
+| supported | 48 |
 | experimental | 1 |
-| best-effort | 42 |
+| best-effort | 34 |
 
 ### Release-Blocking Entries
 
@@ -421,6 +421,14 @@ See `examples/docker/` for Docker build examples.
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 ubuntu-26.04 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 ubuntu-26.04 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
 
 ## Summary

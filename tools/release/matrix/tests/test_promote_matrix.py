@@ -670,3 +670,37 @@ def test_demotion_preserves_an_existing_verification() -> None:
 
     assert promoted["entries"][0]["support_tier"] == "best-effort"
     assert promoted["entries"][0]["verification_state"] == "verified"
+
+
+def test_keep_previous_holds_a_baseline_pinned_patch() -> None:
+    """The perf baselines pin a runtime, so its row must stay supported.
+
+    A benchmark compares against a recorded environment.  Demoting the row
+    that produces that environment's module would leave the perf gate with no
+    artifact to download.
+    """
+    pinned = _row(
+        nginx_version="1.30.4",
+        support_tier="supported",
+        support_stage="primary",
+        release_blocking=True,
+    )
+    superseded = _row(
+        nginx_version="1.30.5",
+        support_tier="supported",
+        support_stage="primary",
+        release_blocking=True,
+    )
+    current = _row(nginx_version="1.30.6")
+    matrix = _matrix(pinned, superseded, current)
+
+    promoted, _ = build_promoted_matrix(
+        matrix,
+        [_record()],
+        demote_superseded=True,
+        keep_previous=frozenset({"1.30.4"}),
+    )
+
+    assert promoted["entries"][0]["support_tier"] == "supported"
+    assert promoted["entries"][0]["release_blocking"] is True
+    assert promoted["entries"][1]["support_tier"] == "best-effort"
