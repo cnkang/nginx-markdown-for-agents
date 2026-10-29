@@ -347,13 +347,22 @@ def _looks_like_ubuntu_revision(value: str) -> bool:
     )
 
 
+def _is_suite_placeholder(value: str) -> bool:
+    """Return whether a value is the ``ubuntu:<major>.<minor>`` placeholder."""
+    prefix, separator, suite = value.partition(":")
+    if not separator or prefix != "ubuntu":
+        return False
+    major, dot, minor = suite.partition(".")
+    return bool(dot) and major.isdigit() and minor.isdigit()
+
+
 def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     """Check a distro row's pinned revision against the record.
 
-    A row that already names an Ubuntu package revision must name the one this
-    record verified.  A row that still carries a placeholder (``ubuntu:24.04``)
-    passes here, because the promotion writes the verified reference; the
-    verification gate then requires the pinned form.
+    A row that names an Ubuntu package revision must name the one this record
+    verified.  A row that still carries the suite placeholder
+    (``ubuntu:24.04``) passes, because the promotion writes the verified
+    reference.  Any other value is rejected instead of being read as a match.
     """
     if record["source_kind"] != "ubuntu-default-repo":
         return True
@@ -361,25 +370,57 @@ def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     reference = provenance.get("reference") if isinstance(provenance, dict) else None
     if not isinstance(reference, str) or not reference:
         return True
-    revision_in_reference = reference.rstrip("/").rsplit("/", 1)[-1]
-    if not _looks_like_ubuntu_revision(revision_in_reference):
+    segment = reference.rstrip("/").rsplit("/", 1)[-1]
+    if _looks_like_ubuntu_revision(segment):
+        return segment == record["nginx_package_revision"]
+    return _is_suite_placeholder(segment)
+
+
+def _source_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
+    """Check that a row's declared source agrees with the record.
+
+    A row without a source field keeps the os-based rule.  A row that declares
+    a different source kind is never covered: a distro package record cannot
+    stand in for an upstream artifact, or the reverse.
+    """
+    source = entry.get("source")
+    if not isinstance(source, str) or not source:
         return True
-    return revision_in_reference == record["nginx_package_revision"]
+    return source == record["source_kind"]
+
+
+def _artifact_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
+    """Check that the row's artifact kind can carry this record's evidence.
+
+    A distro record proves a distro package.  An nginx.org record proves the
+    module and the packages and tarballs built from it, not a container image
+    whose build is a separate artifact.
+    """
+    artifact_type = entry.get("artifact_type")
+    if not isinstance(artifact_type, str) or not artifact_type:
+        return True
+    if record["source_kind"] == "ubuntu-default-repo":
+        return artifact_type == "deb-package"
+    return artifact_type != "docker-image"
 
 
 def record_covers_entry(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     """Return whether one record verifies one matrix entry.
 
     The match is deliberately strict on version, libc, architecture, host OS,
-    and a pinned distro revision.  A generic Linux glibc row is verified by an
-    nginx.org record whose host is ``linux``; a distro row is verified only by
-    a record from that exact suite.
+    source kind, artifact kind, and a pinned distro revision.  A generic Linux
+    glibc row is verified by an nginx.org record whose host is ``linux``; a
+    distro row is verified only by a record from that exact suite.
     """
     if entry.get("nginx_version") != record["nginx_version"]:
         return False
     if entry.get("libc") != record["libc"]:
         return False
     if _normalized_arch(entry) != record["arch"]:
+        return False
+    if not _source_matches(record, entry):
+        return False
+    if not _artifact_matches(record, entry):
         return False
     if not _provenance_matches(record, entry):
         return False

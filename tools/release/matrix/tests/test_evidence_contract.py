@@ -221,3 +221,46 @@ def test_ubuntu_record_accepts_a_placeholder_provenance() -> None:
         "provenance": {"kind": "ubuntu-default-repo", "reference": "ubuntu:24.04"},
     }
     assert record_covers_entry(_ubuntu_record(), row)
+
+
+def test_record_does_not_cover_a_different_source_kind() -> None:
+    """A distro record cannot stand in for an upstream artifact."""
+    row = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "deb-package",
+        "source": "nginx.org",
+    }
+    assert not record_covers_entry(_ubuntu_record(), row)
+
+
+def test_record_does_not_cover_a_docker_image_row() -> None:
+    """A module build record does not prove a container image."""
+    row = {
+        "nginx_version": "1.30.6",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "docker-image",
+        "source": "nginx.org",
+    }
+    assert not record_covers_entry(_record(), row)
+
+
+def test_record_rejects_a_malformed_reference() -> None:
+    """An unrecognized reference is not read as a satisfied pin."""
+    row = {
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "deb-package",
+        "source": "ubuntu-default-repo",
+        "provenance": {
+            "kind": "ubuntu-default-repo",
+            "reference": "https://launchpad.net/ubuntu/+source/nginx",
+        },
+    }
+    assert not record_covers_entry(_ubuntu_record(), row)

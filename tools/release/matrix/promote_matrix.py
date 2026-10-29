@@ -32,6 +32,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
@@ -232,6 +233,45 @@ def build_promoted_matrix(
     return matrix, summary
 
 
+@contextlib.contextmanager
+def _exclusive_lock(path: pathlib.Path):
+    """Hold an exclusive lock on the matrix file for a whole promotion.
+
+    The read, the compute, and the replace must be one transaction: two
+    maintainers who promote at the same time would otherwise both read the
+    same matrix and the second write would drop the first promotion.  The
+    sidecar ``.lock`` file makes the lock portable (``flock`` on POSIX,
+    ``msvcrt.locking`` on Windows) and keeps it out of the matrix itself.
+    """
+    lock_path = path.with_suffix(f"{path.suffix}.lock")
+    handle = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":  # pragma: no cover - Windows only
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            with contextlib.suppress(OSError):
+                lock_path.unlink()
+
+
 def _write_matrix(
     path: pathlib.Path, matrix: dict[str, Any], *, root: pathlib.Path = REPO_ROOT
 ) -> None:
@@ -298,17 +338,30 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     try:
-        matrix = _load_matrix(args.matrix)
-        records = _collect_records(args.evidence, args.evidence_dir)
-        original = json.dumps(matrix, indent=2)
-        promoted, summary = build_promoted_matrix(
-            matrix,
-            records,
-            demote_superseded=args.demote_superseded,
-        )
+        _write_target = validate_write_path_within_root(args.matrix, root=repo_root)
+        with _exclusive_lock(_write_target):
+            matrix = _load_matrix(args.matrix)
+            records = _collect_records(args.evidence, args.evidence_dir)
+            original = json.dumps(matrix, indent=2)
+            promoted, summary = build_promoted_matrix(
+                matrix,
+                records,
+                demote_superseded=args.demote_superseded,
+            )
+            return _finish(args, promoted, original, summary, repo_root)
     except (OSError, ValueError, EvidenceError, PromotionError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
+
+
+def _finish(
+    args: argparse.Namespace,
+    promoted: dict[str, Any],
+    original: str,
+    summary: list[str],
+    repo_root: pathlib.Path,
+) -> int:
+    """Report the result and write the matrix when the mode allows it."""
 
     changed = json.dumps(promoted, indent=2) != original
     for line in summary:

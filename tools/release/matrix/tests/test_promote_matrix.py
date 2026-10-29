@@ -177,9 +177,13 @@ def test_write_mode_then_check_mode_passes(tmp_path: Path) -> None:
 
 
 def test_superseded_demotion_skips_distro_rows() -> None:
-    """A distro row is bound to one package revision, not to an upstream patch."""
+    """A distro row is bound to one package revision, not to an upstream patch.
+
+    The distro row sits in the same minor track as the promoted version, so
+    only the source exclusion keeps it out of the demotion.
+    """
     distro_row = _row(
-        nginx_version="1.24.0",
+        nginx_version="1.30.5",
         os="ubuntu-24.04",
         artifact_type="deb-package",
         source="ubuntu-default-repo",

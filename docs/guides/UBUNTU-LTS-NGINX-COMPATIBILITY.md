@@ -242,13 +242,18 @@ or when you build your own NGINX package.
       sudo apt-get remove nginx-module-markdown-for-agents-ubuntu
       ```
 
-   b. Start NGINX without the filter:
+   b. Remove every `markdown_filter` directive that you added in Section 4.
+      Comment the line out, or delete it, in each server block. NGINX starts
+      without the filter only when no `markdown_filter` directive remains. A
+      remaining directive fails the test with `unknown directive`.
+
+   c. Test the configuration, then start NGINX:
 
       ```bash
       sudo nginx -t && sudo systemctl start nginx
       ```
 
-   c. Install or build a module for the new revision. Section 3 and
+   d. Install or build a module for the new revision. Section 3 and
       Section 5 give the two paths.
 
 Never copy a module from another Ubuntu release. Never keep a module that
