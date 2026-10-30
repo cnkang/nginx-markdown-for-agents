@@ -78,6 +78,17 @@ def test_release_packages_normalizes_matrix_aliases_before_projection() -> None:
     assert 'e["arch"]' not in source_load
 
 
+def test_release_package_checksums_wait_for_successful_release_gate() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    job = workflow["jobs"]["integrity-checksums"]
+
+    assert "release-gate" in job["needs"]
+    assert "needs.release-gate.result == 'success'" in job["if"]
+    assert "needs.integrity-signing.result == 'skipped'" in job["if"]
+    assert "github.event_name == 'workflow_dispatch'" in job["if"]
+    assert not _dag_has_cycle(workflow)
+
+
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
     """Manual recovery publishes only artifacts that passed integrity checks."""
     workflow = _workflow_data("release-binaries.yml")

@@ -2493,7 +2493,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: [smoke-test, musl-build, ubuntu-native, integrity-signing, official-docker-release-gate, fuzz-qualification]
+    needs: [smoke-test, musl-build, ubuntu-native, integrity-signing, official-docker-release-gate, fuzz-qualification, release-gate]
     if: >-
       always()
       && needs.musl-build.result == 'success'
@@ -2501,6 +2501,7 @@ jobs:
       && needs.ubuntu-native.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
       && needs.fuzz-qualification.result == 'success'
+      && needs.release-gate.result == 'success'
       && (needs.integrity-signing.result == 'success'
           || (needs.integrity-signing.result == 'skipped'
               && github.event_name == 'workflow_dispatch'))

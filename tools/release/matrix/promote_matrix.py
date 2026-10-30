@@ -58,7 +58,9 @@ from evidence_contract import (  # noqa: E402
 
 DEFAULT_MATRIX = REPO_ROOT / "tools" / "release-matrix.json"
 
-PROMOTABLE_ARTIFACT_TYPES = frozenset({"dynamic-module", "deb-package"})
+PROMOTABLE_ARTIFACT_TYPES = frozenset(
+    {"dynamic-module", "deb-package", "rpm-package"}
+)
 
 
 class PromotionError(RuntimeError):

@@ -65,6 +65,17 @@ def test_promotion_sets_the_release_promise() -> None:
     assert summary == ["promote 1.30.6 linux/glibc/amd64: 1 row(s)"]
 
 
+def test_rpm_package_row_is_promoted_by_evidence() -> None:
+    matrix = _matrix(_row(artifact_type="rpm-package"))
+    promoted, _ = build_promoted_matrix(
+        matrix, [_record()], demote_superseded=False
+    )
+    row = promoted["entries"][0]
+    assert row["support_tier"] == "supported"
+    assert row["verification_state"] == "verified"
+    assert row["release_blocking"] is True
+
+
 def test_record_without_a_row_is_refused() -> None:
     matrix = _matrix(_row(arch="arm64"))
     records = [_record()]

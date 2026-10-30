@@ -892,7 +892,7 @@ release-gates-check:
 # Lightweight local mirror of the CI/tag 070 strict gate (file-assertion only).
 # Catches doc/workflow drift locally before CI does.
 release-gates-check-070-strict:
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_LINE) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 
 # Lightweight local mirror of the CI `release-gates` job (pytest suites only;
 # 41 gate + 12 matrix test files). Catches release-gate/matrix regressions
@@ -1404,8 +1404,8 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
 		exit 1; \
 	fi
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_release_gates_080.py --active-version 0.9.2
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_LINE) python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_release_gates_080.py --active-version $(RELEASE_LINE)
 	@echo "  [2/8] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	@if [ -n "$(CANDIDATE_BENCHMARK_REPORT)" ]; then \
 		echo "  Reusing candidate-bound 092 benchmark report: $(CANDIDATE_BENCHMARK_REPORT)"; \

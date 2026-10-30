@@ -98,12 +98,12 @@ is_transient() {
     local tail_text marker pattern
     tail_text="$(tail -n "${TAIL_LINES}" "${log_file}")"
     for marker in "${TRANSIENT_MARKERS[@]}"; do
-        if printf '%s\n' "${tail_text}" | grep -Fqi -- "${marker}"; then
+        if grep -Fqi -- "${marker}" <<<"${tail_text}"; then
             return 0
         fi
     done
     for pattern in "${TRANSIENT_STATUS_PATTERNS[@]}"; do
-        if printf '%s\n' "${tail_text}" | grep -Eqi -- "${pattern}"; then
+        if grep -Eqi -- "${pattern}" <<<"${tail_text}"; then
             return 0
         fi
     done
