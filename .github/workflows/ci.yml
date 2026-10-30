@@ -215,6 +215,8 @@ jobs:
               - 'tools/ci/validate_required_workflow_contexts.py'
               - 'tools/ci/test_validate_required_workflow_contexts.py'
               - 'tools/ci/verify_real_nginx_ims.sh'
+              - 'tools/ci/retry_transient.sh'
+              - 'tools/ci/test_retry_transient.py'
               - 'build.sh'
               - '.clusterfuzzlite/**'
               - 'tools/sonar/**'
@@ -331,8 +333,8 @@ jobs:
       - name: Install shellcheck
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y shellcheck
+            bash tools/ci/retry_transient.sh -- sudo apt-get update
+            bash tools/ci/retry_transient.sh -- sudo apt-get install -y shellcheck
           fi
           shellcheck --version
 
@@ -549,8 +551,8 @@ jobs:
 
       - name: Install C toolchain deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             build-essential \
             libbrotli-dev \
             pkg-config \
@@ -598,8 +600,8 @@ jobs:
 
       - name: Install C unit-test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             build-essential \
             libbrotli-dev \
             pkg-config \
@@ -668,8 +670,8 @@ jobs:
 
       - name: Install clang toolchain deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             clang \
             libbrotli-dev \
             pkg-config \
@@ -694,8 +696,8 @@ jobs:
 
       - name: Install clang toolchain deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             clang \
             libbrotli-dev \
             pkg-config \
@@ -723,8 +725,8 @@ jobs:
 
       - name: Install E2E system deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
             libbrotli-dev \
@@ -858,8 +860,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
             libbrotli-dev \
@@ -1119,8 +1121,8 @@ jobs:
 
       - name: Install coverage deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
             libbrotli-dev \
