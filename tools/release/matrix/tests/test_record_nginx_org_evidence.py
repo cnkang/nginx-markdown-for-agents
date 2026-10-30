@@ -30,6 +30,10 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     (root / "tools" / "build_release" / "Dockerfile.glibc").write_text(
         "FROM scratch\n", encoding="utf-8"
     )
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "release-packages.yml").write_text(
+        "name: release\n", encoding="utf-8"
+    )
     (root / "artifacts" / "release" / "0.9.3"
      / "official-build-feature-manifest.json").write_text(
         json.dumps({"prune_noise_regions": True, "streaming": True}),
@@ -213,3 +217,96 @@ def test_main_refuses_an_outside_root_output(tmp_path, capsys):
     assert rc == 1
     assert "escapes root" in captured.err
     assert not out.exists()
+
+
+def _sha256_text(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_default_builder_digest_is_unchanged(tmp_path):
+    """The default must reproduce the digest of the checked-in records."""
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    record = _compose(root, build, ledger)
+
+    descriptor = {
+        "arch": "arm64",
+        "brotli_mode": composer.BROTLI_MODE,
+        "build_kind": composer.BUILD_KIND,
+        "dockerfile_sha256": _sha256_text(
+            root / "tools" / "build_release" / "Dockerfile.glibc"
+        ),
+        "feature_manifest_sha256": _sha256_text(
+            root / "artifacts" / "release" / "0.9.3"
+            / "official-build-feature-manifest.json"
+        ),
+        "libc": "glibc",
+        "nginx_version": "1.30.6",
+        "platform": "linux/arm64",
+        "rust_version": "1.98.1",
+        "source_sha": COMMIT,
+    }
+    raw = json.dumps(descriptor, sort_keys=True, separators=(",", ":"))
+    expected = "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    assert record["build_args_digest"] == expected
+    explicit = _compose(root, build, ledger, builder="build-release-dockerfile")
+    assert explicit["build_args_digest"] == expected
+
+
+def test_release_packages_builder_binds_the_workflow(tmp_path):
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    default = _compose(root, build, ledger)["build_args_digest"]
+    first = _compose(root, build, ledger, builder="release-packages-build")[
+        "build_args_digest"
+    ]
+    assert first != default
+
+    (root / ".github" / "workflows" / "release-packages.yml").write_text(
+        "name: release\n# changed\n", encoding="utf-8"
+    )
+    second = _compose(root, build, ledger, builder="release-packages-build")[
+        "build_args_digest"
+    ]
+    assert first != second
+
+
+def test_package_distro_record_covers_only_its_package_row(tmp_path):
+    from tools.release.matrix.evidence_contract import record_covers_entry
+
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    record = _compose(root, build, ledger, distro="debian12")
+
+    assert validate_record(record) == []
+    assert record["distro"] == "debian12"
+    assert record["target_identity"] == "nginx.org:1.30.6:debian12:glibc:arm64"
+    row = {
+        "nginx_version": "1.30.6",
+        "os": "debian12",
+        "libc": "glibc",
+        "arch": "arm64",
+        "artifact_type": "deb-package",
+        "source": "nginx.org",
+    }
+    assert record_covers_entry(record, row)
+    assert not record_covers_entry(
+        record, {**row, "os": "linux", "artifact_type": "dynamic-module"}
+    )
+
+
+def test_unknown_distro_is_rejected_by_the_cli(tmp_path):
+    build, ledger = _module_and_ledger(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        composer.main(
+            [
+                "--build-dir", str(build),
+                "--ledger", str(ledger),
+                "--nginx-version", "1.30.6",
+                "--libc", "glibc",
+                "--arch", "arm64",
+                "--out", "x.json",
+                "--distro", "ubuntu-24.04",
+            ]
+        )
+    assert exc.value.code == 2

@@ -160,3 +160,124 @@ def test_pinned_row_with_a_different_revision_is_verified_without_record(
         },
     }
     assert validate(_matrix(pinned), records) == []
+
+
+# Release-stage mode: the gate validates only the records this run staged.
+CI_SHA = "d" * 40
+CI_RUN = "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/42"
+
+
+def _ci_record(**overrides) -> dict:
+    """Return a CI record bound to ``CI_SHA`` and ``CI_RUN``."""
+    record = _record(
+        verified_by="ci:release-packages/nginx-org-evidence",
+        workflow_run_url=CI_RUN,
+        commit_sha=CI_SHA,
+    )
+    record.update(overrides)
+    return record
+
+
+def _release_stage(matrix: dict, records: list) -> list[str]:
+    return validate(
+        matrix,
+        records,
+        require_ci=True,
+        candidate_sha=CI_SHA,
+        workflow_run_url=CI_RUN,
+    )
+
+
+def test_ci_record_for_this_run_passes_the_release_stage(tmp_path: Path) -> None:
+    records = [_write(tmp_path, "a.json", _ci_record())]
+    assert _release_stage(_matrix(_row()), records) == []
+
+
+def test_record_from_another_run_fails_the_release_stage(tmp_path: Path) -> None:
+    other = CI_RUN.replace("/42", "/41")
+    records = [_write(tmp_path, "a.json", _ci_record(workflow_run_url=other))]
+    problems = _release_stage(_matrix(_row()), records)
+    assert any("not this run" in p for p in problems), problems
+
+
+def test_local_record_fails_the_release_stage(tmp_path: Path) -> None:
+    records = [
+        _write(
+            tmp_path,
+            "a.json",
+            _ci_record(verified_by="local:release-agent"),
+        )
+    ]
+    problems = _release_stage(_matrix(_row()), records)
+    assert any("requires a CI record" in p for p in problems), problems
+
+
+def test_failed_ci_record_fails_the_release_stage(tmp_path: Path) -> None:
+    tests = [
+        {"name": "build", "status": "PASS"},
+        {"name": "load", "status": "FAIL"},
+        {"name": "request_markdown", "status": "PASS"},
+        {"name": "request_passthrough", "status": "PASS"},
+        {"name": "lifecycle", "status": "PASS"},
+    ]
+    records = [
+        _write(tmp_path, "a.json", _ci_record(tests=tests, **{"pass": 4, "fail": 1}))
+    ]
+    problems = _release_stage(_matrix(_row()), records)
+    assert any("cannot support a release promise" in p for p in problems)
+
+
+def test_skipped_ci_record_fails_the_release_stage(tmp_path: Path) -> None:
+    tests = [
+        {"name": "build", "status": "PASS"},
+        {"name": "load", "status": "PASS"},
+        {"name": "request_markdown", "status": "SKIP"},
+        {"name": "request_passthrough", "status": "PASS"},
+        {"name": "lifecycle", "status": "PASS"},
+    ]
+    records = [
+        _write(tmp_path, "a.json", _ci_record(tests=tests, **{"pass": 4, "skip": 1}))
+    ]
+    problems = _release_stage(_matrix(_row()), records)
+    assert any("cannot support a release promise" in p for p in problems)
+
+
+def test_ci_record_for_another_commit_fails_the_release_stage(tmp_path: Path) -> None:
+    records = [_write(tmp_path, "a.json", _ci_record(commit_sha="e" * 40))]
+    problems = _release_stage(_matrix(_row()), records)
+    assert any("not the candidate" in p for p in problems), problems
+
+
+def test_verified_row_without_a_staged_record_fails_the_release_stage() -> None:
+    problems = _release_stage(_matrix(_row()), [])
+    assert any("verified without a matching evidence record" in p for p in problems)
+
+
+def _cli_release_stage(tmp_path: Path, record: dict) -> int:
+    matrix_path = tmp_path / "matrix.json"
+    matrix_path.write_text(json.dumps(_matrix(_row())), encoding="utf-8")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    _write(evidence, "a.json", record)
+    return main(
+        [
+            "--matrix",
+            str(matrix_path),
+            "--evidence-dir",
+            str(evidence),
+            "--require-ci",
+            "--candidate-sha",
+            CI_SHA,
+            "--workflow-run-url",
+            CI_RUN,
+        ]
+    )
+
+
+def test_cli_release_stage_accepts_a_ci_directory(tmp_path: Path) -> None:
+    assert _cli_release_stage(tmp_path, _ci_record()) == 0
+
+
+def test_cli_release_stage_rejects_a_local_record(tmp_path: Path) -> None:
+    local = _ci_record(verified_by="local:release-agent")
+    assert _cli_release_stage(tmp_path, local) == 1

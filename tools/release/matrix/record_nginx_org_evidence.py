@@ -13,6 +13,15 @@ the builder Dockerfile, the container platform, the build kind, the static
 Brotli mode, and the release identity values.  The digest is the SHA-256 of
 their canonical JSON form, so it is reproducible on any host.
 
+``--builder`` names the producer of the module.  ``build-release-dockerfile``
+(the default) hashes ``tools/build_release/Dockerfile.<libc>``.
+``release-packages-build`` is the glibc ``build`` job of
+``release-packages.yml``, so it hashes that workflow file instead.
+
+``--distro`` names the host family that the verifier ran on.  ``linux`` is the
+dynamic-module row.  ``debian12`` and ``almalinux9`` bind the record to the
+nginx.org DEB and RPM package rows of that distribution.
+
 Usage:
     python3 tools/release/matrix/record_nginx_org_evidence.py \
         --build-dir dist/1.30.6-glibc-aarch64 \
@@ -20,7 +29,9 @@ Usage:
         --nginx-version 1.30.6 --libc glibc --arch arm64 \
         --out docs/evidence/0.9.3/compat/nginx.org-1.30.6-glibc-arm64.json \
         [--source-sha SHA] [--verified-by local:maintainer] \
-        [--workflow-run-url URL]
+        [--workflow-run-url URL] \
+        [--builder {build-release-dockerfile,release-packages-build}] \
+        [--distro {linux,debian12,almalinux9}]
 
 Exit codes:
     0  Record written and contract-valid
@@ -59,6 +70,8 @@ VERIFIER_TEST_CLASSES: tuple[str, ...] = (
 )
 BUILD_KIND = "release"
 BROTLI_MODE = "static-1.2.1"
+BUILDERS: tuple[str, ...] = ("build-release-dockerfile", "release-packages-build")
+DISTROS: tuple[str, ...] = ("linux", "debian12", "almalinux9")
 
 _CHECKSUM_LINE_RE = re.compile(r"^([0-9a-f]{64}) {2}(nginx-\d+\.\d+\.\d+)$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -125,12 +138,26 @@ def _build_args_digest(
     arch: str,
     source_sha: str,
     rust_version: str,
+    builder: str = "build-release-dockerfile",
 ) -> str:
     """Hash the build inputs that live outside the checkout."""
-    dockerfile = validate_read_path(
-        repo_root / "tools" / "build_release" / f"Dockerfile.{libc}",
-        purpose="release builder Dockerfile",
-    )
+    if builder == "release-packages-build":
+        definition = validate_read_path(
+            repo_root / ".github" / "workflows" / "release-packages.yml",
+            purpose="release workflow builder definition",
+        )
+        builder_fields = {
+            "builder": "release-packages/build",
+            "builder_definition_sha256": _sha256_file(definition),
+        }
+    elif builder == "build-release-dockerfile":
+        dockerfile = validate_read_path(
+            repo_root / "tools" / "build_release" / f"Dockerfile.{libc}",
+            purpose="release builder Dockerfile",
+        )
+        builder_fields = {"dockerfile_sha256": _sha256_file(dockerfile)}
+    else:
+        raise ComposeError(f"unknown builder {builder!r}")
     manifest = validate_read_path(
         repo_root
         / "artifacts"
@@ -143,7 +170,7 @@ def _build_args_digest(
         "arch": arch,
         "brotli_mode": BROTLI_MODE,
         "build_kind": BUILD_KIND,
-        "dockerfile_sha256": _sha256_file(dockerfile),
+        **builder_fields,
         "feature_manifest_sha256": _sha256_file(manifest),
         "libc": libc,
         "nginx_version": version,
@@ -224,12 +251,16 @@ def compose(
     execution: str = "native",
     repo_root: pathlib.Path = REPO_ROOT,
     source_sha: str | None = None,
+    builder: str = "build-release-dockerfile",
+    distro: str = "linux",
 ) -> dict[str, Any]:
     """Return a contract-ready record for one nginx.org target.
 
     ``identity`` is ``(nginx_version, libc, arch)``.
     """
     version, libc, arch = identity
+    if distro not in DISTROS:
+        raise ComposeError(f"unknown distro {distro!r}")
     module_sha, ledger = _read_ledger(build_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)
 
@@ -240,11 +271,11 @@ def compose(
 
     return {
         "schema_version": 1,
-        "target_identity": f"nginx.org:{version}:linux:{libc}:{arch}",
+        "target_identity": f"nginx.org:{version}:{distro}:{libc}:{arch}",
         "source_kind": "nginx.org",
         "nginx_version": version,
         "nginx_package_revision": version,
-        "distro": "linux",
+        "distro": distro,
         "distro_version": "n/a",
         "arch": arch,
         "libc": libc,
@@ -258,6 +289,7 @@ def compose(
             arch=arch,
             source_sha=commit,
             rust_version=rust_version,
+            builder=builder,
         ),
         "module_sha256": module_sha,
         "rust_version": rust_version,
@@ -301,6 +333,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--verified-by", default="local:release-agent")
     parser.add_argument("--workflow-run-url", default="")
+    parser.add_argument(
+        "--builder",
+        choices=BUILDERS,
+        default="build-release-dockerfile",
+        help="which builder produced the module",
+    )
+    parser.add_argument(
+        "--distro",
+        choices=DISTROS,
+        default="linux",
+        help="host family the verifier ran on",
+    )
     return parser
 
 
@@ -315,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
             workflow_run_url=args.workflow_run_url,
             execution=args.execution,
             source_sha=args.source_sha,
+            builder=args.builder,
+            distro=args.distro,
         )
     except (OSError, KeyError, ComposeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

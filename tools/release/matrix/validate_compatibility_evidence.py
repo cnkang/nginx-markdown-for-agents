@@ -12,6 +12,12 @@ The gate answers two questions:
 the evidence bundle produced for the frozen SHA, so the default run stays
 usable while a branch is still collecting evidence.
 
+At the release stage, ``release-packages.yml`` stages the records that this
+run's producer jobs emitted and passes ``--evidence-dir`` with
+``--require-ci``, ``--candidate-sha`` and ``--workflow-run-url``.  Every record
+must then come from CI, name the candidate commit, and name this run.  The
+checked-in ``local:`` records never satisfy that mode.
+
 Usage:
     python3 tools/release/matrix/validate_compatibility_evidence.py [options]
 
@@ -63,6 +69,7 @@ def _record_problems(
     *,
     require_ci: bool = False,
     candidate_sha: str = "",
+    workflow_run_url: str = "",
 ) -> list[str]:
     """Return contract violations for every record."""
     problems: list[str] = []
@@ -71,6 +78,12 @@ def _record_problems(
             problems.append(
                 f"{path.name}: record was produced for commit "
                 f"{record.get('commit_sha')}, not the candidate {candidate_sha}"
+            )
+        if workflow_run_url and record.get("workflow_run_url") != workflow_run_url:
+            problems.append(
+                f"{path.name}: record came from run "
+                f"{record.get('workflow_run_url')!r}, not this run "
+                f"{workflow_run_url!r}"
             )
         for error in validate_record(record):
             problems.append(f"{path.name}: {error}")
@@ -137,10 +150,14 @@ def validate(
     require_blocking: bool = False,
     require_ci: bool = False,
     candidate_sha: str = "",
+    workflow_run_url: str = "",
 ) -> list[str]:
     """Return every evidence-contract and matrix-binding violation."""
     problems = _record_problems(
-        records, require_ci=require_ci, candidate_sha=candidate_sha
+        records,
+        require_ci=require_ci,
+        candidate_sha=candidate_sha,
+        workflow_run_url=workflow_run_url,
     )
     entries = matrix["entries"]
     problems.extend(_verified_without_record(entries, records))
@@ -170,6 +187,11 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help="require every record to name this commit (release stage)",
     )
+    parser.add_argument(
+        "--workflow-run-url",
+        default="",
+        help="require every record to name this workflow run (release stage)",
+    )
     return parser
 
 
@@ -191,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         require_blocking=args.require_blocking,
         require_ci=args.require_ci,
         candidate_sha=args.candidate_sha,
+        workflow_run_url=args.workflow_run_url,
     )
     if problems:
         for problem in problems:
