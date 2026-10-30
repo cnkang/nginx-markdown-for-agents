@@ -68,6 +68,12 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    The package name stays the same across module versions. The NGINX version
    in the filename must match your installed NGINX.
 
+   For RPM packages, follow the [RPM checksum and upgrade
+   steps](PACKAGE_INSTALLATION.md#rpm-artifacts-almalinux-amazon-linux-rhel).
+   For musl module tarballs, follow the [authenticated install-script
+   sequence](INSTALLATION.md#4-primary-install-script). It selects and verifies
+   the module for your NGINX version, libc, and architecture.
+
 7. Test and reload:
 
    ```bash
