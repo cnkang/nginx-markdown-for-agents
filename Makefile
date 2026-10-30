@@ -1554,6 +1554,7 @@ compatibility-evidence-check:
 		tools/release/matrix/tests/test_stage_compatibility_evidence.py \
 		tools/release/matrix/tests/test_record_nginx_org_evidence.py \
 		tools/release/matrix/tests/test_record_ubuntu_evidence.py \
+		tools/release/matrix/tests/test_record_container_evidence.py \
 		-q --tb=short $(PYTEST_JOBS)
 	@echo "  Compatibility Evidence Check: PASSED"
 

@@ -241,7 +241,12 @@ def test_record_does_not_cover_a_different_source_kind() -> None:
 
 
 def test_record_does_not_cover_a_docker_image_row() -> None:
-    """A module build record does not prove a container image."""
+    """A module build record does not prove a container image.
+
+    The refusal holds even when the row names the record's own source kind
+    and host, and an Ubuntu record never covers a container row either.
+    Only a container-registry record can.
+    """
     row = {
         "nginx_version": "1.30.6",
         "os": "linux",
@@ -251,6 +256,103 @@ def test_record_does_not_cover_a_docker_image_row() -> None:
         "source": "nginx.org",
     }
     assert not record_covers_entry(_record(), row)
+    assert not record_covers_entry(_record(), {**row, "source": "container-registry"})
+    ubuntu_row = {
+        **_container_row(),
+        "nginx_version": "1.24.0",
+        "os": "ubuntu-24.04",
+    }
+    assert not record_covers_entry(_ubuntu_record(), ubuntu_row)
+
+
+BASE_DIGEST = "sha256:" + "4" * 64
+BUILT_ID = "sha256:" + "5" * 64
+
+
+def _container_record(**overrides) -> dict:
+    record = _record(
+        target_identity=(
+            f"container-registry:nginx:1.26.3@{BASE_DIGEST}:debian12:glibc:amd64"
+        ),
+        source_kind="container-registry",
+        nginx_version="1.26.3",
+        nginx_package_revision="1.26.3",
+        distro="debian12",
+        distro_version="n/a",
+        source_reference=f"nginx:1.26.3@{BASE_DIGEST}",
+        source_digest=BASE_DIGEST,
+        image_reference="nginx:1.26.3",
+        image_digest=BASE_DIGEST,
+        built_image_id=BUILT_ID,
+        verified_by="ci:official-nginx-docker/container-evidence",
+    )
+    record.update(overrides)
+    return record
+
+
+def _container_row(**overrides) -> dict:
+    row = {
+        "nginx_version": "1.26.3",
+        "os": "debian12",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "docker-image",
+        "source": "container-registry",
+        "image_ref": "nginx:1.26.3",
+        "image_digest": BASE_DIGEST,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_complete_container_record_is_valid_and_covers_its_row() -> None:
+    record = _container_record()
+    assert validate_record(record) == []
+    assert is_promotable(record)
+    assert record_covers_entry(record, _container_row())
+
+
+def test_container_record_requires_the_digest_fields() -> None:
+    for field in ("image_reference", "image_digest", "built_image_id"):
+        record = _container_record()
+        record.pop(field)
+        errors = validate_record(record)
+        assert any(field in error for error in errors), field
+
+
+def test_container_record_rejects_a_tag_in_place_of_a_digest() -> None:
+    errors = validate_record(_container_record(image_digest="nginx:1.26.3"))
+    assert any("image_digest must be sha256" in error for error in errors)
+    errors = validate_record(_container_record(built_image_id="latest"))
+    assert any("built_image_id must be sha256" in error for error in errors)
+    errors = validate_record(
+        _container_record(image_reference=f"nginx@{BASE_DIGEST}")
+    )
+    assert any("image_reference" in error for error in errors)
+
+
+def test_container_record_binds_reference_and_source_digest() -> None:
+    errors = validate_record(_container_record(source_reference="nginx:1.26.3"))
+    assert any("source_reference must equal" in error for error in errors)
+    errors = validate_record(_container_record(source_digest="sha256:" + "6" * 64))
+    assert any("source_digest must equal" in error for error in errors)
+
+
+def test_container_record_does_not_cover_a_moved_base_digest() -> None:
+    row = _container_row(image_digest="sha256:" + "7" * 64)
+    assert not record_covers_entry(_container_record(), row)
+    assert not record_covers_entry(
+        _container_record(), _container_row(image_ref="nginx:1.26.3-bookworm")
+    )
+
+
+def test_container_record_covers_only_docker_image_rows() -> None:
+    record = _container_record()
+    for artifact_type in ("dynamic-module", "deb-package", "rpm-package", ""):
+        row = _container_row(artifact_type=artifact_type)
+        assert not record_covers_entry(record, row), artifact_type
+    assert not record_covers_entry(record, _container_row(source="nginx.org"))
+    assert not record_covers_entry(record, _container_row(os="alpine3.20"))
 
 
 def test_record_rejects_a_malformed_reference() -> None:

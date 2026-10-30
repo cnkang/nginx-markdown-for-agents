@@ -48,7 +48,16 @@ DISTRO_REQUIRED_TEST_CLASSES: tuple[str, ...] = ("negative_abi_rejected",)
 
 STATUS_VALUES = frozenset({"PASS", "FAIL", "SKIP"})
 
-SOURCE_KINDS = frozenset({"nginx.org", "ubuntu-default-repo"})
+SOURCE_KINDS = frozenset({"nginx.org", "ubuntu-default-repo", "container-registry"})
+
+# A container record proves one image built on one pinned base image.  It
+# must name that base by digest, so a moved tag cannot stand in for it, and it
+# must name the image that was verified by its content-addressed ID.
+CONTAINER_REQUIRED_FIELDS: tuple[str, ...] = (
+    "image_reference",
+    "image_digest",
+    "built_image_id",
+)
 
 _REQUIRED_FIELDS: tuple[tuple[str, type], ...] = (
     ("schema_version", int),
@@ -88,6 +97,7 @@ _UBUNTU_REVISION_RE = re.compile(r"^\d+\.\d+\.\d+-\d+ubuntu[\d.]+$")
 _ABI_PROVIDE_RE = re.compile(r"^nginx-abi-\d+\.\d+\.\d+-\d+$")
 _NGINX_RPM_PROVIDE_RE = re.compile(r"^nginx-r\d+\.\d+\.\d+$")
 _HTTPS_RE = re.compile(r"^https://[^\s]+$")
+_IMAGE_REFERENCE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class EvidenceError(ValueError):
@@ -160,6 +170,36 @@ def _validate_ubuntu_source(record: dict[str, Any], errors: list[str]) -> None:
     reference = record.get("source_reference", "")
     if not _HTTPS_RE.match(reference):
         errors.append("source_reference must be an https URL")
+
+
+def _is_sha256_digest(value: Any) -> bool:
+    """Return whether a value is ``sha256:<64 lowercase hex>``."""
+    return (
+        isinstance(value, str)
+        and value.startswith("sha256:")
+        and bool(_SHA256_RE.match(value[7:]))
+    )
+
+
+def _validate_container_source(record: dict[str, Any], errors: list[str]) -> None:
+    """Validate the base-image digest binding of a container record."""
+    for field in CONTAINER_REQUIRED_FIELDS:
+        if not isinstance(record.get(field), str):
+            errors.append(f"container records require string field {field}")
+    reference = record.get("image_reference", "")
+    if not isinstance(reference, str) or not _IMAGE_REFERENCE_RE.match(reference):
+        errors.append("image_reference must look like repository:tag")
+    digest = record.get("image_digest", "")
+    if not _is_sha256_digest(digest):
+        errors.append("image_digest must be sha256:<64 hex>")
+    if not _is_sha256_digest(record.get("built_image_id", "")):
+        errors.append("built_image_id must be sha256:<64 hex>")
+    if record.get("source_reference") != f"{reference}@{digest}":
+        errors.append("source_reference must equal image_reference@image_digest")
+    if record.get("source_digest") != digest:
+        errors.append("source_digest must equal image_digest")
+    if record.get("abi_provide", ""):
+        errors.append("container records carry no abi_provide")
 
 
 def _validate_hashes(record: dict[str, Any], errors: list[str]) -> None:
@@ -288,6 +328,8 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     _validate_identity(record, errors)
     if record.get("source_kind") == "ubuntu-default-repo":
         _validate_ubuntu_source(record, errors)
+    elif record.get("source_kind") == "container-registry":
+        _validate_container_source(record, errors)
     else:
         _validate_nginx_org_source(record, errors)
     _validate_hashes(record, errors)
@@ -393,6 +435,14 @@ def _provenance_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
       ``verified`` with no pinned revision is a promise with no evidence
       behind it, so it must never be read as a match.
     """
+    if record["source_kind"] == "container-registry":
+        # A container row pins its base image by digest.  The record must
+        # name the same tag and the same digest, so a record for a rebuilt
+        # or moved base never covers the row.
+        return (
+            entry.get("image_ref") == record.get("image_reference")
+            and entry.get("image_digest") == record.get("image_digest")
+        )
     if record["source_kind"] != "ubuntu-default-repo":
         return True
     provenance = entry.get("provenance")
@@ -427,9 +477,12 @@ def _artifact_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
 
     A distro record proves a distro package.  An nginx.org record proves the
     module and the packages and tarballs built from it, not a container image
-    whose build is a separate artifact.
+    whose build is a separate artifact.  A container record proves only the
+    image built on its pinned base, so it covers only a ``docker-image`` row.
     """
     artifact_type = entry.get("artifact_type")
+    if record["source_kind"] == "container-registry":
+        return artifact_type == "docker-image"
     if not isinstance(artifact_type, str) or not artifact_type:
         return True
     if record["source_kind"] == "ubuntu-default-repo":
