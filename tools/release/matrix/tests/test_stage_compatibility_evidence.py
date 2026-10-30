@@ -55,7 +55,8 @@ def test_duplicate_record_name_fails_without_a_partial_destination(
 
     assert _run(source, dest) == 1
     err = capsys.readouterr().err
-    assert "compat-evidence-a" in err and "compat-evidence-b" in err
+    assert "compat-evidence-a" in err
+    assert "compat-evidence-b" in err
     assert not dest.exists()
 
 

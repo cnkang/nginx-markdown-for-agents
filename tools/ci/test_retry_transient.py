@@ -13,6 +13,11 @@ import subprocess
 import pytest
 
 HELPER = pathlib.Path(__file__).resolve().parent / "retry_transient.sh"
+DOCKER_METADATA_RESOLUTION_ERROR = (
+    "ERROR: failed to resolve source metadata for docker.io/docker/dockerfile:1.7: "
+    + "unexpected status from HEAD request to https://registry-1.docker.io/v2/: "
+    + "502 Bad Gateway"
+)
 
 
 def _fake(tmp_path: pathlib.Path, *, fail_times: int, message: str, rc: int) -> list[str]:
@@ -53,9 +58,7 @@ def _count(tmp_path: pathlib.Path) -> int:
 @pytest.mark.parametrize(
     "message",
     [
-        "ERROR: failed to resolve source metadata for docker.io/docker/dockerfile:1.7: "
-        "unexpected status from HEAD request to https://registry-1.docker.io/v2/: "
-        "502 Bad Gateway",
+        DOCKER_METADATA_RESOLUTION_ERROR,
         "curl: (22) The requested URL returned error: 503",
         "toomanyrequests: You have reached your pull rate limit",
         "curl: (28) Connection timed out after 30001 milliseconds",

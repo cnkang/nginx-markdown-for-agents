@@ -781,7 +781,8 @@ def test_nginx_org_evidence_job_produces_bound_ci_records() -> None:
     assert len(upload) == 1
     name = upload[0]["with"]["name"]
     assert name.startswith("compat-evidence-nginx-org-")
-    assert "matrix.libc" in name and "matrix.arch" in name
+    assert "matrix.libc" in name
+    assert "matrix.arch" in name
     assert "matrix.nginx_version" in name
 
 

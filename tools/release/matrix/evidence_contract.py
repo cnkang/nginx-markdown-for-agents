@@ -30,6 +30,7 @@ if str(_REPO_ROOT / "tools") not in sys.path:
 from lib.path_validation import validate_read_path  # noqa: E402
 
 SCHEMA_VERSION = 1
+SHA256_PREFIX = "sha256:"
 
 # Test classes every promotable record must carry.  A record may carry more,
 # but a release gate that accepts a subset would let a build-only run stand in
@@ -176,7 +177,7 @@ def _is_sha256_digest(value: Any) -> bool:
     """Return whether a value is ``sha256:<64 lowercase hex>``."""
     return (
         isinstance(value, str)
-        and value.startswith("sha256:")
+        and value.startswith(SHA256_PREFIX)
         and bool(_SHA256_RE.match(value[7:]))
     )
 
@@ -208,10 +209,10 @@ def _validate_hashes(record: dict[str, Any], errors: list[str]) -> None:
     if not _SHA256_RE.match(module_sha):
         errors.append("module_sha256 must be 64 lowercase hex characters")
     digest = record.get("source_digest", "")
-    if not digest.startswith("sha256:") or not _SHA256_RE.match(digest[7:]):
+    if not digest.startswith(SHA256_PREFIX) or not _SHA256_RE.match(digest[7:]):
         errors.append("source_digest must be sha256:<64 hex>")
     build_digest = record.get("build_args_digest", "")
-    if not build_digest.startswith("sha256:") or not _SHA256_RE.match(
+    if not build_digest.startswith(SHA256_PREFIX) or not _SHA256_RE.match(
         build_digest[7:]
     ):
         errors.append("build_args_digest must be sha256:<64 hex>")

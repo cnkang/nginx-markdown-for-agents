@@ -57,6 +57,7 @@ LEGACY_WORKFLOWS = {
 RELEASE_PACKAGES_WORKFLOW = "release-packages.yml"
 OFFICIAL_DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
 OFFICIAL_DOCKER_WORKFLOW_REF = "./.github/workflows/official-nginx-docker.yml"
+MATRIX_IMAGE_REF_EXPRESSION = "${{ matrix.image_ref }}"
 
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
@@ -604,7 +605,7 @@ def _validate_prepare_job(jobs: dict[str, object]) -> list[str]:
 
 OFFICIAL_DOCKER_BUILD_ENV: dict[str, str] = {
     "IMAGE_NAME": "nginx-markdown-official-check:${{ matrix.docker_tag }}",
-    "BASE_NAME": "${{ matrix.image_ref }}",
+    "BASE_NAME": MATRIX_IMAGE_REF_EXPRESSION,
     "BASE_DIGEST": "${{ matrix.image_digest }}",
     "MODULE_REPO": "${{ steps.source.outputs.repo }}",
     "MODULE_REF": "${{ steps.source.outputs.ref }}",
@@ -671,9 +672,9 @@ def _validate_verify_step(build: dict[str, object]) -> list[str]:
         errors.append("runtime verification must execute the official Docker verifier")
     expected_env = {
         "IMAGE_NAME": "nginx-markdown-official-check:${{ matrix.docker_tag }}",
-        "JOB_NGINX_TAG": "${{ matrix.image_ref }}",
+        "JOB_NGINX_TAG": MATRIX_IMAGE_REF_EXPRESSION,
         "EXPECTED_NGINX_VERSION": "${{ matrix.nginx_version }}",
-        "IMAGE_REFERENCE": "${{ matrix.image_ref }}",
+        "IMAGE_REFERENCE": MATRIX_IMAGE_REF_EXPRESSION,
         "IMAGE_DIGEST": "${{ matrix.image_digest }}",
         "MATRIX_ROW_ID": "${{ matrix.matrix_row_id }}",
         "MATRIX_OS": "${{ matrix.os }}",
