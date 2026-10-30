@@ -13,9 +13,9 @@ Ubuntu 26.04 native NGINX to the supported surface. It adds an evidence-gated
 promotion path, so a version can become supported only with recorded build,
 load, and request evidence.
 
-0.9.3 is not a breaking release. The 20 active directives, their defaults, the
-HTTP representation, the metrics and diagnostics contracts, the reason-code
-registry, and the FFI ABI version 3 do not change.
+0.9.3 is not a breaking release. The 20 active directives and their defaults do
+not change. The HTTP representation, the metrics and diagnostics contracts, the
+reason-code registry, and the FFI ABI version 3 also do not change.
 
 ### Added
 

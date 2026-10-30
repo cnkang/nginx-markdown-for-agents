@@ -14,8 +14,12 @@ compatibility or release scope.
 - v0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not
   yet published. Use the v0.9.3 release-tag downloads after publication.
 - v0.9.1 was the previous published stable release (2026-07-29).
-- Version metadata is 0.9.2. Use the release tag, assets, and checksums.
+- Version metadata is 0.9.3. Use the release tag, assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
+- v0.9.3 is a controlled compatibility maintenance exception. It is not a
+  second breaking release, and it does not reopen the v0.9.2 contract. Its
+  scope is the NGINX compatibility surface, Ubuntu LTS support, release
+  engineering, and the documentation that follows from those changes.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
 before v1.0. The project deliberately extended that freeze through v0.9.1 because v1.0

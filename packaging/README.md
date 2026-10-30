@@ -34,7 +34,7 @@ The configuration uses template variables injected by the CI matrix:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
+| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.3` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NGINX_VERSION_CEIL` | Exclusive upper bound of the pinned NGINX version (X.Y.Z -> X.Y.Z+1) required by the DEB dependency interval | `1.26.4` |
 | `NGINX_VERSION` | Exact upstream version for the RPM dependency floor (the `%pre` scriptlet enforces the exact version) | `1.26.3` |
@@ -44,7 +44,7 @@ The configuration uses template variables injected by the CI matrix:
 
 ```bash
 # Set required environment variables
-export PKG_VERSION="0.9.2"
+export PKG_VERSION="0.9.3"
 export NGINX_VERSION="1.26.3"
 export NGINX_VERSION_CEIL="$(awk 'BEGIN {
   split(ARGV[1], parts, ".");
@@ -100,8 +100,8 @@ Validates that a package installs correctly and the module loads in NGINX.
 packaging/scripts/smoke-test-basic.sh PACKAGE_FILE NGINX_VERSION
 
 # Examples
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.9.2_nginx-1.26.3_amd64.deb 1.26.3
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.9.2-nginx1.26.3-1.x86_64.rpm 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb 1.30.6
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.9.3-nginx1.30.6-1.x86_64.rpm 1.30.6
 ```
 
 The script:

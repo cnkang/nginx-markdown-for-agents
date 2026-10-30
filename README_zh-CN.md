@@ -9,7 +9,7 @@
 
 > 当前版本线：v0.9.2 已于 2026-10-08 正式发布，是最新公开稳定版本。
 > v0.9.3 是兼容性维护候选版本，尚未发布。正式发布后请使用 v0.9.3 的 release tag 下载。
-> 这是 v1.0 前最后一次计划内的破坏性版本。
+> v0.9.2 是 v1.0 前最后一次计划内的破坏性版本。
 > 安装包可通过 release 标签下载。
 
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
@@ -154,6 +154,16 @@ curl -sS -D - -o /dev/null \
 
 [Bot 定向示例](examples/nginx-configs/06-bot-targeted-conversion.conf)包含
 更完整的 User-Agent map。状态码、Content-Type、大小和其他准入检查仍然生效。
+
+## 0.9.3 的变化
+
+0.9.3 是兼容性维护发布。0.9.2 的配置无需修改即可使用，本版本不新增、不移除、也不重命名任何指令。
+
+- 本项目支持 nginx.org 当前的 stable 1.30.6 与 mainline 1.31.8，覆盖 glibc 与 musl、amd64 与 arm64。发布工作流记录构建、加载与请求证据后，对应条目才成为 supported。
+- 本项目通过 `nginx-module-markdown-for-agents-ubuntu` 包支持 Ubuntu 24.04 LTS 与 Ubuntu 26.04 LTS 的原生 NGINX，覆盖 amd64 与 arm64。该包依赖 Ubuntu 的 ABI，因此安全更新改变 ABI 时，模块不会被继续加载到不兼容的二进制上。
+- 新增的晋升流程把 supported 条目与证据文件绑定。每周的自动发现任务仍把新版本记为 best-effort 与 pending。
+
+请阅读 [0.9.3 发布说明](docs/releases/0.9.3-release-notes.md)。[Ubuntu 兼容指南](docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md)说明发行版原生构建，[兼容支持政策](docs/guides/COMPATIBILITY-SUPPORT-POLICY.md)定义支持合同。
 
 ## 0.9.2 的变化
 
