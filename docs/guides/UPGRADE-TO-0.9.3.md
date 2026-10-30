@@ -49,13 +49,19 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
 5. Verify the checksum:
 
    ```bash
-   sha256sum -c SHA256SUMS --ignore-missing
+   DEB="nginx-module-markdown-for-agents_0.9.3_nginx-<version>_<arch>.deb"
+   CHECKSUM_ENTRY="$(
+     awk -v filename="${DEB}" '
+       $2 == filename { entry = $0; count++ }
+       END { if (count != 1) exit 1; print entry }
+     ' SHA256SUMS
+   )" || { echo "Expected exactly one SHA256SUMS entry for ${DEB}" >&2; exit 1; }
+   printf '%s\n' "${CHECKSUM_ENTRY}" | sha256sum --check -
    ```
 
-6. Remove the old package and install the new one:
+6. Install the new package directly so APT follows the upgrade lifecycle:
 
    ```bash
-   sudo apt-get remove nginx-module-markdown-for-agents
    sudo apt-get install ./nginx-module-markdown-for-agents_0.9.3_nginx-<version>_<arch>.deb
    ```
 
@@ -80,15 +86,21 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    [UBUNTU-LTS-NGINX-COMPATIBILITY.md](UBUNTU-LTS-NGINX-COMPATIBILITY.md) and in
    the support matrix.
 
-3. Download the package for your suite and architecture.
+3. Download the package for your suite and architecture, plus `SHA256SUMS`
+   and `SHA256SUMS.asc` from the same release.
 
-4. Install it:
+4. Verify the `SHA256SUMS.asc` signature and the exact checksum entry for
+   this DEB by following Steps 2 and 3 in the
+   [Ubuntu LTS compatibility guide](UBUNTU-LTS-NGINX-COMPATIBILITY.md#3-install-the-ubuntu-native-package).
+   Both checks must pass before installation.
+
+5. Install it:
 
    ```bash
    sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_0.9.3_ubuntu-<suite>_nginx-<revision>_<arch>.deb
    ```
 
-5. Test and reload:
+6. Test and reload:
 
    ```bash
    sudo nginx -t && sudo systemctl reload nginx

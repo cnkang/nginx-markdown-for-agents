@@ -98,8 +98,18 @@ builds. The two packages conflict because they own the same module file.
 3. Verify the checksum:
 
    ```bash
-   sha256sum -c SHA256SUMS --ignore-missing
+   DEB="nginx-module-markdown-for-agents-ubuntu_<version>_ubuntu-<suite>_nginx-<revision>_<arch>.deb"
+   CHECKSUM_ENTRY="$(
+     awk -v filename="${DEB}" '
+       $2 == filename { entry = $0; count++ }
+       END { if (count != 1) exit 1; print entry }
+     ' SHA256SUMS
+   )" || { echo "Expected exactly one SHA256SUMS entry for ${DEB}" >&2; exit 1; }
+   printf '%s\n' "${CHECKSUM_ENTRY}" | sha256sum --check -
    ```
+
+   This fails when the selected package has no checksum entry or when the
+   entry does not match its bytes.
 
 4. Install the package. Do not remove the manual load line yet.
 
@@ -234,7 +244,8 @@ or when you build your own NGINX package.
 
    ```bash
    sudo -E env PATH="${PATH}" bash packaging/scripts/build-ubuntu-native-module.sh \
-     --suite "${SUITE}" --arch "${ARCH}" --out dist/ubuntu-native --install-deps
+     --suite "${SUITE}" --arch "${ARCH}" --out dist/ubuntu-native \
+     --install-deps --negative-control
    ```
 
    The script reads the configure arguments from `nginx -V`, retrieves the
@@ -247,7 +258,8 @@ or when you build your own NGINX package.
    sudo bash packaging/scripts/verify-ubuntu-native-module.sh \
      --module dist/ubuntu-native/ngx_http_markdown_filter_module.so \
      --out dist/ubuntu-native/ubuntu-native-ledger.json \
-     --suite "${SUITE}"
+     --suite "${SUITE}" \
+     --incompatible dist/ubuntu-native/ngx_http_markdown_filter_module.incompatible.so
    ```
 
 6. Remove `nginx-module-markdown-for-agents-ubuntu` first when the package is
