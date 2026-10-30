@@ -214,3 +214,4 @@ artifacts/release/0.9.3/*
 .perf-cache/
 
 .workbuddy/*
+.agents/*
