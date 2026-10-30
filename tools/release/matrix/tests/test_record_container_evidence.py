@@ -52,13 +52,20 @@ def _module_and_ledger(tmp_path: pathlib.Path, *, libc: str = "glibc", arch: str
 
 
 def _compose(root, build, ledger, **overrides):
+    target = {
+        "distro": "debian12",
+        "image_reference": "nginx:1.26.3",
+        "image_digest": BASE_DIGEST,
+        "built_image_id": BUILT_ID,
+    }
+    for key in list(overrides):
+        if key in target:
+            target[key] = overrides.pop(key)
     kwargs = {
         "module_dir": build,
         "ledger_path": ledger,
         "identity": ("1.26.3", "glibc", "amd64"),
-        "distro": "debian12",
-        "image": ("nginx:1.26.3", BASE_DIGEST),
-        "built_image_id": BUILT_ID,
+        "target": composer.ContainerTarget(**target),
         "source_sha": COMMIT,
         "verified_by": "ci:official-nginx-docker/build-and-verify",
         "workflow_run_url": RUN_URL,
@@ -100,9 +107,9 @@ def test_build_args_digest_binds_the_dockerfile_and_base(tmp_path):
     root = _repo(tmp_path)
     build, ledger = _module_and_ledger(tmp_path)
     first = _compose(root, build, ledger)["build_args_digest"]
-    moved = _compose(
-        root, build, ledger, image=("nginx:1.26.3", "sha256:" + "6" * 64)
-    )["build_args_digest"]
+    moved = _compose(root, build, ledger, image_digest="sha256:" + "6" * 64)[
+        "build_args_digest"
+    ]
     (root / composer.DOCKERFILE).write_text("FROM scratch\n# x\n", encoding="utf-8")
     changed = _compose(root, build, ledger)["build_args_digest"]
     assert len({first, moved, changed}) == 3
@@ -111,7 +118,7 @@ def test_build_args_digest_binds_the_dockerfile_and_base(tmp_path):
 @pytest.mark.parametrize(
     ("override", "message"),
     [
-        ({"image": ("nginx:1.26.3", "nginx:1.26.3")}, "image digest"),
+        ({"image_digest": "nginx:1.26.3"}, "image digest"),
         ({"built_image_id": "latest"}, "built image ID"),
         ({"source_sha": "main"}, "source SHA"),
         ({"distro": "Debian 12"}, "distro"),

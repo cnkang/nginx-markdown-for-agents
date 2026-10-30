@@ -249,7 +249,9 @@ def test_default_builder_digest_is_unchanged(tmp_path):
     raw = json.dumps(descriptor, sort_keys=True, separators=(",", ":"))
     expected = "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
     assert record["build_args_digest"] == expected
-    explicit = _compose(root, build, ledger, builder="build-release-dockerfile")
+    explicit = _compose(
+        root, build, ledger, producer=composer.Producer(builder="build-release-dockerfile")
+    )
     assert explicit["build_args_digest"] == expected
 
 
@@ -257,17 +259,14 @@ def test_release_packages_builder_binds_the_workflow(tmp_path):
     root = _repo(tmp_path)
     build, ledger = _module_and_ledger(tmp_path)
     default = _compose(root, build, ledger)["build_args_digest"]
-    first = _compose(root, build, ledger, builder="release-packages-build")[
-        "build_args_digest"
-    ]
+    release = composer.Producer(builder="release-packages-build")
+    first = _compose(root, build, ledger, producer=release)["build_args_digest"]
     assert first != default
 
     (root / ".github" / "workflows" / "release-packages.yml").write_text(
         "name: release\n# changed\n", encoding="utf-8"
     )
-    second = _compose(root, build, ledger, builder="release-packages-build")[
-        "build_args_digest"
-    ]
+    second = _compose(root, build, ledger, producer=release)["build_args_digest"]
     assert first != second
 
 
@@ -276,7 +275,7 @@ def test_package_distro_record_covers_only_its_package_row(tmp_path):
 
     root = _repo(tmp_path)
     build, ledger = _module_and_ledger(tmp_path)
-    record = _compose(root, build, ledger, distro="debian12")
+    record = _compose(root, build, ledger, producer=composer.Producer(distro="debian12"))
 
     assert validate_record(record) == []
     assert record["distro"] == "debian12"

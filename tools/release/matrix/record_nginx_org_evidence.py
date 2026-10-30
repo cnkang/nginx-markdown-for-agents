@@ -41,6 +41,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import pathlib
@@ -79,6 +80,19 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 class ComposeError(RuntimeError):
     """Raised when a record cannot be composed from the build inputs."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Producer:
+    """How the module was built and where the verifier ran.
+
+    ``execution`` is ``native`` or ``emulated``.  ``builder`` is one of
+    ``BUILDERS``.  ``distro`` is one of ``DISTROS``.
+    """
+
+    execution: str = "native"
+    builder: str = "build-release-dockerfile"
+    distro: str = "linux"
 
 
 def _sha256_file(path: pathlib.Path) -> str:
@@ -248,17 +262,16 @@ def compose(
     identity: tuple[str, str, str],
     verified_by: str,
     workflow_run_url: str,
-    execution: str = "native",
     repo_root: pathlib.Path = REPO_ROOT,
     source_sha: str | None = None,
-    builder: str = "build-release-dockerfile",
-    distro: str = "linux",
+    producer: Producer = Producer(),
 ) -> dict[str, Any]:
     """Return a contract-ready record for one nginx.org target.
 
     ``identity`` is ``(nginx_version, libc, arch)``.
     """
     version, libc, arch = identity
+    distro = producer.distro
     if distro not in DISTROS:
         raise ComposeError(f"unknown distro {distro!r}")
     module_sha, ledger = _read_ledger(build_dir, ledger_path, identity)
@@ -289,7 +302,7 @@ def compose(
             arch=arch,
             source_sha=commit,
             rust_version=rust_version,
-            builder=builder,
+            builder=producer.builder,
         ),
         "module_sha256": module_sha,
         "rust_version": rust_version,
@@ -306,7 +319,7 @@ def compose(
         # execution, but it is weaker evidence than a native run.  Record
         # which one produced this file instead of leaving the reader to
         # guess from the architecture.
-        "execution_environment": execution,
+        "execution_environment": producer.execution,
     }
 
 
@@ -357,10 +370,12 @@ def main(argv: list[str] | None = None) -> int:
             identity=(args.nginx_version, args.libc, args.arch),
             verified_by=args.verified_by,
             workflow_run_url=args.workflow_run_url,
-            execution=args.execution,
             source_sha=args.source_sha,
-            builder=args.builder,
-            distro=args.distro,
+            producer=Producer(
+                execution=args.execution,
+                builder=args.builder,
+                distro=args.distro,
+            ),
         )
     except (OSError, KeyError, ComposeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

@@ -37,6 +37,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import pathlib
@@ -71,18 +72,28 @@ _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DISTRO_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
+@dataclasses.dataclass(frozen=True)
+class ContainerTarget:
+    """The verified image: its matrix host, pinned base, and built image ID."""
+
+    distro: str
+    image_reference: str
+    image_digest: str
+    built_image_id: str
+
+
 def _build_args_digest(
     repo_root: pathlib.Path,
     *,
     identity: tuple[str, str, str],
-    distro: str,
-    image: tuple[str, str],
+    target: ContainerTarget,
     source_sha: str,
     rust_version: str,
 ) -> str:
     """Hash the image build inputs that are not files in the checkout."""
     version, libc, arch = identity
-    reference, digest = image
+    distro = target.distro
+    reference, digest = target.image_reference, target.image_digest
     dockerfile = validate_read_path(
         repo_root / DOCKERFILE, purpose="official Docker source-build Dockerfile"
     )
@@ -103,14 +114,12 @@ def _build_args_digest(
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _check_inputs(
-    distro: str, image: tuple[str, str], built_image_id: str, source_sha: str
-) -> None:
-    if not _DISTRO_RE.match(distro):
+def _check_inputs(target: ContainerTarget, source_sha: str) -> None:
+    if not _DISTRO_RE.match(target.distro):
         raise ComposeError("distro must be a lowercase distro slug")
-    if not _DIGEST_RE.match(image[1]):
+    if not _DIGEST_RE.match(target.image_digest):
         raise ComposeError("image digest must be sha256:<64 hex>")
-    if not _DIGEST_RE.match(built_image_id):
+    if not _DIGEST_RE.match(target.built_image_id):
         raise ComposeError("built image ID must be sha256:<64 hex>")
     if not _COMMIT_RE.match(source_sha):
         raise ComposeError("source SHA must be 40 lowercase hex characters")
@@ -121,9 +130,7 @@ def compose(
     module_dir: pathlib.Path,
     ledger_path: pathlib.Path,
     identity: tuple[str, str, str],
-    distro: str,
-    image: tuple[str, str],
-    built_image_id: str,
+    target: ContainerTarget,
     source_sha: str,
     verified_by: str,
     workflow_run_url: str,
@@ -131,12 +138,12 @@ def compose(
 ) -> dict[str, Any]:
     """Return a contract-ready container record.
 
-    ``identity`` is ``(nginx_version, libc, arch)`` and ``image`` is
-    ``(image_reference, image_digest)``.
+    ``identity`` is ``(nginx_version, libc, arch)``.
     """
-    _check_inputs(distro, image, built_image_id, source_sha)
+    _check_inputs(target, source_sha)
     version, libc, arch = identity
-    reference, digest = image
+    distro = target.distro
+    reference, digest = target.image_reference, target.image_digest
     module_sha, ledger = _read_ledger(module_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)
     rust_version = _rust_version(repo_root)
@@ -157,12 +164,11 @@ def compose(
         "source_digest": digest,
         "image_reference": reference,
         "image_digest": digest,
-        "built_image_id": built_image_id,
+        "built_image_id": target.built_image_id,
         "build_args_digest": _build_args_digest(
             repo_root,
             identity=identity,
-            distro=distro,
-            image=image,
+            target=target,
             source_sha=source_sha,
             rust_version=rust_version,
         ),
@@ -206,9 +212,12 @@ def main(argv: list[str] | None = None) -> int:
             module_dir=args.module_dir,
             ledger_path=args.ledger,
             identity=(args.nginx_version, args.libc, args.arch),
-            distro=args.distro,
-            image=(args.image_reference, args.image_digest),
-            built_image_id=args.built_image_id,
+            target=ContainerTarget(
+                distro=args.distro,
+                image_reference=args.image_reference,
+                image_digest=args.image_digest,
+                built_image_id=args.built_image_id,
+            ),
             source_sha=args.source_sha,
             verified_by=args.verified_by,
             workflow_run_url=args.workflow_run_url,
