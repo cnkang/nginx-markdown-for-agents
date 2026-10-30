@@ -9,8 +9,9 @@
 # configuration, and records every check in a JSON ledger.
 #
 # The configuration is written to a private prefix instead of the image
-# default, so the script never edits a file it did not create and needs no
-# cleanup trap for host state.
+# default, so the script never edits a file it did not create.  An exit trap
+# stops the NGINX it started and removes that prefix on every exit path, so a
+# failed request or an interrupt cannot leave a listener behind.
 #
 # Required test classes:
 #   load                  nginx -t accepts the module
@@ -82,6 +83,20 @@ nginx -V 2>&1 | tr ' ' '\n' | grep -qx -- '--with-compat' || \
     die "host nginx was not built with --with-compat"
 
 PREFIX="$(mktemp -d "${TMPDIR:-/tmp}/verify-nginx-org.XXXXXX")"
+
+# Under set -e a failed curl or an interrupt exits before the normal quit.
+# The pid file exists only while the NGINX this script started is running.
+cleanup() {
+    if [[ -f "${PREFIX}/logs/nginx.pid" ]]; then
+        nginx -c "${PREFIX}/nginx.conf" -p "${PREFIX}" -s quit >/dev/null 2>&1 || true
+    fi
+    rm -rf "${PREFIX}"
+    return 0
+}
+trap cleanup EXIT
+# A signal must end the run; exiting here runs the EXIT trap exactly once.
+trap 'exit 1' HUP INT TERM
+
 # mktemp creates 0700.  The official nginx images run worker processes as an
 # unprivileged user, so a 0700 prefix makes every document unreadable and the
 # whole request phase fails for a reason unrelated to the module.
@@ -243,7 +258,6 @@ pathlib.Path(ledger_path).write_text(
 print(json.dumps(payload, indent=2, sort_keys=True))
 PY
 
-rm -rf "${PREFIX}"
 if [[ "${FAIL}" -ne 0 ]]; then
     die "${FAIL} check(s) failed, ${PASS} passed"
 fi

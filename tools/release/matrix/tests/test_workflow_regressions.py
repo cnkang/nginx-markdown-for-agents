@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -600,3 +602,76 @@ def test_package_metadata_drops_host_brotli_dependency() -> None:
     assert "lib/pkgconfig/libbrotlidec.pc" in formula
     assert 'Version.new(brotli_version) < Version.new("1.2.1")' in formula
     assert 'refute_match "libbrotlidec"' in formula
+
+
+_FAKE_NGINX = """#!/usr/bin/env bash
+# Stand-in for the nginx.org binary: records every call.
+printf '%s\\n' "$*" >>"${FAKE_LOG}"
+case "$*" in
+    -v) echo 'nginx version: nginx/1.30.6' >&2 ;;
+    -V) echo 'configure arguments: --with-compat' >&2 ;;
+    *-t) ;;
+    *'-s quit') rm -f "${4}/logs/nginx.pid" ;;
+    *-s*) ;;
+    *) echo 1 >"${4}/logs/nginx.pid" ;;
+esac
+exit 0
+"""
+
+# The readiness probe succeeds; the first request fails like a reset
+# connection, which set -e turns into an early exit.
+_FAKE_CURL = """#!/usr/bin/env bash
+case "$*" in
+    -fsS*) exit 0 ;;
+    *) exit 7 ;;
+esac
+"""
+
+
+def test_nginx_org_verifier_cleans_up_after_an_early_exit(tmp_path) -> None:
+    """A failed request must not leave the started NGINX or its prefix."""
+    repo_root = Path(__file__).resolve().parents[4]
+    script = repo_root / "packaging" / "scripts" / "verify-nginx-org-module.sh"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("nginx", _FAKE_NGINX), ("curl", _FAKE_CURL)):
+        tool = bin_dir / name
+        tool.write_text(body, encoding="utf-8")
+        tool.chmod(0o755)
+    work = tmp_path / "work"
+    work.mkdir()
+    module = tmp_path / "module.so"
+    module.write_bytes(b"\0")
+    log = tmp_path / "nginx-calls.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "TMPDIR": str(work),
+        "FAKE_LOG": str(log),
+    }
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "--module",
+            str(module),
+            "--nginx-version",
+            "1.30.6",
+            "--arch",
+            "amd64",
+            "--out",
+            str(tmp_path / "ledger.json"),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert result.returncode != 0
+    calls = log.read_text(encoding="utf-8").splitlines()
+    assert any(call.endswith("-s quit") for call in calls), calls
+    assert list(work.iterdir()) == []
+    assert not (tmp_path / "ledger.json").exists()
