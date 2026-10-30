@@ -35,6 +35,19 @@ registry, and the FFI ABI version 3 do not change.
   `docs/guides/UPGRADE-TO-0.9.3.md`.
 - A package-name pattern in the release manifest generator for the
   Ubuntu-native DEB, with the suite and package revision in the name.
+- CI compatibility evidence producers in the release workflow. The
+  `nginx-org-evidence` job verifies each shipped module on the nginx.org
+  binary. The debian12 and almalinux9 `smoke-test` legs cover the nginx.org
+  package rows, and `official-nginx-docker.yml` covers the container rows.
+  Each record names the candidate commit and the run.
+- `tools/release/matrix/stage_compatibility_evidence.py`, which stages the
+  run's `compat-evidence-*` artifacts for the release gate.
+- A `container-registry` evidence source kind and
+  `tools/release/matrix/record_container_evidence.py`. A container record
+  names the pinned base image digest and the built image ID.
+- A `require_blocking` input for a manual `release-packages.yml` dispatch.
+- `tools/ci/retry_transient.sh`, which retries a network or registry command
+  up to three times, and only after a transient failure.
 
 ### Changed
 
@@ -52,6 +65,14 @@ registry, and the FFI ABI version 3 do not change.
 - `packaging/matrix.yaml` points at the canonical release matrix instead of
   listing its own version set.
 - The nFPM checksum table contains the `linux-arm64` binary.
+- The release gate validates only the CI evidence records of its own run,
+  with `--require-ci`, `--candidate-sha` and `--workflow-run-url`. It no longer
+  reads the checked-in local records.
+- `official-docker-release-gate` runs before `release-gate`, because the
+  release gate reads its container records. `publish` still waits for both.
+- `official-nginx-docker.yml` builds with `docker buildx build` instead of
+  `docker/build-push-action`, so its registry fetches can retry. The build no
+  longer uses the GitHub Actions layer cache.
 
 ### Fixed
 
