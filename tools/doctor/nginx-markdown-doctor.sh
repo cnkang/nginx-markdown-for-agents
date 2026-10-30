@@ -645,6 +645,7 @@ _rust_toolchain_json() {
     # $7 expected pinned channel
     printf '{"rustc_version":%s,"msrv":"%s","msrv_ok":%s,"repository_checkout":%s,"symlink_chain_bounded":%s,"pinned_channel":%s,"pinned_channel_expected":"%s"}' \
         "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    return 0
 }
 
 check_rust_toolchain() {
