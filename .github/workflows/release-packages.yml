@@ -72,6 +72,14 @@ on:
           package version.
         required: false
         type: string
+      require_blocking:
+        description: >-
+          Add --require-blocking to the compatibility evidence gate on a
+          dispatch run, so every release-blocking matrix row must have a CI
+          record from this run.  Tag runs always require it.
+        required: false
+        type: boolean
+        default: false
 
 # Workflow-level: no permissions granted by default (Req 9.5).
 # Each job declares its own minimum required permissions.
@@ -81,8 +89,18 @@ permissions: {}
 #   - prepare:             Resolve build matrix from tools/release-matrix.json
 #   - build:               Compile Rust library + NGINX dynamic module (matrix)
 #   - package:             Generate .deb/.rpm via nFPM (matrix)
-#   - smoke-test:          Container install + module load verification (matrix)
-#   - release-gate:        Release governance and artifact layout gate
+#   - smoke-test:          Container install + module load verification (matrix);
+#                          the debian12/almalinux9 legs also write nginx.org
+#                          package-row compatibility evidence
+#   - nginx-org-evidence:  Verify each shipped glibc/musl module on the
+#                          nginx.org binary and write a CI evidence record
+#   - ubuntu-native:       Build, verify and package for the Ubuntu archive
+#                          NGINX, and write a CI evidence record
+#   - official-docker-release-gate: Official Docker image build, functional
+#                          check and container-registry evidence record
+#   - release-gate:        Release governance and artifact layout gate; it
+#                          stages and validates this run's compat-evidence-*
+#                          records
 #   - integrity-checksums: SHA256SUMS + release-manifest.json generation
 #   - integrity-signing:   Mandatory GPG package signing for tag releases
 #     (skipped for workflow_dispatch; artifact-only dispatch stays intentional)
@@ -116,6 +134,7 @@ jobs:
       smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
       musl_matrix: ${{ steps.resolve.outputs.musl_matrix }}
       ubuntu_matrix: ${{ steps.resolve.outputs.ubuntu_matrix }}
+      nginx_org_evidence_matrix: ${{ steps.resolve.outputs.nginx_org_evidence_matrix }}
       feature_manifest_digest: ${{ steps.resolve.outputs.feature_manifest_digest }}
     steps:
       - name: Checkout
@@ -248,6 +267,7 @@ jobs:
                   {"container": "debian:12", "arch": "amd64"},
                   {"container": "ubuntu:22.04", "arch": "arm64"},
                   {"container": "ubuntu:24.04", "arch": "arm64", "min_version": (1, 26, 0)},
+                  {"container": "debian:12", "arch": "arm64"},
               ],
               "rpm": [
                   {"container": "almalinux:9", "arch": "amd64"},
@@ -257,6 +277,20 @@ jobs:
 
           def smoke_version_tuple(value):
               return tuple(int(part) for part in value.split("."))
+
+          # Release-blocking nginx.org package rows.  The matching smoke leg
+          # writes the row's CI compatibility evidence record, so every row
+          # needs exactly one leg.
+          evidence_distros = {"debian:12": "debian12", "almalinux:9": "almalinux9"}
+          package_rows = {
+              (e["nginx_version"], e["os"], package_arch(e["target"]))
+              for e in data.get("entries", [])
+              if e.get("owner_workflow") == owner
+              and e.get("source") == "nginx.org"
+              and e.get("support_tier") == "supported"
+              and e.get("release_blocking") is True
+              and e.get("artifact_type") in ("deb-package", "rpm-package")
+          }
 
           smoke_matrix = []
           for package_entry in package_matrix:
@@ -269,12 +303,29 @@ jobs:
                       minimum = entry.get("min_version")
                       if minimum is not None and smoke_version_tuple(version) < minimum:
                           continue
+                      distro = evidence_distros.get(entry["container"], "")
+                      if (version, distro, arch) not in package_rows:
+                          distro = ""
                       smoke_matrix.append({
                           "container": entry["container"],
                           "format": fmt,
                           "nginx_version": version,
                           "arch": arch,
+                          "evidence_distro": distro,
                       })
+
+          covered_rows = {
+              (e["nginx_version"], e["evidence_distro"], e["arch"])
+              for e in smoke_matrix
+              if e["evidence_distro"]
+          }
+          missing_rows = sorted(package_rows - covered_rows)
+          if missing_rows:
+              print(
+                  "ERROR: release-blocking nginx.org package rows have no "
+                  f"smoke-test evidence leg: {missing_rows}"
+              )
+              raise SystemExit(1)
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"nginx_versions={json.dumps(versions)}\n")
@@ -324,6 +375,50 @@ jobs:
                   print("ERROR: No musl dynamic-module entries found in tools/release-matrix.json for this workflow's ownership")
                   raise SystemExit(1)
 
+              # nginx.org dynamic-module evidence matrix: one leg for every
+              # release-blocking linux module row.  Each leg verifies the
+              # module that this run built and ships, so a row without a
+              # matching build or musl-build leg fails here.
+              nginx_org_evidence_entries = sorted(
+                  [
+                      {
+                          "nginx_version": e["nginx_version"],
+                          "libc": e["libc"],
+                          "arch": package_arch(e["target"]),
+                          "musl_arch": "x86_64" if package_arch(e["target"]) == "amd64" else "aarch64",
+                      }
+                      for e in data.get("entries", [])
+                      if e.get("owner_workflow") == owner
+                      and e.get("source") == "nginx.org"
+                      and e.get("support_tier") == "supported"
+                      and e.get("artifact_type") == "dynamic-module"
+                      and e.get("release_blocking") is True
+                      and e.get("os") == "linux"
+                  ],
+                  key=lambda e: (
+                      tuple(int(p) for p in e["nginx_version"].split(".")),
+                      e["libc"],
+                      e["arch"],
+                  ),
+              )
+              built = {(e["nginx_version"], e["arch"]) for e in package_matrix}
+              musl_built = {(e["nginx_version"], e["arch"]) for e in musl_entries}
+              if not nginx_org_evidence_entries:
+                  print("ERROR: No release-blocking nginx.org dynamic-module rows found")
+                  raise SystemExit(1)
+              for e in nginx_org_evidence_entries:
+                  key = (e["nginx_version"], e["arch"])
+                  produced = built if e["libc"] == "glibc" else musl_built
+                  if key not in produced:
+                      print(
+                          f"ERROR: nginx.org {e['libc']} row {key} has no build "
+                          "leg in this workflow"
+                      )
+                      raise SystemExit(1)
+              out.write(
+                  f"nginx_org_evidence_matrix={json.dumps(nginx_org_evidence_entries)}\n"
+              )
+
           # Ubuntu-native matrix: distro rows that this workflow owns and
           # that block a release.  The exact package revision recorded in the
           # row's provenance reference is the revision the build must use; a
@@ -364,6 +459,7 @@ jobs:
           print(f"Smoke test matrix: {len(smoke_matrix)} entries")
           print(f"Musl dynamic-module matrix: {len(musl_entries)} entries")
           print(f"Ubuntu-native matrix: {len(ubuntu_entries)} entries")
+          print(f"nginx.org evidence matrix: {len(nginx_org_evidence_entries)} entries")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"ubuntu_matrix={json.dumps(ubuntu_entries)}\n")
           PY
@@ -512,7 +608,7 @@ jobs:
         run: |
           NGINX_TARBALL="nginx-${NGINX_VERSION}.tar.gz"
           NGINX_URL="https://nginx.org/download/${NGINX_TARBALL}"
-          curl -fsSL -o "${NGINX_TARBALL}" "${NGINX_URL}"
+          bash tools/ci/retry_transient.sh -- curl -fsSL -o "${NGINX_TARBALL}" "${NGINX_URL}"
           chmod +x packaging/scripts/verify-checksum.sh
           packaging/scripts/verify-checksum.sh \
             -f "${NGINX_TARBALL}" \
@@ -768,6 +864,230 @@ jobs:
           retention-days: 5
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # nginx.org Evidence Job: verify each shipped module on the nginx.org binary
+  # Downloads the module that this run built (glibc build job or musl-build
+  # job), loads it into the official nginx.org build of the same version, and
+  # writes one CI compatibility evidence record bound to github.sha and this
+  # run.  The release gate validates only these staged records.
+  # Hosts: glibc legs run the AlmaLinux 9 build image (the oldest supported
+  # glibc) with the nginx.org RPM; musl legs run the official
+  # nginx:<version>-alpine image.  The official Debian image for 1.24.0 is
+  # Debian 11 (glibc 2.31), which is below the supported runtime baseline.
+  # ─────────────────────────────────────────────────────────────────────────────
+  nginx-org-evidence:
+    name: nginx.org Evidence - ${{ matrix.nginx_version }} - ${{ matrix.libc }} - ${{ matrix.arch }}
+    needs: [prepare, build, musl-build]
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.nginx_org_evidence_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate evidence leg identity
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          MUSL_ARCH: ${{ matrix.musl_arch }}
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
+          if [[ "${checkout_sha}" != "${CANDIDATE_SHA}" ]]; then
+            echo "ERROR: checkout ${checkout_sha} does not match candidate ${CANDIDATE_SHA}" >&2
+            exit 1
+          fi
+          if [[ ! "${NGINX_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: invalid NGINX version ${NGINX_VERSION}" >&2
+            exit 1
+          fi
+          case "${MATRIX_LIBC}" in
+            glibc|musl) ;;
+            *)
+              echo "ERROR: invalid libc ${MATRIX_LIBC}" >&2
+              exit 1
+              ;;
+          esac
+          # The record claims a native run, so the runner must match the
+          # leg's architecture.
+          case "${MATRIX_ARCH}:${MUSL_ARCH}:$(uname -m)" in
+            amd64:x86_64:x86_64|arm64:aarch64:aarch64) ;;
+            *)
+              echo "ERROR: leg ${MATRIX_ARCH}/${MUSL_ARCH} does not run natively on $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+        shell: bash
+
+      - name: Download glibc module artifact
+        if: matrix.libc == 'glibc'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: module-so-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/evidence-input/raw
+
+      - name: Download musl module tarball
+        if: matrix.libc == 'musl'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pkg-musl-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/evidence-input/raw
+
+      - name: Stage the shipped module
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MUSL_ARCH: ${{ matrix.musl_arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/evidence-input/module dist/evidence-output
+          target="dist/evidence-input/module/ngx_http_markdown_filter_module.so"
+          if [[ "${MATRIX_LIBC}" == "glibc" ]]; then
+            source_module="dist/evidence-input/raw/ngx_http_markdown_filter_module.so"
+            if [[ ! -f "${source_module}" || -L "${source_module}" ]]; then
+              echo "ERROR: ${source_module} is missing or not a regular file" >&2
+              exit 1
+            fi
+            install -m 0644 "${source_module}" "${target}"
+          else
+            tarball="dist/evidence-input/raw/ngx_http_markdown_filter_module-${NGINX_VERSION}-musl-${MUSL_ARCH}.tar.gz"
+            if [[ ! -f "${tarball}" || -L "${tarball}" ]]; then
+              echo "ERROR: ${tarball} is missing or not a regular file" >&2
+              exit 1
+            fi
+            members="$(tar -tzf "${tarball}")"
+            if [[ "${members}" != "ngx_http_markdown_filter_module.so" ]]; then
+              echo "ERROR: ${tarball} must hold only ngx_http_markdown_filter_module.so" >&2
+              exit 1
+            fi
+            tar -xzf "${tarball}" -C dist/evidence-input/module ngx_http_markdown_filter_module.so
+          fi
+          sha256sum "${target}"
+        shell: bash
+
+      - name: Start the nginx.org verification host
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+        run: |
+          set -euo pipefail
+          # The glibc host is the pinned AlmaLinux 9 build image, the oldest
+          # supported glibc runtime.  The musl host is the official image.
+          if [[ "${MATRIX_LIBC}" == "glibc" ]]; then
+            image="almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
+          else
+            image="nginx:${NGINX_VERSION}-alpine"
+          fi
+          bash tools/ci/retry_transient.sh -- docker pull "${image}"
+          resolved="$(docker image inspect --format '{{index .RepoDigests 0}}' "${image}")"
+          if [[ ! "${resolved}" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: cannot resolve a digest for ${image}" >&2
+            exit 1
+          fi
+          echo "Verification host: \`${resolved}\`" >> "${GITHUB_STEP_SUMMARY}"
+          # Run by digest, so the host cannot move between pull and run.
+          docker run -d --name nginx-org-host \
+            -v "${GITHUB_WORKSPACE}:/work:ro" \
+            -v "${GITHUB_WORKSPACE}/dist/evidence-output:/out" \
+            --entrypoint sh "${resolved}" \
+            -c 'while :; do sleep 3600; done'
+        shell: bash
+
+      - name: Install the nginx.org binary and verifier tools
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+        run: |
+          set -euo pipefail
+          if [[ "${MATRIX_LIBC}" == "musl" ]]; then
+            # readelf (binutils) is required: without it static_brotli is
+            # SKIP and the record cannot support a release promise.
+            bash tools/ci/retry_transient.sh -- docker exec nginx-org-host \
+              apk add --no-cache bash python3 binutils libgcc curl
+          else
+            # nginx.org publishes even minors in stable and odd minors in
+            # mainline (same rule as smoke-test-basic.sh).
+            minor="$(printf '%s' "${NGINX_VERSION}" | cut -d. -f2)"
+            channel=""
+            if [[ $((minor % 2)) -ne 0 ]]; then
+              channel="mainline/"
+            fi
+            docker exec -e CHANNEL="${channel}" nginx-org-host sh -c \
+              'printf "[nginx-org]\nname=nginx.org\nbaseurl=https://nginx.org/packages/%scentos/\$releasever/\$basearch/\ngpgcheck=1\nenabled=1\ngpgkey=https://nginx.org/keys/nginx_signing.key\nmodule_hotfixes=true\n" "${CHANNEL}" > /etc/yum.repos.d/nginx.repo'
+            bash tools/ci/retry_transient.sh -- docker exec nginx-org-host \
+              dnf install -y python3 binutils "nginx-${NGINX_VERSION}"
+          fi
+        shell: bash
+
+      - name: Verify the module on the nginx.org binary
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # Not retried: a verifier failure is a real compatibility failure.
+          docker exec nginx-org-host bash /work/packaging/scripts/verify-nginx-org-module.sh \
+            --module /work/dist/evidence-input/module/ngx_http_markdown_filter_module.so \
+            --nginx-version "${NGINX_VERSION}" \
+            --arch "${MATRIX_ARCH}" \
+            --libc "${MATRIX_LIBC}" \
+            --out /out/ledger.json
+        shell: bash
+
+      - name: Write compatibility evidence record
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # The glibc module comes from this workflow's build job; the musl
+          # module comes from tools/build_release.sh (Dockerfile.musl).
+          if [[ "${MATRIX_LIBC}" == "glibc" ]]; then
+            builder="release-packages-build"
+          else
+            builder="build-release-dockerfile"
+          fi
+          python3 tools/release/matrix/record_nginx_org_evidence.py \
+            --build-dir dist/evidence-input/module \
+            --ledger dist/evidence-output/ledger.json \
+            --nginx-version "${NGINX_VERSION}" \
+            --libc "${MATRIX_LIBC}" \
+            --arch "${MATRIX_ARCH}" \
+            --out "dist/compat-evidence/nginx.org-${NGINX_VERSION}-${MATRIX_LIBC}-${MATRIX_ARCH}.json" \
+            --source-sha "${CANDIDATE_SHA}" \
+            --verified-by "ci:release-packages/nginx-org-evidence" \
+            --workflow-run-url "${RUN_URL}" \
+            --execution native \
+            --builder "${builder}"
+        shell: bash
+
+      - name: Stop the verification host
+        if: always()
+        run: docker rm -f nginx-org-host >/dev/null 2>&1 || true
+        shell: bash
+
+      - name: Upload compatibility evidence record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-evidence-nginx-org-${{ matrix.nginx_version }}-${{ matrix.libc }}-${{ matrix.arch }}
+          path: dist/compat-evidence/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
   # packages following 0.9.x release package naming and layout conventions.
@@ -800,7 +1120,7 @@ jobs:
           NFPM_VERSION="2.46.3"
           NFPM_TARBALL="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
           NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NFPM_TARBALL}"
-          curl -fsSL -o "${NFPM_TARBALL}" "${NFPM_URL}"
+          bash tools/ci/retry_transient.sh -- curl -fsSL -o "${NFPM_TARBALL}" "${NFPM_URL}"
           chmod +x packaging/scripts/verify-checksum.sh
           packaging/scripts/verify-checksum.sh \
             -f "${NFPM_TARBALL}" \
@@ -1052,6 +1372,89 @@ jobs:
           packaging/scripts/smoke-test-basic.sh "${PKG_FILE}" "${NGINX_VERSION}"
         shell: bash
 
+      # The debian12 and almalinux9 legs back the release-blocking nginx.org
+      # DEB/RPM rows.  They reinstall the package (the smoke test removes it
+      # at the end), verify the installed module on the installed nginx.org
+      # binary, and write one CI evidence record bound to this run.
+      - name: Write nginx.org package-row evidence
+        if: matrix.evidence_distro != ''
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          PACKAGE_FORMAT: ${{ matrix.format }}
+          EVIDENCE_DISTRO: ${{ matrix.evidence_distro }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          case "${EVIDENCE_DISTRO}:${PACKAGE_FORMAT}" in
+            debian12:deb)
+              bash tools/ci/retry_transient.sh -- apt-get update -qq
+              bash tools/ci/retry_transient.sh -- env DEBIAN_FRONTEND=noninteractive \
+                apt-get install -y -qq --no-install-recommends python3 binutils curl
+              ;;
+            almalinux9:rpm)
+              bash tools/ci/retry_transient.sh -- dnf install -y python3 binutils
+              ;;
+            *)
+              echo "ERROR: no evidence rule for ${EVIDENCE_DISTRO}/${PACKAGE_FORMAT}" >&2
+              exit 1
+              ;;
+          esac
+          PKG_FILE="$(find dist/ -name "*.${PACKAGE_FORMAT}" -print -quit)"
+          if [[ -z "${PKG_FILE}" ]]; then
+            echo "ERROR: No .${PACKAGE_FORMAT} file found in dist/" >&2
+            exit 1
+          fi
+          if [[ "${PACKAGE_FORMAT}" == "deb" ]]; then
+            dpkg -i "${PKG_FILE}"
+          else
+            bash tools/ci/retry_transient.sh -- dnf install -y "${PKG_FILE}"
+          fi
+          modules_path="$(nginx -V 2>&1 | tr ' ' '\n' | sed -n 's/^--modules-path=//p' | head -n 1)"
+          if [[ -z "${modules_path}" ]]; then
+            echo "ERROR: installed nginx reports no --modules-path" >&2
+            exit 1
+          fi
+          module="${modules_path}/ngx_http_markdown_filter_module.so"
+          if [[ ! -f "${module}" ]]; then
+            echo "ERROR: package did not install ${module}" >&2
+            exit 1
+          fi
+          mkdir -p dist/evidence-input/module dist/evidence-output
+          install -m 0644 "${module}" dist/evidence-input/module/ngx_http_markdown_filter_module.so
+          # Not retried: a verifier failure is a real compatibility failure.
+          bash packaging/scripts/verify-nginx-org-module.sh \
+            --module dist/evidence-input/module/ngx_http_markdown_filter_module.so \
+            --nginx-version "${NGINX_VERSION}" \
+            --arch "${MATRIX_ARCH}" \
+            --libc glibc \
+            --port 18181 \
+            --out dist/evidence-output/ledger.json
+          python3 tools/release/matrix/record_nginx_org_evidence.py \
+            --build-dir dist/evidence-input/module \
+            --ledger dist/evidence-output/ledger.json \
+            --nginx-version "${NGINX_VERSION}" \
+            --libc glibc \
+            --arch "${MATRIX_ARCH}" \
+            --distro "${EVIDENCE_DISTRO}" \
+            --out "dist/compat-evidence/nginx.org-${NGINX_VERSION}-${EVIDENCE_DISTRO}-${MATRIX_ARCH}.json" \
+            --source-sha "${CANDIDATE_SHA}" \
+            --verified-by "ci:release-packages/smoke-test" \
+            --workflow-run-url "${RUN_URL}" \
+            --execution native \
+            --builder release-packages-build
+        shell: bash
+
+      - name: Upload nginx.org package-row evidence
+        if: matrix.evidence_distro != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-evidence-pkg-${{ matrix.evidence_distro }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/compat-evidence/*.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Diagnostics on failure
         if: failure()
         env:
@@ -1180,7 +1583,7 @@ jobs:
           esac
           NFPM_TARBALL="nfpm_${NFPM_VERSION}_Linux_${NFPM_ARCH}.tar.gz"
           NFPM_URL="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NFPM_TARBALL}"
-          curl -fsSL -o "${NFPM_TARBALL}" "${NFPM_URL}"
+          bash tools/ci/retry_transient.sh -- curl -fsSL -o "${NFPM_TARBALL}" "${NFPM_URL}"
           chmod +x packaging/scripts/verify-checksum.sh
           packaging/scripts/verify-checksum.sh \
             -f "${NFPM_TARBALL}" \
@@ -1260,27 +1663,40 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MATRIX_SUITE: ${{ matrix.suite }}
+          MATRIX_NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           # The composer is unit tested and recomputes the totals from the
           # test ledger, so a ledger with a failed check cannot be written as
-          # a passing record.
+          # a passing record.  The file name carries the suite, version and
+          # architecture, so no two legs write the same record name.
+          suite_slug="$(printf '%s' "${MATRIX_SUITE}" | tr -d .)"
           python3 tools/release/matrix/record_ubuntu_evidence.py \
             --build dist/ubuntu-native/ubuntu-native-build.json \
             --ledger dist/ubuntu-native/ubuntu-native-ledger.json \
-            --out dist/ubuntu-native/compatibility-evidence.json \
+            --out "dist/compat-evidence/ubuntu-${suite_slug}-${MATRIX_NGINX_VERSION}-${MATRIX_ARCH}.json" \
             --source-sha "${CANDIDATE_SHA}" \
             --verified-by "ci:release-packages/ubuntu-native" \
             --workflow-run-url "${RUN_URL}"
         shell: bash
 
-      - name: Upload Ubuntu-native package and evidence
+      - name: Upload Ubuntu-native package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pkg-deb-ubuntu-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            dist/*.deb
-            dist/ubuntu-native/compatibility-evidence.json
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+      # The record has its own artifact, so package downloads that merge
+      # pkg-deb-* never carry it and the release gate stages it by name.
+      - name: Upload Ubuntu-native compatibility evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-evidence-ubuntu-${{ matrix.os }}-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/compat-evidence/*.json
           if-no-files-found: error
           retention-days: 7
 
@@ -1295,7 +1711,11 @@ jobs:
     # The final evidence generation reads the fuzz qualification record this
     # separate job produces, and artifacts only cross jobs after the producer
     # finishes; the release gate therefore waits for the fuzz qualification.
-    needs: [prepare, smoke-test, ubuntu-native, fuzz-qualification]
+    # The compatibility evidence gate reads the compat-evidence-* records of
+    # this run, so every producer must finish first: smoke-test (package
+    # rows), ubuntu-native, nginx-org-evidence (module rows) and
+    # official-docker-release-gate (container rows).
+    needs: [prepare, smoke-test, ubuntu-native, nginx-org-evidence, official-docker-release-gate, fuzz-qualification]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     # This environment supplies the independent candidate promotion anchor and
@@ -1419,8 +1839,8 @@ jobs:
 
       - name: Install release gate dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends \
             apache2-utils \
             build-essential \
             dpkg-dev \
@@ -1662,7 +2082,7 @@ jobs:
       - name: Install pinned Helm for manifest validation
         run: |
           set -euo pipefail
-          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+          bash tools/ci/retry_transient.sh -- curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
             -fsSLo /tmp/helm.tgz \
             "https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz"
           echo "a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496  /tmp/helm.tgz" \
@@ -1705,6 +2125,22 @@ jobs:
             exit 1
           }
         shell: bash
+      - name: Download CI compatibility evidence
+        # One subdirectory per artifact (no merge-multiple), so a record name
+        # collision between two producers cannot silently overwrite a record;
+        # the staging step below rejects it instead.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: compat-evidence-*
+          path: ${{ runner.temp }}/compat-evidence-download
+      - name: Stage CI compatibility evidence
+        # Copies one regular .json per artifact into a fresh flat directory
+        # after layout, symlink, containment (Rule 54) and collision checks.
+        run: |
+          python3 tools/release/matrix/stage_compatibility_evidence.py \
+            --source "${RUNNER_TEMP}/compat-evidence-download" \
+            --dest "${RUNNER_TEMP}/compat-evidence"
+        shell: bash
 
       - name: Run release gates
         env:
@@ -1718,6 +2154,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_GATE_EXPECTED_CARGO_VERSION: ${{ env.RELEASE_VERSION }}
           RELEASE_GATE_EXPECTED_VERSION: ${{ env.RELEASE_VERSION }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REQUIRE_BLOCKING_INPUT: ${{ inputs.require_blocking }}
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
@@ -1783,12 +2221,19 @@ jobs:
           python3 tools/release/gates/validate_fuzz_packaging.py
           python3 tools/release/gates/validate_release_metadata.py \
             --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
-          # Compatibility evidence must cover every release-blocking row
-          # before a tag publishes.  A dispatch keeps the CI-only rule so a
-          # dry run can exercise the pipeline while rows are still pending.
-          EVIDENCE_ARGS=(--require-ci)
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            EVIDENCE_ARGS+=(--require-blocking --candidate-sha "${GITHUB_SHA}")
+          # Compatibility evidence comes only from this run's producer jobs,
+          # staged above.  Every record must be a CI record for this commit
+          # and this run; the checked-in local records under docs/evidence
+          # never satisfy this gate.  A tag must cover every release-blocking
+          # row; a dispatch adds that check when require_blocking is true.
+          EVIDENCE_ARGS=(
+            --evidence-dir "${RUNNER_TEMP}/compat-evidence"
+            --require-ci
+            --candidate-sha "${GITHUB_SHA}"
+            --workflow-run-url "${RUN_URL}"
+          )
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" || "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then
+            EVIDENCE_ARGS+=(--require-blocking)
           fi
           PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
             "${EVIDENCE_ARGS[@]}"
@@ -2023,10 +2468,13 @@ jobs:
   # The official Docker matrix is release-blocking for Docker artifacts in
   # tools/release-matrix.json. Call the reusable workflow with this exact
   # candidate SHA so publish cannot proceed on an independently triggered,
-  # stale, or merely related Docker validation run.
+  # stale, or merely related Docker validation run.  The called workflow also
+  # writes the container-registry evidence records that release-gate stages,
+  # so this job runs before release-gate (not after it); publish still needs
+  # both jobs.
   official-docker-release-gate:
     name: Official NGINX Docker Release Gate
-    needs: [release-gate, fuzz-qualification]
+    needs: [prepare, fuzz-qualification]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     # The called workflow's jobs request contents: read, so this calling job
     # must grant it: a call cannot exceed the calling job's permissions.
@@ -2340,14 +2788,14 @@ jobs:
       - name: Install package signing tools
         run: |
           set -euo pipefail
-          sudo apt-get update
+          bash tools/ci/retry_transient.sh -- sudo apt-get update
           # gnupg brings gpg and gpg-agent, which carries gpg-preset-passphrase;
           # gnupg2 supplies the /usr/bin/gpg2 alias that rpm's built-in %__gpg
           # names.  sign-packages.sh also passes %__gpg explicitly, so signing
           # does not depend on that alias.  debsigs is the DEB signing tool
           # every supported release packages: dpkg-sig left Ubuntu after 22.04,
           # so there is nothing to fall back to and one signature format.
-          sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2 debsigs
+          bash tools/ci/retry_transient.sh -- sudo apt-get install -y --no-install-recommends rpm gnupg gnupg2 debsigs
         shell: bash
 
       - name: Sign DEB and RPM packages

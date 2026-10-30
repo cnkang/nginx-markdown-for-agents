@@ -587,18 +587,6 @@ def _has_matrix_loader_call(tree: ast.AST) -> bool:
     return False
 
 
-def _build_args(value: object) -> dict[str, str]:
-    """Parse the bounded key/value build-argument block."""
-    if not isinstance(value, str):
-        return {}
-    result: dict[str, str] = {}
-    for line in value.splitlines():
-        key, separator, argument = line.partition("=")
-        if separator:
-            result[key.strip()] = argument.strip()
-    return result
-
-
 def _validate_prepare_job(jobs: dict[str, object]) -> list[str]:
     """Validate the executable matrix resolver job."""
     errors: list[str] = []
@@ -614,8 +602,31 @@ def _validate_prepare_job(jobs: dict[str, object]) -> list[str]:
     return errors
 
 
+OFFICIAL_DOCKER_BUILD_ENV: dict[str, str] = {
+    "IMAGE_NAME": "nginx-markdown-official-check:${{ matrix.docker_tag }}",
+    "BASE_NAME": "${{ matrix.image_ref }}",
+    "BASE_DIGEST": "${{ matrix.image_digest }}",
+    "MODULE_REPO": "${{ steps.source.outputs.repo }}",
+    "MODULE_REF": "${{ steps.source.outputs.ref }}",
+    "MODULE_SHA": "${{ steps.source.outputs.sha }}",
+}
+# The shell build must pass every matrix-bound value from the step env.
+OFFICIAL_DOCKER_BUILD_ARGS: tuple[str, ...] = (
+    '--tag "${IMAGE_NAME}"',
+    '--build-arg "NGINX_IMAGE=${BASE_NAME}@${BASE_DIGEST}"',
+    '--build-arg "MODULE_REPO=${MODULE_REPO}"',
+    '--build-arg "MODULE_REF=${MODULE_REF}"',
+    '--build-arg "MODULE_SHA=${MODULE_SHA}"',
+)
+OFFICIAL_DOCKER_BUILD_COMMAND = "bash tools/ci/retry_transient.sh -- docker buildx build"
+
+
 def _validate_build_step(build: dict[str, object]) -> list[str]:
     """Validate that the official Docker build step uses matrix-bound tags and required build arguments.
+
+    The step is a shell ``docker buildx build`` that runs through
+    ``tools/ci/retry_transient.sh``, so a transient registry failure can retry.
+    Every matrix value reaches the build through the step env.
 
     Parameters:
         build (dict[str, object]): The parsed `build-and-verify` job definition.
@@ -628,22 +639,22 @@ def _validate_build_step(build: dict[str, object]) -> list[str]:
     )
     if build_step is None:
         return ["build-and-verify is missing the official Docker build step"]
-    with_values = build_step.get("with")
-    if not isinstance(with_values, dict):
-        return ["official Docker build step must define its inputs"]
+    env = build_step.get("env")
+    run = build_step.get("run")
+    if not isinstance(env, dict) or not isinstance(run, str):
+        return ["official Docker build step must define its env and run script"]
     errors: list[str] = []
-    if with_values.get("tags") != "nginx-markdown-official-check:${{ matrix.docker_tag }}":
-        errors.append("official Docker build tag must use matrix.docker_tag")
-    build_args = _build_args(with_values.get("build-args"))
-    required_args = {
-        "NGINX_IMAGE": "${{ matrix.image_ref }}@${{ matrix.image_digest }}",
-        "MODULE_REPO": "${{ steps.source.outputs.repo }}",
-        "MODULE_REF": "${{ steps.source.outputs.ref }}",
-        "MODULE_SHA": "${{ steps.source.outputs.sha }}",
-    }
-    for key, expected in required_args.items():
-        if build_args.get(key) != expected:
-            errors.append(f"official Docker build args must preserve {key}")
+    if OFFICIAL_DOCKER_BUILD_COMMAND not in run:
+        errors.append(
+            "official Docker build must run docker buildx build through "
+            "tools/ci/retry_transient.sh"
+        )
+    for key, expected in OFFICIAL_DOCKER_BUILD_ENV.items():
+        if env.get(key) != expected:
+            errors.append(f"official Docker build env must bind {key}")
+    for argument in OFFICIAL_DOCKER_BUILD_ARGS:
+        if argument not in run:
+            errors.append(f"official Docker build must pass {argument}")
     return errors
 
 

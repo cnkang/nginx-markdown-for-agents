@@ -39,6 +39,11 @@ on:
       - "tools/release-matrix.json"
       - "tools/release/matrix/official_docker_matrix.py"
       - "tools/ci/verify_official_nginx_docker.sh"
+      - "tools/ci/retry_transient.sh"
+      - "packaging/scripts/verify-nginx-org-module.sh"
+      - "tools/release/matrix/record_container_evidence.py"
+      - "tools/release/matrix/record_nginx_org_evidence.py"
+      - "tools/release/matrix/evidence_contract.py"
       - ".github/workflows/official-nginx-docker.yml"
   pull_request:
     branches: [main, master]
@@ -53,6 +58,11 @@ on:
       - "tools/release-matrix.json"
       - "tools/release/matrix/official_docker_matrix.py"
       - "tools/ci/verify_official_nginx_docker.sh"
+      - "tools/ci/retry_transient.sh"
+      - "packaging/scripts/verify-nginx-org-module.sh"
+      - "tools/release/matrix/record_container_evidence.py"
+      - "tools/release/matrix/record_nginx_org_evidence.py"
+      - "tools/release/matrix/evidence_contract.py"
       - ".github/workflows/official-nginx-docker.yml"
 
 permissions: {}
@@ -164,28 +174,40 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
+      # A shell build instead of docker/build-push-action, so the registry
+      # and frontend fetches can go through tools/ci/retry_transient.sh.  The
+      # helper retries only transient registry or network failures (for
+      # example a Docker Hub 502 on the docker/dockerfile frontend pull); a
+      # compile failure fails on the first attempt.  The GitHub Actions layer
+      # cache is not used: a run step cannot reach the runtime cache token.
       - name: Build from source on official nginx base
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: ./examples/docker/Dockerfile.official-nginx-source-build
-          load: true
-          tags: nginx-markdown-official-check:${{ matrix.docker_tag }}
+        env:
+          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.docker_tag }}
+          BASE_NAME: ${{ matrix.image_ref }}
+          BASE_DIGEST: ${{ matrix.image_digest }}
+          MODULE_REPO: ${{ steps.source.outputs.repo }}
+          MODULE_REF: ${{ steps.source.outputs.ref }}
+          MODULE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
           # Self-attestation for the reused-image verification: the
           # --skip-build path reads these OCI labels back via `docker image
           # inspect` and only claims the matrix binding when the revision and
           # base digest match.  Without the labels that step fails closed.
-          labels: |
-            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
-            org.opencontainers.image.base.name=${{ matrix.image_ref }}
-            org.opencontainers.image.base.digest=${{ matrix.image_digest }}
-          build-args: |
-            NGINX_IMAGE=${{ matrix.image_ref }}@${{ matrix.image_digest }}
-            MODULE_REPO=${{ steps.source.outputs.repo }}
-            MODULE_REF=${{ steps.source.outputs.ref }}
-            MODULE_SHA=${{ steps.source.outputs.sha }}
-          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
-          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
+          bash tools/ci/retry_transient.sh -- docker buildx build \
+            --load \
+            --progress plain \
+            --file ./examples/docker/Dockerfile.official-nginx-source-build \
+            --tag "${IMAGE_NAME}" \
+            --label "org.opencontainers.image.revision=${MODULE_SHA}" \
+            --label "org.opencontainers.image.base.name=${BASE_NAME}" \
+            --label "org.opencontainers.image.base.digest=${BASE_DIGEST}" \
+            --build-arg "NGINX_IMAGE=${BASE_NAME}@${BASE_DIGEST}" \
+            --build-arg "MODULE_REPO=${MODULE_REPO}" \
+            --build-arg "MODULE_REF=${MODULE_REF}" \
+            --build-arg "MODULE_SHA=${MODULE_SHA}" \
+            .
+        shell: bash
 
       - name: Verify runtime behavior
         env:
@@ -219,6 +241,91 @@ jobs:
             --module-sha "${MODULE_SHA}" \
             --artifact-dir "${ARTIFACT_DIR}" \
             --port "${JOB_PORT}"
+
+      # Container-registry compatibility evidence.  The verifier runs inside
+      # the image that this job built, on its own private prefix and port,
+      # and the record binds the pinned base digest, the built image ID, the
+      # module copied out of the image, the candidate SHA and this run.
+      # release-packages.yml stages the record in its release gate.
+      - name: Write container compatibility evidence
+        env:
+          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.docker_tag }}
+          EXPECTED_NGINX_VERSION: ${{ matrix.nginx_version }}
+          IMAGE_REFERENCE: ${{ matrix.image_ref }}
+          IMAGE_DIGEST: ${{ matrix.image_digest }}
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          MODULE_SHA: ${{ steps.source.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          case "${MATRIX_ARCH}:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *)
+              echo "ERROR: ${MATRIX_ARCH} evidence must run natively, found $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "${MATRIX_OS}" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
+            echo "ERROR: invalid matrix os ${MATRIX_OS}" >&2
+            exit 1
+          fi
+          built_image_id="$(docker image inspect --format '{{.Id}}' "${IMAGE_NAME}")"
+          mkdir -p dist/evidence-input/module dist/evidence-output dist/compat-evidence
+          container="container-evidence-${RANDOM}"
+          cleanup() {
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+            return 0
+          }
+          trap cleanup EXIT
+          docker run -d --name "${container}" --user 0 \
+            -v "${GITHUB_WORKSPACE}:/work:ro" \
+            -v "${GITHUB_WORKSPACE}/dist/evidence-output:/out" \
+            --entrypoint sh "${IMAGE_NAME}" -c 'while :; do sleep 3600; done'
+          docker cp "${container}:/etc/nginx/modules/ngx_http_markdown_filter_module.so" \
+            dist/evidence-input/module/ngx_http_markdown_filter_module.so
+          # readelf (binutils) is required: without it static_brotli is SKIP
+          # and the record cannot support a release promise.
+          if [[ "${MATRIX_LIBC}" == "musl" ]]; then
+            bash tools/ci/retry_transient.sh -- docker exec "${container}" \
+              apk add --no-cache bash python3 binutils curl
+          else
+            bash tools/ci/retry_transient.sh -- docker exec "${container}" apt-get update
+            bash tools/ci/retry_transient.sh -- docker exec -e DEBIAN_FRONTEND=noninteractive \
+              "${container}" apt-get install -y --no-install-recommends python3 binutils curl
+          fi
+          # Not retried: a verifier failure is a real compatibility failure.
+          docker exec "${container}" bash /work/packaging/scripts/verify-nginx-org-module.sh \
+            --module /etc/nginx/modules/ngx_http_markdown_filter_module.so \
+            --nginx-version "${EXPECTED_NGINX_VERSION}" \
+            --arch "${MATRIX_ARCH}" \
+            --libc "${MATRIX_LIBC}" \
+            --port 18181 \
+            --out /out/ledger.json
+          python3 tools/release/matrix/record_container_evidence.py \
+            --module-dir dist/evidence-input/module \
+            --ledger dist/evidence-output/ledger.json \
+            --nginx-version "${EXPECTED_NGINX_VERSION}" \
+            --libc "${MATRIX_LIBC}" \
+            --arch "${MATRIX_ARCH}" \
+            --distro "${MATRIX_OS}" \
+            --image-reference "${IMAGE_REFERENCE}" \
+            --image-digest "${IMAGE_DIGEST}" \
+            --built-image-id "${built_image_id}" \
+            --out "dist/compat-evidence/container-${EXPECTED_NGINX_VERSION}-${MATRIX_OS}-${MATRIX_LIBC}-${MATRIX_ARCH}.json" \
+            --source-sha "${MODULE_SHA}" \
+            --verified-by "ci:official-nginx-docker/build-and-verify" \
+            --workflow-run-url "${RUN_URL}"
+        shell: bash
+
+      - name: Upload container compatibility evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-evidence-container-${{ matrix.nginx_version }}-${{ matrix.os }}-${{ matrix.libc }}-${{ matrix.arch }}
+          path: dist/compat-evidence/*.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload failure artifacts
         if: failure()

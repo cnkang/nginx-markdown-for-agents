@@ -671,3 +671,60 @@ class TestParseBlockNeeds:
     def test_glued_scalar_is_not_a_sequence_item(self) -> None:
         lines = ["    needs:", "      -build"]
         assert _parse_block_needs(lines, 0, 4) == set()
+
+
+def _official_build_job() -> dict:
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[4]
+    workflow = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "official-nginx-docker.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    return workflow["jobs"]["build-and-verify"]
+
+
+def test_official_docker_shell_build_step_is_accepted() -> None:
+    from validate_workflow_matrix_consumers import (  # pylint: disable=import-error
+        _validate_build_step,
+    )
+
+    assert _validate_build_step(_official_build_job()) == []
+
+
+def test_official_docker_build_without_the_retry_helper_is_rejected() -> None:
+    from validate_workflow_matrix_consumers import (  # pylint: disable=import-error
+        _validate_build_step,
+    )
+
+    job = _official_build_job()
+    for step in job["steps"]:
+        if step.get("name") == "Build from source on official nginx base":
+            step["run"] = step["run"].replace(
+                "bash tools/ci/retry_transient.sh -- docker buildx build",
+                "docker buildx build",
+            )
+            step["env"]["BASE_DIGEST"] = "sha256:moved"
+    errors = _validate_build_step(job)
+    assert any("retry_transient.sh" in error for error in errors)
+    assert any("BASE_DIGEST" in error for error in errors)
+
+
+def test_official_docker_action_build_step_is_rejected() -> None:
+    from validate_workflow_matrix_consumers import (  # pylint: disable=import-error
+        _validate_build_step,
+    )
+
+    job = {
+        "steps": [
+            {
+                "name": "Build from source on official nginx base",
+                "uses": "docker/build-push-action@0000000000000000000000000000000000000000",
+                "with": {"tags": "x"},
+            }
+        ]
+    }
+    assert _validate_build_step(job) == [
+        "official Docker build step must define its env and run script"
+    ]
