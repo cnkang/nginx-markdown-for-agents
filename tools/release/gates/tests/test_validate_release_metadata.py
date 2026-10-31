@@ -231,6 +231,19 @@ def test_candidate_metadata_passes_but_final_phase_still_rejects(tmp_path: Path)
     assert validate_release_metadata(tmp_path, "0.9.1")
 
 
+def test_candidate_status_must_be_on_the_same_line(tmp_path: Path) -> None:
+    _write_candidate(tmp_path)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8").replace(
+            "**Status:** Release candidate.",
+            "**Status:**\nRelease candidate.",
+        ),
+        encoding="utf-8",
+    )
+    assert validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+
 @pytest.mark.parametrize("path,old,new", [
     ("CHANGELOG.md", "0.9.1", "0.9.2"),
     ("CHANGELOG.md", "Unreleased", "2026-10-31"),

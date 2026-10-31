@@ -202,7 +202,7 @@ def _validate_candidate_metadata(
         project_prose, re.MULTILINE | re.DOTALL,
     )
     status = None if section is None else re.search(
-        r"^\*\*Status:\*\*\s*(.+)$", section.group(1), re.MULTILINE
+        r"^\*\*Status:\*\*[ \t]*(\S.*)$", section.group(1), re.MULTILINE
     )
     errors.extend(
         _candidate_status_errors(
