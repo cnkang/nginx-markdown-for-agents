@@ -1,0 +1,61 @@
+{
+  "abi_provide": "",
+  "arch": "amd64",
+  "build_args_digest": "sha256:f74f26a6a054d74e45459872095ca70532babf94f7b1373b4b75fa28d6c5dd4a",
+  "commit_sha": "035cda2c50c32fb111040a2d55865c179978fd28",
+  "date": "2026-10-29",
+  "distro": "linux",
+  "distro_version": "n/a",
+  "execution_environment": "emulated",
+  "fail": 0,
+  "features": [
+    "prune_noise_regions",
+    "streaming"
+  ],
+  "libc": "musl",
+  "module_sha256": "f90bdd711ff31ee35a6d93f9227d79ecfe8c9d050835e5d7a4fce7a5c7b5e4a7",
+  "nginx_package_revision": "1.31.8",
+  "nginx_version": "1.31.8",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:0652b760b3b772d2ec17b47c2fc15d9a95e6fe35cd5b877eadc1a62d9bc75af1",
+  "source_kind": "nginx.org",
+  "source_reference": "https://nginx.org/download/nginx-1.31.8.tar.gz",
+  "target_identity": "nginx.org:1.31.8:linux:musl:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 f90bdd711ff31ee3",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "no libbrotli NEEDED entry",
+      "name": "static_brotli",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "local:release-agent",
+  "workflow_run_url": ""
+}

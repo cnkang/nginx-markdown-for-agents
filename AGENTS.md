@@ -108,7 +108,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal; empty array expansion under set -u |
 | 12 | security-cwe | Sanitize metadata-derived paths; never interpolate untrusted values |
 | 13 | ci-gating | Update workflow path filters; pin Actions and release builders; verify downloads before use; bind release metadata to one immutable source |
-| 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
+| 14 | testing-coverage | Every bug fix needs regression tests; cover boundaries and malformed inputs; consume parameterized inputs; isolate verification resources and prove cleanup ownership |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
 | 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return; run `make complexity-check` for C/Rust/Python/Shell |
@@ -319,6 +319,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Rust: no unused helpers; #[cfg(feature)] import safety; doctests by visibility [22]
 - Coverage: 80% aggregate (90% critical paths) [25]
 - E2E nginx.conf: explicit `markdown_streaming` matching test intent; no implicit auto + blocking directive [60]
+
+**Verification Resource Ownership** (C, T, R, S, P)
+- Isolate verification processes, configuration, and files from existing host resources [14]
+- Prove ownership before cleanup. A PID alone is insufficient after process exit [14]
+- Verify production cleanup before fixture teardown. Cover errors, handled signals, and assertion failures [14]
 
 **Shell** (S)
 - Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
@@ -669,6 +674,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-10-31 | Codex | Strengthened Rule 14 and its checklist for isolated verification resources, owned cleanup, and fixture cleanup after assertion failures |
 | 0.9.2 | 2026-09-18 | Codex | Added Rule 73 for continuation comments and complete shell/workflow surface scanning; malformed or unreadable scan inputs fail closed, same-indent option/value continuations are covered, and save/commit/push/CI wiring plus regression tests are synchronized |
 | 0.9.2 | 2026-09-05 | Kang | 0.9.2 convergence harness sync (dynconf removal): retired Rules 34 and 35 (removed runtime hot-reload snapshot/reload contract) keeping their numbers for traceability, relabeled Rules 45 and 71 as the retained CURRENT static effective_conf/block-mask rules, renamed the checklist section to "Static Configuration & Effective View"; updated the schema-drift verification line (dynconf precedence schema removed); dynconf-snapshot.md domain rules and the dynamic-config-hot-reload risk pack archived with historical-vs-current wording; routing manifest dropped the removed verify-dynconf-convergence-e2e command and archived the risk-pack routing. Historical Document Updates rows are left unchanged as history |
 | 0.9.2 | 2026-09-04 | Kang | Pre-freeze review closeout: added Rule 72 index and checklist synchronization for header-chain NGX_AGAIN commit-latch semantics, plus the [68] access-before-method C Safety checklist bullet |

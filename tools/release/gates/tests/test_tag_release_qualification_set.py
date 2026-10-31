@@ -252,6 +252,7 @@ def test_any_non_success_candidate_result_blocks_publication() -> None:
     """Neither failure, cancellation nor a skip may publish the tag."""
     green = {
         "musl-build": "success",
+        "ubuntu-native": "success",
         "integrity-checksums": "success",
         "release-gate": "success",
         "official-docker-release-gate": "success",
@@ -265,6 +266,10 @@ def test_any_non_success_candidate_result_blocks_publication() -> None:
     # may publish the tag.
     for outcome in ("failure", "cancelled", "skipped"):
         assert _publish_allowed({**green, "fuzz-qualification": outcome,
+                                 "rc-release-gates": "success"}) is False
+    # The Ubuntu-native job publishes artifacts, so it is a candidate gate.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _publish_allowed({**green, "ubuntu-native": outcome,
                                  "rc-release-gates": "success"}) is False
 
 
@@ -1061,12 +1066,17 @@ def test_a_non_success_candidate_result_blocks_tag_signing() -> None:
         "smoke-test": "success",
         "release-gate": "success",
         "musl-build": "success",
+        "ubuntu-native": "success",
         "official-docker-release-gate": "success",
         "fuzz-qualification": "success",
     }
     assert _signing_allowed({**green, "rc-release-gates": "success"}) is True
     for outcome in ("failure", "cancelled", "skipped"):
         assert _signing_allowed({**green, "rc-release-gates": outcome}) is False
+    # Signing must also wait for the Ubuntu-native artifacts.
+    for outcome in ("failure", "cancelled", "skipped"):
+        assert _signing_allowed({**green, "ubuntu-native": outcome,
+                                 "rc-release-gates": "success"}) is False
     # A failed or missing fuzz qualification must not start protected
     # signing either.
     for outcome in ("failure", "cancelled", "skipped"):

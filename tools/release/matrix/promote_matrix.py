@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""Promote release-matrix rows with recorded compatibility evidence.
+
+Auto-discovery may add a newly published NGINX version, but it must not grant
+support.  This tool is the other half of that rule: a maintainer runs it with
+evidence records, and it promotes only the rows those records cover.
+
+What it does:
+
+1. Reads one or more evidence records and validates them against the shared
+   contract in ``evidence_contract.py``.
+2. Promotes every non-manual row the records cover to ``supported``,
+   ``primary``, ``verified``, and release blocking.
+3. Optionally demotes superseded patches of the same minor track, so the
+   previous patch stops blocking a release without losing its row.
+4. Refuses to touch a row with ``managed_by: manual``.
+
+The tool is idempotent.  ``--check`` reports whether the matrix already
+reflects the evidence, and ``--dry-run`` prints the change set.
+
+Usage:
+    python3 tools/release/matrix/promote_matrix.py \
+        --evidence docs/evidence/0.9.3/compat/nginx.org-1.30.6-amd64.json \
+        [--evidence ...] [--demote-superseded] [--dry-run | --check]
+
+Exit codes:
+    0  Promotion applied, or the matrix already matches the evidence
+    1  Invalid evidence, uncovered record, or a refused manual row
+    2  ``--check`` found a matrix that does not reflect the evidence
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+import pathlib
+import sys
+from typing import Any
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(SCRIPT_DIR))
+from lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
+from evidence_contract import (  # noqa: E402
+    EvidenceError,
+    is_promotable,
+    iter_records,
+    load_record,
+    record_covers_entry,
+    validate_record,
+)
+
+DEFAULT_MATRIX = REPO_ROOT / "tools" / "release-matrix.json"
+
+PROMOTABLE_ARTIFACT_TYPES = frozenset(
+    {"dynamic-module", "deb-package", "rpm-package"}
+)
+
+
+class PromotionError(RuntimeError):
+    """Raised when a promotion request cannot be applied safely."""
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _track(version: str) -> str:
+    return ".".join(version.split(".")[:2])
+
+
+def _load_matrix(path: pathlib.Path) -> dict[str, Any]:
+    validated = validate_read_path(path, purpose="release matrix promotion")
+    with validated.open(encoding="utf-8") as handle:
+        matrix = json.load(handle)
+    if not isinstance(matrix, dict) or not isinstance(matrix.get("entries"), list):
+        raise PromotionError("release matrix must be an object with an entries list")
+    return matrix
+
+
+def _is_promotable_row(entry: dict[str, Any]) -> bool:
+    """Return whether evidence may govern this row."""
+    if entry.get("managed_by") == "manual":
+        return False
+    if entry.get("artifact_type") not in PROMOTABLE_ARTIFACT_TYPES:
+        return False
+    return True
+
+
+def _promote_entry(entry: dict[str, Any], record: dict[str, Any]) -> None:
+    """Apply one evidence record to one matrix row."""
+    entry["support_tier"] = "supported"
+    entry["support_stage"] = "primary"
+    entry["verification_state"] = "verified"
+    entry["release_blocking"] = True
+    entry["date"] = record["date"]
+    entry["source"] = record["source_kind"]
+    entry["provenance"] = {
+        "kind": record["source_kind"],
+        "reference": record["source_reference"],
+    }
+
+
+def _covered_rows(
+    entries: list[dict[str, Any]], record: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return the rows one record verifies."""
+    return [
+        entry
+        for entry in entries
+        if _is_promotable_row(entry) and record_covers_entry(record, entry)
+    ]
+
+
+def _refused_manual_rows(
+    entries: list[dict[str, Any]], record: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return manual rows a record would have claimed.
+
+    Evidence that covers a manual row means the operator pointed at the wrong
+    row family, or the matrix has two rows for one target.  Both need a human.
+    """
+    return [
+        entry
+        for entry in entries
+        if entry.get("managed_by") == "manual" and record_covers_entry(record, entry)
+    ]
+
+
+def _demote_superseded(
+    entries: list[dict[str, Any]],
+    promoted_versions: set[str],
+    keep_previous: frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Demote supported patches that a newer patch in the same track replaces.
+
+    Distro rows are excluded: one Ubuntu row binds to one package revision, so
+    an upstream patch does not supersede it.  Manual rows are excluded too,
+    because their tier is a maintainer decision.
+
+    The verification state is left untouched.  Demotion is a support decision,
+    not evidence: writing ``verified`` here would claim a build record that
+    does not exist, and the evidence gate rejects a verified row without one.
+    """
+    newest_by_track: dict[str, str] = {}
+    for version in promoted_versions:
+        track = _track(version)
+        current = newest_by_track.get(track)
+        if current is None or _version_tuple(version) > _version_tuple(current):
+            newest_by_track[track] = version
+
+    changed: list[dict[str, Any]] = []
+    for entry in entries:
+        if not _is_superseded(
+            entry, promoted_versions, newest_by_track, keep_previous
+        ):
+            continue
+        entry["support_tier"] = "best-effort"
+        entry["support_stage"] = "best-effort"
+        entry["release_blocking"] = False
+        changed.append(entry)
+    return changed
+
+
+def _is_superseded(
+    entry: dict[str, Any],
+    promoted_versions: set[str],
+    newest_by_track: dict[str, str],
+    keep_previous: frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether a newer promoted patch replaces this supported row.
+
+    A distro row is bound to one package revision, so an upstream patch does
+    not supersede it.  A manual row is a maintainer decision.
+    """
+    if entry.get("managed_by") == "manual":
+        return False
+    if entry.get("source") == "ubuntu-default-repo":
+        return False
+    if entry.get("support_tier") != "supported":
+        return False
+    version = entry.get("nginx_version")
+    if not isinstance(version, str) or version in promoted_versions:
+        return False
+    if version in keep_previous:
+        return False
+    newest = newest_by_track.get(_track(version))
+    if newest is None:
+        return False
+    return _version_tuple(version) < _version_tuple(newest)
+
+
+def build_promoted_matrix(
+    matrix: dict[str, Any],
+    records: list[dict[str, Any]],
+    *,
+    demote_superseded: bool,
+    keep_previous: frozenset[str] = frozenset(),
+) -> tuple[dict[str, Any], list[str]]:
+    """Return the promoted matrix and a human-readable change summary."""
+    entries = matrix["entries"]
+    summary: list[str] = []
+    promoted_versions: set[str] = set()
+
+    for record in records:
+        if not is_promotable(record):
+            raise PromotionError(
+                f"record {record.get('target_identity')} is not promotable"
+            )
+        refused = _refused_manual_rows(entries, record)
+        if refused:
+            raise PromotionError(
+                "record "
+                f"{record.get('target_identity')} matches managed_by=manual "
+                f"rows: {[row.get('os') for row in refused]}"
+            )
+        covered = _covered_rows(entries, record)
+        if not covered:
+            raise PromotionError(
+                "record "
+                f"{record.get('target_identity')} covers no matrix row; "
+                "add the row before promoting it"
+            )
+        for entry in covered:
+            _promote_entry(entry, record)
+        promoted_versions.add(record["nginx_version"])
+        summary.append(
+            f"promote {record['nginx_version']} "
+            f"{record['distro']}/{record['libc']}/{record['arch']}: "
+            f"{len(covered)} row(s)"
+        )
+
+    if demote_superseded:
+        demoted = _demote_superseded(entries, promoted_versions, keep_previous)
+        demoted_versions = sorted(
+            {entry["nginx_version"] for entry in demoted}, key=_version_tuple
+        )
+        for version in demoted_versions:
+            summary.append(f"demote superseded patch {version} to best-effort")
+    return matrix, summary
+
+
+@contextlib.contextmanager
+def _exclusive_lock(path: pathlib.Path, *, root: pathlib.Path = REPO_ROOT):
+    """Hold an exclusive lock on the matrix file for a whole promotion.
+
+    The read, the compute, and the replace must be one transaction: two
+    maintainers who promote at the same time would otherwise both read the
+    same matrix and the second write would drop the first promotion.  The
+    sidecar ``.lock`` file makes the lock portable (``flock`` on POSIX,
+    ``msvcrt.locking`` on Windows) and keeps it out of the matrix itself.
+
+    The sidecar is intentionally persistent and is never unlinked.  Unlinking
+    it reintroduces the race it exists to prevent: a process that already
+    opened the old inode keeps waiting on a file no new process can see, while
+    a third process creates a fresh inode and locks that, so two promoters sit
+    in the critical section at once and one promotion is lost.  The kernel
+    drops ``flock`` when the holding process dies, so a lock file left behind
+    by a killed promoter is harmless.
+    """
+    lock_path = validate_write_path_within_root(
+        path.with_suffix(f"{path.suffix}.lock"), root=root
+    )
+    handle = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":  # pragma: no cover - Windows only
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            # The lock file stays: see the docstring.  Removing it here would
+            # let a waiter and a newcomer lock different inodes at once.
+
+
+def _write_matrix(
+    path: pathlib.Path, matrix: dict[str, Any], *, root: pathlib.Path = REPO_ROOT
+) -> None:
+    """Write the matrix atomically inside ``root``."""
+    target = validate_write_path_within_root(path, root=root)
+    tmp = target.with_suffix(f"{target.suffix}.tmp")
+    tmp_path = validate_write_path_within_root(tmp, root=root)
+    try:
+        # NOSONAR suppression for pythonsecurity:S2083: both paths passed
+        # validate_write_path_within_root against the repository root, so CLI
+        # input cannot select a target outside the tree.
+        tmp_path.write_text(  # NOSONAR
+            json.dumps(matrix, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(tmp_path, target)
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise PromotionError(f"cannot write {target}: {exc}") from exc
+
+
+def _collect_records(
+    evidence: list[pathlib.Path], evidence_dir: pathlib.Path | None
+) -> list[dict[str, Any]]:
+    """Load and validate every requested evidence record."""
+    paths = list(evidence)
+    if evidence_dir is not None:
+        directory = validate_read_path(
+            evidence_dir, purpose="compatibility evidence directory"
+        )
+        paths.extend(path for path, _ in iter_records(directory))
+    if not paths:
+        raise PromotionError("no evidence records given")
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        validated = validate_read_path(path, purpose="compatibility evidence")
+        record = load_record(validated)
+        errors = validate_record(record)
+        if errors:
+            raise PromotionError(
+                f"{validated.name}: " + "; ".join(errors)
+            )
+        records.append(record)
+    return records
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--matrix", type=pathlib.Path, default=DEFAULT_MATRIX)
+    parser.add_argument("--evidence", type=pathlib.Path, action="append", default=[])
+    parser.add_argument("--evidence-dir", type=pathlib.Path, default=None)
+    parser.add_argument(
+        "--demote-superseded",
+        action="store_true",
+        help="demote supported patches replaced by a promoted patch",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    parser.add_argument(
+        "--keep-previous",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="do not demote this superseded patch (repeatable)",
+    )
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--check", action="store_true")
+    return parser
+
+
+def _promotion_lock(
+    matrix: pathlib.Path, *, read_only: bool, root: pathlib.Path
+) -> contextlib.AbstractContextManager[None]:
+    """Return the lock a run needs over ``matrix``.
+
+    Only a run that can write takes the lock, so ``--check`` and ``--dry-run``
+    work in a checkout nobody can write to: creating the sidecar there would
+    fail before the matrix was even read.  The write target is validated only
+    on that branch, because it guards a write that read-only modes never make.
+    Traversal is still rejected for every mode by ``_load_matrix``.
+    """
+    if read_only:
+        return contextlib.nullcontext()
+    target = validate_write_path_within_root(matrix, root=root)
+    return _exclusive_lock(target, root=root)
+
+
+def main(
+    argv: list[str] | None = None, *, repo_root: pathlib.Path = REPO_ROOT
+) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        lock = _promotion_lock(
+            args.matrix,
+            read_only=args.check or args.dry_run,
+            root=repo_root,
+        )
+        with lock:
+            matrix = _load_matrix(args.matrix)
+            records = _collect_records(args.evidence, args.evidence_dir)
+            original = json.dumps(matrix, indent=2)
+            promoted, summary = build_promoted_matrix(
+                matrix,
+                records,
+                demote_superseded=args.demote_superseded,
+                keep_previous=frozenset(args.keep_previous),
+            )
+            return _finish(args, promoted, original, summary, repo_root)
+    except (OSError, ValueError, EvidenceError, PromotionError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+
+def _finish(
+    args: argparse.Namespace,
+    promoted: dict[str, Any],
+    original: str,
+    summary: list[str],
+    repo_root: pathlib.Path,
+) -> int:
+    """Report the result and write the matrix when the mode allows it."""
+
+    changed = json.dumps(promoted, indent=2) != original
+    for line in summary:
+        print(f"  {line}")
+
+    if args.check:
+        if changed:
+            print(
+                "FAIL: the matrix does not reflect the supplied evidence; "
+                "run without --check",
+                file=sys.stderr,
+            )
+            return 2
+        print("PASS: the matrix already reflects the supplied evidence")
+        return 0
+
+    if args.dry_run:
+        print("dry run: matrix unchanged")
+        return 0
+
+    if not changed:
+        print("PASS: the matrix already reflects the supplied evidence")
+        return 0
+
+    try:
+        _write_matrix(args.matrix, promoted, root=repo_root)
+    except PromotionError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {args.matrix}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

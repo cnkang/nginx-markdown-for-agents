@@ -1,0 +1,62 @@
+{
+  "abi_provide": "nginx-abi-1.24.0-1",
+  "arch": "amd64",
+  "brotli_linkage": "dynamic",
+  "brotli_version": "1.1.0-2ubuntu0.1",
+  "build_args_digest": "sha256:e57592c8b507f6049c99fd789dd795bff7e8921dbf00ab03318c773bd2185136",
+  "commit_sha": "035cda2c50c32fb111040a2d55865c179978fd28",
+  "date": "2026-10-29",
+  "distro": "ubuntu-24.04",
+  "distro_version": "24.04",
+  "fail": 0,
+  "features": [
+    "streaming",
+    "prune_noise_regions"
+  ],
+  "libc": "glibc",
+  "module_sha256": "7765edb2e4a307df26cf277ed3f02dd37048334ea564cd0884b62577a10173df",
+  "nginx_package_revision": "1.24.0-2ubuntu7.19",
+  "nginx_version": "1.24.0",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d",
+  "source_kind": "ubuntu-default-repo",
+  "source_reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19",
+  "target_identity": "ubuntu-default-repo:1.24.0-2ubuntu7.19:ubuntu-24.04:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 7765edb2e4a307df",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "rejected: not binary compatible",
+      "name": "negative_abi_rejected",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "local:release-agent",
+  "workflow_run_url": ""
+}

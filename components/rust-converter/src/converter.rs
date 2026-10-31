@@ -441,10 +441,41 @@ impl<'a> BudgetedMarkdownWriter<'a> {
         text: &str,
         state: &mut crate::security::MarkdownTextEscapeState,
     ) -> Result<(), ConversionError> {
-        for ch in text.chars() {
+        let mut remaining = text;
+        while !remaining.is_empty() {
+            if state.is_line_prefix() {
+                let ch = remaining
+                    .chars()
+                    .next()
+                    .expect("non-empty text has a first character");
+                let escaped_len = crate::security::escaped_char_len(ch, state);
+                self.try_reserve(escaped_len)?;
+                crate::security::push_escaped_char(self.output, ch, state);
+                remaining = &remaining[ch.len_utf8()..];
+                continue;
+            }
+
+            let Some(boundary) = remaining.find(crate::security::is_escape_scan_boundary) else {
+                self.try_reserve(remaining.len())?;
+                self.output.push_str(remaining);
+                break;
+            };
+
+            let plain_text = &remaining[..boundary];
+            if !plain_text.is_empty() {
+                self.try_reserve(plain_text.len())?;
+                self.output.push_str(plain_text);
+            }
+
+            remaining = &remaining[boundary..];
+            let ch = remaining
+                .chars()
+                .next()
+                .expect("escape scan boundary has a character");
             let escaped_len = crate::security::escaped_char_len(ch, state);
             self.try_reserve(escaped_len)?;
             crate::security::push_escaped_char(self.output, ch, state);
+            remaining = &remaining[ch.len_utf8()..];
         }
         Ok(())
     }
@@ -2972,6 +3003,38 @@ mod tests {
             matches!(result, Err(ConversionError::MemoryLimit(_))),
             "expected controlled MemoryLimit, got {result:?}"
         );
+    }
+
+    #[test]
+    fn test_budgeted_escape_writer_matches_stateful_reference_across_fragments() {
+        let fragments = [
+            "ordinary λ text, punctuation and words",
+            "\n1",
+            ". ordered item *italic*",
+            "\n   # heading",
+            "\nplain <tag> with `code`",
+            "\n| table |",
+            "\ntext\n====",
+        ];
+
+        let mut expected_state = crate::security::MarkdownTextEscapeState::default();
+        let mut expected = String::new();
+        for fragment in fragments.iter().copied() {
+            expected.push_str(&crate::security::escape_markdown_text_with_state(
+                fragment,
+                &mut expected_state,
+            ));
+        }
+
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        let mut actual_state = crate::security::MarkdownTextEscapeState::default();
+        let mut actual = String::new();
+        for fragment in fragments.iter().copied() {
+            ctx.append_escaped_text(&mut actual, fragment, &mut actual_state)
+                .expect("budgeted escaping should accept this input");
+        }
+
+        assert_eq!(actual, expected);
     }
 
     /// The front matter render must respect the budget: an oversized

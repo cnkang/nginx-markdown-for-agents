@@ -5,6 +5,105 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - Unreleased
+
+Compatibility maintenance release. 0.9.3 makes the current nginx.org stable and
+mainline releases supported and release blocking. It adds Ubuntu 24.04 and
+Ubuntu 26.04 native NGINX to the supported surface. It adds an evidence-gated
+promotion path, so a version can become supported only with recorded build,
+load, and request evidence.
+
+0.9.3 is not a breaking release. The 20 active directives and their defaults do
+not change. The HTTP representation, the metrics and diagnostics contracts, the
+reason-code registry, and the FFI ABI version 3 also do not change.
+
+### Added
+
+- Ubuntu-native module build for Ubuntu 24.04 LTS and Ubuntu 26.04 LTS, on
+  amd64 and arm64. The build uses the Canonical source package, the
+  `nginx -V` configure arguments, and the distribution ABI.
+- `nginx-module-markdown-for-agents-ubuntu` DEB package. It depends on
+  `nginx-abi-<version>-<n>`, so an ABI-changing security update cannot leave
+  the module loaded against an incompatible binary.
+- `packaging/scripts/build-ubuntu-native-module.sh` and
+  `packaging/scripts/verify-ubuntu-native-module.sh`.
+- `tools/release/matrix/promote_matrix.py`, an evidence-gated promotion tool.
+- `tools/release/matrix/validate_compatibility_evidence.py` and
+  `make compatibility-evidence-check`.
+- `docs/guides/COMPATIBILITY-SUPPORT-POLICY.md`,
+  `docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md`, and
+  `docs/guides/UPGRADE-TO-0.9.3.md`.
+- A package-name pattern in the release manifest generator for the
+  Ubuntu-native DEB, with the suite and package revision in the name.
+- CI compatibility evidence producers in the release workflow. The
+  `nginx-org-evidence` job verifies each shipped module on the nginx.org
+  binary. The debian12 and almalinux9 `smoke-test` legs cover the nginx.org
+  package rows, and `official-nginx-docker.yml` covers the container rows.
+  Each record names the candidate commit and the run.
+- `tools/release/matrix/stage_compatibility_evidence.py`, which stages the
+  run's `compat-evidence-*` artifacts for the release gate.
+- A `container-registry` evidence source kind and
+  `tools/release/matrix/record_container_evidence.py`. A container record
+  names the pinned base image digest and the built image ID.
+- A `require_blocking` input for a manual `release-packages.yml` dispatch.
+- `tools/ci/retry_transient.sh`, which retries a network or registry command
+  up to three times, and only after a transient failure.
+
+### Changed
+
+- The release supports nginx.org 1.30.6 (stable) and 1.31.8 (mainline) as
+  release-blocking targets for glibc and musl on amd64 and arm64. A build,
+  load, and request record backs each of the eight rows.
+- The release supports Ubuntu 24.04 and Ubuntu 26.04 on amd64 and arm64 as
+  release-blocking targets. Each row records the package revision, the ABI
+  provide, and the decoder it linked.
+- Superseded patches 1.30.4, 1.30.5, 1.31.6, and 1.31.7 keep their rows and
+  their published assets. They are best-effort and no longer release
+  blocking. A demotion makes no verification claim.
+- The auto-update policy rejects a discovered version that is release
+  blocking.
+- `packaging/matrix.yaml` points at the canonical release matrix instead of
+  listing its own version set.
+- The nFPM checksum table contains the `linux-arm64` binary.
+- The release gate validates only the CI evidence records of its own run,
+  with `--require-ci`, `--candidate-sha` and `--workflow-run-url`. It no longer
+  reads the checked-in local records.
+- `official-docker-release-gate` runs before `release-gate`, because the
+  release gate reads its container records. `publish` still waits for both.
+- `official-nginx-docker.yml` builds with `docker buildx build` instead of
+  `docker/build-push-action`, so its registry fetches can retry. The build no
+  longer uses the GitHub Actions layer cache.
+
+### Fixed
+
+- `packaging/checksums.sha256` contains the SHA-256 values for
+  `nginx-1.30.6` and `nginx-1.31.8`. The maintainer checked both values against
+  the nginx.org signing key.
+- `docs/guides/PACKAGE_COMPATIBILITY.md` now states that NGINX rejects an
+  incompatible module at the binary compatibility signature, not at a version
+  string comparison.
+- `promote_matrix.py` keeps its sidecar lock file. Removing the file after the
+  unlock let a waiter and a newcomer lock different inodes, so two promotions
+  could enter the critical section at once and one could be lost. The tool also
+  skips the lock for `--check` and `--dry-run`, so a read-only checkout can
+  report matrix state.
+- `promote_matrix.py` no longer marks a demoted row `verified`. A demotion is
+  a support decision, and the evidence gate rejects a verified row that no
+  record covers.
+- `evidence_contract.py` rejects an Ubuntu row with no provenance reference. A
+  row flagged verified with no pinned package revision no longer passes as
+  covered evidence. The `ubuntu:<suite>` placeholder now has to match the
+  row's own suite.
+- The Ubuntu-native build embeds the release build identity instead of the
+  development default, requires a dynamic Brotli decoder, and records the
+  linked `libbrotli1` version. A missing decoder now fails the build.
+- The Ubuntu package step compares the full `libbrotli1` version, including any
+  epoch, before it writes the dependency floor.
+- `docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md` tells a reader who installed
+  the module by hand to remove the manual `load_module` line before installing
+  the DEB and before the security-update recovery. It also states what package
+  removal cleans up.
+
 ## [0.9.2] - 2026-10-08
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping

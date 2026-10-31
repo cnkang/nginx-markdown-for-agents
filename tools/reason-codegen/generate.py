@@ -39,10 +39,10 @@ RUST_OUTPUT = (
     REPO_ROOT / "components" / "rust-converter" / "src" / "decision" / "reason_code.rs"
 )
 MANIFEST_OUTPUT = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "reason-registry-report.json"
+    REPO_ROOT / "artifacts" / "release" / "0.9.3" / "reason-registry-report.json"
 )
 LISTING_OUTPUT = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "generated-reason-artifacts.json"
+    REPO_ROOT / "artifacts" / "release" / "0.9.3" / "generated-reason-artifacts.json"
 )
 C_HEADER_OUTPUT = (
     REPO_ROOT / "components" / "nginx-module" / "src" / "markdown_reason_meta.h"
@@ -937,7 +937,7 @@ def generate_listing(hash_hex: str) -> dict:
                 "description": "C reason metadata table for diagnostics",
             },
             {
-                "path": "artifacts/release/0.9.2/reason-registry-report.json",
+                "path": "artifacts/release/0.9.3/reason-registry-report.json",
                 "description": "Count/hash manifest for drift detection",
             },
         ],

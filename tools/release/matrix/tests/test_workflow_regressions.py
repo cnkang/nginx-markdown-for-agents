@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -74,6 +76,33 @@ def test_release_packages_normalizes_matrix_aliases_before_projection() -> None:
         "with open(\"tools/release-matrix.json\", \"r\") as f:", 1
     )[1].split("owner =", 1)[0]
     assert 'e["arch"]' not in source_load
+
+
+def test_release_package_checksums_wait_for_successful_release_gate() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    job = workflow["jobs"]["integrity-checksums"]
+
+    assert set(job["needs"]) == {
+        "smoke-test",
+        "musl-build",
+        "ubuntu-native",
+        "integrity-signing",
+        "official-docker-release-gate",
+        "fuzz-qualification",
+        "release-gate",
+    }
+    assert " ".join(job["if"].split()) == (
+        "always() && needs.musl-build.result == 'success' "
+        "&& needs.smoke-test.result == 'success' "
+        "&& needs.ubuntu-native.result == 'success' "
+        "&& needs.official-docker-release-gate.result == 'success' "
+        "&& needs.fuzz-qualification.result == 'success' "
+        "&& needs.release-gate.result == 'success' "
+        "&& (needs.integrity-signing.result == 'success' "
+        "|| (needs.integrity-signing.result == 'skipped' "
+        "&& github.event_name == 'workflow_dispatch'))"
+    )
+    assert not _dag_has_cycle(workflow)
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
@@ -506,6 +535,66 @@ def test_release_dockerfiles_bundle_pinned_brotli_decoder() -> None:
         assert "brotli-dev" not in dockerfile, name
 
 
+def test_ubuntu_native_build_embeds_the_release_identity() -> None:
+    """A published distro artifact must not carry the development identity."""
+    workflow = _workflow_data("release-packages.yml")
+    steps = workflow["jobs"]["ubuntu-native"]["steps"]
+    build = _step_by_name(steps, "Build module against the Ubuntu NGINX package")
+    assert "--release" in build["run"]
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script = (
+        repo_root / "packaging" / "scripts" / "build-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    for variable in (
+        "NGX_MARKDOWN_BUILD_KIND=release",
+        "NGX_MARKDOWN_SOURCE_SHA",
+        "NGX_MARKDOWN_RUST_VERSION",
+        "NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST",
+    ):
+        assert variable in script, variable
+
+
+def test_ubuntu_native_build_requires_a_dynamic_decoder() -> None:
+    """A missing decoder must fail the build, not degrade the artifact."""
+    repo_root = Path(__file__).resolve().parents[4]
+    script = (
+        repo_root / "packaging" / "scripts" / "build-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    assert "export NGX_MARKDOWN_BROTLI_STREAMING=on" in script
+    assert "BROTLI_LINKAGE" in script
+    assert "refusing a degraded release artifact" in script
+
+    # The decoder entry point lives in libbrotlidec.  A module that links only
+    # libbrotlicommon cannot decode.  Read the predicate that actually runs:
+    # a commented-out or copied line elsewhere in the script must not satisfy
+    # this check.
+    active = [
+        line.strip()
+        for line in script.splitlines()
+        if "readelf -d" in line and not line.strip().startswith("#")
+    ]
+    assert len(active) == 1, f"expected one active readelf check, found {active}"
+    predicate = active[0]
+    assert "NEEDED.*libbrotlidec\\.so" in predicate
+    assert "libbrotlicommon" not in predicate
+    assert "libbrotli(dec|common)" not in predicate
+
+    verify = (
+        repo_root / "packaging" / "scripts" / "verify-ubuntu-native-module.sh"
+    ).read_text(encoding="utf-8")
+    assert '"brotli_version"' in verify
+    assert '"brotli_linkage"' in verify
+
+
+def test_ubuntu_package_compares_the_full_libbrotli_version() -> None:
+    """Stripping the epoch changes the meaning of the security floor check."""
+    text = _workflow_text("release-packages.yml")
+    assert "sed 's/^[0-9]*://'" not in text
+    assert "BROTLI_MIN_VERSION=\"$(dpkg-query -W -f='${Version}' libbrotli1)\"" in text
+    assert 'dpkg --compare-versions "${BROTLI_MIN_VERSION}" ge "${BROTLI_FIXED_FLOOR}"' in text
+
+
 def test_package_metadata_drops_host_brotli_dependency() -> None:
     """Packages must not require a host Brotli library they no longer link."""
     repo_root = Path(__file__).resolve().parents[4]
@@ -540,3 +629,432 @@ def test_package_metadata_drops_host_brotli_dependency() -> None:
     assert "lib/pkgconfig/libbrotlidec.pc" in formula
     assert 'Version.new(brotli_version) < Version.new("1.2.1")' in formula
     assert 'refute_match "libbrotlidec"' in formula
+
+
+_FAKE_NGINX = """#!/usr/bin/env bash
+# Stand-in for the nginx.org binary: records every call.
+printf '%s\\n' "$*" >>"${FAKE_LOG}"
+case "$*" in
+    -v) echo 'nginx version: nginx/1.30.6' >&2 ;;
+    -V) echo 'configure arguments: --with-compat' >&2 ;;
+    *-t) ;;
+    *'-s quit') rm -f "${4}/logs/nginx.pid" ;;
+    *-s*) ;;
+    *) echo 1 >"${4}/logs/nginx.pid" ;;
+esac
+exit 0
+"""
+
+# The readiness probe succeeds; the first request fails like a reset
+# connection, which set -e turns into an early exit.
+_FAKE_CURL = """#!/usr/bin/env bash
+case "$*" in
+    -fsS*) exit 0 ;;
+    *) exit 7 ;;
+esac
+"""
+
+
+def test_nginx_org_verifier_cleans_up_after_an_early_exit(tmp_path) -> None:
+    """A failed request must not leave the started NGINX or its prefix."""
+    repo_root = Path(__file__).resolve().parents[4]
+    script = repo_root / "packaging" / "scripts" / "verify-nginx-org-module.sh"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("nginx", _FAKE_NGINX), ("curl", _FAKE_CURL)):
+        tool = bin_dir / name
+        tool.write_text(body, encoding="utf-8")
+        tool.chmod(0o755)
+    work = tmp_path / "work"
+    work.mkdir()
+    module = tmp_path / "module.so"
+    module.write_bytes(b"\0")
+    log = tmp_path / "nginx-calls.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "TMPDIR": str(work),
+        "FAKE_LOG": str(log),
+    }
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "--module",
+            str(module),
+            "--nginx-version",
+            "1.30.6",
+            "--arch",
+            "amd64",
+            "--out",
+            str(tmp_path / "ledger.json"),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert result.returncode != 0
+    calls = log.read_text(encoding="utf-8").splitlines()
+    assert any(call.endswith("-s quit") for call in calls), calls
+    assert list(work.iterdir()) == []
+    assert not (tmp_path / "ledger.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Candidate-bound CI compatibility evidence (PR 309, issue 310).
+# ---------------------------------------------------------------------------
+
+def _job_steps(workflow: dict, job: str) -> list[dict]:
+    return list(workflow["jobs"][job].get("steps", []))
+
+
+def _job_text(workflow: dict, job: str) -> str:
+    return yaml.safe_dump(workflow["jobs"][job], sort_keys=False)
+
+
+def _needs(workflow: dict, job: str) -> set[str]:
+    needs = workflow["jobs"][job].get("needs", [])
+    return {needs} if isinstance(needs, str) else set(needs)
+
+
+def _evidence_uploads(workflow: dict) -> list[tuple[str, dict]]:
+    uploads = []
+    for job_name, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            name = str((step.get("with") or {}).get("name", ""))
+            if str(step.get("uses", "")).startswith("actions/upload-artifact") and (
+                name.startswith("compat-evidence-")
+            ):
+                uploads.append((job_name, step))
+    return uploads
+
+
+def test_release_gate_validates_only_this_runs_staged_ci_records() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    needs = _needs(workflow, "release-gate")
+    assert {
+        "smoke-test",
+        "ubuntu-native",
+        "nginx-org-evidence",
+        "official-docker-release-gate",
+    } <= needs
+    steps = _job_steps(workflow, "release-gate")
+    names = [step.get("name") for step in steps]
+    download = _step_by_name(steps, "Download CI compatibility evidence")
+    stage = _step_by_name(steps, "Stage CI compatibility evidence")
+    gates = _step_by_name(steps, "Run release gates")
+    assert download["with"]["pattern"] == "compat-evidence-*"
+    assert "merge-multiple" not in download["with"]
+    assert "stage_compatibility_evidence.py" in stage["run"]
+    assert (
+        names.index("Download CI compatibility evidence")
+        < names.index("Stage CI compatibility evidence")
+        < names.index("Run release gates")
+    )
+    run = gates["run"]
+    start = run.index("EVIDENCE_ARGS=(")
+    block = run[start : run.index("validate_compatibility_evidence.py", start)]
+    unconditional, _, conditional = block.partition("if [[")
+    for flag in (
+        '--evidence-dir "${RUNNER_TEMP}/compat-evidence"',
+        "--require-ci",
+        '--candidate-sha "${GITHUB_SHA}"',
+        '--workflow-run-url "${RUN_URL}"',
+    ):
+        assert flag in unconditional, flag
+    assert "--require-blocking" in conditional
+    assert "--require-blocking" not in unconditional
+    assert '"${GITHUB_REF_TYPE:-}" == "tag"' in conditional
+    assert '"${REQUIRE_BLOCKING_INPUT:-false}" == "true"' in conditional
+    assert "docs/evidence" not in block
+    assert gates["env"]["RUN_URL"].endswith("/actions/runs/${{ github.run_id }}")
+
+
+def test_require_blocking_dispatch_input_is_routed_through_env() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    spec = workflow["on"]["workflow_dispatch"]["inputs"]["require_blocking"]
+    assert spec["type"] == "boolean"
+    assert spec["default"] == "false"
+    gates = _step_by_name(_job_steps(workflow, "release-gate"), "Run release gates")
+    assert gates["env"]["REQUIRE_BLOCKING_INPUT"] == "${{ inputs.require_blocking }}"
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            assert "${{ inputs.require_blocking" not in str(step.get("run", ""))
+
+
+def test_nginx_org_evidence_job_produces_bound_ci_records() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    job = workflow["jobs"]["nginx-org-evidence"]
+    assert {"prepare", "build", "musl-build"} <= _needs(workflow, "nginx-org-evidence")
+    assert job["permissions"] == {"contents": "read"}
+    text = _job_text(workflow, "nginx-org-evidence")
+    assert "secrets." not in text
+    assert "nginx_org_evidence_matrix" in job["strategy"]["matrix"]["include"]
+    runs = "\n".join(str(step.get("run", "")) for step in job["steps"])
+    assert "verify-nginx-org-module.sh" in runs
+    assert "record_nginx_org_evidence.py" in runs
+    for flag in (
+        "ci:release-packages/nginx-org-evidence",
+        '--source-sha "${CANDIDATE_SHA}"',
+        '--workflow-run-url "${RUN_URL}"',
+        "--execution native",
+    ):
+        assert flag in runs, flag
+    upload = [s for j, s in _evidence_uploads(workflow) if j == "nginx-org-evidence"]
+    assert len(upload) == 1
+    name = upload[0]["with"]["name"]
+    assert name.startswith("compat-evidence-nginx-org-")
+    assert "matrix.libc" in name
+    assert "matrix.arch" in name
+    assert "matrix.nginx_version" in name
+
+
+def test_ubuntu_record_has_a_unique_name_and_its_own_artifact() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    steps = _job_steps(workflow, "ubuntu-native")
+    record = _step_by_name(steps, "Write compatibility evidence record")["run"]
+    assert (
+        '--out "dist/compat-evidence/ubuntu-${suite_slug}-'
+        '${MATRIX_NGINX_VERSION}-${MATRIX_ARCH}.json"'
+    ) in record
+    package = _step_by_name(steps, "Upload Ubuntu-native package")
+    assert ".json" not in package["with"]["path"]
+    evidence = _step_by_name(steps, "Upload Ubuntu-native compatibility evidence")
+    assert evidence["with"]["name"].startswith("compat-evidence-ubuntu-")
+
+
+def test_smoke_test_writes_package_row_evidence_when_selected() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    steps = _job_steps(workflow, "smoke-test")
+    step = _step_by_name(steps, "Write nginx.org package-row evidence")
+    assert step["if"] == "matrix.evidence_distro != ''"
+    assert '--distro "${EVIDENCE_DISTRO}"' in step["run"]
+    assert "verify-nginx-org-module.sh" in step["run"]
+    upload = _step_by_name(steps, "Upload nginx.org package-row evidence")
+    assert upload["if"] == "matrix.evidence_distro != ''"
+    assert upload["with"]["name"].startswith("compat-evidence-pkg-")
+
+
+def test_every_evidence_upload_name_carries_its_matrix_identity() -> None:
+    expected = {
+        ("release-packages.yml", "nginx-org-evidence"): (
+            "matrix.nginx_version", "matrix.libc", "matrix.arch"
+        ),
+        ("release-packages.yml", "ubuntu-native"): (
+            "matrix.os", "matrix.nginx_version", "matrix.arch"
+        ),
+        ("release-packages.yml", "smoke-test"): (
+            "matrix.evidence_distro", "matrix.nginx_version", "matrix.arch"
+        ),
+        ("official-nginx-docker.yml", "build-and-verify"): (
+            "matrix.nginx_version", "matrix.os", "matrix.libc", "matrix.arch"
+        ),
+    }
+    seen = set()
+    for workflow_name in ("release-packages.yml", "official-nginx-docker.yml"):
+        for job, step in _evidence_uploads(_workflow_data(workflow_name)):
+            keys = expected[(workflow_name, job)]
+            for key in keys:
+                assert key in step["with"]["name"], (workflow_name, job, key)
+            assert step["with"]["if-no-files-found"] == "error"
+            seen.add((workflow_name, job))
+    assert seen == set(expected)
+
+
+def _run_prepare(tmp_path) -> dict[str, str]:
+    import json
+
+    repo_root = Path(__file__).resolve().parents[4]
+    workflow = _workflow_data("release-packages.yml")
+    resolve = [s for s in _job_steps(workflow, "prepare") if s.get("id") == "resolve"][0]
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "GITHUB_OUTPUT": str(output),
+        "RELEASE_VERSION": "0.9.3",
+        "PYTHONPATH": str(repo_root),
+    }
+    result = subprocess.run(
+        ["bash", "-c", resolve["run"]],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    values = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+    )
+    return {key: json.loads(value) for key, value in values.items() if key.endswith("matrix")}
+
+
+def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> None:
+    import json
+
+    matrices = _run_prepare(tmp_path)
+    module_legs = matrices["nginx_org_evidence_matrix"]
+    package_legs = [e for e in matrices["smoke_matrix"] if e["evidence_distro"]]
+    ubuntu_legs = matrices["ubuntu_matrix"]
+    assert len(module_legs) == 24
+    assert len(package_legs) == 16
+    assert len(ubuntu_legs) == 4
+    names = (
+        [f"nginx.org-{e['nginx_version']}-{e['libc']}-{e['arch']}.json" for e in module_legs]
+        + [
+            f"nginx.org-{e['nginx_version']}-{e['evidence_distro']}-{e['arch']}.json"
+            for e in package_legs
+        ]
+        + [
+            f"ubuntu-{e['suite'].replace('.', '')}-{e['nginx_version']}-{e['arch']}.json"
+            for e in ubuntu_legs
+        ]
+    )
+    assert len(names) == len(set(names))
+
+    # Every release-blocking row has a producer: the 44 rows above plus the
+    # 4 container rows that official-nginx-docker.yml covers.
+    repo_root = Path(__file__).resolve().parents[4]
+    matrix = json.loads((repo_root / "tools" / "release-matrix.json").read_text())
+    blocking = [e for e in matrix["entries"] if e.get("release_blocking") is True]
+    containers = [e for e in blocking if e.get("artifact_type") == "docker-image"]
+    assert len(blocking) == len(names) + len(containers)
+    assert len(containers) == 4
+
+
+def _dag_has_cycle(workflow: dict) -> bool:
+    graph = {name: _needs(workflow, name) for name in workflow["jobs"]}
+    state: dict[str, int] = {}
+
+    def visit(node: str) -> bool:
+        if state.get(node) == 1:
+            return True
+        if state.get(node) == 2:
+            return False
+        state[node] = 1
+        if any(visit(dep) for dep in graph.get(node, ())):
+            return True
+        state[node] = 2
+        return False
+
+    return any(visit(node) for node in graph)
+
+
+def _ancestors(workflow: dict, job: str) -> set[str]:
+    seen: set[str] = set()
+    pending = list(_needs(workflow, job))
+    while pending:
+        node = pending.pop()
+        if node not in seen:
+            seen.add(node)
+            pending.extend(_needs(workflow, node))
+    return seen
+
+
+def test_container_evidence_producer_runs_before_the_release_gate() -> None:
+    """The container producer feeds release-gate, so it cannot depend on it."""
+    workflow = _workflow_data("release-packages.yml")
+    assert not _dag_has_cycle(workflow)
+    assert "release-gate" not in _ancestors(workflow, "official-docker-release-gate")
+    assert "official-docker-release-gate" in _ancestors(workflow, "release-gate")
+    # Publication still waits for both gates.
+    publish = _ancestors(workflow, "publish")
+    assert {"release-gate", "official-docker-release-gate"} <= publish
+    official = _workflow_data("official-nginx-docker.yml")
+    steps = official["jobs"]["build-and-verify"]["steps"]
+    evidence = _step_by_name(steps, "Write container compatibility evidence")["run"]
+    assert "record_container_evidence.py" in evidence
+    assert '--image-digest "${IMAGE_DIGEST}"' in evidence
+    assert '--built-image-id "${built_image_id}"' in evidence
+    assert '--source-sha "${MODULE_SHA}"' in evidence
+    assert '--workflow-run-url "${RUN_URL}"' in evidence
+    assert "verify-nginx-org-module.sh" in evidence
+
+
+def test_official_docker_build_retries_only_through_the_helper() -> None:
+    official = _workflow_data("official-nginx-docker.yml")
+    steps = official["jobs"]["build-and-verify"]["steps"]
+    build = _step_by_name(steps, "Build from source on official nginx base")
+    assert "uses" not in build
+    assert "bash tools/ci/retry_transient.sh -- docker buildx build" in build["run"]
+    assert '--label "org.opencontainers.image.revision=${MODULE_SHA}"' in build["run"]
+    assert '--build-arg "NGINX_IMAGE=${BASE_NAME}@${BASE_DIGEST}"' in build["run"]
+    # The functional check and the verifier are never retried.
+    verify = _step_by_name(steps, "Verify runtime behavior")
+    assert "retry_transient" not in verify["run"]
+
+
+def test_retry_helper_never_wraps_verifiers_or_tests() -> None:
+    forbidden = (
+        "verify-nginx-org-module.sh",
+        "verify_official_nginx_docker.sh",
+        "smoke-test-basic.sh",
+        "pytest",
+        "make test",
+        "cargo test",
+        "cargo build",
+    )
+    for name in ("release-packages.yml", "official-nginx-docker.yml", "ci.yml"):
+        for line in _workflow_text(name).splitlines():
+            if "retry_transient.sh --" not in line:
+                continue
+            wrapped = line.split("retry_transient.sh --", 1)[1]
+            for word in forbidden:
+                assert word not in wrapped, (name, line.strip())
+
+
+def test_ubuntu_package_lifecycle_invokes_upgrade_script() -> None:
+    """Every native package leg must run the Ubuntu upgrade lifecycle script."""
+    workflow = _workflow_data("release-packages.yml")
+    step = _step_by_name(
+        _job_steps(workflow, "ubuntu-native"),
+        "Install and remove the Ubuntu-native package",
+    )
+    assert step["env"]["PACKAGE_TEST_ALLOW_SYSTEM_MUTATION"] == "1"
+    assert "bash packaging/tests/test_ubuntu_native_upgrade.sh" in step["run"]
+    assert '--deb "dist/${DEB_FILENAME}"' in step["run"]
+
+
+def test_ubuntu_http_contracts_block_evidence_creation() -> None:
+    """Native HTTP responses must pass before a compatibility record is written."""
+    steps = _job_steps(_workflow_data("release-packages.yml"), "ubuntu-native")
+    http = _step_by_name(steps, "Verify Ubuntu-native HTTP contracts")
+    evidence = _step_by_name(steps, "Write compatibility evidence record")
+    assert steps.index(http) < steps.index(evidence)
+    assert str(http.get("continue-on-error", "false")).lower() == "false"
+    assert " ".join(evidence.get("if", "success()").split()) in {
+        "success()", "${{ success() }}",
+    }
+    for scenario in (
+        "encoding-chain", "brotli-streaming", "conditional-requests",
+        "representation-validator-e2e",
+    ):
+        assert scenario in http["run"]
+    assert "runuser -u nobody" in http["run"]
+    assert "ln -s /usr/sbin/nginx" in http["run"]
+    assert "--profile full --timeout 60" in http["run"]
+    report = _step_by_name(steps, "Upload Ubuntu-native HTTP reports")
+    assert report["with"]["if-no-files-found"] == "error"
+
+
+def test_glibc_verification_host_is_the_build_baseline_image() -> None:
+    """The glibc host must stay the pinned build image (oldest supported glibc).
+
+    The official nginx:1.24.0 image is Debian 11 (glibc 2.31), which cannot
+    load a module built on AlmaLinux 9, so the host must not drift from the
+    build container when that digest is bumped.
+    """
+    workflow = _workflow_data("release-packages.yml")
+    build_image = workflow["jobs"]["build"]["container"]
+    assert build_image.startswith("almalinux@sha256:")
+    host = _step_by_name(
+        _job_steps(workflow, "nginx-org-evidence"),
+        "Start the nginx.org verification host",
+    )["run"]
+    assert f'image="{build_image}"' in host
+    assert 'image="nginx:${NGINX_VERSION}-alpine"' in host

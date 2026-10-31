@@ -126,8 +126,12 @@ def test_release_workflow_trigger_matrix_is_explicit() -> None:
     assert triggers["push"] == {"tags": ["v*"]}
     dispatch = triggers["workflow_dispatch"]
     assert isinstance(dispatch, dict)
-    assert set(dispatch.get("inputs", {})) == {"version"}
+    assert set(dispatch.get("inputs", {})) == {"version", "require_blocking"}
     assert dispatch["inputs"]["version"].get("type") == "string"
+    # The evidence gate opt-in is a boolean that defaults off, so a plain
+    # dispatch keeps its current behavior.
+    assert dispatch["inputs"]["require_blocking"].get("type") == "boolean"
+    assert dispatch["inputs"]["require_blocking"].get("default") is False
 
 
 def test_fuzz_record_upload_is_unconditional_and_matches_the_validator() -> None:

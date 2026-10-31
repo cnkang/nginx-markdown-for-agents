@@ -42,7 +42,8 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 
 | Platform | Format | Source |
 |----------|--------|--------|
-| glibc-based Linux (Ubuntu, Debian, RHEL, AlmaLinux, Amazon Linux) | DEB/RPM | `release-packages.yml` (GitHub Releases) |
+| glibc-based Linux with an nginx.org package (Debian, RHEL, AlmaLinux, Amazon Linux) | DEB/RPM | `release-packages.yml` (GitHub Releases) |
+| Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with the Ubuntu package | Native DEB | `release-packages.yml` `ubuntu-native` job (GitHub Releases) |
 | musl-based Linux (Alpine, etc.) | Dynamic-module tarball | `release-packages.yml` `musl-build` job (GitHub Releases) — pair it with an ABI-compatible NGINX binary per the compatibility matrix; `release-binaries.yml` remains as the manual rebuild tool only |
 
 The release pipeline builds DEB and RPM packages on glibc-based build images,
@@ -52,11 +53,21 @@ of the release-packages workflow (it is a loadable module artifact, not a
 static server binary — pair it with an ABI-compatible NGINX executable, see
 the compatibility matrix in PACKAGE_COMPATIBILITY.md) or build from source.
 
-DEB format:
+DEB format for nginx.org builds:
 
 ```text
 nginx-module-markdown-for-agents_<VERSION>_nginx-<NGINX_VERSION>_<ARCH>.deb
 ```
+
+DEB format for Ubuntu-native builds:
+
+```text
+nginx-module-markdown-for-agents-ubuntu_<VERSION>_ubuntu-<SUITE>_nginx-<PACKAGE_REVISION>_<ARCH>.deb
+```
+
+Read [UBUNTU-LTS-NGINX-COMPATIBILITY.md](UBUNTU-LTS-NGINX-COMPATIBILITY.md)
+before you install the Ubuntu-native package. It is not the nginx.org
+package.
 
 RPM format:
 

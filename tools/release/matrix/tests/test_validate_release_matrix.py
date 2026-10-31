@@ -19,7 +19,8 @@ def fake_matrix_root(tmp_path: Path) -> Path:
     (root / "schemas").mkdir(parents=True)
     (root / "tools").mkdir(parents=True)
     (root / "tools/release/matrix").mkdir(parents=True)
-    (root / "artifacts/release/0.9.2").mkdir(parents=True)
+    release_dir = root / "artifacts" / "release" / validator.RELEASE_VERSION
+    release_dir.mkdir(parents=True)
     (root / "components/rust-converter/include").mkdir(parents=True)
     (root / "tools/release-matrix.json").write_text(
         json.dumps(source_matrix()), encoding="utf-8"
@@ -39,7 +40,7 @@ def fake_matrix_root(tmp_path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    (root / "artifacts/release/0.9.2/official-build-feature-manifest.json").write_text(
+    (release_dir / "official-build-feature-manifest.json").write_text(
         json.dumps({"streaming": True, "prune_noise_regions": True}),
         encoding="utf-8",
     )

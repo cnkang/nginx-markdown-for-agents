@@ -52,6 +52,15 @@ DEB_PATTERN = re.compile(
 RPM_PATTERN = re.compile(
     r"^nginx-module-markdown-for-agents-(?P<version>[0-9][^-]*)-nginx(?P<nginx_version>[0-9][^-]*)-[0-9]+\.(?P<rpm_arch>x86_64|aarch64)\.rpm$"
 )
+# Ubuntu-native DEB built from the Canonical source package. The name carries
+# the suite and the exact package revision, so an Ubuntu asset can never be
+# confused with the nginx.org asset for the same module version.
+UBUNTU_DEB_PATTERN = re.compile(
+    r"^nginx-module-markdown-for-agents-ubuntu_(?P<version>[^_]+)"
+    r"_ubuntu-(?P<distro_version>[0-9]+\.[0-9]+)"
+    r"_nginx-(?P<nginx_package_revision>[^_]+)"
+    r"_(?P<arch>[a-z0-9]+)\.deb$"
+)
 TARBALL_PATTERN = re.compile(
     r"^ngx_http_markdown_filter_module-(?P<nginx_version>[0-9]+\.[0-9]+\.[0-9]+)-(?P<os_type>glibc|musl)-(?P<tarball_arch>x86_64|aarch64)\.tar\.gz$"
 )
@@ -102,6 +111,28 @@ def parse_package(path: Path, expected_version: str | None = None) -> dict:
             "version": version,
             "nginx_version": nginx_version,
             "arch": arch,
+            "sha256": sha256_file(path),
+        }
+        if expected_version and version != expected_version:
+            print(
+                f"WARNING: {name} version {version} != expected {expected_version}",
+                file=sys.stderr,
+            )
+        return entry
+
+    m = UBUNTU_DEB_PATTERN.match(name)
+    if m:
+        version = validate_version(m.group("version"), name)
+        entry = {
+            "filename": name,
+            "format": "deb",
+            "version": version,
+            "nginx_version": m.group("nginx_package_revision").split("-")[0],
+            "nginx_package_revision": m.group("nginx_package_revision"),
+            "distro": f"ubuntu-{m.group('distro_version')}",
+            "distro_version": m.group("distro_version"),
+            "arch": m.group("arch"),
+            "source": "ubuntu-default-repo",
             "sha256": sha256_file(path),
         }
         if expected_version and version != expected_version:

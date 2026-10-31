@@ -8,7 +8,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > When the client asks for it, or when you decide to serve it.
 
 > Current release line: v0.9.2, published 2026-10-08 as the latest public
-> stable release. It is the final planned breaking release before v1.0. Use
+> stable release. v0.9.3 is a compatibility maintenance release candidate:
+> 0.9.3 is not yet published. Use the v0.9.3 release-tag downloads after
+> publication. v0.9.2 is the final planned breaking release before v1.0. Use
 > release-tag downloads.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
@@ -163,6 +165,28 @@ The [bot-targeted example](examples/nginx-configs/06-bot-targeted-conversion.con
 contains a larger User-Agent map. Status, content-type, size, and other
 eligibility checks still apply.
 
+## What changed in 0.9.3
+
+0.9.3 is a compatibility maintenance release. A 0.9.2 configuration works
+without a change. The release does not add, remove, or rename a directive.
+
+- The release targets stable 1.30.6 and mainline 1.31.8 for glibc and musl,
+  on amd64 and arm64. A row becomes supported when the release workflow
+  records build, load, and request evidence for it.
+- The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX on
+  amd64 and arm64 through the `nginx-module-markdown-for-agents-ubuntu`
+  package. That
+  package depends on the Ubuntu ABI, so an ABI-changing security update cannot
+  leave the module loaded against an incompatible binary.
+- A new promotion path ties a supported row to a recorded evidence file. The
+  weekly discovery job still adds a new version as best-effort and pending.
+
+Read the [0.9.3 release notes](docs/releases/0.9.3-release-notes.md). The
+[Ubuntu compatibility guide](docs/guides/UBUNTU-LTS-NGINX-COMPATIBILITY.md)
+covers the distro build, and the
+[compatibility support policy](docs/guides/COMPATIBILITY-SUPPORT-POLICY.md)
+defines the support contracts.
+
 ## What changed in 0.9.2
 
 0.9.2 is a breaking release. Read the
@@ -209,22 +233,22 @@ installation-specific details.
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
-| 1.31.8 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.8 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.8 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.31.8 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.8 | mainline | linux | glibc | arm64 | dynamic-module | supported | verified | Yes |
+| 1.31.8 | mainline | linux | musl | arm64 | dynamic-module | supported | verified | Yes |
+| 1.31.8 | mainline | linux | glibc | amd64 | dynamic-module | supported | verified | Yes |
+| 1.31.8 | mainline | linux | musl | amd64 | dynamic-module | supported | verified | Yes |
 | 1.31.7 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
 | 1.31.7 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.31.6 | mainline | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
-| 1.31.6 | mainline | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
-| 1.31.6 | mainline | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
-| 1.31.6 | mainline | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
-| 1.31.6 | mainline | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
-| 1.31.6 | mainline | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
-| 1.31.6 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
-| 1.31.6 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
+| 1.31.6 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.6 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.6 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.6 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.6 | mainline | debian12 | glibc | arm64 | deb-package | best-effort | pending | No |
+| 1.31.6 | mainline | debian12 | glibc | amd64 | deb-package | best-effort | pending | No |
+| 1.31.6 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
+| 1.31.6 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
 | 1.31.5 | mainline | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | pending | No |
 | 1.31.5 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
 | 1.31.5 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
@@ -236,19 +260,19 @@ installation-specific details.
 | 1.31.5 | mainline | alpine3.24 | musl | amd64 | docker-image | best-effort | pending | No |
 | 1.31.5 | mainline | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
 | 1.31.5 | mainline | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
-| 1.30.6 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.6 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.6 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.6 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.5 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
-| 1.30.5 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
-| 1.30.5 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
-| 1.30.5 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
-| 1.30.5 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
-| 1.30.5 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
-| 1.30.5 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
-| 1.30.5 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | verified | No |
+| 1.30.6 | stable | linux | glibc | arm64 | dynamic-module | supported | verified | Yes |
+| 1.30.6 | stable | linux | musl | arm64 | dynamic-module | supported | verified | Yes |
+| 1.30.6 | stable | linux | glibc | amd64 | dynamic-module | supported | verified | Yes |
+| 1.30.6 | stable | linux | musl | amd64 | dynamic-module | supported | verified | Yes |
+| 1.30.5 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.5 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.5 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.30.5 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
+| 1.30.5 | stable | debian12 | glibc | arm64 | deb-package | best-effort | pending | No |
+| 1.30.5 | stable | debian12 | glibc | amd64 | deb-package | best-effort | pending | No |
+| 1.30.5 | stable | almalinux9 | glibc | arm64 | rpm-package | best-effort | pending | No |
+| 1.30.5 | stable | almalinux9 | glibc | amd64 | rpm-package | best-effort | pending | No |
+| 1.30.4 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | best-effort | pending | No |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
@@ -257,15 +281,15 @@ installation-specific details.
 | 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | verified | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | supported | verified | Yes |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | pending | Yes |
 | 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | pending | Yes |
-| 1.28.3 | stable | any | n/a | any | source | best-effort | verified | No |
+| 1.28.3 | stable | any | n/a | any | source | best-effort | pending | No |
 | 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
 | 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | pending | No |
@@ -282,8 +306,8 @@ installation-specific details.
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | verified | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | supported | verified | Yes |
 | 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
