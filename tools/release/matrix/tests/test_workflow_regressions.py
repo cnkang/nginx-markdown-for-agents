@@ -1026,7 +1026,10 @@ def test_ubuntu_http_contracts_block_evidence_creation() -> None:
     http = _step_by_name(steps, "Verify Ubuntu-native HTTP contracts")
     evidence = _step_by_name(steps, "Write compatibility evidence record")
     assert steps.index(http) < steps.index(evidence)
-    assert http.get("continue-on-error", False) is False
+    assert str(http.get("continue-on-error", "false")).lower() == "false"
+    assert " ".join(evidence.get("if", "success()").split()) in {
+        "success()", "${{ success() }}",
+    }
     for scenario in (
         "encoding-chain", "brotli-streaming", "conditional-requests",
         "representation-validator-e2e",

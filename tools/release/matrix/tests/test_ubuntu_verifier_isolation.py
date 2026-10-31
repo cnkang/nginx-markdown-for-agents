@@ -205,34 +205,37 @@ def test_owned_resources_and_existing_host_survive(sandbox, mode, success, defau
     sentinel = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
     try:
         for _ in range(2):
-            result = subprocess.run(command, env=env, capture_output=True, timeout=20)
-            assert (result.returncode == 0) is success, result.stderr.decode()
-            assert sentinel.poll() is None
-            if mode in ('', 'http-fail'):
-                child = int((root / 'child.pid').read_text())
-                with pytest.raises(ProcessLookupError):
-                    os.kill(child, 0)
-            assert (root / 'ngx_http_markdown_filter_module.so').read_bytes() == b'existing host module'
-            if default_kind == 'symlink':
-                assert (root / 'default').is_symlink()
-                assert os.readlink(root / 'default') == 'custom-site'
-            else:
-                assert not (root / 'default').is_symlink()
-                assert (root / 'default').read_text() == 'custom standalone site\n'
-            assert (root / 'custom-site').read_text() == 'custom host configuration\n'
-            assert (root / 'modules-enabled/50-mod-markdown-verify.conf').read_text() == '# existing module config\n'
-            assert (root / 'document-root/sentinel').read_text() == 'existing web root\n'
-            assert not list(work.iterdir())
-            ledger = json.loads((root / 'ledger.json').read_text())
-            assert ledger['schema_version'] == 1
-            assert ledger['source_kind'] == 'ubuntu-default-repo'
-            assert {test['name'] for test in ledger['tests']} == {
-                'load', 'request_markdown', 'request_passthrough', 'lifecycle',
-                'negative_abi_rejected'}
-            assert ledger['skip'] == 0
-            assert (ledger['fail'] == 0) is success
-            if mode in ('config-fail', 'start-fail'):
-                assert not (root / 'signals').exists()
+            (root / 'child.pid').unlink(missing_ok=True)
+            (root / 'child.exit').unlink(missing_ok=True)
+            with _owned_verifier(command, env, root):
+                exit_code = int(_wait_for_file(root / 'verifier.exit'))
+                assert (exit_code == 0) is success
+                assert sentinel.poll() is None
+                if mode in ('', 'http-fail'):
+                    child = int((root / 'child.pid').read_text())
+                    with pytest.raises(ProcessLookupError):
+                        os.kill(child, 0)
+                assert (root / 'ngx_http_markdown_filter_module.so').read_bytes() == b'existing host module'
+                if default_kind == 'symlink':
+                    assert (root / 'default').is_symlink()
+                    assert os.readlink(root / 'default') == 'custom-site'
+                else:
+                    assert not (root / 'default').is_symlink()
+                    assert (root / 'default').read_text() == 'custom standalone site\n'
+                assert (root / 'custom-site').read_text() == 'custom host configuration\n'
+                assert (root / 'modules-enabled/50-mod-markdown-verify.conf').read_text() == '# existing module config\n'
+                assert (root / 'document-root/sentinel').read_text() == 'existing web root\n'
+                assert not list(work.iterdir())
+                ledger = json.loads((root / 'ledger.json').read_text())
+                assert ledger['schema_version'] == 1
+                assert ledger['source_kind'] == 'ubuntu-default-repo'
+                assert {test['name'] for test in ledger['tests']} == {
+                    'load', 'request_markdown', 'request_passthrough', 'lifecycle',
+                    'negative_abi_rejected'}
+                assert ledger['skip'] == 0
+                assert (ledger['fail'] == 0) is success
+                if mode in ('config-fail', 'start-fail'):
+                    assert not (root / 'signals').exists()
     finally:
         sentinel.terminate()
         sentinel.wait()

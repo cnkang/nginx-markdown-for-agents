@@ -50,8 +50,20 @@ def test_local_deb_paths_become_absolute_files(tmp_path: Path, kind: str) -> Non
 
 
 def test_missing_deb_fails_before_package_operations(tmp_path: Path) -> None:
-    """A missing local artifact must not become an APT package argument."""
+    """The production resolver must reject a missing local DEB artifact."""
     result = _resolve(tmp_path, "dist/missing.deb")
     assert result.returncode == 2
     assert result.stdout == ""
     assert "DEB file does not exist" in result.stderr
+
+
+def test_package_resolution_precedes_all_apt_commands() -> None:
+    """A package transaction must not start before path resolution succeeds."""
+    lines = SCRIPT.read_text(encoding="utf-8").splitlines()
+    resolution = lines.index('package_file="$(resolve_package_file "$package_file")"')
+    apt_lines = [
+        index for index, line in enumerate(lines)
+        if "apt-get" in line and not line.lstrip().startswith("#")
+    ]
+    assert apt_lines
+    assert all(index > resolution for index in apt_lines)
