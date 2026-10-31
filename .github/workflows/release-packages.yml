@@ -76,7 +76,7 @@ on:
         description: >-
           Add --require-blocking to the compatibility evidence gate on a
           dispatch run, so every release-blocking matrix row must have a CI
-          record from this run.  Tag runs always require it.
+          record from this run.  Tag push runs always enable it.
         required: false
         type: boolean
         default: false
@@ -2294,15 +2294,16 @@ jobs:
           # Compatibility evidence comes only from this run's producer jobs,
           # staged above.  Every record must be a CI record for this commit
           # and this run; the checked-in local records under docs/evidence
-          # never satisfy this gate.  A tag must cover every release-blocking
-          # row; a dispatch adds that check when require_blocking is true.
+          # never satisfy this gate.  Tag pushes require every blocking row.
+          # Dispatch adds that requirement only when require_blocking is true,
+          # regardless of the selected ref.
           EVIDENCE_ARGS=(
             --evidence-dir "${RUNNER_TEMP}/compat-evidence"
             --require-ci
             --candidate-sha "${GITHUB_SHA}"
             --workflow-run-url "${RUN_URL}"
           )
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" || "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then
+          if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "${GITHUB_REF_TYPE:-}" == "tag" ]] || [[ "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then
             EVIDENCE_ARGS+=(--require-blocking)
           fi
           PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \

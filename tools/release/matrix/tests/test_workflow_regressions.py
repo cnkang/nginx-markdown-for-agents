@@ -854,8 +854,46 @@ def test_release_gate_validates_only_this_runs_staged_ci_records() -> None:
         assert flag in unconditional, flag
     assert "--require-blocking" in conditional
     assert "--require-blocking" not in unconditional
-    assert '"${GITHUB_REF_TYPE:-}" == "tag"' in conditional
-    assert '"${REQUIRE_BLOCKING_INPUT:-false}" == "true"' in conditional
+    condition_line = next(
+        line.strip()
+        for line in block.splitlines()
+        if line.strip().startswith("if [[") and "REQUIRE_BLOCKING_INPUT" in line
+    )
+    assert condition_line == (
+        'if [[ "${GITHUB_EVENT_NAME:-}" == "push" '
+        '&& "${GITHUB_REF_TYPE:-}" == "tag" ]] '
+        '|| [[ "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then'
+    )
+    condition_script = "\n".join(
+        (
+            condition_line,
+            '  printf "required\\n"',
+            "else",
+            '  printf "optional\\n"',
+            "fi",
+        )
+    )
+    cases = (
+        ("push", "tag", "false", "required"),
+        ("workflow_dispatch", "tag", "false", "optional"),
+        ("workflow_dispatch", "tag", "true", "required"),
+        ("workflow_dispatch", "branch", "false", "optional"),
+        ("workflow_dispatch", "branch", "true", "required"),
+    )
+    for event_name, ref_type, require_blocking, expected in cases:
+        result = subprocess.run(
+            ["bash", "-c", condition_script],
+            check=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "GITHUB_EVENT_NAME": event_name,
+                "GITHUB_REF_TYPE": ref_type,
+                "REQUIRE_BLOCKING_INPUT": require_blocking,
+            },
+            text=True,
+        )
+        assert result.stdout.strip() == expected
     assert "docs/evidence" not in block
     assert gates["env"]["RUN_URL"].endswith("/actions/runs/${{ github.run_id }}")
 
@@ -865,6 +903,7 @@ def test_require_blocking_dispatch_input_is_routed_through_env() -> None:
     spec = workflow["on"]["workflow_dispatch"]["inputs"]["require_blocking"]
     assert spec["type"] == "boolean"
     assert spec["default"] == "false"
+    assert "tag push runs always enable it" in spec["description"].lower()
     gates = _step_by_name(_job_steps(workflow, "release-gate"), "Run release gates")
     assert gates["env"]["REQUIRE_BLOCKING_INPUT"] == "${{ inputs.require_blocking }}"
     for job in workflow["jobs"].values():
