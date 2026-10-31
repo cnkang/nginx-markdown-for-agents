@@ -475,6 +475,90 @@ def test_install_paths_provide_installer_runtime_dependencies() -> None:
     assert "apt-get install -y --no-install-recommends curl gawk python3" in workflow_test
 
 
+def test_build_git_bootstrap_retries_transient_appstream_errors(
+    tmp_path: Path,
+) -> None:
+    import os
+
+    steps = _workflow_data("release-packages.yml")["jobs"]["build"]["steps"]
+    step_names = [step.get("name") for step in steps]
+    assert step_names.index("Bootstrap Git for checkout") < step_names.index("Checkout")
+    assert step_names.index("Checkout") < step_names.index("Install build dependencies")
+    bootstrap = _step_by_name(steps, "Bootstrap Git for checkout")["run"]
+    assert 'if [[ "${install_output}" != *"repomd.xml parser error"* ]]; then' in bootstrap
+    assert 'if [[ "${attempt}" == 3 ]]; then' in bootstrap
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    dnf = fake_bin / "dnf"
+    dnf.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$DNF_CALL_LOG"
+if [[ "${1:-}" == "clean" ]]; then
+    exit 0
+fi
+attempts=0
+if [[ -f "$INSTALL_COUNT_FILE" ]]; then
+    read -r attempts < "$INSTALL_COUNT_FILE"
+fi
+attempts=$((attempts + 1))
+printf '%s\\n' "$attempts" > "$INSTALL_COUNT_FILE"
+if (( attempts < 3 )); then
+    printf '%s\\n' "$DNF_FAILURE_MESSAGE" >&2
+    exit 19
+fi
+printf '%s\\n' "git installed"
+""",
+        encoding="utf-8",
+    )
+    dnf.chmod(0o755)
+    sleep = fake_bin / "sleep"
+    sleep.write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$SLEEP_CALL_LOG\"\n",
+        encoding="utf-8",
+    )
+    sleep.chmod(0o755)
+
+    count_file = tmp_path / "install-count"
+    dnf_log = tmp_path / "dnf-calls"
+    sleep_log = tmp_path / "sleep-calls"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "DNF_CALL_LOG": str(dnf_log),
+            "INSTALL_COUNT_FILE": str(count_file),
+            "DNF_FAILURE_MESSAGE": (
+                "repomd.xml parser error: Parse error at line: 1 "
+                "(Document is empty)"
+            ),
+            "SLEEP_CALL_LOG": str(sleep_log),
+        }
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", bootstrap],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert int(count_file.read_text(encoding="utf-8")) == 3
+    calls = dnf_log.read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        "clean all",
+        "install -y git",
+        "clean all",
+        "install -y git",
+        "clean all",
+        "install -y git",
+    ]
+    assert sleep_log.read_text(encoding="utf-8").splitlines() == ["10", "20"]
+    assert "git installed" in result.stdout
+
+
 def test_release_build_bundles_pinned_brotli_decoder() -> None:
     """Official Linux builds must bundle the fixed Brotli decoder.
 

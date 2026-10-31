@@ -478,6 +478,41 @@ jobs:
         include: ${{ fromJson(needs.prepare.outputs.package_matrix) }}
 
     steps:
+      - name: Bootstrap Git for checkout
+        run: |
+          set -euo pipefail
+          attempt=1
+          delay=10
+          install_output=""
+          install_status=0
+          while [[ "${attempt}" -le 3 ]]; do
+            dnf clean all
+            if install_output="$(dnf install -y git 2>&1)"; then
+              printf '%s\n' "${install_output}"
+              exit 0
+            else
+              install_status=$?
+            fi
+            printf '%s\n' "${install_output}" >&2
+            if [[ "${install_output}" != *"repomd.xml parser error"* ]]; then
+              exit "${install_status}"
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              echo "ERROR: AppStream metadata failed after 3 Git install attempts." >&2
+              exit "${install_status}"
+            fi
+            echo "Transient AppStream metadata error; retrying Git install (${attempt}/3)." >&2
+            sleep "${delay}"
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Install build dependencies
         run: |
           bash tools/ci/retry_transient.sh -- bash -e -c '
@@ -501,11 +536,6 @@ jobs:
           '
           dnf clean all
         shell: bash
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
 
       - name: Derive and validate version
         id: version
