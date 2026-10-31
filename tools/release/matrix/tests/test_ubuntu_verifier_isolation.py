@@ -22,6 +22,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE = ROOT / "packaging/scripts/verify-ubuntu-native-module.sh"
+sys.path.insert(0, str(ROOT / "tools"))
+from lib.path_validation import validate_write_path_within_root  # noqa: E402
 
 
 def _wait_for_file(path):
@@ -41,7 +43,6 @@ def _owned_verifier(command, env, root):
     """Keep a live session leader until all test-owned children are stopped."""
     supervisor = '''
 import os, signal, subprocess, sys, time
-from pathlib import Path
 child = subprocess.Popen(sys.argv[2:])
 def forward(signum, _):
     try:
@@ -51,14 +52,19 @@ def forward(signum, _):
 signal.signal(signal.SIGTERM, forward)
 signal.signal(signal.SIGINT, forward)
 signal.signal(signal.SIGUSR1, forward)
-Path(sys.argv[1]).write_text(str(child.wait()))
+status_fd = int(sys.argv[1])
+os.write(status_fd, str(child.wait()).encode())
+os.close(status_fd)
 while True:
     time.sleep(1)
 '''
-    leader = subprocess.Popen([sys.executable, '-c', supervisor,
-                               str(root / 'verifier.exit'), *command], env=env,
-                              start_new_session=True, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL)
+    status_path = validate_write_path_within_root(
+        root / 'verifier.exit', root, purpose='verifier exit status')
+    with status_path.open('wb') as status_file:
+        leader = subprocess.Popen(
+            [sys.executable, '-c', supervisor, str(status_file.fileno()), *command],
+            env=env, pass_fds=(status_file.fileno(),), start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         yield leader
     finally:
