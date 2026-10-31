@@ -65,6 +65,7 @@ def _count(tmp_path: pathlib.Path) -> int:
         "read tcp 10.0.0.1:443: connection reset by peer",
         "net/http: TLS handshake timeout",
         "Temporary failure resolving 'archive.ubuntu.com'",
+        "Error: Failed to download metadata for repo 'appstream': repomd.xml parser error: Parse error at line: 1 (Document is empty)",
         'failed to do request: Head "https://registry-1.docker.io/v2/x": EOF',
         "HTTP/2 429",
     ],

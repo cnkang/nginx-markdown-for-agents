@@ -500,6 +500,8 @@ def test_release_build_bundles_pinned_brotli_decoder() -> None:
     workflow = _workflow_data("release-packages.yml")
     steps = workflow["jobs"]["build"]["steps"]
     install = _step_by_name(steps, "Install build dependencies")["run"]
+    assert "bash tools/ci/retry_transient.sh -- bash -e -c" in install
+    assert install.index("dnf clean all") < install.index("dnf install -y")
     assert re.search(r"^\s+cmake \\$", install, re.MULTILINE) is not None
     assert "brotli-devel" not in install
     assert "./packaging/scripts/build-brotli-static.sh" in text

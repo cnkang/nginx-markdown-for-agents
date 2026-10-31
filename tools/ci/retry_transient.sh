@@ -79,6 +79,7 @@ TRANSIENT_MARKERS=(
     "Could not connect to"
     "spurious network error"
     "temporary error (try again later)"
+    "repomd.xml parser error"
     "\": EOF"
 )
 

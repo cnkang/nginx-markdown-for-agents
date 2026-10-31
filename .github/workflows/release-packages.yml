@@ -480,22 +480,25 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf install -y \
-            gcc \
-            make \
-            binutils \
-            ca-certificates \
-            cmake \
-            curl-minimal \
-            pcre2-devel \
-            zlib-devel \
-            pkg-config \
-            openssl-devel \
-            tar \
-            gzip \
-            findutils \
-            file \
-            git
+          bash tools/ci/retry_transient.sh -- bash -e -c '
+            dnf clean all
+            dnf install -y \
+              gcc \
+              make \
+              binutils \
+              ca-certificates \
+              cmake \
+              curl-minimal \
+              pcre2-devel \
+              zlib-devel \
+              pkg-config \
+              openssl-devel \
+              tar \
+              gzip \
+              findutils \
+              file \
+              git
+          '
           dnf clean all
         shell: bash
 
