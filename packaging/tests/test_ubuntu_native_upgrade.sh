@@ -3,6 +3,16 @@
 # Run only inside a disposable Docker container with an explicit mutation opt-in.
 set -euo pipefail
 
+# Resolve a supplied DEB before APT consumes it. APT treats a bare relative
+# path such as dist/module.deb as a package name rather than a local file.
+resolve_package_file() {
+    if [[ ! -f "$1" ]]; then
+        echo 'DEB file does not exist' >&2
+        return 2
+    fi
+    realpath -- "$1"
+}
+
 case "${1:-}" in
     --deb)
         [[ $# -eq 2 ]] || { echo 'usage: test_ubuntu_native_upgrade.sh --deb FILE' >&2; exit 2; }
@@ -18,7 +28,7 @@ if [[ ! -f /.dockerenv || "${PACKAGE_TEST_ALLOW_SYSTEM_MUTATION:-}" != 1 || "$EU
     echo 'Run only as root in a disposable Docker container with PACKAGE_TEST_ALLOW_SYSTEM_MUTATION=1' >&2
     exit 2
 fi
-[[ -f "$package_file" ]] || { echo 'DEB file does not exist' >&2; exit 2; }
+package_file="$(resolve_package_file "$package_file")"
 service_policy_status=0
 if [[ -x /usr/sbin/policy-rc.d ]]; then
     /usr/sbin/policy-rc.d nginx start || service_policy_status=$?

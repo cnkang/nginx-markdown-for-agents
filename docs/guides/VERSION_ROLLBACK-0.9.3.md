@@ -47,10 +47,10 @@ exact NGINX package revision before restoring service.
    sudo nginx -t
    ```
 
-5. Reload:
+5. Reload or start NGINX:
 
    ```bash
-   sudo systemctl reload nginx
+   sudo systemctl reload-or-restart nginx
    ```
 
 ## 3. Roll back a source installation
@@ -64,10 +64,10 @@ exact NGINX package revision before restoring service.
      /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
-3. Test and reload:
+3. Test, then reload or start NGINX:
 
    ```bash
-   sudo nginx -t && sudo systemctl reload nginx
+   sudo nginx -t && sudo systemctl reload-or-restart nginx
    ```
 
 ## 4. Roll back when the ABI changed

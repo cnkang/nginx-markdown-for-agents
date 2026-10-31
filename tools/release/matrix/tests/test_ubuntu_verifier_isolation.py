@@ -6,6 +6,8 @@ boundaries point to doubles. Former host paths map to private sentinels, so a
 regression cannot damage the machine that runs this test.
 """
 
+from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +22,58 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE = ROOT / "packaging/scripts/verify-ubuntu-native-module.sh"
+
+
+def _wait_for_file(path):
+    """Wait for a bounded process handoff and return its recorded value."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if path.exists():
+            content = path.read_text()
+            if content:
+                return content
+        time.sleep(.01)
+    raise AssertionError(f'process did not populate {path}')
+
+
+@contextmanager
+def _owned_verifier(command, env, root):
+    """Keep a live session leader until all test-owned children are stopped."""
+    supervisor = '''
+import os, signal, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen(sys.argv[2:])
+def forward(signum, _):
+    try:
+        child.send_signal(signal.SIGKILL if signum == signal.SIGUSR1 else signum)
+    except ProcessLookupError:
+        pass
+signal.signal(signal.SIGTERM, forward)
+signal.signal(signal.SIGINT, forward)
+signal.signal(signal.SIGUSR1, forward)
+Path(sys.argv[1]).write_text(str(child.wait()))
+while True:
+    time.sleep(1)
+'''
+    leader = subprocess.Popen([sys.executable, '-c', supervisor,
+                               str(root / 'verifier.exit'), *command], env=env,
+                              start_new_session=True, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+    try:
+        yield leader
+    finally:
+        # The supervisor remains alive after the verifier exits, so this PGID
+        # cannot be reused between these signals and the final wait.
+        if leader.poll() is None:
+            os.killpg(leader.pid, signal.SIGTERM)
+            deadline = time.monotonic() + 2
+            while (root / 'child.pid').exists() and time.monotonic() < deadline:
+                stopped = root / 'child.exit'
+                if stopped.exists() and stopped.read_text():
+                    break
+                time.sleep(.01)
+            os.killpg(leader.pid, signal.SIGKILL)
+        leader.wait(timeout=10)
 
 
 @pytest.fixture
@@ -80,9 +134,12 @@ if '-t' in args:
     sys.exit(1 if os.environ.get('MODE') == 'config-fail' else 0)
 if os.environ.get('MODE') == 'start-fail':
     sys.exit(1)
-Path(os.environ['CHILD_PID']).write_text(str(os.getpid()))
 signal.signal(signal.SIGHUP, lambda *_: None)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+def stop(*_):
+    Path(os.environ['CHILD_EXIT']).write_text('stopped')
+    sys.exit(0)
+signal.signal(signal.SIGTERM, stop)
+Path(os.environ['CHILD_PID']).write_text(str(os.getpid()))
 while True:
     time.sleep(.05)
 ''')
@@ -121,6 +178,7 @@ if '-w' in args:
     bash_env.write_text('kill() { printf "%s\\n" "$*" >>"$KILL_LOG"; builtin kill "$@"; }\n')
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", TMPDIR=str(work),
                CALL_LOG=str(log), CHILD_PID=str(tmp_path / "child.pid"),
+               CHILD_EXIT=str(tmp_path / 'child.exit'),
                BASH_ENV=str(bash_env), KILL_LOG=str(tmp_path / 'signals'))
     command = ["bash", str(script), "--module", str(module), "--out",
                str(tmp_path / "ledger.json"), "--suite", "24.04",
@@ -175,27 +233,31 @@ def test_signal_cleans_only_owned_child(sandbox, stop_signal):
     """Signal exits stop the private child and remove its private prefix."""
     root, work, env, command = sandbox
     sentinel = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-    process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
     try:
-        deadline = time.monotonic() + 10
-        while not (root / 'child.pid').exists() and time.monotonic() < deadline:
-            time.sleep(.01)
-        assert (root / 'child.pid').exists()
-        child = int((root / 'child.pid').read_text())
-        process.send_signal(stop_signal)
-        assert process.wait(timeout=10) != 0
-        assert sentinel.poll() is None
-        with pytest.raises(ProcessLookupError):
-            os.kill(child, 0)
-        assert not list(work.iterdir())
-        assert (root / 'ngx_http_markdown_filter_module.so').read_bytes() == b'existing host module'
+        with _owned_verifier(command, env, root) as process:
+            _wait_for_file(root / 'child.pid')
+            process.send_signal(stop_signal)
+            assert int(_wait_for_file(root / 'verifier.exit')) != 0
+            assert sentinel.poll() is None
+            assert (root / 'child.exit').read_text() == 'stopped'
+            assert not list(work.iterdir())
+            assert (root / 'ngx_http_markdown_filter_module.so').read_bytes() == b'existing host module'
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
         sentinel.terminate()
         sentinel.wait()
+
+
+def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox):
+    """Teardown must clean leaked children even when the shell cannot do so."""
+    root, _, env, command = sandbox
+    with pytest.raises(AssertionError, match='simulated validation failure'):
+        with _owned_verifier(command, env, root) as process:
+            _wait_for_file(root / 'child.pid')
+            process.send_signal(signal.SIGUSR1)
+            assert int(_wait_for_file(root / 'verifier.exit')) == -signal.SIGKILL
+            assert not (root / 'child.exit').exists()
+            raise AssertionError('simulated validation failure')
+    assert _wait_for_file(root / 'child.exit') == 'stopped'
 
 
 def test_negative_control_requires_signature_rejection(sandbox):
@@ -238,11 +300,13 @@ def test_rejects_stale_build_revision(sandbox):
     root, work, env, command = sandbox
     provenance = root / 'build.json'
     provenance.write_text(json.dumps({'nginx_version': '1.24.0',
-                                      'nginx_package_revision': '1.24.0-2ubuntu7.18'}))
+                                      'nginx_package_revision': '1.24.0-2ubuntu7.18',
+                                      'module_sha256': hashlib.sha256(
+                                          (root / 'ngx_http_markdown_filter_module.so').read_bytes()).hexdigest()}))
     result = subprocess.run(command + ['--provenance', str(provenance)], env=env,
                             capture_output=True, timeout=10)
     assert result.returncode != 0
-    assert b'differs from build provenance' in result.stderr
+    assert result.stderr.strip() == b'installed NGINX revision differs from build provenance'
     assert not list(work.iterdir())
     assert not (root / 'child.pid').exists()
 
