@@ -270,8 +270,8 @@ def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox):
             process.send_signal(signal.SIGUSR1)
             assert int(_wait_for_file(root / 'verifier.exit')) == -signal.SIGKILL
             assert not (root / 'child.exit').exists()
-            raise AssertionError('simulated validation failure')
-    except AssertionError as error:
+            raise RuntimeError('simulated validation failure')
+    except RuntimeError as error:
         failure = str(error)
     assert failure == 'simulated validation failure'
     assert _wait_for_file(root / 'child.exit') == 'stopped'
