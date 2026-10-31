@@ -82,7 +82,15 @@ def test_release_package_checksums_wait_for_successful_release_gate() -> None:
     workflow = _workflow_data("release-packages.yml")
     job = workflow["jobs"]["integrity-checksums"]
 
-    assert "release-gate" in job["needs"]
+    assert set(job["needs"]) == {
+        "smoke-test",
+        "musl-build",
+        "ubuntu-native",
+        "integrity-signing",
+        "official-docker-release-gate",
+        "fuzz-qualification",
+        "release-gate",
+    }
     assert " ".join(job["if"].split()) == (
         "always() && needs.musl-build.result == 'success' "
         "&& needs.smoke-test.result == 'success' "
