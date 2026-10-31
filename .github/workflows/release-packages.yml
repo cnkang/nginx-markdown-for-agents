@@ -1596,6 +1596,35 @@ jobs:
           nfpm --version
         shell: bash
 
+      - name: Verify Ubuntu-native HTTP contracts
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path tools/e2e-harness/Cargo.toml
+          http_bin="$(mktemp -d /tmp/ubuntu-http-bin.XXXXXX)"
+          trap 'rm -f "${http_bin}/nginx" "${http_bin}/ngx_http_markdown_filter_module.so"; rmdir "${http_bin}"' EXIT
+          chmod 755 "${http_bin}"
+          ln -s /usr/sbin/nginx "${http_bin}/nginx"
+          install -m 0644 dist/ubuntu-native/ngx_http_markdown_filter_module.so "${http_bin}/"
+          mkdir -p dist/ubuntu-native/http
+          chown nobody:nogroup dist/ubuntu-native/http
+          harness="$(pwd)/tools/e2e-harness/target/release/e2e-harness"
+          for scenario in encoding-chain brotli-streaming conditional-requests representation-validator-e2e; do
+            runuser -u nobody -- "${harness}" --nginx-bin "${http_bin}/nginx" \
+              --profile full --timeout 60 \
+              --json-report "$(pwd)/dist/ubuntu-native/http/${scenario}.json" \
+              scenario "${scenario}"
+          done
+        shell: bash
+
+      - name: Upload Ubuntu-native HTTP reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ubuntu-native-http-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/ubuntu-native/http/*.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Generate Ubuntu-native DEB package
         env:
           MATRIX_ARCH: ${{ matrix.arch }}
@@ -1651,11 +1680,12 @@ jobs:
         shell: bash
 
       - name: Install and remove the Ubuntu-native package
+        env:
+          PACKAGE_TEST_ALLOW_SYSTEM_MUTATION: "1"
         run: |
           set -euo pipefail
-          dpkg -i "dist/${DEB_FILENAME}"
-          nginx -t
-          dpkg -r nginx-module-markdown-for-agents-ubuntu
+          bash packaging/tests/test_ubuntu_native_upgrade.sh \
+            --deb "dist/${DEB_FILENAME}"
           nginx -t
         shell: bash
 

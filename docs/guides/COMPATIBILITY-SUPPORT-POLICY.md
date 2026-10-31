@@ -75,6 +75,13 @@ package revision and one ABI provide. The release workflow refuses to build
 when the archive revision differs from the recorded revision. This rule makes
 the maintainer review the new revision before a release can use it.
 
+A matching ABI or `--with-compat` does not prove compatibility across revisions.
+Support requires real build, load, and request evidence for the exact package revision.
+Ubuntu backports security fixes, so an older upstream version can remain supported.
+APT can hold NGINX or propose module removal after an ABI change.
+The dependency guard does not guarantee upgrade, restart, or rollback success.
+Operators must disable all module directives before running NGINX without the module.
+
 ## 5. Maintainer duties
 
 | Event | Action | Deadline |

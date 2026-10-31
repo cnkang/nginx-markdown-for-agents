@@ -82,6 +82,10 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
 
 ## 2b. Upgrade an Ubuntu-native installation
 
+Back up configuration and review APT's simulated transaction before changing packages.
+Follow [the security-update procedure](UBUNTU-LTS-NGINX-COMPATIBILITY.md#6-handle-a-security-update)
+for backups, dependency conflicts, and removal of module directives.
+
 1. Record the installed package revision:
 
    ```bash
@@ -100,16 +104,28 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    [Ubuntu LTS compatibility guide](UBUNTU-LTS-NGINX-COMPATIBILITY.md#3-install-the-ubuntu-native-package).
    Both checks must pass before installation.
 
-5. Install it:
+5. Simulate the package transaction:
+
+   ```bash
+   apt-get -s install ./nginx-module-markdown-for-agents-ubuntu_0.9.3_ubuntu-<suite>_nginx-<revision>_<arch>.deb
+   ```
+
+6. Install the package after reviewing the simulation:
 
    ```bash
    sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_0.9.3_ubuntu-<suite>_nginx-<revision>_<arch>.deb
    ```
 
-6. Test and reload:
+7. Test the configuration:
 
    ```bash
-   sudo nginx -t && sudo systemctl reload nginx
+   sudo nginx -t
+   ```
+
+8. Reload NGINX after the test passes:
+
+   ```bash
+   sudo systemctl reload nginx
    ```
 
 ## 3. Verify the result
@@ -138,11 +154,13 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
 
 ## 4. Roll back
 
-Keep the package file that you replaced. A rollback is safe only when the
-NGINX ABI did not change.
+Keep the signed package files and configuration backup that the upgrade replaces.
+A matching ABI alone does not prove compatibility across package revisions.
+Use the exact verified NGINX revision, or rebuild and verify the module.
 
 ```bash
-sudo apt-get install ./<previous-package-file>
+apt-get -s install ./<previous-package-file>
+sudo apt-get install --allow-downgrades ./<previous-package-file>
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -163,4 +181,4 @@ procedure and for the checks that show an ABI change.
 | `module is not binary compatible` | The module was built for another NGINX build | Install the artifact for your exact NGINX version, or build from source |
 | `cannot open shared object file` | The module file is missing | Reinstall the package |
 | `unknown directive "markdown_filter"` | The module is not loaded | Add the `load_module` directive, or enable the package snippet |
-| Apt removes the module during an upgrade | The NGINX ABI changed | Install a module for the new revision |
+| APT holds NGINX or proposes module removal | The ABI dependency cannot be satisfied | Follow the Ubuntu guide's backup and conflict procedure |

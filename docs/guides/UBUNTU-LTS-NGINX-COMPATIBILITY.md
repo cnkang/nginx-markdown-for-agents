@@ -22,8 +22,8 @@ reverse is also true. The version string is not enough to decide
 compatibility.
 
 Ubuntu also changes the package revision when it backports a security fix. A
-revision change can keep the ABI, or it can change the ABI. Only a load test
-on the exact revision shows which one happened. Ubuntu published
+revision change can keep the ABI, or it can change the ABI. Read the package's
+ABI provide, then verify module loading on that exact revision. Ubuntu published
 [USN-8563-2](https://ubuntu.com/security/notices/USN-8563-2) and
 [USN-8563-4](https://ubuntu.com/security/notices/USN-8563-4) after such a
 change affected external modules.
@@ -151,9 +151,11 @@ builds. The two packages conflict because they own the same module file.
 
 
 The package depends on `nginx-abi-<version>-<n>`, on `nginx-common`, and on a
-fixed `libbrotli1`. If a later NGINX security update changes the ABI, apt
-cannot keep the module installed. Apt removes the module and the enabled snippet. NGINX then starts without the
-filter. This is the fail-closed path.
+fixed `libbrotli1`. An ABI change makes the module dependency unsatisfied.
+APT can retain the old NGINX package or propose removal of the module.
+Neither outcome guarantees a successful upgrade or restart.
+Module removal leaves user configuration intact. Remaining module directives
+can make `nginx -t` fail with `unknown directive`.
 
 **A failed installation.** The post-install script adds one entry under
 `/etc/nginx`: the link `/etc/nginx/modules-enabled/50-mod-markdown.conf`. The
@@ -296,24 +298,54 @@ or when you build your own NGINX package.
    apt-get changelog nginx
    ```
 
-2. Upgrade the system:
+2. Back up the complete configuration, including links and file modes:
+
+   ```bash
+   backup_dir="$(mktemp -d "$HOME/nginx-backup.XXXXXX")"
+   sudo tar -C /etc -cpf "$backup_dir/nginx-config.tar" nginx
+   dpkg-query -W -f='${Package} ${Version}\n' nginx nginx-common \
+     nginx-module-markdown-for-agents-ubuntu > "$backup_dir/packages.txt"
+   ```
+
+   Keep the previous signed package files beside this backup.
+
+3. Refresh package metadata and simulate the upgrade:
 
    ```bash
    sudo apt-get update
-   sudo apt-get upgrade
+   apt-get -s upgrade
+   apt-get -s install nginx nginx-common
    ```
 
-3. Test the configuration:
+   Review held packages, removals, and dependency conflicts before installation.
+   Do not force broken dependencies or remove the ABI dependency.
+   Keep NGINX unchanged until a matching module is available, or disable the
+   module with the procedure below. Retaining old packages can delay security fixes.
+
+4. Apply the reviewed transaction, then test the configuration:
 
    ```bash
+   sudo apt-get install nginx nginx-common
    sudo nginx -t
    ```
 
-4. Do these steps when the test fails with a module error:
+5. Use these steps before removing the module, or after a module error:
 
-   a. Remove the module package:
+   a. Find every module directive and load line:
 
       ```bash
+      sudo grep -R -n -E 'markdown_[[:alnum:]_]+|load_module.*markdown' /etc/nginx
+      sudoedit /etc/nginx/nginx.conf
+      ```
+
+      Edit each file from the search results. Disable all module directives,
+      including `markdown_filter`, limits, cache settings, metrics, and diagnostics.
+      Disable manual Markdown `load_module` lines. Preserve unrelated configuration.
+
+   b. Simulate removal, then remove the package:
+
+      ```bash
+      apt-get -s remove nginx-module-markdown-for-agents-ubuntu
       sudo apt-get remove nginx-module-markdown-for-agents-ubuntu
       ```
 
@@ -324,14 +356,11 @@ or when you build your own NGINX package.
       `/etc/nginx/modules-enabled/50-mod-markdown.conf` before it deletes the
       module file. The link needs no manual cleanup. The script deletes the
       link only when it points at
-      `/usr/share/nginx/modules-available/mod-markdown.conf`. Delete a link
-      that points elsewhere, or a copy of the snippet, by hand:
+      `/usr/share/nginx/modules-available/mod-markdown.conf`. Inspect custom
+      snippets and links before changing them. Disable only the Markdown
+      load configuration that you own. Preserve unrelated files and links.
 
-      ```bash
-      sudo rm -f /etc/nginx/modules-enabled/50-mod-markdown.conf
-      ```
-
-   b. Disable the manual load line from Section 5 when it is still active.
+   c. Disable the manual load line from Section 5 when it is still active.
       Comment out or delete this line in `/etc/nginx/nginx.conf`:
 
       ```nginx
@@ -341,15 +370,14 @@ or when you build your own NGINX package.
       That module no longer matches the updated NGINX binary. NGINX fails to
       start while the load line stays active.
 
-   c. Remove every `markdown_filter` directive that you added in Section 4.
-      Comment the line out, or delete it, in each server block. NGINX starts
-      without the filter only when no `markdown_filter` directive remains. A
-      remaining directive fails the test with `unknown directive`.
+      Review the search results again. No active module directive may remain
+      when the module is absent.
 
-   d. Test the configuration, then start NGINX:
+   d. Test before starting or reloading NGINX:
 
       ```bash
-      sudo nginx -t && sudo systemctl start nginx
+      sudo nginx -t
+      sudo systemctl reload-or-restart nginx
       ```
 
    e. Install or build a module for the new revision. Section 3 and
@@ -360,13 +388,15 @@ fails the load test.
 
 ## 7. Roll back
 
-A rollback to a module for the **same** NGINX ABI is safe. A rollback across
-an ABI change is not possible, because the old module cannot load.
+A matching ABI is necessary, but it does not prove module loadability.
+Use the previous module only with its verified package revision and configuration.
+For another revision, rebuild or verify the module before restoring service.
 
-1. Stop the new module version:
+1. Simulate installation of the saved package:
 
    ```bash
-   sudo apt-get install --reinstall nginx-module-markdown-for-agents-ubuntu=<previous-version>
+   apt-get -s install ./<previous-package-file>
+   sudo apt-get install --allow-downgrades ./<previous-package-file>
    ```
 
 2. Test and reload:
@@ -374,6 +404,17 @@ an ABI change is not possible, because the old module cannot load.
    ```bash
    sudo nginx -t && sudo systemctl reload nginx
    ```
+
+Restore configuration only after restoring compatible packages:
+
+Review files added after the backup. Remove only identified files from the failed
+upgrade before restoring. Archive extraction does not remove additional files.
+
+```bash
+sudo tar -C /etc -xpf "$backup_dir/nginx-config.tar"
+sudo nginx -t
+sudo systemctl reload-or-restart nginx
+```
 
 Keep a copy of the previous package file when you upgrade. The support matrix
 records the exact package revisions that this project verified.
@@ -384,6 +425,19 @@ The project records one evidence file per verified target under
 `docs/evidence/<release>/compat/`. Each file contains the package revision,
 the ABI provide, the source digest, the module checksum, the configure
 argument digest, and every test result.
+
+On 2026-10-31, fresh arm64 Ubuntu containers reported these archive candidates:
+
+| Suite | NGINX revision | ABI provide |
+|---|---|---|
+| 24.04 | `1.24.0-2ubuntu7.19` | `nginx-abi-1.24.0-1` |
+| 26.04 | `1.28.3-2ubuntu1.12` | `nginx-abi-1.28.3-1` |
+
+[USN-8955-1](https://ubuntu.com/security/notices/USN-8955-1) lists the same fixed revisions.
+Both archives also exposed base revisions with the same ABI provide.
+No real ABI-changing upgrade pair was available for this check.
+APT hold and removal outcomes therefore remain conditional, not verified upgrade results.
+The archive check does not establish module loadability on another revision.
 
 Limits:
 

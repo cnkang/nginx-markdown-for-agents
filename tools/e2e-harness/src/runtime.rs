@@ -180,7 +180,7 @@ fn write_nginx_conf_stub(
     let error_log = runtime_dir.join("nginx-error.log");
     let access_log = runtime_dir.join("nginx-access.log");
     let pid_path = runtime_dir.join("nginx.pid");
-    let content = match scenario_name {
+    let mut content = match scenario_name {
         "brotli-streaming" => brotli_nginx_conf(
             &error_log,
             &access_log,
@@ -269,6 +269,19 @@ http {{\n\
             access_log.display(),
         ),
     };
+    // Distribution builds can use absolute /var/lib/nginx temporary paths.
+    // Override all HTTP temporary paths so an unprivileged scenario owns them.
+    let mut temp_directives = String::new();
+    for kind in ["client_body", "proxy", "fastcgi", "uwsgi", "scgi"] {
+        let temp_path = runtime_dir.join(format!("{kind}-temp"));
+        std::fs::create_dir_all(&temp_path)?;
+        temp_directives.push_str(&format!("    {kind}_temp_path {};\n", temp_path.display()));
+    }
+    let http_start = content
+        .find("http {\n")
+        .context("generated NGINX config has no HTTP block")?
+        + "http {\n".len();
+    content.insert_str(http_start, &temp_directives);
     std::fs::write(path, content)?;
     Ok(())
 }
@@ -782,6 +795,41 @@ fn find_module(nginx_bin: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn every_scenario_owns_its_http_temporary_paths() -> Result<()> {
+        for scenario in [
+            "smoke",
+            "brotli-streaming",
+            "encoding-chain",
+            "metrics-endpoint",
+            "conditional-requests",
+            "representation-validator-e2e",
+            "auth-cache",
+            "accept-negotiation",
+            "status-codes",
+        ] {
+            let temp = tempfile::tempdir()?;
+            let config = temp.path().join("nginx.conf");
+            write_nginx_conf_stub(
+                &config,
+                scenario,
+                Path::new("/usr/sbin/nginx"),
+                18080,
+                18081,
+            )?;
+            let content = std::fs::read_to_string(config)?;
+            for kind in ["client_body", "proxy", "fastcgi", "uwsgi", "scgi"] {
+                let owned_path = temp.path().join(format!("{kind}-temp"));
+                assert!(owned_path.is_dir(), "{scenario}: {kind}");
+                assert!(
+                    content.contains(&format!("{kind}_temp_path {};", owned_path.display())),
+                    "{scenario}: {kind}"
+                );
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn runtime_mode_from_cli_resolves_correctly() {

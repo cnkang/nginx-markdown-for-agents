@@ -34,8 +34,8 @@ maintainer: "nginx-markdown-for-agents maintainers"
 description: |
   NGINX module that serves Markdown to AI agents.
   Built for the NGINX package in the Ubuntu archive. The package depends on
-  the distro ABI virtual package, so an ABI-changing NGINX security update
-  cannot leave this module loaded against an incompatible binary.
+  the distro ABI virtual package. Operators must check package dependencies
+  and validate configuration before an NGINX upgrade or restart.
 vendor: "NGINX Markdown for Agents Contributors"
 homepage: "https://github.com/cnkang/nginx-markdown-for-agents"
 license: "BSD-2-Clause"

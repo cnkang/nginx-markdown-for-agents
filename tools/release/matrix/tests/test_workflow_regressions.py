@@ -1008,6 +1008,36 @@ def test_retry_helper_never_wraps_verifiers_or_tests() -> None:
                 assert word not in wrapped, (name, line.strip())
 
 
+def test_ubuntu_package_lifecycle_checks_residual_directives() -> None:
+    """Every native package leg must exercise removal with remaining directives."""
+    workflow = _workflow_data("release-packages.yml")
+    step = _step_by_name(
+        _job_steps(workflow, "ubuntu-native"),
+        "Install and remove the Ubuntu-native package",
+    )
+    assert step["env"]["PACKAGE_TEST_ALLOW_SYSTEM_MUTATION"] == "1"
+    assert "bash packaging/tests/test_ubuntu_native_upgrade.sh" in step["run"]
+    assert '--deb "dist/${DEB_FILENAME}"' in step["run"]
+
+
+def test_ubuntu_http_contracts_block_evidence_creation() -> None:
+    """Native HTTP responses must pass before a compatibility record is written."""
+    steps = _job_steps(_workflow_data("release-packages.yml"), "ubuntu-native")
+    http = _step_by_name(steps, "Verify Ubuntu-native HTTP contracts")
+    evidence = _step_by_name(steps, "Write compatibility evidence record")
+    assert steps.index(http) < steps.index(evidence)
+    for scenario in (
+        "encoding-chain", "brotli-streaming", "conditional-requests",
+        "representation-validator-e2e",
+    ):
+        assert scenario in http["run"]
+    assert "runuser -u nobody" in http["run"]
+    assert "ln -s /usr/sbin/nginx" in http["run"]
+    assert "--profile full --timeout 60" in http["run"]
+    report = _step_by_name(steps, "Upload Ubuntu-native HTTP reports")
+    assert report["with"]["if-no-files-found"] == "error"
+
+
 def test_glibc_verification_host_is_the_build_baseline_image() -> None:
     """The glibc host must stay the pinned build image (oldest supported glibc).
 
