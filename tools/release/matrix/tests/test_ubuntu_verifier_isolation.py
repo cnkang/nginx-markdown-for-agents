@@ -250,13 +250,17 @@ def test_signal_cleans_only_owned_child(sandbox, stop_signal):
 def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox):
     """Teardown must clean leaked children even when the shell cannot do so."""
     root, _, env, command = sandbox
-    with pytest.raises(AssertionError, match='simulated validation failure'):
+    failure = None
+    try:
         with _owned_verifier(command, env, root) as process:
             _wait_for_file(root / 'child.pid')
             process.send_signal(signal.SIGUSR1)
             assert int(_wait_for_file(root / 'verifier.exit')) == -signal.SIGKILL
             assert not (root / 'child.exit').exists()
             raise AssertionError('simulated validation failure')
+    except AssertionError as error:
+        failure = str(error)
+    assert failure == 'simulated validation failure'
     assert _wait_for_file(root / 'child.exit') == 'stopped'
 
 
