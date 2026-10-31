@@ -6,7 +6,7 @@ boundaries point to doubles. Former host paths map to private sentinels, so a
 regression cannot damage the machine that runs this test.
 """
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
@@ -39,19 +39,30 @@ def _wait_for_file(path):
 
 
 @contextmanager
-def _owned_verifier(command, env, root):
+def _owned_verifier(command, env, root, *, hold_requests=False):
     """Keep a live session leader until all test-owned children are stopped."""
     supervisor = '''
 import os, signal, subprocess, sys, time
-child = subprocess.Popen(sys.argv[2:])
+child = None
+pending = []
+ack_fd = int(sys.argv[2])
 def forward(signum, _):
+    if child is None:
+        pending.append(signum)
+        return
+    if child.poll() is not None:
+        return
     try:
         child.send_signal(signal.SIGKILL if signum == signal.SIGUSR1 else signum)
     except ProcessLookupError:
-        pass
+        return
+    os.write(ack_fd, str(signum).encode())
 signal.signal(signal.SIGTERM, forward)
 signal.signal(signal.SIGINT, forward)
 signal.signal(signal.SIGUSR1, forward)
+child = subprocess.Popen(sys.argv[5:], pass_fds=tuple(map(int, sys.argv[3:5])))
+for signum in pending:
+    forward(signum, None)
 status_fd = int(sys.argv[1])
 os.write(status_fd, str(child.wait()).encode())
 os.close(status_fd)
@@ -60,26 +71,41 @@ while True:
 '''
     status_path = validate_write_path_within_root(
         root / 'verifier.exit', root, purpose='verifier exit status')
-    with status_path.open('wb') as status_file:
+    ack_path = validate_write_path_within_root(
+        root / 'signal.ack', root, purpose='forwarded signal acknowledgment')
+    ready_path = validate_write_path_within_root(
+        root / 'gate.ready', root, purpose='blocked curl acknowledgment')
+    with ExitStack() as resources:
+        status_file = resources.enter_context(status_path.open('wb'))
+        ack_file = resources.enter_context(ack_path.open('wb'))
+        ready_file = resources.enter_context(ready_path.open('wb'))
+        release_read, release_write = os.pipe()
+        resources.callback(os.close, release_read)
+        resources.callback(os.close, release_write)
+        child_env = dict(env, CURL_READY_FD=str(ready_file.fileno()),
+                         CURL_RELEASE_FD=str(release_read),
+                         HOLD_CURL='1' if hold_requests else '0')
         leader = subprocess.Popen(
-            [sys.executable, '-c', supervisor, str(status_file.fileno()), *command],
-            env=env, pass_fds=(status_file.fileno(),), start_new_session=True,
+            [sys.executable, '-c', supervisor, str(status_file.fileno()),
+             str(ack_file.fileno()), str(ready_file.fileno()), str(release_read), *command],
+            env=child_env, pass_fds=(status_file.fileno(), ack_file.fileno(),
+                                   ready_file.fileno(), release_read), start_new_session=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        yield leader
-    finally:
-        # The supervisor remains alive after the verifier exits, so this PGID
-        # cannot be reused between these signals and the final wait.
-        if leader.poll() is None:
-            os.killpg(leader.pid, signal.SIGTERM)
-            deadline = time.monotonic() + 2
-            while (root / 'child.pid').exists() and time.monotonic() < deadline:
-                stopped = root / 'child.exit'
-                if stopped.exists() and stopped.read_text():
-                    break
-                time.sleep(.01)
-            os.killpg(leader.pid, signal.SIGKILL)
-        leader.wait(timeout=10)
+        try:
+            yield leader, release_write
+        finally:
+            # The supervisor remains alive after the verifier exits, so this
+            # PGID cannot be reused before the final signal and wait.
+            if leader.poll() is None:
+                os.killpg(leader.pid, signal.SIGTERM)
+                deadline = time.monotonic() + 2
+                while (root / 'child.pid').exists() and time.monotonic() < deadline:
+                    stopped = root / 'child.exit'
+                    if stopped.exists() and stopped.read_text():
+                        break
+                    time.sleep(.01)
+                os.killpg(leader.pid, signal.SIGKILL)
+            leader.wait(timeout=10)
 
 
 @pytest.fixture
@@ -164,6 +190,9 @@ else:
 import os, sys
 from pathlib import Path
 args = sys.argv[1:]
+if os.environ.get('HOLD_CURL') == '1':
+    os.write(int(os.environ['CURL_READY_FD']), b'ready')
+    assert os.read(int(os.environ['CURL_RELEASE_FD']), 1) == b'1'
 body = '<h1>Ubuntu native smoke</h1>' if 'Accept: text/html' in args else '# Ubuntu native smoke'
 if os.environ.get('MODE') == 'http-fail':
     body = 'wrong representation'
@@ -247,10 +276,12 @@ def test_signal_cleans_only_owned_child(sandbox, stop_signal):
     root, work, env, command = sandbox
     sentinel = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
     try:
-        with _owned_verifier(command, env, root) as process:
-            _wait_for_file(root / 'child.pid')
+        with _owned_verifier(command, env, root, hold_requests=True) as (process, release):
+            _wait_for_file(root / 'gate.ready')
             process.send_signal(stop_signal)
-            assert int(_wait_for_file(root / 'verifier.exit')) != 0
+            assert _wait_for_file(root / 'signal.ack') == str(stop_signal)
+            os.write(release, b'1')
+            assert int(_wait_for_file(root / 'verifier.exit')) == 128 + stop_signal
             assert sentinel.poll() is None
             assert (root / 'child.exit').read_text() == 'stopped'
             assert not list(work.iterdir())
@@ -265,9 +296,11 @@ def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox):
     root, _, env, command = sandbox
     failure = None
     try:
-        with _owned_verifier(command, env, root) as process:
-            _wait_for_file(root / 'child.pid')
+        with _owned_verifier(command, env, root, hold_requests=True) as (process, release):
+            _wait_for_file(root / 'gate.ready')
             process.send_signal(signal.SIGUSR1)
+            assert _wait_for_file(root / 'signal.ack') == str(signal.SIGUSR1)
+            os.write(release, b'1')
             assert int(_wait_for_file(root / 'verifier.exit')) == -signal.SIGKILL
             assert not (root / 'child.exit').exists()
             raise RuntimeError('simulated validation failure')
@@ -281,11 +314,14 @@ def test_negative_control_requires_signature_rejection(sandbox):
     """An unrelated NGINX error cannot establish an ABI rejection."""
     root, _, env, command = sandbox
     env['NEGATIVE_ERROR'] = 'module file not found'
-    result = subprocess.run(command, env=env, capture_output=True, timeout=20)
-    assert result.returncode != 0
-    ledger = json.loads((root / 'ledger.json').read_text())
-    negative = next(test for test in ledger['tests'] if test['name'] == 'negative_abi_rejected')
-    assert negative['status'] == 'FAIL'
+    with _owned_verifier(command, env, root):
+        assert int(_wait_for_file(root / 'verifier.exit')) != 0
+        child = int((root / 'child.pid').read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+        ledger = json.loads((root / 'ledger.json').read_text())
+        negative = next(test for test in ledger['tests'] if test['name'] == 'negative_abi_rejected')
+        assert negative['status'] == 'FAIL'
 
 
 def test_busy_port_aborts_before_creating_resources(sandbox):

@@ -2249,8 +2249,15 @@ jobs:
           python3 tools/release/gates/validate_package_metadata.py
           python3 tools/release/gates/validate_k8s_manifests.py
           python3 tools/release/gates/validate_fuzz_packaging.py
+          # Dispatches qualify unpublished candidates; tags require final metadata.
+          case "${GITHUB_EVENT_NAME}:${GITHUB_REF_TYPE}" in
+            push:tag) METADATA_PHASE="final" ;;
+            workflow_dispatch:*) METADATA_PHASE="candidate" ;;
+            *) echo "ERROR: unsupported release metadata event" >&2; exit 1 ;;
+          esac
           python3 tools/release/gates/validate_release_metadata.py \
-            --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
+            --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}" \
+            --phase "${METADATA_PHASE}"
           # Compatibility evidence comes only from this run's producer jobs,
           # staged above.  Every record must be a CI record for this commit
           # and this run; the checked-in local records under docs/evidence

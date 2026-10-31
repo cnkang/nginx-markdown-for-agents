@@ -29,7 +29,9 @@ if [[ ! -f /.dockerenv || "${PACKAGE_TEST_ALLOW_SYSTEM_MUTATION:-}" != 1 || "$EU
     echo 'Run only as root in a disposable Docker container with PACKAGE_TEST_ALLOW_SYSTEM_MUTATION=1' >&2
     exit 2
 fi
-package_file="$(resolve_package_file "$package_file")"
+package_file="$(resolve_package_file "$package_file" && printf x)"
+package_file="${package_file%x}"
+package_file="${package_file%$'\n'}"
 service_policy_status=0
 if [[ -x /usr/sbin/policy-rc.d ]]; then
     /usr/sbin/policy-rc.d nginx start || service_policy_status=$?
