@@ -322,9 +322,12 @@ or when you build your own NGINX package.
    Keep NGINX unchanged until a matching module is available, or disable the
    module with the procedure below. Retaining old packages can delay security fixes.
 
-4. Apply the reviewed transaction, then test the configuration:
+4. If the transaction removes `nginx-module-markdown-for-agents-ubuntu`, complete step 5a first.
+   Test the edited configuration before installation.
+   Apply the reviewed transaction, then test the configuration again:
 
    ```bash
+   sudo nginx -t
    sudo apt-get install nginx nginx-common
    sudo nginx -t
    ```

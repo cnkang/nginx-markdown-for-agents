@@ -202,6 +202,10 @@ def test_owned_resources_and_existing_host_survive(sandbox, mode, success, defau
             result = subprocess.run(command, env=env, capture_output=True, timeout=20)
             assert (result.returncode == 0) is success, result.stderr.decode()
             assert sentinel.poll() is None
+            if mode in ('', 'http-fail'):
+                child = int((root / 'child.pid').read_text())
+                with pytest.raises(ProcessLookupError):
+                    os.kill(child, 0)
             assert (root / 'ngx_http_markdown_filter_module.so').read_bytes() == b'existing host module'
             if default_kind == 'symlink':
                 assert (root / 'default').is_symlink()

@@ -11,6 +11,7 @@ resolve_package_file() {
         return 2
     fi
     realpath -- "$1"
+    return $?
 }
 
 case "${1:-}" in
@@ -78,6 +79,7 @@ test_dir="$(mktemp -d /tmp/markdown-upgrade.XXXXXX)"
 cleanup() {
     rm -f "$test_dir/nginx.conf" "$test_dir/without-module.conf" "$test_dir/negative.log"
     rmdir "$test_dir"
+    return $?
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -86,6 +88,14 @@ trap 'exit 143' TERM
 apt-get -s install nginx "$package_file"
 DEBIAN_FRONTEND=noninteractive apt-get install -y nginx "$package_file"
 dpkg-query -W -f='${Package} ${Version} ${Provides} ${Depends}\n' nginx "$package_name"
+[[ -d /etc/nginx/modules-enabled ]] || {
+    echo 'Module installation did not create modules-enabled' >&2
+    exit 1
+}
+[[ -L /etc/nginx/modules-enabled/50-mod-markdown.conf ]] || {
+    echo 'Module installation did not create the enablement symlink' >&2
+    exit 1
+}
 cat > "$test_dir/nginx.conf" <<'CONFIG'
 error_log stderr;
 load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;

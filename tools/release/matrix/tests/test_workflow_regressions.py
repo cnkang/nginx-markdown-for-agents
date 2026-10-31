@@ -1008,8 +1008,8 @@ def test_retry_helper_never_wraps_verifiers_or_tests() -> None:
                 assert word not in wrapped, (name, line.strip())
 
 
-def test_ubuntu_package_lifecycle_checks_residual_directives() -> None:
-    """Every native package leg must exercise removal with remaining directives."""
+def test_ubuntu_package_lifecycle_invokes_upgrade_script() -> None:
+    """Every native package leg must run the Ubuntu upgrade lifecycle script."""
     workflow = _workflow_data("release-packages.yml")
     step = _step_by_name(
         _job_steps(workflow, "ubuntu-native"),
@@ -1026,6 +1026,7 @@ def test_ubuntu_http_contracts_block_evidence_creation() -> None:
     http = _step_by_name(steps, "Verify Ubuntu-native HTTP contracts")
     evidence = _step_by_name(steps, "Write compatibility evidence record")
     assert steps.index(http) < steps.index(evidence)
+    assert http.get("continue-on-error", False) is False
     for scenario in (
         "encoding-chain", "brotli-streaming", "conditional-requests",
         "representation-validator-e2e",
