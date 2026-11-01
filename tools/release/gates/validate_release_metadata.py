@@ -181,6 +181,34 @@ def _candidate_status_errors(value: str | None, path: Path) -> list[str]:
     return []
 
 
+def _candidate_project_status_errors(
+    project: str, version: str, path: Path
+) -> list[str]:
+    """Validate the single status field in the active project section."""
+    project_prose = "\n".join(_unfenced_lines(project))
+    section = re.search(
+        rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
+        project_prose,
+        re.MULTILINE | re.DOTALL,
+    )
+    if section is None:
+        return _candidate_status_errors(None, path)
+
+    status_matches = re.findall(
+        r"^\*\*Status:\*\*[ \t]*(\S.*)$",
+        section.group(1),
+        re.MULTILINE,
+    )
+    if not status_matches:
+        return _candidate_status_errors(None, path)
+    if len(status_matches) > 1:
+        return [
+            f"{path}: active candidate section must contain "
+            "exactly one Status field"
+        ]
+    return _candidate_status_errors(status_matches[0], path)
+
+
 def _validate_candidate_metadata(
     version: str, changelog: str, project: str, notes: str, paths: tuple[Path, ...]
 ) -> list[str]:
@@ -196,29 +224,7 @@ def _validate_candidate_metadata(
         errors.append(f"{changelog_path}: active candidate must be [{version}] - Unreleased")
     if sum(heading_version == version for heading_version, _ in headings) != 1:
         errors.append(f"{changelog_path}: candidate heading must occur exactly once")
-    project_prose = "\n".join(_unfenced_lines(project))
-    section = re.search(
-        rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
-        project_prose, re.MULTILINE | re.DOTALL,
-    )
-    status_matches = (
-        []
-        if section is None
-        else re.findall(
-            r"^\*\*Status:\*\*[ \t]*(\S.*)$",
-            section.group(1),
-            re.MULTILINE,
-        )
-    )
-    if len(status_matches) == 1:
-        errors.extend(_candidate_status_errors(status_matches[0], project_path))
-    elif status_matches:
-        errors.append(
-            f"{project_path}: active candidate section must contain "
-            "exactly one Status field"
-        )
-    else:
-        errors.extend(_candidate_status_errors(None, project_path))
+    errors.extend(_candidate_project_status_errors(project, version, project_path))
     if f"# Release Notes: {version}" not in _unfenced_lines(notes):
         errors.append(f"{notes_path}: missing '# Release Notes: {version}' title")
     errors.extend(_candidate_status_errors(_release_note_field(notes, "Status"), notes_path))
