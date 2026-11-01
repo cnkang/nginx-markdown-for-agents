@@ -184,18 +184,26 @@ def _candidate_status_errors(value: str | None, path: Path) -> list[str]:
 def _candidate_project_status_errors(
     project: str, version: str, path: Path
 ) -> list[str]:
-    """Validate the single status field in the active project section."""
+    """Require one matching release section with one pending status field."""
     project_prose = "\n".join(_unfenced_lines(project))
-    section = re.search(
-        rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
-        project_prose,
-        re.MULTILINE | re.DOTALL,
+    sections = list(
+        re.finditer(
+            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
+            project_prose,
+            re.MULTILINE | re.DOTALL,
+        )
     )
-    if section is None:
+    if not sections:
         return _candidate_status_errors(None, path)
+    if len(sections) > 1:
+        return [
+            f"{path}: candidate metadata must contain exactly one "
+            f"Current Release Line {version} section"
+        ]
 
+    section = sections[0]
     status_matches = re.findall(
-        r"^\*\*Status:\*\*[ \t]*(\S.*)$",
+        r"^\*\*Status:\*\*[ \t]*(.*)$",
         section.group(1),
         re.MULTILINE,
     )

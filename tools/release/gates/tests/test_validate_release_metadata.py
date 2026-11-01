@@ -244,14 +244,20 @@ def test_candidate_status_must_be_on_the_same_line(tmp_path: Path) -> None:
     assert validate_release_metadata(tmp_path, "0.9.1", "candidate")
 
 
-def test_candidate_status_must_appear_exactly_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "duplicate_status_line",
+    ["**Status:** Stable release.", "**Status:**"],
+)
+def test_candidate_status_must_appear_exactly_once(
+    tmp_path: Path, duplicate_status_line: str
+) -> None:
     _write_candidate(tmp_path)
     status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
     status_line = "**Status:** Release candidate."
     status_path.write_text(
         status_path.read_text(encoding="utf-8").replace(
             status_line,
-            f"{status_line}\n**Status:** Stable release.",
+            f"{status_line}\n{duplicate_status_line}",
         ),
         encoding="utf-8",
     )
@@ -263,6 +269,27 @@ def test_candidate_status_must_appear_exactly_once(tmp_path: Path) -> None:
         "exactly one Status field"
     )
     assert duplicate_status_error in errors
+
+
+def test_candidate_status_rejects_duplicate_current_release_sections(
+    tmp_path: Path,
+) -> None:
+    _write_candidate(tmp_path)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8")
+        + "\n### Current Release Line 0.9.1\n\n"
+        + "**Status:** Release candidate.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+    duplicate_section_error = (
+        f"{status_path}: candidate metadata must contain exactly one "
+        "Current Release Line 0.9.1 section"
+    )
+    assert duplicate_section_error in errors
 
 
 @pytest.mark.parametrize("path,old,new", [

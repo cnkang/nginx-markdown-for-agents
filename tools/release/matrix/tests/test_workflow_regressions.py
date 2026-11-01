@@ -923,6 +923,8 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     upload = _step_by_name(
         steps, "Upload candidate-bound short-soak evidence"
     )
+    gates = _step_by_name(steps, "Run release gates")
+    release_version = workflow["env"]["RELEASE_VERSION"]
 
     assert (
         names.index("Download canonical benchmark NGINX runtime")
@@ -933,7 +935,8 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     )
     assert "generate_soak_scenario_manifest.py" in manifest["run"]
     assert '--candidate-sha "${GITHUB_SHA}"' in manifest["run"]
-    assert "--version 0.9.2" in manifest["run"]
+    assert release_version == "0.9.3"
+    assert '--version "${RELEASE_VERSION}"' in manifest["run"]
     assert 'git rev-parse HEAD' in manifest["run"]
     assert "make test-e2e-rust-soak" in soak["run"]
     assert 'test -f "${NGINX_BIN}"' in soak["run"]
@@ -946,7 +949,10 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     assert "--env GITHUB_WORKSPACE" in soak["run"]
     assert "--env NGINX_BIN" in soak["run"]
     assert "--env MODULE_SO" in soak["run"]
-    assert "dnf install -y git make" in soak["run"]
+    assert "dnf install -y git make httpd-tools procps-ng" in soak["run"]
+    assert "rpm -q httpd-tools procps-ng" in soak["run"]
+    assert "command -v ab" in soak["run"]
+    assert "command -v ps" in soak["run"]
     assert (
         'git config --global --add safe.directory "${GITHUB_WORKSPACE}"'
         in soak["run"]
@@ -964,11 +970,21 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     assert upload["if"] == "always()"
     assert upload["with"]["if-no-files-found"] == "warn"
     for path in (
-        "artifacts/release/0.9.2/short-soak-scenario-manifest.json",
-        "artifacts/release/0.9.2/soak-qualification-record.json",
+        "artifacts/release/${{ env.RELEASE_VERSION }}/short-soak-scenario-manifest.json",
+        "artifacts/release/${{ env.RELEASE_VERSION }}/soak-qualification-record.json",
         "build/soak-runtime",
     ):
         assert path in upload["with"]["path"]
+    assert "validate_soak_qualification.py" in gates["run"]
+    assert (
+        '--manifest "artifacts/release/${RELEASE_VERSION}/'
+        'short-soak-scenario-manifest.json"'
+    ) in gates["run"]
+    assert (
+        '--record "artifacts/release/${RELEASE_VERSION}/'
+        'soak-qualification-record.json"'
+    ) in gates["run"]
+    assert "--env RELEASE_VERSION" in gates["run"]
 
 
 def test_require_blocking_dispatch_input_is_routed_through_env() -> None:
