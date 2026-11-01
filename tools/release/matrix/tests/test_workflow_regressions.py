@@ -910,6 +910,53 @@ def test_release_gate_validates_only_this_runs_staged_ci_records() -> None:
     assert gates["env"]["RUN_URL"].endswith("/actions/runs/${{ github.run_id }}")
 
 
+def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    steps = _job_steps(workflow, "release-gate")
+    names = [step.get("name") for step in steps]
+    manifest = _step_by_name(
+        steps, "Generate candidate-bound short-soak manifest"
+    )
+    soak = _step_by_name(
+        steps, "Run candidate-bound short-soak qualification"
+    )
+    upload = _step_by_name(
+        steps, "Upload candidate-bound short-soak evidence"
+    )
+
+    assert (
+        names.index("Download canonical benchmark NGINX runtime")
+        < names.index("Generate candidate-bound short-soak manifest")
+        < names.index("Run candidate-bound short-soak qualification")
+        < names.index("Upload candidate-bound short-soak evidence")
+        < names.index("Run release gates")
+    )
+    assert "generate_soak_scenario_manifest.py" in manifest["run"]
+    assert '--candidate-sha "${GITHUB_SHA}"' in manifest["run"]
+    assert "--version 0.9.2" in manifest["run"]
+    assert 'git rev-parse HEAD' in manifest["run"]
+    assert "make test-e2e-rust-soak" in soak["run"]
+    assert 'test -x "${NGINX_BIN}"' in soak["run"]
+    assert 'test -f "${MODULE_SO}"' in soak["run"]
+    assert soak["env"]["NGINX_BIN"] == (
+        "${{ github.workspace }}/module-runtime/nginx"
+    )
+    assert soak["env"]["MODULE_SO"] == (
+        "${{ github.workspace }}/module-runtime/"
+        "ngx_http_markdown_filter_module.so"
+    )
+
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["if"] == "always()"
+    assert upload["with"]["if-no-files-found"] == "warn"
+    for path in (
+        "artifacts/release/0.9.2/short-soak-scenario-manifest.json",
+        "artifacts/release/0.9.2/soak-qualification-record.json",
+        "build/soak-runtime",
+    ):
+        assert path in upload["with"]["path"]
+
+
 def test_require_blocking_dispatch_input_is_routed_through_env() -> None:
     workflow = _workflow_data("release-packages.yml")
     spec = workflow["on"]["workflow_dispatch"]["inputs"]["require_blocking"]
