@@ -1002,12 +1002,23 @@ def test_every_evidence_upload_name_carries_its_matrix_identity() -> None:
     assert seen == set(expected)
 
 
-def _run_prepare(tmp_path) -> dict[str, str]:
+def _execute_prepare(tmp_path, matrix_document=None) -> subprocess.CompletedProcess:
     import json
 
     repo_root = Path(__file__).resolve().parents[4]
     workflow = _workflow_data("release-packages.yml")
     resolve = [s for s in _job_steps(workflow, "prepare") if s.get("id") == "resolve"][0]
+    script = resolve["run"]
+    if matrix_document is not None:
+        matrix_path = tmp_path / "release-matrix.json"
+        matrix_path.write_text(json.dumps(matrix_document), encoding="utf-8")
+        matrix_open = 'with open("tools/release-matrix.json", "r") as f:'
+        assert matrix_open in script
+        script = script.replace(
+            matrix_open,
+            f"with open({str(matrix_path)!r}, \"r\") as f:",
+            1,
+        )
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
     env = {
@@ -1017,14 +1028,22 @@ def _run_prepare(tmp_path) -> dict[str, str]:
         "PYTHONPATH": str(repo_root),
     }
     result = subprocess.run(
-        ["bash", "-c", resolve["run"]],
+        ["bash", "-c", script],
         cwd=repo_root,
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
+    return result
+
+
+def _run_prepare(tmp_path) -> dict[str, str]:
+    import json
+
+    result = _execute_prepare(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
+    output = tmp_path / "github_output"
     values = dict(
         line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
     )
@@ -1041,6 +1060,25 @@ def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> N
     assert len(module_legs) == 24
     assert len(package_legs) == 16
     assert len(ubuntu_legs) == 4
+    assert {
+        (entry["suite"], entry["image"])
+        for entry in ubuntu_legs
+    } == {
+        (
+            "24.04",
+            "docker.io/library/ubuntu@sha256:"
+            "fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+        ),
+        (
+            "26.04",
+            "docker.io/library/ubuntu@sha256:"
+            "6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c",
+        ),
+    }
+    assert (
+        _workflow_data("release-packages.yml")["jobs"]["ubuntu-native"]["container"]
+        == "${{ matrix.image }}"
+    )
     names = (
         [f"nginx.org-{e['nginx_version']}-{e['libc']}-{e['arch']}.json" for e in module_legs]
         + [
@@ -1062,6 +1100,25 @@ def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> N
     containers = [e for e in blocking if e.get("artifact_type") == "docker-image"]
     assert len(blocking) == len(names) + len(containers)
     assert len(containers) == 4
+
+
+def test_prepare_fails_when_ubuntu_suite_has_no_pinned_builder_image(tmp_path) -> None:
+    import json
+
+    repo_root = Path(__file__).resolve().parents[4]
+    matrix = json.loads((repo_root / "tools" / "release-matrix.json").read_text())
+    ubuntu_row = next(
+        entry
+        for entry in matrix["entries"]
+        if entry.get("source") == "ubuntu-default-repo"
+        and entry.get("artifact_type") == "deb-package"
+    )
+    ubuntu_row["os"] = "ubuntu-25.04"
+
+    result = _execute_prepare(tmp_path, matrix)
+
+    assert result.returncode != 0
+    assert "no pinned Ubuntu builder image for suite 25.04" in result.stdout
 
 
 def _dag_has_cycle(workflow: dict) -> bool:

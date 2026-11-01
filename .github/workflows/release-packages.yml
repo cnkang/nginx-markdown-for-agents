@@ -424,6 +424,11 @@ jobs:
           # row's provenance reference is the revision the build must use; a
           # moved revision fails the build instead of silently testing a
           # different ABI.
+          ubuntu_builder_images = {
+              # Multi-architecture official-image manifest digests.
+              "24.04": "docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+              "26.04": "docker.io/library/ubuntu@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c",
+          }
           ubuntu_entries = []
           for entry in data.get("entries", []):
               if (
@@ -443,12 +448,20 @@ jobs:
                       f"pinned package revision in provenance.reference: {reference!r}"
                   )
                   raise SystemExit(1)
+              suite = entry["os"].split("-", 1)[1]
+              image = ubuntu_builder_images.get(suite)
+              if image is None:
+                  print(
+                      f"ERROR: no pinned Ubuntu builder image for suite {suite}"
+                  )
+                  raise SystemExit(1)
               ubuntu_entries.append({
                   "os": entry["os"],
-                  "suite": entry["os"].split("-", 1)[1],
+                  "suite": suite,
                   "nginx_version": entry["nginx_version"],
                   "arch": package_arch(entry["target"]),
                   "package_revision": revision,
+                  "image": image,
               })
           ubuntu_entries.sort(
               key=lambda e: (e["os"], tuple(int(p) for p in e["nginx_version"].split(".")), e["arch"])
@@ -1509,7 +1522,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.ubuntu_matrix != '[]'
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    container: ubuntu:${{ matrix.suite }}
+    container: ${{ matrix.image }}
     permissions:
       contents: read
     strategy:
