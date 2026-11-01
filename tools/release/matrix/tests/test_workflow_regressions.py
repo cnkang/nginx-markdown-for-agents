@@ -920,6 +920,9 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     soak = _step_by_name(
         steps, "Run candidate-bound short-soak qualification"
     )
+    ownership = _step_by_name(
+        steps, "Restore short-soak runtime artifact ownership"
+    )
     upload = _step_by_name(
         steps, "Upload candidate-bound short-soak evidence"
     )
@@ -930,6 +933,7 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         names.index("Download canonical benchmark NGINX runtime")
         < names.index("Generate candidate-bound short-soak manifest")
         < names.index("Run candidate-bound short-soak qualification")
+        < names.index("Restore short-soak runtime artifact ownership")
         < names.index("Upload candidate-bound short-soak evidence")
         < names.index("Run release gates")
     )
@@ -964,6 +968,16 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     assert soak["env"]["MODULE_SO"] == (
         "${{ github.workspace }}/module-runtime/"
         "ngx_http_markdown_filter_module.so"
+    )
+
+    assert ownership["if"] == "always()"
+    assert 'runtime_dir="${GITHUB_WORKSPACE}/build/soak-runtime"' in ownership[
+        "run"
+    ]
+    assert 'if [[ -d "${runtime_dir}" ]]; then' in ownership["run"]
+    assert (
+        'sudo chown -R --no-dereference "$(id -u):$(id -g)" -- "${runtime_dir}"'
+        in ownership["run"]
     )
 
     assert upload["uses"].startswith("actions/upload-artifact@")

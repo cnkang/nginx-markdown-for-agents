@@ -2266,6 +2266,16 @@ jobs:
             '
         shell: bash
 
+      - name: Restore short-soak runtime artifact ownership
+        if: always()
+        run: |
+          set -euo pipefail
+          runtime_dir="${GITHUB_WORKSPACE}/build/soak-runtime"
+          if [[ -d "${runtime_dir}" ]]; then
+            sudo chown -R --no-dereference "$(id -u):$(id -g)" -- "${runtime_dir}"
+          fi
+        shell: bash
+
       - name: Upload candidate-bound short-soak evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6.0.0
