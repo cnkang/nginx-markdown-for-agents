@@ -936,6 +936,8 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     assert "--version 0.9.2" in manifest["run"]
     assert 'git rev-parse HEAD' in manifest["run"]
     assert "make test-e2e-rust-soak" in soak["run"]
+    assert 'test -f "${NGINX_BIN}"' in soak["run"]
+    assert 'chmod +x "${NGINX_BIN}"' in soak["run"]
     assert 'test -x "${NGINX_BIN}"' in soak["run"]
     assert 'test -f "${MODULE_SO}"' in soak["run"]
     assert soak["env"]["NGINX_BIN"] == (

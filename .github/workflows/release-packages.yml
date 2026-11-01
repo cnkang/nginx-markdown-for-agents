@@ -2222,6 +2222,8 @@ jobs:
           RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
         run: |
           set -euo pipefail
+          test -f "${NGINX_BIN}"
+          chmod +x "${NGINX_BIN}"
           test -x "${NGINX_BIN}"
           test -f "${MODULE_SO}"
           make test-e2e-rust-soak

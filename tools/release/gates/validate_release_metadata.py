@@ -201,14 +201,24 @@ def _validate_candidate_metadata(
         rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
         project_prose, re.MULTILINE | re.DOTALL,
     )
-    status = None if section is None else re.search(
-        r"^\*\*Status:\*\*[ \t]*(\S.*)$", section.group(1), re.MULTILINE
-    )
-    errors.extend(
-        _candidate_status_errors(
-            None if status is None else status.group(1), project_path
+    status_matches = (
+        []
+        if section is None
+        else re.findall(
+            r"^\*\*Status:\*\*[ \t]*(\S.*)$",
+            section.group(1),
+            re.MULTILINE,
         )
     )
+    if len(status_matches) == 1:
+        errors.extend(_candidate_status_errors(status_matches[0], project_path))
+    elif status_matches:
+        errors.append(
+            f"{project_path}: active candidate section must contain "
+            "exactly one Status field"
+        )
+    else:
+        errors.extend(_candidate_status_errors(None, project_path))
     if f"# Release Notes: {version}" not in _unfenced_lines(notes):
         errors.append(f"{notes_path}: missing '# Release Notes: {version}' title")
     errors.extend(_candidate_status_errors(_release_note_field(notes, "Status"), notes_path))

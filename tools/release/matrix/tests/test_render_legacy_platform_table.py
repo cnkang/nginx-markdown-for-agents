@@ -98,9 +98,10 @@ def test_unmappable_linux_module_rows_fail_closed(field, value):
     entry.pop("arch")
     entry["target"] = "aarch64"
     entry[field] = value
+    matrix = _matrix(entry)
 
     with pytest.raises(ValueError, match="linux module row cannot be rendered"):
-        renderer.legacy_entries(_matrix(entry))
+        renderer.legacy_entries(matrix)
 
 
 def test_a_duplicate_matrix_row_is_rejected():
