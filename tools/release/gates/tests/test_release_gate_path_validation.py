@@ -13,6 +13,47 @@ from tools.release.gates import validate_fuzz_packaging as fuzz_gate
 from tools.release.gates import validate_metrics_registry as metrics_registry_gate
 from tools.release.gates import validate_release_candidate_evidence as candidate_gate
 from tools.release.gates import validate_release_evidence_manifest as evidence_gate
+from tools.release.matrix.normalize_matrix import RELEASE_VERSION
+
+
+def test_candidate_manifest_default_tracks_active_release_version() -> None:
+    """The candidate gate must read the manifest generated for this release."""
+    assert candidate_gate.DEFAULT_MANIFEST_PATH == (
+        candidate_gate.REPO_ROOT
+        / "artifacts"
+        / "release"
+        / RELEASE_VERSION
+        / "release-candidate-sha-manifest.json"
+    )
+
+
+def test_artifact_registry_defaults_track_active_release_version() -> None:
+    """Artifact index and feature manifest paths must match generated inputs."""
+    release_root = artifact_gate.REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
+
+    assert artifact_gate.DEFAULT_INDEX_PATH == (
+        release_root / "candidate-release-artifact-index.json"
+    )
+    assert artifact_gate.DEFAULT_CANDIDATE_MANIFEST == (
+        release_root / "release-candidate-sha-manifest.json"
+    )
+    assert artifact_gate.FEATURE_MANIFEST_PATH == (
+        release_root / "official-build-feature-manifest.json"
+    )
+
+
+def test_final_evidence_default_tracks_active_release_version() -> None:
+    """Final evidence validation must follow the release manifest generator."""
+    args = evidence_gate.build_arg_parser().parse_args(["--mode", "real"])
+    expected = (
+        evidence_gate.REPO_ROOT
+        / "artifacts"
+        / "release"
+        / RELEASE_VERSION
+        / "final-evidence-manifest.json"
+    )
+
+    assert Path(args.manifest) == expected
 
 
 @pytest.mark.parametrize(

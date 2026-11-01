@@ -42,8 +42,13 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from lib.path_validation import validate_read_path  # noqa: E402
 from lib.executable_validation import resolve_approved_executable  # noqa: E402
+from tools.release.matrix.normalize_matrix import RELEASE_VERSION  # noqa: E402
 
 FINAL_EVIDENCE_MANIFEST_LABEL = "final evidence manifest"
+DEFAULT_MANIFEST_PATH = (
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
+    / "final-evidence-manifest.json"
+)
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
@@ -59,10 +64,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                              "stale-digest detection")
     parser.add_argument(
         "--manifest",
-        default=str(
-            REPO_ROOT / "artifacts" / "release" / "0.9.2"
-            / "final-evidence-manifest.json"
-        ),
+        default=str(DEFAULT_MANIFEST_PATH),
         help="real mode: final evidence manifest to validate")
     parser.add_argument(
         "--verify-head",

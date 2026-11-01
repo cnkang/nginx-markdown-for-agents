@@ -7,7 +7,7 @@ status and blocking flag. All blocking entries must have status=pass;
 no blocking entry may be pending.
 
 Real mode validates the candidate-bound release-candidate-sha-manifest
-(`artifacts/release/0.9.2/release-candidate-sha-manifest.json`) produced
+(`artifacts/release/<active-version>/release-candidate-sha-manifest.json`) produced
 by release tooling: candidate SHA format, branch, source-tree digest, required
 input existence, and per-input sha256 digests. When run inside the
 repository worktree at the freeze point, the candidate SHA is verified
@@ -40,11 +40,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(REPO_ROOT))
 
 from lib.path_validation import validate_read_path  # noqa: E402
 from lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
+from tools.release.matrix.normalize_matrix import RELEASE_VERSION  # noqa: E402
 
 SCHEMA_VERSION = "release.candidate-evidence.v1"
 MANIFEST_SCHEMA_VERSION = "release.candidate-sha-manifest.v1"
@@ -76,7 +78,7 @@ MANIFEST_REQUIRED_FIELDS = (
 )
 
 DEFAULT_MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "release-candidate-sha-manifest.json"
 )
 
