@@ -73,6 +73,36 @@ def test_a_version_with_one_architecture_does_not_invent_the_others():
     assert rows[0]["arch"] == "aarch64"
 
 
+def test_target_only_alias_is_normalized_before_rendering():
+    entry = _module("1.30.6", "supported")
+    entry.pop("arch")
+    entry["target"] = "x86_64-unknown-linux-gnu"
+
+    rows = renderer.legacy_entries(_matrix(entry))
+
+    assert len(rows) == 1
+    assert rows[0]["arch"] == "x86_64"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("target", "mips64"),
+        ("nginx_version", None),
+        ("libc", None),
+        ("support_tier", None),
+    ),
+)
+def test_unmappable_linux_module_rows_fail_closed(field, value):
+    entry = _module("1.30.6", "supported")
+    entry.pop("arch")
+    entry["target"] = "aarch64"
+    entry[field] = value
+
+    with pytest.raises(ValueError, match="linux module row cannot be rendered"):
+        renderer.legacy_entries(_matrix(entry))
+
+
 def test_a_duplicate_matrix_row_is_rejected():
     matrix = _matrix(
         _module("1.30.6", "supported"),

@@ -40,6 +40,10 @@ from update_matrix import (  # noqa: E402
     DOC_MARKER_END,
     update_doc_table,
 )
+from normalize_matrix import (  # noqa: E402
+    canonical_arch,
+    normalize_compatibility_document,
+)
 
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
@@ -50,7 +54,7 @@ MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 _LEGACY_ARTIFACT = "dynamic-module"
 _LEGACY_OS = "linux"
 # The legacy table spells the architectures in GCC triple form.
-_LEGACY_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}
+_LEGACY_ARCH = {"x86_64": "x86_64", "aarch64": "aarch64"}
 
 
 def legacy_entries(matrix: dict[str, Any]) -> list[dict[str, str]]:
@@ -60,6 +64,7 @@ def legacy_entries(matrix: dict[str, Any]) -> list[dict[str, str]]:
     libc or architecture pair that the matrix does not carry: a version that
     ships only one architecture would otherwise claim four.
     """
+    matrix = normalize_compatibility_document(matrix)
     seen: dict[tuple[str, str, str], str] = {}
     for entry in matrix["entries"]:
         if entry.get("artifact_type") != _LEGACY_ARTIFACT:
@@ -68,11 +73,19 @@ def legacy_entries(matrix: dict[str, Any]) -> list[dict[str, str]]:
             continue
         version = entry.get("nginx_version")
         libc = entry.get("libc")
-        arch = _LEGACY_ARCH.get(str(entry.get("arch")))
+        arch = _LEGACY_ARCH.get(canonical_arch(entry["target"]))
         tier = entry.get("support_tier")
-        if not isinstance(version, str) or arch is None or not isinstance(tier, str):
-            continue
-        key = (version, str(libc), arch)
+        if (
+            not isinstance(version, str)
+            or not version
+            or arch is None
+            or not isinstance(libc, str)
+            or not libc
+            or not isinstance(tier, str)
+            or not tier
+        ):
+            raise ValueError(f"linux module row cannot be rendered: {entry!r}")
+        key = (version, libc, arch)
         if key in seen:
             raise ValueError(f"duplicate linux module row for {key}")
         seen[key] = tier
