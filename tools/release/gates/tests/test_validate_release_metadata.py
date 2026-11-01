@@ -98,6 +98,31 @@ def test_negated_status_fails_tag_gate(tmp_path: Path) -> None:
     assert any("not marked stable" in error for error in errors), errors
 
 
+@pytest.mark.parametrize(
+    "status_lines,error_fragment",
+    [
+        ("**Status:**", "not marked stable"),
+        (
+            "**Status:** Stable release, published 2026-07-28.\n**Status:**",
+            "exactly one Status field",
+        ),
+    ],
+)
+def test_status_fields_must_be_nonempty_and_unique_in_tag_gate(
+    tmp_path: Path, status_lines: str, error_fragment: str
+) -> None:
+    _write_release_surfaces(tmp_path, finalized=True)
+    status = tmp_path / "docs" / "project" / "PROJECT_STATUS.md"
+    status.write_text(
+        f"### Current Release Line 0.9.1\n\n{status_lines}\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "0.9.1")
+
+    assert any(error_fragment in error for error in errors), errors
+
+
 def test_publication_date_must_appear_in_status_section(tmp_path: Path) -> None:
     """The status section must carry the changelog's publication date."""
     _write_release_surfaces(tmp_path, finalized=True)

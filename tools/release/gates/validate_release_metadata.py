@@ -63,10 +63,18 @@ def _validate_project_status(
     if project_match is None:
         return [f"{path}: missing current release line {version}"]
     body = project_match.group("body")
-    status = re.search(r"^\*\*Status:\*\*(?P<value>.*)$", body, re.MULTILINE)
-    if status is None:
+    status_matches = re.findall(
+        r"^\*\*Status:\*\*(?P<value>.*)$",
+        body,
+        re.MULTILINE,
+    )
+    if not status_matches:
         return [f"{path}: missing **Status:** line for {version}"]
-    value_text = " ".join(status.group("value").split())
+    if len(status_matches) > 1:
+        return [
+            f"{path}: {version} section must contain exactly one Status field"
+        ]
+    value_text = " ".join(status_matches[0].split())
     first_sentence = re.split(r"[.;,]", value_text, maxsplit=1)[0].strip().casefold()
     non_final = re.search(
         r"\b(?:candidate|pending|unreleased|unpublished)\b"
