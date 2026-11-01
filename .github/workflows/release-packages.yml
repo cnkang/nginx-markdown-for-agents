@@ -2219,14 +2219,48 @@ jobs:
         env:
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
-          RUSTUP_TOOLCHAIN: ${{ env.RUST_TOOLCHAIN }}
         run: |
           set -euo pipefail
           test -f "${NGINX_BIN}"
           chmod +x "${NGINX_BIN}"
           test -x "${NGINX_BIN}"
           test -f "${MODULE_SO}"
-          make test-e2e-rust-soak
+          docker run --rm --platform linux/amd64 \
+            --volume "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
+            --workdir "${GITHUB_WORKSPACE}" \
+            --env GITHUB_WORKSPACE \
+            --env NGINX_BIN \
+            --env MODULE_SO \
+            almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743 \
+            bash -e -u -o pipefail -c '
+              attempt=1
+              delay=10
+              install_output=""
+              install_status=0
+              while [[ "${attempt}" -le 3 ]]; do
+                dnf clean all
+                if install_output="$(dnf install -y git make 2>&1)"; then
+                  printf "%s\\n" "${install_output}"
+                  break
+                else
+                  install_status=$?
+                fi
+                printf "%s\\n" "${install_output}" >&2
+                if [[ "${install_output}" != *"repomd.xml parser error"* ]]; then
+                  exit "${install_status}"
+                fi
+                if [[ "${attempt}" == 3 ]]; then
+                  echo "ERROR: AppStream metadata failed after 3 soak dependency attempts." >&2
+                  exit "${install_status}"
+                fi
+                echo "Transient AppStream metadata error; retrying soak dependencies (${attempt}/3)." >&2
+                sleep "${delay}"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+              done
+              git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+              make test-e2e-rust-soak
+            '
         shell: bash
 
       - name: Upload candidate-bound short-soak evidence

@@ -940,6 +940,18 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     assert 'chmod +x "${NGINX_BIN}"' in soak["run"]
     assert 'test -x "${NGINX_BIN}"' in soak["run"]
     assert 'test -f "${MODULE_SO}"' in soak["run"]
+    assert "docker run --rm --platform linux/amd64" in soak["run"]
+    assert '--volume "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}"' in soak["run"]
+    assert '--workdir "${GITHUB_WORKSPACE}"' in soak["run"]
+    assert "--env GITHUB_WORKSPACE" in soak["run"]
+    assert "--env NGINX_BIN" in soak["run"]
+    assert "--env MODULE_SO" in soak["run"]
+    assert "dnf install -y git make" in soak["run"]
+    assert (
+        'git config --global --add safe.directory "${GITHUB_WORKSPACE}"'
+        in soak["run"]
+    )
+    assert workflow["jobs"]["build"]["container"] in soak["run"]
     assert soak["env"]["NGINX_BIN"] == (
         "${{ github.workspace }}/module-runtime/nginx"
     )
