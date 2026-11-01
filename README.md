@@ -173,6 +173,10 @@ without a change. The release does not add, remove, or rename a directive.
 - The release targets stable 1.30.6 and mainline 1.31.8 for glibc and musl,
   on amd64 and arm64. A row becomes supported when the release workflow
   records build, load, and request evidence for it.
+- NGINX 1.30.5 and 1.31.6 dynamic-module targets and their Debian 12 and
+  AlmaLinux 9 package targets move from supported to best-effort. These rows
+  no longer block releases. NGINX 1.30.4 remains supported and release-blocking
+  for performance baselines.
 - The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX on
   amd64 and arm64 through the `nginx-module-markdown-for-agents-ubuntu`
   package. That

@@ -160,6 +160,7 @@ curl -sS -D - -o /dev/null \
 0.9.3 是兼容性维护发布。0.9.2 的配置无需修改即可使用，本版本不新增、不移除、也不重命名任何指令。
 
 - 本项目支持 nginx.org 当前的 stable 1.30.6 与 mainline 1.31.8，覆盖 glibc 与 musl、amd64 与 arm64。发布工作流记录构建、加载与请求证据后，对应条目才成为 supported。
+- 在 v0.9.3 中，1.30.5 与 1.31.6 的动态模块目标，以及对应 Debian 12 与 AlmaLinux 9 软件包目标，从 supported 降为 best-effort。这些目标不再阻塞发布。1.30.4 仍为 supported，并因性能基线要求继续阻塞发布。
 - 本项目通过 `nginx-module-markdown-for-agents-ubuntu` 包支持 Ubuntu 24.04 LTS 与 Ubuntu 26.04 LTS 的原生 NGINX，覆盖 amd64 与 arm64。该包依赖 Ubuntu 的 ABI，因此安全更新改变 ABI 时，模块不会被继续加载到不兼容的二进制上。
 - 新增的晋升流程把 supported 条目与证据文件绑定。每周的自动发现任务仍把新版本记为 best-effort 与 pending。
 
