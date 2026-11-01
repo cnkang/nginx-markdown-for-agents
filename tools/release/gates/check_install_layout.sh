@@ -9,6 +9,11 @@
 # REQUIRED PATHS:
 #   DEB: /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 #   RPM: /usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so
+#   Ubuntu-native DEB docs:
+#     /usr/share/doc/nginx-markdown-for-agents-ubuntu/LICENSE
+#     /usr/share/doc/nginx-markdown-for-agents-ubuntu/README.md
+#     /usr/share/doc/nginx-markdown-for-agents-ubuntu/UBUNTU-LTS-NGINX-COMPATIBILITY.md
+#   nginx.org package docs:
 #   /usr/share/doc/nginx-markdown-for-agents/README.md
 #   /usr/share/doc/nginx-markdown-for-agents/INSTALL.md
 #   /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
@@ -59,6 +64,10 @@ COMMON_REQUIRED_PATHS="/usr/share/doc/nginx-markdown-for-agents/README.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md
 /usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md
 /usr/share/licenses/nginx-markdown-for-agents/LICENSE"
+
+UBUNTU_DEB_REQUIRED_PATHS="/usr/share/doc/nginx-markdown-for-agents-ubuntu/LICENSE
+/usr/share/doc/nginx-markdown-for-agents-ubuntu/README.md
+/usr/share/doc/nginx-markdown-for-agents-ubuntu/UBUNTU-LTS-NGINX-COMPATIBILITY.md"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,6 +181,12 @@ required_paths_for_package() {
     local pkg_basename="$1"
 
     case "$pkg_basename" in
+        nginx-module-markdown-for-agents-ubuntu_*.deb)
+            printf '%s\n%s\n' \
+                "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+/usr/share/nginx/modules-available/mod-markdown.conf" \
+                "$UBUNTU_DEB_REQUIRED_PATHS"
+            ;;
         *.deb)
             printf '%s\n%s\n' \
                 "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPOSITORY_ROOT / "packaging" / "scripts" / "generate-release-manifest.py"
+VALIDATOR_PATH = REPOSITORY_ROOT / "packaging" / "scripts" / "validate-release-manifest.py"
 SPEC = importlib.util.spec_from_file_location("generate_release_manifest", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 GENERATOR = importlib.util.module_from_spec(SPEC)
@@ -78,3 +82,54 @@ def test_ubuntu_native_deb_keeps_distro_identity(tmp_path: Path) -> None:
     )
     assert nginx_org_entry["format"] == "deb"
     assert "distro" not in nginx_org_entry
+
+
+def test_ubuntu_native_deb_manifest_passes_release_validator(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    package_names = [
+        "nginx-module-markdown-for-agents-ubuntu_0.9.3"
+        "_ubuntu-24.04_nginx-1.24.0-2ubuntu7.19_amd64.deb",
+        "nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb",
+    ]
+    for index, package_name in enumerate(package_names):
+        (artifact_dir / package_name).write_bytes(f"package-{index}".encode())
+
+    manifest = GENERATOR.build_manifest(
+        artifact_dir,
+        version="0.9.3",
+        tag=None,
+        commit="a" * 40,
+        run_id="1",
+        run_number="1",
+        ref="refs/heads/release/0.9.3-nginx-ubuntu-compat",
+        ref_type="branch",
+        repo="cnkang/nginx-markdown-for-agents",
+        source_url=None,
+        source_sha=None,
+        no_source=True,
+    )
+    filenames = [package["filename"] for package in manifest["packages"]]
+    assert filenames == sorted(filenames)
+
+    manifest_path = tmp_path / "release-manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATOR_PATH),
+            "-m",
+            str(manifest_path),
+            "-d",
+            str(artifact_dir),
+            "--version",
+            "0.9.3",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr

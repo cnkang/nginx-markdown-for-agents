@@ -75,6 +75,22 @@ def _track(version: str) -> str:
     return ".".join(version.split(".")[:2])
 
 
+def _promotion_slot(entry: dict[str, Any]) -> tuple[str, ...] | None:
+    """Return the track and artifact identity for one matrix row."""
+    version = entry.get("nginx_version")
+    target_fields = (
+        entry.get("os"),
+        entry.get("libc"),
+        entry.get("arch"),
+        entry.get("artifact_type"),
+    )
+    if not isinstance(version, str) or not all(
+        isinstance(value, str) for value in target_fields
+    ):
+        return None
+    return (_track(version), *target_fields)
+
+
 def _load_matrix(path: pathlib.Path) -> dict[str, Any]:
     validated = validate_read_path(path, purpose="release matrix promotion")
     with validated.open(encoding="utf-8") as handle:
@@ -135,10 +151,10 @@ def _refused_manual_rows(
 
 def _demote_superseded(
     entries: list[dict[str, Any]],
-    promoted_versions: set[str],
+    promoted_rows: list[dict[str, Any]],
     keep_previous: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
-    """Demote supported patches that a newer patch in the same track replaces.
+    """Demote rows only when a newer patch was promoted for that target.
 
     Distro rows are excluded: one Ubuntu row binds to one package revision, so
     an upstream patch does not supersede it.  Manual rows are excluded too,
@@ -148,17 +164,22 @@ def _demote_superseded(
     not evidence: writing ``verified`` here would claim a build record that
     does not exist, and the evidence gate rejects a verified row without one.
     """
-    newest_by_track: dict[str, str] = {}
-    for version in promoted_versions:
-        track = _track(version)
-        current = newest_by_track.get(track)
+    newest_by_slot: dict[tuple[str, ...], str] = {}
+    promoted_versions_by_slot: dict[tuple[str, ...], set[str]] = {}
+    for row in promoted_rows:
+        version = row.get("nginx_version")
+        slot = _promotion_slot(row)
+        if not isinstance(version, str) or slot is None:
+            continue
+        promoted_versions_by_slot.setdefault(slot, set()).add(version)
+        current = newest_by_slot.get(slot)
         if current is None or _version_tuple(version) > _version_tuple(current):
-            newest_by_track[track] = version
+            newest_by_slot[slot] = version
 
     changed: list[dict[str, Any]] = []
     for entry in entries:
         if not _is_superseded(
-            entry, promoted_versions, newest_by_track, keep_previous
+            entry, promoted_versions_by_slot, newest_by_slot, keep_previous
         ):
             continue
         entry["support_tier"] = "best-effort"
@@ -170,11 +191,11 @@ def _demote_superseded(
 
 def _is_superseded(
     entry: dict[str, Any],
-    promoted_versions: set[str],
-    newest_by_track: dict[str, str],
+    promoted_versions_by_slot: dict[tuple[str, ...], set[str]],
+    newest_by_slot: dict[tuple[str, ...], str],
     keep_previous: frozenset[str] = frozenset(),
 ) -> bool:
-    """Return whether a newer promoted patch replaces this supported row.
+    """Return whether a newer promoted patch replaces this supported target.
 
     A distro row is bound to one package revision, so an upstream patch does
     not supersede it.  A manual row is a maintainer decision.
@@ -186,11 +207,14 @@ def _is_superseded(
     if entry.get("support_tier") != "supported":
         return False
     version = entry.get("nginx_version")
-    if not isinstance(version, str) or version in promoted_versions:
+    if not isinstance(version, str):
         return False
     if version in keep_previous:
         return False
-    newest = newest_by_track.get(_track(version))
+    slot = _promotion_slot(entry)
+    if slot is None or version in promoted_versions_by_slot.get(slot, set()):
+        return False
+    newest = newest_by_slot.get(slot)
     if newest is None:
         return False
     return _version_tuple(version) < _version_tuple(newest)
@@ -206,7 +230,7 @@ def build_promoted_matrix(
     """Return the promoted matrix and a human-readable change summary."""
     entries = matrix["entries"]
     summary: list[str] = []
-    promoted_versions: set[str] = set()
+    promoted_rows: list[dict[str, Any]] = []
 
     for record in records:
         if not is_promotable(record):
@@ -229,7 +253,7 @@ def build_promoted_matrix(
             )
         for entry in covered:
             _promote_entry(entry, record)
-        promoted_versions.add(record["nginx_version"])
+        promoted_rows.extend(covered)
         summary.append(
             f"promote {record['nginx_version']} "
             f"{record['distro']}/{record['libc']}/{record['arch']}: "
@@ -237,7 +261,7 @@ def build_promoted_matrix(
         )
 
     if demote_superseded:
-        demoted = _demote_superseded(entries, promoted_versions, keep_previous)
+        demoted = _demote_superseded(entries, promoted_rows, keep_previous)
         demoted_versions = sorted(
             {entry["nginx_version"] for entry in demoted}, key=_version_tuple
         )

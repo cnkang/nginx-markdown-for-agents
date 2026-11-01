@@ -127,6 +127,61 @@ def test_superseded_patch_is_demoted_without_losing_its_row() -> None:
     assert "demote superseded patch 1.30.5 to best-effort" in summary
 
 
+def test_partial_promotion_only_demotes_matching_target_identity() -> None:
+    matching_old_row = _row(
+        nginx_version="1.30.5",
+        support_tier="supported",
+        release_blocking=True,
+    )
+    unrelated_old_rows = [
+        _row(
+            nginx_version="1.30.5",
+            libc="musl",
+            arch="arm64",
+            support_tier="supported",
+            release_blocking=True,
+        ),
+        _row(
+            nginx_version="1.30.5",
+            arch="arm64",
+            support_tier="supported",
+            release_blocking=True,
+        ),
+        _row(
+            nginx_version="1.30.5",
+            os="debian12",
+            artifact_type="deb-package",
+            support_tier="supported",
+            release_blocking=True,
+        ),
+        _row(
+            nginx_version="1.30.5",
+            os="almalinux9",
+            artifact_type="rpm-package",
+            support_tier="supported",
+            release_blocking=True,
+        ),
+        _row(
+            nginx_version="1.30.5",
+            artifact_type="docker-image",
+            support_tier="supported",
+            release_blocking=True,
+        ),
+    ]
+    matrix = _matrix(
+        matching_old_row,
+        *unrelated_old_rows,
+        _row(nginx_version="1.30.6"),
+    )
+
+    build_promoted_matrix(matrix, [_record()], demote_superseded=True)
+
+    assert matching_old_row["support_tier"] == "best-effort"
+    assert matching_old_row["release_blocking"] is False
+    assert all(row["support_tier"] == "supported" for row in unrelated_old_rows)
+    assert all(row["release_blocking"] is True for row in unrelated_old_rows)
+
+
 def test_superseded_demotion_keeps_other_tracks() -> None:
     matrix = _matrix(
         _row(nginx_version="1.28.3", support_tier="supported", release_blocking=True),

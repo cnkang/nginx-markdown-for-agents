@@ -15,6 +15,41 @@ CANDIDATE_SHA = "a" * 40
 GENERATED_AT = "2026-09-25T12:00:00+00:00"
 
 
+def test_artifact_index_accepts_ubuntu_native_deb(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    feature_manifest = repo_root / "official-build-feature-manifest.json"
+    feature_manifest.write_text("{}\n", encoding="utf-8")
+    abi_header = repo_root / "ngx_http_markdown_abi.h"
+    abi_header.write_text(
+        "#define MARKDOWN_ABI_VERSION 1\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(generator, "REPO_ROOT", repo_root)
+    monkeypatch.setattr(
+        generator, "_feature_manifest_path", lambda: feature_manifest
+    )
+    monkeypatch.setattr(generator, "ABI_HEADER", abi_header)
+
+    artifact_root = repo_root / "dist"
+    artifact_root.mkdir()
+    package_name = (
+        "nginx-module-markdown-for-agents-ubuntu_0.9.3"
+        "_ubuntu-24.04_nginx-1.24.0-2ubuntu7.19_amd64.deb"
+    )
+    (artifact_root / package_name).write_bytes(b"ubuntu-native package")
+
+    index = generator.build_artifact_index(
+        CANDIDATE_SHA, GENERATED_AT, artifact_root
+    )
+
+    assert index["candidate_sha"] == CANDIDATE_SHA
+    assert len(index["artifacts"]) == 1
+    artifact = index["artifacts"][0]
+    assert artifact["artifact_type"] == "deb"
+    assert artifact["artifact_id"] == f"dist/{package_name}"
+    assert artifact["candidate_sha"] == CANDIDATE_SHA
+
+
 def _write_fuzz_record(tmp_path: Path, record: dict) -> None:
     """Write one record at the path consumed by final-evidence generation."""
     path = _release_root(tmp_path) / generator.FUZZ_QUALIFICATION_RECORD_NAME

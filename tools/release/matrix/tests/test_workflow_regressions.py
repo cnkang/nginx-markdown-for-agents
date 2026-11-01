@@ -105,6 +105,18 @@ def test_release_package_checksums_wait_for_successful_release_gate() -> None:
     assert not _dag_has_cycle(workflow)
 
 
+def test_release_jobs_download_ubuntu_debs_with_the_general_deb_pattern() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    for job_name in ("integrity-checksums", "publish"):
+        download_patterns = [
+            step.get("with", {}).get("pattern")
+            for step in workflow["jobs"][job_name]["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
+        ]
+        assert "pkg-deb-*" in download_patterns
+        assert "pkg-deb-ubuntu-*" not in download_patterns
+
+
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
     """Manual recovery publishes only artifacts that passed integrity checks."""
     workflow = _workflow_data("release-binaries.yml")

@@ -53,7 +53,7 @@ def test_final_evidence_default_tracks_active_release_version() -> None:
         / "final-evidence-manifest.json"
     )
 
-    assert Path(args.manifest) == expected
+    assert args.manifest == str(expected)
 
 
 @pytest.mark.parametrize(
