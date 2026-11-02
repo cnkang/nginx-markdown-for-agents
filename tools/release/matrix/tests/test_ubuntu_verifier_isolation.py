@@ -26,9 +26,16 @@ sys.path.insert(0, str(ROOT / "tools"))
 from lib.path_validation import validate_write_path_within_root  # noqa: E402
 
 
+# One bound for every process handoff in this module.  Teardown and the
+# assertions that follow it must use the same window: a shorter teardown
+# escalation kills the child before it can record its graceful stop, and the
+# assertion then fails on a loaded runner instead of a real cleanup defect.
+_HANDOFF_TIMEOUT = 10
+
+
 def _wait_for_file(path):
     """Wait for a bounded process handoff and return its recorded value."""
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + _HANDOFF_TIMEOUT
     while time.monotonic() < deadline:
         if path.exists():
             content = path.read_text()
@@ -98,14 +105,14 @@ while True:
             # PGID cannot be reused before the final signal and wait.
             if leader.poll() is None:
                 os.killpg(leader.pid, signal.SIGTERM)
-                deadline = time.monotonic() + 2
+                deadline = time.monotonic() + _HANDOFF_TIMEOUT
                 while (root / 'child.pid').exists() and time.monotonic() < deadline:
                     stopped = root / 'child.exit'
                     if stopped.exists() and stopped.read_text():
                         break
                     time.sleep(.01)
                 os.killpg(leader.pid, signal.SIGKILL)
-            leader.wait(timeout=10)
+            leader.wait(timeout=_HANDOFF_TIMEOUT)
 
 
 @pytest.fixture
