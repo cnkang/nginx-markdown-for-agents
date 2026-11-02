@@ -189,6 +189,16 @@ def _candidate_status_errors(value: str | None, path: Path) -> list[str]:
     return []
 
 
+def _status_field_values(text: str) -> list[str]:
+    """Return one value per ``**Status:**`` line without a backtracking regex."""
+    prefix = "**Status:**"
+    values: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            values.append(line[len(prefix):].lstrip(" \t"))
+    return values
+
+
 def _candidate_project_status_errors(
     project: str, version: str, path: Path
 ) -> list[str]:
@@ -210,11 +220,7 @@ def _candidate_project_status_errors(
         ]
 
     section = sections[0]
-    status_matches = re.findall(
-        r"^\*\*Status:\*\*[ \t]*(.*)$",
-        section.group(1),
-        re.MULTILINE,
-    )
+    status_matches = _status_field_values(section.group(1))
     if not status_matches:
         return _candidate_status_errors(None, path)
     if len(status_matches) > 1:

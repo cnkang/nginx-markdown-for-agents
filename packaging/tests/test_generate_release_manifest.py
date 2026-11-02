@@ -89,7 +89,7 @@ def test_ubuntu_native_deb_manifest_passes_release_validator(tmp_path: Path) -> 
     artifact_dir.mkdir()
     package_names = [
         "nginx-module-markdown-for-agents-ubuntu_0.9.3"
-        "_ubuntu-24.04_nginx-1.24.0-2ubuntu7.19_amd64.deb",
+        + "_ubuntu-24.04_nginx-1.24.0-2ubuntu7.19_amd64.deb",
         "nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb",
     ]
     for index, package_name in enumerate(package_names):
