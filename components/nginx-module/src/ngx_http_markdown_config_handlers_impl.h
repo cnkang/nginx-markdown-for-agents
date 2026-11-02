@@ -1003,9 +1003,14 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
  * - $variable         (dynamic per-request switch)
  * - complex value containing variables
  */
+/* c:S995 false positive: ngx_command_t.set is
+ * ngx_conf_handler_pt(ngx_conf_t *, ngx_command_t *, void *). A const
+ * parameter cannot be assigned to that type (C11 6.7.6.3), so the requested
+ * change does not compile.
+ */
 static char *
 ngx_http_markdown_filter(ngx_conf_t *cf,
-    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature is fixed (Rule 24). */
+    ngx_command_t *cmd, /* NOSONAR: c:S995; see the comment above. */
     void *conf)
 {
     static u_char                      on_str[]  = "on";
