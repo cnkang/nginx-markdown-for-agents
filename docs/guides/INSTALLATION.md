@@ -39,7 +39,7 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-> **Release publication note:** This sequence targets the official `v0.9.2` release tag. The project published the v0.9.2 release assets on 2026-10-08. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
+> **Release publication note:** This sequence targets the official `v0.9.3` release tag. The project published the v0.9.3 release assets on 2026-11-02. Verify each artifact against `SHA256SUMS` and `SHA256SUMS.asc` as shown.
 
 This sequence applies to a system with NGINX already installed (official
 build). The release-bound sequence downloads and authenticates the installer
@@ -48,7 +48,7 @@ responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
-# RELEASE_TAG selects the official v0.9.2 release assets below
+# RELEASE_TAG selects the official v0.9.3 release assets below
 # Key setup (once per operator, before the download step):
 #   git clone --depth 1 https://github.com/cnkang/nginx-markdown-for-agents ./nk-md-repo
 #   RELEASE_KEY_PATH="$(pwd)/nk-md-repo/packaging/nginx-markdown-for-agents-release.asc"
@@ -58,7 +58,7 @@ responses:
 # below through a genuinely independent source (an HTTPS page on a different
 # domain, a web-of-trust signature, or a vendor
 # announcement) before trusting the verification.
-set -euo pipefail; RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; WORKDIR="$(mktemp -d)"; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "${WORKDIR}" "${GNUPGHOME}"' EXIT; curl --proto '=https' --tlsv1.2 -fsSL -o "${WORKDIR}/${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o "${WORKDIR}/SHA256SUMS" "${RELEASE_BASE}/SHA256SUMS" -o "${WORKDIR}/SHA256SUMS.asc" "${RELEASE_BASE}/SHA256SUMS.asc"
+set -euo pipefail; RELEASE_TAG=v0.9.3; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; WORKDIR="$(mktemp -d)"; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "${WORKDIR}" "${GNUPGHOME}"' EXIT; curl --proto '=https' --tlsv1.2 -fsSL -o "${WORKDIR}/${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o "${WORKDIR}/SHA256SUMS" "${RELEASE_BASE}/SHA256SUMS" -o "${WORKDIR}/SHA256SUMS.asc" "${RELEASE_BASE}/SHA256SUMS.asc"
 : "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to the release public key file (see key setup above)}"; TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; gpg --batch --homedir "${GNUPGHOME}" --import "${RELEASE_KEY_PATH}"; VALIDSIG="$(gpg --batch --homedir "${GNUPGHOME}" --status-fd=1 --verify "${WORKDIR}/SHA256SUMS.asc" "${WORKDIR}/SHA256SUMS" 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "${VALIDSIG}" == "${TRUSTED_FINGERPRINT}" ]] || exit 1; CHECKSUM_LINE="$(awk -v file="${INSTALLER}" '$2 == file { print; count++ } END { exit count == 1 ? 0 : 1 }' "${WORKDIR}/SHA256SUMS")"; printf '%s\n' "${CHECKSUM_LINE}" | (cd "${WORKDIR}" && sha256sum -c -); sudo env VERSION="${RELEASE_TAG}" bash "${WORKDIR}/${INSTALLER}"; sudo nginx -t; sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
