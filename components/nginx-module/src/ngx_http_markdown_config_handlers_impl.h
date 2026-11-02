@@ -1005,7 +1005,7 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
  */
 static char *
 ngx_http_markdown_filter(ngx_conf_t *cf,
-    ngx_command_t *cmd,
+    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature is fixed (Rule 24). */
     void *conf)
 {
     static u_char                      on_str[]  = "on";
