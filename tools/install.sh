@@ -58,6 +58,10 @@ readonly MSG_CHECK_PERMS_TMP_DISK="check temporary directory permissions and dis
 readonly CONF_GLOB='*.conf'
 readonly SEPARATOR_LINE='=================================================================================='
 readonly CATEGORY_CONFIG="config"
+readonly CATEGORY_CHECKSUM="checksum"
+readonly CATEGORY_EXTRACTION="extraction"
+readonly NGINX_BIN_HINT="Set NGINX_BIN to the absolute path of a trusted nginx executable."
+readonly CURL_PROTO_HTTPS="=https"
 
 # --json flag: when set, output structured JSON to stdout at exit
 JSON_OUTPUT=0
@@ -665,7 +669,8 @@ is_secure_root_path() {
 # privileged installer never writes through a user-owned Homebrew tree: the
 # owner can replace a validated component between the check and the write.
 is_secure_trusted_path() {
-  if is_secure_root_path "$1"; then
+  local path="$1"
+  if is_secure_root_path "$path"; then
     return 0
   fi
   return 1
@@ -945,11 +950,11 @@ resolve_nginx_binary() {
   if [[ -n "$NGINX_BIN" ]]; then
     if [[ "$NGINX_BIN" != /* ]]; then
       die_with_error "$CATEGORY_CONFIG" "NGINX_BIN must be an absolute path." \
-        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+        "$NGINX_BIN_HINT"
     fi
     if [[ ! -f "$NGINX_BIN" ]] || [[ ! -x "$NGINX_BIN" ]]; then
       die_with_error "$CATEGORY_CONFIG" "NGINX_BIN is not an executable file: ${NGINX_BIN}" \
-        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+        "$NGINX_BIN_HINT"
     fi
     candidate="$NGINX_BIN"
     resolved="$(canonicalize_path "$candidate")"
@@ -958,15 +963,14 @@ resolve_nginx_binary() {
       || [[ ! -f "$resolved" ]] || [[ ! -x "$resolved" ]]; then
       die_with_error "$CATEGORY_CONFIG" \
         "NGINX_BIN is outside the trusted nginx executable roots: ${candidate}" \
-        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+        "$NGINX_BIN_HINT"
     fi
-    if [[ "$EUID" -eq 0 ]]; then
-      if ! is_secure_trusted_path "$candidate" \
-        || ! is_secure_trusted_path "$resolved"; then
-        die_with_error "$CATEGORY_CONFIG" \
-          "NGINX_BIN is not root-owned and non-writable by group/other: ${resolved}" \
-          "Set NGINX_BIN to the absolute path of a trusted nginx executable."
-      fi
+    if [[ "$EUID" -eq 0 ]] \
+      && { ! is_secure_trusted_path "$candidate" \
+        || ! is_secure_trusted_path "$resolved"; }; then
+      die_with_error "$CATEGORY_CONFIG" \
+        "NGINX_BIN is not root-owned and non-writable by group/other: ${resolved}" \
+        "$NGINX_BIN_HINT"
     fi
     NGINX_BIN="$resolved"
     return 0
@@ -981,23 +985,22 @@ resolve_nginx_binary() {
   resolved="$(canonicalize_path "$candidate")"
   if [[ -z "$resolved" ]] || [[ ! -f "$resolved" ]] || [[ ! -x "$resolved" ]]; then
     die_with_error "$CATEGORY_CONFIG" "Resolved nginx binary is not an executable file: ${resolved}" \
-      "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+      "$NGINX_BIN_HINT"
   fi
 
   if ! is_trusted_nginx_path "$candidate" \
     || ! is_trusted_nginx_path "$resolved"; then
     die_with_error "$CATEGORY_CONFIG" \
       "nginx was discovered in an untrusted PATH location: ${candidate}" \
-      "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+      "$NGINX_BIN_HINT"
   fi
 
-  if [[ "$EUID" -eq 0 ]]; then
-    if ! is_secure_trusted_path "$candidate" \
-      || ! is_secure_trusted_path "$resolved"; then
-      die_with_error "$CATEGORY_CONFIG" \
-        "Resolved nginx binary is not root-owned and non-writable by group/other: ${resolved}" \
-        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
-    fi
+  if [[ "$EUID" -eq 0 ]] \
+    && { ! is_secure_trusted_path "$candidate" \
+      || ! is_secure_trusted_path "$resolved"; }; then
+    die_with_error "$CATEGORY_CONFIG" \
+      "Resolved nginx binary is not root-owned and non-writable by group/other: ${resolved}" \
+      "$NGINX_BIN_HINT"
   fi
 
   NGINX_BIN="$resolved"
@@ -1179,7 +1182,7 @@ verify_requested_tag_identity() {
   local requested_tag_norm="${RELEASE_VERSION#v}"
   local resolved_tag_norm="${RELEASE_TAG#v}"
   if [[ "$requested_tag_norm" != "$resolved_tag_norm" ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Resolved release tag ${RELEASE_TAG} does not match the requested version ${RELEASE_VERSION}; refusing to mix metadata across releases." \
       "Verify the requested version and retry, or pin the exact tag in the download URL." \
       "Build and install from source if no signed release is available."
@@ -1225,7 +1228,7 @@ fetch_release_json() {
   local response=""
 
   if [[ -z "$RELEASE_VERSION" ]]; then
-    if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' \
+    if ! response="$("$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' \
       "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)"; then
       return 1
     fi
@@ -1248,7 +1251,7 @@ fetch_release_json() {
 
   local release_api
   for release_api in "${release_apis[@]}"; do
-    if response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
+    if response="$("$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
       printf '%s\n' "$response"
       return 0
     fi
@@ -1261,7 +1264,7 @@ fetch_dist_index_json() {
   local ref_name="$1"
   local dist_api="https://api.github.com/repos/${REPO}/contents/dist?ref=${ref_name}"
   local response=""
-  if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null)"; then
+  if ! response="$("$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null)"; then
     return 1
   fi
   printf '%s\n' "$response"
@@ -1875,7 +1878,7 @@ if [[ -n "$RELEASE_VERSION" ]]; then
 fi
 
 if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]] && [[ -z "$DOWNLOAD_SHA256" ]]; then
-  die_with_error "checksum" \
+  die_with_error "$CATEGORY_CHECKSUM" \
     "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256; checksumless installation is not supported." \
     "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
     "If no independently authenticated digest is available, build and install from source."
@@ -1950,7 +1953,7 @@ fi
 
 if [[ -z "$DOWNLOAD_URL_OVERRIDE" && -n "$RELEASE_TAG"
       && "$DOWNLOAD_URL" != *"/releases/download/${RELEASE_TAG}/"* ]]; then
-  die_with_error "checksum" \
+  die_with_error "$CATEGORY_CHECKSUM" \
     "Asset URL does not belong to the verified release ${RELEASE_TAG}: ${DOWNLOAD_URL}." \
     "Re-run without overrides; if the mismatch persists, report it at https://github.com/${REPO}/issues." \
     "Build and install from source if no signed release is available."
@@ -1964,7 +1967,7 @@ if ! TMP_DIR="$("$MKTEMP_BIN" -d)"; then
 fi
 trap '"$RM_BIN" -rf "$TMP_DIR"' EXIT
 
-if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
+if ! "$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
   _json_available_versions="$AVAILABLE_VERSIONS"
   if [[ -n "$AVAILABLE_VERSIONS" ]]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
@@ -1989,35 +1992,35 @@ fi
 if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
   if [[ -n "$DOWNLOAD_SHA256" ]]; then
     if ! ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"; then
-      die_with_error "checksum" \
+      die_with_error "$CATEGORY_CHECKSUM" \
         "No SHA-256 hashing tool is available to verify ${ASSET_NAME}." \
         "Install sha256sum, shasum, or openssl and retry." \
         "Do not install the artifact without checksum verification."
     fi
     EXPECTED_SHA256="$(printf '%s' "$DOWNLOAD_SHA256" | "$TR_BIN" '[:upper:]' '[:lower:]')"
     if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
-      die_with_error "checksum" \
+      die_with_error "$CATEGORY_CHECKSUM" \
         "Checksum verification failed for ${ASSET_NAME}. Expected: ${DOWNLOAD_SHA256}, Actual: ${ACTUAL_SHA256}." \
         "Re-download the file and try again." \
         "If the problem persists, the artifact may be corrupted. Report at https://github.com/${REPO}/issues"
     fi
     echo "[+] SHA256 checksum verified (operator-supplied DOWNLOAD_SHA256)"
   else
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256; checksumless installation is not supported." \
       "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
       "If no independently authenticated digest is available, build and install from source."
   fi
 else
   if [[ -z "$SHA256SUMS_URL" ]] || [[ -z "$SHA256SUMS_ASC_URL" ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Release does not publish a signed SHA256SUMS manifest (SHA256SUMS/SHA256SUMS.asc); refusing to install unsigned artifact." \
       "Provide DOWNLOAD_URL_OVERRIDE together with DOWNLOAD_SHA256, or build and install from source." \
       "See ${SOURCE_BUILD_URL}"
   fi
 
   if [[ -z "$RELEASE_TAG" ]] || [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Release metadata did not provide an immutable version tag for signed verification." \
       "Use a published release tag or provide DOWNLOAD_URL_OVERRIDE together with DOWNLOAD_SHA256." \
       "Build and install from source if no signed release is available."
@@ -2027,13 +2030,13 @@ else
   # precisely that tag. The latest-release flow has no pinned version and
   # skips the comparison inside the helper.
   verify_requested_tag_identity
-  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
+  if ! "$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS manifest." \
       "Check your network connection and try again." \
       "See ${SOURCE_BUILD_URL}"
   fi
-  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS.asc" "$SHA256SUMS_ASC_URL"; then
+  if ! "$CURL_BIN" --proto "$CURL_PROTO_HTTPS" --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS.asc" "$SHA256SUMS_ASC_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS.asc signature." \
       "Check your network connection and try again." \
@@ -2048,27 +2051,27 @@ else
 
   if ! verify_release_signature "$TMP_DIR/SHA256SUMS" "$TMP_DIR/SHA256SUMS.asc" \
       "$TMP_DIR/release-key.asc" "$TRUSTED_FINGERPRINT"; then
-    die_with_error "checksum" "${_json_error_message}" \
+    die_with_error "$CATEGORY_CHECKSUM" "${_json_error_message}" \
       "Re-run with the correct TRUSTED_FINGERPRINT or DOWNLOAD_URL_OVERRIDE + DOWNLOAD_SHA256." \
       "See ${SOURCE_BUILD_URL}"
   fi
 
   MANIFEST_SHA256="$(manifest_digest_for "$ASSET_NAME" "$TMP_DIR/SHA256SUMS")" || true
   if [[ -z "$MANIFEST_SHA256" ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Verified SHA256SUMS manifest does not list ${ASSET_NAME}." \
       "The release may not contain a module for NGINX ${NGINX_VERSION} (${OS_TYPE} ${ARCH})." \
       "See ${SOURCE_BUILD_URL}"
   fi
 
   if ! ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "No SHA-256 hashing tool is available to verify ${ASSET_NAME}." \
       "Install sha256sum, shasum, or openssl and retry." \
       "Do not install the artifact without checksum verification."
   fi
   if [[ "$ACTUAL_SHA256" != "$MANIFEST_SHA256" ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Checksum verification failed for ${ASSET_NAME} against the signed manifest. Expected: ${MANIFEST_SHA256}, Actual: ${ACTUAL_SHA256}." \
       "Re-download the file and try again." \
       "If the problem persists, the release artifact may be corrupted. Report at https://github.com/${REPO}/issues"
@@ -2076,7 +2079,7 @@ else
   echo "[+] SHA256 checksum verified against signed SHA256SUMS manifest"
 
   if [[ -n "$EXPECTED_SHA256" ]] && [[ "$EXPECTED_SHA256" != "$MANIFEST_SHA256" ]]; then
-    die_with_error "checksum" \
+    die_with_error "$CATEGORY_CHECKSUM" \
       "Release API digest disagrees with the signed manifest for ${ASSET_NAME}. API: ${EXPECTED_SHA256}, manifest: ${MANIFEST_SHA256}." \
       "Report the inconsistency at https://github.com/${REPO}/issues"
   fi
@@ -2090,19 +2093,19 @@ cd "$TMP_DIR"
 echo "[+] Preflight tar member list for ${ASSET_NAME}"
 TAR_MEMBERS="$("$TAR_BIN" -tzf "$ASSET_NAME" 2>/dev/null | "$SORT_BIN")"
 if [[ -z "$TAR_MEMBERS" ]]; then
-    die_with_error "extraction" \
+    die_with_error "$CATEGORY_EXTRACTION" \
         "Archive appears empty or unreadable." \
         "Re-download and try again."
 fi
 EXPECTED_MEMBER="ngx_http_markdown_filter_module.so"
 MEMBER_COUNT=$(printf '%s\n' "$TAR_MEMBERS" | "$WC_BIN" -l | "$TR_BIN" -d ' ')
 if [[ "$MEMBER_COUNT" -ne 1 ]]; then
-    die_with_error "extraction" \
+    die_with_error "$CATEGORY_EXTRACTION" \
         "Archive contains $MEMBER_COUNT member(s), expected exactly 1 ($EXPECTED_MEMBER)." \
         "Found: $TAR_MEMBERS"
 fi
 if [[ "$TAR_MEMBERS" != "$EXPECTED_MEMBER" ]]; then
-    die_with_error "extraction" \
+    die_with_error "$CATEGORY_EXTRACTION" \
         "Archive member mismatch: expected \"$EXPECTED_MEMBER\", got \"$TAR_MEMBERS\"." \
         "The archive may be corrupted or built for a different purpose."
 fi
@@ -2114,20 +2117,20 @@ TAR_TYPEFLAG="$( "$TAR_BIN" -tvzf "$ASSET_NAME" 2>/dev/null \
     | "$AWK_BIN" -v member="$EXPECTED_MEMBER" '$NF == member { print substr($0, 1, 1) }' \
     | "$HEAD_BIN" -1)"
 if [[ -n "$TAR_TYPEFLAG" && "$TAR_TYPEFLAG" != "-" ]]; then
-    die_with_error "extraction" \
+    die_with_error "$CATEGORY_EXTRACTION" \
         "Archive member ${EXPECTED_MEMBER} is not a regular file (type flag '${TAR_TYPEFLAG}')." \
         "Refusing to extract a non-regular-file member."
 fi
 # Check for absolute paths or path traversal in member names (defense-in-depth)
 if printf '%s\n' "$TAR_MEMBERS" | "$GREP_BIN" -qE '^/|(^|/)\.\./'; then
-    die_with_error "extraction" \
+    die_with_error "$CATEGORY_EXTRACTION" \
         "Archive member name contains absolute path or '..' traversal." \
         "Members: $TAR_MEMBERS"
 fi
 echo "[+] Tar member list preflight passed: $TAR_MEMBERS"
 
 if ! "$TAR_BIN" --no-same-owner -xzf "$ASSET_NAME"; then
-  die_with_error "extraction" \
+  die_with_error "$CATEGORY_EXTRACTION" \
     "Failed to extract ${ASSET_NAME}." \
     "The archive may be corrupted. Re-download and try again." \
     "Report at https://github.com/${REPO}/issues if the problem persists."
