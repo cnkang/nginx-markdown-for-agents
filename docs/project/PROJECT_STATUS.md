@@ -10,7 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release 0.9.2 (published 2026-10-08)**, the project includes bounded
+As of the **current release 0.9.3 (published 2026-11-02)**, the project includes bounded
 full-buffer conversion by default (`markdown_streaming off`) with explicit streaming opt-in.
 It provides Rust-first architecture modules for Accept negotiation, conditional requests,
 decision logic, and header plan application. The project enforces a unified decompression
@@ -27,13 +27,14 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.3
 
-**Status:** Release candidate. Publication is pending.
+**Status:** Stable release, published 2026-11-02. 0.9.2 was the previous
+release (2026-10-08).
 
-0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
-published. The release makes the current nginx.org stable and mainline
-releases supported and release blocking, and it adds Ubuntu 24.04 and Ubuntu
-26.04 native NGINX to the supported surface. It does not change a directive,
-a default value, or a frozen contract. See the
+0.9.3 is a compatibility maintenance release. It makes the current nginx.org
+stable and mainline releases supported and release blocking. It also adds
+Ubuntu 24.04 and Ubuntu 26.04 native NGINX to the supported surface. It does
+not change a directive, a default value, or a frozen contract. Use the v0.9.3 tag,
+package assets, and checksums from the release. See the
 [0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
 [compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
 
@@ -49,7 +50,7 @@ the bundled FFI ABI sits at version 3. See the removal inventory in the
 [0.9.2 release notes](../releases/0.9.2-release-notes.md). Use the v0.9.2 tag,
 package assets, and checksums from the release.
 
-#### 0.9.2 (current release)
+#### 0.9.2 (previous release)
 
 - **OTel removal**: The experimental OTel directives and implementation are
   absent from the 0.9.2 production surface. ADR-0027 records conditions for a
@@ -229,8 +230,10 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current release
-is 0.9.2 (published 2026-10-08). 0.9.1 is the previous release. 0.9.2 is a
-breaking surface-freeze release that consolidates the configuration surface
+is 0.9.3 (published 2026-11-02). 0.9.3 is a compatibility maintenance release,
+so it keeps the 0.9.2 contracts. 0.9.2 is the previous release (2026-10-08).
+0.9.2 is a breaking surface-freeze release that consolidates the configuration
+surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
 selectors, and per-path metrics), freezes the observability surface (ten v1
 metric families, reason registry, diagnostics JSON v3), advances the bundled
@@ -471,6 +474,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state for 2026-11-02 |
 | 0.9.3 | 2026-10-31 | Codex | Made the pending publication status explicit |
 | 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and the published release status, and refreshed the support-matrix counts |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |

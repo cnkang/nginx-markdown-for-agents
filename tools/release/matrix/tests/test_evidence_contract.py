@@ -7,9 +7,9 @@ release promise, so each rejection path gets its own test.
 from __future__ import annotations
 
 from tools.release.matrix.evidence_contract import (
-    RECORD_REQUIRED_FIELDS,
     is_promotable,
     record_covers_entry,
+    required_record_fields,
     validate_record,
 )
 
@@ -89,7 +89,7 @@ def test_complete_ubuntu_record_requires_negative_control() -> None:
 
 
 def test_every_required_field_is_enforced() -> None:
-    for field in RECORD_REQUIRED_FIELDS:
+    for field in required_record_fields():
         record = _record()
         record.pop(field)
         errors = validate_record(record)

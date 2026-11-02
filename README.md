@@ -7,10 +7,10 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current release line: v0.9.2, published 2026-10-08 as the latest public
-> stable release. v0.9.3 is a compatibility maintenance release candidate:
-> 0.9.3 is not yet published. Use the v0.9.3 release-tag downloads after
-> publication. v0.9.2 is the final planned breaking release before v1.0. Use
+> Current release line: v0.9.3, published 2026-11-02 as the latest public
+> stable release. v0.9.3 is a compatibility maintenance release, so it keeps
+> the v0.9.2 directive, HTTP, metrics, diagnostics, reason-code, and FFI ABI
+> contracts. v0.9.2 is the final planned breaking release before v1.0. Use
 > release-tag downloads.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
