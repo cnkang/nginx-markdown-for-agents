@@ -1,7 +1,7 @@
 # Upgrade to 0.9.3
 
-0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
-published. Use the release-tag downloads after publication. An existing 0.9.2
+0.9.3 is the current compatibility maintenance release, published 2026-11-02.
+Use the release-tag downloads. An existing 0.9.2
 configuration works without a change. This guide covers the artifact choice,
 the upgrade steps, and the checks that prove the result.
 

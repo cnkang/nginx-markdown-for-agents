@@ -1,8 +1,8 @@
 # Project Documentation
 
-> The project published v0.9.2 on 2026-10-08. Use release-tag downloads.
-> v0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not
-> yet published. Use the v0.9.3 release-tag downloads after publication.
+> The project published v0.9.3 on 2026-11-02. Use release-tag downloads.
+> v0.9.2 was the previous release (2026-10-08), and it remains the final
+> planned breaking release before v1.0.
 
 This directory contains project-level status and maintenance-oriented documentation.
 
@@ -10,7 +10,7 @@ This directory contains project-level status and maintenance-oriented documentat
 
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) - current implementation and validation status (aligned to code and recent verification)
 - [HARNESS_HISTORY.md](HARNESS_HISTORY.md) - why the repo-owned harness exists, which failures it is meant to prevent, and what remains intentionally out of scope
-- [VERSION_PLANNING.md](VERSION_PLANNING.md) - the current v0.9.2 release line and the v1.0 frozen compatibility contract that follows it
+- [VERSION_PLANNING.md](VERSION_PLANNING.md) - the current v0.9.3 release line, the previous v0.9.2 release, and the v1.0 frozen compatibility contract that follows it
 - Historical planning and release-gate records live under
   [`history/`](history/). They remain available for audit context, not as
   active compatibility or release instructions.
