@@ -257,9 +257,10 @@ def test_publish_gate_requires_the_exact_dependency_set() -> None:
     assert _publish_gate_item(workflow)
 
     needs_line = (
-        "    needs: [release-gate, musl-build, integrity-checksums, "
-        "integrity-signature, official-docker-release-gate, "
-        "rc-release-gates, fuzz-qualification]\n"
+        "    needs: [release-gate, musl-build, ubuntu-native, "
+        "integrity-checksums, integrity-signature, "
+        "official-docker-release-gate, rc-release-gates, "
+        "fuzz-qualification]\n"
     )
     assert workflow.count(needs_line) == 1
     missing = workflow.replace(needs_line, needs_line.replace("musl-build, ", ""), 1)
@@ -514,12 +515,14 @@ def test_publish_gate_reads_the_publish_job_dependency_and_condition() -> None:
     workflow = """
 jobs:
   publish:
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
-            official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    needs: [release-gate, musl-build, ubuntu-native, integrity-checksums,
+            integrity-signature, official-docker-release-gate,
+            rc-release-gates, fuzz-qualification]
     if: >-
       always() &&
       needs.release-gate.result == 'success' &&
       needs.musl-build.result == 'success' &&
+      needs.ubuntu-native.result == 'success' &&
       needs.integrity-checksums.result == 'success' &&
       needs.official-docker-release-gate.result == 'success' &&
       needs.rc-release-gates.result == 'success' &&
@@ -536,12 +539,14 @@ def test_publish_gate_requires_signature_success_for_tag_publication() -> None:
     workflow = """
 jobs:
   publish:
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
-            official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    needs: [release-gate, musl-build, ubuntu-native, integrity-checksums,
+            integrity-signature, official-docker-release-gate,
+            rc-release-gates, fuzz-qualification]
     if: >-
       always() &&
       needs.release-gate.result == 'success' &&
       needs.musl-build.result == 'success' &&
+      needs.ubuntu-native.result == 'success' &&
       needs.integrity-checksums.result == 'success' &&
       needs.official-docker-release-gate.result == 'success' &&
       needs.rc-release-gates.result == 'success' &&
@@ -587,12 +592,14 @@ def test_github_expression_parser_does_not_strip_block_scalar_hashes() -> None:
     workflow = """
 jobs:
   publish:
-    needs: [release-gate, musl-build, integrity-checksums, integrity-signature,
-            official-docker-release-gate, rc-release-gates, fuzz-qualification]
+    needs: [release-gate, musl-build, ubuntu-native, integrity-checksums,
+            integrity-signature, official-docker-release-gate,
+            rc-release-gates, fuzz-qualification]
     if: >-
       always() &&
       needs.release-gate.result == 'success' &&
       needs.musl-build.result == 'success' &&
+      needs.ubuntu-native.result == 'success' &&
       needs.integrity-checksums.result == 'success' &&
       needs.official-docker-release-gate.result == 'success' &&
       needs.rc-release-gates.result == 'success' &&

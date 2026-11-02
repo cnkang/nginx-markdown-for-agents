@@ -14,6 +14,13 @@ Historical issues: `48edb7c`, `0a08d08`, `3a9f3cd`, `dcbf923`, `2a23415`, `25343
 
 Required:
 - Every bug fix must ship with at least one targeted regression test.
+- Verification tools and fixtures must isolate processes, configuration, and
+  files from existing host resources.
+  Cleanup must use proven ownership after normal exits, failures, and handled signals.
+  A PID alone does not prove process ownership after exit.
+  Fixtures must clean their own children when an assertion fails.
+  Test assertions must verify production cleanup before fixture cleanup.
+  Failure and interrupted-run tests must prove that host state stays unchanged.
 - **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the
   0.9.2 window needed ~10 commits fixing the detectors themselves
   (`076bfdc1` reusable-workflow boundary state, `658cb4d3` future

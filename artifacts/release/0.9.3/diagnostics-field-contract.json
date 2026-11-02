@@ -1,0 +1,49 @@
+{
+  "constraints": {
+    "field_count": 5
+  },
+  "effective_fields": {
+    "error_policy": {
+      "enum": [
+        "pass",
+        "fail_closed",
+        "status 429",
+        "status 503"
+      ],
+      "type": "string"
+    },
+    "filter": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
+    "log_verbosity": {
+      "enum": [
+        "error",
+        "warn",
+        "info",
+        "debug"
+      ],
+      "type": "string"
+    },
+    "prune_noise": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
+    "streaming_buffer": {
+      "bounds": {
+        "maximum": 1073741824,
+        "minimum": 65536
+      },
+      "type": "integer"
+    }
+  },
+  "generator": "generate_schema_artifacts.py",
+  "schema_version": 1,
+  "source": "schemas/diagnostics.schema.json"
+}

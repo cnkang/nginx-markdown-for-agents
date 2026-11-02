@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SCOPE = REPO_ROOT / "release" / "scope" / "short-soak-scope.json"
-DEFAULT_VERSION = "0.9.2"
+DEFAULT_VERSION = "0.9.3"
 MANIFEST_NAME = "short-soak-scenario-manifest.json"
 SCENARIO_IDS = ("small", "medium", "large")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")

@@ -56,13 +56,16 @@ from lib.path_validation import (  # noqa: E402
 from lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
+DEFAULT_RELEASE_VERSION = "0.9.3"
 DEFAULT_MANIFEST = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "short-soak-scenario-manifest.json"
+    REPO_ROOT / "artifacts" / "release" / DEFAULT_RELEASE_VERSION
+    / "short-soak-scenario-manifest.json"
 )
 DEFAULT_RECORD = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "soak-qualification-record.json"
+    REPO_ROOT / "artifacts" / "release" / DEFAULT_RELEASE_VERSION
+    / "soak-qualification-record.json"
 )
-RECORD_OUTPUT_ROOT = pathlib.Path("artifacts/release/0.9.2")
+RECORD_OUTPUT_ROOT = pathlib.Path("artifacts/release") / DEFAULT_RELEASE_VERSION
 RECORD_OUTPUT_LABEL = "soak qualification record"
 SOAK_RUNTIME_ROOT = REPO_ROOT / "build" / "soak-runtime"
 SOAK_PORT = 19200
@@ -1076,7 +1079,7 @@ def _write_record(record: dict, args: argparse.Namespace) -> pathlib.Path:
                 and output_parts[:3] == RECORD_OUTPUT_ROOT.parts)):
         raise ValueError(
             "Output path must be '<filename>' or "
-            "'artifacts/release/0.9.2/<filename>'"
+            f"'artifacts/release/{DEFAULT_RELEASE_VERSION}/<filename>'"
         )
     safe_name = validate_filename_strict(
         raw_name, purpose=RECORD_OUTPUT_LABEL

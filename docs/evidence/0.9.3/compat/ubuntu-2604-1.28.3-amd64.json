@@ -1,0 +1,62 @@
+{
+  "abi_provide": "nginx-abi-1.28.3-1",
+  "arch": "amd64",
+  "brotli_linkage": "dynamic",
+  "brotli_version": "1.2.0-3ubuntu0.1",
+  "build_args_digest": "sha256:19cb05e9e9b1c01b179bba8b7a34988ff5ce8afa162a600038a84b4d5758f1b7",
+  "commit_sha": "035cda2c50c32fb111040a2d55865c179978fd28",
+  "date": "2026-10-29",
+  "distro": "ubuntu-26.04",
+  "distro_version": "26.04",
+  "fail": 0,
+  "features": [
+    "streaming",
+    "prune_noise_regions"
+  ],
+  "libc": "glibc",
+  "module_sha256": "8598ccd22b38c096856132f5d9c3581fc45aaf9ac7f70fe42198a5eb086add53",
+  "nginx_package_revision": "1.28.3-2ubuntu1.12",
+  "nginx_version": "1.28.3",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:79b9d602dd8c16ce0c2d459a43a9d837f59930345e7909edb107a7dde1a94acf",
+  "source_kind": "ubuntu-default-repo",
+  "source_reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12",
+  "target_identity": "ubuntu-default-repo:1.28.3-2ubuntu1.12:ubuntu-26.04:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 8598ccd22b38c096",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "rejected: not binary compatible",
+      "name": "negative_abi_rejected",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "local:release-agent",
+  "workflow_run_url": ""
+}

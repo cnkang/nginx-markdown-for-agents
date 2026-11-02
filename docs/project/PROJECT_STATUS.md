@@ -25,6 +25,18 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
+### Current Release Line 0.9.3
+
+**Status:** Release candidate. Publication is pending.
+
+0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
+published. The release makes the current nginx.org stable and mainline
+releases supported and release blocking, and it adds Ubuntu 24.04 and Ubuntu
+26.04 native NGINX to the supported surface. It does not change a directive,
+a default value, or a frozen contract. See the
+[0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
+[compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
+
 ### Current Release Line 0.9.2
 
 **Status:** Stable release, published 2026-10-08. 0.9.1 was the previous
@@ -363,9 +375,9 @@ See `examples/docker/` for Docker build examples.
 
 | Tier | Count |
 |------|-------|
-| supported | 52 |
+| supported | 48 |
 | experimental | 1 |
-| best-effort | 30 |
+| best-effort | 34 |
 
 ### Release-Blocking Entries
 
@@ -383,18 +395,20 @@ See `examples/docker/` for Docker build examples.
 | 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.5 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.5 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.5 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.5 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.6 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.6 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.6 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.31.6 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.6 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.6 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.6 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.6 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.8 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.8 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.8 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.8 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 ubuntu-24.04 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.24.0 ubuntu-24.04 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
@@ -407,6 +421,8 @@ See `examples/docker/` for Docker build examples.
 | 1.28.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.28.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.28.3 ubuntu-26.04 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.28.3 ubuntu-26.04 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.30.4 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
@@ -415,14 +431,6 @@ See `examples/docker/` for Docker build examples.
 | 1.30.4 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.30.4 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
-| 1.30.5 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.30.5 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.30.5 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.30.5 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.31.6 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.31.6 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
-| 1.31.6 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
-| 1.31.6 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
 <!-- END:release-matrix:status-matrix -->
 
 ## Summary
@@ -463,6 +471,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-10-31 | Codex | Made the pending publication status explicit |
 | 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and the published release status, and refreshed the support-matrix counts |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
 | 0.9.2 | 2026-10-02 | Hermes | Release finalization: the release date corrected to the finalization day; the tag had never been pushed, so the date was still that of an abandoned first attempt |

@@ -22,9 +22,11 @@
 #   Example: add "rockylinux:9" under rpm format.
 #
 # Mainline support:
-#   The currently validated nginx.org mainline entry is 1.31.5 below.
-#   Add newer mainline versions only after ABI compatibility is validated
-#   and the matching checksum and release-matrix entry are present.
+#   The validated nginx.org mainline entry is 1.31.8 below.
+#   Add a newer mainline version only after the release workflow records
+#   load and request evidence and a maintainer promotes the matrix row.
+#   tools/docs/validate_packaging_matrix.py fails when this list names a
+#   version that the canonical release matrix does not define.
 #
 # =============================================================================
 
@@ -39,8 +41,8 @@ nginx_versions:
   - "1.24.0"
   - "1.26.3"
   - "1.28.3"
-  - "1.30.4"
-  - "1.31.5"
+  - "1.30.6"
+  - "1.31.8"
 
 # ---------------------------------------------------------------------------
 # Target architectures

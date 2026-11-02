@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "generator": "tools/reason-codegen/generate.py",
+  "source": "components/rust-converter/reason_registry.toml",
+  "source_sha256": "aa67c062dcc8768155db2b915f7a50e511f2480bb7cf2cdb7d9453559be3207d",
+  "generated_artifacts": [
+    {
+      "path": "components/rust-converter/src/decision/reason_code.rs",
+      "description": "Rust enum with all metadata and FFI exports"
+    },
+    {
+      "path": "components/nginx-module/src/markdown_reason_meta.h",
+      "description": "C reason metadata table for diagnostics"
+    },
+    {
+      "path": "artifacts/release/0.9.3/reason-registry-report.json",
+      "description": "Count/hash manifest for drift detection"
+    }
+  ]
+}

@@ -272,6 +272,10 @@ impl Default for MarkdownTextEscapeState {
 }
 
 impl MarkdownTextEscapeState {
+    pub(crate) fn is_line_prefix(&self) -> bool {
+        self.line_prefix
+    }
+
     /// Record a blockquote marker written at the start of a line.
     ///
     /// Markdown still recognises block markers after `> `, so the line prefix
@@ -1314,8 +1318,15 @@ fn requires_escape(ch: char, state: &MarkdownTextEscapeState) -> bool {
         && state.indent <= 3
         && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
             || (matches!(ch, '.' | ')') && state.ordered_digits));
-    let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
-    block_marker || inline_delimiter
+    block_marker || is_inline_delimiter(ch)
+}
+
+fn is_inline_delimiter(ch: char) -> bool {
+    matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~')
+}
+
+pub(crate) fn is_escape_scan_boundary(ch: char) -> bool {
+    ch == '\n' || is_inline_delimiter(ch)
 }
 
 #[cfg(test)]

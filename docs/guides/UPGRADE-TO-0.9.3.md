@@ -1,0 +1,184 @@
+# Upgrade to 0.9.3
+
+0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
+published. Use the release-tag downloads after publication. An existing 0.9.2
+configuration works without a change. This guide covers the artifact choice,
+the upgrade steps, and the checks that prove the result.
+
+## 1. Choose the artifact family
+
+The artifact families are not interchangeable.
+
+| Your NGINX | Use | Do not use |
+|---|---|---|
+| nginx.org package or source build | The DEB, RPM, or module tarball whose name contains `nginx-<version>` | The Ubuntu-native package |
+| Ubuntu package from the Ubuntu archive | `nginx-module-markdown-for-agents-ubuntu` with `ubuntu-<suite>` in the name | The nginx.org DEB or tarball |
+| Another source build | A source build for your exact NGINX version | Any prebuilt binary |
+
+To read your NGINX origin, run:
+
+```bash
+nginx -V 2>&1 | head -1
+```
+
+A line that ends with `(Ubuntu)` identifies the Ubuntu package.
+
+## 2a. Upgrade an nginx.org installation
+
+1. Read your current version:
+
+   ```bash
+   nginx -v 2>&1
+   ```
+
+2. Confirm that the release matrix marks the version as supported:
+
+   ```bash
+   python3 tools/render_release_matrix_docs.py --release-notes
+   ```
+
+3. Download the package for that version and architecture from the release
+   page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` too.
+
+4. Verify the signature of `SHA256SUMS` before the checksum. Use the key from
+   the git repository and the fingerprint in
+   [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md). A `VALIDSIG` line must name
+   that fingerprint. [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md) has the
+   complete command block, including the `TRUSTED_FINGERPRINT` check.
+
+5. Verify the checksum:
+
+   ```bash
+   DEB="nginx-module-markdown-for-agents_0.9.3_nginx-<version>_<arch>.deb"
+   CHECKSUM_ENTRY="$(
+     awk -v filename="${DEB}" '
+       $2 == filename { entry = $0; count++ }
+       END { if (count != 1) exit 1; print entry }
+     ' SHA256SUMS
+   )" || { echo "Expected exactly one SHA256SUMS entry for ${DEB}" >&2; exit 1; }
+   printf '%s\n' "${CHECKSUM_ENTRY}" | sha256sum --check -
+   ```
+
+6. Install the new package directly so APT follows the upgrade lifecycle:
+
+   ```bash
+   sudo apt-get install ./nginx-module-markdown-for-agents_0.9.3_nginx-<version>_<arch>.deb
+   ```
+
+   The package name stays the same across module versions. The NGINX version
+   in the filename must match your installed NGINX.
+
+   For RPM packages, follow the [RPM checksum and upgrade
+   steps](PACKAGE_INSTALLATION.md#rpm-artifacts-almalinux-amazon-linux-rhel).
+   For musl module tarballs, follow the [authenticated install-script
+   sequence](INSTALLATION.md#4-primary-install-script). It selects and verifies
+   the module for your NGINX version, libc, and architecture.
+
+7. Test and reload:
+
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+## 2b. Upgrade an Ubuntu-native installation
+
+Back up configuration and review APT's simulated transaction before changing packages.
+Follow [the security-update procedure](UBUNTU-LTS-NGINX-COMPATIBILITY.md#6-handle-a-security-update)
+for backups, dependency conflicts, and removal of module directives.
+
+1. Record the installed package revision:
+
+   ```bash
+   dpkg-query -W -f='${Version}\n' nginx
+   ```
+
+2. Compare it with the verified revision in
+   [UBUNTU-LTS-NGINX-COMPATIBILITY.md](UBUNTU-LTS-NGINX-COMPATIBILITY.md) and in
+   the support matrix.
+
+3. Download the package for your suite and architecture, plus `SHA256SUMS`
+   and `SHA256SUMS.asc` from the same release.
+
+4. Verify the `SHA256SUMS.asc` signature and the exact checksum entry for
+   this DEB by following Steps 2 and 3 in the
+   [Ubuntu LTS compatibility guide](UBUNTU-LTS-NGINX-COMPATIBILITY.md#3-install-the-ubuntu-native-package).
+   Both checks must pass before installation.
+
+5. Simulate the package transaction:
+
+   ```bash
+   apt-get -s install ./nginx-module-markdown-for-agents-ubuntu_0.9.3_ubuntu-<suite>_nginx-<revision>_<arch>.deb
+   ```
+
+6. Install the package after reviewing the simulation:
+
+   ```bash
+   sudo apt-get install ./nginx-module-markdown-for-agents-ubuntu_0.9.3_ubuntu-<suite>_nginx-<revision>_<arch>.deb
+   ```
+
+7. Test the configuration:
+
+   ```bash
+   sudo nginx -t
+   ```
+
+8. Reload NGINX after the test passes:
+
+   ```bash
+   sudo systemctl reload nginx
+   ```
+
+## 3. Verify the result
+
+1. Confirm the Markdown response:
+
+   ```bash
+   curl -sD - -o /dev/null -H 'Accept: text/markdown' http://localhost/
+   ```
+
+   The output must contain `Content-Type: text/markdown` and `Vary: Accept`.
+
+2. Confirm the HTML response:
+
+   ```bash
+   curl -s -H 'Accept: text/html' http://localhost/ | head -3
+   ```
+
+   The output must contain HTML, not Markdown.
+
+3. Run the doctor:
+
+   ```bash
+   bash tools/doctor/nginx-markdown-doctor.sh
+   ```
+
+## 4. Roll back
+
+Keep the signed package files and configuration backup that the upgrade replaces.
+A matching ABI alone does not prove compatibility across package revisions.
+Use the exact verified NGINX revision, or rebuild and verify the module.
+
+```bash
+apt-get -s install ./<previous-package-file>
+sudo apt-get install --allow-downgrades ./<previous-package-file>
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+See [VERSION_ROLLBACK-0.9.3.md](VERSION_ROLLBACK-0.9.3.md) for the full
+procedure and for the checks that show an ABI change.
+
+## 5. What does not change
+
+- The 20 active directives keep their names, syntax, and defaults.
+- The metrics, diagnostics, and reason-code contracts keep their shape.
+- The FFI ABI stays at version 3.
+- The minimum supported NGINX source version stays at 1.24.0.
+
+## 6. Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `module is not binary compatible` | The module was built for another NGINX build | Install the artifact for your exact NGINX version, or build from source |
+| `cannot open shared object file` | The module file is missing | Reinstall the package |
+| `unknown directive "markdown_filter"` | The module is not loaded | Add the `load_module` directive, or enable the package snippet |
+| APT holds NGINX or proposes module removal | The ABI dependency cannot be satisfied | Follow the Ubuntu guide's backup and conflict procedure |

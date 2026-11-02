@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate that a tag is accompanied by finalized release metadata."""
+"""Validate candidate or finalized release metadata for the selected phase."""
 
 from __future__ import annotations
 
@@ -63,10 +63,18 @@ def _validate_project_status(
     if project_match is None:
         return [f"{path}: missing current release line {version}"]
     body = project_match.group("body")
-    status = re.search(r"^\*\*Status:\*\*(?P<value>.*)$", body, re.MULTILINE)
-    if status is None:
+    status_matches = re.findall(
+        r"^\*\*Status:\*\*(?P<value>.*)$",
+        body,
+        re.MULTILINE,
+    )
+    if not status_matches:
         return [f"{path}: missing **Status:** line for {version}"]
-    value_text = " ".join(status.group("value").split())
+    if len(status_matches) > 1:
+        return [
+            f"{path}: {version} section must contain exactly one Status field"
+        ]
+    value_text = " ".join(status_matches[0].split())
     first_sentence = re.split(r"[.;,]", value_text, maxsplit=1)[0].strip().casefold()
     non_final = re.search(
         r"\b(?:candidate|pending|unreleased|unpublished)\b"
@@ -166,13 +174,102 @@ def _validate_release_notes(
     return errors
 
 
-def validate_release_metadata(repo_root: Path, version: str) -> list[str]:
+def _candidate_status_errors(value: str | None, path: Path) -> list[str]:
+    """Require a pending status without positive publication or stable claims."""
+    if value is None or re.match(
+        r"^(?:Release candidate|Pending release|Unreleased)(?:[.,]|$)", value
+    ) is None:
+        return [f"{path}: candidate status must identify a pending release"]
+    remainder = re.sub(
+        r"\bnot\s+(?:yet\s+)?(?:published|released)\b|\bunpublished\b",
+        "", value, flags=re.IGNORECASE,
+    )
+    if re.search(r"\b(?:stable|published|released)\b", remainder, re.IGNORECASE):
+        return [f"{path}: candidate status cannot claim publication or stable status"]
+    return []
+
+
+def _status_field_values(text: str) -> list[str]:
+    """Return one value per ``**Status:**`` line without a backtracking regex."""
+    prefix = "**Status:**"
+    values: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            values.append(line[len(prefix):].lstrip(" \t"))
+    return values
+
+
+def _candidate_project_status_errors(
+    project: str, version: str, path: Path
+) -> list[str]:
+    """Require one matching release section with one pending status field."""
+    project_prose = "\n".join(_unfenced_lines(project))
+    sections = list(
+        re.finditer(
+            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
+            project_prose,
+            re.MULTILINE | re.DOTALL,
+        )
+    )
+    if not sections:
+        return _candidate_status_errors(None, path)
+    if len(sections) > 1:
+        return [
+            f"{path}: candidate metadata must contain exactly one "
+            f"Current Release Line {version} section"
+        ]
+
+    section = sections[0]
+    status_matches = _status_field_values(section.group(1))
+    if not status_matches:
+        return _candidate_status_errors(None, path)
+    if len(status_matches) > 1:
+        return [
+            f"{path}: active candidate section must contain "
+            "exactly one Status field"
+        ]
+    return _candidate_status_errors(status_matches[0], path)
+
+
+def _validate_candidate_metadata(
+    version: str, changelog: str, project: str, notes: str, paths: tuple[Path, ...]
+) -> list[str]:
+    """Require consistent, truthful metadata for an artifact-only candidate."""
+    errors: list[str] = []
+    changelog_path, project_path, notes_path = paths
+    headings = re.findall(
+        r"^## \[([^\]]+)\] - (.+)$",
+        "\n".join(_unfenced_lines(changelog)),
+        re.MULTILINE,
+    )
+    if not headings or headings[0] != (version, "Unreleased"):
+        errors.append(f"{changelog_path}: active candidate must be [{version}] - Unreleased")
+    if sum(heading_version == version for heading_version, _ in headings) != 1:
+        errors.append(f"{changelog_path}: candidate heading must occur exactly once")
+    errors.extend(_candidate_project_status_errors(project, version, project_path))
+    if f"# Release Notes: {version}" not in _unfenced_lines(notes):
+        errors.append(f"{notes_path}: missing '# Release Notes: {version}' title")
+    errors.extend(_candidate_status_errors(_release_note_field(notes, "Status"), notes_path))
+    if _release_note_field(notes, "Date") is not None:
+        errors.append(f"{notes_path}: candidate cannot declare a publication Date")
+    target = _release_note_field(notes, "Target release date")
+    if target is not None and target != "TBD (at release)":
+        try:
+            planned_date, qualifier = target.split(" ", 1)
+            date.fromisoformat(planned_date)
+            if qualifier != "(planned, publication pending)":
+                raise ValueError("missing planned qualifier")
+        except ValueError:
+            errors.append(f"{notes_path}: target date must be valid and explicitly planned")
+    return errors
+
+
+def validate_release_metadata(repo_root: Path, version: str, phase: str = "final") -> list[str]:
     """Return release metadata errors for ``version``.
 
-    The release gate uses this validator only after a tag is created.  The
-    corresponding pre-release documentation gate accepts an ``Unreleased`` /
-    release-candidate state; this validator requires the final state so a tag
-    cannot publish documentation that still describes a pending release.
+    Candidate phase validates pending metadata for artifact-only dispatch.
+    Final phase requires published metadata, so a tag cannot publish
+    documentation that still describes a pending release.
     """
     changelog_path = repo_root / "CHANGELOG.md"
     project_status_path = repo_root / "docs" / "project" / "PROJECT_STATUS.md"
@@ -187,6 +284,12 @@ def validate_release_metadata(repo_root: Path, version: str) -> list[str]:
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
     project_status = project_status_path.read_text(encoding="utf-8", errors="ignore")
     release_notes = release_notes_path.read_text(encoding="utf-8", errors="ignore")
+    if phase == "candidate":
+        return _validate_candidate_metadata(
+            version, changelog, project_status, release_notes, metadata_paths
+        )
+    if phase != "final":
+        return [f"unknown release metadata phase: {phase}"]
     errors, release_date = _validate_changelog(changelog_path, version, changelog)
     concrete_date = release_date if release_date != "Unreleased" else None
     errors.extend(
@@ -205,6 +308,12 @@ def main() -> int:
     """Parse command-line arguments and validate the current repository."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--phase",
+        choices=("candidate", "final"),
+        default="final",
+        help="Candidate dispatch or finalized tag metadata (default: final)",
+    )
+    parser.add_argument(
         "--version",
         required=True,
         help="Release version without a v prefix",
@@ -222,12 +331,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    errors = validate_release_metadata(args.repo_root.resolve(), args.version)
+    errors = validate_release_metadata(args.repo_root.resolve(), args.version, args.phase)
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(f"Release metadata for {args.version} is finalized and consistent.")
+    print(f"Release metadata for {args.version} is consistent for phase {args.phase}.")
     return 0
 
 

@@ -97,6 +97,14 @@ def _check_added_version_entry(
             f"entries[{index}] version {version} must have a non-primary "
             f"support_stage (got {support_stage!r})"
         )
+    # A best-effort row that still blocks the release would let an unverified
+    # version stop or gate a publication, which is the opposite of the
+    # discovery contract.
+    if entry.get("release_blocking") is True:
+        violations.append(
+            f"entries[{index}] version {version} must not be release-blocking "
+            "before a maintainer records verification evidence"
+        )
     return violations
 
 

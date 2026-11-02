@@ -1,6 +1,9 @@
 """Tests for the tag-only release metadata validator."""
 
 from pathlib import Path
+import subprocess
+
+import pytest
 
 from tools.release.gates.validate_release_metadata import (
     RELEASE_NOTES_DIR,
@@ -93,6 +96,31 @@ def test_negated_status_fails_tag_gate(tmp_path: Path) -> None:
     errors = validate_release_metadata(tmp_path, "0.9.1")
 
     assert any("not marked stable" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "status_lines,error_fragment",
+    [
+        ("**Status:**", "not marked stable"),
+        (
+            "**Status:** Stable release, published 2026-07-28.\n**Status:**",
+            "exactly one Status field",
+        ),
+    ],
+)
+def test_status_fields_must_be_nonempty_and_unique_in_tag_gate(
+    tmp_path: Path, status_lines: str, error_fragment: str
+) -> None:
+    _write_release_surfaces(tmp_path, finalized=True)
+    status = tmp_path / "docs" / "project" / "PROJECT_STATUS.md"
+    status.write_text(
+        f"### Current Release Line 0.9.1\n\n{status_lines}\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "0.9.1")
+
+    assert any(error_fragment in error for error in errors), errors
 
 
 def test_publication_date_must_appear_in_status_section(tmp_path: Path) -> None:
@@ -209,3 +237,140 @@ def test_fence_close_with_trailing_text_does_not_close() -> None:
     )
     assert _release_note_field(text, "Date") is None
     assert _release_note_field(text, "Status") is None
+
+
+def _write_candidate(root: Path) -> None:
+    """Write realistic pending metadata for artifact-only qualification."""
+    _write_release_surfaces(root, finalized=False)
+    (root / "docs/releases/0.9.1-release-notes.md").write_text(
+        "# Release Notes: 0.9.1\n"
+        "**Target release date**: 2026-10-31 (planned, publication pending)\n"
+        "**Status**: Pending release. 0.9.1 is not yet published.\n",
+        encoding="utf-8",
+    )
+
+
+def test_candidate_metadata_passes_but_final_phase_still_rejects(tmp_path: Path) -> None:
+    _write_candidate(tmp_path)
+    assert validate_release_metadata(tmp_path, "0.9.1", "candidate") == []
+    assert validate_release_metadata(tmp_path, "0.9.1")
+
+
+def test_candidate_status_must_be_on_the_same_line(tmp_path: Path) -> None:
+    _write_candidate(tmp_path)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8").replace(
+            "**Status:** Release candidate.",
+            "**Status:**\nRelease candidate.",
+        ),
+        encoding="utf-8",
+    )
+    assert validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+
+@pytest.mark.parametrize(
+    "duplicate_status_line",
+    ["**Status:** Stable release.", "**Status:**"],
+)
+def test_candidate_status_must_appear_exactly_once(
+    tmp_path: Path, duplicate_status_line: str
+) -> None:
+    _write_candidate(tmp_path)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    status_line = "**Status:** Release candidate."
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8").replace(
+            status_line,
+            f"{status_line}\n{duplicate_status_line}",
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+    duplicate_status_error = (
+        f"{status_path}: active candidate section must contain "
+        "exactly one Status field"
+    )
+    assert duplicate_status_error in errors
+
+
+def test_candidate_status_rejects_duplicate_current_release_sections(
+    tmp_path: Path,
+) -> None:
+    _write_candidate(tmp_path)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8")
+        + "\n### Current Release Line 0.9.1\n\n"
+        + "**Status:** Release candidate.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+    duplicate_section_error = (
+        f"{status_path}: candidate metadata must contain exactly one "
+        "Current Release Line 0.9.1 section"
+    )
+    assert duplicate_section_error in errors
+
+
+@pytest.mark.parametrize("path,old,new", [
+    ("CHANGELOG.md", "0.9.1", "0.9.2"),
+    ("CHANGELOG.md", "Unreleased", "2026-10-31"),
+    ("docs/project/PROJECT_STATUS.md", "0.9.1", "0.9.2"),
+    ("docs/project/PROJECT_STATUS.md", "Release candidate.", "Stable release."),
+    ("docs/project/PROJECT_STATUS.md", "Release candidate.", "Release candidate. Published today."),
+    ("docs/releases/0.9.1-release-notes.md", "Notes: 0.9.1", "Notes: 0.9.2"),
+    ("docs/releases/0.9.1-release-notes.md", "Pending release.", "Stable release."),
+    ("docs/releases/0.9.1-release-notes.md", "Pending release.", "Pending release. Published today."),
+    ("docs/releases/0.9.1-release-notes.md", "2026-10-31", "2026-99-99"),
+    ("docs/releases/0.9.1-release-notes.md", "Target release date", "Date"),
+])
+def test_candidate_metadata_rejects_mismatch_or_final_claim(
+    tmp_path: Path, path: str, old: str, new: str
+) -> None:
+    _write_candidate(tmp_path)
+    surface = tmp_path / path
+    surface.write_text(surface.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    assert validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+
+@pytest.mark.parametrize("event,ref_type,phase", [
+    ("push", "tag", "final"),
+    ("workflow_dispatch", "branch", "candidate"),
+    ("workflow_dispatch", "tag", "candidate"),
+    ("pull_request", "branch", None),
+])
+def test_workflow_routes_metadata_phase_without_bypassing_validation(
+    tmp_path: Path, event: str, ref_type: str, phase: str | None
+) -> None:
+    """Execute the actual workflow routing and validator call with a Python probe."""
+    import os
+    import yaml
+
+    root = Path(__file__).resolve().parents[4]
+    workflow = yaml.safe_load((root / ".github/workflows/release-packages.yml").read_text())
+    step = next(s for s in workflow["jobs"]["release-gate"]["steps"] if s.get("name") == "Run release gates")
+    run = step["run"]
+    start = run.index('case "${GITHUB_EVENT_NAME}:${GITHUB_REF_TYPE}"')
+    stop = run.index('--phase "${METADATA_PHASE}"', start) + len('--phase "${METADATA_PHASE}"')
+    probe = tmp_path / "python3"
+    probe.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    probe.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-e", "-c", run[start:stop]], text=True, capture_output=True,
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
+             "GITHUB_EVENT_NAME": event, "GITHUB_REF_TYPE": ref_type,
+             "RELEASE_GATE_EXPECTED_CARGO_VERSION": "0.9.3"},
+    )
+    if phase is None:
+        assert result.returncode != 0
+        assert "unsupported release metadata event" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            "tools/release/gates/validate_release_metadata.py", "--version", "0.9.3", "--phase", phase
+        ]

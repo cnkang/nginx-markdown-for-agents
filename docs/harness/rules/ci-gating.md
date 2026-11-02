@@ -257,6 +257,17 @@ Required:
       must install `cbindgen` as a build dependency before the build step.
       A missing `cbindgen` causes the Rust converter to fail generating C
       headers, breaking the source build.
+- Transient network retries: wrap a network or registry command in
+  `bash tools/ci/retry_transient.sh -- <command>`. Examples are docker pull,
+  `docker buildx build`, image pushes, curl downloads, apt, apk and dnf
+  fetches, and cargo fetch. The helper allows at most 3 attempts with
+  backoff. It retries only when the last 40 output lines show a transient
+  class: HTTP 5xx or 429, a timeout, a reset or refused connection, a TLS
+  handshake error, a DNS failure, or a registry `unexpected status`,
+  `toomanyrequests` or EOF error. Any other failure returns the command's own
+  exit code on the first attempt. Never wrap a compile, test, verifier or
+  validation command, and never add a whole-job auto-rerun.
+  `tools/ci/test_retry_transient.py` pins this behavior.
 
 Verification:
 - `bash tools/harness/detect_ci_supply_chain.sh`

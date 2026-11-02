@@ -74,6 +74,8 @@ DESTDIR ?=
 # with the main branch, which is what CI compares against.
 STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
 SCHEMA_RELEASE_VERSION ?= 0.9.2
+# Current release line for generated artifacts and evidence paths.
+RELEASE_LINE ?= 0.9.3
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -751,6 +753,7 @@ test-harness:
 	PYTHONPATH=tools/ci python3 -m pytest tools/ci/test_pre_commit_cargo_fmt.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/ci/test_install_recipe_asset_name.py -q --tb=short
 	bash tools/ci/test_verify_official_nginx_docker_binding.sh
+	PYTHONPATH=. python3 -m pytest tools/ci/test_retry_transient.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_continuation_comments.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_detect_script_exec_bits.py -q --tb=short
 	PYTHONPATH=. python3 -m pytest tools/harness/tests/test_release_build_context.py -q --tb=short
@@ -889,7 +892,7 @@ release-gates-check:
 # Lightweight local mirror of the CI/tag 070 strict gate (file-assertion only).
 # Catches doc/workflow drift locally before CI does.
 release-gates-check-070-strict:
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_LINE) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 
 # Lightweight local mirror of the CI `release-gates` job (pytest suites only;
 # 41 gate + 12 matrix test files). Catches release-gate/matrix regressions
@@ -1401,8 +1404,8 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
 		exit 1; \
 	fi
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.2 python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_release_gates_080.py --active-version 0.9.2
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_LINE) python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	python3 tools/release/gates/validate_release_gates_080.py --active-version $(RELEASE_LINE)
 	@echo "  [2/8] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	@if [ -n "$(CANDIDATE_BENCHMARK_REPORT)" ]; then \
 		echo "  Reusing candidate-bound 092 benchmark report: $(CANDIDATE_BENCHMARK_REPORT)"; \
@@ -1419,7 +1422,8 @@ release-gates-check-092-canonical: release-gates-check-080-regression
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
-	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+	RELEASE_GATE_EXPECTED_VERSION=$(RELEASE_LINE) \
+		PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
 	@echo "  [6/8] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
 	@echo "  [7/8] Official build feature manifest"
@@ -1472,6 +1476,38 @@ release-gates-check-092: release-gates-check-092-canonical
 	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
+# release-gates-check-093: Blocking 0.9.3 compatibility gates.
+#
+# This target covers every gate that a branch can run from a clean checkout.
+# The candidate-bound evidence stages (perf, fuzz soak, soak, rc evidence)
+# stay in the 0.9.2 canonical target and in the release workflow, because they
+# need the frozen candidate SHA and hours of runtime.
+release-gates-check-093: release-matrix-check
+	@echo "=== 0.9.3 Release Gates (blocking) ==="
+	@echo "  [1/7] Compatibility evidence"
+	$(MAKE) compatibility-evidence-check
+	@echo "  [2/7] Version consistency"
+	bash tools/harness/detect_version_consistency.sh
+	@echo "  [3/7] Official build feature manifest ($(RELEASE_LINE))"
+	$(MAKE) official-feature-manifest-generate
+	python3 tools/release/gates/validate_official_feature_manifest.py
+	git diff --exit-code -- \
+		artifacts/release/$(RELEASE_LINE)/official-build-feature-manifest.json
+	@echo "  [4/7] Reason code registry"
+	$(MAKE) reason-codegen-generate
+	$(MAKE) reason-codegen-check
+	git diff --exit-code -- \
+		artifacts/release/$(RELEASE_LINE)/reason-registry-report.json \
+		artifacts/release/$(RELEASE_LINE)/generated-reason-artifacts.json
+	@echo "  [5/7] Public surface and schema drift"
+	$(MAKE) public-surface-drift-check
+	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(RELEASE_LINE)
+	@echo "  [6/7] Documentation and release-state contract"
+	$(MAKE) docs-check
+	@echo "  [7/7] Harness quick checks"
+	$(MAKE) harness-quick-checks
+	@echo "=== 0.9.3 Release Gates: PASS ==="
+
 # streaming-evidence-check: Blocking parity evidence and registry contract.
 streaming-evidence-check:
 	@echo "=== Streaming Evidence Check ==="
@@ -1495,10 +1531,54 @@ release-matrix-check:
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
-	git diff --exit-code -- artifacts/release/0.9.2/official-build-feature-manifest.json
+	git diff --exit-code -- artifacts/release/$(RELEASE_LINE)/official-build-feature-manifest.json
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Release Matrix Source/Projection Check: PASSED"
+
+# compatibility-evidence-check: Validate every compatibility evidence record
+# and bind each verified matrix row to a record. Fail-closed on a missing
+# record, a malformed record, or a record with a failed or skipped test.
+# Pass CANDIDATE_SHA=<sha> to require every record to name that commit.
+# Classification: BLOCKING
+.PHONY: compatibility-evidence-check
+compatibility-evidence-check:
+	@echo "=== Compatibility Evidence Check ==="
+	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
+		--evidence-dir "docs/evidence/$(RELEASE_LINE)/compat" \
+		$(if $(CANDIDATE_SHA),--candidate-sha "$(CANDIDATE_SHA)",)
+	PYTHONPATH=. python3 -m pytest \
+		tools/release/matrix/tests/test_evidence_contract.py \
+		tools/release/matrix/tests/test_validate_compatibility_evidence.py \
+		tools/release/matrix/tests/test_promote_matrix.py \
+		tools/release/matrix/tests/test_auto_update_preserves_promotion.py \
+		tools/release/matrix/tests/test_stage_compatibility_evidence.py \
+		tools/release/matrix/tests/test_record_nginx_org_evidence.py \
+		tools/release/matrix/tests/test_record_ubuntu_evidence.py \
+		tools/release/matrix/tests/test_record_container_evidence.py \
+		-q --tb=short $(PYTEST_JOBS)
+	@echo "  Compatibility Evidence Check: PASSED"
+
+# matrix-promote: Apply maintainer promotion from the recorded evidence, then
+# regenerate every derived projection. The evidence must already exist under
+# docs/evidence/$(RELEASE_LINE)/compat/.
+# Classification: MAINTAINER ACTION (not part of CI)
+.PHONY: matrix-promote
+matrix-promote:
+	@echo "=== Release Matrix Promotion ($(RELEASE_LINE)) ==="
+	# 1.30.4 stays supported: the checked-in perf baselines were measured on
+	# that runtime, and the benchmark job downloads its module artifact.  A
+	# demotion would leave the perf gate with nothing to run.
+	python3 tools/release/matrix/promote_matrix.py \
+		--evidence-dir docs/evidence/$(RELEASE_LINE)/compat \
+		--demote-superseded \
+		--keep-previous 1.30.4
+	python3 tools/release/matrix/generate_release_contract_matrix.py --write
+	python3 tools/render_release_matrix_docs.py --write
+	python3 tools/release/matrix/render_legacy_platform_table.py
+	$(MAKE) release-matrix-check
+	$(MAKE) compatibility-evidence-check
+	@echo "  Release Matrix Promotion: PASSED"
 
 # pre-lts-status-check: Validate the six release-level statuses without
 # promoting pending, blocked, fixture, or external-observation work to PASS.

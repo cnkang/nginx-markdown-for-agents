@@ -1,6 +1,8 @@
 # Project Documentation
 
 > The project published v0.9.2 on 2026-10-08. Use release-tag downloads.
+> v0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not
+> yet published. Use the v0.9.3 release-tag downloads after publication.
 
 This directory contains project-level status and maintenance-oriented documentation.
 

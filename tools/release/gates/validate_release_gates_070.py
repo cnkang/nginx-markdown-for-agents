@@ -74,6 +74,7 @@ RELEASE_PUBLISH_REQUIRED_NEEDS = frozenset(
     {
         "release-gate",
         "musl-build",
+        "ubuntu-native",
         "integrity-checksums",
         "integrity-signature",
         "official-docker-release-gate",

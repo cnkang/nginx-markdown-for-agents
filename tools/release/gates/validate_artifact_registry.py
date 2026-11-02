@@ -6,7 +6,7 @@ binds a candidate SHA to a set of artifacts with storage class, producer,
 consumer, and cryptographic digest information.
 
 Real mode validates the candidate-bound release artifact index
-(`artifacts/release/0.9.2/candidate-release-artifact-index.json`)
+(`artifacts/release/<active-version>/candidate-release-artifact-index.json`)
 produced by release tooling: candidate identity against the frozen
 release-candidate-sha-manifest, per-artifact digest/AIDB bindings,
 feature-manifest digest and ABI version consistency with the official
@@ -39,10 +39,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(REPO_ROOT))
 
 from lib.path_validation import (  # noqa: E402
     validate_read_path,
 )
+from tools.release.matrix.normalize_matrix import RELEASE_VERSION  # noqa: E402
 
 SCHEMA_VERSION = "release.artifact-registry.v1"
 INDEX_SCHEMA_VERSION = "release.candidate-artifact-index.v1"
@@ -73,15 +75,15 @@ INDEX_REQUIRED_ARTIFACT_FIELDS = (
 VALID_VERIFICATION_STATUSES = ("pass", "pending", "fail", "skip")
 
 DEFAULT_INDEX_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "candidate-release-artifact-index.json"
 )
 DEFAULT_CANDIDATE_MANIFEST = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "release-candidate-sha-manifest.json"
 )
 FEATURE_MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "official-build-feature-manifest.json"
 )
 ABI_HEADER_PATH = (

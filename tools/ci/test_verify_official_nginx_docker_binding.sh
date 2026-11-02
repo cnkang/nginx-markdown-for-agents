@@ -312,11 +312,16 @@ fi
 # Fixture 12 (structural): the official-nginx-docker workflow builds the image
 # it later verifies with --skip-build, so it must stamp the same labels;
 # otherwise the verify step fails closed by design (release gate turns red).
+# The shell build reads the label values from its step env, so the fixture
+# checks both the env binding and the --label arguments.
 DOCKER_WORKFLOW="${REPO_ROOT}/.github/workflows/official-nginx-docker.yml"
 if [[ -f "${DOCKER_WORKFLOW}" ]] \
-  && grep -qF 'org.opencontainers.image.revision=${{ steps.source.outputs.sha }}' "${DOCKER_WORKFLOW}" \
-  && grep -qF 'org.opencontainers.image.base.name=${{ matrix.image_ref }}' "${DOCKER_WORKFLOW}" \
-  && grep -qF 'org.opencontainers.image.base.digest=${{ matrix.image_digest }}' "${DOCKER_WORKFLOW}"; then
+  && grep -qF 'MODULE_SHA: ${{ steps.source.outputs.sha }}' "${DOCKER_WORKFLOW}" \
+  && grep -qF 'BASE_NAME: ${{ matrix.image_ref }}' "${DOCKER_WORKFLOW}" \
+  && grep -qF 'BASE_DIGEST: ${{ matrix.image_digest }}' "${DOCKER_WORKFLOW}" \
+  && grep -qF -- '--label "org.opencontainers.image.revision=${MODULE_SHA}"' "${DOCKER_WORKFLOW}" \
+  && grep -qF -- '--label "org.opencontainers.image.base.name=${BASE_NAME}"' "${DOCKER_WORKFLOW}" \
+  && grep -qF -- '--label "org.opencontainers.image.base.digest=${BASE_DIGEST}"' "${DOCKER_WORKFLOW}"; then
   pass "fixture 12: official Docker workflow stamps the OCI binding labels on the built image"
 else
   fail "fixture 12: official Docker workflow build is missing the OCI binding labels"
