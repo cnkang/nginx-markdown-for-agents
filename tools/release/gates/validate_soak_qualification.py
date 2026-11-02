@@ -11,8 +11,10 @@ per-request memory, error rate, and latency.
 
 Real mode (`--mode real`) runs the soak against a module-enabled NGINX
 binary (NGINX_BIN / MODULE_SO environment) and writes the qualification
-record. Fixture mode (`--mode fixture`) validates an existing record with
-the same threshold semantics, used for gate regression coverage only.
+record. Verify mode (`--mode verify`) checks an existing record against
+the manifest and git HEAD without measuring or writing it. It rejects skips.
+Fixture mode (`--mode fixture`) uses the same threshold checks for tests
+and allows explicitly skipped fixtures.
 
 Failure semantics are fail-closed: any missing field, stale candidate
 SHA, below-threshold metric, blocking pending state, or missing
@@ -167,6 +169,16 @@ def load_json(path: str | pathlib.Path, label: str) -> dict:
     return raw
 
 
+def _is_finite_duration(value: object) -> bool:
+    """Reject non-numeric durations and integers too large for float math."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def load_manifest(manifest_path: str) -> dict:
     manifest = load_json(manifest_path, "soak manifest")
     required = {"schema_version", "candidate_sha", "duration_minutes", "concurrency"}
@@ -178,9 +190,9 @@ def load_manifest(manifest_path: str) -> dict:
     ):
         raise SystemExit("ERROR: soak manifest candidate_sha must be 40 hex")
     if (
-        isinstance(manifest["duration_minutes"], bool)
-        or not isinstance(manifest["duration_minutes"], (int, float))
+        not _is_finite_duration(manifest["duration_minutes"])
         or manifest["duration_minutes"] <= 0
+        or not _is_finite_duration(manifest["duration_minutes"] * 60)
     ):
         raise SystemExit("ERROR: soak manifest duration_minutes must be positive")
     if manifest["duration_minutes"] * 60 < MIN_RSS_SAMPLES:
@@ -324,8 +336,7 @@ def validate_against_manifest(record: dict, manifest: dict) -> None:
         )
     floor = manifest["duration_minutes"] * 60 * 0.95
     if (
-        isinstance(record["duration_seconds"], bool)
-        or not isinstance(record["duration_seconds"], (int, float))
+        not _is_finite_duration(record["duration_seconds"])
         or record["duration_seconds"] < floor
     ):
         raise SoakQualificationValidationError(
@@ -410,11 +421,16 @@ def validate_soak_outcome(record: dict, manifest: dict) -> None:
         )
 
 
-def fixture_main(args: argparse.Namespace) -> int:
+def record_main(args: argparse.Namespace) -> int:
+    """Validate recorded evidence without starting another measurement."""
     manifest = load_manifest(args.manifest)
+    if args.mode == "verify" and manifest["candidate_sha"] != _git_head_sha():
+        print("ERROR: stale-digest: soak manifest does not match git HEAD",
+              file=sys.stderr)
+        return 1
     record = load_json(args.record_input, "soak record")
     validate_record_structure(record)
-    if record.get("status") == "skip":
+    if args.mode == "fixture" and record.get("status") == "skip":
         print(
             f"SKIP: soak qualification fixture {args.record_input}: "
             f"{record['skip_reason']}"
@@ -432,7 +448,7 @@ def fixture_main(args: argparse.Namespace) -> int:
         print(failure_detail, file=sys.stderr)
         return 1
     print(
-        f"PASS: soak qualification fixture {args.record_input} is valid "
+        f"PASS: soak qualification {args.mode} record {args.record_input} is valid "
         f"({record['duration_seconds']}s, concurrency {record['concurrency']})"
     )
     return 0
@@ -979,6 +995,7 @@ def run_load_loop(
 ) -> tuple:
     """Run the sustained load loop, returning (rss_series, scenario_metrics)."""
     finished = started + duration
+    print(f"Soak load started: {duration}s, concurrency {concurrency}", flush=True)
     rss_series = []
     scenario_metrics = {sid: [] for sid in corpus}
     if worker_pid > 0:
@@ -1002,6 +1019,11 @@ def run_load_loop(
             url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
             report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir, label=sid)
             scenario_metrics[sid].append(report)
+            print(
+                f"Soak progress: {time.time() - started:.0f}/{duration}s "
+                f"scenario={sid}, completed={report.get('completed_requests', 0)}",
+                flush=True,
+            )
         if worker_pid > 0:
             rss_series.append([round(time.time() - started, 1),
                                read_worker_rss(worker_pid)])
@@ -1014,6 +1036,7 @@ def run_load_loop(
 
 def measure_drain(worker_pid: int) -> tuple[int | None, bool, list[int]]:
     """Sample worker RSS after load; return delta, monotonic flag, and samples."""
+    print("Soak load finished; waiting for worker RSS drain samples", flush=True)
     time.sleep(30)
     drain = []
     attempts = 0
@@ -1812,12 +1835,15 @@ def real_main(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Soak qualification gate")
-    parser.add_argument("--mode", choices=["real", "fixture"], default="real")
+    parser.add_argument("--mode", choices=["real", "verify", "fixture"], default="real")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument(
         "--record", default=str(DEFAULT_RECORD.relative_to(REPO_ROOT))
     )
-    parser.add_argument("--record-input", default=None)
+    parser.add_argument(
+        "--record-input", default=None,
+        help="existing evidence to check in verify or fixture mode",
+    )
     parser.add_argument("--output", default=None)
     parser.add_argument("--allow-skip-soak", action="store_true")
     parser.add_argument(
@@ -1830,22 +1856,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """
-    Run the qualification gate in fixture or real mode.
+    Run a measurement or validate an existing qualification record.
 
     Parameters:
         argv: Optional command-line arguments. Uses process arguments when omitted.
 
     Returns:
-        0 on success, 1 for operational or qualification errors, or 2 when fixture
-        mode is missing its required record input.
+        0 on success, 1 for operational or qualification errors, or 2 when a
+        record validation mode is missing its required input.
     """
     args = build_parser().parse_args(argv)
     try:
-        if args.mode == "fixture":
+        if args.mode in ("fixture", "verify"):
             if not args.record_input:
-                print("ERROR: fixture mode requires --record-input", file=sys.stderr)
+                print(f"ERROR: {args.mode} mode requires --record-input", file=sys.stderr)
                 return 2
-            return fixture_main(args)
+            return record_main(args)
         return real_main(args)
     except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

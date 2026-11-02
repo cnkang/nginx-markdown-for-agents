@@ -37,6 +37,50 @@ def _step_by_name(steps: list[dict[str, object]], name: str) -> dict[str, object
     raise AssertionError(f"Missing workflow step: {name}")
 
 
+def test_runtime_regressions_can_overlap_rust_quality() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    runtime = jobs["runtime-regressions"]
+    assert runtime["needs"] == ["changes"]
+    assert runtime["name"] == "Runtime Regressions (IMS + Chunked + Large)"
+    assert "rust-quality" in jobs
+    assert "needs.rust-quality" not in str(runtime)
+    steps = runtime["steps"]
+    assert _step_by_name(steps, "Set up Rust toolchain")
+    assert _step_by_name(steps, "Run delegated If-Modified-Since runtime validation")
+
+
+def test_sonar_restores_rust_cache_before_native_builds() -> None:
+    jobs = _workflow_data("sonarcloud.yml")["jobs"]
+    steps = next(iter(jobs.values()))["steps"]
+    names = [step.get("name") for step in steps]
+    cache = _step_by_name(steps, "Cache Rust build artifacts")
+    assert cache["if"] == "steps.token.outputs.enabled == 'true'"
+    assert names.index("Set up Rust toolchain") < names.index(cache["name"])
+    for name in (
+        "Generate compile_commands.json for CFamily analysis",
+        "Generate C module e2e coverage", "Generate Rust test coverage",
+    ):
+        assert names.index(cache["name"]) < names.index(name)
+
+
+def test_expensive_pr_checks_cancel_only_superseded_pr_runs() -> None:
+    fuzz = _workflow_data("cflite_pr.yml")
+    assert set(fuzz["on"]) == {"pull_request"}
+    assert fuzz["concurrency"] == {
+        "group": "${{ github.workflow }}-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": "true",
+    }
+    brew = _workflow_data("homebrew-formula-gate.yml")
+    assert set(brew["on"]) == {"pull_request", "push"}
+    assert brew["concurrency"] == {
+        "group": (
+            "${{ github.workflow }}-${{ github.event_name }}-"
+            "${{ github.event.pull_request.number || github.run_id }}"
+        ),
+        "cancel-in-progress": "true",
+    }
+
+
 def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> None:
     """Release binaries must build from the checked-in current matrix schema."""
     workflow = _workflow_data("release-binaries.yml")
@@ -990,12 +1034,16 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     ):
         assert path in upload["with"]["path"]
     assert "validate_soak_qualification.py" in gates["run"]
+    soak_command = gates["run"].split("validate_soak_qualification.py", 1)[1]
+    soak_command = soak_command.split("CONTAINER_SCRIPT", 1)[0]
+    assert "--mode verify" in soak_command
+    assert "--mode real" not in soak_command
     assert (
         '--manifest "artifacts/release/${RELEASE_VERSION}/'
         'short-soak-scenario-manifest.json"'
     ) in gates["run"]
     assert (
-        '--record "artifacts/release/${RELEASE_VERSION}/'
+        '--record-input "artifacts/release/${RELEASE_VERSION}/'
         'soak-qualification-record.json"'
     ) in gates["run"]
     assert "--env RELEASE_VERSION" in gates["run"]

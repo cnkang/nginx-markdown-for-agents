@@ -711,7 +711,8 @@ jobs:
     # required-check context.  The additional SSI/filter-ordering coverage is
     # implemented by steps below and must not change the required context.
     name: Runtime Regressions (IMS + Chunked + Large)
-    needs: [changes, rust-quality]
+    # This job builds its own runtime; both required checks can run in parallel.
+    needs: [changes]
     if: needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
