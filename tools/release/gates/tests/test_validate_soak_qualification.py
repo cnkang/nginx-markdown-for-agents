@@ -3036,6 +3036,7 @@ def test_valid_soak_record_passes() -> None:
     "valid", "stale-head", "stale-record", "skip", "pending", "missing",
     "short", "concurrency", "scenario", "errors", "rss", "peak",
     "duration-nan", "duration-inf", "manifest-nan", "manifest-inf",
+    "duration-oversized", "manifest-oversized",
 ])
 def test_verify_existing_record_without_measuring_or_writing(
     change, monkeypatch, tmp_path, capsys,
@@ -3052,6 +3053,7 @@ def test_verify_existing_record_without_measuring_or_writing(
         "short": {"duration_seconds": 1},
         "duration-nan": {"duration_seconds": float("nan")},
         "duration-inf": {"duration_seconds": float("inf")},
+        "duration-oversized": {"duration_seconds": 10**1000},
         "concurrency": {"concurrency": 1},
         "scenario": {"per_scenario": record["per_scenario"][:-1]},
         "rss": {"rss_time_series": []},
@@ -3060,6 +3062,7 @@ def test_verify_existing_record_without_measuring_or_writing(
     manifest.update({
         "manifest-nan": {"duration_minutes": float("nan")},
         "manifest-inf": {"duration_minutes": float("inf")},
+        "manifest-oversized": {"duration_minutes": 10**1000},
     }.get(change, {}))
     if change == "errors":
         record["per_scenario"][0]["error_rate"] = 0.5
@@ -3094,6 +3097,40 @@ def test_verify_existing_record_without_measuring_or_writing(
 def test_verify_requires_record_input(capsys):
     assert validator.main(["--mode", "verify"]) == 2
     assert "verify mode requires --record-input" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "duration", [10**1000, -(10**1000), 10**308, 1e308],
+    ids=["oversized-int", "negative-oversized-int", "scaled-int", "scaled-float"],
+)
+def test_manifest_rejects_duration_overflow_with_controlled_error(duration, tmp_path):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest["duration_minutes"] = duration
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(SystemExit, match="duration_minutes must be positive"):
+        validator.load_manifest(str(manifest_path))
+
+
+@pytest.mark.parametrize("entrypoint", [validator.record_main, validator.main])
+def test_record_duration_overflow_uses_normal_error_path(
+    entrypoint, monkeypatch, tmp_path, capsys,
+):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    monkeypatch.setattr(validator, "_git_head_sha", lambda: manifest["candidate_sha"])
+    record = json.loads(
+        (FIXTURE_DIR / "soak-qualification-valid.json").read_text(encoding="utf-8")
+    )
+    record["duration_seconds"] = 10**1000
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    argv = ["--mode", "verify", "--manifest", str(MANIFEST),
+            "--record-input", str(record_path)]
+    args = argv if entrypoint is validator.main else validator.build_parser().parse_args(argv)
+    assert entrypoint(args) == 1
+    output = capsys.readouterr()
+    assert output.err.startswith("ERROR: below-threshold: soak duration")
+    assert "PASS:" not in output.out
 
 
 def test_soak_load_reports_flushed_progress_without_changing_measurement(

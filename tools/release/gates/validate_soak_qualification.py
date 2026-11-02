@@ -169,6 +169,16 @@ def load_json(path: str | pathlib.Path, label: str) -> dict:
     return raw
 
 
+def _is_finite_duration(value: object) -> bool:
+    """Reject non-numeric durations and integers too large for float math."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def load_manifest(manifest_path: str) -> dict:
     manifest = load_json(manifest_path, "soak manifest")
     required = {"schema_version", "candidate_sha", "duration_minutes", "concurrency"}
@@ -180,10 +190,9 @@ def load_manifest(manifest_path: str) -> dict:
     ):
         raise SystemExit("ERROR: soak manifest candidate_sha must be 40 hex")
     if (
-        isinstance(manifest["duration_minutes"], bool)
-        or not isinstance(manifest["duration_minutes"], (int, float))
-        or not math.isfinite(manifest["duration_minutes"])
+        not _is_finite_duration(manifest["duration_minutes"])
         or manifest["duration_minutes"] <= 0
+        or not _is_finite_duration(manifest["duration_minutes"] * 60)
     ):
         raise SystemExit("ERROR: soak manifest duration_minutes must be positive")
     if manifest["duration_minutes"] * 60 < MIN_RSS_SAMPLES:
@@ -327,9 +336,7 @@ def validate_against_manifest(record: dict, manifest: dict) -> None:
         )
     floor = manifest["duration_minutes"] * 60 * 0.95
     if (
-        isinstance(record["duration_seconds"], bool)
-        or not isinstance(record["duration_seconds"], (int, float))
-        or not math.isfinite(record["duration_seconds"])
+        not _is_finite_duration(record["duration_seconds"])
         or record["duration_seconds"] < floor
     ):
         raise SoakQualificationValidationError(
