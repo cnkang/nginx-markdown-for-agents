@@ -9,13 +9,12 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.2 is the current published release line (2026-10-08).
-  It consolidates the v0.9.1 baseline and resets compatibility.
-- v0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not
-  yet published.
-- v0.9.1 was the previous published stable release (2026-07-29).
-- Repository metadata targets 0.9.3. Until publication, use the v0.9.2 assets.
-  After publication, use the v0.9.3 tag, assets, and checksums.
+- v0.9.3 is the current published release line (2026-11-02). It is a
+  compatibility maintenance release, so it keeps the v0.9.2 contracts.
+- v0.9.2 was the previous published release (2026-10-08). It consolidates the
+  v0.9.1 baseline and resets compatibility.
+- v0.9.1 was the published stable release before v0.9.2 (2026-07-29).
+- Repository metadata targets 0.9.3. Use the v0.9.3 tag, assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 - v0.9.3 is a controlled compatibility maintenance exception. It is not a
   second breaking release, and it does not reopen the v0.9.2 contract. Its
@@ -160,6 +159,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state and set the release date |
 | 0.9.3 | 2026-10-31 | Codex | Clarified asset availability before and after publication |
 | 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and updated the current release state |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |

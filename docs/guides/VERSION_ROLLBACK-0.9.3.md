@@ -1,7 +1,7 @@
 # Version Rollback: 0.9.3
 
-This guide returns a host from 0.9.3 to the previous module version. 0.9.3 is
-not yet published, so use it after the release. Verify the module against the
+This guide returns a host from 0.9.3 to the previous module version. The project
+published 0.9.3 on 2026-11-02. Verify the module against the
 exact NGINX package revision before restoring service.
 
 ## 1. Decide whether a rollback is possible

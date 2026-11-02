@@ -5,7 +5,7 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.3] - Unreleased
+## [0.9.3] - 2026-11-02
 
 Compatibility maintenance release. 0.9.3 makes the current nginx.org stable and
 mainline releases supported and release blocking. It adds Ubuntu 24.04 and
