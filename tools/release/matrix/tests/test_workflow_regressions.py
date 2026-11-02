@@ -1035,7 +1035,7 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         assert path in upload["with"]["path"]
     assert "validate_soak_qualification.py" in gates["run"]
     soak_command = gates["run"].split("validate_soak_qualification.py", 1)[1]
-    soak_command = soak_command.split("# Fail loudly", 1)[0]
+    soak_command = soak_command.split("CONTAINER_SCRIPT", 1)[0]
     assert "--mode verify" in soak_command
     assert "--mode real" not in soak_command
     assert (
