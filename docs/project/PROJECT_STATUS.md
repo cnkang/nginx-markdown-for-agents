@@ -27,13 +27,14 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.3
 
-**Status:** Release candidate. Publication is pending.
+**Status:** Stable release, published 2026-11-02. 0.9.2 was the previous
+release (2026-10-08).
 
-0.9.3 is a compatibility maintenance release candidate, and 0.9.3 is not yet
-published. The release makes the current nginx.org stable and mainline
-releases supported and release blocking, and it adds Ubuntu 24.04 and Ubuntu
-26.04 native NGINX to the supported surface. It does not change a directive,
-a default value, or a frozen contract. See the
+0.9.3 is a compatibility maintenance release. It makes the current nginx.org
+stable and mainline releases supported and release blocking, and it adds Ubuntu
+24.04 and Ubuntu 26.04 native NGINX to the supported surface. It does not
+change a directive, a default value, or a frozen contract. Use the v0.9.3 tag,
+package assets, and checksums from the release. See the
 [0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
 [compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
 
@@ -471,6 +472,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state for 2026-11-02 |
 | 0.9.3 | 2026-10-31 | Codex | Made the pending publication status explicit |
 | 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and the published release status, and refreshed the support-matrix counts |
 | 0.9.2 | 2026-10-03 | Codex | Align documentation with current implementation and release publication state |
