@@ -2512,13 +2512,13 @@ jobs:
           # evidence when it is present.
           EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
             make release-perf-evidence-blocking BASELINE_VERSION=092
-          # Short-soak qualification against the module-enabled EL9 nginx
-          # binary.
+          # Recheck the candidate-bound evidence already measured and uploaded
+          # by the short-soak step. Do not run another 30-minute measurement
+          # or replace the record used by the uploaded evidence artifact.
           python3 tools/release/gates/validate_soak_qualification.py \
-            --mode real \
-            --git-head \
+            --mode verify \
             --manifest "artifacts/release/${RELEASE_VERSION}/short-soak-scenario-manifest.json" \
-            --record "artifacts/release/${RELEASE_VERSION}/soak-qualification-record.json"
+            --record-input "artifacts/release/${RELEASE_VERSION}/soak-qualification-record.json"
           # Fail loudly if any candidate artifact did not materialize: the
           # blocking gates above consume these files downstream.
           test -f perf/baselines/module-baseline-092-raw.json

@@ -3032,6 +3032,100 @@ def test_valid_soak_record_passes() -> None:
     assert _run_fixture("soak-qualification-valid.json") == 0
 
 
+@pytest.mark.parametrize("change", [
+    "valid", "stale-head", "stale-record", "skip", "pending", "missing",
+    "short", "concurrency", "scenario", "errors", "rss", "peak",
+    "duration-nan", "duration-inf", "manifest-nan", "manifest-inf",
+])
+def test_verify_existing_record_without_measuring_or_writing(
+    change, monkeypatch, tmp_path, capsys,
+):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    record = json.loads(
+        (FIXTURE_DIR / "soak-qualification-valid.json").read_text(encoding="utf-8")
+    )
+    head = "a" * 40 if change == "stale-head" else manifest["candidate_sha"]
+    record.update({
+        "stale-record": {"candidate_sha": "a" * 40},
+        "skip": {"status": "skip", "skip_reason": "missing binary"},
+        "pending": {"status": "pending"},
+        "short": {"duration_seconds": 1},
+        "duration-nan": {"duration_seconds": float("nan")},
+        "duration-inf": {"duration_seconds": float("inf")},
+        "concurrency": {"concurrency": 1},
+        "scenario": {"per_scenario": record["per_scenario"][:-1]},
+        "rss": {"rss_time_series": []},
+        "peak": {"per_request_peak_bytes": 2**40},
+    }.get(change, {}))
+    manifest.update({
+        "manifest-nan": {"duration_minutes": float("nan")},
+        "manifest-inf": {"duration_minutes": float("inf")},
+    }.get(change, {}))
+    if change == "errors":
+        record["per_scenario"][0]["error_rate"] = 0.5
+    manifest_path = tmp_path / "manifest.json"
+    record_path = tmp_path / "record.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = json.dumps(record).encode()
+    if change != "missing":
+        record_path.write_bytes(before)
+    monkeypatch.setattr(validator, "_git_head_sha", lambda: head)
+
+    def unexpected_call(*args, **kwargs):
+        pytest.fail("record verification must not measure or write evidence")
+
+    monkeypatch.setattr(validator, "_run_soak_session", unexpected_call)
+    monkeypatch.setattr(validator, "_write_record", unexpected_call)
+    try:
+        rc = validator.main([
+            "--mode", "verify", "--manifest", str(manifest_path),
+            "--record-input", str(record_path),
+        ])
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
+    assert rc == (0 if change == "valid" else 1)
+    output = capsys.readouterr()
+    assert ("PASS:" in output.out) == (change == "valid")
+    assert record_path.exists() == (change != "missing")
+    if record_path.exists():
+        assert record_path.read_bytes() == before
+
+
+def test_verify_requires_record_input(capsys):
+    assert validator.main(["--mode", "verify"]) == 2
+    assert "verify mode requires --record-input" in capsys.readouterr().err
+
+
+def test_soak_load_reports_flushed_progress_without_changing_measurement(
+    monkeypatch, tmp_path,
+):
+    now = [1000.0]
+    messages = []
+    monkeypatch.setattr(validator.time, "time", lambda: now[0])
+    monkeypatch.setattr(
+        validator, "print",
+        lambda message, **kwargs: messages.append((message, kwargs)),
+        raising=False,
+    )
+
+    def chunk(url, concurrency, seconds, output_dir, label):
+        assert concurrency == 16
+        assert output_dir == tmp_path
+        assert label == "small"
+        now[0] += seconds
+        return {"completed_requests": seconds}
+
+    monkeypatch.setattr(validator, "run_ab_chunk", chunk)
+    rss, metrics = validator.run_load_loop(
+        {"small": "small.html"}, -1, 120, now[0], 16, tmp_path,
+    )
+    assert rss == []
+    assert sum(row["completed_requests"] for row in metrics["small"]) == 120
+    assert any("60/120s" in message for message, _ in messages)
+    assert any("120/120s" in message for message, _ in messages)
+    assert all(options.get("flush") is True for _, options in messages)
+
+
 def test_fixture_skip_record_is_accepted_before_threshold_checks(
     tmp_path: Path,
 ) -> None:
