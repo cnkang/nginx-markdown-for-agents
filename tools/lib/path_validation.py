@@ -20,7 +20,7 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
-_SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_SAFE_FILENAME_RE = re.compile(r"^\w[\w.-]*$", re.ASCII)
 
 
 def validate_read_path(
