@@ -87,8 +87,11 @@ _REQUIRED_FIELDS: tuple[tuple[str, type], ...] = (
     ("verified_by", str),
 )
 
-# Public field-name list for tests and documentation tooling.
-RECORD_REQUIRED_FIELDS: tuple[str, ...] = tuple(name for name, _ in _REQUIRED_FIELDS)
+# Public field-name accessor for tests and documentation tooling.
+def required_record_fields() -> tuple[str, ...]:
+    """Return the public evidence field names in contract order."""
+    return tuple(name for name, _ in _REQUIRED_FIELDS)
+
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
