@@ -268,10 +268,8 @@ resolve_tool() {
     return 1
   fi
 
-  if [[ "$EUID" -eq 0 ]]; then
-    if ! is_secure_root_file "$resolved"; then
-      return 1
-    fi
+  if [[ "$EUID" -eq 0 ]] && ! is_secure_root_file "$resolved"; then
+    return 1
   fi
 
   printf -v "$varname" '%s' "$resolved"
