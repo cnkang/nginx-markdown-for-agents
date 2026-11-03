@@ -22,8 +22,8 @@ matching package artifact, `SHA256SUMS`, and `SHA256SUMS.asc` from the same
 GitHub Release. `SHA256SUMS` detects transfer corruption. It is not an
 authenticated trust anchor.
 
-> **Availability check:** A release candidate and its compatibility-matrix
-> entry do not make a DEB or RPM package downloadable. Before using the
+> **Availability check:** A compatibility-matrix entry does not make a DEB or
+> RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
 > package, `SHA256SUMS`, and `SHA256SUMS.asc`. The release signing-key
 > fingerprint appears in [GPG_KEY_MANAGEMENT.md](./GPG_KEY_MANAGEMENT.md).

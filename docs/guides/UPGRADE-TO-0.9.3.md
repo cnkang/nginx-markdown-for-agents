@@ -37,8 +37,8 @@ A line that ends with `(Ubuntu)` identifies the Ubuntu package.
    python3 tools/render_release_matrix_docs.py --release-notes
    ```
 
-3. Download the package for that version and architecture from the release
-   page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` too.
+3. Download the package for that version and architecture from the v0.9.3
+   release page. Download `SHA256SUMS` and `SHA256SUMS.asc` too.
 
 4. Verify the signature of `SHA256SUMS` before the checksum. Use the key from
    the git repository and the fingerprint in
