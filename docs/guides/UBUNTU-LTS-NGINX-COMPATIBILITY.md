@@ -72,9 +72,9 @@ The package name is `nginx-module-markdown-for-agents-ubuntu`. It is not the
 same package as `nginx-module-markdown-for-agents`, which targets nginx.org
 builds. The two packages conflict because they own the same module file.
 
-1. Download the package for your suite and architecture from the release
-   page after publication. Download `SHA256SUMS` and `SHA256SUMS.asc` from
-   the same release.
+1. Download the package for your suite and architecture from the v0.9.3
+   release page. Download `SHA256SUMS` and `SHA256SUMS.asc` from the same
+   release.
 
 2. Verify the `SHA256SUMS` signature before you verify the checksum. Read the
    expected fingerprint from [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md)

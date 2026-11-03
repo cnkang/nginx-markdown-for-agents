@@ -34,7 +34,9 @@ release (2026-10-08).
 stable and mainline releases supported and release blocking. It also adds
 Ubuntu 24.04 and Ubuntu 26.04 native NGINX to the supported surface. It does
 not change a directive, a default value, or a frozen contract. Use the v0.9.3 tag,
-package assets, and checksums from the release. See the
+package assets, and checksums from the
+[release](https://github.com/cnkang/nginx-markdown-for-agents/releases/tag/v0.9.3).
+See the
 [0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
 [compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
 
