@@ -65,6 +65,8 @@ reason-code registry, and the FFI ABI version 3 also do not change.
 - `packaging/matrix.yaml` points at the canonical release matrix instead of
   listing its own version set.
 - The nFPM checksum table contains the `linux-arm64` binary.
+- The Rust decompression crates moved to `brotli` 9.1.1 and
+  `brotli-decompressor` 6.2.0. `THIRD-PARTY-NOTICES` records both versions.
 - The release gate validates only the CI evidence records of its own run,
   with `--require-ci`, `--candidate-sha` and `--workflow-run-url`. It no longer
   reads the checked-in local records.
