@@ -104,6 +104,13 @@ readonly TRUSTED_TOOL_ROOTS=(
   # actions/setup-python installs the runner interpreter here on GitHub-hosted
   # Linux runners; the runner image owns this immutable toolcache.
   /opt/hostedtoolcache
+  # Ubuntu 25.10+ (and the ubuntu-26.04 GitHub runner image) ships coreutils
+  # as rust-coreutils: /usr/bin/<tool> entries are symlinks into this
+  # dpkg-owned directory (root-owned, not user writable).  resolve_tool
+  # requires BOTH the candidate and the resolved target to be trusted, so
+  # the resolved coreutils location must be listed or mktemp/rm-style
+  # helpers fail closed on those runners.
+  /usr/lib/cargo/bin/coreutils
   # Python.framework install location (python.org macOS installer).
   # Trust only the framework's own subtree: a broad /Library/Frameworks root
   # would trust unrelated frameworks, and a glob entry never matches because
