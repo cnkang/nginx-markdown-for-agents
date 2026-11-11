@@ -196,9 +196,11 @@ jobs:
           set -euo pipefail
           # Homebrew 7.x on the runner images no longer clones the
           # homebrew-core tap (API-mode formulae); brew --repository still
-          # resolves the tap path without any directory on disk.  Materialize
-          # the tap explicitly before copying the rendered formula into it.
-          brew tap homebrew/core
+          # resolves the tap path without any directory on disk, and plain
+          # "brew tap homebrew/core" is refused with a developer guard.
+          # Force-materialize the tap before copying the rendered formula
+          # into it for the audit.
+          brew tap --force homebrew/core
           core_formula="$(
             brew --repository homebrew/core
           )/Formula/n/nginx-markdown-module.rb"
