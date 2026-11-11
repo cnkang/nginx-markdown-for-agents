@@ -194,6 +194,11 @@ jobs:
           RENDERED_FORMULA: ${{ steps.formula.outputs.path }}
         run: |
           set -euo pipefail
+          # Homebrew 7.x on the runner images no longer clones the
+          # homebrew-core tap (API-mode formulae); brew --repository still
+          # resolves the tap path without any directory on disk.  Materialize
+          # the tap explicitly before copying the rendered formula into it.
+          brew tap homebrew/core
           core_formula="$(
             brew --repository homebrew/core
           )/Formula/n/nginx-markdown-module.rb"
