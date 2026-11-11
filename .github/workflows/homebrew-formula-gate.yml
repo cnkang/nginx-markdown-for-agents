@@ -53,6 +53,12 @@ jobs:
           set -euo pipefail
           brew --version
           brew update-reset
+          # Homebrew 7.x on the runner images no longer clones the
+          # homebrew-core tap (API-mode formulae); brew --repository still
+          # resolves the tap path without any directory on disk.  The steps
+          # below write the candidate formula into the official tap and
+          # resolve it by name, so materialize the tap explicitly here.
+          brew tap homebrew/core
 
       - name: Audit local formula
         shell: bash
