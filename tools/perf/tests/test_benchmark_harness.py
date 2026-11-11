@@ -36,6 +36,7 @@ import pytest
 
 from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
+from tools.perf.evidence_gate import _TRUSTED_TOOL_ROOTS
 from tools.perf.benchmark_validation import (
     _ab_performance,
     _hey_performance,
@@ -1703,6 +1704,18 @@ class TestNginxConfigGeneration:
         assert "RSS_SUPPORTED=0" in script_content
         assert "memory evidence will fail closed" in script_content
         assert '"$RESOLVED_PS" -o rss= -p "$$"' in script_content
+
+    def test_trusted_roots_cover_ubuntu_rust_coreutils(self):
+        """Ubuntu 25.10+ rust-coreutils targets must resolve inside a trusted root."""
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        # ubuntu-26.04 runners ship coreutils as rust-coreutils, so every
+        # coreutils-derived helper (mktemp, rm, ...) resolves to the
+        # dpkg-owned binary directory below instead of /usr/bin.  Both
+        # allowlists must include it or tool resolution fails closed on
+        # those runners with "not from a trusted location".
+        assert "/usr/lib/cargo/bin/coreutils" in script_content
+        assert "/usr/lib/cargo/bin/coreutils" in _TRUSTED_TOOL_ROOTS
 
     def test_preflight_requires_pinned_python_brotli(self):
         """The blocking chunked Brotli scenario must fail before serving requests."""

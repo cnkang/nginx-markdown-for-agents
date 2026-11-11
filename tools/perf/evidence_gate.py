@@ -111,6 +111,13 @@ _TRUSTED_TOOL_ROOTS = (
     "/opt/homebrew/Cellar",
     "/usr/local/Cellar",
     "/usr/lib/nginx",
+    # Ubuntu 25.10+ (and the ubuntu-26.04 GitHub runner image) ships coreutils
+    # as rust-coreutils: /usr/bin/<tool> entries are symlinks into this
+    # dpkg-owned directory (root-owned, not user writable).  Tool resolution
+    # requires BOTH the candidate and the resolved target to be trusted, so
+    # the resolved coreutils location must be listed or coreutils-derived
+    # helpers fail closed on those runners.
+    "/usr/lib/cargo/bin/coreutils",
 )
 
 
