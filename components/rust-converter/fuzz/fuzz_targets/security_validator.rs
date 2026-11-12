@@ -18,7 +18,7 @@ fn walk_dom(handle: &Handle, validator: &SecurityValidator, depth: usize) {
 
     if let NodeData::Element { name, attrs, .. } = &handle.data {
         let attrs_ref = attrs.borrow();
-        let _ = validator.check_element(name.local.as_ref());
+        let _ = validator.check_element(&*name.local);
         let _ = validator.check_attributes(&attrs_ref);
         let _ = validator.get_attributes_to_remove(&attrs_ref);
     }

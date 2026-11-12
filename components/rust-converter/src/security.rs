@@ -476,7 +476,7 @@ impl SecurityValidator {
     /// Returns the appropriate `SanitizeAction` based on attribute analysis.
     pub fn check_attributes(&self, attrs: &Ref<Vec<Attribute>>) -> SanitizeAction {
         for attr in attrs.iter() {
-            let attr_name = attr.name.local.as_ref();
+            let attr_name = &*attr.name.local;
 
             // Check for event handlers
             if self.is_event_handler(attr_name) {
@@ -567,7 +567,7 @@ impl SecurityValidator {
         let mut to_remove = Vec::new();
 
         for attr in attrs.iter() {
-            let attr_name = attr.name.local.as_ref();
+            let attr_name = &*attr.name.local;
 
             // Remove event handlers
             if self.is_event_handler(attr_name) {

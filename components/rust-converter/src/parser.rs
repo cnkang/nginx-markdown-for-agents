@@ -263,9 +263,13 @@ mod tests {
             result.is_ok(),
             "malformed metadata must not escape as a panic"
         );
+        // html5ever 0.40 fixed the truncation panic that surfaced this input
+        // as ParseError through the catch_unwind guard on html5ever 0.39.
+        // The truncated charset label now parses normally; any failure must
+        // still be a typed error rather than an escaped panic.
         assert!(
-            matches!(result.unwrap(), Err(ConversionError::ParseError(_))),
-            "truncated metadata should be reported as a parse error"
+            matches!(result.unwrap(), Ok(_) | Err(ConversionError::ParseError(_))),
+            "truncated metadata must parse or fail as a typed error"
         );
     }
 

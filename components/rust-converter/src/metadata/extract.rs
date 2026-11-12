@@ -153,11 +153,11 @@ impl MetadataExtractor {
         metadata: &mut PageMetadata,
         canonical: &mut Option<String>,
     ) -> Result<(), ConversionError> {
-        if name.local.as_ref() == "meta" {
+        if &*name.local == "meta" {
             self.process_meta_tag(&attrs.borrow(), metadata)?;
             return Ok(());
         }
-        if name.local.as_ref() == "link" && canonical.is_none() {
+        if &*name.local == "link" && canonical.is_none() {
             self.try_extract_canonical(&attrs.borrow(), canonical);
         }
         Ok(())
@@ -169,7 +169,7 @@ impl MetadataExtractor {
         canonical: &mut Option<String>,
     ) {
         let has_canonical_rel = attrs.iter().any(|attr| {
-            attr.name.local.as_ref() == "rel"
+            &*attr.name.local == "rel"
                 && attr
                     .value
                     .split_ascii_whitespace()
@@ -250,7 +250,7 @@ impl MetadataExtractor {
     fn get_attr(&self, attrs: &Ref<Vec<html5ever::Attribute>>, name: &str) -> Option<String> {
         attrs
             .iter()
-            .find(|attr| attr.name.local.as_ref() == name)
+            .find(|attr| &*attr.name.local == name)
             .map(|attr| attr.value.to_string())
     }
 
@@ -269,7 +269,7 @@ impl MetadataExtractor {
 
             match node.data {
                 NodeData::Element { ref name, .. } => {
-                    if name.local.as_ref() == element_name {
+                    if &*name.local == element_name {
                         return Self::extract_text_content(&node, depth, ctx)
                             .map(|text| Some(text.trim().to_string()));
                     }
