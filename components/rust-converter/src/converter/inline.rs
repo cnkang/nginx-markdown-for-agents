@@ -38,6 +38,23 @@ use std::borrow::Cow;
 /// Uses the same shared policy as the ordinary traversal, so the extractors
 /// keep a page-provided caption (`aria-label`, `placeholder`) while never
 /// exposing the control's own value or prefilled child text.
+/// Which content flavor the shared extraction walk serves; the two flavors
+/// differ only in the depth-overflow error label.
+#[derive(Clone, Copy)]
+enum ContentExtractionKind {
+    Text,
+    Code,
+}
+
+impl ContentExtractionKind {
+    fn depth_overflow_label(self) -> &'static str {
+        match self {
+            Self::Text => "text extraction depth overflow",
+            Self::Code => "code extraction depth overflow",
+        }
+    }
+}
+
 fn form_control_description(node: &Handle) -> String {
     let NodeData::Element {
         ref name,
@@ -578,41 +595,7 @@ impl MarkdownConverter {
         depth: usize,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let mut ctx = ctx;
-
-        if let Some(ctx) = ctx.as_deref_mut() {
-            ctx.increment_and_check()?;
-        }
-        self.security_validator
-            .validate_depth(depth)
-            .map_err(ConversionError::InvalidInput)?;
-
-        match node.data {
-            NodeData::Text { ref contents } => {
-                let text = contents.borrow();
-                append_str_with_context(output, text.as_ref(), &mut ctx)?;
-            }
-            NodeData::Element { ref name, .. } => {
-                if matches!(&*name.local, "script" | "style" | "noscript") {
-                    return Ok(());
-                }
-                if is_form_state_subtree(&name.local) {
-                    // Same policy as the ordinary traversal: keep the approved
-                    // description, never the child defaults.
-                    append_str_with_context(output, &form_control_description(node), &mut ctx)?;
-                    return Ok(());
-                }
-
-                for child in node.children.borrow().iter() {
-                    let child_depth = depth.checked_add(1).ok_or_else(|| {
-                        ConversionError::MemoryLimit("code extraction depth overflow".into())
-                    })?;
-                    self.extract_code_content(child, output, child_depth, ctx.as_deref_mut())?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
+        self.extract_content_walk(node, output, depth, ctx, ContentExtractionKind::Code)
     }
 
     /// Extract text content from a node and its descendants.
@@ -622,6 +605,20 @@ impl MarkdownConverter {
         output: &mut String,
         depth: usize,
         ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        self.extract_content_walk(node, output, depth, ctx, ContentExtractionKind::Text)
+    }
+
+    /// Walk shared by `extract_text` and `extract_code_content`: the two
+    /// wrappers were identical apart from the depth-overflow label, so the
+    /// recursion lives here once and carries the flavor with it.
+    fn extract_content_walk(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+        kind: ContentExtractionKind,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
 
@@ -650,9 +647,15 @@ impl MarkdownConverter {
 
                 for child in node.children.borrow().iter() {
                     let child_depth = depth.checked_add(1).ok_or_else(|| {
-                        ConversionError::MemoryLimit("text extraction depth overflow".into())
+                        ConversionError::MemoryLimit(kind.depth_overflow_label().into())
                     })?;
-                    self.extract_text(child, output, child_depth, ctx.as_deref_mut())?;
+                    self.extract_content_walk(
+                        child,
+                        output,
+                        child_depth,
+                        ctx.as_deref_mut(),
+                        kind,
+                    )?;
                 }
             }
             _ => {}

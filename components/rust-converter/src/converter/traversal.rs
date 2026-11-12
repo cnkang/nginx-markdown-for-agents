@@ -754,30 +754,7 @@ impl MarkdownConverter {
         output: &mut String,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
-        let mut ctx = ctx;
-        if let NodeData::Element { ref attrs, .. } = node.data {
-            let attrs_borrowed = attrs.borrow();
-            let src = attrs_borrowed
-                .iter()
-                .find(|a| &*a.name.local == "src")
-                .map(|a| a.value.as_ref());
-
-            if let Some(u) = src
-                && let Some(safe_url) = self.security_validator.sanitize_url(u)
-            {
-                // Use type attribute as context if available
-                let type_attr = attrs_borrowed
-                    .iter()
-                    .find(|a| &*a.name.local == "type")
-                    .map(|a| a.value.as_ref());
-                let url_capacity = self.resolved_url_capacity(safe_url)?;
-                with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(&[type_attr], &resolved_url, output, ctx)
-                })?;
-            }
-        }
-        Ok(())
+        self.extract_media_url(node, output, ctx, "type")
     }
 
     /// Extract `src` and `label` from a `<track>` element as a Markdown link.
@@ -786,6 +763,19 @@ impl MarkdownConverter {
         node: &Handle,
         output: &mut String,
         ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        self.extract_media_url(node, output, ctx, "label")
+    }
+
+    /// Shared `<source>`/`<track>` link extraction: both read `src`, then a
+    /// media-specific context attribute (`type` or `label`), and emit one
+    /// Markdown link whose label falls back to the resolved URL.
+    fn extract_media_url(
+        &self,
+        node: &Handle,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+        context_attr: &str,
     ) -> Result<(), ConversionError> {
         let mut ctx = ctx;
         if let NodeData::Element { ref attrs, .. } = node.data {
@@ -798,14 +788,14 @@ impl MarkdownConverter {
             if let Some(u) = src
                 && let Some(safe_url) = self.security_validator.sanitize_url(u)
             {
-                let label = attrs_borrowed
+                let context_attr_value = attrs_borrowed
                     .iter()
-                    .find(|a| &*a.name.local == "label")
+                    .find(|a| &*a.name.local == context_attr)
                     .map(|a| a.value.as_ref());
                 let url_capacity = self.resolved_url_capacity(safe_url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
                     let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(&[label], &resolved_url, output, ctx)
+                    Self::emit_markdown_link(&[context_attr_value], &resolved_url, output, ctx)
                 })?;
             }
         }
