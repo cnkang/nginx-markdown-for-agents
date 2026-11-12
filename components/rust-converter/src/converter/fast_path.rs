@@ -162,7 +162,7 @@ fn check_node(
         | NodeData::ProcessingInstruction { .. } => {}
 
         NodeData::Element { name, .. } => {
-            let tag = name.local.as_ref();
+            let tag = &*name.local;
 
             // Prunable elements are acceptable — their subtrees are skipped
             // during traversal, so we don't need to inspect children.

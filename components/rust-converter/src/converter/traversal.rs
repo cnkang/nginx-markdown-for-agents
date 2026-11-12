@@ -352,7 +352,7 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let raw_input_type = attrs_borrowed
                 .iter()
-                .find(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "type")
+                .find(|a| a.name.ns.is_empty() && &*a.name.local == "type")
                 .map(|a| a.value.as_ref());
             let input_type = crate::security::normalize_input_type(raw_input_type);
             /* GitHub Flavored Markdown represents a checkbox as a task-list
@@ -366,7 +366,7 @@ impl MarkdownConverter {
             {
                 let checked = attrs_borrowed
                     .iter()
-                    .any(|a| a.name.ns.is_empty() && a.name.local.as_ref() == "checked");
+                    .any(|a| a.name.ns.is_empty() && &*a.name.local == "checked");
                 /* The marker is Markdown structure, not text: emit it through
                  * the same path as other structural markers so the list-item
                  * text escaper cannot turn it into `\[x\]`. */
@@ -377,7 +377,7 @@ impl MarkdownConverter {
                 attrs_borrowed
                     .iter()
                     .filter(|attribute| attribute.name.ns.is_empty())
-                    .map(|attribute| (attribute.name.local.as_ref(), attribute.value.as_ref())),
+                    .map(|attribute| (&*attribute.name.local, attribute.value.as_ref())),
             );
 
             Self::append_escaped_control_text(output, text, &mut ctx)?;
@@ -406,7 +406,7 @@ impl MarkdownConverter {
                     attrs_borrowed
                         .iter()
                         .filter(|attribute| attribute.name.ns.is_empty())
-                        .map(|attribute| (attribute.name.local.as_ref(), attribute.value.as_ref())),
+                        .map(|attribute| (&*attribute.name.local, attribute.value.as_ref())),
                 );
                 Self::append_escaped_control_text(output, text, &mut ctx)?;
             }
@@ -420,11 +420,11 @@ impl MarkdownConverter {
             let url_attr = if tag_name == "object" { "data" } else { "src" };
             let url = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == url_attr)
+                .find(|a| &*a.name.local == url_attr)
                 .map(|a| a.value.as_ref());
             let title = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "title")
+                .find(|a| &*a.name.local == "title")
                 .map(|a| a.value.as_ref());
 
             if let Some(url) = url
@@ -575,7 +575,7 @@ impl MarkdownConverter {
         match node.data {
             NodeData::Document => self.traverse_children(node, output, depth, None)?,
             NodeData::Element { ref name, .. } => {
-                self.handle_element(node, name.local.as_ref(), output, depth)?;
+                self.handle_element(node, &name.local, output, depth)?;
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
@@ -602,7 +602,7 @@ impl MarkdownConverter {
         match node.data {
             NodeData::Document => self.traverse_children(node, output, depth, Some(ctx))?,
             NodeData::Element { ref name, .. } => {
-                self.handle_element_with_context(node, name.local.as_ref(), output, depth, ctx)?;
+                self.handle_element_with_context(node, &name.local, output, depth, ctx)?;
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
@@ -711,11 +711,11 @@ impl MarkdownConverter {
 
             let src = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "src")
+                .find(|a| &*a.name.local == "src")
                 .map(|a| a.value.as_ref());
             let title = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "title")
+                .find(|a| &*a.name.local == "title")
                 .map(|a| a.value.as_ref());
 
             if let Some(u) = src
@@ -732,7 +732,7 @@ impl MarkdownConverter {
             if tag_name == "video"
                 && let Some(poster) = attrs_borrowed
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "poster")
+                    .find(|a| &*a.name.local == "poster")
                     .map(|a| a.value.as_ref())
                 && let Some(safe_url) = self.security_validator.sanitize_url(poster)
             {
@@ -759,7 +759,7 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "src")
+                .find(|a| &*a.name.local == "src")
                 .map(|a| a.value.as_ref());
 
             if let Some(u) = src
@@ -768,7 +768,7 @@ impl MarkdownConverter {
                 // Use type attribute as context if available
                 let type_attr = attrs_borrowed
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "type")
+                    .find(|a| &*a.name.local == "type")
                     .map(|a| a.value.as_ref());
                 let url_capacity = self.resolved_url_capacity(safe_url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
@@ -792,7 +792,7 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "src")
+                .find(|a| &*a.name.local == "src")
                 .map(|a| a.value.as_ref());
 
             if let Some(u) = src
@@ -800,7 +800,7 @@ impl MarkdownConverter {
             {
                 let label = attrs_borrowed
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "label")
+                    .find(|a| &*a.name.local == "label")
                     .map(|a| a.value.as_ref());
                 let url_capacity = self.resolved_url_capacity(safe_url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {
@@ -824,7 +824,7 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let href = attrs_borrowed
                 .iter()
-                .find(|a| a.name.local.as_ref() == "href")
+                .find(|a| &*a.name.local == "href")
                 .map(|a| a.value.as_ref());
 
             if let Some(u) = href
@@ -832,11 +832,11 @@ impl MarkdownConverter {
             {
                 let alt = attrs_borrowed
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "alt")
+                    .find(|a| &*a.name.local == "alt")
                     .map(|a| a.value.as_ref());
                 let title = attrs_borrowed
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "title")
+                    .find(|a| &*a.name.local == "title")
                     .map(|a| a.value.as_ref());
                 let url_capacity = self.resolved_url_capacity(safe_url)?;
                 with_reserved_working_set(output, &mut ctx, url_capacity, |output, ctx| {

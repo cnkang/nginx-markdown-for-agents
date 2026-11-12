@@ -411,7 +411,7 @@ impl MarkdownConverter {
 
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
-                && name.local.as_ref() == "li"
+                && &*name.local == "li"
             {
                 self.handle_list_item_with_marker(
                     child,
@@ -480,7 +480,7 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         match child.data {
             NodeData::Element { ref name, .. } => {
-                let tag_name = name.local.as_ref();
+                let tag_name = &*name.local;
                 if tag_name == "ul" || tag_name == "ol" {
                     if !item_output.is_empty() && !item_output.ends_with('\n') {
                         append_char_with_context(item_output, '\n', ctx)?;
@@ -689,7 +689,7 @@ impl MarkdownConverter {
     ) -> Result<bool, ConversionError> {
         let attrs_borrowed = attrs.borrow();
         for attr in attrs_borrowed.iter() {
-            if attr.name.local.as_ref() != "class" {
+            if &*attr.name.local != "class" {
                 continue;
             }
             for class in attr.value.split_whitespace() {
@@ -719,7 +719,7 @@ impl MarkdownConverter {
                 ref attrs,
                 ..
             } = child.data
-                && name.local.as_ref() == "code"
+                && &*name.local == "code"
                 && self.append_safe_language_class(attrs, output, ctx)?
             {
                 break;

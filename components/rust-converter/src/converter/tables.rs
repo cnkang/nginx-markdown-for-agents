@@ -135,7 +135,7 @@ impl MarkdownConverter {
         let first_tr = children.iter().find(|candidate| {
             matches!(
                 candidate.data,
-                NodeData::Element { ref name, .. } if name.local.as_ref() == "tr"
+                NodeData::Element { ref name, .. } if &*name.local == "tr"
             )
         });
         let Some(first_tr) = first_tr else {
@@ -153,7 +153,7 @@ impl MarkdownConverter {
         let mut is_first = true;
         for tbody_child in children.iter() {
             if let NodeData::Element { ref name, .. } = tbody_child.data
-                && name.local.as_ref() == "tr"
+                && &*name.local == "tr"
             {
                 if is_first {
                     is_first = false;
@@ -187,7 +187,7 @@ impl MarkdownConverter {
             return Ok(());
         };
 
-        match name.local.as_ref() {
+        match &*name.local {
             "thead" => self.extract_table_header(
                 child,
                 ctx.as_deref_mut(),
@@ -368,7 +368,7 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
-                && name.local.as_ref() == "colgroup"
+                && &*name.local == "colgroup"
             {
                 self.extract_colgroup_alignments(child, ctx, col_alignments, table_scratch)?;
             }
@@ -417,12 +417,12 @@ impl MarkdownConverter {
                 ref attrs,
                 ..
             } = child.data
-                && name.local.as_ref() == "col"
+                && &*name.local == "col"
             {
                 let attrs_borrowed = attrs.borrow();
                 let span = attrs_borrowed
                     .iter()
-                    .find(|attr| attr.name.local.as_ref() == "span")
+                    .find(|attr| &*attr.name.local == "span")
                     .and_then(|attr| attr.value.parse::<usize>().ok())
                     .unwrap_or(1)
                     .clamp(1, 1_000);
@@ -448,7 +448,7 @@ impl MarkdownConverter {
         let mut ctx = ctx;
         for child in thead.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
-                && name.local.as_ref() == "tr"
+                && &*name.local == "tr"
             {
                 self.extract_table_row_as_header(
                     child,
@@ -484,7 +484,7 @@ impl MarkdownConverter {
                 ..
             } = child.data
             {
-                let tag = name.local.as_ref();
+                let tag = &*name.local;
                 if tag == "th" || tag == "td" {
                     let mut cell_output = String::new();
                     for cell_child in child.children.borrow().iter() {
@@ -521,7 +521,7 @@ impl MarkdownConverter {
         let mut ctx = ctx;
         for child in tbody.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
-                && name.local.as_ref() == "tr"
+                && &*name.local == "tr"
             {
                 let mut row_cells = Vec::new();
                 self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells, table_scratch)?;
@@ -544,7 +544,7 @@ impl MarkdownConverter {
         let mut ctx = ctx;
         for child in tr.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data {
-                let tag = name.local.as_ref();
+                let tag = &*name.local;
                 if tag == "td" || tag == "th" {
                     let mut cell_output = String::new();
                     for cell_child in child.children.borrow().iter() {
@@ -703,7 +703,7 @@ impl MarkdownConverter {
 
     fn find_align_attribute(&self, attrs: &Ref<Vec<Attribute>>) -> Option<Option<TableAlignment>> {
         for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "align" {
+            if &*attr.name.local == "align" {
                 let value = attr.value.to_string().to_lowercase();
                 return Some(match value.as_str() {
                     "left" => Some(TableAlignment::Left),
@@ -718,7 +718,7 @@ impl MarkdownConverter {
 
     fn find_text_align_in_style(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
         for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "style"
+            if &*attr.name.local == "style"
                 && let Some(align) = parse_text_align_from_style(&attr.value)
             {
                 return Some(align);

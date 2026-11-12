@@ -103,7 +103,7 @@ into or distributed with the converter binary.
 
 ================================================================================
 
-4.  html5ever 0.39.0
+4.  html5ever 0.40.1
     https://github.com/servo/html5ever
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers
@@ -113,7 +113,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-5.  markup5ever 0.39.0
+5.  markup5ever 0.40.0
     https://github.com/servo/html5ever/tree/main/markup5ever
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers
@@ -123,7 +123,7 @@ into or distributed with the converter binary.
 
 --------------------------------------------------------------------------------
 
-6.  markup5ever_rcdom 0.39.0+unofficial
+6.  markup5ever_rcdom 0.40.1+unofficial
     https://github.com/servo/html5ever/tree/main/rcdom
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers

@@ -51,13 +51,11 @@ fn form_control_description(node: &Handle) -> String {
     // The raw attribute goes through the shared normalizer, exactly as the
     // ordinary traversal does, so an uppercase `type="BUTTON"` follows the same
     // policy here and stops diverging from it.
-    let control_type = if name.local.as_ref() == "input" {
+    let control_type = if &*name.local == "input" {
         let raw_type = attrs
             .borrow()
             .iter()
-            .find(|attribute| {
-                attribute.name.ns.is_empty() && attribute.name.local.as_ref() == "type"
-            })
+            .find(|attribute| attribute.name.ns.is_empty() && &*attribute.name.local == "type")
             .map(|attribute| attribute.value.to_string());
         normalize_input_type(raw_type.as_deref())
     } else {
@@ -240,7 +238,7 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let href = attrs_borrowed
                 .iter()
-                .find(|attr| attr.name.local.as_ref() == "href")
+                .find(|attr| &*attr.name.local == "href")
                 .map(|attr| attr.value.as_ref());
 
             if let Some(url) = href {
@@ -323,16 +321,16 @@ impl MarkdownConverter {
             let attrs_borrowed = attrs.borrow();
             let src = attrs_borrowed
                 .iter()
-                .find(|attr| attr.name.local.as_ref() == "src")
+                .find(|attr| &*attr.name.local == "src")
                 .map(|attr| attr.value.as_ref());
             let alt = attrs_borrowed
                 .iter()
-                .find(|attr| attr.name.local.as_ref() == "alt")
+                .find(|attr| &*attr.name.local == "alt")
                 .map(|attr| attr.value.as_ref())
                 .unwrap_or_default();
             let title = attrs_borrowed
                 .iter()
-                .find(|attr| attr.name.local.as_ref() == "title")
+                .find(|attr| &*attr.name.local == "title")
                 .map(|attr| attr.value.as_ref());
 
             let safe_url = src.and_then(|url| self.security_validator.sanitize_url(url));
@@ -472,10 +470,10 @@ impl MarkdownConverter {
                 Ok(text.len())
             }
             NodeData::Element { ref name, .. } => {
-                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                if matches!(&*name.local, "script" | "style" | "noscript") {
                     return Ok(0);
                 }
-                if is_form_state_subtree(name.local.as_ref()) {
+                if is_form_state_subtree(&name.local) {
                     // Measure exactly what `extract_text` appends, so the
                     // reserved working set matches the emitted bytes. Counting
                     // the child defaults here while the extractor writes the
@@ -550,10 +548,10 @@ impl MarkdownConverter {
                 }
             }
             NodeData::Element { ref name, .. } => {
-                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                if matches!(&*name.local, "script" | "style" | "noscript") {
                     return Ok(());
                 }
-                if is_form_state_subtree(name.local.as_ref()) {
+                if is_form_state_subtree(&name.local) {
                     // Measure exactly what `extract_code_content` appends, so
                     // the reserved working set matches the emitted bytes.
                     append_code_content_stats(stats, &form_control_description(node), ctx)?;
@@ -595,10 +593,10 @@ impl MarkdownConverter {
                 append_str_with_context(output, text.as_ref(), &mut ctx)?;
             }
             NodeData::Element { ref name, .. } => {
-                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                if matches!(&*name.local, "script" | "style" | "noscript") {
                     return Ok(());
                 }
-                if is_form_state_subtree(name.local.as_ref()) {
+                if is_form_state_subtree(&name.local) {
                     // Same policy as the ordinary traversal: keep the approved
                     // description, never the child defaults.
                     append_str_with_context(output, &form_control_description(node), &mut ctx)?;
@@ -640,10 +638,10 @@ impl MarkdownConverter {
                 append_str_with_context(output, text.as_ref(), &mut ctx)?;
             }
             NodeData::Element { ref name, .. } => {
-                if matches!(name.local.as_ref(), "script" | "style" | "noscript") {
+                if matches!(&*name.local, "script" | "style" | "noscript") {
                     return Ok(());
                 }
-                if is_form_state_subtree(name.local.as_ref()) {
+                if is_form_state_subtree(&name.local) {
                     // Same policy as the ordinary traversal: keep the approved
                     // description, never the child defaults.
                     append_str_with_context(output, &form_control_description(node), &mut ctx)?;
@@ -691,7 +689,7 @@ mod measurement_twin_tests {
             // Walk to the anchor and its form control.
             fn find(node: &Handle, wanted: &str) -> Option<Handle> {
                 if let NodeData::Element { ref name, .. } = node.data
-                    && name.local.as_ref() == wanted
+                    && &*name.local == wanted
                 {
                     return Some(node.clone());
                 }
