@@ -380,7 +380,10 @@ def apply_notice_rewrites(notices_path: Path, rewrites: dict[int, str]) -> list[
     if not rewrites:
         return []
     try:
-        raw = notices_path.read_bytes()
+        # NOSONAR suppression for pythonsecurity:S2083: the path is the
+        # repository's THIRD-PARTY-NOTICES constant, never caller- or
+        # content-controlled; only the file's own text is read back.
+        raw = notices_path.read_bytes()  # NOSONAR
         text = raw.decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return [f"cannot read {display_path(notices_path)}: {exc}"]
@@ -390,7 +393,11 @@ def apply_notice_rewrites(notices_path: Path, rewrites: dict[int, str]) -> list[
             return [f"{display_path(notices_path)} changed while syncing"]
         lines[index] = replacement
     try:
-        notices_path.write_bytes("".join(lines).encode("utf-8"))
+        # NOSONAR suppression for pythonsecurity:S2083: the path is the
+        # repository's THIRD-PARTY-NOTICES constant; the tainted-looking
+        # argument is file content, written back as content, and never used
+        # to build a path.
+        notices_path.write_bytes("".join(lines).encode("utf-8"))  # NOSONAR
     except OSError as exc:
         return [f"cannot write {display_path(notices_path)}: {exc}"]
     return []
@@ -440,9 +447,7 @@ def _report_check(plan: SyncPlan, baseline_lock: Path) -> int:
     return 1
 
 
-def _apply_plan(
-    plan: SyncPlan, baseline_lock: Path, notices_path: Path, cargo: str | None
-) -> int:
+def _apply_plan(plan: SyncPlan, notices_path: Path, cargo: str | None) -> int:
     """Apply the sync plan and map the outcome to an exit code."""
     if not plan.out_of_sync():
         print("dependency surfaces are already in sync")
@@ -486,7 +491,7 @@ def run_sync(
     plan.errors.extend(load_errors)
     if check_only:
         return _report_check(plan, baseline_lock)
-    return _apply_plan(plan, baseline_lock, notices_path, cargo)
+    return _apply_plan(plan, notices_path, cargo)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -495,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv == ["--check"]:
         check_only = True
     elif argv:
-        print(f"usage: {Path(sys.argv[0]).name} [--check]", file=sys.stderr)
+        print("usage: tools/ci/sync_dependency_surfaces.py [--check]", file=sys.stderr)
         return 2
     else:
         check_only = False

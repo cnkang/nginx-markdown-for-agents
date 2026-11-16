@@ -10,6 +10,7 @@ from tools.harness import check_rust_baseline as baseline
 EXPECTED_BASELINE_ACTION_WORKFLOWS = (
     Path(".github/workflows/ci.yml"),
     Path(".github/workflows/codeql.yml"),
+    Path(".github/workflows/dependabot-sync.yml"),
     Path(".github/workflows/macos-smoke.yml"),
     Path(".github/workflows/nightly-perf.yml"),
     Path(".github/workflows/real-nginx-ims.yml"),

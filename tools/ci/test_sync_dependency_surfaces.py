@@ -398,10 +398,8 @@ class SyncDependencySurfacesTests(unittest.TestCase):
         self.assertEqual(
             lines,
             [
-                "would update fuzz/Cargo.lock: brotli-decompressor "
-                "6.3.0 -> 6.3.1",
-                "would rewrite THIRD-PARTY-NOTICES line 10 with: "
-                "10. encoding_rs 0.8.44",
+                "would update fuzz/Cargo.lock: brotli-decompressor 6.3.0 -> 6.3.1",
+                "would rewrite THIRD-PARTY-NOTICES line 10 with: 10. encoding_rs 0.8.44",
             ],
         )
 
