@@ -30,7 +30,13 @@ concurrency:
 jobs:
   sync:
     name: Sync sub-workspace locks and notices
-    if: github.actor == 'dependabot[bot]'
+    # Gate on the PR author, not the event actor: github.actor is whoever
+    # pushed (a human follow-up commit on a Dependabot branch must still
+    # see the sync verified), while Dependabot PRs are authored by
+    # dependabot[bot].  The repository guard mirrors the Dependabot docs.
+    if: >-
+      github.repository == 'cnkang/nginx-markdown-for-agents' &&
+      github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
