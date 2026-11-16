@@ -199,6 +199,45 @@ def _stale_shared_packages(
     return updates, skipped, manual
 
 
+def _plan_notices_line(
+    index: int,
+    line: str,
+    baseline: dict[str, set[str]],
+    manual: list[str],
+) -> str | None:
+    """Plan the rewrite for one Section B line, or return None to keep it.
+
+    Appends to ``manual`` when the line is a stale baseline crate that has no
+    compatible baseline version to move to.
+    """
+    ending_match = _LINE_ENDING_RE.search(line)
+    ending = ending_match.group(1) if ending_match else ""
+    entry = _NOTICES_ENTRY_RE.match(line[: len(line) - len(ending)])
+    if entry is None:
+        return None
+    lock_name = match_lock_name(entry.group("name"), baseline)
+    if lock_name is None:
+        return None  # not a baseline crate: never rewrite
+    baseline_versions = baseline[lock_name]
+    stale_version = entry.group("version")
+    if stale_version in baseline_versions:
+        return None  # already current
+    target = select_baseline_target(stale_version, baseline_versions)
+    if target is None:
+        joined = ", ".join(sorted(baseline_versions))
+        manual.append(
+            f"THIRD-PARTY-NOTICES line {index + 1}: {lock_name} "
+            f"{stale_version} is stale but the baseline has no "
+            f"compatible version ({joined}); sync needs manual attention"
+        )
+        return None
+    return (
+        f"{entry.group('prefix')}{entry.group('name')}"
+        f"{entry.group('sep')}{target}"
+        f"{entry.group('suffix') or ''}{ending}"
+    )
+
+
 def plan_notices_rewrites(
     notices_text: str,
     baseline: dict[str, set[str]],
@@ -222,33 +261,9 @@ def plan_notices_rewrites(
             continue
         if not in_section_b:
             continue
-        ending_match = _LINE_ENDING_RE.search(line)
-        ending = ending_match.group(1) if ending_match else ""
-        body = line[: len(line) - len(ending)]
-        entry = _NOTICES_ENTRY_RE.match(body)
-        if entry is None:
-            continue
-        lock_name = match_lock_name(entry.group("name"), baseline)
-        if lock_name is None:
-            continue  # not a baseline crate: never rewrite
-        baseline_versions = baseline[lock_name]
-        stale_version = entry.group("version")
-        if stale_version in baseline_versions:
-            continue  # already current
-        target = select_baseline_target(stale_version, baseline_versions)
-        if target is None:
-            joined = ", ".join(sorted(baseline_versions))
-            manual.append(
-                f"THIRD-PARTY-NOTICES line {index + 1}: {lock_name} "
-                f"{stale_version} is stale but the baseline has no "
-                f"compatible version ({joined}); sync needs manual attention"
-            )
-            continue
-        rewrites[index] = (
-            f"{entry.group('prefix')}{entry.group('name')}"
-            f"{entry.group('sep')}{target}"
-            f"{entry.group('suffix') or ''}{ending}"
-        )
+        replacement = _plan_notices_line(index, line, baseline, manual)
+        if replacement is not None:
+            rewrites[index] = replacement
     if not section_found:
         manual.append(
             "THIRD-PARTY-NOTICES: no 'Section B:' header found; notices "
@@ -336,7 +351,14 @@ def apply_lock_updates(updates: list[LockUpdate], cargo: str) -> list[str]:
     errors: list[str] = []
     for update in updates:
         command = build_cargo_update_command(cargo, update)
-        completed = subprocess.run(
+        # Audited against opengrep python.lang.security.audit.dangerous-
+        # subprocess-use-audit: no shell is involved (argv list), cargo
+        # resolves through the approved-executable allowlist, and the
+        # name/version arguments sit in value position of --package and
+        # --precise, where a leading dash stays a cargo argument error and
+        # cannot inject new options.  Same shape as the subprocess call in
+        # tools/ci/check_third_party_notices.py.
+        completed = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             command,
             cwd=ROOT,
             check=False,
@@ -389,57 +411,47 @@ def describe_changes(plan: SyncPlan) -> list[str]:
     return lines
 
 
-def run_sync(
-    *,
-    check_only: bool,
-    baseline_lock: Path,
-    sub_workspaces: list[tuple[Path, Path]],
-    allowed: dict[str, dict[str, set[str]]],
-    notices_path: Path,
-    cargo: str | None,
-) -> int:
-    """Plan and, unless ``check_only``, apply the sync.  Returns an exit code."""
+def _load_notices_text(notices_path: Path) -> tuple[str | None, list[str]]:
+    """Read the notices file, returning (text, errors)."""
     try:
-        notices_text = notices_path.read_text(encoding="utf-8")
+        return notices_path.read_text(encoding="utf-8"), []
     except (OSError, UnicodeDecodeError) as exc:
-        notices_text = None
-        missing_notices = f"cannot read {display_path(notices_path)}: {exc}"
-    else:
-        missing_notices = None
+        return None, [f"cannot read {display_path(notices_path)}: {exc}"]
 
-    plan = build_sync_plan(baseline_lock, sub_workspaces, allowed, notices_text)
-    if missing_notices is not None:
-        plan.errors.append(missing_notices)
 
-    if check_only:
-        for line in describe_changes(plan):
-            print(line)
-        if plan.skipped_divergences:
-            print("documented divergences left unchanged:")
-            for line in plan.skipped_divergences:
-                print(f"  - {line}")
-        if plan.out_of_sync():
-            for line in plan.manual_attention + plan.errors:
-                print(f"  - {line}")
-            print(
-                "dependency surfaces are out of sync with the baseline lock "
-                f"({display_path(baseline_lock)}); run "
-                "python3 tools/ci/sync_dependency_surfaces.py to fix"
-            )
-            return 1
+def _report_check(plan: SyncPlan, baseline_lock: Path) -> int:
+    """Print what check mode found and map it to an exit code."""
+    for line in describe_changes(plan):
+        print(line)
+    if plan.skipped_divergences:
+        print("documented divergences left unchanged:")
+        for line in plan.skipped_divergences:
+            print(f"  - {line}")
+    if not plan.out_of_sync():
         print("dependency surfaces are in sync")
         return 0
+    for line in plan.manual_attention + plan.errors:
+        print(f"  - {line}")
+    print(
+        "dependency surfaces are out of sync with the baseline lock "
+        f"({display_path(baseline_lock)}); run "
+        "python3 tools/ci/sync_dependency_surfaces.py to fix"
+    )
+    return 1
 
+
+def _apply_plan(
+    plan: SyncPlan, baseline_lock: Path, notices_path: Path, cargo: str | None
+) -> int:
+    """Apply the sync plan and map the outcome to an exit code."""
     if not plan.out_of_sync():
         print("dependency surfaces are already in sync")
         return 0
-
     if plan.errors or plan.manual_attention:
         for line in plan.manual_attention + plan.errors:
             print(f"  - {line}")
         print("cannot sync automatically; fix the items above by hand")
         return 1
-
     for line in describe_changes(plan):
         print(line)
     if cargo is None:
@@ -457,6 +469,24 @@ def run_sync(
         f"{len(plan.notice_rewrites)} notices entries with the baseline lock"
     )
     return 0
+
+
+def run_sync(
+    *,
+    check_only: bool,
+    baseline_lock: Path,
+    sub_workspaces: list[tuple[Path, Path]],
+    allowed: dict[str, dict[str, set[str]]],
+    notices_path: Path,
+    cargo: str | None,
+) -> int:
+    """Plan and, unless ``check_only``, apply the sync.  Returns an exit code."""
+    notices_text, load_errors = _load_notices_text(notices_path)
+    plan = build_sync_plan(baseline_lock, sub_workspaces, allowed, notices_text)
+    plan.errors.extend(load_errors)
+    if check_only:
+        return _report_check(plan, baseline_lock)
+    return _apply_plan(plan, baseline_lock, notices_path, cargo)
 
 
 def main(argv: list[str] | None = None) -> int:
