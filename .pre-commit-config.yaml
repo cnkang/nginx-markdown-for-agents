@@ -39,6 +39,18 @@ repos:
         language: script
         pass_filenames: false
         files: ^(components/rust-converter/Cargo\.toml|charts/nginx-markdown/Chart\.yaml|components/rust-converter/fuzz/Cargo\.toml|tools/corpus/test-corpus-conversion/Cargo\.toml|docs/guides/INSTALLATION\.md)$
+  # Dependency-surface synchronization (Rule 49): a Cargo.lock or
+  # THIRD-PARTY-NOTICES change must leave every sub-workspace lock aligned
+  # with the baseline converter lock.  The --check mode never writes and
+  # never invokes cargo, so the hook is cheap and offline-safe.
+  - repo: local
+    hooks:
+      - id: dependency-surfaces-sync
+        name: dependency surfaces sync check
+        entry: python3 tools/ci/sync_dependency_surfaces.py --check
+        language: system
+        pass_filenames: false
+        files: ^(THIRD-PARTY-NOTICES|components/rust-converter/Cargo\.(toml|lock)|components/rust-converter/fuzz/Cargo\.lock|tools/corpus/test-corpus-conversion/Cargo\.lock|tools/e2e-harness/Cargo\.lock)$
   # FFI header synchronization
   - repo: local
     hooks:

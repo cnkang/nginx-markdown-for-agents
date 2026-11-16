@@ -178,14 +178,10 @@ jobs:
       - name: Set up Rust toolchain
         uses: ./.github/actions/setup-rust
 
-      - name: Install cargo-audit
-        working-directory: components/rust-converter
-        run: cargo install cargo-audit --version 0.22.2 --locked
-
-      - name: Rust dependency vulnerability audit
-        working-directory: components/rust-converter
-        run: cargo audit --deny warnings
-
+      # Fail-fast ordering: these three checks are pure Python and catch the
+      # recurring dependency-surface drift (Rule 49) in seconds.  Running
+      # them before the ~3 minute cargo-audit build keeps the audit job from
+      # spending the build budget on a PR that fails for lockfile drift.
       - name: Rust copyleft license policy check
         run: python3 tools/ci/check_rust_licenses.py --locked
 
@@ -194,3 +190,11 @@ jobs:
 
       - name: THIRD-PARTY-NOTICES validator tests
         run: python3 -m unittest tools/ci/test_check_third_party_notices.py
+
+      - name: Install cargo-audit
+        working-directory: components/rust-converter
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Rust dependency vulnerability audit
+        working-directory: components/rust-converter
+        run: cargo audit --deny warnings

@@ -1,0 +1,66 @@
+name: Dependabot Dependency-Surface Sync
+
+# Rule 49 automation for the recurring Rust Security Audit failure:
+# Dependabot updates only components/rust-converter/Cargo.lock, while the
+# sub-workspace Cargo.lock files and the THIRD-PARTY-NOTICES version entries
+# must follow it.  On every Dependabot pull request this workflow applies
+# tools/ci/sync_dependency_surfaces.py, verifies the result with
+# tools/ci/check_third_party_notices.py, and pushes the sync commit to the
+# Dependabot branch.  Human pull requests are covered by the pre-commit
+# dependency-surfaces-sync hook instead of receiving bot commits.
+#
+# Token choice: GitHub suppresses workflow events triggered by the
+# repository GITHUB_TOKEN, so a push made with it lands the sync commit but
+# does not re-run the PR's required checks.  Configure the
+# DEPENDENCY_SYNC_TOKEN secret with a fine-grained PAT (contents: write, this
+# repository only) to make the sync fully automatic; the expression below
+# falls back to GITHUB_TOKEN when that secret is absent.
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependabot-sync-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Sync sub-workspace locks and notices
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          # persist-credentials is required here: the commit step pushes the
+          # sync commit with the credentials this checkout persists.
+          persist-credentials: true
+          token: ${{ secrets.DEPENDENCY_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Sync dependency surfaces
+        run: python3 tools/ci/sync_dependency_surfaces.py
+
+      - name: Verify THIRD-PARTY-NOTICES coverage
+        run: python3 tools/ci/check_third_party_notices.py
+
+      - name: Commit and push the sync
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No dependency-surface changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add THIRD-PARTY-NOTICES components/rust-converter/fuzz/Cargo.lock tools/corpus/test-corpus-conversion/Cargo.lock tools/e2e-harness/Cargo.lock
+          git commit -m "chore(deps): sync sub-workspace locks and notices with the bump"
+          git push
