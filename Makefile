@@ -796,7 +796,9 @@ workflow-context-check:
 license-check:
 	python3 tools/ci/check_c_licenses.py
 	python3 tools/ci/check_rust_licenses.py
+	python3 tools/ci/sync_dependency_surfaces.py --check
 	python3 -m unittest tools/ci/test_check_third_party_notices.py
+	python3 -m unittest tools/ci/test_sync_dependency_surfaces.py
 	python3 tools/ci/check_third_party_notices.py
 
 security-static: security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny
