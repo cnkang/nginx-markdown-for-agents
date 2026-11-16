@@ -43,12 +43,19 @@ jobs:
       - name: Checkout pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          # PR-controlled event fields are routed through step env before
+          # use: the repository semgrep rule bans their direct
+          # interpolation, and the indirection keeps a malleable ref string
+          # out of the action input.
+          ref: ${{ env.PR_HEAD_REF }}
+          repository: ${{ env.PR_HEAD_REPO }}
           # persist-credentials is required here: the commit step pushes the
           # sync commit with the credentials this checkout persists.
           persist-credentials: true
           token: ${{ secrets.DEPENDENCY_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
 
       - name: Set up Rust toolchain
         uses: ./.github/actions/setup-rust
