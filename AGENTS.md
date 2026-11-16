@@ -143,7 +143,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
 | 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused and locally runnable; scope workflow secrets narrowly; runnable examples preserve runtime and credential transport safety |
-| 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
+| 49 | docs-tooling | THIRD-PARTY-NOTICES and sub-workspace locks must stay in sync with resolved dependency versions in the same changeset; verify with `python3 tools/ci/sync_dependency_surfaces.py --check`; dependabot PRs get the sync commit from `.github/workflows/dependabot-sync.yml` |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
 | 52 | streaming-backpressure | Drain logic reconciles every derived state field for every popped context |
@@ -503,7 +503,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   targets (`make security-static`, `make supply-chain`) and whether the gate is
   PR-blocking or report-oriented visibility [48]
 - THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
-  add/remove/update entries in same changeset as Cargo.lock changes [49]
+  add/remove/update entries in the same changeset as Cargo.lock changes; keep
+  every sub-workspace Cargo.lock aligned with the baseline converter lock
+  (only `CROSS_LOCK_ALLOWED_DIVERGENCES` may differ); verify with
+  `python3 tools/ci/sync_dependency_surfaces.py --check`; dependabot PRs
+  receive the sync commit from `.github/workflows/dependabot-sync.yml` [49]
 - Docs style at write time: run the changed-file writing-style gate before
   committing docs (`python3 tools/docs/check_writing_style.py --changed`,
   wired as `docs-style-changed` pre-commit hook); do not defer to review [63]
@@ -674,6 +678,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.3 | 2026-11-16 | Kang | Added dependency-surface sync automation for Rule 49: `tools/ci/sync_dependency_surfaces.py` with 15 regression tests, `.github/workflows/dependabot-sync.yml` auto-commit workflow, `dependency-surfaces-sync` pre-commit hook, fail-fast check reordering in the Rust Security Audit job, and `license-check` wiring; extended Rule 49 in docs-tooling.md and this file's index and checklist with the cross-workspace lock invariant and verification command |
 | 0.9.3 | 2026-10-31 | Codex | Strengthened Rule 14 and its checklist for isolated verification resources, owned cleanup, and fixture cleanup after assertion failures |
 | 0.9.2 | 2026-09-18 | Codex | Added Rule 73 for continuation comments and complete shell/workflow surface scanning; malformed or unreadable scan inputs fail closed, same-indent option/value continuations are covered, and save/commit/push/CI wiring plus regression tests are synchronized |
 | 0.9.2 | 2026-09-05 | Kang | 0.9.2 convergence harness sync (dynconf removal): retired Rules 34 and 35 (removed runtime hot-reload snapshot/reload contract) keeping their numbers for traceability, relabeled Rules 45 and 71 as the retained CURRENT static effective_conf/block-mask rules, renamed the checklist section to "Static Configuration & Effective View"; updated the schema-drift verification line (dynconf precedence schema removed); dynconf-snapshot.md domain rules and the dynamic-config-hot-reload risk pack archived with historical-vs-current wording; routing manifest dropped the removed verify-dynconf-convergence-e2e command and archived the risk-pack routing. Historical Document Updates rows are left unchanged as history |

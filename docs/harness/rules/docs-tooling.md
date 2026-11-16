@@ -53,6 +53,13 @@ Required:
   positive and negative fixtures run through `make test-harness`.
 
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
+Historical issues: at least five manual "sync" commits (`54ed7799`,
+`0ee43e93`, `3f4442f0`, `a4c49847`, `94c5bb84`) repaired the same failure
+after Dependabot bumps: the audit gate ran `check_third_party_notices.py`,
+which reported a stale notices version and cross-workspace lock drift. The
+recurring actor is Dependabot itself: it updates only the baseline converter
+lock, so the automation (2026-11-16) applies the mechanical remainder.
+
 Required:
 - When any dependency arrives, leaves, or changes version (in
   Cargo.toml, Cargo.lock, or C/NGINX build files), update the corresponding
@@ -61,10 +68,28 @@ Required:
   `Cargo.lock` (not the semver range in Cargo.toml).
 - Add new dependencies with the correct license type, copyright notice, and
   license text. Delete entries for removed dependencies.
+- Keep every sub-workspace Cargo.lock aligned with the baseline converter
+  lock (`components/rust-converter/Cargo.lock`): each shared package must
+  resolve a baseline version, except the versions documented in
+  `CROSS_LOCK_ALLOWED_DIVERGENCES`. Rebuild with a targeted
+  `cargo update -p <crate>@<stale> --precise <baseline version>`; a full
+  lock rebuild would rewrite the documented divergences.
+- Verify all dependency surfaces with one command:
+  `python3 tools/ci/sync_dependency_surfaces.py --check`. The check mode
+  writes nothing and runs no cargo, so it is safe offline. Apply the sync by
+  running the same script without `--check`.
 - Verify with the structured checker: `python3 tools/ci/check_third_party_notices.py`.
   It resolves each Cargo.lock package by name and version and matches that
   version to its corresponding `THIRD-PARTY-NOTICES` entry; do not compare
   unrelated file-order or line-number output with `diff`.
+- Dependabot pull requests receive the sync commit automatically from
+  `.github/workflows/dependabot-sync.yml`, which runs the sync tool and
+  pushes only when the coverage checker passes. The workflow needs the
+  `DEPENDENCY_SYNC_TOKEN` secret (fine-grained PAT, contents: write on this
+  repository) for the PR checks to re-run after the push; the
+  `GITHUB_TOKEN` fallback lands the commit only. The
+  `dependency-surfaces-sync` pre-commit hook enforces human changesets at
+  write time.
 
 ### 63. Non-native-reader writing style (STE-inspired) for maintained docs
 Historical issues: writing-pass semantic drift found in the docs/kb-pilot
