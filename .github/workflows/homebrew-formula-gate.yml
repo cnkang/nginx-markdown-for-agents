@@ -39,7 +39,7 @@ concurrency:
 jobs:
   brew-formula-check:
     name: Formula audit/install/test
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
     steps:
       - name: Checkout repository
@@ -118,7 +118,10 @@ jobs:
             echo "::error::rendered formula missing at ${FORMULA_PATH}" >&2
             exit 1
           fi
-          brew install --build-from-source "${FORMULA_PATH}"
+          # Homebrew 7 refuses absolute formula paths in install ('Invalid
+          # tap name'), so install through the tap-qualified name, which
+          # resolves to the same rendered file the audit step verified.
+          brew install --build-from-source codex/formula-gate/nginx-markdown-module
 
       - name: Run formula test
         shell: bash
