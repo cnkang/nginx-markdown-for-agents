@@ -64,6 +64,13 @@ jobs:
             brew tap-new --no-git codex/formula-gate
           fi
           mkdir -p "$(brew --repository codex/formula-gate)/Formula"
+          # Homebrew 7 refuses to load a formula from a tap without an
+          # explicit trust grant; trust the whole tap once (the packaging
+          # audit script grants the same trust per run for its own
+          # temporary tap).
+          if brew help trust >/dev/null 2>&1; then
+            brew trust codex/formula-gate
+          fi
 
       - name: Audit local formula
         shell: bash
