@@ -172,7 +172,8 @@ jobs:
           cbindgen --quiet \
             --config components/rust-converter/cbindgen.toml \
             --crate nginx-markdown-converter \
-            --output components/rust-converter/include/markdown_converter.h
+            --output components/rust-converter/include/markdown_converter.h \
+            components/rust-converter
           python3 tools/harness/normalize_cbindgen_header.py
           cp components/rust-converter/include/markdown_converter.h \
             components/nginx-module/src/markdown_converter.h
