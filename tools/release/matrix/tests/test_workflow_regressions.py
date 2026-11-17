@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -1422,4 +1423,20 @@ def test_weekly_soak_cbindgen_receives_crate_directory() -> None:
     )
     assert "--crate nginx-markdown-converter" in command
     assert "--output components/rust-converter/include/markdown_converter.h" in command
-    assert command.endswith("components/rust-converter"), command
+    # Parse the logical command so comments are discarded and shell quoting is
+    # resolved.  The crate directory must be a positional argument, not text
+    # inside a comment or a substring of an option value.
+    args = shlex.split(command, comments=True)
+    value_options = {"-c", "--config", "--crate", "--output", "--lang", "--profile"}
+    positional = []
+    index = 1  # skip the executable
+    while index < len(args):
+        if args[index] in value_options:
+            index += 2
+            continue
+        if args[index].startswith("-"):
+            index += 1
+            continue
+        positional.append(args[index])
+        index += 1
+    assert positional == ["components/rust-converter"], args
