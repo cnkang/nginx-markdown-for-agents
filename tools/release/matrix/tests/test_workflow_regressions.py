@@ -1403,9 +1403,23 @@ def test_weekly_soak_cbindgen_receives_crate_directory() -> None:
     """
     job = _workflow_data("weekly-observation.yml")["jobs"]["weekly-soak"]
     run = _step_by_name(job["steps"], "Build module-enabled NGINX")["run"]
-    block = run.split("cbindgen --quiet", 1)[1].split("python3", 1)[0]
-    command = " ".join(token for token in block.split() if token != "\\")
-    assert command.startswith("--config components/rust-converter/cbindgen.toml")
+    lines = run.splitlines()
+    start = next(i for i, line in enumerate(lines) if "cbindgen --quiet" in line)
+    # Rebuild only the shell command continued by trailing backslashes.  A
+    # line without one ends the command, so a crate dir split onto its own
+    # line cannot pass as an argument after --output.
+    parts = []
+    for line in lines[start:]:
+        part = line.strip()
+        parts.append(part)
+        if not part.endswith("\\"):
+            break
+    else:
+        raise AssertionError("unterminated cbindgen continuation")
+    command = " ".join(part.rstrip("\\").rstrip() for part in parts)
+    assert command.startswith(
+        "cbindgen --quiet --config components/rust-converter/cbindgen.toml"
+    )
     assert "--crate nginx-markdown-converter" in command
     assert "--output components/rust-converter/include/markdown_converter.h" in command
     assert command.endswith("components/rust-converter"), command
