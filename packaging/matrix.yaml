@@ -21,10 +21,10 @@
 #   workflow matrix include/exclude rules if needed.
 #   Example: add "rockylinux:9" under rpm format.
 #
-# Mainline support:
-#   The validated nginx.org mainline entry is 1.31.8 below.
-#   Add a newer mainline version only after the release workflow records
-#   load and request evidence and a maintainer promotes the matrix row.
+# Stable/mainline support:
+#   The canonical matrix lists 1.30.7 stable and 1.31.9 mainline as
+#   best-effort and pending. Add either version here only after the release
+#   workflow records load and request evidence and a maintainer promotes it.
 #   tools/docs/validate_packaging_matrix.py fails when this list names a
 #   version that the canonical release matrix does not define.
 #
@@ -41,8 +41,6 @@ nginx_versions:
   - "1.24.0"
   - "1.26.3"
   - "1.28.3"
-  - "1.30.6"
-  - "1.31.8"
 
 # ---------------------------------------------------------------------------
 # Target architectures

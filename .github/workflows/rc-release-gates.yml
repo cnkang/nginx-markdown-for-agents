@@ -26,13 +26,13 @@ env:
   # The module is loaded into the container images the checks default to, so the
   # build version must match them, and the build runs in the same Alpine release
   # as those images.
-  NGINX_VERSION: "1.30.4"
+  NGINX_VERSION: "1.30.7"
   RUST_VERSION: "1.98.1"
   RUST_FEATURES: streaming,prune_noise_regions
   DOCKER_DEFAULT_PLATFORM: linux/amd64
-  IMAGE: "nginx:1.30.4-alpine@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c"
+  IMAGE: "nginx:1.30.7-alpine@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598"
   INCOMPATIBLE_TAG: "1.26-alpine@sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d"
-  NGINX_BASE_IMAGE: "nginx:1.30.4-alpine3.24@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c"
+  NGINX_BASE_IMAGE: "nginx:1.30.7-alpine3.24@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598"
   RUST_BUILDER_IMAGE: "rust:1.98.1-alpine3.24@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f"
 
 jobs:
