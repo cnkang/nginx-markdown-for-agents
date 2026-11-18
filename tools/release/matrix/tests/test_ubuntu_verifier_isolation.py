@@ -45,6 +45,17 @@ def _wait_for_file(path):
     raise AssertionError(f'process did not populate {path}')
 
 
+def _wait_for_child_ready(root):
+    """Block until the child can record a graceful stop.
+
+    The ready gate only proves that a request is blocked.  The child writes
+    its PID after installing the SIGTERM handler, so cleanup can escalate
+    safely only after this handoff.  Without it a loaded runner can reach
+    the SIGKILL branch before the child ever records its stop.
+    """
+    _wait_for_file(root / 'child.pid')
+
+
 @contextmanager
 def _owned_verifier(command, env, root, *, hold_requests=False):
     """Keep a live session leader until all test-owned children are stopped."""
@@ -173,6 +184,8 @@ if '-t' in args:
     sys.exit(1 if os.environ.get('MODE') == 'config-fail' else 0)
 if os.environ.get('MODE') == 'start-fail':
     sys.exit(1)
+# Optional startup delay reproduces the handoff race on loaded runners.
+time.sleep(float(os.environ.get('CHILD_START_DELAY') or 0))
 signal.signal(signal.SIGHUP, lambda *_: None)
 def stop(*_):
     Path(os.environ['CHILD_EXIT']).write_text('stopped')
@@ -285,6 +298,7 @@ def test_signal_cleans_only_owned_child(sandbox, stop_signal):
     try:
         with _owned_verifier(command, env, root, hold_requests=True) as (process, release):
             _wait_for_file(root / 'gate.ready')
+            _wait_for_child_ready(root)
             process.send_signal(stop_signal)
             assert _wait_for_file(root / 'signal.ack') == str(stop_signal)
             os.write(release, b'1')
@@ -298,13 +312,18 @@ def test_signal_cleans_only_owned_child(sandbox, stop_signal):
         sentinel.wait()
 
 
-def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox):
+@pytest.mark.parametrize('start_delay', ['0', '1.5'])
+def test_session_cleanup_stops_child_after_verifier_is_killed(sandbox, start_delay):
     """Teardown must clean leaked children even when the shell cannot do so."""
     root, _, env, command = sandbox
+    # The delayed case holds the gate open long enough for the ready gate to
+    # lead the child's PID handoff, which is the shape that failed on CI.
+    env['CHILD_START_DELAY'] = start_delay
     failure = None
     try:
         with _owned_verifier(command, env, root, hold_requests=True) as (process, release):
             _wait_for_file(root / 'gate.ready')
+            _wait_for_child_ready(root)
             process.send_signal(signal.SIGUSR1)
             assert _wait_for_file(root / 'signal.ack') == str(signal.SIGUSR1)
             os.write(release, b'1')
