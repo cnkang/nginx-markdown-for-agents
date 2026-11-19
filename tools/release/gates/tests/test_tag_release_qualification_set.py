@@ -340,13 +340,13 @@ def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
     job = jobs["real-nginx-e2e"]
     assert job["runs-on"] == "ubuntu-24.04"
     environment = yaml.safe_load(workflow)["env"]
-    assert environment["NGINX_VERSION"] == "1.30.4"
+    assert environment["NGINX_VERSION"] == "1.30.7"
     # The Alpine release is pinned inside the image references below; a
     # separate variable nobody reads would be dead configuration.
     assert "ALPINE_VERSION" not in environment
     for key, prefix in (
-        ("IMAGE", r"nginx:1\.30\.4-alpine"),
-        ("NGINX_BASE_IMAGE", r"nginx:1\.30\.4-alpine3\.24"),
+        ("IMAGE", r"nginx:1\.30\.7-alpine"),
+        ("NGINX_BASE_IMAGE", r"nginx:1\.30\.7-alpine3\.24"),
         ("RUST_BUILDER_IMAGE", r"rust:1\.98\.1-alpine3\.24"),
     ):
         assert re.fullmatch(prefix + r"@sha256:[0-9a-f]{64}", environment[key])

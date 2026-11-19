@@ -125,20 +125,20 @@ def _benchmark_step_body() -> str:
         "the extracted step body has no resolver call; the workflow changed "
         "shape and these tests would run the wrong script"
     )
-    assert '"${NGINX_VERSIONS}"' in body, (
-        "could not extract the benchmark step body: it ends before the selector"
+    assert '"${BUILT_BENCHMARK_VERSION}"' in body, (
+        "could not extract the benchmark step body: it omits the benchmark-only build"
     )
     return body
 
 
-def test_the_benchmark_step_rejects_an_unusable_baseline_version(
+def test_the_benchmark_step_accepts_a_benchmark_only_version(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A run that cannot build the baseline's version must fail, not fall back.
+    """A retired version is buildable even when absent from release rows.
 
     The step computes `BASELINE_NGINX_VERSION` itself, so the scenario is
-    produced by pointing the resolver at baselines recorded on a version this run
-    does not build. Injecting the variable in the environment would be ignored.
+    produced by pointing the resolver at a baseline outside the release matrix.
+    The separate benchmark build must supply that same version.
     """
     script = tmp_path / "step.sh"
     body = _benchmark_step_body()
@@ -159,20 +159,19 @@ def test_the_benchmark_step_rejects_an_unusable_baseline_version(
         env={
             **os.environ,
             "NGINX_VERSIONS": versions,
+            "BUILT_BENCHMARK_VERSION": "1.31.5",
             "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
         },
     )
 
-    assert result.returncode != 0, (
-        "the step must not benchmark a version the baselines do not describe"
-    )
+    assert result.returncode == 0, result.stderr
     selected_file = tmp_path / "out.txt"
-    # `bool(...)` because the `and` yields the file's text, not a bool, when the
-    # file exists: the name should match what it holds.
-    wrote_anything = bool(
-        selected_file.exists() and selected_file.read_text().strip()
-    )
-    assert not wrote_anything, "no benchmark version may be selected"
+    selected = [
+        line.split("=", 1)[1]
+        for line in selected_file.read_text().splitlines()
+        if line.startswith("bench_nginx_version=")
+    ]
+    assert selected == ["1.31.5"]
 
 
 def test_the_benchmark_step_rejects_an_unresolvable_baseline(
@@ -182,15 +181,13 @@ def test_the_benchmark_step_rejects_an_unresolvable_baseline(
 
     The step computes `BASELINE_NGINX_VERSION` itself, so this runs the real
     body against a baseline directory that yields nothing rather than injecting
-    an empty environment variable. An empty version used to mean "fall back to
-    the matrix", which benchmarks an environment no baseline describes.
+    an empty environment variable. It must fail before selecting a benchmark
+    runtime whose version cannot be bound to a baseline.
     """
     script = tmp_path / "step.sh"
     script.write_text(_benchmark_step_body(), encoding="utf-8")
     empty_dir = tmp_path / "baselines"
     empty_dir.mkdir()
-    versions = json.dumps(["1.24.0", "1.26.3", "1.30.4"])
-
     # Redirect the resolver at the empty directory the way the workflow's own
     # flags allow, by rewriting the resolver invocation in the extracted body.
     body = script.read_text(encoding="utf-8").replace(
@@ -205,7 +202,7 @@ def test_the_benchmark_step_rejects_an_unresolvable_baseline(
         cwd=REPO_ROOT,
         env={
             **os.environ,
-            "NGINX_VERSIONS": versions,
+            "BUILT_BENCHMARK_VERSION": "1.30.4",
             "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
         },
     )
@@ -231,6 +228,57 @@ def test_the_workflow_benchmark_step_uses_the_resolver() -> None:
         "the matrix-first selector must be gone, not merely deprioritised: "
         "with it as a fallback an unreadable baseline silently benchmarks an "
         "environment no baseline describes"
+    )
+
+
+def test_benchmark_only_build_uses_verified_baseline_source() -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["benchmark-build"]
+    steps = {step["name"]: step for step in job["steps"]}
+
+    assert "strategy" not in job, (
+        "benchmark runtime must not depend on release rows"
+    )
+    assert job["container"] == workflow["jobs"]["build"]["container"], (
+        "benchmark runtime must use the same pinned AlmaLinux image as the "
+        "release build"
+    )
+    step_names = [step["name"] for step in job["steps"]]
+    assert step_names.index("Bootstrap Git for checkout") < step_names.index(
+        "Checkout"
+    ) < step_names.index("Install benchmark build dependencies") < step_names.index(
+        "Resolve baseline NGINX version"
+    )
+    assert "dnf install -y git" in steps["Bootstrap Git for checkout"]["run"]
+    dependencies = steps["Install benchmark build dependencies"]["run"]
+    assert "dnf install -y" in dependencies
+    assert "python3" in dependencies
+    assert "apt-get" not in dependencies
+    assert "baseline_nginx_version.py" in steps[
+        "Resolve baseline NGINX version"
+    ]["run"]
+    assert "verify-checksum.sh" in steps["Download verified NGINX source"]["run"]
+    assert "--add-dynamic-module" in steps[
+        "Build benchmark-only NGINX runtime"
+    ]["run"]
+    assert "build-brotli-static.sh" in steps[
+        "Build pinned Brotli static library"
+    ]["run"]
+    assert "BrotliDecoderDecompressStream" in steps[
+        "Verify benchmark runtime linkage"
+    ]["run"]
+    assert (
+        steps["Upload benchmark-only runtime"]["with"]["name"]
+        == "benchmark-runtime-${{ steps.bench-nginx.outputs.version }}-amd64"
+    )
+    assert job["outputs"]["nginx_version"] == "${{ steps.bench-nginx.outputs.version }}"
+    assert "benchmark-build" in workflow["jobs"]["release-gate"]["needs"]
+    download = next(
+        step for step in workflow["jobs"]["release-gate"]["steps"]
+        if step["name"] == "Download canonical benchmark NGINX runtime"
+    )
+    assert download["with"]["name"] == (
+        "benchmark-runtime-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64"
     )
 
 
@@ -270,7 +318,7 @@ def test_the_benchmark_step_selects_the_baseline_version(tmp_path: pathlib.Path)
     body = _benchmark_step_body()
     script = tmp_path / "step.sh"
     script.write_text(body, encoding="utf-8")
-    versions = json.dumps(["1.24.0", "1.26.3", "1.28.3", "1.30.4", "1.31.5"])
+    versions = json.dumps(["1.24.0", "1.26.3", "1.28.3", "1.31.5"])
     env_version = subprocess.run(
         [
             sys.executable,
@@ -293,6 +341,7 @@ def test_the_benchmark_step_selects_the_baseline_version(tmp_path: pathlib.Path)
         env={
             **os.environ,
             "NGINX_VERSIONS": versions,
+            "BUILT_BENCHMARK_VERSION": env_version,
             "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
         },
     )

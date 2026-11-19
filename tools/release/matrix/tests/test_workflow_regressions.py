@@ -1217,8 +1217,8 @@ def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> N
     module_legs = matrices["nginx_org_evidence_matrix"]
     package_legs = [e for e in matrices["smoke_matrix"] if e["evidence_distro"]]
     ubuntu_legs = matrices["ubuntu_matrix"]
-    assert len(module_legs) == 24
-    assert len(package_legs) == 16
+    assert len(module_legs) == 12
+    assert len(package_legs) == 12
     assert len(ubuntu_legs) == 4
     assert {
         (entry["suite"], entry["image"])
@@ -1252,7 +1252,7 @@ def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> N
     )
     assert len(names) == len(set(names))
 
-    # Every release-blocking row has a producer: the 44 rows above plus the
+    # Every release-blocking row has a producer: the 28 rows above plus the
     # 4 container rows that official-nginx-docker.yml covers.
     repo_root = Path(__file__).resolve().parents[4]
     matrix = json.loads((repo_root / "tools" / "release-matrix.json").read_text())

@@ -65,11 +65,11 @@ def test_release_gate_downloads_canonical_amd64_module_artifact():
     workflow = Path(RELEASE_PACKAGES_WORKFLOW).read_text(encoding="utf-8")
 
     assert (
-        "name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64"
+        "name: benchmark-runtime-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64"
         in workflow
     )
     assert (
-        "name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64"
+        "name: benchmark-runtime-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64"
         not in workflow
     )
 

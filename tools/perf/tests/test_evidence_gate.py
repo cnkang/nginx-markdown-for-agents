@@ -266,8 +266,8 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "Benchmark selection must not read the matrix through the evidence "
         "normalizer (it drops the release-metadata keys the filter reads)"
     )
-    assert "module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64" in workflow, (
-        "Release gate must download the canonical benchmark NGINX artifact "
+    assert "benchmark-runtime-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64" in workflow, (
+        "Release gate must download the canonical benchmark runtime artifact "
         "by exact name, not a wildcard pattern with merge-multiple"
     )
     assert "NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx" in workflow

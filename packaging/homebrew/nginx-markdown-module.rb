@@ -94,7 +94,17 @@ class NginxMarkdownModule < Formula
 
     nginx_version = Formula["nginx"].version.to_s
     odie "Unable to detect Homebrew nginx version" if nginx_version.blank?
-    openssl_formula = nginx_openssl_formula
+    # A dependency can be declared tap-qualified (for example
+    # "homebrew/core/openssl@3"), and Dependency#name keeps that full form,
+    # so the match reads the bare formula name through Homebrew's own helper.
+    # Keep the declared spelling because the opt-prefix helpers strip the
+    # tap component themselves.
+    openssl_dependencies = Formula["nginx"].deps.select do |dependency|
+      Utils.name_from_full_name(dependency.name).match?(/\Aopenssl(?:@\d+)?\z/)
+    end
+    odie "Unable to detect Homebrew nginx OpenSSL dependency" \
+      unless openssl_dependencies.one?
+    openssl_formula = openssl_dependencies.first.name
 
     nginx_archive = "nginx-#{nginx_version}.tar.gz"
     system "curl", "--proto", "=https", "--tlsv1.2", "-fsSL",
@@ -120,22 +130,6 @@ class NginxMarkdownModule < Formula
       system "make", "modules"
       (lib/"nginx/modules").install "objs/ngx_http_markdown_filter_module.so"
     end
-  end
-
-  def nginx_openssl_formula
-    # A dependency can be declared tap-qualified (for example
-    # "homebrew/core/openssl@3"), and Dependency#name keeps that full form,
-    # so the match reads the bare formula name through Homebrew's own
-    # helper (the audit requires it over manual name splitting).  The
-    # return value keeps the declared spelling: the opt-prefix helpers
-    # strip the tap component themselves.
-    dependencies = Formula["nginx"].deps.select do |dependency|
-      Utils.name_from_full_name(dependency.name).match?(/\Aopenssl(?:@\d+)?\z/)
-    end
-    odie "Unable to detect Homebrew nginx OpenSSL dependency" \
-      unless dependencies.one?
-
-    dependencies.first.name
   end
 
   def caveats
