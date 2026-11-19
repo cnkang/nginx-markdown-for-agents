@@ -1,4 +1,4 @@
-# Version Planning: v0.9.2 Release and v1.0 Freeze
+# Version Planning: v0.9.4 Candidate and v1.0 Freeze
 
 ## Purpose
 
@@ -9,17 +9,25 @@ compatibility or release scope.
 
 ## Current Release State
 
+- v0.9.4 is the current development line and a compatibility release
+  candidate. The project has not published it yet. The latest public stable
+  release remains v0.9.3. v0.9.4 assets become available only after publication
+  and approval of the exact candidate SHA.
 - v0.9.3 is the current published release line (2026-11-02). It is a
   compatibility maintenance release, so it keeps the v0.9.2 contracts.
 - v0.9.2 was the previous published release (2026-10-08). It consolidates the
   v0.9.1 baseline and resets compatibility.
 - v0.9.1 was the published stable release before v0.9.2 (2026-07-29).
-- Repository metadata targets 0.9.3. Use the v0.9.3 tag, assets, and checksums.
+- Repository metadata targets 0.9.4. Until publication, use the v0.9.3 tag,
+  assets, and checksums.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 - v0.9.3 is a controlled compatibility maintenance exception. It is not a
   second breaking release, and it does not reopen the v0.9.2 contract. Its
   scope is the NGINX compatibility surface, Ubuntu LTS support, release
   engineering, and the documentation that follows from those changes.
+- The v0.9.4 candidate continues that compatibility-only scope. The 20 active
+  directives, defaults, HTTP representation, metrics, diagnostics, reason
+  codes, and FFI ABI version 3 stay unchanged.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
 before v1.0. The project deliberately extended that freeze through v0.9.1 because v1.0

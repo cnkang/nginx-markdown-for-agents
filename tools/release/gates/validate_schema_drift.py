@@ -23,7 +23,7 @@ if str(REPO_ROOT / "tools") not in sys.path:
 from lib.path_validation import validate_read_path  # noqa: E402
 
 
-DEFAULT_VERSION = "0.9.2"
+DEFAULT_VERSION = "0.9.4"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 # Release artifact paths.  configure_release_version updates these for the

@@ -10,7 +10,7 @@ Usage:
     python3 tools/release/matrix/record_ubuntu_evidence.py \
         --build dist/ubuntu-native/ubuntu-native-build.json \
         --ledger dist/ubuntu-native/ubuntu-native-ledger.json \
-        --out docs/evidence/0.9.3/compat/ubuntu-2404-1.24.0-amd64.json \
+        --out docs/evidence/0.9.4/compat/ubuntu-2404-1.24.0-amd64.json \
         [--source-sha SHA] [--verified-by ci:release-packages/ubuntu-native] \
         [--workflow-run-url URL]
 

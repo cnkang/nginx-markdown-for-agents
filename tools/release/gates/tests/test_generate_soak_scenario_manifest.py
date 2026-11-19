@@ -64,19 +64,19 @@ def test_build_manifest_rejects_missing_scenario_memory() -> None:
 
 
 def test_output_path_is_version_scoped() -> None:
-    assert generator.DEFAULT_VERSION == "0.9.3"
+    assert generator.DEFAULT_VERSION == "0.9.4"
     output = generator._output_path(generator.DEFAULT_VERSION)
     assert output == ROOT / (
-        "artifacts/release/0.9.3/short-soak-scenario-manifest.json"
+        "artifacts/release/0.9.4/short-soak-scenario-manifest.json"
     )
 
 
 def test_output_path_rejects_untrusted_version_components() -> None:
     with pytest.raises(ValueError, match="Invalid release version"):
-        generator._output_path("0.9.3/../../outside")
+        generator._output_path("0.9.4/../../outside")
 
-    assert generator._output_path("0.9.3") == ROOT / (
-        "artifacts/release/0.9.3/short-soak-scenario-manifest.json"
+    assert generator._output_path("0.9.4") == ROOT / (
+        "artifacts/release/0.9.4/short-soak-scenario-manifest.json"
     )
 
 

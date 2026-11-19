@@ -75,6 +75,15 @@ package revision and one ABI provide. The release workflow refuses to build
 when the archive revision differs from the recorded revision. This rule makes
 the maintainer review the new revision before a release can use it.
 
+The v0.9.4 candidate targets nginx.org stable 1.30.7 and mainline 1.31.9. Its
+Ubuntu targets are 24.04 `1.24.0-2ubuntu7.20` and 26.04
+`1.28.3-2ubuntu1.13`. Ubuntu published these revisions in
+[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1). These are
+candidate targets, not verified support claims. On a candidate branch, select
+them for a release-workflow run while their evidence is pending. Do not merge
+that selection state into `main`. Use the generated records and promotion tool
+before merging.
+
 A matching ABI or `--with-compat` does not prove compatibility across revisions.
 Support requires real build, load, and request evidence for the exact package revision.
 Ubuntu backports security fixes, so an older upstream version can remain supported.

@@ -13,6 +13,13 @@ English | [Simplified Chinese](README_zh-CN.md)
 > contracts. v0.9.2 is the final planned breaking release before v1.0. Use
 > release-tag downloads.
 
+> v0.9.4 is a release candidate and the project has not published it yet.
+> Its NGINX compatibility targets remain pending until the candidate workflow
+> records build, load, and request evidence. The latest public stable release
+> remains v0.9.3. Candidate assets become available only after publication
+> and approval of the exact candidate SHA. See the
+> [0.9.4 candidate notes](docs/releases/0.9.4-release-notes.md).
+
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
 HTML pages that you already serve. Clients that send `Accept: text/markdown`
 receive Markdown. Browsers and other clients keep receiving the original HTML.
@@ -237,16 +244,16 @@ installation-specific details.
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
-| 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | verified | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | supported | verified | Yes |
+| 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
@@ -270,8 +277,8 @@ installation-specific details.
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | verified | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | supported | verified | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |

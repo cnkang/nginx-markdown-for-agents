@@ -19,7 +19,7 @@ MANIFEST = FIXTURE_DIR / "soak-qualification-manifest.json"
 
 def test_default_artifact_paths_follow_current_release_version() -> None:
     version = validator.DEFAULT_RELEASE_VERSION
-    assert version == "0.9.3"
+    assert version == "0.9.4"
     assert validator.DEFAULT_MANIFEST == (
         REPO_ROOT
         / "artifacts"
@@ -3242,7 +3242,7 @@ def test_allowed_soak_skip_writes_a_structurally_valid_record(
     args = type("Args", (), {
         "allow_skip_soak": True,
         "output": None,
-        "record": "artifacts/release/0.9.3/soak-record.json",
+        "record": str(validator.RECORD_OUTPUT_ROOT / "soak-record.json"),
     })()
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "_validated_nginx_binary", lambda: None)
@@ -3250,8 +3250,9 @@ def test_allowed_soak_skip_writes_a_structurally_valid_record(
 
     assert validator.handle_missing_nginx(args, manifest) == 0
     record = json.loads(
-        (tmp_path / "artifacts" / "release" / "0.9.3" /
-         "soak-record.json").read_text(encoding="utf-8")
+        (tmp_path / validator.RECORD_OUTPUT_ROOT / "soak-record.json").read_text(
+            encoding="utf-8"
+        )
     )
     validator.validate_record_structure(record)
     assert record["status"] == "skip"
@@ -3530,7 +3531,7 @@ def test_real_mode_missing_peak_is_failure(
     conversion completed."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     record_path = (
-        tmp_path / "artifacts" / "release" / "0.9.3" / "soak-record.json"
+        tmp_path / validator.RECORD_OUTPUT_ROOT / "soak-record.json"
     )
 
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
@@ -3588,7 +3589,7 @@ def test_real_mode_missing_peak_is_failure(
         (),
         {
             "manifest": str(MANIFEST),
-            "record": "artifacts/release/0.9.3/soak-record.json",
+            "record": str(validator.RECORD_OUTPUT_ROOT / "soak-record.json"),
             "output": None,
             "allow_skip_soak": False,
         },
@@ -3606,7 +3607,7 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
     """A valid module peak cannot mask a missing worker RSS observation."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     record_path = (
-        tmp_path / "artifacts" / "release" / "0.9.3" / "soak-record.json"
+        tmp_path / validator.RECORD_OUTPUT_ROOT / "soak-record.json"
     )
     runtime_dir = tmp_path / "runtime"
 
@@ -3657,7 +3658,7 @@ def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
         (),
         {
             "manifest": str(MANIFEST),
-            "record": "artifacts/release/0.9.3/soak-record.json",
+            "record": str(validator.RECORD_OUTPUT_ROOT / "soak-record.json"),
             "output": None,
             "allow_skip_soak": False,
         },

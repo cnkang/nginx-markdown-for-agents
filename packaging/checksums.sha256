@@ -36,6 +36,7 @@ e6f20b644a17a643f059ae6467a1971fe2811587d025e071068753a1f1e3b3c3  nginx-1.31.4
 e951607d534836624bd36b6b45a71dbfb055237deae3738da6bbf3270dada279  nginx-1.31.5
 974ed5298a5e398e008704ed5db284e655fc270c596493dbccada452448fc9f1  nginx-1.31.6
 0652b760b3b772d2ec17b47c2fc15d9a95e6fe35cd5b877eadc1a62d9bc75af1  nginx-1.31.8
+a11c5eeee2e257f4478f0e649f84b0040787d277d2d3e5233952aa6b6dcb80ad  nginx-1.31.9
 
 # --- Brotli decoder source (statically linked into official Linux modules) ---
 # Obtained from: https://github.com/google/brotli/archive/refs/tags/v1.2.1.tar.gz

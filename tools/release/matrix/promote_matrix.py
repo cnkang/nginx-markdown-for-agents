@@ -20,7 +20,7 @@ reflects the evidence, and ``--dry-run`` prints the change set.
 
 Usage:
     python3 tools/release/matrix/promote_matrix.py \
-        --evidence docs/evidence/0.9.3/compat/nginx.org-1.30.6-amd64.json \
+        --evidence docs/evidence/0.9.4/compat/nginx.org-1.31.9-amd64.json \
         [--evidence ...] [--demote-superseded] [--dry-run | --check]
 
 Exit codes:

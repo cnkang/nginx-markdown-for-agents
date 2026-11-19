@@ -73,9 +73,9 @@ DESTDIR ?=
 # regression CI reports as new looks clean locally.  Default to the merge base
 # with the main branch, which is what CI compares against.
 STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
-SCHEMA_RELEASE_VERSION ?= 0.9.2
+SCHEMA_RELEASE_VERSION ?= 0.9.4
 # Current release line for generated artifacts and evidence paths.
-RELEASE_LINE ?= 0.9.3
+RELEASE_LINE ?= 0.9.4
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -93,7 +93,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-        docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-strict \
+        docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-092-canonical release-gates-check-092 release-gates-check-093 release-gates-check-094 release-gates-check-all release-gates-check-strict \
         release-pytest-check test-nginx-integration-c \
         release-matrix-check pre-lts-status-check \
         streaming-evidence-check \
@@ -1478,14 +1478,20 @@ release-gates-check-092: release-gates-check-092-canonical
 	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
-# release-gates-check-093: Blocking 0.9.3 compatibility gates.
+# release-gates-check-093 remains as a compatibility alias for old scripts.
+# The active v0.9.4 gate is release-gates-check-094.
+release-gates-check-093:
+	@echo "DEPRECATED: use release-gates-check-094 for the active release."
+	$(MAKE) release-gates-check-094
+
+# release-gates-check-094: Blocking 0.9.4 compatibility gates.
 #
 # This target covers every gate that a branch can run from a clean checkout.
 # The candidate-bound evidence stages (perf, fuzz soak, soak, rc evidence)
 # stay in the 0.9.2 canonical target and in the release workflow, because they
 # need the frozen candidate SHA and hours of runtime.
-release-gates-check-093: release-matrix-check
-	@echo "=== 0.9.3 Release Gates (blocking) ==="
+release-gates-check-094: release-matrix-check
+	@echo "=== 0.9.4 Release Gates (blocking) ==="
 	@echo "  [1/7] Compatibility evidence"
 	$(MAKE) compatibility-evidence-check
 	@echo "  [2/7] Version consistency"
@@ -1508,7 +1514,7 @@ release-gates-check-093: release-matrix-check
 	$(MAKE) docs-check
 	@echo "  [7/7] Harness quick checks"
 	$(MAKE) harness-quick-checks
-	@echo "=== 0.9.3 Release Gates: PASS ==="
+	@echo "=== 0.9.4 Release Gates: PASS ==="
 
 # streaming-evidence-check: Blocking parity evidence and registry contract.
 streaming-evidence-check:

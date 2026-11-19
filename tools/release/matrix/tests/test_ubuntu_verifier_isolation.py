@@ -235,9 +235,12 @@ if '-w' in args:
                CALL_LOG=str(log), CHILD_PID=str(tmp_path / "child.pid"),
                CHILD_EXIT=str(tmp_path / 'child.exit'),
                BASH_ENV=str(bash_env), KILL_LOG=str(tmp_path / 'signals'))
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
     command = ["bash", str(script), "--module", str(module), "--out",
                str(tmp_path / "ledger.json"), "--suite", "24.04",
-               "--incompatible", str(incompatible)]
+               "--port", str(port), "--incompatible", str(incompatible)]
     return tmp_path, work, env, command
 
 

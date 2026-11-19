@@ -24,10 +24,10 @@ nginx.org DEB and RPM package rows of that distribution.
 
 Usage:
     python3 tools/release/matrix/record_nginx_org_evidence.py \
-        --build-dir dist/1.30.6-glibc-aarch64 \
-        --ledger dist/1.30.6-glibc-aarch64/ledger.json \
-        --nginx-version 1.30.6 --libc glibc --arch arm64 \
-        --out docs/evidence/0.9.3/compat/nginx.org-1.30.6-glibc-arm64.json \
+        --build-dir dist/1.31.9-glibc-aarch64 \
+        --ledger dist/1.31.9-glibc-aarch64/ledger.json \
+        --nginx-version 1.31.9 --libc glibc --arch arm64 \
+        --out docs/evidence/0.9.4/compat/nginx.org-1.31.9-glibc-arm64.json \
         [--source-sha SHA] [--verified-by local:maintainer] \
         [--workflow-run-url URL] \
         [--builder {build-release-dockerfile,release-packages-build}] \
@@ -59,6 +59,7 @@ from lib.path_validation import (  # noqa: E402
     validate_write_path_within_root,
 )
 from evidence_contract import validate_record  # noqa: E402
+from normalize_matrix import RELEASE_VERSION  # noqa: E402
 
 FEATURES = ["prune_noise_regions", "streaming"]
 # Test classes the verifier must produce.  "build" is added below from the
@@ -176,7 +177,7 @@ def _build_args_digest(
         repo_root
         / "artifacts"
         / "release"
-        / "0.9.3"
+        / RELEASE_VERSION
         / "official-build-feature-manifest.json",
         purpose="official feature manifest",
     )
