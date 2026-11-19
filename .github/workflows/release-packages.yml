@@ -534,7 +534,7 @@ jobs:
         env:
           MATRIX_ARCH: amd64
         run: |
-          bash packaging/scripts/install-verified-rustup.sh \
+          bash ./packaging/scripts/install-verified-rustup.sh \
             --arch "${MATRIX_ARCH}" \
             --toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
