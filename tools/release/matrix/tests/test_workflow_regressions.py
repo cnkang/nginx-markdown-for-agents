@@ -260,6 +260,26 @@ def test_weekly_observation_provisions_fuzz_and_rust_toolchains() -> None:
     assert soak_setup["with"]["components"] == "rustfmt,clippy"
 
 
+def test_weekly_soak_manifest_tracks_the_current_cargo_release_version() -> None:
+    """Manifest generation and artifact upload must use the active version."""
+    job = _workflow_data("weekly-observation.yml")["jobs"]["weekly-soak"]
+    manifest = _step_by_name(job["steps"], "Generate candidate-bound soak manifest")
+    upload = _step_by_name(job["steps"], "Upload soak artifacts")
+
+    assert manifest["id"] == "soak-manifest"
+    assert 'tomllib.load(handle)["package"]["version"]' in manifest["run"]
+    assert '--version "${release_version}"' in manifest["run"]
+    release_prefix = (
+        "artifacts/release/${{ steps.soak-manifest.outputs.version }}/"
+    )
+    assert release_prefix + "short-soak-scenario-manifest.json" in upload[
+        "with"
+    ]["path"]
+    assert release_prefix + "soak-qualification-record.json" in upload["with"][
+        "path"
+    ]
+
+
 def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     """Verifier changes must classify as E2E so the blocking job runs."""
     workflow = _workflow_data("ci.yml")
