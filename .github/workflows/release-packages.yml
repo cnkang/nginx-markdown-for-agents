@@ -485,6 +485,7 @@ jobs:
     name: Build Benchmark-Only NGINX Runtime
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    container: almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743
     timeout-minutes: 45
     permissions:
       contents: read
@@ -493,10 +494,65 @@ jobs:
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
     steps:
+      - name: Bootstrap Git for checkout
+        run: |
+          set -euo pipefail
+          attempt=1
+          delay=10
+          install_output=""
+          install_status=0
+          while [[ "${attempt}" -le 3 ]]; do
+            dnf clean all
+            if install_output="$(dnf install -y git 2>&1)"; then
+              printf '%s\n' "${install_output}"
+              exit 0
+            else
+              install_status=$?
+            fi
+            printf '%s\n' "${install_output}" >&2
+            if [[ "${install_output}" != *"repomd.xml parser error"* ]]; then
+              exit "${install_status}"
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              echo "ERROR: AppStream metadata failed after 3 Git install attempts." >&2
+              exit "${install_status}"
+            fi
+            echo "Transient AppStream metadata error; retrying Git install" \
+              "(${attempt}/3)." >&2
+            sleep "${delay}"
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
+        shell: bash
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Install benchmark build dependencies
+        run: |
+          bash tools/ci/retry_transient.sh -- bash -e -c '
+            dnf clean all
+            dnf install -y \
+              gcc \
+              make \
+              binutils \
+              ca-certificates \
+              cmake \
+              curl-minimal \
+              file \
+              findutils \
+              gzip \
+              pcre2-devel \
+              zlib-devel \
+              pkg-config \
+              openssl-devel \
+              tar \
+              python3
+          '
+          dnf clean all
+        shell: bash
 
       - name: Resolve baseline NGINX version
         id: bench-nginx
@@ -509,25 +565,6 @@ jobs:
             exit 1
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-        shell: bash
-
-      - name: Install benchmark build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            binutils \
-            build-essential \
-            ca-certificates \
-            cmake \
-            curl \
-            file \
-            findutils \
-            gzip \
-            libpcre2-dev \
-            libssl-dev \
-            pkg-config \
-            tar \
-            zlib1g-dev
         shell: bash
 
       - name: Set up Rust toolchain
@@ -2548,11 +2585,11 @@ jobs:
           # artifact and mirror `make test-package-compatibility`.
           make test-package-compatibility
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
-          # The module-enabled NGINX binary is built in the AlmaLinux release
-          # image and links to libcrypt.so.2. Run the benchmark in that same
-          # immutable runtime family instead of assuming Ubuntu provides the
-          # EL9 ABI. Keep the host-side validators above on Ubuntu because
-          # they intentionally inspect DEB/RPM layouts with native tooling.
+          # benchmark-build compiles this binary inside the pinned AlmaLinux
+          # release image, and it links to libcrypt.so.2. Run the benchmark
+          # in that same immutable runtime family. Keep the host-side
+          # validators above on Ubuntu because they inspect DEB/RPM layouts
+          # with native tooling.
           docker run --rm -i \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \

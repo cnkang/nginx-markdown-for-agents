@@ -239,6 +239,21 @@ def test_benchmark_only_build_uses_verified_baseline_source() -> None:
     assert "strategy" not in job, (
         "benchmark runtime must not depend on release rows"
     )
+    assert job["container"] == workflow["jobs"]["build"]["container"], (
+        "benchmark runtime must use the same pinned AlmaLinux image as the "
+        "release build"
+    )
+    step_names = [step["name"] for step in job["steps"]]
+    assert step_names.index("Bootstrap Git for checkout") < step_names.index(
+        "Checkout"
+    ) < step_names.index("Install benchmark build dependencies") < step_names.index(
+        "Resolve baseline NGINX version"
+    )
+    assert "dnf install -y git" in steps["Bootstrap Git for checkout"]["run"]
+    dependencies = steps["Install benchmark build dependencies"]["run"]
+    assert "dnf install -y" in dependencies
+    assert "python3" in dependencies
+    assert "apt-get" not in dependencies
     assert "baseline_nginx_version.py" in steps[
         "Resolve baseline NGINX version"
     ]["run"]
