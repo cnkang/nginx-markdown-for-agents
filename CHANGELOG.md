@@ -5,6 +5,28 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - Unreleased
+
+Compatibility maintenance candidate. This release prepares matching module
+artifacts for current NGINX and Ubuntu package revisions after upstream
+security updates. It does not claim to fix an NGINX vulnerability. The 20
+active directives and their defaults, HTTP representation, metrics and
+diagnostics, reason codes, and FFI ABI version 3 remain unchanged.
+The v0.9.4 assets become available only after publication and maintainer
+approval of the exact candidate SHA.
+
+### Changed
+
+- Candidate nginx.org targets: stable 1.30.7 and mainline 1.31.9, with glibc
+  and musl on amd64 and arm64. Ubuntu-native targets: 24.04 LTS
+  `1.24.0-2ubuntu7.20` and 26.04 LTS `1.28.3-2ubuntu1.13`, on amd64 and arm64.
+- The candidate-only matrix keeps these targets pending until a single
+  release-workflow run records matching build, load, and request evidence.
+  Do not merge the candidate matrix before promoting rows from evidence.
+- This change adds the 1.31.9 source SHA-256 after signature verification with
+  an NGINX project developer key. It also re-verifies the existing 1.30.7
+  checksum.
+
 ## [0.9.3] - 2026-11-02
 
 Compatibility maintenance release. 0.9.3 makes the current nginx.org stable and

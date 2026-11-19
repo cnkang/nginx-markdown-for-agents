@@ -624,9 +624,9 @@ jobs:
         env:
           # The gate name is part of the protected branch required checks.
           # The active release line comes from the caller (AGENTS Rule 13).
-          RELEASE_GATE_EXPECTED_VERSION: "0.9.3"
-          RELEASE_LINE: "0.9.3"
-          SCHEMA_RELEASE_VERSION: "0.9.3"
+          RELEASE_GATE_EXPECTED_VERSION: "0.9.4"
+          RELEASE_LINE: "0.9.4"
+          SCHEMA_RELEASE_VERSION: "0.9.4"
         run: |
           make public-surface-drift-check
           make schema-drift-check

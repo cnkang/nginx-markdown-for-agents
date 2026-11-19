@@ -4,13 +4,17 @@
 > v0.9.2 was the previous release (2026-10-08), and it remains the final
 > planned breaking release before v1.0.
 
+> v0.9.4 is a release candidate and the project has not published it yet.
+> The latest public stable release remains v0.9.3. Candidate assets become
+> available only after publication and approval of the exact candidate SHA.
+
 This directory contains project-level status and maintenance-oriented documentation.
 
 ## Contents
 
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) - current implementation and validation status (aligned to code and recent verification)
 - [HARNESS_HISTORY.md](HARNESS_HISTORY.md) - why the repo-owned harness exists, which failures it is meant to prevent, and what remains intentionally out of scope
-- [VERSION_PLANNING.md](VERSION_PLANNING.md) - the current v0.9.3 release line, the previous v0.9.2 release, and the v1.0 frozen compatibility contract that follows it
+- [VERSION_PLANNING.md](VERSION_PLANNING.md) - the v0.9.4 candidate, the latest published v0.9.3 release, and the v1.0 frozen compatibility contract
 - Historical planning and release-gate records live under
   [`history/`](history/). They remain available for audit context, not as
   active compatibility or release instructions.

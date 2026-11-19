@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:50e36e7f1813546536ea65d7e26d589623b5636311abab1d92c030d5695f36f9"
+    "sha256": "sha256:98694aa50ff02275a3aed0f822535e05c3829f530d290260cd77eb7cb8eaeb90"
   },
   "entries": [
     {
@@ -30,13 +30,13 @@
       "artifact_type": "deb-package",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
       }
     },
     {
@@ -115,13 +115,13 @@
       "artifact_type": "deb-package",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
       }
     },
     {
@@ -446,13 +446,13 @@
       "artifact_type": "deb-package",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
       }
     },
     {
@@ -549,13 +549,13 @@
       "artifact_type": "deb-package",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
       }
     },
     {
@@ -618,7 +618,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -635,7 +635,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -652,7 +652,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -669,7 +669,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -686,7 +686,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -703,7 +703,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -720,7 +720,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -737,7 +737,7 @@
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {

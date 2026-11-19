@@ -29,6 +29,29 @@ except ModuleNotFoundError:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 REGISTRY_PATH = REPO_ROOT / "components" / "rust-converter" / "reason_registry.toml"
+PACKAGE_MANIFEST_PATH = (
+    REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
+)
+
+
+def _load_release_version() -> str:
+    """Read and validate the active Rust package version."""
+    try:
+        manifest = tomllib.loads(PACKAGE_MANIFEST_PATH.read_text(encoding="utf-8"))
+        version = manifest["package"]["version"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(
+            f"Unable to read package version from {PACKAGE_MANIFEST_PATH}"
+        ) from exc
+
+    if not isinstance(version, str) or not re.fullmatch(
+        r"[0-9]+\.[0-9]+\.[0-9]+", version
+    ):
+        raise RuntimeError(f"Invalid package release version: {version!r}")
+    return version
+
+
+RELEASE_VERSION = _load_release_version()
 
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -38,12 +61,9 @@ from lib.executable_validation import resolve_approved_executable  # noqa: E402
 RUST_OUTPUT = (
     REPO_ROOT / "components" / "rust-converter" / "src" / "decision" / "reason_code.rs"
 )
-MANIFEST_OUTPUT = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.3" / "reason-registry-report.json"
-)
-LISTING_OUTPUT = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.3" / "generated-reason-artifacts.json"
-)
+RELEASE_ARTIFACT_DIR = REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
+MANIFEST_OUTPUT = RELEASE_ARTIFACT_DIR / "reason-registry-report.json"
+LISTING_OUTPUT = RELEASE_ARTIFACT_DIR / "generated-reason-artifacts.json"
 C_HEADER_OUTPUT = (
     REPO_ROOT / "components" / "nginx-module" / "src" / "markdown_reason_meta.h"
 )
@@ -937,7 +957,10 @@ def generate_listing(hash_hex: str) -> dict:
                 "description": "C reason metadata table for diagnostics",
             },
             {
-                "path": "artifacts/release/0.9.3/reason-registry-report.json",
+                "path": (
+                    "artifacts/release/"
+                    f"{RELEASE_VERSION}/reason-registry-report.json"
+                ),
                 "description": "Count/hash manifest for drift detection",
             },
         ],

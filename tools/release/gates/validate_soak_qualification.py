@@ -58,7 +58,7 @@ from lib.path_validation import (  # noqa: E402
 from lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
-DEFAULT_RELEASE_VERSION = "0.9.3"
+DEFAULT_RELEASE_VERSION = "0.9.4"
 DEFAULT_MANIFEST = (
     REPO_ROOT / "artifacts" / "release" / DEFAULT_RELEASE_VERSION
     / "short-soak-scenario-manifest.json"

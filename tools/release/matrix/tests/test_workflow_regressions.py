@@ -1004,7 +1004,7 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     )
     assert "generate_soak_scenario_manifest.py" in manifest["run"]
     assert '--candidate-sha "${GITHUB_SHA}"' in manifest["run"]
-    assert release_version == "0.9.3"
+    assert release_version == "0.9.4"
     assert '--version "${RELEASE_VERSION}"' in manifest["run"]
     assert 'git rev-parse HEAD' in manifest["run"]
     assert "make test-e2e-rust-soak" in soak["run"]
@@ -1184,7 +1184,7 @@ def _execute_prepare(tmp_path, matrix_document=None) -> subprocess.CompletedProc
     env = {
         **os.environ,
         "GITHUB_OUTPUT": str(output),
-        "RELEASE_VERSION": "0.9.3",
+        "RELEASE_VERSION": "0.9.4",
         "PYTHONPATH": str(repo_root),
     }
     result = subprocess.run(
@@ -1210,16 +1210,105 @@ def _run_prepare(tmp_path) -> dict[str, str]:
     return {key: json.loads(value) for key, value in values.items() if key.endswith("matrix")}
 
 
-def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> None:
+def _blocking_release_rows() -> list[dict[str, str]]:
     import json
 
+    repo_root = Path(__file__).resolve().parents[4]
+    matrix = json.loads((repo_root / "tools" / "release-matrix.json").read_text())
+    return [row for row in matrix["entries"] if row.get("release_blocking") is True]
+
+
+def _filter_blocking_rows(
+    rows: list[dict[str, str]],
+    *,
+    source: str | None = None,
+    artifact_types: set[str] | None = None,
+) -> list[dict[str, str]]:
+    return [
+        row
+        for row in rows
+        if (source is None or row.get("source") == source)
+        and (
+            artifact_types is None
+            or row.get("artifact_type") in artifact_types
+        )
+    ]
+
+
+def _target_keys(
+    rows: list[dict[str, str]], fields: tuple[str, ...]
+) -> set[tuple[str, ...]]:
+    return {tuple(row[field] for field in fields) for row in rows}
+
+
+def _evidence_artifact_names(
+    module_legs: list[dict[str, str]],
+    package_legs: list[dict[str, str]],
+    ubuntu_legs: list[dict[str, str]],
+) -> list[str]:
+    return (
+        [
+            f"nginx.org-{entry['nginx_version']}-{entry['libc']}-{entry['arch']}.json"
+            for entry in module_legs
+        ]
+        + [
+            f"nginx.org-{entry['nginx_version']}-{entry['evidence_distro']}-{entry['arch']}.json"
+            for entry in package_legs
+        ]
+        + [
+            f"ubuntu-{entry['suite'].replace('.', '')}-{entry['nginx_version']}-{entry['arch']}.json"
+            for entry in ubuntu_legs
+        ]
+    )
+
+
+def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> None:
     matrices = _run_prepare(tmp_path)
     module_legs = matrices["nginx_org_evidence_matrix"]
     package_legs = [e for e in matrices["smoke_matrix"] if e["evidence_distro"]]
     ubuntu_legs = matrices["ubuntu_matrix"]
-    assert len(module_legs) == 12
-    assert len(package_legs) == 12
-    assert len(ubuntu_legs) == 4
+    blocking = _blocking_release_rows()
+    module_rows = _filter_blocking_rows(
+        blocking, source="nginx.org", artifact_types={"dynamic-module"}
+    )
+    package_rows = _filter_blocking_rows(
+        blocking,
+        source="nginx.org",
+        artifact_types={"rpm-package", "deb-package"},
+    )
+    ubuntu_rows = _filter_blocking_rows(
+        blocking, source="ubuntu-default-repo"
+    )
+    containers = _filter_blocking_rows(
+        blocking, artifact_types={"docker-image"}
+    )
+    assert len(module_legs) == len(module_rows)
+    assert len(package_legs) == len(package_rows)
+    assert len(ubuntu_legs) == len(ubuntu_rows)
+    module_fields = ("nginx_version", "libc", "arch")
+    assert _target_keys(module_legs, module_fields) == _target_keys(
+        module_rows, module_fields
+    )
+    candidate_package_targets = {
+        (version, arch)
+        for version in ("1.30.7", "1.31.9")
+        for arch in ("amd64", "arm64")
+    }
+    assert candidate_package_targets <= _target_keys(
+        matrices["package_matrix"], ("nginx_version", "arch")
+    )
+    assert candidate_package_targets <= _target_keys(
+        matrices["musl_matrix"], ("nginx_version", "arch")
+    )
+    smoke_package_targets = {
+        (entry["nginx_version"], entry["arch"], entry["format"])
+        for entry in matrices["smoke_matrix"]
+    }
+    assert {
+        (version, arch, package_format)
+        for version, arch in candidate_package_targets
+        for package_format in ("deb", "rpm")
+    } <= smoke_package_targets
     assert {
         (entry["suite"], entry["image"])
         for entry in ubuntu_legs
@@ -1239,25 +1328,10 @@ def test_prepare_emits_one_evidence_leg_per_feasible_blocking_row(tmp_path) -> N
         _workflow_data("release-packages.yml")["jobs"]["ubuntu-native"]["container"]
         == "${{ matrix.image }}"
     )
-    names = (
-        [f"nginx.org-{e['nginx_version']}-{e['libc']}-{e['arch']}.json" for e in module_legs]
-        + [
-            f"nginx.org-{e['nginx_version']}-{e['evidence_distro']}-{e['arch']}.json"
-            for e in package_legs
-        ]
-        + [
-            f"ubuntu-{e['suite'].replace('.', '')}-{e['nginx_version']}-{e['arch']}.json"
-            for e in ubuntu_legs
-        ]
-    )
+    names = _evidence_artifact_names(module_legs, package_legs, ubuntu_legs)
     assert len(names) == len(set(names))
 
-    # Every release-blocking row has a producer: the 28 rows above plus the
-    # 4 container rows that official-nginx-docker.yml covers.
-    repo_root = Path(__file__).resolve().parents[4]
-    matrix = json.loads((repo_root / "tools" / "release-matrix.json").read_text())
-    blocking = [e for e in matrix["entries"] if e.get("release_blocking") is True]
-    containers = [e for e in blocking if e.get("artifact_type") == "docker-image"]
+    # Container rows are produced by the official NGINX Docker workflow.
     assert len(blocking) == len(names) + len(containers)
     assert len(containers) == 4
 

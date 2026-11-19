@@ -429,18 +429,33 @@ The project records one evidence file per verified target under
 the ABI provide, the source digest, the module checksum, the configure
 argument digest, and every test result.
 
-On 2026-10-31, fresh arm64 Ubuntu containers reported these archive candidates:
+For the v0.9.3 release, fresh arm64 Ubuntu containers reported these archive
+candidates on 2026-10-31:
 
 | Suite | NGINX revision | ABI provide |
 |---|---|---|
 | 24.04 | `1.24.0-2ubuntu7.19` | `nginx-abi-1.24.0-1` |
 | 26.04 | `1.28.3-2ubuntu1.12` | `nginx-abi-1.28.3-1` |
 
-[USN-8955-1](https://ubuntu.com/security/notices/USN-8955-1) lists the same fixed revisions.
+[USN-8955-1](https://ubuntu.com/security/notices/USN-8955-1) lists the same
+fixed revisions.
 Both archives also exposed base revisions with the same ABI provide.
 No real ABI-changing upgrade pair was available for this check.
 APT hold and removal outcomes therefore remain conditional, not verified upgrade results.
 The archive check does not establish module loadability on another revision.
+
+For the v0.9.4 candidate, [USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1)
+lists these package revisions:
+
+| Suite | Candidate NGINX revision | Architecture evidence | ABI provide |
+|---|---|---|---|
+| 24.04 | `1.24.0-2ubuntu7.20` | amd64 and arm64 pending | Pending CI evidence |
+| 26.04 | `1.28.3-2ubuntu1.13` | amd64 and arm64 pending | Pending CI evidence |
+
+The release workflow must install each exact revision on both architectures
+and record its ABI provide, linked Brotli package, module load, Markdown
+request, and incompatible-module rejection result. The v0.9.3 ABI values above
+are historical evidence and do not substitute for v0.9.4 records.
 
 Limits:
 

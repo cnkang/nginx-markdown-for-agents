@@ -273,13 +273,13 @@
       "arch": "arm64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -295,13 +295,13 @@
       "arch": "amd64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -317,13 +317,13 @@
       "arch": "arm64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -339,13 +339,13 @@
       "arch": "amd64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -361,13 +361,13 @@
       "arch": "arm64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -383,13 +383,13 @@
       "arch": "amd64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -405,13 +405,13 @@
       "arch": "arm64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -427,13 +427,13 @@
       "arch": "amd64",
       "artifact_type": "dynamic-module",
       "test_level": "smoke-test",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-packages.yml",
-      "support_tier": "best-effort",
+      "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
       "verification_state": "pending",
-      "support_stage": "best-effort",
+      "support_stage": "primary",
       "date": "2026-11-18",
       "source": "nginx.org",
       "provenance": {
@@ -542,13 +542,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
       }
     },
     {
@@ -564,13 +564,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.19"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
       }
     },
     {
@@ -925,13 +925,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
       }
     },
     {
@@ -947,13 +947,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "verified",
+      "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-10-29",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.12"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
       }
     }
   ],

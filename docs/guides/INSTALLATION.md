@@ -3,6 +3,9 @@
 > For a quick package-only install, see
 > [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md).
 
+The project has not published 0.9.4 yet. Set `RELEASE_TAG` to the latest
+published tag until the v0.9.4 assets become available after publication.
+
 ## Table of Contents
 
 1. [Overview](#1-overview)
@@ -704,56 +707,26 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 <!-- BEGIN AUTO-GENERATED MATRIX -->
 | NGINX Version | OS Type | Architecture | Support Tier |
 |---------------|---------|--------------|--------------|
-| 1.24.0 | glibc | aarch64 | Full |
-| 1.24.0 | glibc | x86_64 | Full |
-| 1.24.0 | musl | aarch64 | Full |
-| 1.24.0 | musl | x86_64 | Full |
-| 1.26.3 | glibc | aarch64 | Full |
-| 1.26.3 | glibc | x86_64 | Full |
-| 1.26.3 | musl | aarch64 | Full |
-| 1.26.3 | musl | x86_64 | Full |
-| 1.26.3 | unlisted | unlisted | Source Only |
-| 1.28.3 | glibc | aarch64 | Full |
-| 1.28.3 | glibc | x86_64 | Full |
-| 1.28.3 | musl | aarch64 | Full |
-| 1.28.3 | musl | x86_64 | Full |
-| 1.28.3 | unlisted | unlisted | Source Only |
-| 1.30.4 | glibc | aarch64 | Full |
-| 1.30.4 | glibc | x86_64 | Full |
-| 1.30.4 | musl | aarch64 | Full |
-| 1.30.4 | musl | x86_64 | Full |
-| 1.30.5 | glibc | aarch64 | Best-Effort |
-| 1.30.5 | glibc | x86_64 | Best-Effort |
-| 1.30.5 | musl | aarch64 | Best-Effort |
-| 1.30.5 | musl | x86_64 | Best-Effort |
-| 1.30.6 | glibc | aarch64 | Full |
-| 1.30.6 | glibc | x86_64 | Full |
-| 1.30.6 | musl | aarch64 | Full |
-| 1.30.6 | musl | x86_64 | Full |
-| 1.30.7 | glibc | aarch64 | Best-Effort |
-| 1.30.7 | glibc | x86_64 | Best-Effort |
-| 1.30.7 | musl | aarch64 | Best-Effort |
-| 1.30.7 | musl | x86_64 | Best-Effort |
-| 1.31.5 | glibc | aarch64 | Best-Effort |
-| 1.31.5 | glibc | x86_64 | Best-Effort |
-| 1.31.5 | musl | aarch64 | Best-Effort |
-| 1.31.5 | musl | x86_64 | Best-Effort |
-| 1.31.6 | glibc | aarch64 | Best-Effort |
-| 1.31.6 | glibc | x86_64 | Best-Effort |
-| 1.31.6 | musl | aarch64 | Best-Effort |
-| 1.31.6 | musl | x86_64 | Best-Effort |
-| 1.31.7 | glibc | aarch64 | Best-Effort |
-| 1.31.7 | glibc | x86_64 | Best-Effort |
-| 1.31.7 | musl | aarch64 | Best-Effort |
-| 1.31.7 | musl | x86_64 | Best-Effort |
-| 1.31.8 | glibc | aarch64 | Full |
-| 1.31.8 | glibc | x86_64 | Full |
-| 1.31.8 | musl | aarch64 | Full |
-| 1.31.8 | musl | x86_64 | Full |
-| 1.31.9 | glibc | aarch64 | Best-Effort |
-| 1.31.9 | glibc | x86_64 | Best-Effort |
-| 1.31.9 | musl | aarch64 | Best-Effort |
-| 1.31.9 | musl | x86_64 | Best-Effort |
+| 1.24.0 | glibc | aarch64 | Supported |
+| 1.24.0 | glibc | x86_64 | Supported |
+| 1.24.0 | musl | aarch64 | Supported |
+| 1.24.0 | musl | x86_64 | Supported |
+| 1.26.3 | glibc | aarch64 | Supported |
+| 1.26.3 | glibc | x86_64 | Supported |
+| 1.26.3 | musl | aarch64 | Supported |
+| 1.26.3 | musl | x86_64 | Supported |
+| 1.28.3 | glibc | aarch64 | Supported |
+| 1.28.3 | glibc | x86_64 | Supported |
+| 1.28.3 | musl | aarch64 | Supported |
+| 1.28.3 | musl | x86_64 | Supported |
+| 1.30.7 | glibc | aarch64 | Supported |
+| 1.30.7 | glibc | x86_64 | Supported |
+| 1.30.7 | musl | aarch64 | Supported |
+| 1.30.7 | musl | x86_64 | Supported |
+| 1.31.9 | glibc | aarch64 | Supported |
+| 1.31.9 | glibc | x86_64 | Supported |
+| 1.31.9 | musl | aarch64 | Supported |
+| 1.31.9 | musl | x86_64 | Supported |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -764,14 +737,14 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | supported | verified |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | supported | verified |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | supported | pending |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | supported | pending |
 | 1.28.3 | stable | debian12 | glibc | arm64 | supported | pending |
 | 1.28.3 | stable | debian12 | glibc | amd64 | supported | pending |
 | 1.26.3 | stable | debian12 | glibc | arm64 | supported | pending |
 | 1.26.3 | stable | debian12 | glibc | amd64 | supported | pending |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | supported | verified |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | supported | verified |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | supported | pending |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | supported | pending |
 | 1.24.0 | stable | debian12 | glibc | arm64 | supported | pending |
 | 1.24.0 | stable | debian12 | glibc | amd64 | supported | pending |
 
@@ -788,14 +761,14 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
-| 1.31.9 | mainline | linux | glibc | arm64 | best-effort | pending |
-| 1.31.9 | mainline | linux | musl | arm64 | best-effort | pending |
-| 1.31.9 | mainline | linux | glibc | amd64 | best-effort | pending |
-| 1.31.9 | mainline | linux | musl | amd64 | best-effort | pending |
-| 1.30.7 | stable | linux | glibc | arm64 | best-effort | pending |
-| 1.30.7 | stable | linux | musl | arm64 | best-effort | pending |
-| 1.30.7 | stable | linux | glibc | amd64 | best-effort | pending |
-| 1.30.7 | stable | linux | musl | amd64 | best-effort | pending |
+| 1.31.9 | mainline | linux | glibc | arm64 | supported | pending |
+| 1.31.9 | mainline | linux | musl | arm64 | supported | pending |
+| 1.31.9 | mainline | linux | glibc | amd64 | supported | pending |
+| 1.31.9 | mainline | linux | musl | amd64 | supported | pending |
+| 1.30.7 | stable | linux | glibc | arm64 | supported | pending |
+| 1.30.7 | stable | linux | musl | arm64 | supported | pending |
+| 1.30.7 | stable | linux | glibc | amd64 | supported | pending |
+| 1.30.7 | stable | linux | musl | amd64 | supported | pending |
 | 1.28.3 | stable | linux | glibc | arm64 | supported | pending |
 | 1.28.3 | stable | linux | musl | arm64 | supported | pending |
 | 1.28.3 | stable | linux | glibc | amd64 | supported | pending |

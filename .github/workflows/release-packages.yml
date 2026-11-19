@@ -112,7 +112,7 @@ permissions: {}
 # release-packages.yml is the canonical release package workflow and official release path.
 
 env:
-  RELEASE_VERSION: "0.9.3"
+  RELEASE_VERSION: "0.9.4"
   RUST_TOOLCHAIN: 1.98.1
   FUZZ_TOOLCHAIN: nightly-2026-09-21
   RUST_FEATURES: streaming,prune_noise_regions

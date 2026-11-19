@@ -3,6 +3,9 @@
 > v0.9.3 was published on 2026-11-02. Use release-tag downloads.
 > v0.9.2 was the previous release (2026-10-08).
 
+The project has not published v0.9.4 yet. This example uses v0.9.3 assets;
+v0.9.4 assets become available only after publication and maintainer approval.
+
 This is the APT package repository for `nginx-module-markdown-for-agents`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal
 clients.

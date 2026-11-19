@@ -12,6 +12,8 @@
 > v0.9.2 仍是 v1.0 前最后一次计划内的破坏性版本。
 > 安装包可通过 release 标签下载。
 
+> v0.9.4 是兼容性发布候选版本，尚未发布；最新公开稳定版本仍为 v0.9.3。NGINX 兼容目标须由候选工作流生成构建、加载和请求证据。维护者批准候选 SHA 并正式发布后，才会提供 v0.9.4 资产。请见 [0.9.4 候选说明](docs/releases/0.9.4-release-notes.md)。
+
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
 表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
 客户端仍然收到原始 HTML。
@@ -204,16 +206,16 @@ curl -sS -D - -o /dev/null \
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
-| 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
-| 1.30.7 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | verified | Yes |
-| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | supported | verified | Yes |
+| 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
+| 1.30.7 | stable | linux | musl | amd64 | dynamic-module | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.28.3 | stable | ubuntu-26.04 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |
@@ -237,8 +239,8 @@ curl -sS -D - -o /dev/null \
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | pending | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | pending | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | verified | Yes |
-| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | supported | verified | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | pending | Yes |
+| 1.24.0 | stable | ubuntu-24.04 | glibc | amd64 | deb-package | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | musl | arm64 | dynamic-module | supported | pending | Yes |
 | 1.24.0 | stable | linux | glibc | amd64 | dynamic-module | supported | pending | Yes |

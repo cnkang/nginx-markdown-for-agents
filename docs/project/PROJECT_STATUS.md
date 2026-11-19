@@ -40,6 +40,17 @@ See the
 [0.9.3 release notes](../releases/0.9.3-release-notes.md) and the
 [compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
 
+### Current Release Line 0.9.4
+
+**Status:** Release candidate, pending publication. v0.9.3 is the latest
+published version (2026-11-02). The 0.9.4 candidate prepares matching
+module artifacts for nginx.org 1.30.7 and 1.31.9 and the Ubuntu revisions in
+[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1). Compatibility
+evidence remains pending until candidate workflow records verify the exact
+builds, loads, and Markdown requests. The project will provide v0.9.4 assets
+only after publication and maintainer approval of the exact candidate SHA. See
+[0.9.4 candidate notes](../releases/0.9.4-release-notes.md).
+
 ### Current Release Line 0.9.2
 
 **Status:** Stable release, published 2026-10-08. 0.9.1 was the previous
@@ -380,9 +391,9 @@ See `examples/docker/` for Docker build examples.
 
 | Tier | Count |
 |------|-------|
-| supported | 32 |
+| supported | 40 |
 | experimental | 1 |
-| best-effort | 10 |
+| best-effort | 2 |
 
 ### Release-Blocking Entries
 
@@ -400,6 +411,14 @@ See `examples/docker/` for Docker build examples.
 | 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.28.3 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.7 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.7 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.7 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.7 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.9 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.9 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.9 linux musl arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.9 linux musl amd64 dynamic-module | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
 | 1.24.0 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
@@ -460,6 +479,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.4 | 2026-11-20 | Codex | Prepared an unpublished compatibility candidate; evidence remains pending |
 | 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state for 2026-11-02 |
 | 0.9.3 | 2026-10-31 | Codex | Made the pending publication status explicit |
 | 0.9.2 | 2026-10-08 | Hermes | Unified the release date to 2026-10-08 and the published release status, and refreshed the support-matrix counts |
