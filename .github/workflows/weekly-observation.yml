@@ -215,10 +215,25 @@ jobs:
         shell: bash
 
       - name: Generate candidate-bound soak manifest
+        id: soak-manifest
         run: |
+          set -euo pipefail
+          release_version="$(python3 - <<'PY'
+          import tomllib
+
+          with open("components/rust-converter/Cargo.toml", "rb") as handle:
+              version = tomllib.load(handle)["package"]["version"]
+          print(version)
+          PY
+          )"
+          if [[ ! "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: invalid current release version: ${release_version}" >&2
+            exit 1
+          fi
+          echo "version=${release_version}" >> "${GITHUB_OUTPUT}"
           python3 tools/release/gates/generate_soak_scenario_manifest.py \
             --candidate-sha "$(git rev-parse HEAD)" \
-            --version 0.9.2
+            --version "${release_version}"
         shell: bash
 
       - name: Probe module loadability
@@ -254,8 +269,8 @@ jobs:
         with:
           name: weekly-soak
           path: |
-            artifacts/release/0.9.2/short-soak-scenario-manifest.json
-            artifacts/release/0.9.2/soak-qualification-record.json
+            artifacts/release/${{ steps.soak-manifest.outputs.version }}/short-soak-scenario-manifest.json
+            artifacts/release/${{ steps.soak-manifest.outputs.version }}/soak-qualification-record.json
             build/soak-runtime
           if-no-files-found: warn
           retention-days: 30
