@@ -50,7 +50,7 @@ Build or reuse a module-enabled NGINX runtime and validate Markdown conversion
 through a real HTTPS proxy chain backed by a local TLS test server.
 
 Environment variables:
-  NGINX_VERSION       Default: 1.28.2
+  NGINX_VERSION       Default: 1.28.3
   PORT                Default: 18089
   BACKEND_PORT        Default: 19089
   NGINX_BIN           Optional module-enabled nginx binary to reuse instead of rebuilding
