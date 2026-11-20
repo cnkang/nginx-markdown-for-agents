@@ -15,6 +15,7 @@
 # Environment:
 #   MODULE_SO       module to package (default: build/ngx_http_markdown_filter_module.so)
 #   IMAGE_REF       runtime image tag to build and load (default: markdown-smoke:local)
+#   NGINX_VERSION   Expected base image version (default: read from its tag)
 #   NGINX_BASE_IMAGE NGINX base image pinned by digest
 #
 # Exit codes:
@@ -32,6 +33,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLUSTER="${CLUSTER:-markdown-helm-smoke}"
 IMAGE_REF="${IMAGE_REF:-markdown-smoke:local}"
 NGINX_BASE_IMAGE="${NGINX_BASE_IMAGE:-nginx:1.30.4-alpine3.24@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c}"
+NGINX_VERSION="${NGINX_VERSION:-${NGINX_BASE_IMAGE#nginx:}}"
+NGINX_VERSION="${NGINX_VERSION%%-alpine*}"
 NGINX_BASE_DIGEST="${NGINX_BASE_IMAGE##*@}"
 MODULE_SO="${MODULE_SO:-${REPO_ROOT}/build/ngx_http_markdown_filter_module.so}"
 MODULE_PATH_IN_IMAGE="/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
@@ -128,8 +131,9 @@ LOCK_CLUSTER="${CLUSTER}"
 source "${REPO_ROOT}/tools/lib/cluster_lock.sh"
 acquire_cluster_lock
 
-if ! [[ "${NGINX_BASE_IMAGE}" =~ ^nginx:1[.]30[.]4-alpine3[.]24@sha256:[0-9a-f]{64}$ ]]; then
-    echo "ERROR: NGINX_BASE_IMAGE must be nginx:1.30.4-alpine3.24 pinned by sha256 digest" >&2
+if ! [[ "${NGINX_BASE_IMAGE}" =~ ^nginx:([0-9]+[.][0-9]+[.][0-9]+)-alpine3[.]24@sha256:[0-9a-f]{64}$ ]] ||
+    [[ "${BASH_REMATCH[1]:-}" != "${NGINX_VERSION}" ]]; then
+    echo "ERROR: NGINX_BASE_IMAGE must be nginx:${NGINX_VERSION}-alpine3.24 pinned by sha256 digest" >&2
     exit 1
 fi
 

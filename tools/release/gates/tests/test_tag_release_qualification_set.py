@@ -340,13 +340,14 @@ def test_rc_evidence_records_digest_pinned_execution_inputs() -> None:
     job = jobs["real-nginx-e2e"]
     assert job["runs-on"] == "ubuntu-24.04"
     environment = yaml.safe_load(workflow)["env"]
-    assert environment["NGINX_VERSION"] == "1.30.7"
+    nginx_version = environment["NGINX_VERSION"]
+    assert re.fullmatch(r"[0-9]+[.][0-9]+[.][0-9]+", nginx_version)
     # The Alpine release is pinned inside the image references below; a
     # separate variable nobody reads would be dead configuration.
     assert "ALPINE_VERSION" not in environment
     for key, prefix in (
-        ("IMAGE", r"nginx:1\.30\.7-alpine"),
-        ("NGINX_BASE_IMAGE", r"nginx:1\.30\.7-alpine3\.24"),
+        ("IMAGE", rf"nginx:{re.escape(nginx_version)}-alpine"),
+        ("NGINX_BASE_IMAGE", rf"nginx:{re.escape(nginx_version)}-alpine3[.]24"),
         ("RUST_BUILDER_IMAGE", r"rust:1\.98\.1-alpine3\.24"),
     ):
         assert re.fullmatch(prefix + r"@sha256:[0-9a-f]{64}", environment[key])
@@ -448,6 +449,8 @@ def _run_stubbed_helm_cluster_smoke(
     cluster_exists: bool = True,
     namespace_exists: bool = True,
     namespace_create_fails: bool = False,
+    nginx_version: str | None = None,
+    nginx_base_image: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the smoke script against owned command stubs."""
     tools = tmp_path / "bin"
@@ -528,7 +531,12 @@ def _run_stubbed_helm_cluster_smoke(
     }
     if helm_stub.version is not None:
         env["HELM_VERSION"] = helm_stub.version
+    if nginx_version is not None:
+        env["NGINX_VERSION"] = nginx_version
+    if nginx_base_image is not None:
+        env["NGINX_BASE_IMAGE"] = nginx_base_image
 
+    calls.touch()
     result = subprocess.run(
         ["bash", str(REPO_ROOT / "tools/e2e/verify_helm_cluster_smoke_e2e.sh")],
         env=env,
@@ -540,6 +548,46 @@ def _run_stubbed_helm_cluster_smoke(
 
     command_log = calls.read_text(encoding="utf-8")
     return result, command_log
+
+
+def test_helm_cluster_smoke_binds_base_image_to_nginx_version(
+    tmp_path: Path,
+) -> None:
+    digest = "a" * 64
+    accepted_image = f"nginx:1.30.7-alpine3.24@sha256:{digest}"
+    accepted, accepted_calls = _run_stubbed_helm_cluster_smoke(
+        tmp_path / "matching",
+        "",
+        nginx_version="1.30.7",
+        nginx_base_image=accepted_image,
+    )
+
+    # Stubbed kubectl fails the later rollout check; reaching docker proves
+    # the candidate image passed the script's input validation.
+    assert accepted.returncode != 0
+    assert "docker build -q" in accepted_calls
+    assert "NGINX_BASE_IMAGE must be" not in accepted.stderr
+
+    derived, derived_calls = _run_stubbed_helm_cluster_smoke(
+        tmp_path / "derived",
+        "",
+        nginx_base_image=accepted_image,
+    )
+
+    assert derived.returncode != 0
+    assert "docker build -q" in derived_calls
+    assert "NGINX_BASE_IMAGE must be" not in derived.stderr
+
+    rejected, rejected_calls = _run_stubbed_helm_cluster_smoke(
+        tmp_path / "mismatched",
+        "",
+        nginx_version="1.30.7",
+        nginx_base_image=f"nginx:1.30.4-alpine3.24@sha256:{digest}",
+    )
+
+    assert rejected.returncode != 0
+    assert "NGINX_BASE_IMAGE must be nginx:1.30.7-alpine3.24" in rejected.stderr
+    assert "docker build" not in rejected_calls
 
 
 def test_helm_cluster_smoke_leaves_a_preexisting_release_untouched(
