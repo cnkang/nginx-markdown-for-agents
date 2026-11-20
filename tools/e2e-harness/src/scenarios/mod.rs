@@ -10,12 +10,15 @@ pub mod auth_cache;
 pub mod brotli_streaming;
 pub mod common;
 pub mod conditional_requests;
+pub mod config_merge;
 pub mod encoding_chain;
 pub mod error_handling;
+pub mod large_response;
 pub mod metrics_endpoint;
 pub mod representation_validator;
 pub mod smoke;
 pub mod status_codes;
+pub mod streaming_failure_cache;
 
 use crate::cli::Profile;
 use crate::runtime::RuntimeMode;
@@ -38,8 +41,8 @@ pub struct ScenarioContext {
     pub profile: Profile,
     /// Per-scenario timeout.
     pub timeout: Duration,
-    /// Directory for retained scenario diagnostics.
-    pub artifact_dir: std::path::PathBuf,
+    /// Root directory for this invocation.
+    pub run_dir: std::path::PathBuf,
 }
 
 impl ScenarioContext {
@@ -53,7 +56,7 @@ impl ScenarioContext {
     /// * `upstream_port` - Optional explicit upstream port.
     /// * `profile` - Execution profile.
     /// * `timeout` - Per-scenario timeout.
-    /// * `artifact_dir` - Directory for scenario diagnostics.
+    /// * `run_dir` - Root directory for this invocation.
     ///
     /// # Returns
     ///
@@ -66,7 +69,7 @@ impl ScenarioContext {
         upstream_port: Option<u16>,
         profile: Profile,
         timeout: Duration,
-        artifact_dir: std::path::PathBuf,
+        run_dir: std::path::PathBuf,
     ) -> Result<Self> {
         let port = port.unwrap_or_else(|| allocate_ephemeral_port_or_fallback(30080));
         let upstream_port =
@@ -78,8 +81,15 @@ impl ScenarioContext {
             upstream_port,
             profile,
             timeout,
-            artifact_dir,
+            run_dir,
         })
+    }
+
+    pub fn artifact_dir(&self) -> std::path::PathBuf {
+        self.run_dir
+            .join("artifacts")
+            .join("scenarios")
+            .join(&self.name)
     }
 }
 
@@ -222,10 +232,28 @@ static SCENARIOS: &[ScenarioEntry] = &[
         name: "error-handling",
         run: error_handling::run,
     },
+    ScenarioEntry {
+        name: config_merge::NAME,
+        run: config_merge::run,
+    },
+    ScenarioEntry {
+        name: large_response::NAME,
+        run: large_response::run,
+    },
+    ScenarioEntry {
+        name: streaming_failure_cache::NAME,
+        run: streaming_failure_cache::run,
+    },
 ];
 
 /// Build scenario-specific upstream routes.
 pub fn fixture_spec(name: &str, listen_port: u16) -> crate::fixtures::FixtureSpec {
+    if name == streaming_failure_cache::NAME {
+        return streaming_failure_cache::fixture_spec(listen_port);
+    }
+    if name == config_merge::NAME {
+        return config_merge::fixture_spec(listen_port);
+    }
     if name == "brotli-streaming" {
         return brotli_streaming::fixture_spec(listen_port);
     }

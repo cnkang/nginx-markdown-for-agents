@@ -26,6 +26,8 @@ approval of the exact candidate SHA.
   checksum.
 - The Rust E2E harness now runs all eight error-handling cases. The existing
   shell command delegates to the harness.
+- The Rust E2E harness also checks configuration merge, large responses,
+  and streaming failure and cache behavior.
 - The module benchmark gate now evaluates thresholds in Rust and keeps the
   existing Python command and verdict report.
 

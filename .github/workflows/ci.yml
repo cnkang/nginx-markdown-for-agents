@@ -807,6 +807,16 @@ jobs:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_error_handling_e2e.sh
 
+      - name: Run migrated configuration and streaming E2E scenarios
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: |
+          cargo build --locked --manifest-path tools/e2e-harness/Cargo.toml
+          harness=tools/e2e-harness/target/debug/e2e-harness
+          "${harness}" scenario config-merge
+          "${harness}" scenario large-response
+          "${harness}" scenario streaming-failure-cache
+
       - name: Run native SSI and filter-ordering qualification
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}

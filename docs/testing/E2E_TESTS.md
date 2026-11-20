@@ -50,6 +50,9 @@ owns their fixtures, requests, and assertions. They run via
 | `auth-cache` | `tools/e2e-harness/src/scenarios/auth_cache.rs` | `tools/e2e/verify_auth_cache_e2e.sh` |
 | `status-codes` | `tools/e2e-harness/src/scenarios/status_codes.rs` | `tools/e2e/verify_status_codes_e2e.sh` |
 | `error-handling` | `tools/e2e-harness/src/scenarios/error_handling.rs` | `tools/e2e/verify_error_handling_e2e.sh` |
+| `config-merge` | `tools/e2e-harness/src/scenarios/config_merge.rs` | `tools/e2e/verify_config_merge_e2e.sh` |
+| `large-response` | `tools/e2e-harness/src/scenarios/large_response.rs` | `tools/e2e/verify_large_markdown_response_e2e.sh` |
+| `streaming-failure-cache` | `tools/e2e-harness/src/scenarios/streaming_failure_cache.rs` | `tools/e2e/verify_streaming_failure_cache_e2e.sh` |
 
 Run the migrated suite directly:
 
@@ -68,7 +71,10 @@ Without `NGINX_BIN`, the harness builds the requested NGINX version through
 the native bootstrap. The harness stores response headers and bodies under
 `artifacts/scenarios/error-handling/raw/` on failure or with `--keep-artifacts`.
 
-### Non-migrated scenarios (retained shell paths)
+### Shell scenarios and migration references
+
+The canonical suite, the Rust suite, and the runtime CI job run the Rust
+implementations. The original scripts remain available for comparison.
 
 | Script | Purpose |
 |--------|---------|

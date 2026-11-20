@@ -96,7 +96,7 @@ pub fn get_with_header_pairs(url: &str, headers: &[(&str, &str)]) -> Result<Http
 }
 
 /// Convert a `reqwest::blocking::Response` into our `HttpResponse`.
-fn to_http_response(resp: reqwest::blocking::Response) -> Result<HttpResponse> {
+pub fn to_http_response(resp: reqwest::blocking::Response) -> Result<HttpResponse> {
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
     let body = resp.text()?;
@@ -105,4 +105,25 @@ fn to_http_response(resp: reqwest::blocking::Response) -> Result<HttpResponse> {
         headers,
         body,
     })
+}
+
+pub fn get_with_timeout(
+    url: &str,
+    headers: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<HttpResponse> {
+    to_http_response(send(reqwest::Method::GET, url, headers, timeout)?)
+}
+
+pub fn send(
+    method: reqwest::Method,
+    url: &str,
+    headers: &[(&str, &str)],
+    timeout: Duration,
+) -> reqwest::Result<reqwest::blocking::Response> {
+    let mut req = shared_client().request(method, url).timeout(timeout);
+    for (key, value) in headers {
+        req = req.header(*key, *value);
+    }
+    req.send()
 }

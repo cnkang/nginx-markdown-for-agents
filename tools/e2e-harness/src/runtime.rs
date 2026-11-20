@@ -120,8 +120,17 @@ impl ScenarioRuntime {
 
         // Write a minimal nginx.conf stub; scenarios may override this.
         let conf_path = runtime_dir.join("nginx.conf");
-        let load_module = if scenario_name == "error-handling" {
-            prepare_error_handling_module(&nginx_bin, &runtime_dir)?
+        if scenario_name == crate::scenarios::large_response::NAME {
+            crate::scenarios::large_response::prepare_fixture(&runtime_dir)?;
+        }
+        let load_module = if matches!(
+            scenario_name,
+            "error-handling"
+                | crate::scenarios::config_merge::NAME
+                | crate::scenarios::large_response::NAME
+                | crate::scenarios::streaming_failure_cache::NAME
+        ) {
+            prepare_native_module(&nginx_bin, &runtime_dir)?
         } else {
             String::new()
         };
@@ -219,6 +228,15 @@ fn write_nginx_conf_stub(
             port,
             upstream_port,
         ),
+        crate::scenarios::config_merge::NAME => {
+            crate::scenarios::config_merge::nginx_conf(load_module, port, upstream_port)
+        }
+        crate::scenarios::large_response::NAME => {
+            crate::scenarios::large_response::nginx_conf(load_module, port)
+        }
+        crate::scenarios::streaming_failure_cache::NAME => {
+            crate::scenarios::streaming_failure_cache::nginx_conf(load_module, port, upstream_port)
+        }
         "metrics-endpoint" => metrics_nginx_conf(
             &error_log,
             &access_log,
@@ -813,7 +831,7 @@ fn find_module(nginx_bin: &Path) -> Option<PathBuf> {
     lib.is_file().then_some(lib)
 }
 
-fn prepare_error_handling_module(nginx_bin: &Path, runtime_dir: &Path) -> Result<String> {
+fn prepare_native_module(nginx_bin: &Path, runtime_dir: &Path) -> Result<String> {
     // Keep the compatibility wrapper's MODULE_SO and install-prefix lookup.
     let helper =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/nginx_markdown_native_build.sh");
@@ -827,10 +845,10 @@ fn prepare_error_handling_module(nginx_bin: &Path, runtime_dir: &Path) -> Result
         .arg(nginx_bin)
         .arg(runtime_dir)
         .output()
-        .context("preparing the error-handling NGINX module")?;
+        .context("preparing the NGINX module")?;
     anyhow::ensure!(
         output.status.success(),
-        "error-handling runtime setup failed: {}",
+        "NGINX runtime setup failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(String::from_utf8(output.stdout)?)
@@ -854,6 +872,9 @@ mod tests {
             "accept-negotiation",
             "status-codes",
             "error-handling",
+            crate::scenarios::config_merge::NAME,
+            crate::scenarios::large_response::NAME,
+            crate::scenarios::streaming_failure_cache::NAME,
         ] {
             let temp = tempfile::tempdir()?;
             let config = temp.path().join("nginx.conf");
