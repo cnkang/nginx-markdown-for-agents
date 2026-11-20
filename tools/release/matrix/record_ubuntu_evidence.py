@@ -80,6 +80,20 @@ def _check_agreement(build: dict[str, Any], ledger: dict[str, Any]) -> None:
         raise ComposeError("ledger module digest does not match the built module")
 
 
+def _require_canonical_features(
+    record: dict[str, Any], features: list[str]
+) -> None:
+    """Reject a feature list that differs from the frozen release manifest."""
+    recorded = record.get("features")
+    if (
+        not isinstance(recorded, list)
+        or not all(isinstance(feature, str) for feature in recorded)
+        or len(recorded) != len(features)
+        or set(recorded) != set(features)
+    ):
+        raise ComposeError("built feature set does not match the release manifest")
+
+
 def _reject_reported_build_failure(ledger: dict[str, Any]) -> None:
     """Refuse a ledger that reports a failed build.
 
@@ -129,6 +143,15 @@ def compose(
     build = _read(build_path, "Ubuntu-native build information")
     ledger = _read(ledger_path, "Ubuntu-native verification ledger")
     _check_agreement(build, ledger)
+    features, feature_digest, abi_version = canonical_build_identity()
+    _require_canonical_features(build, features)
+    if any(
+        "abi_version" in source and source["abi_version"] != abi_version
+        for source in (build, ledger)
+    ):
+        raise ComposeError(
+            "build or ledger ABI version does not match the frozen FFI ABI"
+        )
     tests, counts = _test_ledger(ledger, str(build.get("module_sha256", "")))
 
     record = dict(build)
@@ -137,15 +160,7 @@ def compose(
     record["pass"] = counts["PASS"]
     record["fail"] = counts["FAIL"]
     record["skip"] = counts["SKIP"]
-    features, feature_digest, abi_version = canonical_build_identity()
-    recorded_features = record.get("features")
-    if (
-        not isinstance(recorded_features, list)
-        or not all(isinstance(feature, str) for feature in recorded_features)
-        or len(recorded_features) != len(features)
-        or set(recorded_features) != set(features)
-    ):
-        raise ComposeError("built feature set does not match the release manifest")
+    _require_canonical_features(record, features)
     record["feature_manifest_digest"] = feature_digest
     record["abi_version"] = abi_version
     record["target_identity"] = (
