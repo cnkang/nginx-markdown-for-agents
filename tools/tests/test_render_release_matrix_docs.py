@@ -285,6 +285,9 @@ def test_generate_compatibility_matrix():
     assert "Workflow" in result
     assert "### Tier Definitions" in result
     assert "**supported**" in result
+    assert "### Verification State" in result
+    assert "**pending**" in result
+    assert "blocks release until CI passes" in result
 
 
 def test_generate_installation_matrix():
