@@ -445,11 +445,12 @@ APT hold and removal outcomes therefore remain conditional, not verified upgrade
 The archive check does not establish module loadability on another revision.
 
 For the v0.9.4 candidate, [USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1)
-lists the initial security-fixed revisions `.20` for Ubuntu 24.04 and `.13`
-for Ubuntu 26.04. The release workflow's default Ubuntu APT installs resolved
-newer arm64 revisions `.21` and `.14`. Each candidate row now pins the exact
-revision for its architecture. Ubuntu APT verifies official archive signatures
-by default, as described in its
+initially listed security-fixed revisions `1.24.0-2ubuntu7.20` for Ubuntu
+24.04 and `1.28.3-2ubuntu1.13` for Ubuntu 26.04. Subsequent APT checks found
+newer revisions `.21` and `.14`. Ubuntu later listed those candidate revisions
+in [USN-9182-1](https://ubuntu.com/security/notices/USN-9182-1). Each candidate
+row now pins the exact revision for its architecture. Ubuntu APT
+verifies official archive signatures by default, as described in its
 [archive integrity policy](https://documentation.ubuntu.com/security/software-integrity/archive-verification/).
 
 | Suite | Candidate package revision (amd64 / arm64) | Module evidence | ABI provide |
