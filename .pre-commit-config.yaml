@@ -50,7 +50,7 @@ repos:
         entry: python3 tools/ci/sync_dependency_surfaces.py --check
         language: system
         pass_filenames: false
-        files: ^(THIRD-PARTY-NOTICES|components/rust-converter/Cargo\.(toml|lock)|components/rust-converter/fuzz/Cargo\.lock|tools/corpus/test-corpus-conversion/Cargo\.lock|tools/e2e-harness/Cargo\.lock)$
+        files: ^(THIRD-PARTY-NOTICES|components/rust-converter/Cargo\.(toml|lock)|components/rust-converter/fuzz/Cargo\.lock|tools/corpus/test-corpus-conversion/Cargo\.lock|tools/e2e-harness/Cargo\.lock|tools/perf/threshold-cli/Cargo\.(toml|lock))$
   # FFI header synchronization
   - repo: local
     hooks:

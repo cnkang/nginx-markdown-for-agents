@@ -17,12 +17,15 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
+from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.path_validation import validate_read_path
+from lib.executable_validation import resolve_approved_executable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -559,18 +562,6 @@ DEFAULT_MODULE_LEVEL_THRESHOLDS = {
     "memory_slope_pct": 20,
 }
 
-# Direction map for module-level metrics.  Positive deviation is a regression
-# for latency/memory; fallback_rate is absolute (not percentage-of-baseline).
-_MODULE_LEVEL_DIRECTION = {
-    "p50_latency_small_pct": "lower_is_better",
-    "p95_latency_small_pct": "lower_is_better",
-    "p50_latency_large_pct": "lower_is_better",
-    "ttfb_streaming_large_pct": "lower_is_better",
-    "fallback_rate_abs": "absolute_cap",
-    "memory_slope_pct": "lower_is_better",
-}
-
-
 def get_module_level_thresholds(thresholds_cfg):
     """
     Retrieve the module-level threshold definitions from the config.
@@ -628,118 +619,81 @@ def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has
                 - "current" (float|None): Current value (None for absolute caps).
             - "results" (list[dict]): All evaluated metrics with pass/breach status.
     """
-    module_thresholds = get_module_level_thresholds(thresholds_cfg)
-    breaches = []
-    results = []
-    missing_evidence = []
+    thresholds = get_module_level_thresholds(thresholds_cfg)
+    request = {
+        "current": {name: _wire_measurement(current_metrics.get(name)) for name in thresholds},
+        "baseline": _wire_baseline(baseline_metrics, thresholds) if has_baseline else {},
+        "thresholds": {name: _wire_threshold(value) for name, value in thresholds.items()},
+        "has_baseline": bool(has_baseline),
+    }
+    result = _run_module_threshold_cli(request)
+    for entry in result["results"] + result["breaches"]:
+        for key in ("threshold", "actual"):
+            if isinstance(entry.get(key), str):
+                entry[key] = float(entry[key])
+    return result
 
-    for metric_name, threshold_value in sorted(module_thresholds.items()):
-        direction = _MODULE_LEVEL_DIRECTION.get(metric_name, "lower_is_better")
-        entry = _evaluate_single_module_metric(
-            metric_name, threshold_value, direction,
-            current_metrics, baseline_metrics, has_baseline=has_baseline
+
+def _wire_measurement(value):
+    if value is None or _is_finite_number(value):
+        return value
+    return {"invalid": repr(value)}
+
+
+def _wire_threshold(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    return value
+
+
+def _wire_baseline(metrics, thresholds):
+    return {
+        name: value for name, value in metrics.items()
+        if name in thresholds and name != "fallback_rate_abs" and _is_finite_number(value)
+    }
+
+
+@cache
+def _module_threshold_binary():
+    """Build the checkout's locked evaluator and use Cargo's executable path."""
+    manifest = Path(__file__).resolve().parent / "threshold-cli" / "Cargo.toml"
+    cargo = resolve_approved_executable("cargo", cwd=REPO_ROOT)
+    rustc = resolve_approved_executable("rustc", cwd=REPO_ROOT)
+    if cargo is None or rustc is None:
+        raise RuntimeError("Cargo and rustc are required to build the module threshold evaluator")
+    command = [cargo, "build", "--locked", "--manifest-path", str(manifest),
+               "--message-format=json-render-diagnostics"]
+    # A direct Cargo executable can otherwise invoke the default Rustup
+    # compiler instead of the compiler selected for this checkout.
+    output = _run_threshold_command(command, env={**os.environ, "RUSTC": rustc})
+    for line in output.splitlines():
+        record = json.loads(line)
+        if record.get("reason") == "compiler-artifact" and record.get("executable"):
+            return record["executable"]
+    raise RuntimeError("Cargo did not report a perf-threshold executable")
+
+
+def _run_threshold_command(command, *, payload=None, env=None):
+    try:
+        process = subprocess.run(
+            command, input=payload, capture_output=True, text=True,
+            cwd=REPO_ROOT, env=env, check=True,
         )
-        results.append(entry)
-        if entry.get("status") == "breach":
-            breaches.append(entry)
-        elif entry.get("status") == "missing_evidence":
-            missing_evidence.append(entry)
-
-    if missing_evidence:
-        verdict = "MISSING_EVIDENCE"
-    elif breaches:
-        verdict = "NO_GO"
-    else:
-        verdict = "GO"
-
-    return {
-        "verdict": verdict,
-        "breaches": breaches,
-        "results": results,
-    }
+    except OSError as exc:
+        raise RuntimeError(f"Could not start the module threshold evaluator: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"Module threshold evaluator failed (exit {exc.returncode}): {exc.stderr.strip()}"
+        ) from exc
+    return process.stdout
 
 
-def _evaluate_single_module_metric(metric_name, threshold_value, direction,
-                                   current_metrics, baseline_metrics, has_baseline=True):
-    """
-    Evaluate a single module-level metric against its threshold.
+def _run_module_threshold_cli(request):
+    payload = json.dumps(request, allow_nan=False)
+    output = _run_threshold_command([_module_threshold_binary()], payload=payload)
+    return json.loads(output)
 
-    Parameters:
-        metric_name (str): The metric identifier.
-        threshold_value (float): The configured threshold (pct or absolute).
-        direction (str): "absolute_cap" or "lower_is_better".
-        current_metrics (dict): Current metric values.
-        baseline_metrics (dict): Baseline metric values.
-        has_baseline (bool): Whether a valid baseline report is available.
 
-    Returns:
-        dict: Result entry with status ("pass", "breach", "missing_evidence", or "skipped").
-    """
-    cur_val = current_metrics.get(metric_name)
-    if cur_val is None:
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": f"critical metric '{metric_name}' not present in current measurements",
-        }
-
-    # Non-numeric metric values (e.g. a malformed string in a JSON report)
-    # must be rejected before any comparison or deviation math, which
-    # would otherwise raise TypeError and abort the whole gate.  Booleans
-    # are int subclasses in Python, so JSON true/false must be rejected
-    # explicitly before the int/float check.
-    if not _is_finite_number(cur_val):
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": f"critical metric '{metric_name}' not a finite number: {cur_val!r}",
-        }
-
-    if direction == "absolute_cap":
-        passed = cur_val <= threshold_value
-        return {
-            "metric": metric_name,
-            "status": "pass" if passed else "breach",
-            "threshold": threshold_value,
-            "actual": cur_val,
-            "baseline": None,
-            "current": cur_val,
-        }
-
-    # percentage deviation
-    if not has_baseline:
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": "cannot evaluate percentage threshold: missing baseline",
-            "threshold": threshold_value,
-            "actual": None,
-            "baseline": None,
-            "current": cur_val,
-        }
-
-    base_val = baseline_metrics.get(metric_name)
-    if not _is_finite_number(base_val):
-        return {
-            "metric": metric_name,
-            "status": "missing_evidence",
-            "reason": "baseline metric is missing or not a valid number",
-            "threshold": threshold_value,
-            "actual": None,
-            "baseline": None,
-            "current": cur_val,
-        }
-
-    deviation = compute_deviation(cur_val, base_val)
-    passed = deviation <= threshold_value
-    return {
-        "metric": metric_name,
-        "status": "pass" if passed else "breach",
-        "threshold": threshold_value,
-        "actual": round(deviation, 4),
-        "baseline": base_val,
-        "current": cur_val,
-    }
 
 
 if __name__ == "__main__":

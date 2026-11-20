@@ -814,6 +814,7 @@
         "tools/e2e/verify_conditional_requests_e2e.sh",
         "tools/e2e/verify_metrics_endpoint_e2e.sh",
         "tools/e2e/verify_status_codes_e2e.sh",
+        "tools/e2e/verify_error_handling_e2e.sh",
         "tools/e2e/verify_auth_cache_e2e.sh",
         "tools/e2e/verify_accept_negotiation_e2e.sh",
         "tools/e2e/verify_examples_nginx_t.sh",

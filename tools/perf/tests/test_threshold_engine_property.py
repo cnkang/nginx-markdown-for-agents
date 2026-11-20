@@ -15,6 +15,7 @@ Run:
 import sys
 from pathlib import Path
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -24,10 +25,16 @@ from hypothesis import strategies as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from threshold_engine import (
+    _module_threshold_binary,
     evaluate_module_level,
     DEFAULT_MODULE_LEVEL_THRESHOLDS,
-    _MODULE_LEVEL_DIRECTION,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def build_module_threshold_cli():
+    """Build before Hypothesis starts timing individual cases."""
+    _module_threshold_binary()
 
 
 # ---------------------------------------------------------------------------
@@ -54,17 +61,9 @@ absolute_cap = st.floats(
     min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False
 )
 
-# Module-level metric names that use pct deviation
-PCT_METRICS = [
-    k for k, v in _MODULE_LEVEL_DIRECTION.items() if v == "lower_is_better"
-]
-
-# Module-level metric names that use absolute cap
-ABS_METRICS = [
-    k for k, v in _MODULE_LEVEL_DIRECTION.items() if v == "absolute_cap"
-]
-
 ALL_METRICS = list(DEFAULT_MODULE_LEVEL_THRESHOLDS.keys())
+ABS_METRICS = ["fallback_rate_abs"]
+PCT_METRICS = [name for name in ALL_METRICS if name not in ABS_METRICS]
 
 
 def _build_within_threshold_metrics(baseline_values, thresholds):
@@ -76,10 +75,9 @@ def _build_within_threshold_metrics(baseline_values, thresholds):
     """
     current = {}
     for metric_name in ALL_METRICS:
-        direction = _MODULE_LEVEL_DIRECTION.get(metric_name, "lower_is_better")
         threshold_val = thresholds.get(metric_name, DEFAULT_MODULE_LEVEL_THRESHOLDS[metric_name])
 
-        if direction == "absolute_cap":
+        if metric_name in ABS_METRICS:
             # Stay below the absolute cap
             current[metric_name] = threshold_val * 0.5
         else:
@@ -97,10 +95,9 @@ def _build_breach_metrics(baseline_values, thresholds, breach_metric):
     """
     current = _build_within_threshold_metrics(baseline_values, thresholds)
 
-    direction = _MODULE_LEVEL_DIRECTION.get(breach_metric, "lower_is_better")
     threshold_val = thresholds.get(breach_metric, DEFAULT_MODULE_LEVEL_THRESHOLDS[breach_metric])
 
-    if direction == "absolute_cap":
+    if breach_metric in ABS_METRICS:
         # Exceed the absolute cap
         current[breach_metric] = threshold_val * 2.0
     else:
@@ -229,9 +226,8 @@ def test_property12_no_go_verdict_multiple_breaches(base_val, breach_metrics):
     # Start with all-within and then breach selected metrics
     current = _build_within_threshold_metrics(baseline, DEFAULT_MODULE_LEVEL_THRESHOLDS)
     for bm in breach_metrics:
-        direction = _MODULE_LEVEL_DIRECTION.get(bm, "lower_is_better")
         threshold_val = DEFAULT_MODULE_LEVEL_THRESHOLDS[bm]
-        if direction == "absolute_cap":
+        if bm in ABS_METRICS:
             current[bm] = threshold_val * 2.0
         else:
             current[bm] = base_val * (1 + threshold_val * 1.5 / 100.0)

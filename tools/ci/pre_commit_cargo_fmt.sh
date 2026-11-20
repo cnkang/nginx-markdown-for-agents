@@ -54,6 +54,7 @@ done < <(git ls-files -z -- '*.rs')
 cargo fmt --manifest-path components/rust-converter/Cargo.toml --all
 cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all
 cargo fmt --manifest-path tools/e2e-harness/Cargo.toml --all
+cargo fmt --manifest-path tools/perf/threshold-cli/Cargo.toml --all
 
 # Convergence check: a crate whose sources cannot be formatted must fail here
 # rather than silently ship unformatted.

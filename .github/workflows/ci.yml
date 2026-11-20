@@ -191,6 +191,8 @@ jobs:
               - 'requirements-dev.txt'
             matrix_release:
               - 'tools/release/matrix/**'
+              - 'tools/perf/threshold_engine.py'
+              - 'tools/perf/threshold-cli/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/**'
               - 'tests/fixtures/**'
@@ -800,6 +802,11 @@ jobs:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_encoding_chain_e2e.sh
 
+      - name: Run error-handling native E2E verification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_error_handling_e2e.sh
+
       - name: Run native SSI and filter-ordering qualification
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
@@ -1093,6 +1100,9 @@ jobs:
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
+
+      - name: Set up Rust toolchain for module threshold tests
+        uses: ./.github/actions/setup-rust
 
       - name: Generate official feature manifest
         run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write

@@ -33,7 +33,9 @@ pub struct BootstrapResult {
 ///
 /// A `BootstrapResult` with the resolved paths.
 pub fn prepare(base_dir: &Path) -> Result<BootstrapResult> {
-    if let Some(result) = try_direct_prepare()? {
+    if std::env::var_os("NGINX_VERSION").is_none()
+        && let Some(result) = try_direct_prepare()?
+    {
         return Ok(result);
     }
     bridge_to_native_build(base_dir)

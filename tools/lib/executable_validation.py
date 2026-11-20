@@ -173,7 +173,7 @@ def _toolchain_from_directory(cwd: Path) -> str | None:
     return None
 
 
-def _active_rustup_toolchain() -> str | None:
+def _active_rustup_toolchain(cwd: Path | None = None) -> str | None:
     """Resolve the active Rustup toolchain name.
 
     Priority follows Rustup's own selection rules:
@@ -193,10 +193,11 @@ def _active_rustup_toolchain() -> str | None:
         # concrete toolchain Rustup would select.
         return _expand_toolchain_name(env_toolchain)
 
-    try:
-        cwd = Path.cwd()
-    except OSError:
-        cwd = None
+    if cwd is None:
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            pass
     if cwd is not None:
         if directory_toolchain := _toolchain_from_directory(cwd):
             return _expand_toolchain_name(directory_toolchain)
@@ -238,7 +239,7 @@ def _expand_toolchain_name(channel: str) -> str:
 
 
 def _resolve_rustup_tool_shim(
-    candidate: Path, resolved: Path, name: str
+    candidate: Path, resolved: Path, name: str, cwd: Path | None
 ) -> Path | None:
     """Return the validated active-toolchain target for a Rustup shim.
 
@@ -266,7 +267,7 @@ def _resolve_rustup_tool_shim(
     rustup_dispatcher = home / _CARGO_DIR_NAME / "bin" / "rustup"
     try:
         return _resolve_active_toolchain_tool(
-            rustup_dispatcher, resolved, rustup_toolchains, name
+            rustup_dispatcher, resolved, rustup_toolchains, name, cwd
         )
     except (OSError, RuntimeError):
         return None
@@ -277,6 +278,7 @@ def _resolve_active_toolchain_tool(
     resolved: Path,
     rustup_toolchains: Path,
     name: str,
+    cwd: Path | None,
 ) -> Path | None:
     """Return the tool binary under the active Rustup toolchain, or None.
 
@@ -295,7 +297,7 @@ def _resolve_active_toolchain_tool(
     if resolved != dispatcher_resolved and not same_file:
         return None
     toolchain_root = rustup_toolchains.resolve(strict=True)
-    active = _active_rustup_toolchain()
+    active = _active_rustup_toolchain(cwd)
     if not active:
         return None
     toolchain = toolchain_root / active
@@ -352,7 +354,7 @@ def resolve_rustup_tool_shim(name: str) -> str | None:
     return str(shim)
 
 
-def resolve_approved_executable(name: str) -> str | None:
+def resolve_approved_executable(name: str, *, cwd: Path | None = None) -> str | None:
     """Resolve an approved CLI to a canonical executable path.
 
     PATH lookup is retained for portability, but the resolved target must be a
@@ -366,7 +368,8 @@ def resolve_approved_executable(name: str) -> str | None:
     ``~/.rustup/toolchains`` roots are user-writable, because the shim is
     additionally constrained to resolve into the *active* toolchain per
     Rustup's own selection rules (see ``_resolve_rustup_tool_shim``).  Every
-    non-shim executable must sit under a trusted system root.
+    non-shim executable must sit under a trusted system root. Pass the child
+    process's working directory when Rustup must honor its toolchain file.
     """
     if name not in _APPROVED_EXECUTABLES:
         raise ValueError(f"executable is not approved: {name!r}")
@@ -394,7 +397,7 @@ def resolve_approved_executable(name: str) -> str | None:
     resolved_is_trusted = _is_under(resolved, trusted_roots)
     rustup_target = None
     if name in _RUSTUP_SHIM_TOOLS:
-        rustup_target = _resolve_rustup_tool_shim(candidate, resolved, name)
+        rustup_target = _resolve_rustup_tool_shim(candidate, resolved, name, cwd)
     if not (
         (candidate_is_trusted and resolved_is_trusted) or alias_ok
     ) and rustup_target is None:

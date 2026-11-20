@@ -120,7 +120,19 @@ impl ScenarioRuntime {
 
         // Write a minimal nginx.conf stub; scenarios may override this.
         let conf_path = runtime_dir.join("nginx.conf");
-        write_nginx_conf_stub(&conf_path, scenario_name, &nginx_bin, port, upstream_port)?;
+        let load_module = if scenario_name == "error-handling" {
+            prepare_error_handling_module(&nginx_bin, &runtime_dir)?
+        } else {
+            String::new()
+        };
+        write_nginx_conf_stub(
+            &conf_path,
+            scenario_name,
+            &nginx_bin,
+            port,
+            upstream_port,
+            &load_module,
+        )?;
 
         let base_url = format!("http://127.0.0.1:{port}");
 
@@ -155,7 +167,7 @@ impl ScenarioRuntime {
 ///
 /// For the module-enabled scenarios (`brotli-streaming`, `encoding-chain`,
 /// `metrics-endpoint`, `conditional-requests`, `auth-cache`,
-/// `accept-negotiation`, `status-codes`, and
+/// `accept-negotiation`, `status-codes`, `error-handling`, and
 /// `representation-validator-e2e`), produces a
 /// module-enabled config with the routes needed by the scenario. For all
 /// other scenarios, writes a minimal proxy stub.
@@ -167,12 +179,14 @@ impl ScenarioRuntime {
 /// * `nginx_bin` - NGINX binary path (used to locate module .so).
 /// * `port` - NGINX listener port.
 /// * `upstream_port` - Upstream fixture port.
+/// * `load_module` - Prepared module directive for the error-handling scenario.
 fn write_nginx_conf_stub(
     path: &Path,
     scenario_name: &str,
     nginx_bin: &Path,
     port: u16,
     upstream_port: u16,
+    load_module: &str,
 ) -> Result<()> {
     let runtime_dir = path
         .parent()
@@ -194,6 +208,14 @@ fn write_nginx_conf_stub(
             &access_log,
             &pid_path,
             nginx_bin,
+            port,
+            upstream_port,
+        ),
+        "error-handling" => crate::scenarios::error_handling::nginx_conf(
+            load_module,
+            &error_log,
+            &access_log,
+            &pid_path,
             port,
             upstream_port,
         ),
@@ -791,6 +813,29 @@ fn find_module(nginx_bin: &Path) -> Option<PathBuf> {
     lib.is_file().then_some(lib)
 }
 
+fn prepare_error_handling_module(nginx_bin: &Path, runtime_dir: &Path) -> Result<String> {
+    // Keep the compatibility wrapper's MODULE_SO and install-prefix lookup.
+    let helper =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/nginx_markdown_native_build.sh");
+    let output = std::process::Command::new("bash")
+        .args([
+            "-c",
+            "source \"$1\" && markdown_prepare_runtime_reuse \"$2\" \"$3\"",
+            "--",
+        ])
+        .arg(helper)
+        .arg(nginx_bin)
+        .arg(runtime_dir)
+        .output()
+        .context("preparing the error-handling NGINX module")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "error-handling runtime setup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -808,6 +853,7 @@ mod tests {
             "auth-cache",
             "accept-negotiation",
             "status-codes",
+            "error-handling",
         ] {
             let temp = tempfile::tempdir()?;
             let config = temp.path().join("nginx.conf");
@@ -817,6 +863,7 @@ mod tests {
                 Path::new("/usr/sbin/nginx"),
                 18080,
                 18081,
+                "",
             )?;
             let content = std::fs::read_to_string(config)?;
             for kind in ["client_body", "proxy", "fastcgi", "uwsgi", "scgi"] {
@@ -853,6 +900,7 @@ mod tests {
             Path::new("/opt/nginx/sbin/nginx"),
             18080,
             18081,
+            "",
         )?;
 
         let content = std::fs::read_to_string(&conf_path)?;

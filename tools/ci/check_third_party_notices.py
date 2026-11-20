@@ -46,6 +46,7 @@ SUB_WORKSPACE_CARGO_TOMLS: list[Path] = [
     ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_TOML_NAME,
     ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_TOML_NAME,
     ROOT / "tools" / "e2e-harness" / _CARGO_TOML_NAME,
+    ROOT / "tools" / "perf" / "threshold-cli" / _CARGO_TOML_NAME,
 ]
 
 # Corresponding Cargo.lock files for sub-workspaces.
@@ -53,6 +54,7 @@ SUB_WORKSPACE_CARGO_LOCKS: list[Path] = [
     ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_LOCK_NAME,
     ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_LOCK_NAME,
     ROOT / "tools" / "e2e-harness" / _CARGO_LOCK_NAME,
+    ROOT / "tools" / "perf" / "threshold-cli" / _CARGO_LOCK_NAME,
 ]
 
 # Cross-workspace version-consistency allowlist.

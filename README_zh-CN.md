@@ -14,6 +14,8 @@
 
 > v0.9.4 仍是未发布的候选版本。兼容矩阵中标为 `verified` 的目标已有绑定到同一候选提交和 workflow run 的 CI 构建、加载及请求证据；其他目标仍为 pending。最新公开稳定版本仍为 v0.9.3。维护者批准精确候选 SHA 并正式发布后，才会提供 v0.9.4 资产。请见 [0.9.4 候选说明](docs/releases/0.9.4-release-notes.md)。
 
+v0.9.4 候选版还将错误处理端到端测试和模块性能阈值判定迁移到 Rust，继续沿用现有的测试和性能门禁命令。
+
 NGINX Markdown for Agents 为现有 HTML 页面增加适合机器消费的 Markdown
 表示。发送 `Accept: text/markdown` 的客户端会收到 Markdown。浏览器和其他
 客户端仍然收到原始 HTML。

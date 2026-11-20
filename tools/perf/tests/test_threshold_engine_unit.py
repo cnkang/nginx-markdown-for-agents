@@ -11,6 +11,7 @@ Run:
 """
 
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -25,10 +26,40 @@ from threshold_engine import (
     build_verdict_report,
     compute_deviation,
     DEFAULT_THRESHOLDS,
+    DEFAULT_MODULE_LEVEL_THRESHOLDS,
+    evaluate_module_level,
     get_threshold,
     judge_metric,
     main,
 )
+
+
+@pytest.mark.parametrize(
+    ("current", "baseline", "threshold", "status"),
+    [
+        (110.0, 100.0, 10, "pass"),
+        (math.nextafter(110.0, math.inf), 100.0, 10, "breach"),
+        (2**60 + 1, 2**60, 0, "breach"),
+        (0.0, -0.0, 0, "pass"),
+        (-1.0, 0.0, -100, "pass"),
+        (1.0, 0.0, 99.9999, "breach"),
+    ],
+)
+def test_module_cli_compares_before_rounding(current, baseline, threshold, status):
+    metric = "p50_latency_small_pct"
+    measurements = dict.fromkeys(DEFAULT_MODULE_LEVEL_THRESHOLDS, 0)
+    report = evaluate_module_level(
+        measurements | {metric: current},
+        measurements | {metric: baseline},
+        {"module_level": {metric: threshold}},
+    )
+    entry = next(result for result in report["results"] if result["metric"] == metric)
+    assert entry == {
+        "metric": metric, "status": status, "threshold": threshold,
+        "actual": round(compute_deviation(current, baseline), 4),
+        "baseline": baseline, "current": current,
+    }
+    assert report["verdict"] == ("GO" if status == "pass" else "NO_GO")
 
 # ---------------------------------------------------------------------------
 # Fixtures

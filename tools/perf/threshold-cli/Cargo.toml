@@ -1,0 +1,14 @@
+[package]
+name = "perf-threshold"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "BSD-2-Clause"
+publish = false
+
+[dependencies]
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }

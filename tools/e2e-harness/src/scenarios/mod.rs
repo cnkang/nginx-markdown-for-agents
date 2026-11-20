@@ -11,6 +11,7 @@ pub mod brotli_streaming;
 pub mod common;
 pub mod conditional_requests;
 pub mod encoding_chain;
+pub mod error_handling;
 pub mod metrics_endpoint;
 pub mod representation_validator;
 pub mod smoke;
@@ -35,10 +36,10 @@ pub struct ScenarioContext {
     pub upstream_port: u16,
     /// Execution profile.
     pub profile: Profile,
-    /// Whether to retain artifacts on success.
-    pub keep_artifacts: bool,
     /// Per-scenario timeout.
     pub timeout: Duration,
+    /// Directory for retained scenario diagnostics.
+    pub artifact_dir: std::path::PathBuf,
 }
 
 impl ScenarioContext {
@@ -51,8 +52,8 @@ impl ScenarioContext {
     /// * `port` - Optional explicit NGINX port.
     /// * `upstream_port` - Optional explicit upstream port.
     /// * `profile` - Execution profile.
-    /// * `keep_artifacts` - Artifact retention flag.
     /// * `timeout` - Per-scenario timeout.
+    /// * `artifact_dir` - Directory for scenario diagnostics.
     ///
     /// # Returns
     ///
@@ -64,8 +65,8 @@ impl ScenarioContext {
         port: Option<u16>,
         upstream_port: Option<u16>,
         profile: Profile,
-        keep_artifacts: bool,
         timeout: Duration,
+        artifact_dir: std::path::PathBuf,
     ) -> Result<Self> {
         let port = port.unwrap_or_else(|| allocate_ephemeral_port_or_fallback(30080));
         let upstream_port =
@@ -76,8 +77,8 @@ impl ScenarioContext {
             port,
             upstream_port,
             profile,
-            keep_artifacts,
             timeout,
+            artifact_dir,
         })
     }
 }
@@ -217,6 +218,10 @@ static SCENARIOS: &[ScenarioEntry] = &[
         name: "encoding-chain",
         run: encoding_chain::run,
     },
+    ScenarioEntry {
+        name: "error-handling",
+        run: error_handling::run,
+    },
 ];
 
 /// Build scenario-specific upstream routes.
@@ -226,6 +231,9 @@ pub fn fixture_spec(name: &str, listen_port: u16) -> crate::fixtures::FixtureSpe
     }
     if name == "encoding-chain" {
         return encoding_chain::fixture_spec(listen_port);
+    }
+    if name == "error-handling" {
+        return error_handling::fixture_spec(listen_port);
     }
     crate::fixtures::FixtureSpec {
         listen_port: Some(listen_port),

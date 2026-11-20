@@ -8,14 +8,14 @@
 #   4. streaming failure cache verification
 #   5. accept negotiation verification (e2e-harness)
 #   6. security verification
-#   7. error handling verification
+#   7. error handling verification (e2e-harness)
 #   8. metrics endpoint verification (e2e-harness)
 #   9. conditional requests verification (e2e-harness)
 #  10. config merge verification
 #  11. auth cache verification (e2e-harness)
 #  12. status codes verification (e2e-harness)
 #
-# Migrated scenarios (5, 8-9, 11-12) are delegated to the Rust e2e-harness binary.
+# Migrated scenarios (5, 7-9, 11-12) are delegated to the Rust e2e-harness binary.
 # Non-migrated scenarios remain on their canonical shell paths.
 #
 # Options:
@@ -32,7 +32,6 @@ CHUNKED_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.
 LARGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
 STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh"
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
-ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
 CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
 SUBREQUEST_SSI_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/subrequest_ssi_test.sh"
@@ -184,11 +183,9 @@ else
 fi
 
 security_args=()
-error_args=()
 config_merge_args=()
 if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
   security_args=(--keep-artifacts)
-  error_args=(--keep-artifacts)
   config_merge_args=(--keep-artifacts)
 fi
 
@@ -203,11 +200,7 @@ if [[ ${#security_args[@]} -gt 0 ]]; then
 else
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}"
 fi
-if [[ ${#error_args[@]} -gt 0 ]]; then
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}" "${error_args[@]}"
-else
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_HANDLING_SCRIPT}"
-fi
+"${E2E_HARNESS_BIN}" scenario error-handling "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario metrics-endpoint "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario conditional-requests "${e2e_harness_args[@]}"
 if [[ ${#config_merge_args[@]} -gt 0 ]]; then

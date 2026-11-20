@@ -74,6 +74,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add THIRD-PARTY-NOTICES components/rust-converter/fuzz/Cargo.lock tools/corpus/test-corpus-conversion/Cargo.lock tools/e2e-harness/Cargo.lock
+          git add THIRD-PARTY-NOTICES components/rust-converter/fuzz/Cargo.lock tools/corpus/test-corpus-conversion/Cargo.lock tools/e2e-harness/Cargo.lock tools/perf/threshold-cli/Cargo.lock
           git commit -m "chore(deps): sync sub-workspace locks and notices with the bump"
           git push
