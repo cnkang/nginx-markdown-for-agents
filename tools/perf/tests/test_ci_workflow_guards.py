@@ -379,6 +379,18 @@ def test_release_gate_generates_candidate_bound_092_baseline() -> None:
     ) in workflow
 
 
+def test_release_benchmark_container_provisions_pinned_threshold_toolchain() -> None:
+    """A clean release benchmark container can build the Rust evaluator."""
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/release-packages.yml").read_text(encoding="utf-8")
+    container_script = _benchmark_container_script(workflow)
+    install = 'install-verified-rustup.sh --arch amd64 --toolchain "${RUST_TOOLCHAIN}"'
+    assert "--env RUST_TOOLCHAIN" in workflow[:workflow.index(BENCHMARK_CONTAINER_MARKER)]
+    assert container_script.index(install) < container_script.index(BENCHMARK_SCRIPT)
+    assert 'export PATH="${HOME}/.cargo/bin:${PATH}"' in container_script
+    assert 'resolve_approved_executable' in container_script
+
+
 def test_benchmark_candidate_binding_rejects_deviations() -> None:
     """Only the exact in-container binding satisfies the guard."""
     open_marker = "bash -se <<'CONTAINER_SCRIPT'\n"

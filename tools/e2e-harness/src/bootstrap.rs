@@ -121,6 +121,7 @@ fn bridge_to_native_build(base_dir: &Path) -> Result<BootstrapResult> {
     let buildroot_output = base_dir.join("buildroot.txt");
 
     let output = std::process::Command::new("bash")
+        .env("TMPDIR", base_dir)
         .arg(&script)
         .arg("--keep-artifacts")
         .arg("--nginx-bin-output")

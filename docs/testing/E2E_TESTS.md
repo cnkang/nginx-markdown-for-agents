@@ -71,19 +71,13 @@ Without `NGINX_BIN`, the harness builds the requested NGINX version through
 the native bootstrap. The harness stores response headers and bodies under
 `artifacts/scenarios/error-handling/raw/` on failure or with `--keep-artifacts`.
 
-### Shell scenarios and migration references
-
-The canonical suite, the Rust suite, and the runtime CI job run the Rust
-implementations. The original scripts remain available for comparison.
+### Scenarios maintained as shell scripts
 
 | Script | Purpose |
 |--------|---------|
 | `tools/e2e/verify_proxy_tls_backend_e2e.sh` | Real proxy-chain validation against a local TLS backend |
 | `tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke` | Chunked buffering and oversized fail-open smoke coverage |
-| `tools/e2e/verify_large_markdown_response_e2e.sh` | Large-response buffering and conversion validation |
-| `tools/e2e/verify_config_merge_e2e.sh` | Directive merge precedence and override behavior |
 | `tools/e2e/verify_security_e2e.sh` | Security header and sanitizer behavior |
-| `tools/e2e/verify_streaming_failure_cache_e2e.sh` | Streaming failure cache and retry behavior |
 | `tools/ci/verify_real_nginx_ims.sh` | Real-NGINX conditional-validation (ETag/If-None-Match/If-Modified-Since matrix, runs under `test-all-e2e` with `NGINX_BIN`; mirrors `real-nginx-ims.yml` CI job) |
 | `tools/e2e/verify_subrequest_filter_ordering_native_e2e.sh` | SSI / auth_request / filter-ordering / internal-redirect qualification (runs under `test-all-e2e` with `NGINX_BIN`; mirrors the runtime-regressions CI job) |
 | `tools/ci/verify_non_streaming_nginx_module.sh` | Non-streaming production-module linkage check (`nginx -t`, builds its own Rust archive; runs under `test-all-e2e`) |
