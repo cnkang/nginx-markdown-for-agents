@@ -1,21 +1,23 @@
 {
   "abi_provide": "nginx-abi-1.24.0-1",
+  "abi_version": 3,
   "arch": "arm64",
   "brotli_linkage": "dynamic",
   "brotli_version": "1.1.0-2ubuntu0.1",
-  "build_args_digest": "sha256:ad25dcc1a6617d508923bc046d9e53dfcdc38fdc507933de9c7e23d6643a3428",
-  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
-  "date": "2026-11-19",
+  "build_args_digest": "sha256:e22376b31c7cf00cce632563605fdf01cd7803b6cf16c5fed0f0428d10c681a6",
+  "commit_sha": "53021544261f8b5ba0ab8ff61809d09c2e067d71",
+  "date": "2026-11-20",
   "distro": "ubuntu-24.04",
   "distro_version": "24.04",
   "fail": 0,
+  "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
   "features": [
     "streaming",
     "prune_noise_regions"
   ],
   "libc": "glibc",
-  "module_sha256": "23f68ea7544d8ba08b51aeb3efcf86b6b7742f4d5062d73be346eb0d1d63c230",
-  "nginx_package_revision": "1.24.0-2ubuntu7.20",
+  "module_sha256": "348a011bbfb7dcad2ed779fae8da19fad049e6dbc6e6052a3cf2c1d2891e2682",
+  "nginx_package_revision": "1.24.0-2ubuntu7.21",
   "nginx_version": "1.24.0",
   "pass": 6,
   "rust_version": "1.98.1",
@@ -23,11 +25,11 @@
   "skip": 0,
   "source_digest": "sha256:77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d",
   "source_kind": "ubuntu-default-repo",
-  "source_reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20",
-  "target_identity": "ubuntu-default-repo:1.24.0-2ubuntu7.20:ubuntu-24.04:arm64",
+  "source_reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.21",
+  "target_identity": "ubuntu-default-repo:1.24.0-2ubuntu7.21:ubuntu-24.04:arm64",
   "tests": [
     {
-      "detail": "module sha256 23f68ea7544d8ba0",
+      "detail": "module sha256 348a011bbfb7dcad",
       "name": "build",
       "status": "PASS"
     },
@@ -58,5 +60,5 @@
     }
   ],
   "verified_by": "ci:release-packages/ubuntu-native",
-  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44756640042"
 }

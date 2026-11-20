@@ -1,19 +1,21 @@
 {
   "abi_provide": "",
+  "abi_version": 3,
   "arch": "arm64",
-  "build_args_digest": "sha256:a8fa5b780e3620ae3d447cd1645dc11c3667e1aa8898ec3303f6d3de5d945311",
-  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
+  "build_args_digest": "sha256:fe326101f1e47fc8f7f69143889169a740d43e8553dd2663623dbbc25ecaa432",
+  "commit_sha": "53021544261f8b5ba0ab8ff61809d09c2e067d71",
   "date": "2026-11-20",
   "distro": "linux",
   "distro_version": "n/a",
   "execution_environment": "native",
   "fail": 0,
+  "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
   "features": [
     "prune_noise_regions",
     "streaming"
   ],
   "libc": "musl",
-  "module_sha256": "89d73a129a5cb3c5e6d622b979e482e1ccd29216f81af52a5ef0dd498e67cd95",
+  "module_sha256": "eb5e502e29d0da3aea70b4e6dc20aef40227269e991d112d10c6583e39477332",
   "nginx_package_revision": "1.31.9",
   "nginx_version": "1.31.9",
   "pass": 6,
@@ -26,7 +28,7 @@
   "target_identity": "nginx.org:1.31.9:linux:musl:arm64",
   "tests": [
     {
-      "detail": "module sha256 89d73a129a5cb3c5",
+      "detail": "module sha256 eb5e502e29d0da3a",
       "name": "build",
       "status": "PASS"
     },
@@ -57,5 +59,5 @@
     }
   ],
   "verified_by": "ci:release-packages/nginx-org-evidence",
-  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44756640042"
 }
