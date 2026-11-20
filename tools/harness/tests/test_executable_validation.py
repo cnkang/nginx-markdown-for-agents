@@ -184,7 +184,7 @@ def test_rustup_shim_forms_resolve_to_active_toolchain(tmp_path, monkeypatch, na
     monkeypatch.setattr(
         module,
         "_active_rustup_toolchain",
-        lambda: "stable-x86_64-unknown-linux-gnu",
+        lambda _cwd: "stable-x86_64-unknown-linux-gnu",
     )
 
     assert module.resolve_approved_executable(name) == str(tool)
