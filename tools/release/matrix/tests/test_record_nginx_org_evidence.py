@@ -8,7 +8,10 @@ import pathlib
 
 import pytest
 
-from tools.release.matrix.evidence_contract import validate_record
+from tools.release.matrix.evidence_contract import (
+    canonical_build_identity,
+    validate_record,
+)
 from tools.release.matrix import record_nginx_org_evidence as composer
 
 COMMIT = "a" * 40
@@ -108,6 +111,10 @@ def test_compose_produces_a_contract_valid_record(tmp_path):
     assert record["commit_sha"] == COMMIT
     assert record["rust_version"] == "1.98.1"
     assert record["build_args_digest"].startswith("sha256:")
+    features, digest, abi_version = canonical_build_identity()
+    assert record["features"] == list(features)
+    assert record["feature_manifest_digest"] == digest
+    assert record["abi_version"] == abi_version
 
 
 def test_module_digest_mismatch_is_rejected(tmp_path):
@@ -280,6 +287,7 @@ def test_package_distro_record_covers_only_its_package_row(tmp_path):
     assert validate_record(record) == []
     assert record["distro"] == "debian12"
     assert record["target_identity"] == "nginx.org:1.30.6:debian12:glibc:arm64"
+    _, digest, abi_version = canonical_build_identity()
     row = {
         "nginx_version": "1.30.6",
         "os": "debian12",
@@ -287,8 +295,10 @@ def test_package_distro_record_covers_only_its_package_row(tmp_path):
         "arch": "arm64",
         "artifact_type": "deb-package",
         "source": "nginx.org",
+        "feature_manifest_digest": digest,
+        "abi_version": abi_version,
     }
-    assert record_covers_entry(record, row)
+    assert record_covers_entry(record, row, require_promotion_identity=True)
     assert not record_covers_entry(
         record, {**row, "os": "linux", "artifact_type": "dynamic-module"}
     )

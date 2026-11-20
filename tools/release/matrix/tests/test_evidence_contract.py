@@ -7,6 +7,7 @@ release promise, so each rejection path gets its own test.
 from __future__ import annotations
 
 from tools.release.matrix.evidence_contract import (
+    canonical_build_identity,
     is_promotable,
     record_covers_entry,
     required_record_fields,
@@ -25,9 +26,10 @@ def _tests() -> list[dict[str, str]]:
 
 
 def _record(**overrides) -> dict:
+    features, feature_digest, abi_version = canonical_build_identity()
     record = {
         "schema_version": 1,
-        "target_identity": "nginx.org:1.30.6:linux:amd64",
+        "target_identity": "nginx.org:1.30.6:linux:glibc:amd64",
         "source_kind": "nginx.org",
         "nginx_version": "1.30.6",
         "nginx_package_revision": "1.30.6",
@@ -41,7 +43,9 @@ def _record(**overrides) -> dict:
         "build_args_digest": "sha256:" + "b" * 64,
         "module_sha256": "c" * 64,
         "rust_version": "1.98.1",
-        "features": ["streaming", "prune_noise_regions"],
+        "features": list(features),
+        "feature_manifest_digest": feature_digest,
+        "abi_version": abi_version,
         "tests": _tests(),
         "pass": 5,
         "fail": 0,
@@ -52,6 +56,11 @@ def _record(**overrides) -> dict:
         "verified_by": "ci:release-packages",
     }
     record.update(overrides)
+    if "target_identity" not in overrides and record["source_kind"] == "nginx.org":
+        record["target_identity"] = (
+            f"nginx.org:{record['nginx_version']}:{record['distro']}:"
+            f"{record['libc']}:{record['arch']}"
+        )
     return record
 
 
@@ -146,6 +155,22 @@ def test_boolean_count_is_rejected() -> None:
     assert any("pass must be an integer" in error for error in errors)
 
 
+def test_optional_promotion_identity_is_validated_without_rejecting_legacy() -> None:
+    legacy = _record()
+    legacy.pop("feature_manifest_digest")
+    legacy.pop("abi_version")
+    assert validate_record(legacy) == []
+
+    assert any(
+        "feature_manifest_digest" in error
+        for error in validate_record(_record(feature_manifest_digest="invalid"))
+    )
+    assert any(
+        "abi_version" in error
+        for error in validate_record(_record(abi_version=True))
+    )
+
+
 def test_record_covers_matching_row_only() -> None:
     row = {
         "nginx_version": "1.30.6",
@@ -157,6 +182,53 @@ def test_record_covers_matching_row_only() -> None:
     assert not record_covers_entry(_record(), {**row, "arch": "arm64"})
     assert not record_covers_entry(_record(), {**row, "libc": "musl"})
     assert not record_covers_entry(_record(), {**row, "os": "debian12"})
+
+
+def test_promotion_coverage_requires_the_canonical_module_identity() -> None:
+    features, digest, abi_version = canonical_build_identity()
+    row = {
+        "nginx_version": "1.30.6",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": digest,
+        "abi_version": abi_version,
+    }
+    record = _record()
+    assert record_covers_entry(
+        record, row, require_promotion_identity=True
+    )
+    assert not record_covers_entry(
+        {key: value for key, value in record.items() if key != "abi_version"},
+        row,
+        require_promotion_identity=True,
+    )
+    assert not record_covers_entry(
+        {**record, "features": [features[0]]},
+        row,
+        require_promotion_identity=True,
+    )
+    assert not record_covers_entry(
+        {**record, "feature_manifest_digest": "sha256:" + "0" * 64},
+        row,
+        require_promotion_identity=True,
+    )
+    assert not record_covers_entry(
+        {**record, "abi_version": abi_version + 1},
+        row,
+        require_promotion_identity=True,
+    )
+    assert not record_covers_entry(
+        {**record, "module_sha256": "short"},
+        row,
+        require_promotion_identity=True,
+    )
+    assert not record_covers_entry(
+        {**record, "target_identity": "nginx.org:1.30.6:other:glibc:amd64"},
+        row,
+        require_promotion_identity=True,
+    )
 
 
 def test_record_covers_target_triple_row() -> None:

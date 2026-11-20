@@ -20,17 +20,24 @@ from tools.release.matrix import promote_matrix as promote_matrix_module
 from tools.release.matrix.promote_matrix import (
     PromotionError,
     REPO_ROOT,
+    _candidate_sha,
     _exclusive_lock,
+    _promote_entry,
     build_promoted_matrix,
     main,
 )
-from tools.release.matrix.tests.test_evidence_contract import _record, _ubuntu_record
+from tools.release.matrix.evidence_contract import canonical_build_identity
+from tools.release.matrix.tests.test_evidence_contract import (
+    _record as _fixture_record,
+    _ubuntu_record as _fixture_ubuntu_record,
+)
 
 PROMOTE_SCRIPT = Path(__file__).resolve().parents[1] / "promote_matrix.py"
 WORK_ROOT = REPO_ROOT / ".test-tmp"
 
 
 def _row(**overrides) -> dict:
+    _, feature_digest, abi_version = canonical_build_identity()
     row = {
         "nginx_version": "1.30.6",
         "os": "linux",
@@ -41,9 +48,28 @@ def _row(**overrides) -> dict:
         "support_stage": "best-effort",
         "verification_state": "pending",
         "release_blocking": False,
+        "feature_manifest_digest": feature_digest,
+        "abi_version": abi_version,
     }
     row.update(overrides)
     return row
+
+
+def _record(**overrides) -> dict:
+    record = _fixture_record(**overrides)
+    record["commit_sha"] = overrides.get("commit_sha", _candidate_sha())
+    if "target_identity" not in overrides and record["source_kind"] == "nginx.org":
+        record["target_identity"] = (
+            f"nginx.org:{record['nginx_version']}:{record['distro']}:"
+            f"{record['libc']}:{record['arch']}"
+        )
+    return record
+
+
+def _ubuntu_record(**overrides) -> dict:
+    record = _fixture_ubuntu_record(**overrides)
+    record["commit_sha"] = overrides.get("commit_sha", _candidate_sha())
+    return record
 
 
 def _matrix(*rows: dict) -> dict:
@@ -62,6 +88,8 @@ def test_promotion_sets_the_release_promise() -> None:
     assert row["release_blocking"] is True
     assert row["date"] == "2026-10-29"
     assert row["source"] == "nginx.org"
+    assert row["feature_manifest_digest"] == _row()["feature_manifest_digest"]
+    assert row["abi_version"] == _row()["abi_version"]
     assert summary == ["promote 1.30.6 linux/glibc/amd64: 1 row(s)"]
 
 
@@ -217,6 +245,59 @@ def test_invalid_record_is_refused() -> None:
     records = [_record(module_sha256="short")]
     with pytest.raises(PromotionError, match="is not promotable"):
         build_promoted_matrix(matrix, records, demote_superseded=False)
+
+
+def test_record_from_another_candidate_commit_is_refused_before_promotion() -> None:
+    row = _row()
+    matrix = _matrix(row)
+    record = _record(commit_sha="e" * 40)
+
+    with pytest.raises(PromotionError, match="not the candidate"):
+        build_promoted_matrix(matrix, [record], demote_superseded=False)
+
+    assert row["verification_state"] == "pending"
+    assert row["release_blocking"] is False
+
+
+def test_record_without_matching_module_identity_cannot_promote() -> None:
+    _, digest, abi_version = canonical_build_identity()
+    mutations = (
+        lambda record: record.pop("feature_manifest_digest"),
+        lambda record: record.update(feature_manifest_digest="sha256:" + "0" * 64),
+        lambda record: record.pop("abi_version"),
+        lambda record: record.update(abi_version=abi_version + 1),
+        lambda record: record.update(features=["streaming"]),
+        lambda record: record.update(module_sha256="short"),
+        lambda record: record.update(target_identity="nginx.org:1.30.6:elsewhere:glibc:amd64"),
+    )
+    for mutate in mutations:
+        row = _row(feature_manifest_digest=digest, abi_version=abi_version)
+        matrix = _matrix(row)
+        record = _record()
+        mutate(record)
+
+        with pytest.raises(PromotionError):
+            build_promoted_matrix(matrix, [record], demote_superseded=False)
+
+        assert row["verification_state"] == "pending"
+        assert row["release_blocking"] is False
+        assert row["feature_manifest_digest"] == digest
+        assert row["abi_version"] == abi_version
+
+
+def test_promote_entry_rechecks_identity_and_preserves_row_contract() -> None:
+    row = _row()
+    digest = row["feature_manifest_digest"]
+    abi_version = row["abi_version"]
+    record = _record(abi_version=abi_version + 1)
+
+    with pytest.raises(PromotionError, match="canonical module build identity"):
+        _promote_entry(row, record)
+
+    assert row["verification_state"] == "pending"
+    assert row["release_blocking"] is False
+    assert row["feature_manifest_digest"] == digest
+    assert row["abi_version"] == abi_version
 
 
 def _write_evidence(path: Path, **overrides) -> Path:
@@ -398,7 +479,7 @@ def test_concurrent_promotions_keep_every_row(repo_workdir: Path) -> None:
         _write_evidence(
             repo_workdir / f"record-{index}.json",
             nginx_version=version,
-            target_identity=f"nginx.org:{version}:linux:amd64",
+                target_identity=f"nginx.org:{version}:linux:glibc:amd64",
         )
         for index, version in enumerate(versions)
     ]
@@ -441,12 +522,12 @@ def test_lock_sidecar_persists_and_keeps_its_inode(repo_workdir: Path) -> None:
     second = _write_evidence(
         repo_workdir / "second.json",
         nginx_version="1.30.7",
-        target_identity="nginx.org:1.30.7:linux:amd64",
+            target_identity="nginx.org:1.30.7:linux:glibc:amd64",
     )
     third = _write_evidence(
         repo_workdir / "third.json",
         nginx_version="1.30.8",
-        target_identity="nginx.org:1.30.8:linux:amd64",
+            target_identity="nginx.org:1.30.8:linux:glibc:amd64",
     )
     lock_path = matrix_path.with_suffix(".json.lock")
 
