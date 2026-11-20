@@ -43,8 +43,8 @@
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
-#   workflow_dispatch: signing is skipped; publish proceeds with SHA256SUMS-only
-#   integrity verification (useful for testing the build/package pipeline).
+#   workflow_dispatch: verify SHA256SUMS and upload unsigned rehearsal
+#   artifacts. A dispatch never publishes a GitHub Release.
 #
 # Path filters note:
 #   GitHub Actions path filters only apply to push events on branches, NOT tag pushes.
@@ -77,6 +77,13 @@ on:
           Add --require-blocking to the compatibility evidence gate on a
           dispatch run, so every release-blocking matrix row must have a CI
           record from this run.  Tag push runs always enable it.
+        required: false
+        type: boolean
+        default: false
+      final_metadata:
+        description: >-
+          Rehearse a candidate with finalized release documentation. Requires
+          all blocking evidence and uploads workflow artifacts only.
         required: false
         type: boolean
         default: false
@@ -2483,6 +2490,7 @@ jobs:
           RELEASE_GATE_EXPECTED_VERSION: ${{ env.RELEASE_VERSION }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REQUIRE_BLOCKING_INPUT: ${{ inputs.require_blocking }}
+          FINAL_METADATA_INPUT: ${{ inputs.final_metadata }}
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
@@ -2546,10 +2554,15 @@ jobs:
           python3 tools/release/gates/validate_package_metadata.py
           python3 tools/release/gates/validate_k8s_manifests.py
           python3 tools/release/gates/validate_fuzz_packaging.py
-          # Dispatches qualify unpublished candidates; tags require final metadata.
+          # Finalized dispatches rehearse the exact commit planned for the tag.
           case "${GITHUB_EVENT_NAME}:${GITHUB_REF_TYPE}" in
             push:tag) METADATA_PHASE="final" ;;
-            workflow_dispatch:*) METADATA_PHASE="candidate" ;;
+            workflow_dispatch:*)
+              METADATA_PHASE="candidate"
+              if [[ "${FINAL_METADATA_INPUT:-false}" == "true" ]]; then
+                METADATA_PHASE="final"
+              fi
+              ;;
             *) echo "ERROR: unsupported release metadata event" >&2; exit 1 ;;
           esac
           python3 tools/release/gates/validate_release_metadata.py \
@@ -2558,16 +2571,15 @@ jobs:
           # Compatibility evidence comes only from this run's producer jobs,
           # staged above.  Every record must be a CI record for this commit
           # and this run; the checked-in local records under docs/evidence
-          # never satisfy this gate.  Tag pushes require every blocking row.
-          # Dispatch adds that requirement only when require_blocking is true,
-          # regardless of the selected ref.
+          # never satisfy this gate.  Final metadata and explicit blocking
+          # dispatches require every blocking row, regardless of the ref.
           EVIDENCE_ARGS=(
             --evidence-dir "${RUNNER_TEMP}/compat-evidence"
             --require-ci
             --candidate-sha "${GITHUB_SHA}"
             --workflow-run-url "${RUN_URL}"
           )
-          if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "${GITHUB_REF_TYPE:-}" == "tag" ]] || [[ "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then
+          if [[ "${METADATA_PHASE}" == "final" || "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then
             EVIDENCE_ARGS+=(--require-blocking)
           fi
           PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \

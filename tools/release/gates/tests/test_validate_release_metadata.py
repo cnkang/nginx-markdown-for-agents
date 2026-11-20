@@ -338,16 +338,18 @@ def test_candidate_metadata_rejects_mismatch_or_final_claim(
     assert validate_release_metadata(tmp_path, "0.9.1", "candidate")
 
 
-@pytest.mark.parametrize("event,ref_type,phase", [
-    ("push", "tag", "final"),
-    ("workflow_dispatch", "branch", "candidate"),
-    ("workflow_dispatch", "tag", "candidate"),
-    ("pull_request", "branch", None),
+@pytest.mark.parametrize("event,ref_type,final_metadata,require_blocking,phase,blocking", [
+    ("push", "tag", "false", "false", "final", True),
+    ("workflow_dispatch", "branch", "false", "false", "candidate", False),
+    ("workflow_dispatch", "tag", "false", "true", "candidate", True),
+    ("workflow_dispatch", "branch", "true", "false", "final", True),
+    ("pull_request", "branch", "true", "true", None, False),
 ])
 def test_workflow_routes_metadata_phase_without_bypassing_validation(
-    tmp_path: Path, event: str, ref_type: str, phase: str | None
+    tmp_path: Path, event: str, ref_type: str, final_metadata: str,
+    require_blocking: str, phase: str | None, blocking: bool,
 ) -> None:
-    """Execute the actual workflow routing and validator call with a Python probe."""
+    """Exercise phase routing and mandatory evidence in the workflow shell."""
     import os
     import yaml
 
@@ -356,21 +358,37 @@ def test_workflow_routes_metadata_phase_without_bypassing_validation(
     step = next(s for s in workflow["jobs"]["release-gate"]["steps"] if s.get("name") == "Run release gates")
     run = step["run"]
     start = run.index('case "${GITHUB_EVENT_NAME}:${GITHUB_REF_TYPE}"')
-    stop = run.index('--phase "${METADATA_PHASE}"', start) + len('--phase "${METADATA_PHASE}"')
+    evidence_argument = '"${EVIDENCE_ARGS[@]}"'
+    stop = run.index(evidence_argument, start) + len(evidence_argument)
     probe = tmp_path / "python3"
     probe.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
     probe.chmod(0o755)
+    candidate_sha = "b" * 40
+    run_url = "https://github.com/example/repo/actions/runs/100"
     result = subprocess.run(
         ["bash", "-e", "-c", run[start:stop]], text=True, capture_output=True,
         env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
              "GITHUB_EVENT_NAME": event, "GITHUB_REF_TYPE": ref_type,
-             "RELEASE_GATE_EXPECTED_CARGO_VERSION": "0.9.3"},
+             "RELEASE_GATE_EXPECTED_CARGO_VERSION": "0.9.3",
+             "GITHUB_SHA": candidate_sha, "RUN_URL": run_url,
+             "RUNNER_TEMP": str(tmp_path),
+             "FINAL_METADATA_INPUT": final_metadata,
+             "REQUIRE_BLOCKING_INPUT": require_blocking},
     )
     if phase is None:
         assert result.returncode != 0
         assert "unsupported release metadata event" in result.stderr
     else:
         assert result.returncode == 0, result.stderr
-        assert result.stdout.splitlines() == [
+        arguments = result.stdout.splitlines()
+        assert arguments[:5] == [
             "tools/release/gates/validate_release_metadata.py", "--version", "0.9.3", "--phase", phase
         ]
+        expected_evidence = [
+            "tools/release/matrix/validate_compatibility_evidence.py",
+            "--evidence-dir", str(tmp_path / "compat-evidence"),
+            "--require-ci", "--candidate-sha", candidate_sha, "--workflow-run-url", run_url,
+        ]
+        if blocking:
+            expected_evidence.append("--require-blocking")
+        assert arguments[5:] == expected_evidence
