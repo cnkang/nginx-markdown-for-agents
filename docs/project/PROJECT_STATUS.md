@@ -45,7 +45,8 @@ See the
 **Status:** Release candidate, pending publication. v0.9.3 is the latest
 published version (2026-11-02). The 0.9.4 candidate prepares matching
 module artifacts for nginx.org 1.30.7 and 1.31.9 and the Ubuntu revisions in
-[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1). Compatibility
+[USN-9182-1](https://ubuntu.com/security/notices/USN-9182-1): Ubuntu 24.04
+`1.24.0-2ubuntu7.21` and Ubuntu 26.04 `1.28.3-2ubuntu1.14`. Compatibility
 evidence remains pending until candidate workflow records verify the exact
 builds, loads, and Markdown requests. The project will provide v0.9.4 assets
 only after publication and maintainer approval of the exact candidate SHA. See
