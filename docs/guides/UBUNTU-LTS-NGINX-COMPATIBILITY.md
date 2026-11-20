@@ -445,12 +445,17 @@ APT hold and removal outcomes therefore remain conditional, not verified upgrade
 The archive check does not establish module loadability on another revision.
 
 For the v0.9.4 candidate, [USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1)
-lists these package revisions:
+lists the initial security-fixed revisions `.20` for Ubuntu 24.04 and `.13`
+for Ubuntu 26.04. The release workflow's default Ubuntu APT installs resolved
+newer arm64 revisions `.21` and `.14`. Each candidate row now pins the exact
+revision for its architecture. Ubuntu APT verifies official archive signatures
+by default, as described in its
+[archive integrity policy](https://documentation.ubuntu.com/security/software-integrity/archive-verification/).
 
-| Suite | Candidate NGINX revision | Architecture evidence | ABI provide |
+| Suite | Candidate package revision (amd64 / arm64) | Module evidence | ABI provide |
 |---|---|---|---|
-| 24.04 | `1.24.0-2ubuntu7.20` | amd64 and arm64 pending | Pending CI evidence |
-| 26.04 | `1.28.3-2ubuntu1.13` | amd64 and arm64 pending | Pending CI evidence |
+| 24.04 | `1.24.0-2ubuntu7.20` / `1.24.0-2ubuntu7.21` | Pending for both architectures | Pending CI evidence |
+| 26.04 | `1.28.3-2ubuntu1.13` / `1.28.3-2ubuntu1.14` | Pending for both architectures | Pending CI evidence |
 
 The release workflow must install each exact revision on both architectures
 and record its ABI provide, linked Brotli package, module load, Markdown

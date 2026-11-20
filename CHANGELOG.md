@@ -18,18 +18,22 @@ approval of the exact candidate SHA.
 ### Changed
 
 - Candidate nginx.org targets: stable 1.30.7 and mainline 1.31.9, with glibc
-  and musl on amd64 and arm64. Ubuntu-native targets: 24.04 LTS
-  `1.24.0-2ubuntu7.20` and 26.04 LTS `1.28.3-2ubuntu1.13`, on amd64 and arm64.
+  and musl on amd64 and arm64. Ubuntu-native targets: 24.04 LTS amd64
+  `1.24.0-2ubuntu7.20` / arm64 `1.24.0-2ubuntu7.21`, and 26.04 LTS amd64
+  `1.28.3-2ubuntu1.13` / arm64 `1.28.3-2ubuntu1.14`.
 - This change adds the 1.31.9 source SHA-256 after signature verification with
   an NGINX project developer key. It also re-verifies the existing 1.30.7
   checksum.
 
 ### Candidate validation status
 
-- The 0.9.4 release run recorded 40 CI compatibility records tied to one SHA
-  and run. The promotion tool marked 36 module and package rows verified after
-  matching build, load, and request checks. Four workflow-owned Docker rows
-  retain `pending` matrix state. Their same-run evidence is also present.
+- All 12 new compatibility rows remain `pending`. Checked-in evidence from an
+  earlier candidate does not verify the current SHA. Diagnostic run
+  [44672326394](https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44672326394)
+  installed Ubuntu's arm64 revisions `.21` and `.14`, then stopped at the
+  exact-revision guard before module build, ABI, load, or request validation.
+  Dispatch the required-blocking workflow again after the final candidate SHA
+  is ready.
 - GitHub blocked the Release Gate before runner startup because the protected
   `release-signing` environment permits only `main` and tag `v0.9.3`. The
   final candidate SHA has no complete release gate, manifest, or checksums.
