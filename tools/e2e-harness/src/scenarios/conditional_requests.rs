@@ -107,6 +107,11 @@ fn append_if_none_match_cases(
             response.status,
             304,
         ));
+        assertions.push(common::assert_condition(
+            "case3_inm_empty_body",
+            response.body.is_empty(),
+            "empty 304 response body",
+        ));
         let vary_check =
             header_contains_token_case_insensitive(&response.headers, "Vary", "Accept");
         assertions.push(AssertionResult {
@@ -134,6 +139,21 @@ fn append_if_none_match_cases(
             "case4_inm_nomatch_200",
             response.status,
             200,
+        ));
+    }
+
+    let mut list_headers = headers.clone();
+    list_headers.insert(
+        "If-None-Match".into(),
+        format!("\"other\", {response_etag}"),
+    );
+    if let Some(response) =
+        common::try_get_with_headers(url, &list_headers, assertions, "inm_list_match")
+    {
+        assertions.push(assertions::assert_status(
+            "inm_list_match",
+            response.status,
+            304,
         ));
     }
 

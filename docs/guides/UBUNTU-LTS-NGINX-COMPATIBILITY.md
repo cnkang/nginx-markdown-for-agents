@@ -454,8 +454,8 @@ by default, as described in its
 
 | Suite | Candidate package revision (amd64 / arm64) | Module evidence | ABI provide |
 |---|---|---|---|
-| 24.04 | `1.24.0-2ubuntu7.20` / `1.24.0-2ubuntu7.21` | Pending for both architectures | Pending CI evidence |
-| 26.04 | `1.28.3-2ubuntu1.13` / `1.28.3-2ubuntu1.14` | Pending for both architectures | Pending CI evidence |
+| 24.04 | `1.24.0-2ubuntu7.21` | Pending for both architectures | Pending CI evidence |
+| 26.04 | `1.28.3-2ubuntu1.14` | Pending for both architectures | Pending CI evidence |
 
 The release workflow must install each exact revision on both architectures
 and record its ABI provide, linked Brotli package, module load, Markdown

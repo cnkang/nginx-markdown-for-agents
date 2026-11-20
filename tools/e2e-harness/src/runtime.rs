@@ -407,6 +407,7 @@ http {{\n\
             markdown_filter on;\n\
             markdown_accept strict;\n\
             markdown_streaming off;\n\
+            proxy_set_header Accept \"\";\n\
             proxy_pass http://fixture_backend;\n\
         }}\n\
         location /force/ {{\n\

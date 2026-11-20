@@ -98,7 +98,7 @@ permissions: {}
 #   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
 #   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
 #   - brotli-build-matrix    — Brotli streaming build matrix (on/off, Ubuntu 22.04)
-#   - release-092-contract-gates — 0.9.2 source metadata, ABI, version,
+#   - release-092-contract-gates — active release source metadata, ABI, version,
 #                                  reason-code and release contract gates
 #
 # EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
@@ -566,16 +566,16 @@ jobs:
       - name: Run NGINX C integration harness
         run: make -C components/nginx-module/tests integration-c
 
-      - name: 0.9.2 streaming lifecycle unit test
+      - name: Check streaming lifecycle
         run: make -C components/nginx-module/tests unit-streaming_impl
 
-      - name: 0.9.2 build capability check
+      - name: Check build capabilities
         # Fail closed when a promised engine or encoding is missing from the
         # source build (LTS-R013); the capability gate is part of `make build`
         # and must also run on the main CI path.
         run: make capability-check
 
-      - name: 0.9.2 public-surface drift check
+      - name: Check public-surface drift
         run: make public-surface-drift-check
 
   release-092-contract-gates:
@@ -622,7 +622,7 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Run 0.9.2 contract gates
+      - name: Run active release contract gates
         env:
           # The gate name is part of the protected branch required checks.
           # The active release line comes from the caller (AGENTS Rule 13).
@@ -809,6 +809,13 @@ jobs:
           ./tools/e2e/verify_config_merge_e2e.sh
           ./tools/e2e/verify_large_markdown_response_e2e.sh
           ./tools/e2e/verify_streaming_failure_cache_e2e.sh
+
+      - name: Run Accept and conditional request regressions in Rust
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: |
+          ./tools/e2e/verify_accept_negotiation_e2e.sh
+          ./tools/e2e/verify_conditional_requests_e2e.sh
 
       - name: Run native SSI and filter-ordering qualification
         env:
@@ -1111,7 +1118,9 @@ jobs:
         run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
 
       - name: Generate schema artifacts
-        run: python3 tools/release/gates/generate_schema_artifacts.py --version 0.9.2
+        env:
+          SCHEMA_RELEASE_VERSION: "0.9.4"
+        run: python3 tools/release/gates/generate_schema_artifacts.py --version "${SCHEMA_RELEASE_VERSION}"
 
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -n 4 -q tools/release/matrix/tests/

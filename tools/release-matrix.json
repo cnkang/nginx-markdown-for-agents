@@ -548,7 +548,7 @@
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.21"
       }
     },
     {
@@ -927,11 +927,11 @@
       "abi_version": 3,
       "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-11-19",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.14"
       }
     },
     {

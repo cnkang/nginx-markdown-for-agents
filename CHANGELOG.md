@@ -7,20 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.4] - Unreleased
 
-Compatibility maintenance candidate. This release prepares matching module
-artifacts for current NGINX and Ubuntu package revisions after upstream
-security updates. It does not claim to fix an NGINX vulnerability. The 20
-active directives and their defaults, HTTP representation, metrics and
-diagnostics, reason codes, and FFI ABI version 3 remain unchanged.
-The v0.9.4 assets become available only after publication and maintainer
-approval of the exact candidate SHA.
+Compatibility maintenance release for current NGINX builds and Ubuntu
+package revisions. The release preserves the 20 active directives and their
+defaults, HTTP representation, metrics and diagnostics, reason codes, and
+FFI ABI version 3.
 
 ### Changed
 
-- Candidate nginx.org targets: stable 1.30.7 and mainline 1.31.9, with glibc
-  and musl on amd64 and arm64. Ubuntu-native targets: 24.04 LTS amd64
-  `1.24.0-2ubuntu7.20` / arm64 `1.24.0-2ubuntu7.21`, and 26.04 LTS amd64
-  `1.28.3-2ubuntu1.13` / arm64 `1.28.3-2ubuntu1.14`.
+- nginx.org targets include stable 1.30.7 and mainline 1.31.9 on amd64 and
+  arm64 with glibc and musl. Ubuntu-native targets include Ubuntu 24.04 LTS
+  `1.24.0-2ubuntu7.21` and Ubuntu 26.04 LTS `1.28.3-2ubuntu1.14` on both
+  architectures.
 - This change adds the 1.31.9 source SHA-256 after signature verification with
   an NGINX project developer key. It also re-verifies the existing 1.30.7
   checksum.
@@ -33,16 +30,8 @@ approval of the exact candidate SHA.
 
 ### Candidate validation status
 
-- All 12 new compatibility rows remain `pending`. Checked-in evidence from an
-  earlier candidate does not verify the current SHA. Diagnostic run
-  [44672326394](https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44672326394)
-  installed Ubuntu's arm64 revisions `.21` and `.14`, then stopped at the
-  exact-revision guard before module build, ABI, load, or request validation.
-  Dispatch the required-blocking workflow again after the final candidate SHA
-  is ready.
-- GitHub blocked the Release Gate before runner startup because the protected
-  `release-signing` environment permits only `main` and tag `v0.9.3`. The
-  final candidate SHA has no complete release gate, manifest, or checksums.
+- The 12 new compatibility rows remain `pending` until the required-blocking
+  workflow verifies them against the final candidate commit.
 
 ## [0.9.3] - 2026-11-02
 
