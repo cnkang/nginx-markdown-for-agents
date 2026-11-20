@@ -45,7 +45,7 @@ def _load_release_version() -> str:
         ) from exc
 
     if not isinstance(version, str) or not re.fullmatch(
-        r"[0-9]+\.[0-9]+\.[0-9]+", version
+        r"\d+\.\d+\.\d+", version, flags=re.ASCII
     ):
         raise RuntimeError(f"Invalid package release version: {version!r}")
     return version
