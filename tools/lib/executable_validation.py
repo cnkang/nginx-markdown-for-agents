@@ -197,7 +197,8 @@ def _active_rustup_toolchain(cwd: Path | None = None) -> str | None:
         try:
             cwd = Path.cwd()
         except OSError:
-            pass
+            # A removed or inaccessible working directory has no override.
+            cwd = None
     if cwd is not None:
         if directory_toolchain := _toolchain_from_directory(cwd):
             return _expand_toolchain_name(directory_toolchain)
