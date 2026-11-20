@@ -9,7 +9,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COVERAGE_SCRIPT = REPO_ROOT / "tools" / "sonar" / "collect_nginx_coverage.sh"
 STREAMING_FAILURE_CACHE_SCENARIO = (
-    REPO_ROOT / "tools/e2e-harness/src/scenarios/streaming_failure_cache.rs"
+    REPO_ROOT / "tools/e2e-harness/src/scenarios/streaming_failure_cache_nginx.rs"
 )
 
 

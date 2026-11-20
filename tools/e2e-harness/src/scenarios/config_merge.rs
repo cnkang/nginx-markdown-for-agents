@@ -9,26 +9,32 @@ use std::time::{Duration, Instant};
 pub const NAME: &str = "config-merge";
 const HTML: &str = "(?i)^text/html";
 const MARKDOWN: &str = "(?i)^text/markdown";
+#[path = "config_merge_nginx.rs"]
+mod nginx;
+
 const ACCEPT: (&str, &str) = ("Accept", "text/markdown");
 
 pub fn fixture_spec(port: u16) -> FixtureSpec {
-    let valid = r#"<!doctype html>
-<html><head><meta charset="UTF-8"><title>Config Merge Test</title></head>
-<body><h1>Config Merge Test Page</h1><p>Testing configuration merging.</p></body></html>
-"#;
-    let malformed = r#"<html><head><title>Bad
-<body><h1>Unclosed heading
-<div><div><div>nested without closing
-<p>paragraph without closing
-<a href="link without quote>text</a>
-</html>
-"#;
+    let valid = concat!(
+        "<!doctype html>\n",
+        "<html><head><meta charset=\"UTF-8\"><title>Config Merge Test</title></head>\n",
+        "<body><h1>Config Merge Test Page</h1><p>Testing configuration merging.</p></body></html>\n",
+    );
+    let malformed = concat!(
+        "<html><head><title>Bad\n",
+        "<body><h1>Unclosed heading\n",
+        "<div><div><div>nested without closing\n",
+        "<p>paragraph without closing\n",
+        "<a href=\"link without quote>text</a>\n",
+        "</html>\n",
+    );
     let large = format!(
-        r#"<!doctype html>
-<html><head><meta charset="UTF-8"><title>Large</title></head>
-<body>
-{}</body></html>
-"#,
+        concat!(
+            "<!doctype html>\n",
+            "<html><head><meta charset=\"UTF-8\"><title>Large</title></head>\n",
+            "<body>\n",
+            "{}</body></html>\n",
+        ),
         "<p>x</p>\n".repeat(100_000)
     );
     let mut routes = [
@@ -62,106 +68,7 @@ pub fn fixture_spec(port: u16) -> FixtureSpec {
 }
 
 pub fn nginx_conf(load: &str, port: u16, upstream_port: u16) -> String {
-    r#"@LOAD@worker_processes 1;
-error_log "nginx-error.log" info;
-pid "nginx.pid";
-
-events { worker_connections 512; }
-
-http {
-    access_log nginx-access.log;
-    default_type  application/octet-stream;
-    sendfile      on;
-    keepalive_timeout 5;
-
-    # http-level defaults
-    markdown_error_policy pass;
-
-    server {
-        listen 127.0.0.1:@PORT@;
-        server_name localhost;
-
-        # server-level settings
-        markdown_accept force;
-        markdown_cache_validation off;
-
-        # Case 1: location overrides error_policy to fail_closed
-        location /md/reject/ {
-            markdown_filter on;
-            markdown_error_policy fail_closed;
-            markdown_limits conversion_memory=64k parser_budget=64k streaming_buffer=64k conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 1b: location inherits error_policy pass from http level
-        location /md/pass/ {
-            markdown_filter on;
-            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 3: markdown_filter off disables conversion
-        location /nomd/ {
-            markdown_filter off;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 4: markdown_accept strict at location
-        location /no-wildcard/ {
-            markdown_filter on;
-            markdown_accept strict;
-            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 5: cache_validation full at location overrides server off
-        location /etag-on/ {
-            markdown_filter on;
-            markdown_streaming off;
-            markdown_cache_validation full;
-            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 6: cache_validation ims_only override at location
-        location /cond-ims/ {
-            markdown_filter on;
-            markdown_cache_validation ims_only;
-            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-
-        # Case 7: flavor override at location
-        location /flavor/ {
-            markdown_filter on;
-            markdown_flavor gfm;
-            markdown_limits conversion_memory=10m parser_budget=10m conversion_timeout=120s;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-            proxy_pass http://127.0.0.1:@UPSTREAM@/;
-        }
-    }
-}
-"#
+    nginx::CONFIG
         .replace("@LOAD@", load)
         .replace("@PORT@", &port.to_string())
         .replace("@UPSTREAM@", &upstream_port.to_string())
