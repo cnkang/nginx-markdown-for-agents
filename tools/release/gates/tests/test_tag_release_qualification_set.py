@@ -511,9 +511,11 @@ def _run_stubbed_helm_cluster_smoke(
         stub.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
         stub.chmod(0o755)
     env = os.environ.copy()
-    # Drop an ambient HELM_VERSION so a developer's shell setting cannot
-    # change what the stub reports; the parameter is the only source.
+    # Keep host settings from changing fixture behavior, especially the
+    # case that derives the NGINX version from the pinned image tag.
     env.pop("HELM_VERSION", None)
+    env.pop("NGINX_VERSION", None)
+    env.pop("NGINX_BASE_IMAGE", None)
     env |= {
         "PATH": f"{tools}{os.pathsep}{env['PATH']}",
         "TMPDIR": str(temp_root),
