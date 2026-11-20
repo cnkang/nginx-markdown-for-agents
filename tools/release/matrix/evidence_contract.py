@@ -58,7 +58,10 @@ DISTRO_REQUIRED_TEST_CLASSES: tuple[str, ...] = ("negative_abi_rejected",)
 
 STATUS_VALUES = frozenset({"PASS", "FAIL", "SKIP"})
 
-SOURCE_KINDS = frozenset({"nginx.org", "ubuntu-default-repo", "container-registry"})
+_NGINX_ORG_SOURCE = "nginx.org"
+SOURCE_KINDS = frozenset(
+    {_NGINX_ORG_SOURCE, "ubuntu-default-repo", "container-registry"}
+)
 
 # A container record proves one image built on one pinned base image.  It
 # must name that base by digest, so a moved tag cannot stand in for it, and it
@@ -159,7 +162,7 @@ def _validate_nginx_org_source(record: dict[str, Any], errors: list[str]) -> Non
     reference = record.get("source_reference", "")
     if not _HTTPS_RE.match(reference):
         errors.append("source_reference must be an https URL")
-    if "nginx.org" not in reference:
+    if _NGINX_ORG_SOURCE not in reference:
         errors.append("nginx.org records must reference nginx.org")
 
 
@@ -322,7 +325,7 @@ def _promotion_module_identity_matches(record: dict[str, Any]) -> bool:
         return False
 
     source_kind = record.get("source_kind")
-    if source_kind == "nginx.org":
+    if source_kind == _NGINX_ORG_SOURCE:
         expected_identity = (
             f"nginx.org:{record.get('nginx_version')}:{record.get('distro')}:"
             f"{record.get('libc')}:{record.get('arch')}"

@@ -116,9 +116,10 @@ def test_failed_test_in_the_ledger_is_refused(tmp_path):
 
 def test_build_with_a_noncanonical_feature_set_is_refused(tmp_path):
     build = _build(tmp_path, features=["streaming"])
+    ledger = _ledger(tmp_path)
 
     with pytest.raises(composer.ComposeError, match="feature set"):
-        _compose(build, _ledger(tmp_path))
+        _compose(build, ledger)
 
 def test_ledger_cannot_mask_a_noncanonical_build_feature_set(tmp_path):
     build = _build(tmp_path, features=["streaming"])
