@@ -31,6 +31,7 @@ RUST_MANIFEST_RELS = (
     "components/rust-converter/fuzz/Cargo.toml",
     "tools/corpus/test-corpus-conversion/Cargo.toml",
     "tools/e2e-harness/Cargo.toml",
+    "tools/perf/threshold-cli/Cargo.toml",
 )
 
 

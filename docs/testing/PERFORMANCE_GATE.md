@@ -104,6 +104,13 @@ When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
 stdout and diagnostics to stderr. Redirect stdout to the intended artifact.
 The Python process does not accept a caller-controlled output path.
 
+The module benchmark evidence gate delegates `evaluate_module_level` to
+`tools/perf/threshold-cli`. Python loads the reports and thresholds and
+keeps the same `verdict`, `breaches`, and `results` fields. The first module
+evaluation in each Python process requires Cargo to build the locked CLI.
+An evaluator build or execution failure stops the gate. The converter-tier
+comparison still runs through `threshold_engine.py` directly.
+
 ## Baseline Management
 
 `perf/baselines/<platform>.json` stores the baselines. You must generate

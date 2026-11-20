@@ -72,6 +72,7 @@ MIGRATED_SCENARIO_WRAPPERS = {
     "tools/e2e/verify_conditional_requests_e2e.sh": "conditional-requests",
     "tools/e2e/verify_auth_cache_e2e.sh": "auth-cache",
     "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
+    "tools/e2e/verify_error_handling_e2e.sh": "error-handling",
 }
 DOCKER_RUNTIME_PATHS = (
     CLUSTERFUZZ_DOCKERFILE,

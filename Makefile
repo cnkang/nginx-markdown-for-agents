@@ -187,6 +187,7 @@ rust-fmt-check:
 	cd $(RUST_DIR) && cargo fmt --all -- --check
 	cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
 	cargo fmt --manifest-path tools/e2e-harness/Cargo.toml --all -- --check
+	cargo fmt --manifest-path tools/perf/threshold-cli/Cargo.toml --all -- --check
 	@echo "  Rust Formatting Check: PASSED"
 
 rust-clippy-check:
@@ -194,6 +195,7 @@ rust-clippy-check:
 	cargo clippy --manifest-path $(RUST_DIR)/Cargo.toml --all-targets --all-features -- -D warnings
 	cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
 	cargo clippy --manifest-path tools/e2e-harness/Cargo.toml --all-targets -- -D warnings
+	cargo clippy --locked --manifest-path tools/perf/threshold-cli/Cargo.toml --all-targets -- -D warnings
 	@echo "  Rust Clippy Check: PASSED"
 
 test-rust: rust-fmt-check
@@ -840,7 +842,7 @@ security-semgrep:
 
 security-cargo-deny:
 	@command -v cargo-deny >/dev/null 2>&1 || { echo "ERROR: cargo-deny not found. Install with: cargo install cargo-deny --version 0.19.8 --locked" >&2; exit 127; }
-	@for manifest in components/rust-converter/Cargo.toml components/rust-converter/fuzz/Cargo.toml tools/corpus/test-corpus-conversion/Cargo.toml tools/e2e-harness/Cargo.toml; do \
+	@for manifest in components/rust-converter/Cargo.toml components/rust-converter/fuzz/Cargo.toml tools/corpus/test-corpus-conversion/Cargo.toml tools/e2e-harness/Cargo.toml tools/perf/threshold-cli/Cargo.toml; do \
 		cargo deny --manifest-path "$$manifest" check --config deny.toml advisories licenses bans sources || exit $$?; \
 	done
 

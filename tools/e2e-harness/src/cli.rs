@@ -198,16 +198,6 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
         .nginx_bin()
         .context("resolved runtime mode does not include an nginx binary")?
         .to_path_buf();
-    let ctx = ScenarioContext::new(
-        name,
-        mode,
-        cli.port,
-        cli.upstream_port,
-        cli.profile.clone(),
-        cli.keep_artifacts,
-        timeout,
-    )?;
-
     let runtime_base = std::env::temp_dir().join(format!(
         "e2e-harness-{name}-{}-{}",
         std::process::id(),
@@ -216,6 +206,15 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
             .unwrap_or_default()
             .as_millis()
     ));
+    let ctx = ScenarioContext::new(
+        name,
+        mode,
+        cli.port,
+        cli.upstream_port,
+        cli.profile.clone(),
+        timeout,
+        runtime_base.join("artifacts").join("scenarios").join(name),
+    )?;
     // Arm the guard BEFORE prepare: prepare creates the tree and can fail
     // partway through, and a partial tree must still be classified (a
     // settled tree is never reclaimed even when no invocation record was

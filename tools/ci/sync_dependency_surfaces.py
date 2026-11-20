@@ -7,7 +7,7 @@ dependency surfaces - the sub-workspace Cargo.lock files and the numbered
 that stops at the baseline lock then fails the Rust Security Audit gate
 (Rule 49). This tool applies that sync mechanically instead of by hand:
 
-1. Sub-workspace locks (fuzz, corpus tooling, e2e harness): every shared
+1. Sub-workspace locks (fuzz, corpus tooling, E2E harness, perf thresholds): every shared
    package whose resolved version differs from the baseline and is not
    documented in ``CROSS_LOCK_ALLOWED_DIVERGENCES`` is moved to the baseline
    version with a targeted ``cargo update --precise``. A full lock rebuild

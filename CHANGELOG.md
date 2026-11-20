@@ -24,6 +24,10 @@ approval of the exact candidate SHA.
 - This change adds the 1.31.9 source SHA-256 after signature verification with
   an NGINX project developer key. It also re-verifies the existing 1.30.7
   checksum.
+- The Rust E2E harness now runs all eight error-handling cases. The existing
+  shell command delegates to the harness.
+- The module benchmark gate now evaluates thresholds in Rust and keeps the
+  existing Python command and verdict report.
 
 ### Candidate validation status
 

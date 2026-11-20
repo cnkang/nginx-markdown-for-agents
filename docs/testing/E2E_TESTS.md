@@ -49,12 +49,24 @@ owns their fixtures, requests, and assertions. They run via
 | `representation-validator-e2e` | `tools/e2e-harness/src/scenarios/representation_validator.rs` | *(new Rust-only scenario, no shell predecessor)* |
 | `auth-cache` | `tools/e2e-harness/src/scenarios/auth_cache.rs` | `tools/e2e/verify_auth_cache_e2e.sh` |
 | `status-codes` | `tools/e2e-harness/src/scenarios/status_codes.rs` | `tools/e2e/verify_status_codes_e2e.sh` |
+| `error-handling` | `tools/e2e-harness/src/scenarios/error_handling.rs` | `tools/e2e/verify_error_handling_e2e.sh` |
 
 Run the migrated suite directly:
 
 ```bash
 make test-e2e-rust
 ```
+
+To run error handling alone against an existing module build, use:
+
+```bash
+NGINX_BIN=/path/to/nginx tools/e2e/verify_error_handling_e2e.sh --keep-artifacts
+```
+
+The wrapper accepts `--nginx-version`, `--port`, and `--upstream-port`.
+Without `NGINX_BIN`, the harness builds the requested NGINX version through
+the native bootstrap. The harness stores response headers and bodies under
+`artifacts/scenarios/error-handling/raw/` on failure or with `--keep-artifacts`.
 
 ### Non-migrated scenarios (retained shell paths)
 
@@ -64,7 +76,6 @@ make test-e2e-rust
 | `tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke` | Chunked buffering and oversized fail-open smoke coverage |
 | `tools/e2e/verify_large_markdown_response_e2e.sh` | Large-response buffering and conversion validation |
 | `tools/e2e/verify_config_merge_e2e.sh` | Directive merge precedence and override behavior |
-| `tools/e2e/verify_error_handling_e2e.sh` | Error passthrough, fail-open, 206 skip, max-size boundary |
 | `tools/e2e/verify_security_e2e.sh` | Security header and sanitizer behavior |
 | `tools/e2e/verify_streaming_failure_cache_e2e.sh` | Streaming failure cache and retry behavior |
 | `tools/ci/verify_real_nginx_ims.sh` | Real-NGINX conditional-validation (ETag/If-None-Match/If-Modified-Since matrix, runs under `test-all-e2e` with `NGINX_BIN`; mirrors `real-nginx-ims.yml` CI job) |

@@ -168,6 +168,7 @@ pub fn settle_run_tree(runtime_base: &Path, keep_artifacts: bool, passed: bool) 
         let _ = std::fs::remove_dir_all(runtime_base);
         return;
     }
+    eprintln!("E2E artifacts retained at {}", runtime_base.display());
     let marker = runtime_base.join(COMPLETION_MARKER_FILE);
     if let Err(err) = std::fs::write(&marker, if passed { "passed" } else { "failed" }) {
         // A missing marker is the discriminator wrapper recovery uses to

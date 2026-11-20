@@ -203,6 +203,18 @@ def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
     assert executable_validation.resolve_approved_executable("rustfmt") == str(
         toolchain_rustfmt
     )
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "rust-toolchain.toml").write_text(
+        '[toolchain]\nchannel = "pinned"\n', encoding="utf-8",
+    )
+    pinned_rustfmt = tmp_path / ".rustup" / "toolchains" / "pinned" / "bin" / "rustfmt"
+    pinned_rustfmt.parent.mkdir(parents=True)
+    pinned_rustfmt.write_text("#!/bin/sh\n", encoding="utf-8")
+    pinned_rustfmt.chmod(0o755)
+    assert executable_validation.resolve_approved_executable("rustfmt", cwd=checkout) == str(
+        pinned_rustfmt
+    )
 
 
 def test_discover_fixtures_persists_validated_html_path(tmp_path):
