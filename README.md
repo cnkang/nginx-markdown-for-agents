@@ -20,9 +20,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > only after publication and approval of the exact candidate SHA. See the
 > [0.9.4 candidate notes](docs/releases/0.9.4-release-notes.md).
 
-The v0.9.4 candidate also moves the error-handling E2E scenario and module
-benchmark threshold decisions to Rust. The existing test and performance gate
-commands still work.
+The v0.9.4 candidate also moves error handling, configuration merge, large
+responses, streaming failure and cache tests, and module benchmark threshold
+decisions to Rust. The existing test and performance commands still work.
 
 NGINX Markdown for Agents adds a machine-friendly Markdown representation to
 HTML pages that you already serve. Clients that send `Accept: text/markdown`

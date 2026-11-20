@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:f2161d819fda46581188698c6892ec8118c8ac360d3122423596a69424333636"
+    "sha256": "sha256:5b6bd08ea4c801904dbd8db9921dee212aeaf53990c4cc5740a7cba2c712a539"
   },
   "entries": [
     {
@@ -121,7 +121,7 @@
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.20"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.24.0-2ubuntu7.21"
       }
     },
     {
@@ -551,11 +551,11 @@
       "abi_version": 3,
       "verification_state": "pending",
       "support_stage": "primary",
-      "date": "2026-11-19",
+      "date": "2026-11-20",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
-        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.13"
+        "reference": "https://launchpad.net/ubuntu/+source/nginx/1.28.3-2ubuntu1.14"
       }
     },
     {

@@ -76,20 +76,15 @@ when the archive revision differs from the recorded revision. This rule makes
 the maintainer review the new revision before a release can use it.
 
 The v0.9.4 candidate targets nginx.org stable 1.30.7 and mainline 1.31.9.
-[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1) sets the Ubuntu
-24.04 and 26.04 security-fix floors at `1.24.0-2ubuntu7.20` and
-`1.28.3-2ubuntu1.13`. The release workflow's Ubuntu APT installs resolved
-24.04 amd64 `.20` and arm64 `.21`, and 26.04 amd64 `.13` and arm64 `.14`.
+Ubuntu published `1.24.0-2ubuntu7.21` for 24.04 and `1.28.3-2ubuntu1.14`
+for 26.04 in [USN-9182-1](https://ubuntu.com/security/notices/USN-9182-1).
 Ubuntu's [archive integrity policy](https://documentation.ubuntu.com/security/software-integrity/archive-verification/)
 states that APT verifies official archive signatures automatically. The
 matrix records the exact per-architecture source revisions.
 
-Diagnostic run
-[44672326394](https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44672326394),
-on commit `da21d3b15ae6e190d1a409783db7f671eb989e91`, stopped the two arm64
-jobs at the exact-revision guard before module compilation, ABI capture, load,
-or request checks. The existing records cite an earlier candidate and cannot
-promote current rows. Keep all 12 new compatibility rows pending until a
+In rehearsal [44689767223](https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44689767223),
+APT installed the newer revisions on amd64. The exact-revision guard stopped
+those builds against the earlier matrix. Keep the 12 new rows pending until a
 required-blocking run on the final candidate SHA records matching build,
 load, request, and package evidence. Do not merge or publish until that run
 also passes the release gate and produces the required manifest and checksums.

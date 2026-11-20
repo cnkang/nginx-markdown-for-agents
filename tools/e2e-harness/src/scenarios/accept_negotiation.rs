@@ -44,8 +44,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut wildcard_headers = HashMap::new();
     wildcard_headers.insert("Accept".to_string(), "*/*".to_string());
 
-    let mut no_accept_headers = HashMap::new();
-    no_accept_headers.insert("Accept".to_string(), "".to_string());
+    // Override the HTTP client's default Accept: */*.
+    let no_accept_headers = HashMap::from([("Accept".into(), String::new())]);
 
     // Case 1: Accept: text/markdown triggers conversion
     let resp1 = match http::get_with_headers(&md_html_url, &markdown_headers) {
@@ -223,5 +223,38 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ));
     }
 
+    append_quality_cases(&md_html_url, &mut assertions);
     Ok(common::finalize_report(SCENARIO, start, assertions))
+}
+
+fn append_quality_cases(url: &str, results: &mut Vec<AssertionResult>) {
+    for (name, accept, media) in [
+        (
+            "html_wins_quality",
+            "text/markdown;q=0.9, text/html;q=1.0",
+            "^text/html",
+        ),
+        ("markdown_rejected", "text/markdown;q=0", "^text/html"),
+        ("malformed_accept", ";;;invalid;;;", "^text/html"),
+        (
+            "equal_quality",
+            "text/markdown, text/html",
+            "^text/markdown",
+        ),
+    ] {
+        let headers = HashMap::from([("Accept".into(), accept.into())]);
+        if let Some(response) = common::try_get_with_headers(url, &headers, results, name) {
+            results.push(assertions::assert_status(
+                &format!("{name}_status"),
+                response.status,
+                200,
+            ));
+            results.push(assertions::assert_header_pattern(
+                &format!("{name}_type"),
+                "Content-Type",
+                media,
+                &response.headers,
+            ));
+        }
+    }
 }
