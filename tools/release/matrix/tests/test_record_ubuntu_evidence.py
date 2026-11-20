@@ -120,6 +120,25 @@ def test_build_with_a_noncanonical_feature_set_is_refused(tmp_path):
     with pytest.raises(composer.ComposeError, match="feature set"):
         _compose(build, _ledger(tmp_path))
 
+def test_ledger_cannot_mask_a_noncanonical_build_feature_set(tmp_path):
+    build = _build(tmp_path, features=["streaming"])
+    features, _, _ = canonical_build_identity()
+    ledger = _ledger(tmp_path, features=features)
+
+    with pytest.raises(composer.ComposeError, match="feature set"):
+        _compose(build, ledger)
+
+@pytest.mark.parametrize("source", ["build", "ledger"])
+def test_conflicting_abi_version_is_refused(tmp_path, source):
+    _, _, abi_version = canonical_build_identity()
+    build_overrides = {"abi_version": abi_version + 1} if source == "build" else {}
+    ledger_overrides = {"abi_version": abi_version + 1} if source == "ledger" else {}
+    build = _build(tmp_path, **build_overrides)
+    ledger = _ledger(tmp_path, **ledger_overrides)
+
+    with pytest.raises(composer.ComposeError, match="frozen FFI ABI"):
+        _compose(build, ledger)
+
 
 def test_missing_verifier_class_is_refused(tmp_path):
     ledger = _ledger(tmp_path)

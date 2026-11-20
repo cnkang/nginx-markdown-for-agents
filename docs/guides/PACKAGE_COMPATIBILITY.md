@@ -383,7 +383,8 @@ the module from source against your local NGINX installation.
 
 ### Tier Definitions
 
-- **supported**: CI passes, artifact produced, and install verified. A supported row is a release gate: a failure blocks the release, including compatibility-floor maintenance rows, which carry the same promise for the platforms they cover.
+- **supported**: The project commits to this row and blocks release until CI passes, the artifact exists, and installation succeeds. A supported row with pending evidence remains an unfulfilled release obligation, including compatibility-floor maintenance rows, which carry the same promise for the platforms they cover.
+- **pending**: The project has not recorded the required CI or installation evidence for this candidate. Do not treat the row as verified; a pending supported row blocks release until its evidence passes.
 - **experimental**: Available, not guaranteed, CI non-blocking, noted in release notes.
 - **best-effort**: The project may produce an artifact for the listed platform but the row is not a release gate. Availability is not guaranteed and the row does not block the release. Source-only rows use this tier when they are not part of the prebuilt-package surface.
 - **unsupported**: No artifacts, no commitment.
