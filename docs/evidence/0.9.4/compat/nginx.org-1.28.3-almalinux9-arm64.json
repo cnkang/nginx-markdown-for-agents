@@ -1,0 +1,61 @@
+{
+  "abi_provide": "",
+  "arch": "arm64",
+  "build_args_digest": "sha256:9dccdaea942269ce164d20ca21e7c32fa496ee683b6da7e504a04f9707b5111c",
+  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
+  "date": "2026-11-20",
+  "distro": "almalinux9",
+  "distro_version": "n/a",
+  "execution_environment": "native",
+  "fail": 0,
+  "features": [
+    "prune_noise_regions",
+    "streaming"
+  ],
+  "libc": "glibc",
+  "module_sha256": "a831b5c124bc25f1cf88158dd5b1821d454c7707eae8740d1f1ac726608a8e78",
+  "nginx_package_revision": "1.28.3",
+  "nginx_version": "1.28.3",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918",
+  "source_kind": "nginx.org",
+  "source_reference": "https://nginx.org/download/nginx-1.28.3.tar.gz",
+  "target_identity": "nginx.org:1.28.3:almalinux9:glibc:arm64",
+  "tests": [
+    {
+      "detail": "module sha256 a831b5c124bc25f1",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "no libbrotli NEEDED entry",
+      "name": "static_brotli",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "ci:release-packages/smoke-test",
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+}

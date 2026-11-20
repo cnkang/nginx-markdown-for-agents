@@ -1,0 +1,63 @@
+{
+  "abi_provide": "",
+  "arch": "amd64",
+  "build_args_digest": "sha256:b945340428777ca1fe2d9de6645638562e9f74f16abd6ec47528b7b060546ce2",
+  "built_image_id": "sha256:6fd4fbce100cd114091310ef7570c9ddeb60efa49077fceb5fa3559407624696",
+  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
+  "date": "2026-11-20",
+  "distro": "debian12",
+  "distro_version": "n/a",
+  "execution_environment": "native",
+  "fail": 0,
+  "features": [
+    "streaming"
+  ],
+  "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
+  "image_reference": "nginx:1.26.3",
+  "libc": "glibc",
+  "module_sha256": "49db64ae26b4db3c5fda793f50328ae61e88d9f7c55f331cbdaab7c8deadd5cc",
+  "nginx_package_revision": "1.26.3",
+  "nginx_version": "1.26.3",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
+  "source_kind": "container-registry",
+  "source_reference": "nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
+  "target_identity": "container-registry:nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860:debian12:glibc:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 49db64ae26b4db3c",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "no libbrotli NEEDED entry",
+      "name": "static_brotli",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "ci:official-nginx-docker/build-and-verify",
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+}
