@@ -142,6 +142,33 @@ fn behavior_response(
                 &method,
             )
         }
+        RouteBehavior::Html { body, headers } => {
+            let mut headers = headers.clone();
+            headers.push(("Content-Type".into(), "text/html; charset=utf-8".into()));
+            to_response(
+                FixtureResponse {
+                    status: 200,
+                    headers,
+                    body: body.clone(),
+                },
+                &method,
+            )
+        }
+        RouteBehavior::AbortedHtml { first_chunk } => {
+            use futures_util::{StreamExt, stream};
+            let first = Ok(Bytes::copy_from_slice(first_chunk.as_bytes()));
+            let chunks = stream::iter([first]).chain(stream::once(async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                Err(std::io::Error::other(
+                    "fixture closed before chunked terminator",
+                ))
+            }));
+            (
+                [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                Body::from_stream(chunks),
+            )
+                .into_response()
+        }
         RouteBehavior::Conditional => {
             let etag = "\"fixture-conditional-etag\"";
             let if_none_match = header_value(&headers, "If-None-Match");

@@ -15,7 +15,7 @@
 #  11. auth cache verification (e2e-harness)
 #  12. status codes verification (e2e-harness)
 #
-# Migrated scenarios (5, 7-9, 11-12) are delegated to the Rust e2e-harness binary.
+# Migrated scenarios (3-5, 7-12) are delegated to the Rust e2e-harness binary.
 # Non-migrated scenarios remain on their canonical shell paths.
 #
 # Options:
@@ -29,10 +29,7 @@ KEEP_ARTIFACTS=0
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROXY_TLS_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_proxy_tls_backend_e2e.sh"
 CHUNKED_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh"
-LARGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_large_markdown_response_e2e.sh"
-STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_failure_cache_e2e.sh"
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
-CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
 SUBREQUEST_SSI_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/subrequest_ssi_test.sh"
 ERROR_POLICY_VALUES_SCRIPT="${WORKSPACE_ROOT}/tests/compatibility/test_error_policy_values.sh"
@@ -159,41 +156,17 @@ SUITE_BUILDROOT="$(cat "${BUILDROOT_OUTPUT_FILE}")"
 }
 
 chunked_args=(--profile smoke)
-large_args=()
+security_args=()
+e2e_harness_args=(--nginx-bin "${SUITE_NGINX_BIN}")
 if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
   chunked_args=(--keep-artifacts "${chunked_args[@]}")
-  large_args=(--keep-artifacts)
+  security_args=(--keep-artifacts)
+  e2e_harness_args=(--keep-artifacts "${e2e_harness_args[@]}")
 fi
 
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CHUNKED_SCRIPT}" "${chunked_args[@]}"
-if [[ ${#large_args[@]} -gt 0 ]]; then
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${LARGE_SCRIPT}" "${large_args[@]}"
-else
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${LARGE_SCRIPT}"
-fi
-
-streaming_fc_args=()
-if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
-  streaming_fc_args=(--keep-artifacts)
-fi
-if [[ ${#streaming_fc_args[@]} -gt 0 ]]; then
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}" "${streaming_fc_args[@]}"
-else
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${STREAMING_FAILURE_CACHE_SCRIPT}"
-fi
-
-security_args=()
-config_merge_args=()
-if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
-  security_args=(--keep-artifacts)
-  config_merge_args=(--keep-artifacts)
-fi
-
-# --- Migrated scenarios: delegate to e2e-harness ---
-e2e_harness_args=(--nginx-bin "${SUITE_NGINX_BIN}")
-if [[ "${KEEP_ARTIFACTS}" -eq 1 ]]; then
-  e2e_harness_args=(--keep-artifacts "${e2e_harness_args[@]}")
-fi
+"${E2E_HARNESS_BIN}" scenario large-response "${e2e_harness_args[@]}"
+"${E2E_HARNESS_BIN}" scenario streaming-failure-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario accept-negotiation "${e2e_harness_args[@]}"
 if [[ ${#security_args[@]} -gt 0 ]]; then
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SECURITY_SCRIPT}" "${security_args[@]}"
@@ -203,11 +176,7 @@ fi
 "${E2E_HARNESS_BIN}" scenario error-handling "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario metrics-endpoint "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario conditional-requests "${e2e_harness_args[@]}"
-if [[ ${#config_merge_args[@]} -gt 0 ]]; then
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}" "${config_merge_args[@]}"
-else
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${CONFIG_MERGE_SCRIPT}"
-fi
+"${E2E_HARNESS_BIN}" scenario config-merge "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 

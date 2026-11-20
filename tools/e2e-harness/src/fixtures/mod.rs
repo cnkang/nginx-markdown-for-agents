@@ -28,6 +28,13 @@ pub enum RouteBehavior {
         content_type: String,
         etag: Option<String>,
     },
+    /// Fixed HTML with explicit upstream headers.
+    Html {
+        body: String,
+        headers: Vec<(String, String)>,
+    },
+    /// Send one chunk and abort the transfer before the terminator.
+    AbortedHtml { first_chunk: String },
     /// Conditional response (ETag / If-Modified-Since / If-None-Match).
     Conditional,
     /// Cache behavior simulation.

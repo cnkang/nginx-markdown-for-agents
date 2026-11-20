@@ -205,6 +205,34 @@ pub fn markdown_token_bytes_present(body: &[u8], token: &str) -> bool {
         .any(|window| window == escaped_token.as_bytes())
 }
 
+pub fn assert_condition(name: &str, passed: bool, expected: &str) -> AssertionResult {
+    AssertionResult {
+        name: name.into(),
+        passed,
+        expected: expected.into(),
+        actual: if passed { "matched" } else { "did not match" }.into(),
+        message: (!passed).then(|| format!("expected {expected}")),
+    }
+}
+
+pub fn save_response(
+    raw: &std::path::Path,
+    case: &str,
+    response: &crate::http::HttpResponse,
+) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut headers = std::fs::File::create(raw.join(format!("{case}.hdr")))?;
+    writeln!(headers, "HTTP/1.1 {}", response.status)?;
+    for (name, value) in &response.headers {
+        write!(headers, "{name}: ")?;
+        headers.write_all(value.as_bytes())?;
+        writeln!(headers)?;
+    }
+    std::fs::write(raw.join(format!("{case}.body")), &response.body)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{markdown_token_bytes_present, markdown_token_present};

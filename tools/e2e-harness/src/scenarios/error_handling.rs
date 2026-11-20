@@ -2,7 +2,6 @@
 
 use crate::assertions;
 use crate::fixtures::{FixtureSpec, RouteBehavior, RouteSpec};
-use crate::http::HttpResponse;
 use crate::scenarios::{AssertionResult, ScenarioContext, ScenarioReport, common};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -116,7 +115,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let mut results = Vec::new();
     let headers = HashMap::from([("Accept".into(), "text/markdown".into())]);
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
-    let raw = ctx.artifact_dir.join("raw");
+    let raw = ctx.artifact_dir().join("raw");
     std::fs::create_dir(&raw)?;
 
     let upstream_url = format!("http://127.0.0.1:{}/large", ctx.upstream_port);
@@ -154,7 +153,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         else {
             continue;
         };
-        save_response(&raw, &case, &response)?;
+        common::save_response(&raw, &case, &response)?;
         results.push(assertions::assert_status(
             &format!("{case}_status"),
             response.status,
@@ -182,18 +181,4 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         }
     }
     Ok(common::finalize_report(SCENARIO, start, results))
-}
-
-fn save_response(raw: &Path, case: &str, response: &HttpResponse) -> Result<()> {
-    use std::io::Write;
-
-    let mut headers = std::fs::File::create(raw.join(format!("{case}.hdr")))?;
-    writeln!(headers, "HTTP/1.1 {}", response.status)?;
-    for (name, value) in &response.headers {
-        write!(headers, "{name}: ")?;
-        headers.write_all(value.as_bytes())?;
-        writeln!(headers)?;
-    }
-    std::fs::write(raw.join(format!("{case}.body")), &response.body)?;
-    Ok(())
 }

@@ -213,7 +213,7 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
         cli.upstream_port,
         cli.profile.clone(),
         timeout,
-        runtime_base.join("artifacts").join("scenarios").join(name),
+        runtime_base.clone(),
     )?;
     // Arm the guard BEFORE prepare: prepare creates the tree and can fail
     // partway through, and a partial tree must still be classified (a
