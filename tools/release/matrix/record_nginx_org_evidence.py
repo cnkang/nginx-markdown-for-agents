@@ -58,7 +58,10 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
-from evidence_contract import validate_record  # noqa: E402
+from evidence_contract import (  # noqa: E402
+    canonical_build_identity,
+    validate_record,
+)
 from normalize_matrix import RELEASE_VERSION  # noqa: E402
 
 FEATURES = ["prune_noise_regions", "streaming"]
@@ -275,6 +278,9 @@ def compose(
     distro = producer.distro
     if distro not in DISTROS:
         raise ComposeError(f"unknown distro {distro!r}")
+    features, feature_digest, abi_version = canonical_build_identity()
+    if tuple(sorted(FEATURES)) != features:
+        raise ComposeError("recorded features do not match the release manifest")
     module_sha, ledger = _read_ledger(build_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)
 
@@ -308,6 +314,8 @@ def compose(
         "module_sha256": module_sha,
         "rust_version": rust_version,
         "features": list(FEATURES),
+        "feature_manifest_digest": feature_digest,
+        "abi_version": abi_version,
         "tests": tests,
         "pass": counts["PASS"],
         "fail": counts["FAIL"],

@@ -17,6 +17,7 @@ Exit codes of the command-line wrapper in
 from __future__ import annotations
 
 import datetime as _datetime
+import functools
 import json
 import pathlib
 import re
@@ -28,6 +29,14 @@ _REPO_ROOT = _SCRIPT_DIR.parents[2]
 if str(_REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "tools"))
 from lib.path_validation import validate_read_path  # noqa: E402
+from release.gates.feature_manifest_digest import (  # noqa: E402
+    CANONICAL_FEATURE_MANIFEST,
+    calculate_feature_manifest_digest,
+)
+from release.matrix.validate_release_matrix import (  # noqa: E402
+    FEATURE_MANIFEST_PATH,
+    frozen_abi_version,
+)
 
 SCHEMA_VERSION = 1
 SHA256_PREFIX = "sha256:"
@@ -255,6 +264,98 @@ def _validate_features(record: dict[str, Any], errors: list[str]) -> None:
         errors.append("features must contain non-empty strings")
 
 
+def _validate_optional_promotion_identity(
+    record: dict[str, Any], errors: list[str]
+) -> None:
+    """Validate additive module identity fields without invalidating old records."""
+    if "feature_manifest_digest" in record:
+        digest = record["feature_manifest_digest"]
+        if (
+            not isinstance(digest, str)
+            or not digest.startswith(SHA256_PREFIX)
+            or not _SHA256_RE.fullmatch(digest[len(SHA256_PREFIX) :])
+        ):
+            errors.append("feature_manifest_digest must be sha256:<64 hex>")
+    if "abi_version" in record:
+        abi_version = record["abi_version"]
+        if (
+            isinstance(abi_version, bool)
+            or not isinstance(abi_version, int)
+            or abi_version < 1
+        ):
+            errors.append("abi_version must be a positive integer")
+
+
+@functools.lru_cache(maxsize=1)
+def canonical_build_identity() -> tuple[tuple[str, ...], str, int]:
+    """Return the release feature set, canonical digest, and frozen FFI ABI."""
+    features = tuple(
+        sorted(
+            name
+            for name, enabled in CANONICAL_FEATURE_MANIFEST.items()
+            if enabled
+        )
+    )
+    digest = calculate_feature_manifest_digest(FEATURE_MANIFEST_PATH)
+    return features, digest, frozen_abi_version()
+
+
+def _promotion_features_match(
+    record: dict[str, Any], features: tuple[str, ...], digest: str
+) -> bool:
+    """Require a record's feature list and digest to match the release build."""
+    recorded_features = record.get("features")
+    if (
+        not isinstance(recorded_features, list)
+        or len(recorded_features) != len(features)
+        or not all(isinstance(feature, str) for feature in recorded_features)
+        or set(recorded_features) != set(features)
+    ):
+        return False
+    return record.get("feature_manifest_digest") == digest
+
+
+def _promotion_module_identity_matches(record: dict[str, Any]) -> bool:
+    """Require a valid module digest and target identity in the evidence."""
+    module_sha = record.get("module_sha256")
+    if not isinstance(module_sha, str) or not _SHA256_RE.fullmatch(module_sha):
+        return False
+
+    source_kind = record.get("source_kind")
+    if source_kind == "nginx.org":
+        expected_identity = (
+            f"nginx.org:{record.get('nginx_version')}:{record.get('distro')}:"
+            f"{record.get('libc')}:{record.get('arch')}"
+        )
+    elif source_kind == "ubuntu-default-repo":
+        expected_identity = (
+            "ubuntu-default-repo:"
+            f"{record.get('nginx_package_revision')}:{record.get('distro')}:"
+            f"{record.get('arch')}"
+        )
+    else:
+        return False
+    return record.get("target_identity") == expected_identity
+
+
+def _promotion_identity_matches(
+    record: dict[str, Any], entry: dict[str, Any]
+) -> bool:
+    """Require a record to identify the exact canonical module build."""
+    features, digest, abi_version = canonical_build_identity()
+    if not _promotion_features_match(record, features, digest):
+        return False
+    if entry.get("feature_manifest_digest") != digest:
+        return False
+    record_abi = record.get("abi_version")
+    entry_abi = entry.get("abi_version")
+    if type(record_abi) is not int or type(entry_abi) is not int:
+        return False
+    if record_abi != abi_version or entry_abi != abi_version:
+        return False
+    return _promotion_module_identity_matches(record)
+
+
 def _required_test_classes(record: dict[str, Any]) -> set[str]:
     """Return the test classes a record for this source kind must carry."""
     required = set(REQUIRED_TEST_CLASSES)
@@ -339,6 +440,7 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     _validate_hashes(record, errors)
     _validate_provenance(record, errors)
     _validate_features(record, errors)
+    _validate_optional_promotion_identity(record, errors)
     _validate_tests(record, errors)
     return errors
 
@@ -494,13 +596,18 @@ def _artifact_matches(record: dict[str, Any], entry: dict[str, Any]) -> bool:
     return artifact_type != "docker-image"
 
 
-def record_covers_entry(record: dict[str, Any], entry: dict[str, Any]) -> bool:
+def record_covers_entry(
+    record: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    require_promotion_identity: bool = False,
+) -> bool:
     """Return whether one record verifies one matrix entry.
 
     The match is deliberately strict on version, libc, architecture, host OS,
-    source kind, artifact kind, and a pinned distro revision.  A generic Linux
-    glibc row is verified by an nginx.org record whose host is ``linux``; a
-    distro row is verified only by a record from that exact suite.
+    source kind, artifact kind, and a pinned distro revision.  Promotion also
+    requires the canonical module build identity; legacy evidence remains
+    readable for historical matrix coverage but cannot promote a row.
     """
     if entry.get("nginx_version") != record["nginx_version"]:
         return False
@@ -514,7 +621,13 @@ def record_covers_entry(record: dict[str, Any], entry: dict[str, Any]) -> bool:
         return False
     if not _provenance_matches(record, entry):
         return False
-    return entry.get("os") == record["distro"]
+    if entry.get("os") != record["distro"]:
+        return False
+    if require_promotion_identity and not _promotion_identity_matches(
+        record, entry
+    ):
+        return False
+    return True
 
 
 def iter_records(directory: pathlib.Path) -> Iterable[tuple[pathlib.Path, dict[str, Any]]]:

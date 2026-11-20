@@ -36,6 +36,8 @@ import contextlib
 import json
 import os
 import pathlib
+import re
+import subprocess
 import sys
 from typing import Any
 
@@ -47,6 +49,7 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
 from evidence_contract import (  # noqa: E402
     EvidenceError,
     is_promotable,
@@ -61,10 +64,29 @@ DEFAULT_MATRIX = REPO_ROOT / "tools" / "release-matrix.json"
 PROMOTABLE_ARTIFACT_TYPES = frozenset(
     {"dynamic-module", "deb-package", "rpm-package"}
 )
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class PromotionError(RuntimeError):
     """Raised when a promotion request cannot be applied safely."""
+
+
+def _candidate_sha() -> str:
+    """Resolve the candidate from the current checkout, as release gates do."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise PromotionError("cannot resolve candidate commit: git is unavailable")
+    result = subprocess.run(
+        [git, "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    sha = result.stdout.strip()
+    if result.returncode != 0 or not _COMMIT_RE.fullmatch(sha):
+        raise PromotionError("cannot resolve candidate commit from git rev-parse HEAD")
+    return sha
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -111,6 +133,13 @@ def _is_promotable_row(entry: dict[str, Any]) -> bool:
 
 def _promote_entry(entry: dict[str, Any], record: dict[str, Any]) -> None:
     """Apply one evidence record to one matrix row."""
+    if not is_promotable(record) or not record_covers_entry(
+        record, entry, require_promotion_identity=True
+    ):
+        raise PromotionError(
+            f"record {record.get('target_identity')} does not verify the "
+            "canonical module build identity for this row"
+        )
     entry["support_tier"] = "supported"
     entry["support_stage"] = "primary"
     entry["verification_state"] = "verified"
@@ -130,7 +159,10 @@ def _covered_rows(
     return [
         entry
         for entry in entries
-        if _is_promotable_row(entry) and record_covers_entry(record, entry)
+        if _is_promotable_row(entry)
+        and record_covers_entry(
+            record, entry, require_promotion_identity=True
+        )
     ]
 
 
@@ -220,45 +252,65 @@ def _is_superseded(
     return _version_tuple(version) < _version_tuple(newest)
 
 
+def _resolve_candidate_sha(candidate_sha: str | None) -> str:
+    """Return a validated candidate SHA, defaulting to the current checkout."""
+    candidate = candidate_sha if candidate_sha is not None else _candidate_sha()
+    if not _COMMIT_RE.fullmatch(candidate):
+        raise PromotionError("candidate SHA must be 40 lowercase hex characters")
+    return candidate
+
+
+def _promote_record(
+    entries: list[dict[str, Any]], record: dict[str, Any], candidate: str
+) -> tuple[list[dict[str, Any]], str]:
+    """Validate one candidate-bound record and apply it to covered rows."""
+    target = record.get("target_identity")
+    if record.get("commit_sha") != candidate:
+        raise PromotionError(
+            f"record {target} was produced for commit "
+            f"{record.get('commit_sha')}, not the candidate {candidate}"
+        )
+    if not is_promotable(record):
+        raise PromotionError(f"record {target} is not promotable")
+    refused = _refused_manual_rows(entries, record)
+    if refused:
+        raise PromotionError(
+            f"record {target} matches managed_by=manual rows: "
+            f"{[row.get('os') for row in refused]}"
+        )
+    covered = _covered_rows(entries, record)
+    if not covered:
+        raise PromotionError(
+            f"record {target} covers no matrix row; add the row before promoting it"
+        )
+    for entry in covered:
+        _promote_entry(entry, record)
+    summary = (
+        f"promote {record['nginx_version']} "
+        f"{record['distro']}/{record['libc']}/{record['arch']}: "
+        f"{len(covered)} row(s)"
+    )
+    return covered, summary
+
+
 def build_promoted_matrix(
     matrix: dict[str, Any],
     records: list[dict[str, Any]],
     *,
     demote_superseded: bool,
     keep_previous: frozenset[str] = frozenset(),
+    candidate_sha: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return the promoted matrix and a human-readable change summary."""
+    candidate = _resolve_candidate_sha(candidate_sha)
     entries = matrix["entries"]
     summary: list[str] = []
     promoted_rows: list[dict[str, Any]] = []
 
     for record in records:
-        if not is_promotable(record):
-            raise PromotionError(
-                f"record {record.get('target_identity')} is not promotable"
-            )
-        refused = _refused_manual_rows(entries, record)
-        if refused:
-            raise PromotionError(
-                "record "
-                f"{record.get('target_identity')} matches managed_by=manual "
-                f"rows: {[row.get('os') for row in refused]}"
-            )
-        covered = _covered_rows(entries, record)
-        if not covered:
-            raise PromotionError(
-                "record "
-                f"{record.get('target_identity')} covers no matrix row; "
-                "add the row before promoting it"
-            )
-        for entry in covered:
-            _promote_entry(entry, record)
+        covered, record_summary = _promote_record(entries, record, candidate)
         promoted_rows.extend(covered)
-        summary.append(
-            f"promote {record['nginx_version']} "
-            f"{record['distro']}/{record['libc']}/{record['arch']}: "
-            f"{len(covered)} row(s)"
-        )
+        summary.append(record_summary)
 
     if demote_superseded:
         demoted = _demote_superseded(entries, promoted_rows, keep_previous)
@@ -423,6 +475,7 @@ def main(
                 records,
                 demote_superseded=args.demote_superseded,
                 keep_previous=frozenset(args.keep_previous),
+                candidate_sha=_candidate_sha(),
             )
             return _finish(args, promoted, original, summary, repo_root)
     except (OSError, ValueError, EvidenceError, PromotionError) as exc:

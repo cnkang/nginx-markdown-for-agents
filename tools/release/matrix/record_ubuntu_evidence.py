@@ -37,7 +37,10 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
-from evidence_contract import validate_record  # noqa: E402
+from evidence_contract import (  # noqa: E402
+    canonical_build_identity,
+    validate_record,
+)
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERIFIER_TESTS = ("load", "request_markdown", "request_passthrough", "lifecycle")
@@ -134,6 +137,17 @@ def compose(
     record["pass"] = counts["PASS"]
     record["fail"] = counts["FAIL"]
     record["skip"] = counts["SKIP"]
+    features, feature_digest, abi_version = canonical_build_identity()
+    recorded_features = record.get("features")
+    if (
+        not isinstance(recorded_features, list)
+        or not all(isinstance(feature, str) for feature in recorded_features)
+        or len(recorded_features) != len(features)
+        or set(recorded_features) != set(features)
+    ):
+        raise ComposeError("built feature set does not match the release manifest")
+    record["feature_manifest_digest"] = feature_digest
+    record["abi_version"] = abi_version
     record["target_identity"] = (
         f"ubuntu-default-repo:{build['nginx_package_revision']}:"
         f"{build['distro']}:{build['arch']}"

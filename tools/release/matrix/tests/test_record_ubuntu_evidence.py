@@ -8,7 +8,10 @@ import pathlib
 
 import pytest
 
-from tools.release.matrix.evidence_contract import validate_record
+from tools.release.matrix.evidence_contract import (
+    canonical_build_identity,
+    validate_record,
+)
 from tools.release.matrix import record_ubuntu_evidence as composer
 
 COMMIT = "c" * 40
@@ -94,6 +97,10 @@ def test_compose_adds_the_build_class_and_recomputes_totals(tmp_path):
     )
     assert record["brotli_version"] == "1.1.0-2ubuntu0.1"
     assert record["brotli_linkage"] == "dynamic"
+    features, digest, abi_version = canonical_build_identity()
+    assert set(record["features"]) == set(features)
+    assert record["feature_manifest_digest"] == digest
+    assert record["abi_version"] == abi_version
 
 
 def test_failed_test_in_the_ledger_is_refused(tmp_path):
@@ -105,6 +112,13 @@ def test_failed_test_in_the_ledger_is_refused(tmp_path):
     build = _build(tmp_path)
     with pytest.raises(composer.ComposeError, match="non-passing"):
         _compose(build, ledger)
+
+
+def test_build_with_a_noncanonical_feature_set_is_refused(tmp_path):
+    build = _build(tmp_path, features=["streaming"])
+
+    with pytest.raises(composer.ComposeError, match="feature set"):
+        _compose(build, _ledger(tmp_path))
 
 
 def test_missing_verifier_class_is_refused(tmp_path):

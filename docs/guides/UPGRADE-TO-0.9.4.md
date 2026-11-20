@@ -12,9 +12,9 @@ codes, and FFI ABI version 3.
 
 | NGINX installation | Artifact family |
 |---|---|
-| nginx.org package or source build | DEB/RPM: exact NGINX version, distribution, and architecture; module archive: exact version, runtime libc (`glibc` or `musl`), and architecture |
+| nginx.org package | DEB/RPM: exact NGINX version, distribution, and architecture; module archive: exact version, runtime libc (`glibc` or `musl`), and architecture |
 | Ubuntu 24.04 or 26.04 archive package | Ubuntu-native DEB for the exact suite, architecture, package revision, and ABI |
-| Other source build | Build the module against that exact NGINX build |
+| Source-built NGINX | Build the module against the exact NGINX source and configure arguments used for the server. Matching version, libc, and architecture alone do not guarantee a matching NGINX module build signature. |
 
 Do not substitute an nginx.org package for an Ubuntu-native package. A matching
 version string or ABI provide alone does not prove that a module can load.
