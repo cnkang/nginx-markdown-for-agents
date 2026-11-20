@@ -8,8 +8,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COVERAGE_SCRIPT = REPO_ROOT / "tools" / "sonar" / "collect_nginx_coverage.sh"
-STREAMING_FAILURE_CACHE_SCRIPT = (
-    REPO_ROOT / "tools" / "e2e" / "verify_streaming_failure_cache_e2e.sh"
+STREAMING_FAILURE_CACHE_SCENARIO = (
+    REPO_ROOT / "tools/e2e-harness/src/scenarios/streaming_failure_cache.rs"
 )
 
 
@@ -152,9 +152,10 @@ def test_coverage_runtime_avoids_rejected_streaming_cache_combination() -> None:
 
 def test_streaming_failure_cache_runtime_avoids_rejected_combination() -> None:
     """The native failure/cache E2E config must pass config merge."""
-    script = STREAMING_FAILURE_CACHE_SCRIPT.read_text(encoding="utf-8")
-
-    assert not _conflicting_location_blocks(script)
+    source = STREAMING_FAILURE_CACHE_SCENARIO.read_text(encoding="utf-8")
+    config = source.partition('r#"@LOAD@')[2].partition('"#')[0]
+    assert "location /t12/" in config
+    assert not _conflicting_location_blocks(config)
 
 
 def test_quoted_regex_location_with_brace_is_parsed() -> None:

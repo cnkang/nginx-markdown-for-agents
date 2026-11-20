@@ -787,11 +787,6 @@ jobs:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
 
-      - name: Run large-response native E2E verification
-        env:
-          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
-        run: ./tools/e2e/verify_large_markdown_response_e2e.sh
-
       - name: Run Brotli streaming native E2E verification
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
@@ -811,11 +806,9 @@ jobs:
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: |
-          cargo build --locked --manifest-path tools/e2e-harness/Cargo.toml
-          harness=tools/e2e-harness/target/debug/e2e-harness
-          "${harness}" scenario config-merge
-          "${harness}" scenario large-response
-          "${harness}" scenario streaming-failure-cache
+          ./tools/e2e/verify_config_merge_e2e.sh
+          ./tools/e2e/verify_large_markdown_response_e2e.sh
+          ./tools/e2e/verify_streaming_failure_cache_e2e.sh
 
       - name: Run native SSI and filter-ordering qualification
         env:

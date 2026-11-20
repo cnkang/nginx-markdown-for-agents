@@ -235,7 +235,7 @@ fn write_nginx_conf_stub(
             crate::scenarios::large_response::nginx_conf(load_module, port)
         }
         crate::scenarios::streaming_failure_cache::NAME => {
-            crate::scenarios::streaming_failure_cache::nginx_conf(load_module, port, upstream_port)
+            crate::scenarios::streaming_failure_cache::nginx_conf(load_module, port, upstream_port)?
         }
         "metrics-endpoint" => metrics_nginx_conf(
             &error_log,

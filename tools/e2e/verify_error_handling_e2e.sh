@@ -5,6 +5,8 @@ set -euo pipefail
 workspace_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=tools/lib/nginx_markdown_native_build.sh
 source "${workspace_root}/tools/lib/nginx_markdown_native_build.sh"
+# shellcheck source=tools/e2e/e2e_common.sh
+source "${workspace_root}/tools/e2e/e2e_common.sh"
 
 usage() {
   echo "Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--upstream-port PORT]"
@@ -28,6 +30,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 args+=(--port "${port}" --upstream-port "${upstream_port}")
+e2e_enter_rust_workspace "${workspace_root}"
 exec cargo run --locked --quiet \
   --manifest-path "${workspace_root}/tools/e2e-harness/Cargo.toml" \
   -- scenario error-handling "${args[@]}"

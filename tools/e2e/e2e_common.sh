@@ -59,3 +59,16 @@ e2e_curl_get() {
   curl -sS "$@"
   return $?
 }
+
+# Select Cargo's repository toolchain and retain caller-relative binary paths.
+e2e_enter_rust_workspace() {
+  local workspace_root="$1"
+  if [[ -n "${NGINX_BIN:-}" && "${NGINX_BIN}" != /* ]]; then
+    export NGINX_BIN="${PWD}/${NGINX_BIN}"
+  fi
+  if [[ -n "${MODULE_SO:-}" && "${MODULE_SO}" != /* ]]; then
+    export MODULE_SO="${PWD}/${MODULE_SO}"
+  fi
+  cd "${workspace_root}" || return 1
+  return 0
+}

@@ -228,7 +228,7 @@ if [[ ! -f "${BACKEND_SERVER}" ]]; then
 fi
 
 RUST_TARGET="$(markdown_detect_rust_target)"
-BUILDROOT="$(mktemp -d /tmp/nginx-proxy-tls-e2e.XXXXXX)"
+BUILDROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-proxy-tls-e2e.XXXXXX")"
 RUNTIME="${BUILDROOT}/runtime"
 RAW_DIR="${BUILDROOT}/raw"
 TLS_DIR="${BUILDROOT}/tls"

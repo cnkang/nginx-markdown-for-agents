@@ -2602,6 +2602,7 @@ jobs:
             --env NGINX_BIN=/workspace/module-runtime/nginx \
             --env MODULE_SO=/workspace/module-runtime/ngx_http_markdown_filter_module.so \
             --env BENCHMARK_NGINX_VERSION \
+            --env RUST_TOOLCHAIN \
             almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743 \
             bash -se <<'CONTAINER_SCRIPT'
           set -euo pipefail
@@ -2610,6 +2611,7 @@ jobs:
             ca-certificates \
             curl-minimal \
             findutils \
+            gcc \
             git \
             gawk \
             gzip \
@@ -2622,6 +2624,10 @@ jobs:
             tar
           git config --global --add safe.directory /workspace
           python3 -m pip install --requirement requirements-perf.txt
+          bash ./packaging/scripts/install-verified-rustup.sh --arch amd64 --toolchain "${RUST_TOOLCHAIN}"
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+          export RUSTUP_TOOLCHAIN="${RUST_TOOLCHAIN}"
+          python3 -c 'from tools.lib.executable_validation import resolve_approved_executable as resolve; assert all(resolve(tool) for tool in ("cargo", "rustc")), "Release Perf requires approved Cargo and rustc"'
           chmod +x "${NGINX_BIN}"
           echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
           echo "Architecture: $(uname -m)"

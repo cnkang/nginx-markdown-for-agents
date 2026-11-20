@@ -89,8 +89,17 @@ fn html(path: &str, body: String, headers: &[(&str, &str)]) -> RouteSpec {
     }
 }
 
-pub fn nginx_conf(load: &str, port: u16, upstream_port: u16) -> String {
-    r#"@LOAD@worker_processes 1;
+pub fn nginx_conf(load: &str, port: u16, upstream_port: u16) -> Result<String> {
+    let limit = match std::env::var("MARKDOWN_MAX_SIZE") {
+        Ok(limit) => limit,
+        Err(std::env::VarError::NotPresent) => "10m".to_owned(),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        valid_memory_limit(&limit),
+        "invalid MARKDOWN_MAX_SIZE: {limit:?}"
+    );
+    Ok(r#"@LOAD@worker_processes 1;
 error_log nginx-error.log debug;
 pid nginx.pid;
 
@@ -112,7 +121,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -160,7 +169,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -176,7 +185,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -192,7 +201,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -208,7 +217,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -224,7 +233,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming off;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -274,7 +283,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -292,7 +301,7 @@ http {
             markdown_accept strict;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -331,7 +340,7 @@ http {
             markdown_filter on;
             markdown_accept strict;
             markdown_cache_validation ims_only;
-            markdown_limits conversion_memory=10m parser_budget=10m streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=@MEMORY@ parser_budget=@MEMORY@ streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_auth_policy allow;
             markdown_auth_cookies "session*";
@@ -348,6 +357,14 @@ http {
         .replace("@LOAD@", load)
         .replace("@PORT@", &port.to_string())
         .replace("@UPSTREAM@", &upstream_port.to_string())
+        .replace("@MEMORY@", &limit))
+}
+
+fn valid_memory_limit(limit: &str) -> bool {
+    let digits = limit
+        .strip_suffix(['k', 'K', 'm', 'M', 'g', 'G'])
+        .unwrap_or(limit);
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 struct Run {

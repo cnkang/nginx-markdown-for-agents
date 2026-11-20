@@ -73,6 +73,9 @@ MIGRATED_SCENARIO_WRAPPERS = {
     "tools/e2e/verify_auth_cache_e2e.sh": "auth-cache",
     "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
     "tools/e2e/verify_error_handling_e2e.sh": "error-handling",
+    "tools/e2e/verify_config_merge_e2e.sh": "config-merge",
+    "tools/e2e/verify_large_markdown_response_e2e.sh": "large-response",
+    "tools/e2e/verify_streaming_failure_cache_e2e.sh": "streaming-failure-cache",
 }
 DOCKER_RUNTIME_PATHS = (
     CLUSTERFUZZ_DOCKERFILE,

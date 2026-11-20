@@ -4,7 +4,7 @@
 //! appropriate execution path.  The `NGINX_BIN` environment variable is
 //! treated as equivalent to `--nginx-bin` when the flag is absent.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -93,8 +93,10 @@ pub fn run() -> Result<()> {
     let timeout = Duration::from_secs(cli.timeout);
 
     match &cli.command {
-        Some(Command::Suite) => run_suite(&cli, timeout),
-        Some(Command::Scenario { name }) => run_scenario(&cli, name, timeout),
+        Some(Command::Suite) => with_nginx(&cli, |resolved| run_suite(resolved, timeout)),
+        Some(Command::Scenario { name }) => {
+            with_nginx(&cli, |resolved| run_scenario(resolved, name, timeout))
+        }
         None => {
             let mut cmd = Cli::command();
             cmd.print_help()?;
@@ -120,12 +122,11 @@ fn list_scenarios() -> Result<()> {
 /// * `cli` - Parsed CLI arguments.
 /// * `timeout` - Per-scenario timeout.
 fn run_suite(cli: &Cli, timeout: Duration) -> Result<()> {
-    let resolved_cli = resolve_cli_nginx_bin(cli)?;
     let names = crate::scenarios::registered_names();
     let mut all_passed = true;
 
     for name in &names {
-        let passed = run_scenario_inner(&resolved_cli, name, timeout)?;
+        let passed = run_scenario_inner(cli, name, timeout)?;
         if !passed {
             all_passed = false;
         }
@@ -145,8 +146,7 @@ fn run_suite(cli: &Cli, timeout: Duration) -> Result<()> {
 /// * `name` - Scenario name to look up in the registry.
 /// * `timeout` - Per-scenario timeout.
 fn run_scenario(cli: &Cli, name: &str, timeout: Duration) -> Result<()> {
-    let resolved_cli = resolve_cli_nginx_bin(cli)?;
-    let passed = run_scenario_inner(&resolved_cli, name, timeout)?;
+    let passed = run_scenario_inner(cli, name, timeout)?;
     if !passed {
         anyhow::bail!("Scenario '{name}' failed");
     }
@@ -284,9 +284,9 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
     Ok(report.passed)
 }
 
-fn resolve_cli_nginx_bin(cli: &Cli) -> Result<Cli> {
+fn with_nginx(cli: &Cli, run: impl FnOnce(&Cli) -> Result<()>) -> Result<()> {
     if cli.nginx_bin.is_some() {
-        return Ok(cli.clone());
+        return run(cli);
     }
 
     let bootstrap_dir = std::env::temp_dir().join(format!(
@@ -297,27 +297,31 @@ fn resolve_cli_nginx_bin(cli: &Cli) -> Result<Cli> {
             .unwrap_or_default()
             .as_millis()
     ));
-    std::fs::create_dir_all(&bootstrap_dir)
+    std::fs::create_dir(&bootstrap_dir)
         .with_context(|| format!("failed to create bootstrap dir {}", bootstrap_dir.display()))?;
-    let prepared = crate::bootstrap::prepare(&bootstrap_dir);
-    // The pointer directory is scratch: prepare read its outputs, so it is
-    // removed on every outcome.  A retained copy would accumulate one
-    // directory per bootstrap run in the temporary directory, and wrapper
-    // recovery never touches it (its name does not match a scenario).
-    let _ = std::fs::remove_dir_all(&bootstrap_dir);
-    let prepared = prepared.with_context(
-        || "Bootstrap_Mode could not prepare a runnable module-enabled NGINX runtime",
-    )?;
-    if !prepared.nginx_bin.exists() {
-        bail!(
-            "bootstrap completed but nginx binary is missing at {}",
-            prepared.nginx_bin.display()
+    let result = crate::bootstrap::prepare(&bootstrap_dir)
+        .context("Bootstrap_Mode could not prepare a runnable module-enabled NGINX runtime")
+        .and_then(|prepared| {
+            let mut resolved = cli.clone();
+            resolved.nginx_bin = Some(prepared.nginx_bin);
+            run(&resolved)
+        });
+    // The bridge receives this newly created directory as TMPDIR. Use that
+    // ownership boundary for cleanup, independently of the paths it reports.
+    if result.is_ok() && !cli.keep_artifacts {
+        if let Err(error) = std::fs::remove_dir_all(&bootstrap_dir) {
+            eprintln!(
+                "Could not clean bootstrap artifacts at {}: {error}",
+                bootstrap_dir.display()
+            );
+        }
+    } else {
+        eprintln!(
+            "Bootstrap artifacts retained at {}",
+            bootstrap_dir.display()
         );
     }
-
-    let mut resolved = cli.clone();
-    resolved.nginx_bin = Some(prepared.nginx_bin);
-    Ok(resolved)
+    result
 }
 
 #[cfg(test)]
