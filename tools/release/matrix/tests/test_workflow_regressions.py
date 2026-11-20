@@ -937,9 +937,8 @@ def test_release_gate_validates_only_this_runs_staged_ci_records() -> None:
         if line.strip().startswith("if [[") and "REQUIRE_BLOCKING_INPUT" in line
     )
     assert condition_line == (
-        'if [[ "${GITHUB_EVENT_NAME:-}" == "push" '
-        '&& "${GITHUB_REF_TYPE:-}" == "tag" ]] '
-        '|| [[ "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then'
+        'if [[ "${METADATA_PHASE}" == "final" '
+        '|| "${REQUIRE_BLOCKING_INPUT:-false}" == "true" ]]; then'
     )
     condition_script = "\n".join(
         (
@@ -951,21 +950,19 @@ def test_release_gate_validates_only_this_runs_staged_ci_records() -> None:
         )
     )
     cases = (
-        ("push", "tag", "false", "required"),
-        ("workflow_dispatch", "tag", "false", "optional"),
-        ("workflow_dispatch", "tag", "true", "required"),
-        ("workflow_dispatch", "branch", "false", "optional"),
-        ("workflow_dispatch", "branch", "true", "required"),
+        ("final", "false", "required"),
+        ("final", "true", "required"),
+        ("candidate", "false", "optional"),
+        ("candidate", "true", "required"),
     )
-    for event_name, ref_type, require_blocking, expected in cases:
+    for metadata_phase, require_blocking, expected in cases:
         result = subprocess.run(
             ["bash", "-c", condition_script],
             check=True,
             capture_output=True,
             env={
                 **os.environ,
-                "GITHUB_EVENT_NAME": event_name,
-                "GITHUB_REF_TYPE": ref_type,
+                "METADATA_PHASE": metadata_phase,
                 "REQUIRE_BLOCKING_INPUT": require_blocking,
             },
             text=True,
