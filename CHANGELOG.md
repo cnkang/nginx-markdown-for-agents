@@ -20,12 +20,19 @@ approval of the exact candidate SHA.
 - Candidate nginx.org targets: stable 1.30.7 and mainline 1.31.9, with glibc
   and musl on amd64 and arm64. Ubuntu-native targets: 24.04 LTS
   `1.24.0-2ubuntu7.20` and 26.04 LTS `1.28.3-2ubuntu1.13`, on amd64 and arm64.
-- The candidate-only matrix keeps these targets pending until a single
-  release-workflow run records matching build, load, and request evidence.
-  Do not merge the candidate matrix before promoting rows from evidence.
 - This change adds the 1.31.9 source SHA-256 after signature verification with
   an NGINX project developer key. It also re-verifies the existing 1.30.7
   checksum.
+
+### Candidate validation status
+
+- The 0.9.4 release run recorded 40 CI compatibility records tied to one SHA
+  and run. The promotion tool marked 36 module and package rows verified after
+  matching build, load, and request checks. Four workflow-owned Docker rows
+  retain `pending` matrix state. Their same-run evidence is also present.
+- GitHub blocked the Release Gate before runner startup because the protected
+  `release-signing` environment permits only `main` and tag `v0.9.3`. The
+  final candidate SHA has no complete release gate, manifest, or checksums.
 
 ## [0.9.3] - 2026-11-02
 

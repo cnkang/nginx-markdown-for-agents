@@ -1,0 +1,61 @@
+{
+  "abi_provide": "",
+  "arch": "amd64",
+  "build_args_digest": "sha256:d1485c36c68327ee19d7c9af73a6491f583f95fe7faa6f09634d70c3769c6b0b",
+  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
+  "date": "2026-11-20",
+  "distro": "linux",
+  "distro_version": "n/a",
+  "execution_environment": "native",
+  "fail": 0,
+  "features": [
+    "prune_noise_regions",
+    "streaming"
+  ],
+  "libc": "glibc",
+  "module_sha256": "025671a63cbff911840b467bc7759a9ec7ab00ef45c67372e62196682b7582c0",
+  "nginx_package_revision": "1.31.9",
+  "nginx_version": "1.31.9",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:a11c5eeee2e257f4478f0e649f84b0040787d277d2d3e5233952aa6b6dcb80ad",
+  "source_kind": "nginx.org",
+  "source_reference": "https://nginx.org/download/nginx-1.31.9.tar.gz",
+  "target_identity": "nginx.org:1.31.9:linux:glibc:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 025671a63cbff911",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "no libbrotli NEEDED entry",
+      "name": "static_brotli",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "ci:release-packages/nginx-org-evidence",
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+}

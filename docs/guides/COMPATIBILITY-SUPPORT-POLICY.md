@@ -78,11 +78,15 @@ the maintainer review the new revision before a release can use it.
 The v0.9.4 candidate targets nginx.org stable 1.30.7 and mainline 1.31.9. Its
 Ubuntu targets are 24.04 `1.24.0-2ubuntu7.20` and 26.04
 `1.28.3-2ubuntu1.13`. Ubuntu published these revisions in
-[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1). These are
-candidate targets, not verified support claims. On a candidate branch, select
-them for a release-workflow run while their evidence is pending. Do not merge
-that selection state into `main`. Use the generated records and promotion tool
-before merging.
+[USN-9159-1](https://ubuntu.com/security/notices/USN-9159-1). The records in
+`docs/evidence/0.9.4/compat/` bind all 40 blocking targets to release run
+44641110009 and commit `637c5992d9221dafcca2d77f86c5b82fc2e4a778`. The
+promotion tool verified 36 module and package rows. Four official Docker rows
+remain `pending` in the projection because that tool does not manage
+`docker-image` rows. GitHub blocked the Release Gate before runner startup:
+the protected `release-signing` environment permits only `main` and tag
+`v0.9.3`. Do not merge or publish until the final candidate SHA completes the
+full release gate and produces the required manifest and checksums.
 
 A matching ABI or `--with-compat` does not prove compatibility across revisions.
 Support requires real build, load, and request evidence for the exact package revision.

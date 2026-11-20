@@ -1,0 +1,63 @@
+{
+  "abi_provide": "",
+  "arch": "amd64",
+  "build_args_digest": "sha256:993aa3347f99cb527dd2525037b44f7486f925ae586fc899e83aa2603dd25dd4",
+  "built_image_id": "sha256:7b112da4b6697e285f2ef2e2c9706948237ea5c67b5f63eee611e03c16fcdb83",
+  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
+  "date": "2026-11-20",
+  "distro": "alpine3.20",
+  "distro_version": "n/a",
+  "execution_environment": "native",
+  "fail": 0,
+  "features": [
+    "streaming"
+  ],
+  "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
+  "image_reference": "nginx:1.26.3-alpine3.20",
+  "libc": "musl",
+  "module_sha256": "e77fb72030a9347cd5dd600221ab68608e91542594dcfba190c662e3c994b3a9",
+  "nginx_package_revision": "1.26.3",
+  "nginx_version": "1.26.3",
+  "pass": 6,
+  "rust_version": "1.98.1",
+  "schema_version": 1,
+  "skip": 0,
+  "source_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
+  "source_kind": "container-registry",
+  "source_reference": "nginx:1.26.3-alpine3.20@sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
+  "target_identity": "container-registry:nginx:1.26.3-alpine3.20@sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d:alpine3.20:musl:amd64",
+  "tests": [
+    {
+      "detail": "module sha256 e77fb72030a9347c",
+      "name": "build",
+      "status": "PASS"
+    },
+    {
+      "detail": "nginx -t",
+      "name": "load",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_passthrough",
+      "status": "PASS"
+    },
+    {
+      "detail": "HTTP 200",
+      "name": "request_markdown",
+      "status": "PASS"
+    },
+    {
+      "detail": "HEAD 200, reload PASS",
+      "name": "lifecycle",
+      "status": "PASS"
+    },
+    {
+      "detail": "no libbrotli NEEDED entry",
+      "name": "static_brotli",
+      "status": "PASS"
+    }
+  ],
+  "verified_by": "ci:official-nginx-docker/build-and-verify",
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+}

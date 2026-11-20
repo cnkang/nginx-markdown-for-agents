@@ -10,13 +10,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -32,13 +32,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -54,13 +54,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -76,13 +76,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -98,13 +98,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -120,13 +120,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -142,13 +142,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -164,13 +164,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -186,13 +186,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -208,13 +208,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -230,13 +230,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -252,13 +252,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       },
       "nginx_channel": "stable",
       "test_level": "smoke-test",
@@ -278,13 +278,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.30.7.tar.gz"
       }
     },
     {
@@ -300,13 +300,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.30.7.tar.gz"
       }
     },
     {
@@ -322,13 +322,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.30.7.tar.gz"
       }
     },
     {
@@ -344,13 +344,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.30.7.tar.gz"
       }
     },
     {
@@ -366,13 +366,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.31.9.tar.gz"
       }
     },
     {
@@ -388,13 +388,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.31.9.tar.gz"
       }
     },
     {
@@ -410,13 +410,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.31.9.tar.gz"
       }
     },
     {
@@ -432,13 +432,13 @@
       "support_tier": "supported",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-18",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.31.9.tar.gz"
       }
     },
     {
@@ -454,13 +454,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       }
     },
     {
@@ -476,13 +476,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       }
     },
     {
@@ -498,13 +498,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       }
     },
     {
@@ -520,13 +520,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
-      "support_stage": "compat-floor",
-      "date": "2026-09-07",
+      "verification_state": "verified",
+      "support_stage": "primary",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.24.0.tar.gz"
       }
     },
     {
@@ -542,7 +542,7 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
       "date": "2026-11-20",
       "source": "ubuntu-default-repo",
@@ -564,9 +564,9 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-20",
+      "date": "2026-11-19",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
@@ -586,13 +586,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       }
     },
     {
@@ -608,13 +608,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       }
     },
     {
@@ -700,13 +700,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       }
     },
     {
@@ -746,13 +746,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.26.3.tar.gz"
       }
     },
     {
@@ -814,13 +814,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       }
     },
     {
@@ -836,13 +836,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       }
     },
     {
@@ -881,13 +881,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       }
     },
     {
@@ -903,13 +903,13 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-09-07",
+      "date": "2026-11-20",
       "source": "nginx.org",
       "provenance": {
         "kind": "nginx.org",
-        "reference": "https://nginx.org/en/download.html"
+        "reference": "https://nginx.org/download/nginx-1.28.3.tar.gz"
       }
     },
     {
@@ -925,9 +925,9 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-20",
+      "date": "2026-11-19",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
@@ -947,9 +947,9 @@
       "owner_workflow": ".github/workflows/release-packages.yml",
       "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
       "abi_version": 3,
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "primary",
-      "date": "2026-11-20",
+      "date": "2026-11-19",
       "source": "ubuntu-default-repo",
       "provenance": {
         "kind": "ubuntu-default-repo",
