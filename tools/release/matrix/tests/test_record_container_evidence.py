@@ -24,7 +24,11 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     root = tmp_path / "repo"
     (root / "examples" / "docker").mkdir(parents=True)
     (root / "rust-toolchain.toml").write_text('channel = "1.98.1"\n', encoding="utf-8")
-    (root / composer.DOCKERFILE).write_text("FROM scratch\n", encoding="utf-8")
+    (root / composer.DOCKERFILE).write_text(
+        "FROM scratch\n"
+        "RUN RUST_RELEASE_FEATURES=streaming,prune_noise_regions make build\n",
+        encoding="utf-8",
+    )
     return root
 
 
@@ -128,7 +132,10 @@ def test_build_args_digest_binds_the_dockerfile_and_base(tmp_path):
     moved = _compose(root, build, ledger, image_digest="sha256:" + "6" * 64)[
         "build_args_digest"
     ]
-    (root / composer.DOCKERFILE).write_text("FROM scratch\n# x\n", encoding="utf-8")
+    dockerfile = root / composer.DOCKERFILE
+    dockerfile.write_text(
+        dockerfile.read_text(encoding="utf-8") + "# x\n", encoding="utf-8"
+    )
     changed = _compose(root, build, ledger)["build_args_digest"]
     assert len({first, moved, changed}) == 3
 
@@ -162,6 +169,17 @@ def test_module_source_mismatch_with_abi_checkout_is_rejected(tmp_path):
     build, ledger = _module_and_ledger(tmp_path)
     with pytest.raises(composer.ComposeError, match="canonical ABI checkout"):
         _compose(root, build, ledger, source_sha="b" * 40)
+
+
+def test_noncanonical_docker_build_features_are_rejected(tmp_path):
+    root = _repo(tmp_path)
+    build, ledger = _module_and_ledger(tmp_path)
+    (root / composer.DOCKERFILE).write_text(
+        "FROM scratch\nRUN RUST_RELEASE_FEATURES=streaming make build\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(composer.ComposeError, match="feature set.*manifest"):
+        _compose(root, build, ledger)
 
 
 def test_skipped_check_is_not_composed(tmp_path):
