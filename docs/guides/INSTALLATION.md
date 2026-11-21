@@ -752,10 +752,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
-| 1.26.3 | stable | debian12 | glibc | arm64 | supported | pending |
-| 1.26.3 | stable | debian12 | glibc | amd64 | supported | pending |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported | pending |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported | pending |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported | verified |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported | verified |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported | verified |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported | verified |
 
 ### dynamic-module
 

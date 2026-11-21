@@ -1,15 +1,18 @@
 {
   "abi_provide": "",
+  "abi_version": 3,
   "arch": "amd64",
-  "build_args_digest": "sha256:993aa3347f99cb527dd2525037b44f7486f925ae586fc899e83aa2603dd25dd4",
-  "built_image_id": "sha256:7b112da4b6697e285f2ef2e2c9706948237ea5c67b5f63eee611e03c16fcdb83",
-  "commit_sha": "637c5992d9221dafcca2d77f86c5b82fc2e4a778",
-  "date": "2026-11-20",
+  "build_args_digest": "sha256:67b21ea5e631c1a7c0ef95c872bd3b88ed172dc88d49d1aeed34dd56b427f3b2",
+  "built_image_id": "sha256:7f6415f019c9a0784566dcaf999d87fb92798d60d3534375f70dddef17416b36",
+  "commit_sha": "67b3ccad15e23170ebbdbac921e52878a8f59e34",
+  "date": "2026-11-21",
   "distro": "alpine3.20",
   "distro_version": "n/a",
   "execution_environment": "native",
   "fail": 0,
+  "feature_manifest_digest": "sha256:8ca2fc0d135a6ff7c33cf20f029facaa556fd28b3c6c4dfb1e6dd39d0e042e2d",
   "features": [
+    "prune_noise_regions",
     "streaming"
   ],
   "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
@@ -59,5 +62,5 @@
     }
   ],
   "verified_by": "ci:official-nginx-docker/build-and-verify",
-  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44641110009"
+  "workflow_run_url": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/44876215568"
 }

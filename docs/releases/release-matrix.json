@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:80d61a810fbf793923bf1a50b18efa5f3dd7cf831bcdfcbb58ea446431da15a1"
+    "sha256": "sha256:f8e4fd3e9cf0575b5000cfdba06e1b5d5419ca45b8459bf41af9264113523577"
   },
   "entries": [
     {
@@ -219,9 +219,9 @@
       "abi_version": 3,
       "image_ref": "nginx:1.26.3",
       "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "container",
-      "date": "2026-09-07",
+      "date": "2026-11-21",
       "source": "container-registry",
       "provenance": {
         "kind": "container",
@@ -272,9 +272,9 @@
       "abi_version": 3,
       "image_ref": "nginx:1.26.3-alpine3.20",
       "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "container",
-      "date": "2026-09-07",
+      "date": "2026-11-21",
       "source": "container-registry",
       "provenance": {
         "kind": "container",
@@ -342,9 +342,9 @@
       "abi_version": 3,
       "image_ref": "nginx:1.26.3",
       "image_digest": "sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860",
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "container",
-      "date": "2026-09-07",
+      "date": "2026-11-21",
       "source": "container-registry",
       "provenance": {
         "kind": "container",
@@ -395,9 +395,9 @@
       "abi_version": 3,
       "image_ref": "nginx:1.26.3-alpine3.20",
       "image_digest": "sha256:1eadbb07820339e8bbfed18c771691970baee292ec4ab2558f1453d26153e22d",
-      "verification_state": "pending",
+      "verification_state": "verified",
       "support_stage": "container",
-      "date": "2026-09-07",
+      "date": "2026-11-21",
       "source": "container-registry",
       "provenance": {
         "kind": "container",
