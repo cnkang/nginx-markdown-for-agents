@@ -256,6 +256,24 @@ RELEASE_CHECKSUM_SIGNING_FORBIDDEN_SNIPPETS = [
     "ref: ${{ inputs.version }}",
     "ref: ${{ github.ref }}",
 ]
+RELEASE_GATE_ENVIRONMENT_SECURITY_SNIPPETS = [
+    (
+        "name",
+        "    environment:\n"
+        "      name: ${{ github.event_name == 'push' && github.ref_type == 'tag' "
+        "&& 'release-signing' || 'release-preview' }}",
+    ),
+    (
+        "candidate-sha",
+        "      - name: Verify tag SHA is main CI-approved\n"
+        "        if: github.event_name == 'push' && github.ref_type == 'tag'",
+    ),
+    (
+        "tag-protection",
+        "      - name: Verify release tag protection\n"
+        "        if: github.event_name == 'push' && github.ref_type == 'tag'",
+    ),
+]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
     "Requires:       nginx-r%{nginx_version}",
@@ -2400,7 +2418,42 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
             "smoke-runner:arch",
             "release-packages smoke tests must use arch-matched runners",
         )
+    _validate_release_gate_environment_security(result)
     _validate_release_checksum_signing_security(result)
+
+
+def _validate_release_gate_environment_security(result: ValidationResult) -> None:
+    """Keep unsigned dispatch rehearsals outside the protected signing env."""
+    workflow = read_safe(RELEASE_PACKAGES_WORKFLOW)
+    if not workflow:
+        result.fail(
+            "release-gate-environment:exists",
+            "release-packages.yml is required for release-gate environment validation",
+        )
+        return
+
+    start = workflow.find("\n  release-gate:")
+    if start < 0:
+        result.fail(
+            "release-gate-environment:job",
+            "release-packages.yml must define a bounded release-gate job",
+        )
+        return
+
+    next_job = re.search(r"\n {2}[a-zA-Z0-9_-]+:", workflow[start + 1 :])
+    job_end = start + 1 + next_job.start() if next_job is not None else len(workflow)
+    job = workflow[start:job_end]
+    for check_id, snippet in RELEASE_GATE_ENVIRONMENT_SECURITY_SNIPPETS:
+        if snippet in job:
+            result.pass_(
+                f"release-gate-environment:{check_id}",
+                "release-gate uses preview for dispatch and tag-only release checks",
+            )
+        else:
+            result.fail(
+                f"release-gate-environment:{check_id}",
+                "release-gate environment and tag-check scope must match the release event",
+            )
 
 
 def _validate_release_checksum_signing_security(result: ValidationResult) -> None:

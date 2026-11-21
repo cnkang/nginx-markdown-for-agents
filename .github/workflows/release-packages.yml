@@ -2009,9 +2009,11 @@ jobs:
     needs: [prepare, smoke-test, ubuntu-native, nginx-org-evidence, official-docker-release-gate, fuzz-qualification, benchmark-build]
     if: (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    # This environment supplies the independent candidate promotion anchor and
-    # requires the same human approval that protects release signing.
-    environment: release-signing
+    # Manual workflow_dispatch rehearsals are unsigned and should not require
+    # approval in the protected signing environment. Only tag pushes enter the
+    # signing environment; tag governance checks below remain in this job.
+    environment:
+      name: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release-signing' || 'release-preview' }}
     # Host-side gates, the EL9 short-soak qualification and the module
     # benchmark share this job; the 14-target fuzz soak runs in the separate
     # fuzz-qualification job so each phase owns a full 360-minute budget.
@@ -2313,6 +2315,7 @@ jobs:
         shell: bash
 
       - name: Verify release tag protection
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           # Fine-grained PAT with repository Administration: read (the
