@@ -132,7 +132,7 @@ RUN --mount=type=cache,target=/opt/rust/cargo/registry,sharing=locked \
     rm -rf /workspace/nginx-markdown-for-agents/components/rust-converter/target; \
     ln -s /opt/cargo-target /workspace/nginx-markdown-for-agents/components/rust-converter/target; \
     cd /workspace/nginx-markdown-for-agents; \
-    make build; \
+    RUST_RELEASE_FEATURES=streaming,prune_noise_regions make build; \
     confargs="$(nginx -V 2>&1 | sed -n 's/^.*arguments: //p')"; \
     test -n "${confargs}"; \
     cd "${nginx_src_root}"; \

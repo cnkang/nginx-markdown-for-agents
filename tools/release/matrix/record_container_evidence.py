@@ -53,7 +53,10 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
-from evidence_contract import validate_record  # noqa: E402
+from evidence_contract import (  # noqa: E402
+    canonical_build_identity,
+    validate_record,
+)
 from record_nginx_org_evidence import (  # noqa: E402
     ComposeError,
     _read_ledger,
@@ -63,9 +66,8 @@ from record_nginx_org_evidence import (  # noqa: E402
     _today,
 )
 
-# The source-build Dockerfile runs `make build`, whose release feature set is
-# RUST_RELEASE_FEATURES (streaming).
-FEATURES = ["streaming"]
+# The source-build Dockerfile passes the canonical release feature set to
+# `make build`; Cargo verifies it through the build capability check.
 DOCKERFILE = pathlib.Path("examples") / "docker" / "Dockerfile.official-nginx-source-build"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -87,6 +89,7 @@ def _build_args_digest(
     *,
     identity: tuple[str, str, str],
     target: ContainerTarget,
+    features: tuple[str, ...],
     source_sha: str,
     rust_version: str,
 ) -> str:
@@ -103,7 +106,7 @@ def _build_args_digest(
         "builder": "official-nginx-docker/build-and-verify",
         "distro": distro,
         "dockerfile_sha256": _sha256_file(dockerfile),
-        "features": list(FEATURES),
+        "features": list(features),
         "libc": libc,
         "nginx_version": version,
         "platform": f"linux/{arch}",
@@ -144,6 +147,7 @@ def compose(
     version, libc, arch = identity
     distro = target.distro
     reference, digest = target.image_reference, target.image_digest
+    features, feature_digest, abi_version = canonical_build_identity()
     module_sha, ledger = _read_ledger(module_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)
     rust_version = _rust_version(repo_root)
@@ -169,12 +173,15 @@ def compose(
             repo_root,
             identity=identity,
             target=target,
+            features=features,
             source_sha=source_sha,
             rust_version=rust_version,
         ),
         "module_sha256": module_sha,
         "rust_version": rust_version,
-        "features": list(FEATURES),
+        "features": list(features),
+        "feature_manifest_digest": feature_digest,
+        "abi_version": abi_version,
         "tests": tests,
         "pass": counts["PASS"],
         "fail": counts["FAIL"],
