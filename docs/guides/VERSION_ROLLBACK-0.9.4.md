@@ -1,8 +1,8 @@
 # Version Rollback: 0.9.4
 
-v0.9.4 is a compatibility candidate and is not released. This guide describes
-the rollback procedure to use after an approved publication. Keep the previous
-module package before upgrading.
+v0.9.4 is the published compatibility maintenance release. Keep the previous
+module package before upgrading so you can restore the matching module if
+validation fails.
 
 ## Check the NGINX package and ABI
 
