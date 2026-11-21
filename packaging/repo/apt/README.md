@@ -1,10 +1,11 @@
 # nginx-markdown-for-agents APT Repository
 
-> v0.9.3 was published on 2026-11-02. Use release-tag downloads.
-> v0.9.2 was the previous release (2026-10-08).
+> v0.9.4 was published on 2026-11-22. Use release-tag downloads.
+> v0.9.3 was the previous release (2026-11-02).
 
-The project has not published v0.9.4 yet. This example uses v0.9.3 assets;
-v0.9.4 assets become available only after publication and maintainer approval.
+Use the v0.9.4 GitHub Release DEB artifacts as the source for this
+self-hosted repository template. Verify each artifact against the published
+signed checksums before adding it to your repository.
 
 This is the APT package repository for `nginx-module-markdown-for-agents`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal
@@ -235,18 +236,18 @@ gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 **Canonical release verification**: for the published release, download the
 exact versioned GitHub Release artifact first, verify the release signature
 over `SHA256SUMS.asc`, then check the downloaded artifacts against the
-checksums file — all in the same directory. The example below uses the published v0.9.3
-release assets. Asset names follow the canonical
+checksums file — all in the same directory. The example below uses the
+published v0.9.4 release assets. Asset names follow the canonical
 `nginx-module-markdown-for-agents_<ver>_nginx-<nginx-ver>_<arch>.deb` form —
-list the exact names with `gh release view v0.9.3 --json assets`:
+list the exact names with `gh release view v0.9.4 --json assets`:
 
 ```bash
-VERSION=v0.9.3
+VERSION=v0.9.4
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}"
 curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
 curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSLo nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb \
-  "${BASE_URL}/nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb"
+curl -fsSLo nginx-module-markdown-for-agents_0.9.4_nginx-1.30.7_amd64.deb \
+  "${BASE_URL}/nginx-module-markdown-for-agents_0.9.4_nginx-1.30.7_amd64.deb"
 # Verify the signature AND the signer identity.  `gpg --verify` alone only
 # proves the file was signed by *some* key.  Download the checked-in project
 # public key into this working directory first (run from a repository clone),
@@ -283,7 +284,7 @@ gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
 # passes.  Select the checksum line for the exact artifact you fetched and
 # fail unless exactly one entry matches (an empty selection would make
 # `sha256sum -c` succeed vacuously):
-PACKAGE="nginx-module-markdown-for-agents_0.9.3_nginx-1.30.6_amd64.deb"
+PACKAGE="nginx-module-markdown-for-agents_0.9.4_nginx-1.30.7_amd64.deb"
 awk -v pkg="$PACKAGE" '
   $2 == pkg || $2 == "*" pkg { print; n++ }
   END { exit n == 1 ? 0 : 1 }
