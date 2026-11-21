@@ -5,7 +5,7 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.4] - Unreleased
+## [0.9.4] - 2026-11-22
 
 Compatibility maintenance release for current NGINX builds and Ubuntu
 package revisions. The release preserves the 20 active directives and their
@@ -27,11 +27,6 @@ FFI ABI version 3.
   and streaming failure and cache behavior.
 - The module benchmark gate now evaluates thresholds in Rust and keeps the
   existing Python command and verdict report.
-
-### Candidate validation status
-
-- The 12 new compatibility rows remain `pending` until the required-blocking
-  workflow verifies them against the final candidate commit.
 
 ## [0.9.3] - 2026-11-02
 

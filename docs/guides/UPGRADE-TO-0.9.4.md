@@ -1,14 +1,13 @@
 # Upgrade to 0.9.4
 
-v0.9.4 is a compatibility candidate and is not released. Do not download a
-v0.9.4 package or tag. Until a maintainer approves publication, use the
-v0.9.3 release assets.
+v0.9.4 is the published compatibility maintenance release. Download its
+signed assets and checksums from the [v0.9.4 GitHub release](https://github.com/cnkang/nginx-markdown-for-agents/releases/tag/v0.9.4).
 
-The planned release is non-breaking: it keeps all 20 active directives and
+The release is non-breaking: it keeps all 20 active directives and
 their defaults, the HTTP representation, metrics and diagnostics, reason
 codes, and FFI ABI version 3.
 
-## Choose the matching artifact after publication
+## Choose the matching artifact
 
 | NGINX installation | Artifact family |
 |---|---|
@@ -20,7 +19,7 @@ Do not substitute an nginx.org package for an Ubuntu-native package. A matching
 version string or ABI provide alone does not prove that a module can load.
 Use only rows marked `verified` in the published matrix.
 
-## Install after approval
+## Install the release
 
 1. Record the NGINX version, package origin, package revision, architecture,
    and Ubuntu ABI provide when applicable.
@@ -41,6 +40,6 @@ Use only rows marked `verified` in the published matrix.
    still receives HTML.
 6. Run `nginx-markdown-doctor --json` and review any failed or skipped check.
 
-The v0.9.4 release notes and compatibility matrix will list the package
-revisions and architectures with recorded evidence. Do not treat a skipped
-check or missing evidence as a pass.
+The v0.9.4 release notes and compatibility matrix list package revisions and
+architectures with recorded evidence. Do not treat a skipped check or missing
+evidence as a pass.

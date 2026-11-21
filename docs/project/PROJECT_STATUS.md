@@ -10,7 +10,7 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of the **current release 0.9.3 (published 2026-11-02)**, the project includes bounded
+As of **2026-11-22**, v0.9.4 is the current release. The project includes bounded
 full-buffer conversion by default (`markdown_streaming off`) with explicit streaming opt-in.
 It provides Rust-first architecture modules for Accept negotiation, conditional requests,
 decision logic, and header plan application. The project enforces a unified decompression
@@ -42,15 +42,17 @@ See the
 
 ### Current Release Line 0.9.4
 
-**Status:** Release candidate, pending publication. v0.9.3 is the latest
-published version (2026-11-02). The 0.9.4 candidate prepares matching
-module artifacts for nginx.org 1.30.7 and 1.31.9 and the Ubuntu revisions in
+**Status:** Stable release. The release date is 2026-11-22. v0.9.3 preceded
+it on 2026-11-02. The 0.9.4 release provides matching module artifacts
+for nginx.org 1.30.7 and 1.31.9 and the Ubuntu revisions in
 [USN-9182-1](https://ubuntu.com/security/notices/USN-9182-1): Ubuntu 24.04
 `1.24.0-2ubuntu7.21` and Ubuntu 26.04 `1.28.3-2ubuntu1.14`. Compatibility
-evidence remains pending until candidate workflow records verify the exact
-builds, loads, and Markdown requests. The project will provide v0.9.4 assets
-only after publication and maintainer approval of the exact candidate SHA. See
-[0.9.4 candidate notes](../releases/0.9.4-release-notes.md).
+verification is bound to the release commit and workflow run, including
+build, load, and Markdown request checks. Use the v0.9.4 tag, package assets,
+and checksums from the
+[release](https://github.com/cnkang/nginx-markdown-for-agents/releases/tag/v0.9.4).
+See the [0.9.4 release notes](../releases/0.9.4-release-notes.md) and the
+[compatibility support policy](../guides/COMPATIBILITY-SUPPORT-POLICY.md).
 
 ### Current Release Line 0.9.2
 
@@ -244,8 +246,9 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current release
-is 0.9.3 (published 2026-11-02). 0.9.3 is a compatibility maintenance release,
-so it keeps the 0.9.2 contracts. 0.9.2 is the previous release (2026-10-08).
+is 0.9.4, dated 2026-11-22. It is a compatibility maintenance release,
+so it keeps the 0.9.2 contracts. 0.9.3 was the previous release (2026-11-02).
+The project released v0.9.2 on 2026-10-08.
 0.9.2 is a breaking surface-freeze release that consolidates the configuration
 surface
 to the 20-directive active contract (removing profile presets, dynconf, custom
@@ -480,6 +483,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.4 | 2026-11-22 | Codex | Recorded v0.9.4 release status and synchronized release documentation |
 | 0.9.4 | 2026-11-20 | Codex | Prepared an unpublished compatibility candidate; evidence remains pending |
 | 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state for 2026-11-02 |
 | 0.9.3 | 2026-10-31 | Codex | Made the pending publication status explicit |
