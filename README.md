@@ -13,9 +13,9 @@ English | [Simplified Chinese](README_zh-CN.md)
 > diagnostics, reason codes, and FFI ABI version 3 unchanged. v0.9.2 is the
 > final planned breaking release before v1.0. Use release-tag downloads.
 
-> Rows marked `verified` in the compatibility matrix have CI build, load, and
-> request evidence tied to the released commit and its workflow run. Check
-> each target's state in the matrix. See the
+> Release publication requires CI build, load, and request evidence for each
+> `verified` compatibility row, bound to the approved release commit and its
+> workflow run. Check each target's state in the matrix. See the
 > [0.9.4 release notes](docs/releases/0.9.4-release-notes.md).
 
 The v0.9.4 release also moves error handling, configuration merge, large
