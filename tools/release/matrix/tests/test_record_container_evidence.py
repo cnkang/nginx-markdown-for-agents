@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
-import subprocess
 
 import pytest
 
@@ -26,17 +25,6 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     (root / "examples" / "docker").mkdir(parents=True)
     (root / "rust-toolchain.toml").write_text('channel = "1.98.1"\n', encoding="utf-8")
     (root / composer.DOCKERFILE).write_text("FROM scratch\n", encoding="utf-8")
-    subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
-    subprocess.run(["git", "add", "."], cwd=root, check=True)
-    subprocess.run(
-        [
-            "git", "-c", "user.name=Evidence Test", "-c",
-            "user.email=evidence-test@example.invalid", "commit", "--quiet",
-            "--no-gpg-sign", "-m", "fixture source",
-        ],
-        cwd=root,
-        check=True,
-    )
     return root
 
 
@@ -81,7 +69,7 @@ def _compose(root, build, ledger, **overrides):
         "ledger_path": ledger,
         "identity": ("1.26.3", "glibc", "amd64"),
         "target": composer.ContainerTarget(**target),
-        "source_sha": composer._git_head(root),
+        "source_sha": composer._git_head(composer.REPO_ROOT),
         "verified_by": "ci:official-nginx-docker/build-and-verify",
         "workflow_run_url": RUN_URL,
         "repo_root": root,
@@ -115,7 +103,7 @@ def test_compose_produces_a_valid_record_that_covers_its_row(tmp_path):
     assert record["source_kind"] == "container-registry"
     assert record["image_digest"] == BASE_DIGEST
     assert record["built_image_id"] == BUILT_ID
-    assert record["commit_sha"] == composer._git_head(root)
+    assert record["commit_sha"] == composer._git_head(composer.REPO_ROOT)
     assert record["workflow_run_url"] == RUN_URL
     features, digest, abi_version = canonical_build_identity()
     assert record["features"] == list(features)
