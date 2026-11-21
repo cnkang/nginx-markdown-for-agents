@@ -59,6 +59,7 @@ from evidence_contract import (  # noqa: E402
 )
 from record_nginx_org_evidence import (  # noqa: E402
     ComposeError,
+    _git_head,
     _read_ledger,
     _rust_version,
     _sha256_file,
@@ -147,6 +148,12 @@ def compose(
     version, libc, arch = identity
     distro = target.distro
     reference, digest = target.image_reference, target.image_digest
+    # The ABI below comes from this checkout, so it must be the exact source
+    # commit used to build the module copied from the verified image.
+    if _git_head(repo_root) != source_sha:
+        raise ComposeError(
+            "module source SHA must match the canonical ABI checkout"
+        )
     features, feature_digest, abi_version = canonical_build_identity()
     module_sha, ledger = _read_ledger(module_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)

@@ -1408,8 +1408,15 @@ def test_container_evidence_producer_runs_before_the_release_gate() -> None:
 def test_official_docker_workflow_call_binds_module_sha_to_caller() -> None:
     official = _workflow_data("official-nginx-docker.yml")
     steps = official["jobs"]["build-and-verify"]["steps"]
+    checkout = _step_by_name(steps, "Checkout repository")["with"]
     source = _step_by_name(steps, "Resolve source clone target")["run"]
 
+    assert checkout["repository"] == (
+        "${{ github.event.pull_request.head.repo.full_name || github.repository }}"
+    )
+    assert checkout["ref"] == (
+        "${{ inputs.module_sha || github.event.pull_request.head.sha || github.sha }}"
+    )
     assert '"${CALLER_MODULE_SHA}" != "${DEFAULT_SHA}"' in source
     assert "workflow_call module_sha must match the caller workflow SHA" in source
     caller = _workflow_data("release-packages.yml")["jobs"][
