@@ -67,12 +67,16 @@ from record_nginx_org_evidence import (  # noqa: E402
     _today,
 )
 
-# The source-build Dockerfile passes the canonical release feature set to
-# `make build`; Cargo verifies it through the build capability check.
+# The source-build Dockerfile passes the release feature set to `make build`.
+# The composer checks it against the canonical manifest before recording.
 DOCKERFILE = pathlib.Path("examples") / "docker" / "Dockerfile.official-nginx-source-build"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DISTRO_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+_BUILD_FEATURES_RE = re.compile(
+    r"\bRUST_RELEASE_FEATURES=([a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*)"
+    r"\s+make\s+build\b"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,6 +87,19 @@ class ContainerTarget:
     image_reference: str
     image_digest: str
     built_image_id: str
+
+
+def _dockerfile_features(repo_root: pathlib.Path) -> tuple[str, ...]:
+    """Return the feature list passed to the source-build make invocation."""
+    dockerfile = validate_read_path(
+        repo_root / DOCKERFILE, purpose="official Docker source-build Dockerfile"
+    )
+    matches = _BUILD_FEATURES_RE.findall(dockerfile.read_text(encoding="utf-8"))
+    if len(matches) != 1:
+        raise ComposeError(
+            "Dockerfile must set RUST_RELEASE_FEATURES once for make build"
+        )
+    return tuple(sorted(matches[0].split(",")))
 
 
 def _build_args_digest(
@@ -155,6 +172,10 @@ def compose(
             "module source SHA must match the canonical ABI checkout"
         )
     features, feature_digest, abi_version = canonical_build_identity()
+    if _dockerfile_features(repo_root) != features:
+        raise ComposeError(
+            "Docker build feature set does not match the release manifest"
+        )
     module_sha, ledger = _read_ledger(module_dir, ledger_path, identity)
     tests, counts = _test_ledger(ledger, module_sha)
     rust_version = _rust_version(repo_root)
