@@ -574,6 +574,56 @@ class TestReleaseGateSnippetExpectations:
 
         assert not result.has_failures, result.results
 
+    def test_release_gate_environment_validator_checks_the_live_job(
+        self, monkeypatch
+    ) -> None:
+        """Validate the rehearsal and tag environment split in the live workflow."""
+        workflow = validator.RELEASE_PACKAGES_WORKFLOW.read_text(encoding="utf-8")
+        monkeypatch.setattr(validator, "read_safe", lambda _path: workflow)
+        result = validator.ValidationResult()
+
+        validator._validate_release_gate_environment_security(result)
+
+        assert not result.has_failures, result.results
+
+    def test_release_gate_environment_validator_rejects_unsafe_dispatch_contracts(
+        self, monkeypatch
+    ) -> None:
+        """Reject signing env use and unscoped tag checks in the release gate."""
+        workflow = validator.RELEASE_PACKAGES_WORKFLOW.read_text(encoding="utf-8")
+        invalid_workflows = [
+            (
+                workflow.replace(
+                    "|| 'release-preview' }}",
+                    "|| 'release-signing' }}",
+                    1,
+                ),
+                "name",
+            ),
+            (
+                workflow.replace(
+                    "      - name: Verify release tag protection\n"
+                    "        if: github.event_name == 'push' && github.ref_type == 'tag'\n",
+                    "      - name: Verify release tag protection\n",
+                    1,
+                ),
+                "tag-protection",
+            ),
+        ]
+        for invalid_workflow, check_id in invalid_workflows:
+            monkeypatch.setattr(
+                validator, "read_safe", lambda _path: invalid_workflow
+            )
+            result = validator.ValidationResult()
+
+            validator._validate_release_gate_environment_security(result)
+
+            assert any(
+                status == "FAIL"
+                and id_ == f"release-gate-environment:{check_id}"
+                for status, id_, _message in result.results
+            )
+
     def test_nfpm_postinstall_doc_path_matches_installed_layout(self) -> None:
         """Ensure postinstall doc path matches the installed package layout."""
         assert "/usr/share/doc/nginx-markdown-for-agents/README.md" in validator.NFPM_POSTINSTALL_SNIPPETS
