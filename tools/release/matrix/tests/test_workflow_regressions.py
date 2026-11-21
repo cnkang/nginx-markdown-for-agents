@@ -325,7 +325,10 @@ def test_release_packages_tag_gate_requires_exact_approved_candidate() -> None:
     release_gate = workflow["jobs"]["release-gate"]
     verify_step = _step_by_name(release_gate["steps"], "Verify tag SHA is main CI-approved")
 
-    assert release_gate["environment"] == "release-signing"
+    assert release_gate["environment"] == {
+        "name": "${{ github.event_name == 'push' && github.ref_type == 'tag' "
+        "&& 'release-signing' || 'release-preview' }}"
+    }
     assert 'compare/${TAG_SHA}...${DEFAULT_BRANCH}' in workflow_text
     assert 'branch_relation="$(gh api ' in workflow_text
     assert 'ahead|identical)' in workflow_text
@@ -334,6 +337,7 @@ def test_release_packages_tag_gate_requires_exact_approved_candidate() -> None:
     )
     assert verify_step["env"]["REF_TYPE"] == "${{ github.ref_type }}"
     assert verify_step["env"]["REF_NAME"] == "${{ github.ref_name }}"
+    assert verify_step["if"] == "github.event_name == 'push' && github.ref_type == 'tag'"
     assert '[[ -z "${APPROVED_CANDIDATE_SHA}"' in verify_step["run"]
     assert '"${TAG_SHA}" != "${APPROVED_CANDIDATE_SHA}"' in verify_step["run"]
     assert "verify_tag_candidate.py" in verify_step["run"]
