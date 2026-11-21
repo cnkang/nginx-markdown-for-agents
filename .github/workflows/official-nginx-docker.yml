@@ -155,6 +155,12 @@ jobs:
               echo "ERROR: workflow_call must provide module_repo, module_ref, and module_sha together." >&2
               exit 1
             fi
+            # The evidence composer reads the canonical ABI from this
+            # workflow checkout, so the built source must be the same commit.
+            if [[ "${CALLER_MODULE_SHA}" != "${DEFAULT_SHA}" ]]; then
+              echo "ERROR: workflow_call module_sha must match the caller workflow SHA." >&2
+              exit 1
+            fi
             {
               printf 'repo=%s\n' "${CALLER_MODULE_REPO}"
               printf 'ref=%s\n' "${CALLER_MODULE_REF}"
