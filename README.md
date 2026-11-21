@@ -273,12 +273,12 @@ installation-specific details.
 | 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | verified | Yes |
 | 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | verified | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | verified | Yes |
-| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | verified | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | verified | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | verified | Yes |
 | 1.26.3 | stable | any | n/a | any | source | best-effort | pending | No |
-| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | pending | Yes |
-| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | pending | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | verified | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | verified | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | verified | Yes |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | verified | Yes |
 | 1.24.0 | stable | ubuntu-24.04 | glibc | arm64 | deb-package | supported | verified | Yes |
