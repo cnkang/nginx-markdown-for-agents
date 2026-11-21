@@ -28,6 +28,8 @@ from tools.release.matrix.promote_matrix import (
 )
 from tools.release.matrix.evidence_contract import canonical_build_identity
 from tools.release.matrix.tests.test_evidence_contract import (
+    _container_record as _fixture_container_record,
+    _container_row as _fixture_container_row,
     _record as _fixture_record,
     _ubuntu_record as _fixture_ubuntu_record,
 )
@@ -72,6 +74,30 @@ def _ubuntu_record(**overrides) -> dict:
     return record
 
 
+def _container_record(**overrides) -> dict:
+    record = _fixture_container_record(**overrides)
+    record["commit_sha"] = overrides.get("commit_sha", _candidate_sha())
+    return record
+
+
+def _container_row(**overrides) -> dict:
+    _, feature_digest, abi_version = canonical_build_identity()
+    row = _fixture_container_row()
+    row.update(
+        {
+            "support_tier": "supported",
+            "support_stage": "container",
+            "verification_state": "pending",
+            "release_blocking": True,
+            "provenance": {"kind": "container", "reference": "nginx:1.26.3"},
+            "feature_manifest_digest": feature_digest,
+            "abi_version": abi_version,
+        }
+    )
+    row.update(overrides)
+    return row
+
+
 def _matrix(*rows: dict) -> dict:
     return {"schema_version": 1, "entries": list(rows)}
 
@@ -102,6 +128,56 @@ def test_rpm_package_row_is_promoted_by_evidence() -> None:
     assert row["support_tier"] == "supported"
     assert row["verification_state"] == "verified"
     assert row["release_blocking"] is True
+
+
+def test_container_row_is_promoted_without_changing_its_artifact_contract() -> None:
+    row = _container_row()
+    original_provenance = dict(row["provenance"])
+    digest = row["feature_manifest_digest"]
+    abi_version = row["abi_version"]
+    matrix = _matrix(row)
+
+    promoted, _ = build_promoted_matrix(
+        matrix,
+        [_container_record()],
+        demote_superseded=False,
+    )
+
+    promoted_row = promoted["entries"][0]
+    assert promoted_row["support_tier"] == "supported"
+    assert promoted_row["support_stage"] == "container"
+    assert promoted_row["verification_state"] == "verified"
+    assert promoted_row["release_blocking"] is True
+    assert promoted_row["provenance"] == original_provenance
+    assert promoted_row["feature_manifest_digest"] == digest
+    assert promoted_row["abi_version"] == abi_version
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("features", ["streaming"]),
+        ("feature_manifest_digest", None),
+        ("abi_version", None),
+        ("module_sha256", "short"),
+        ("target_identity", "container-registry:nginx:1.26.3:debian12:glibc:amd64"),
+    ],
+)
+def test_container_row_with_unverified_build_identity_stays_pending(
+    field: str, value: object
+) -> None:
+    row = _container_row()
+    record = _container_record()
+    if value is None:
+        del record[field]
+    else:
+        record[field] = value
+
+    with pytest.raises(PromotionError, match="canonical module build identity"):
+        _promote_entry(row, record)
+
+    assert row["verification_state"] == "pending"
+    assert row["support_stage"] == "container"
 
 
 def test_record_without_a_row_is_refused() -> None:

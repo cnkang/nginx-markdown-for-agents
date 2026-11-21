@@ -62,7 +62,7 @@ from evidence_contract import (  # noqa: E402
 DEFAULT_MATRIX = REPO_ROOT / "tools" / "release-matrix.json"
 
 PROMOTABLE_ARTIFACT_TYPES = frozenset(
-    {"dynamic-module", "deb-package", "rpm-package"}
+    {"dynamic-module", "deb-package", "rpm-package", "docker-image"}
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -141,15 +141,17 @@ def _promote_entry(entry: dict[str, Any], record: dict[str, Any]) -> None:
             "canonical module build identity for this row"
         )
     entry["support_tier"] = "supported"
-    entry["support_stage"] = "primary"
+    if entry.get("artifact_type") != "docker-image":
+        entry["support_stage"] = "primary"
     entry["verification_state"] = "verified"
     entry["release_blocking"] = True
     entry["date"] = record["date"]
     entry["source"] = record["source_kind"]
-    entry["provenance"] = {
-        "kind": record["source_kind"],
-        "reference": record["source_reference"],
-    }
+    if record["source_kind"] != "container-registry":
+        entry["provenance"] = {
+            "kind": record["source_kind"],
+            "reference": record["source_reference"],
+        }
 
 
 def _covered_rows(

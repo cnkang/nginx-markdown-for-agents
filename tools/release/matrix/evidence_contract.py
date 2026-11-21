@@ -336,6 +336,12 @@ def _promotion_module_identity_matches(record: dict[str, Any]) -> bool:
             f"{record.get('nginx_package_revision')}:{record.get('distro')}:"
             f"{record.get('arch')}"
         )
+    elif source_kind == "container-registry":
+        expected_identity = (
+            f"container-registry:{record.get('image_reference')}@"
+            f"{record.get('image_digest')}:{record.get('distro')}:"
+            f"{record.get('libc')}:{record.get('arch')}"
+        )
     else:
         return False
     return record.get("target_identity") == expected_identity

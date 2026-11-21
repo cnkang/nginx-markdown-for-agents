@@ -9,7 +9,11 @@ import pathlib
 import pytest
 
 from tools.release.matrix import record_container_evidence as composer
-from tools.release.matrix.evidence_contract import record_covers_entry, validate_record
+from tools.release.matrix.evidence_contract import (
+    canonical_build_identity,
+    record_covers_entry,
+    validate_record,
+)
 
 COMMIT = "a" * 40
 BASE_DIGEST = "sha256:" + "4" * 64
@@ -99,6 +103,10 @@ def test_compose_produces_a_valid_record_that_covers_its_row(tmp_path):
     assert record["built_image_id"] == BUILT_ID
     assert record["commit_sha"] == COMMIT
     assert record["workflow_run_url"] == RUN_URL
+    features, digest, abi_version = canonical_build_identity()
+    assert record["features"] == list(features)
+    assert record["feature_manifest_digest"] == digest
+    assert record["abi_version"] == abi_version
     assert record["tests"][0]["name"] == "build"
     assert record_covers_entry(record, _row())
 
