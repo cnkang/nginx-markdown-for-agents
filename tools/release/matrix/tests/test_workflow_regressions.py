@@ -1405,6 +1405,19 @@ def test_container_evidence_producer_runs_before_the_release_gate() -> None:
     assert "verify-nginx-org-module.sh" in evidence
 
 
+def test_official_docker_workflow_call_binds_module_sha_to_caller() -> None:
+    official = _workflow_data("official-nginx-docker.yml")
+    steps = official["jobs"]["build-and-verify"]["steps"]
+    source = _step_by_name(steps, "Resolve source clone target")["run"]
+
+    assert '"${CALLER_MODULE_SHA}" != "${DEFAULT_SHA}"' in source
+    assert "workflow_call module_sha must match the caller workflow SHA" in source
+    caller = _workflow_data("release-packages.yml")["jobs"][
+        "official-docker-release-gate"
+    ]
+    assert caller["with"]["module_sha"] == "${{ github.sha }}"
+
+
 def test_official_docker_build_retries_only_through_the_helper() -> None:
     official = _workflow_data("official-nginx-docker.yml")
     steps = official["jobs"]["build-and-verify"]["steps"]
