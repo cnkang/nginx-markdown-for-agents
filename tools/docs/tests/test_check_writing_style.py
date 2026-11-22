@@ -434,6 +434,20 @@ def test_docs_check_fetches_style_base_history():
     assert "fetch-depth: 0" in docs_job
 
 
+def test_release_tag_style_base_ignores_previous_tag_object():
+    workflow = (cws.ROOT / ".github/workflows/release-packages.yml").read_text(
+        encoding="utf-8"
+    )
+    release_gates = workflow.split("      - name: Run release gates", 1)[1]
+    style_base = next(
+        line.strip()
+        for line in release_gates.splitlines()
+        if line.lstrip().startswith("STYLE_BASE:")
+    )
+    assert "github.ref_type != 'tag'" in style_base
+    assert 'STYLE_BASE="$(git rev-parse HEAD)"' in release_gates
+
+
 def test_reference_line_noun_chain_exempt():
     # Reference lines carry formal document titles.
     text = "- ADR-0019: 0.9.0 Production Readiness Release Gate Framework\n"
