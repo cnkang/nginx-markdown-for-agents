@@ -7,8 +7,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > HTML in. Markdown out.
 > When the client asks for it, or when you decide to serve it.
 
-> Current release line: v0.9.4, published 2026-11-22 as the latest public
-> stable release. v0.9.4 is a compatibility maintenance release that keeps
+> Current release line: v0.9.4, a compatibility maintenance release that keeps
 > the 20 active directives and their defaults, HTTP representation, metrics,
 > diagnostics, reason codes, and FFI ABI version 3 unchanged. v0.9.2 is the
 > final planned breaking release before v1.0. Use release-tag downloads.

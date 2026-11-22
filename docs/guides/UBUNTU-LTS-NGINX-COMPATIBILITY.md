@@ -455,13 +455,14 @@ verifies official archive signatures by default, as described in its
 
 | Suite | Candidate package revision (amd64 / arm64) | Module evidence | ABI provide |
 |---|---|---|---|
-| 24.04 | `1.24.0-2ubuntu7.21` | Pending for both architectures | Pending CI evidence |
-| 26.04 | `1.28.3-2ubuntu1.14` | Pending for both architectures | Pending CI evidence |
+| 24.04 | `1.24.0-2ubuntu7.21` | Verified on amd64 and arm64; Brotli `1.1.0-2ubuntu0.1` (dynamic) | `nginx-abi-1.24.0-1` |
+| 26.04 | `1.28.3-2ubuntu1.14` | Verified on amd64 and arm64; Brotli `1.2.0-3ubuntu0.1` (dynamic) | `nginx-abi-1.28.3-1` |
 
-The release workflow must install each exact revision on both architectures
-and record its ABI provide, linked Brotli package, module load, Markdown
-request, and incompatible-module rejection result. The v0.9.3 ABI values above
-are historical evidence and do not substitute for v0.9.4 records.
+Each architecture passed exact-revision build and install checks, module load,
+passthrough and Markdown requests, lifecycle checks, and incompatible-ABI
+rejection. The final-metadata release workflow records bind each target to the
+candidate commit and workflow run. The v0.9.3 ABI values above are historical
+evidence and do not substitute for v0.9.4 records.
 
 Limits:
 
