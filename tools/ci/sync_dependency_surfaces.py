@@ -36,7 +36,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +91,10 @@ class SyncPlan:
     skipped_divergences: list[str] = field(default_factory=list)
     manual_attention: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Baseline package -> resolved versions.  Apply mode revalidates each
+    # planned update against the lock as it changes, so it needs the same
+    # baseline view the plan was built from.
+    baseline_packages: dict[str, set[str]] = field(default_factory=dict)
 
     def out_of_sync(self) -> bool:
         """Return whether anything is stale, ambiguous, or broken."""
@@ -287,6 +291,7 @@ def build_sync_plan(
             f"cannot read baseline Cargo.lock {display_path(baseline_lock)}: {exc}"
         )
         return plan
+    plan.baseline_packages = baseline
 
     for cargo_toml, sub_lock in sub_workspaces:
         if not cargo_toml.is_file():
@@ -346,11 +351,66 @@ def build_cargo_update_command(cargo: str, update: LockUpdate) -> list[str]:
     ]
 
 
-def apply_lock_updates(updates: list[LockUpdate], cargo: str) -> list[str]:
+def _refresh_update(
+    update: LockUpdate,
+    baseline: dict[str, set[str]],
+    allowed_for_lock: dict[str, set[str]],
+) -> tuple[LockUpdate | None, str | None]:
+    """Re-derive one planned update from the sub-lock as it is now.
+
+    A targeted ``cargo update`` for one package can move a shared transitive
+    dependency past the version the plan recorded: updating regex to 1.13.2
+    pulls regex-automata 0.4.19 while a later plan entry still names 0.4.16.
+    Cargo then rejects ``--package name@old`` because that version is gone.
+    Re-reading the lock keeps every package spec valid: an entry the cascade
+    already moved to a baseline version is dropped, and one that landed on a
+    different stale version is re-targeted instead of failing the whole sync.
+    """
+    try:
+        versions = lock_package_versions(update.lock).get(update.name, set())
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return None, f"cannot read Cargo.lock {display_path(update.lock)}: {exc}"
+    baseline_versions = baseline.get(update.name, set())
+    exempt = allowed_for_lock.get(update.name, set())
+    stale = sorted((versions - baseline_versions) - exempt)
+    if not stale:
+        return None, None  # an earlier update in this run already moved it
+    stale_version = (
+        update.stale_version
+        if update.stale_version in stale
+        else max(stale, key=_version_sort_key)
+    )
+    target = select_baseline_target(stale_version, baseline_versions)
+    if target is None:
+        joined = ", ".join(sorted(baseline_versions))
+        return None, (
+            f"{display_path(update.lock)}: {update.name} {stale_version} is "
+            f"stale but the baseline has no compatible version ({joined}); "
+            "sync needs manual attention"
+        )
+    return replace(
+        update, stale_version=stale_version, baseline_version=target
+    ), None
+
+
+def apply_lock_updates(
+    updates: list[LockUpdate],
+    cargo: str,
+    baseline: dict[str, set[str]],
+    allowed: dict[str, dict[str, set[str]]],
+) -> list[str]:
     """Run every planned cargo update and return the failures."""
     errors: list[str] = []
     for update in updates:
-        command = build_cargo_update_command(cargo, update)
+        current, error = _refresh_update(
+            update, baseline, allowed.get(display_path(update.lock), {})
+        )
+        if error is not None:
+            errors.append(error)
+            continue
+        if current is None:
+            continue
+        command = build_cargo_update_command(cargo, current)
         # Audited against opengrep python.lang.security.audit.dangerous-
         # subprocess-use-audit: no shell is involved (argv list), cargo
         # resolves through the approved-executable allowlist, and the
@@ -368,8 +428,8 @@ def apply_lock_updates(updates: list[LockUpdate], cargo: str) -> list[str]:
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
             errors.append(
-                f"cargo update failed for {update.name} in "
-                f"{display_path(update.lock)}"
+                f"cargo update failed for {current.name} in "
+                f"{display_path(current.lock)}"
                 + (f": {detail[-300:]}" if detail else "")
             )
     return errors
@@ -447,7 +507,12 @@ def _report_check(plan: SyncPlan, baseline_lock: Path) -> int:
     return 1
 
 
-def _apply_plan(plan: SyncPlan, notices_path: Path, cargo: str | None) -> int:
+def _apply_plan(
+    plan: SyncPlan,
+    notices_path: Path,
+    cargo: str | None,
+    allowed: dict[str, dict[str, set[str]]],
+) -> int:
     """Apply the sync plan and map the outcome to an exit code."""
     if not plan.out_of_sync():
         print("dependency surfaces are already in sync")
@@ -462,16 +527,21 @@ def _apply_plan(plan: SyncPlan, notices_path: Path, cargo: str | None) -> int:
     if cargo is None:
         print("cargo is unavailable; cannot run the targeted lock updates")
         return 1
-    errors = apply_lock_updates(plan.lock_updates, cargo)
+    errors = apply_lock_updates(
+        plan.lock_updates, cargo, plan.baseline_packages, allowed
+    )
     errors.extend(apply_notice_rewrites(notices_path, plan.notice_rewrites))
     if errors:
         for line in errors:
             print(f"  - {line}")
-        print("sync failed; re-run python3 tools/ci/check_third_party_notices.py")
+        print(
+            "sync failed; re-run python3 tools/ci/sync_dependency_surfaces.py "
+            "to finish"
+        )
         return 1
     print(
-        f"synced {len(plan.lock_updates)} lock packages and "
-        f"{len(plan.notice_rewrites)} notices entries with the baseline lock"
+        "synced dependency surfaces with the baseline lock "
+        f"({len(plan.notice_rewrites)} notices entries rewritten)"
     )
     return 0
 
@@ -491,7 +561,7 @@ def run_sync(
     plan.errors.extend(load_errors)
     if check_only:
         return _report_check(plan, baseline_lock)
-    return _apply_plan(plan, notices_path, cargo)
+    return _apply_plan(plan, notices_path, cargo, allowed)
 
 
 def main(argv: list[str] | None = None) -> int:
