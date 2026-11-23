@@ -986,6 +986,12 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     soak = _step_by_name(
         steps, "Run candidate-bound short-soak qualification"
     )
+    reuse_download = _step_by_name(
+        steps, "Download reusable qualification handoff"
+    )
+    reuse_restore = _step_by_name(
+        steps, "Restore reusable short-soak evidence"
+    )
     ownership = _step_by_name(
         steps, "Restore short-soak runtime artifact ownership"
     )
@@ -997,6 +1003,8 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
 
     assert (
         names.index("Download canonical benchmark NGINX runtime")
+        < names.index("Download reusable qualification handoff")
+        < names.index("Restore reusable short-soak evidence")
         < names.index("Generate candidate-bound short-soak manifest")
         < names.index("Run candidate-bound short-soak qualification")
         < names.index("Restore short-soak runtime artifact ownership")
@@ -1004,6 +1012,23 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         < names.index("Run release gates")
     )
     assert "generate_soak_scenario_manifest.py" in manifest["run"]
+    assert manifest["env"]["REUSE_QUALIFICATION"] == (
+        "${{ needs.candidate-qualification.outputs.reuse }}"
+    )
+    assert "steps.restore_reused_soak.outcome" in manifest["env"][
+        "REUSED_SOAK_EVIDENCE"
+    ]
+    assert '"${REUSED_SOAK_EVIDENCE}" == "true"' in manifest["run"]
+    assert reuse_download["with"]["name"] == (
+        "reusable-release-qualification-${{ github.sha }}"
+    )
+    assert reuse_download["continue-on-error"] == "true"
+    assert "release_qualification_reuse.py restore-soak" in reuse_restore["run"]
+    assert reuse_restore["continue-on-error"] == "true"
+    assert "steps.restore_reused_soak.outcome" in soak["env"][
+        "REUSED_SOAK_EVIDENCE"
+    ]
+    assert '"${REUSED_SOAK_EVIDENCE}" == "true"' in soak["run"]
     assert '--candidate-sha "${GITHUB_SHA}"' in manifest["run"]
     assert release_version == "0.9.4"
     assert '--version "${RELEASE_VERSION}"' in manifest["run"]
@@ -1069,6 +1094,64 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         'soak-qualification-record.json"'
     ) in gates["run"]
     assert "--env RELEASE_VERSION" in gates["run"]
+
+
+def test_release_qualification_reuse_is_sha_bound_and_fails_back_to_long_checks() -> None:
+    workflow = _workflow_data("release-packages.yml")
+    jobs = workflow["jobs"]
+    candidate = jobs["candidate-qualification"]
+    candidate_steps = candidate["steps"]
+    find = _step_by_name(candidate_steps, "Find reusable qualification run")
+    download = _step_by_name(candidate_steps, "Download reusable qualification bundle")
+    verify = _step_by_name(candidate_steps, "Verify reusable qualification evidence")
+    upload = _step_by_name(candidate_steps, "Upload verified qualification handoff")
+    decision = _step_by_name(candidate_steps, "Decide whether qualification reuse is safe")
+
+    assert candidate["permissions"] == {"actions": "read", "contents": "read"}
+    assert candidate["outputs"]["reuse"] == "${{ steps.decision.outputs.reuse }}"
+    assert "release_qualification_reuse.py discover" in find["run"]
+    assert download["uses"].startswith("actions/download-artifact@")
+    assert download["with"]["run-id"] == "${{ steps.find.outputs.run_id }}"
+    assert download["with"]["github-token"] == "${{ github.token }}"
+    assert download["continue-on-error"] == "true"
+    assert "release_qualification_reuse.py verify" in verify["run"]
+    assert "validate_fuzz_qualification.py" in verify["run"]
+    assert "--mode fixture" in verify["run"]
+    assert "validate_soak_qualification.py" in verify["run"]
+    assert "--mode verify --git-head" in verify["run"]
+    assert decision["env"]["UPLOAD_OUTCOME"] == "${{ steps.upload.outcome }}"
+    assert "reuse=false" in decision["run"]
+    assert upload["with"]["retention-days"] == "1"
+    assert "${{ github.sha }}" in upload["with"]["name"]
+
+    source_steps = _job_steps(workflow, "release-gate")
+    source_bundle = _step_by_name(
+        source_steps, "Create reusable release qualification bundle"
+    )
+    source_upload = _step_by_name(
+        source_steps, "Upload reusable release qualification bundle"
+    )
+    assert "inputs.require_blocking" in source_bundle["if"]
+    assert "inputs.final_metadata" in source_bundle["if"]
+    assert "github.workflow_sha" in str(source_bundle["env"])
+    assert source_upload["with"]["retention-days"] == "90"
+    assert "${{ github.run_attempt }}" in source_upload["with"]["name"]
+
+    for job_name in ("release-gate", "fuzz-qualification"):
+        assert "candidate-qualification" in jobs[job_name]["needs"]
+    fuzz_steps = _job_steps(workflow, "fuzz-qualification")
+    for step_name in (
+        "Install pinned Rust toolchain for fuzz qualification",
+        "Run fuzz qualification",
+    ):
+        step = _step_by_name(fuzz_steps, step_name)
+        assert step["env"]["REUSE_QUALIFICATION"] == (
+            "${{ needs.candidate-qualification.outputs.reuse }}"
+        )
+        assert "steps.restore_reused_fuzz.outcome" in step["env"][
+            "REUSED_FUZZ_EVIDENCE"
+        ]
+        assert '"${REUSED_FUZZ_EVIDENCE}" == "true"' in step["run"]
 
 
 def test_require_blocking_dispatch_input_is_routed_through_env() -> None:

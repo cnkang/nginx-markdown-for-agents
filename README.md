@@ -302,6 +302,7 @@ installation-specific details.
 | Understand features | [Features index](docs/features/README.md), [Decompression](docs/features/DECOMPRESSION.md), [Streaming](docs/features/STREAMING_COMPATIBILITY.md) |
 | Understand architecture | [Architecture index](docs/architecture/README.md), [System Architecture](docs/architecture/SYSTEM_ARCHITECTURE.md) |
 | Validate or contribute | [Testing index](docs/testing/README.md), [Harness index](docs/harness/README.md) |
+| Prepare a release | [Same-SHA qualification reuse](docs/guides/RELEASE-QUALIFICATION-REUSE.md) |
 | Contribute or report a vulnerability | [Contributing](CONTRIBUTING.md), [Security policy](SECURITY.md) |
 
 ## Development and validation
@@ -321,6 +322,12 @@ Documentation and repository-contract changes also require:
 make docs-check
 make harness-check
 ```
+
+After a successful release preflight, a tag for the same full commit SHA can
+reuse the fuzz and short-soak qualifications after validating their source run,
+artifact, attestation, and records. Package builds, compatibility evidence, RC
+and performance gates still run. Missing or mismatched evidence falls back to
+the long checks. See the [qualification reuse guide](docs/guides/RELEASE-QUALIFICATION-REUSE.md).
 
 Before submitting a change, run the complete local gate set and push profile:
 
@@ -362,6 +369,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 0.9.4 | 2026-11-23 | Added same-SHA release preflight qualification reuse guidance. |
 | 0.9.2 | 2026-10-08 | Unified the release date to 2026-10-08 and the published release status, and added the Ubuntu 26.04 default-repository NGINX 1.28.3 support rows |
 | 0.9.2 | 2026-10-03 | Update release target, simplify migration guidance, and document complete validation |
 | 0.9.2 | 2026-09-30 | Finalized the entry point for the v0.9.2 stable release (publication date and status). |
