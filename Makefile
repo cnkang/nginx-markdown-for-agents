@@ -652,7 +652,9 @@ compatibility-contract-check:
 # worktree; a case that stops failing means the gate lost its teeth.
 compatibility-contract-tests:
 	@echo "=== Cross-Release Compatibility Contract Tests ==="
-	PYTHONPATH=. python3 -m pytest tools/compatibility/tests/ -q --tb=short $(PYTEST_JOBS)
+	# Serial on purpose: every negative fixture owns a git worktree, and
+	# parallel workers make git's administrative entries race.
+	PYTHONPATH=. python3 -m pytest tools/compatibility/tests/ -q --tb=short
 	@echo "  Cross-Release Compatibility Contract Tests: PASSED"
 
 # package-version-ordering-check: prove the RC package version mapping with the

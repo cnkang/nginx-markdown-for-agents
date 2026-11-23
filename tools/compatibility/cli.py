@@ -26,7 +26,6 @@ if REPO_ROOT not in sys.path:
 from tools.compatibility import EXTRACTOR_NAME, EXTRACTOR_VERSION  # noqa: E402
 from tools.compatibility.compare import (  # noqa: E402
     ADDITIVE,
-    BLOCKING_VERDICTS,
     OK,
     apply_approvals,
     compare_contracts,
