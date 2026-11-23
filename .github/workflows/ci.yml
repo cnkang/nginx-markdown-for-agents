@@ -127,6 +127,7 @@ jobs:
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
       harness_tooling: ${{ steps.filter.outputs.harness_tooling }}
       contract_gates: ${{ steps.filter.outputs.contract_gates }}
+      compatibility_contract: ${{ steps.filter.outputs.compatibility_contract }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -255,6 +256,24 @@ jobs:
               # Package metadata and the shipped module snippets are validated
               # by this job, so packaging changes must trigger it.
               - 'packaging/**'
+            compatibility_contract:
+              # Every path the cross-release contract manifest reads.  A change
+              # to any of them can move a frozen surface, so the gate that
+              # compares against the published anchors has to run.
+              - 'tools/compatibility/**'
+              - 'schemas/metrics-v1.registry.json'
+              - 'schemas/diagnostics.schema.json'
+              - 'components/rust-converter/reason_registry.toml'
+              - 'components/rust-converter/include/markdown_converter.h'
+              - 'components/nginx-module/src/ngx_http_markdown_config_directives_impl.h'
+              - 'components/nginx-module/src/ngx_http_markdown_directive_names.h'
+              - 'components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h'
+              - 'components/nginx-module/tests/unit/**'
+              - 'tools/e2e/**'
+              - 'tools/release-matrix.json'
+              - 'packaging/nfpm/nfpm.yaml'
+              - 'docs/harness/public-surface-inventory.json'
+              - 'Makefile'
             workflows:
               - '.github/workflows/**'
 
@@ -655,6 +674,59 @@ jobs:
             "artifacts/release/${RELEASE_LINE}/official-build-feature-manifest.json"
           python3 tools/release/matrix/generate_release_contract_matrix.py --check
           PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+
+  compatibility-contract-gates:
+    name: Cross-Release Compatibility Gates
+    needs: changes
+    # Blocking.  The gate compares the candidate against frozen manifests of
+    # published release tags, which the current-surface drift gate cannot do:
+    # one change can edit the implementation and its inventory together.
+    if: >-
+      needs.changes.outputs.compatibility_contract == 'true' ||
+      needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository (full history and tags)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The gate re-extracts every frozen anchor from its release tag.  A
+          # shallow checkout without tags must fail the gate, not silently
+          # skip the proof, so the job fetches the full history and the tags.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14.6'
+
+      - name: Install Python test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify every frozen anchor against its release tag
+        run: PYTHONPATH=. python3 -m tools.compatibility verify-anchors --repo-root .
+
+      - name: Run the blocking cross-release compatibility gate
+        run: make compatibility-contract-check
+
+      - name: Run the compatibility gate negative fixtures
+        run: make compatibility-contract-tests
+
+      - name: Prove the RC package version ordering
+        run: make package-version-ordering-check REQUIRE_ALL=1
+
+      - name: Upload the compatibility report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compatibility-contract-report
+          path: build/reports/compatibility-contract.json
+          if-no-files-found: warn
+          retention-days: 14
 
   nginx-c-clang-smoke:
     name: NGINX C Clang Smoke

@@ -1,0 +1,2250 @@
+{
+  "contract_digest": "sha256:9443a1f686b1a16152d6cdfdfe636ff3cafb95740e687b5965011c36b41bea64",
+  "extractor": {
+    "name": "compatibility-contract",
+    "version": "1"
+  },
+  "manifest_schema": 1,
+  "product_version": "0.9.2",
+  "source": {
+    "commit": "9b8596c6242ca76f51d5f57451eb99519a27735f",
+    "kind": "release-tag",
+    "label": "v0.9.2",
+    "tag_object": "a3ca1865510930e82a7e5c9a10649695fb9a6383"
+  },
+  "surface_digests": {
+    "diagnostics": "sha256:b301d95d09c8c7c6372a5fc64ddec61750154cc657d9b19e49b94ebdf56d16ce",
+    "directives": "sha256:77b50891a6616b653326dfc25a899d31350a66b0009f2a84768cd73a40a708da",
+    "ffi": "sha256:4d559d824ff826febcca88b072aabcf9f8d16aab1b9ae26fa8b859172e2b880f",
+    "http": "sha256:c421b7674782b7b85f09a93e4a6dd8157868a986e179c818f9681689b287e246",
+    "metrics": "sha256:dfe5c82d58e732c9715a2b7f72901dd7848c151940b368699b67d001a1d358f0",
+    "packaging": "sha256:cdb97b0ce1f0ed5e28b7beb7820607100579d726766d3c4338fb6f61744d68d8",
+    "reasons": "sha256:5122f7145d533c310888f1edda0196065cbdf8395f59a0f1359327005392c0e3"
+  },
+  "surfaces": {
+    "diagnostics": {
+      "additional_properties": false,
+      "fields": [
+        {
+          "additional_properties": false,
+          "name": "build",
+          "nullable": false,
+          "properties": [
+            {
+              "name": "build_kind",
+              "type": "string"
+            },
+            {
+              "name": "feature_manifest_digest",
+              "type": null
+            },
+            {
+              "name": "features",
+              "type": "array"
+            },
+            {
+              "name": "nginx_version",
+              "type": "string"
+            },
+            {
+              "name": "rust_version",
+              "type": null
+            },
+            {
+              "name": "source_sha",
+              "type": null
+            }
+          ],
+          "required": true,
+          "required_children": [
+            "build_kind",
+            "feature_manifest_digest",
+            "features",
+            "nginx_version",
+            "rust_version",
+            "source_sha"
+          ],
+          "type": "object"
+        },
+        {
+          "additional_properties": false,
+          "name": "configuration",
+          "nullable": false,
+          "properties": [
+            {
+              "name": "effective",
+              "type": null
+            },
+            {
+              "name": "effective_sources",
+              "type": null
+            },
+            {
+              "name": "static_digest",
+              "type": "string"
+            }
+          ],
+          "required": true,
+          "required_children": [
+            "effective",
+            "effective_sources",
+            "static_digest"
+          ],
+          "type": "object"
+        },
+        {
+          "additional_properties": true,
+          "name": "extensions",
+          "nullable": false,
+          "properties": [],
+          "required": false,
+          "required_children": [],
+          "type": "object"
+        },
+        {
+          "name": "product_version",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "items_additional_properties": null,
+          "items_required": [],
+          "items_type": null,
+          "name": "recent_decisions",
+          "nullable": false,
+          "required": true,
+          "type": "array"
+        },
+        {
+          "additional_properties": false,
+          "name": "runtime",
+          "nullable": false,
+          "properties": [
+            {
+              "name": "diagnostics_recording",
+              "type": "string"
+            },
+            {
+              "name": "inflight",
+              "type": "integer"
+            },
+            {
+              "name": "module_metrics",
+              "type": "object"
+            },
+            {
+              "name": "pending_output",
+              "type": "integer"
+            }
+          ],
+          "required": true,
+          "required_children": [
+            "diagnostics_recording",
+            "inflight",
+            "module_metrics",
+            "pending_output"
+          ],
+          "type": "object"
+        },
+        {
+          "name": "schema_version",
+          "nullable": false,
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "additional_properties": false,
+          "name": "worker",
+          "nullable": false,
+          "properties": [
+            {
+              "name": "pid",
+              "type": "integer"
+            },
+            {
+              "name": "scope",
+              "type": "string"
+            }
+          ],
+          "required": true,
+          "required_children": [
+            "pid",
+            "scope"
+          ],
+          "type": "object"
+        }
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "read_only": true,
+      "required": [
+        "build",
+        "configuration",
+        "product_version",
+        "recent_decisions",
+        "runtime",
+        "schema_version",
+        "worker"
+      ],
+      "schema_version": 3,
+      "type": "object"
+    },
+    "directives": {
+      "count": 20,
+      "declared_names": [
+        "markdown_accept",
+        "markdown_auth_cookies",
+        "markdown_auth_policy",
+        "markdown_auto_decompress",
+        "markdown_cache_validation",
+        "markdown_content_types",
+        "markdown_diagnostics",
+        "markdown_error_policy",
+        "markdown_filter",
+        "markdown_flavor",
+        "markdown_front_matter",
+        "markdown_limits",
+        "markdown_log_verbosity",
+        "markdown_metrics",
+        "markdown_metrics_shm_size",
+        "markdown_prune_noise",
+        "markdown_stream_excluded_types",
+        "markdown_streaming",
+        "markdown_token_estimate",
+        "markdown_trusted_proxies"
+      ],
+      "entries": [
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "strict",
+          "documentation": "markdown_accept strict|force   (Config V2, 0.9.0; wildcard removed 0.9.2) Accept-header negotiation policy. strict   - convert only on an explicit text/markdown match (default) force    - convert regardless of the Accept header (dangerous) Public default: strict Context: http, server, location The \"wildcard\" value was removed in 0.9.2 (LTS-R008/LTS-R010): it is no longer part of ngx_http_markdown_accept_enum, and the ngx_http_markdown_accept wrapper rejects it with an explicit migration message so `nginx -t` fails rather than silently ignoring it. Example: markdown_accept strict;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_accept",
+          "name": "markdown_accept",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "strict|force"
+        },
+        {
+          "args": "1_or_more",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "built-in session*, auth*, PHPSESSID, wordpress_logged_in_* (explicit replaces)",
+          "documentation": "markdown_auth_cookies <pattern> [<pattern> ...] Cookie name patterns to identify authenticated requests. Supports exact match, prefix match (pattern*), and wildcards. Public default: built-in session*, auth*, PHPSESSID, wordpress_logged_in_* (explicit replaces) The built-in patterns are used in addition to Authorization header detection.  An explicit directive replaces the built-ins. Context: http, server, location Example: markdown_auth_cookies session* auth_token PHPSESSID;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_auth_cookies",
+          "name": "markdown_auth_cookies",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE",
+          "syntax": "<pattern> [<pattern> ...]"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "deny",
+          "documentation": "markdown_auth_policy allow|deny Policy for converting identifiable authenticated requests (LTS-R021): - allow: Explicit opt-in; convert authenticated requests - deny:  Do not convert authenticated requests (still serve the original HTML; never refuse) Default: deny (unset resolves to no-convert for authenticated content) Public default: deny Context: http, server, location Example: markdown_auth_policy allow;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_auth_policy",
+          "name": "markdown_auth_policy",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "allow|deny"
+        },
+        {
+          "args": "flag",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "on",
+          "documentation": "markdown_auto_decompress on|off Controls whether the module automatically decompresses upstream compressed responses (gzip, deflate, brotli) before conversion. When off, compressed responses pass through unconverted. Default: on Context: http, server, location Example: markdown_auto_decompress off;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_conf_set_flag_slot",
+          "name": "markdown_auto_decompress",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
+          "syntax": "on|off"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "ims_only",
+          "documentation": "markdown_cache_validation off|ims_only|full   (Config V2, 0.9.0) Cache-validation policy. off      - no ETag, no conditional request handling ims_only - no ETag; source If-Modified-Since applies to pass-through responses only; converted responses never produce a 304 (the module clears the source Last-Modified) (default) full     - transformed ETag + If-None-Match + If-Modified-Since Public default: ims_only Context: http, server, location Example: markdown_cache_validation full;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_cache_validation",
+          "name": "markdown_cache_validation",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "off|ims_only|full"
+        },
+        {
+          "args": "1_or_more",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "text/html",
+          "documentation": "markdown_content_types <type> [<type> ...] Content types eligible for Markdown conversion (positive allowlist). Uses prefix + boundary-char matching: \"text/html\" matches \"text/html\" and \"text/html; charset=utf-8\" but not \"text/htmlx\". Public default: text/html Default: text/html Context: http, server, location Example: markdown_content_types text/html application/xhtml+xml;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_content_types",
+          "name": "markdown_content_types",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE",
+          "syntax": "<type> [<type> ...]"
+        },
+        {
+          "args": "flag",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_diagnostics on|off Enable or disable the runtime diagnostics endpoint (/nginx-markdown/diagnostics).  When enabled, the endpoint exposes the Diagnostics Schema v3 fields: worker/build identity, configuration, runtime counters, and recent decisions. Access control: the diagnostics content handler runs in the NGINX content phase, which executes AFTER the access phase. Use native NGINX allow/deny directives in the same location block to restrict access. Default: off Context: location Example: location /nginx-markdown/diagnostics { markdown_diagnostics on; allow 127.0.0.1; allow ::1; deny all; }",
+          "documented_context": [
+            "location"
+          ],
+          "handler": "ngx_http_markdown_diagnostics_directive",
+          "name": "markdown_diagnostics",
+          "source_flags": "NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
+          "syntax": "on|off"
+        },
+        {
+          "args": "1_or_2",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "pass",
+          "documentation": "markdown_error_policy pass|fail_closed|status <code>   (Config V2, 0.9.0) Unified pre-commit error policy. pass        - return original content on pre-commit error (fail-open) fail_closed - return 502 on pre-commit error status <c>  - return status code c (429 or 503) Default: pass Context: http, server, location Example: markdown_error_policy status 503;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_error_policy",
+          "name": "markdown_error_policy",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12",
+          "syntax": "pass|fail_closed|status <code>"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_filter on|off|$variable Enables or disables Markdown conversion for this context. Also supports per-request toggle via nginx variables/complex values. Default: off Context: http, server, location Example: location /api { markdown_filter on; }",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_filter",
+          "name": "markdown_filter",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "on|off|$variable"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "commonmark",
+          "documentation": "markdown_flavor commonmark|gfm Markdown flavor to generate: - commonmark: CommonMark specification (default) - gfm: GitHub Flavored Markdown (includes tables, strikethrough) Default: commonmark Context: http, server, location Example: markdown_flavor gfm;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_flavor",
+          "name": "markdown_flavor",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "commonmark|gfm"
+        },
+        {
+          "args": "flag",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_front_matter on|off Conflict (config conflict): markdown_streaming force + front_matter on => error.  The YAML front matter is assembled from the completed metadata set by the full-buffer converter, so a forced streaming path would silently drop the configured feature.  With `markdown_streaming auto` the request routes to the full-buffer engine instead. Include YAML front matter with metadata (title, description, etc.). Default: off Context: http, server, location Example: markdown_front_matter on;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_conf_set_flag_slot",
+          "name": "markdown_front_matter",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
+          "syntax": "on|off"
+        },
+        {
+          "args": "1_or_more",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "(per-key inheritance)",
+          "documentation": "markdown_limits key=value ... Unified resource limits (0.9.2 frozen contract, 8 keys): conversion_timeout, parser_timeout, conversion_memory, parser_budget, streaming_buffer, decompressed_size, decompression_ratio, max_inflight Any subset of keys may be given; unspecified keys inherit (per-key inheritance). Public default: (per-key inheritance) Context: http, server, location (max_inflight is http-only) Example: markdown_limits conversion_timeout=30s conversion_memory=64m;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_limits",
+          "name": "markdown_limits",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE",
+          "syntax": "key=value ..."
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "info",
+          "documentation": "markdown_log_verbosity error|warn|info|debug Module-local verbosity filter for module-generated logs. NGINX's global error_log level still applies. Default: info Context: http, server, location Example: markdown_log_verbosity warn;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_log_verbosity",
+          "name": "markdown_log_verbosity",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "error|warn|info|debug"
+        },
+        {
+          "args": "no_args",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_metrics Enables the Prometheus text 0.0.4 metrics endpoint at this location. Accept negotiation does not select another metrics representation. Access is restricted to localhost (127.0.0.1, ::1) by default for security. Default: off Context: location only Example: location /markdown-metrics { markdown_metrics; } Security: Only accessible from localhost by default. NGINX allow/deny directives can further restrict access, but they do not broaden access beyond localhost. Public default: off",
+          "documented_context": [
+            "location only"
+          ],
+          "handler": "ngx_http_markdown_metrics_directive",
+          "name": "markdown_metrics",
+          "source_flags": "NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS",
+          "syntax": "(no args)"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
+          "context": [
+            "http"
+          ],
+          "default": "8*pagesize",
+          "documentation": "markdown_metrics_shm_size <size> Size of the shared-memory zone used to aggregate metrics across workers. Public default: 8*pagesize Default: 8 * ngx_pagesize Context: http Example: markdown_metrics_shm_size 128k;",
+          "documented_context": [
+            "http"
+          ],
+          "handler": "ngx_conf_set_size_slot",
+          "name": "markdown_metrics_shm_size",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1",
+          "syntax": "<size>"
+        },
+        {
+          "args": "flag",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "on",
+          "documentation": "markdown_prune_noise on|off Enable or disable noise region pruning at runtime. When enabled, structural HTML regions matching prune selectors are excluded from Markdown output. Default: on Context: http, server, location Example: markdown_prune_noise off;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_conf_set_flag_slot",
+          "name": "markdown_prune_noise",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF\n            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
+          "syntax": "on|off"
+        },
+        {
+          "args": "1_or_more",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "none",
+          "documentation": "markdown_stream_excluded_types <type> [<type> ...] Content types that should never enter streaming conversion. User-configured types are additive to built-in hard exclusions (text/event-stream, application/x-ndjson, application/stream+json). Public default: none Default: none (only built-in hard exclusions apply) Context: http, server, location Example: markdown_stream_excluded_types text/csv application/xml;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_http_markdown_stream_excluded_types_handler",
+          "name": "markdown_stream_excluded_types",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF\n            |NGX_HTTP_LOC_CONF|NGX_CONF_1MORE",
+          "syntax": "<type> [<type> ...]"
+        },
+        {
+          "args": "1",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_streaming off|auto|force   (Config V2, 0.9.0) Sole streaming processing-path policy. off   - bounded full-buffer conversion (default; unset == off) auto  - prefer streaming (no size/heuristic branching); explicit only force - always stream (subject to runtime hard blocks) Public default: off Migration note (0.9.2): the unset default changed from auto to off. Unset markdown_streaming now resolves to bounded full-buffer (design \u00a714(a), LTS-R011.2).  auto retains \"prefer streaming\" meaning only when written explicitly; operators who relied on the old implicit streaming default must now write \"markdown_streaming auto\" (or \"force\"). Conflict (config conflict): markdown_cache_validation full + force => error; full + auto => warning (runtime blocks streaming, falls back to full-buffer).  Enforced in merge_conf. Example: markdown_streaming auto;",
+          "documented_context": [],
+          "handler": "ngx_http_markdown_streaming",
+          "name": "markdown_streaming",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1",
+          "syntax": "off|auto|force"
+        },
+        {
+          "args": "flag",
+          "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+          "context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "default": "off",
+          "documentation": "markdown_token_estimate on|off Include X-Markdown-Tokens header with estimated token count. Useful for AI agents to manage context windows. Default: off Context: http, server, location Example: markdown_token_estimate on;",
+          "documented_context": [
+            "http",
+            "server",
+            "location"
+          ],
+          "handler": "ngx_conf_set_flag_slot",
+          "name": "markdown_token_estimate",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG",
+          "syntax": "on|off"
+        },
+        {
+          "args": "1_or_more",
+          "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
+          "context": [
+            "http"
+          ],
+          "default": "off",
+          "documentation": "markdown_trusted_proxies <CIDR>... | off   (Config V2, 0.9.0) CIDR-based trusted-proxy list controlling whether forwarded headers (Forwarded / X-Forwarded-Proto / X-Forwarded-Host) are honored when deriving the base URL for relative-link resolution.  Replaces the removed boolean markdown_trust_forwarded_headers trust model. Context: http only.  NGINX rejects server/location use to avoid per-location trust bypass.  CIDRs are validated at config time (IPv4 + IPv6); \"off\" disables trust entirely. Example: markdown_trusted_proxies 10.0.0.0/8 2001:db8::/32; markdown_trusted_proxies off; Public default: off",
+          "documented_context": [
+            "http only.  NGINX rejects server/location use to avoid"
+          ],
+          "handler": "ngx_http_markdown_trusted_proxies",
+          "name": "markdown_trusted_proxies",
+          "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_1MORE",
+          "syntax": "<CIDR>... | off"
+        }
+      ],
+      "reject_only_count": 0
+    },
+    "ffi": {
+      "abi_version": 3,
+      "classification": "INTERNAL_ONLY",
+      "count": 38,
+      "handshake_symbols": [
+        "markdown_abi_header_hash",
+        "markdown_abi_layout_fingerprint",
+        "markdown_abi_symbol_set_hash",
+        "markdown_abi_version"
+      ],
+      "header": "components/rust-converter/include/markdown_converter.h",
+      "symbols": [
+        {
+          "name": "markdown_abi_header_hash",
+          "return_type": "/ * * uint64_t",
+          "signature": "/** uint64_t markdown_abi_header_hash(void)"
+        },
+        {
+          "name": "markdown_abi_layout_fingerprint",
+          "return_type": "/ * * uint64_t",
+          "signature": "/** uint64_t markdown_abi_layout_fingerprint(void)"
+        },
+        {
+          "name": "markdown_abi_symbol_set_hash",
+          "return_type": "/ * * uint64_t",
+          "signature": "/** uint64_t markdown_abi_symbol_set_hash(void)"
+        },
+        {
+          "name": "markdown_abi_version",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_abi_version(void)"
+        },
+        {
+          "name": "markdown_base_url_input_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_base_url_input_init(struct FFIBaseUrlInput *result)"
+        },
+        {
+          "name": "markdown_build_header_plan",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_build_header_plan(const uint8_t *content_type, uintptr_t content_type_len, uint8_t has_etag, struct FFIHeaderPlan *result)"
+        },
+        {
+          "name": "markdown_chain_decode_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_chain_decode_free(struct FFIChainDecodeResult *result)"
+        },
+        {
+          "name": "markdown_chain_decode_result_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result)"
+        },
+        {
+          "name": "markdown_classify_error_code",
+          "return_type": "/ * * uint8_t",
+          "signature": "/** uint8_t markdown_classify_error_code(uint32_t error_code)"
+        },
+        {
+          "name": "markdown_convert",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_convert(struct MarkdownConverterHandle *handle, const uint8_t *html, uintptr_t html_len, const struct MarkdownOptions *options, struct MarkdownResult *result)"
+        },
+        {
+          "name": "markdown_converter_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_converter_free(struct MarkdownConverterHandle *handle)"
+        },
+        {
+          "name": "markdown_converter_new",
+          "return_type": "/ * * struct MarkdownConverterHandle  *",
+          "signature": "/** struct MarkdownConverterHandle *markdown_converter_new(void)"
+        },
+        {
+          "name": "markdown_decide_base_url",
+          "return_type": "/ * * uint8_t",
+          "signature": "/** uint8_t markdown_decide_base_url(const struct FFIBaseUrlInput *input, uint8_t *out_buf, uintptr_t out_buf_cap, struct FFIBaseUrlDecision *out)"
+        },
+        {
+          "name": "markdown_decide_conditional",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_decide_conditional(const struct FFIConditionalInput *input, struct FFIConditionalDecision *out)"
+        },
+        {
+          "name": "markdown_decide_eligibility",
+          "return_type": "/ * * uint8_t",
+          "signature": "/** uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input)"
+        },
+        {
+          "name": "markdown_decode_encoding_chain",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_decode_encoding_chain(const uint8_t *input, uintptr_t input_len, const uint8_t *layers, uint32_t layer_count, uintptr_t max_output, uint64_t ratio, struct FFIChainDecodeResult *result)"
+        },
+        {
+          "name": "markdown_decomp_result_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_decomp_result_init(struct FFIDecompResult *result)"
+        },
+        {
+          "name": "markdown_decompress_bounded",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_decompress_bounded(const uint8_t *input, uintptr_t input_len, uint8_t format, uintptr_t budget, uint64_t ratio, struct FFIDecompResult *result)"
+        },
+        {
+          "name": "markdown_decompress_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_decompress_free(struct FFIDecompResult *result)"
+        },
+        {
+          "name": "markdown_header_plan_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_header_plan_free(struct FFIHeaderPlan *plan)"
+        },
+        {
+          "name": "markdown_header_plan_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_header_plan_init(struct FFIHeaderPlan *result)"
+        },
+        {
+          "name": "markdown_negotiate_accept",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_negotiate_accept(const uint8_t *accept_header, uintptr_t accept_header_len, struct FFIAcceptResult *result)"
+        },
+        {
+          "name": "markdown_options_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_options_init(struct MarkdownOptions *result)"
+        },
+        {
+          "name": "markdown_parse_encoding_chain",
+          "return_type": "/ * * uint8_t",
+          "signature": "/** uint8_t markdown_parse_encoding_chain(const uint8_t *value, uintptr_t value_len, struct FFIEncodingChainResult *result)"
+        },
+        {
+          "name": "markdown_reason_code_count",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_reason_code_count(void)"
+        },
+        {
+          "name": "markdown_reason_code_metric_key",
+          "return_type": "/ * * const uint8_t  *",
+          "signature": "/** const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len)"
+        },
+        {
+          "name": "markdown_reason_code_str",
+          "return_type": "/ * * const uint8_t  *",
+          "signature": "/** const uint8_t *markdown_reason_code_str(uint32_t code, uintptr_t *out_len)"
+        },
+        {
+          "name": "markdown_result_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_result_free(struct MarkdownResult *result)"
+        },
+        {
+          "name": "markdown_result_init",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_result_init(struct MarkdownResult *result)"
+        },
+        {
+          "name": "markdown_streaming_abort",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_streaming_abort(struct StreamingConverterHandle *handle)"
+        },
+        {
+          "name": "markdown_streaming_feed",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle, const uint8_t *data, uintptr_t data_len, uint8_t **out_data, uintptr_t *out_len)"
+        },
+        {
+          "name": "markdown_streaming_finalize",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle, struct MarkdownResult *result)"
+        },
+        {
+          "name": "markdown_streaming_new_with_code",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options, struct StreamingConverterHandle **out_handle)"
+        },
+        {
+          "name": "markdown_streaming_output_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_streaming_output_free(uint8_t *data, uintptr_t len)"
+        },
+        {
+          "name": "markdown_streaming_safe_finish",
+          "return_type": "/ * * uint32_t",
+          "signature": "/** uint32_t markdown_streaming_safe_finish(struct StreamingConverterHandle *handle, uint8_t **out_data, uintptr_t *out_len)"
+        },
+        {
+          "name": "markdown_trusted_proxies_free",
+          "return_type": "/ * * void",
+          "signature": "/** void markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)"
+        },
+        {
+          "name": "markdown_trusted_proxies_new",
+          "return_type": "/ * * struct MarkdownTrustedProxies  *",
+          "signature": "/** struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void)"
+        },
+        {
+          "name": "markdown_trusted_proxies_push",
+          "return_type": "/ * * uint8_t",
+          "signature": "/** uint8_t markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle, const uint8_t *cidr, uintptr_t cidr_len)"
+        }
+      ]
+    },
+    "http": {
+      "behaviours": {
+        "accept_negotiation": {
+          "executed_by": "make test-nginx-unit / make test-all-e2e",
+          "tests": [
+            "components/nginx-module/tests/unit/accept_negotiation_test.c",
+            "components/nginx-module/tests/unit/accept_production_test.c",
+            "tools/e2e/verify_accept_negotiation_e2e.sh"
+          ]
+        },
+        "auth_and_cache": {
+          "executed_by": "make test-all-e2e",
+          "tests": [
+            "tools/e2e/verify_auth_cache_e2e.sh"
+          ]
+        },
+        "conditional_304": {
+          "executed_by": "make test-nginx-unit / make test-all-e2e",
+          "tests": [
+            "components/nginx-module/tests/unit/conditional_production_test.c",
+            "tools/e2e/verify_conditional_requests_e2e.sh"
+          ]
+        },
+        "head_request": {
+          "executed_by": "make test-nginx-unit",
+          "tests": [
+            "components/nginx-module/tests/unit/head_request_test.c"
+          ]
+        },
+        "header_plan_vary_content_type": {
+          "executed_by": "make test-nginx-unit",
+          "tests": [
+            "components/nginx-module/tests/unit/header_ordering_test.c",
+            "components/nginx-module/tests/unit/header_plan_apply_test.c",
+            "components/nginx-module/tests/unit/header_plan_test.c"
+          ]
+        },
+        "pre_post_commit": {
+          "executed_by": "make test-nginx-unit",
+          "tests": [
+            "components/nginx-module/tests/unit/header_plan_prepare_commit_test.c",
+            "components/nginx-module/tests/unit/stream_commit_test.c"
+          ]
+        },
+        "status_and_range": {
+          "executed_by": "make test-all-e2e",
+          "tests": [
+            "tools/e2e/verify_status_codes_e2e.sh"
+          ]
+        }
+      },
+      "evidence_class": "unit_and_e2e_golden",
+      "static_extraction_limit": "These files are the executed proof of the HTTP contract. This manifest binds their content and does not claim that a static digest proves runtime behaviour.",
+      "test_file_digests": {
+        "components/nginx-module/tests/unit/accept_negotiation_test.c": "sha256:7d3cdc0028fe2947220ecd5b32a1f0d37a976680fe52984015e977fc2a62aff3",
+        "components/nginx-module/tests/unit/accept_production_test.c": "sha256:c6f983d0efdf84b5f07d19997e0db4036b0ce62288466301481eeeb3fa2c566c",
+        "components/nginx-module/tests/unit/conditional_production_test.c": "sha256:bdffc9b2de472a5546d05d6329af34f69e9071dd8e059cfc7474e89fef06645a",
+        "components/nginx-module/tests/unit/head_request_test.c": "sha256:71231e4a8628830ad4c5e2dca3bbfceedffb1ee6130a8d0844505406c51a0fbc",
+        "components/nginx-module/tests/unit/header_ordering_test.c": "sha256:273d61890ad5de57cb67a3f1cd84919a89f9ed915a5d15b20675ee2d59b88f1f",
+        "components/nginx-module/tests/unit/header_plan_apply_test.c": "sha256:e420bb7c7c5e8465483255d66474062d4ca68c7f48bf180e3e4b136a90dcb14c",
+        "components/nginx-module/tests/unit/header_plan_prepare_commit_test.c": "sha256:87a5a9855125c92fd5330de7a93383cc67462371b3d00ed99d6b6ffc2042cc67",
+        "components/nginx-module/tests/unit/header_plan_test.c": "sha256:6b0be1e0323d5c4ec32ec68fa13171b2f2959e99a33e1e19d11f6a0f160836f8",
+        "components/nginx-module/tests/unit/stream_commit_test.c": "sha256:f85cbd78e0af492466775277f57dba0f56fa7e82b95d58623b21a18c6350b660",
+        "tools/e2e/verify_accept_negotiation_e2e.sh": "sha256:7351545713c0643c5bd8ae84fcbe6a9ef921023b1a50a71196397027ff53b118",
+        "tools/e2e/verify_auth_cache_e2e.sh": "sha256:77e92261e12092efdf70152228fe8ca2ec11bc4e552392eefbf14c4babba0388",
+        "tools/e2e/verify_conditional_requests_e2e.sh": "sha256:d2f8fe74304c34e3ee44969aa376eac69a97780fa8496cf310df0ea91067cd46",
+        "tools/e2e/verify_status_codes_e2e.sh": "sha256:dafffc4e93386321f4595fb5d3e92b240a4cd30791818c39a242728c4a580d0d"
+      }
+    },
+    "metrics": {
+      "emitted": {
+        "families": {
+          "nginx_markdown_build_info": "gauge",
+          "nginx_markdown_conversion_attempts_total": "counter",
+          "nginx_markdown_conversion_deliveries_total": "counter",
+          "nginx_markdown_conversion_duration_seconds": "histogram",
+          "nginx_markdown_conversion_peak_memory_bytes": "gauge",
+          "nginx_markdown_decompression_events_total": "counter",
+          "nginx_markdown_input_bytes_total": "counter",
+          "nginx_markdown_output_bytes_total": "counter",
+          "nginx_markdown_requests_total": "counter",
+          "nginx_markdown_streaming_events_total": "counter"
+        },
+        "label_sets": {
+          "nginx_markdown_build_info": [
+            [
+              "features",
+              "nginx_version",
+              "version"
+            ]
+          ],
+          "nginx_markdown_conversion_attempts_total": [
+            [
+              "engine"
+            ]
+          ],
+          "nginx_markdown_conversion_deliveries_total": [
+            [
+              "engine"
+            ]
+          ],
+          "nginx_markdown_conversion_duration_seconds": [],
+          "nginx_markdown_conversion_peak_memory_bytes": [],
+          "nginx_markdown_decompression_events_total": [
+            [
+              "encoding",
+              "outcome",
+              "reason"
+            ]
+          ],
+          "nginx_markdown_input_bytes_total": [],
+          "nginx_markdown_output_bytes_total": [],
+          "nginx_markdown_requests_total": [
+            [
+              "outcome",
+              "reason",
+              "stage"
+            ]
+          ],
+          "nginx_markdown_streaming_events_total": [
+            [
+              "reason",
+              "transition"
+            ]
+          ]
+        },
+        "series": {
+          "nginx_markdown_build_info": [
+            [
+              "version=%s",
+              "nginx_version=%s",
+              "features=%s"
+            ]
+          ],
+          "nginx_markdown_conversion_attempts_total": [
+            [
+              "engine=full_buffer"
+            ],
+            [
+              "engine=streaming"
+            ]
+          ],
+          "nginx_markdown_conversion_deliveries_total": [
+            [
+              "engine=full_buffer"
+            ],
+            [
+              "engine=streaming"
+            ]
+          ],
+          "nginx_markdown_conversion_duration_seconds": [],
+          "nginx_markdown_conversion_peak_memory_bytes": [],
+          "nginx_markdown_decompression_events_total": [
+            [
+              "encoding=brotli",
+              "outcome=failure",
+              "reason=budget_exceeded"
+            ],
+            [
+              "encoding=brotli",
+              "outcome=failure",
+              "reason=format_error"
+            ],
+            [
+              "encoding=brotli",
+              "outcome=failure",
+              "reason=io_error"
+            ],
+            [
+              "encoding=brotli",
+              "outcome=failure",
+              "reason=truncated_input"
+            ],
+            [
+              "encoding=brotli",
+              "outcome=success",
+              "reason=ok"
+            ],
+            [
+              "encoding=deflate",
+              "outcome=failure",
+              "reason=budget_exceeded"
+            ],
+            [
+              "encoding=deflate",
+              "outcome=failure",
+              "reason=format_error"
+            ],
+            [
+              "encoding=deflate",
+              "outcome=failure",
+              "reason=io_error"
+            ],
+            [
+              "encoding=deflate",
+              "outcome=failure",
+              "reason=truncated_input"
+            ],
+            [
+              "encoding=deflate",
+              "outcome=success",
+              "reason=ok"
+            ],
+            [
+              "encoding=gzip",
+              "outcome=failure",
+              "reason=budget_exceeded"
+            ],
+            [
+              "encoding=gzip",
+              "outcome=failure",
+              "reason=format_error"
+            ],
+            [
+              "encoding=gzip",
+              "outcome=failure",
+              "reason=io_error"
+            ],
+            [
+              "encoding=gzip",
+              "outcome=failure",
+              "reason=truncated_input"
+            ],
+            [
+              "encoding=gzip",
+              "outcome=success",
+              "reason=ok"
+            ]
+          ],
+          "nginx_markdown_input_bytes_total": [],
+          "nginx_markdown_output_bytes_total": [],
+          "nginx_markdown_requests_total": [
+            [
+              "outcome=aborted",
+              "stage=delivery",
+              "reason=streaming_mid_flight_error"
+            ],
+            [
+              "outcome=converted",
+              "stage=conversion",
+              "reason=converted"
+            ],
+            [
+              "outcome=failed_closed",
+              "stage=delivery",
+              "reason=failed_closed"
+            ],
+            [
+              "outcome=failed_open",
+              "stage=delivery",
+              "reason=failed_open"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=bypass_no_transform"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=disabled"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=not_eligible"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=skipped_accept"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=skipped_conditional"
+            ],
+            [
+              "outcome=skipped",
+              "stage=eligibility",
+              "reason=skipped_no_accept"
+            ]
+          ],
+          "nginx_markdown_streaming_events_total": [
+            [
+              "transition=abort_start",
+              "reason=streaming_mid_flight_error"
+            ],
+            [
+              "transition=commit",
+              "reason=converted"
+            ],
+            [
+              "transition=fallback",
+              "reason=precommit_html_error"
+            ],
+            [
+              "transition=resume_failure",
+              "reason=streaming_mid_flight_error"
+            ],
+            [
+              "transition=resume_success",
+              "reason=converted"
+            ],
+            [
+              "transition=safe_finish_start",
+              "reason=converted"
+            ]
+          ]
+        }
+      },
+      "families": [
+        {
+          "labels": [
+            {
+              "dynamic": true,
+              "name": "features",
+              "values": []
+            },
+            {
+              "dynamic": true,
+              "name": "nginx_version",
+              "values": []
+            },
+            {
+              "dynamic": true,
+              "name": "version",
+              "values": []
+            }
+          ],
+          "name": "nginx_markdown_build_info",
+          "type": "gauge",
+          "value": 1
+        },
+        {
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "engine",
+              "values": [
+                "full_buffer",
+                "streaming"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_conversion_attempts_total",
+          "type": "counter"
+        },
+        {
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "engine",
+              "values": [
+                "full_buffer",
+                "streaming"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_conversion_deliveries_total",
+          "type": "counter"
+        },
+        {
+          "bucket_boundaries": [
+            0.001,
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+            1.0,
+            5.0
+          ],
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "engine",
+              "values": [
+                "full_buffer",
+                "streaming"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_conversion_duration_seconds",
+          "type": "histogram"
+        },
+        {
+          "labels": [],
+          "name": "nginx_markdown_conversion_peak_memory_bytes",
+          "type": "gauge"
+        },
+        {
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "encoding",
+              "values": [
+                "brotli",
+                "deflate",
+                "gzip"
+              ]
+            },
+            {
+              "dynamic": false,
+              "name": "outcome",
+              "values": [
+                "failure",
+                "success"
+              ]
+            },
+            {
+              "dynamic": false,
+              "name": "reason",
+              "values": [
+                "budget_exceeded",
+                "format_error",
+                "io_error",
+                "ok",
+                "truncated_input"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_decompression_events_total",
+          "type": "counter"
+        },
+        {
+          "labels": [],
+          "name": "nginx_markdown_input_bytes_total",
+          "type": "counter"
+        },
+        {
+          "labels": [],
+          "name": "nginx_markdown_output_bytes_total",
+          "type": "counter"
+        },
+        {
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "outcome",
+              "values": [
+                "aborted",
+                "converted",
+                "failed_closed",
+                "failed_open",
+                "skipped"
+              ]
+            },
+            {
+              "dynamic": false,
+              "name": "reason",
+              "values": [
+                "bypass_no_transform",
+                "converted",
+                "disabled",
+                "failed_closed",
+                "failed_open",
+                "not_eligible",
+                "skipped_accept",
+                "skipped_conditional",
+                "skipped_no_accept",
+                "streaming_mid_flight_error"
+              ]
+            },
+            {
+              "dynamic": false,
+              "name": "stage",
+              "values": [
+                "conversion",
+                "delivery",
+                "eligibility"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_requests_total",
+          "type": "counter"
+        },
+        {
+          "labels": [
+            {
+              "dynamic": false,
+              "name": "reason",
+              "values": [
+                "converted",
+                "precommit_html_error",
+                "streaming_mid_flight_error"
+              ]
+            },
+            {
+              "dynamic": false,
+              "name": "transition",
+              "values": [
+                "abort_start",
+                "commit",
+                "fallback",
+                "resume_failure",
+                "resume_success",
+                "safe_finish_start"
+              ]
+            }
+          ],
+          "name": "nginx_markdown_streaming_events_total",
+          "type": "counter"
+        }
+      ],
+      "family_prefix": "nginx_markdown_",
+      "forbidden_labels": [
+        "address",
+        "client",
+        "host",
+        "path",
+        "query",
+        "uri"
+      ],
+      "format": "prometheus_text_004",
+      "max_histogram_buckets": 10,
+      "registry_schema_version": 2
+    },
+    "packaging": {
+      "deb_module_path": [
+        "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
+      ],
+      "deb_nginx_constraints": [
+        [
+          "<<",
+          "NGINX_VERSION_CEIL"
+        ],
+        [
+          ">=",
+          "NGINX_VERSION"
+        ]
+      ],
+      "load_snippet_paths": [
+        "/usr/share/nginx/modules-available/mod-markdown.conf",
+        "/usr/share/nginx/modules/mod-markdown.conf"
+      ],
+      "matrix_schema_version": "1.1",
+      "package_name": "nginx-module-markdown-for-agents",
+      "rpm_module_path": [
+        "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so"
+      ],
+      "rpm_nginx_constraints": [
+        "-r${NGINX_VERSION}",
+        ">=${NGINX_VERSION}"
+      ],
+      "support": {
+        "counts": {
+          "best_effort": 18,
+          "experimental": 1,
+          "release_blocking": 52,
+          "supported": 52,
+          "total": 71
+        },
+        "targets": [
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "almalinux9",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "almalinux9",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "debian12",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "debian12",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "linux",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "linux",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.24",
+            "os": "linux",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.24",
+            "os": "linux",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "ubuntu-24.04",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "os": "ubuntu-24.04",
+            "patches": [
+              "1.24.0"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "almalinux9",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "almalinux9",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.26",
+            "os": "alpine3.20",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.26",
+            "os": "alpine3.20",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "any",
+            "libc": "n/a",
+            "nginx_minor": "1.26",
+            "os": "any",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "debian12",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "debian12",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "linux",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "os": "linux",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.26",
+            "os": "linux",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.26",
+            "os": "linux",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "darwin",
+            "nginx_minor": "1.26",
+            "os": "macos",
+            "patches": [
+              "1.26.3"
+            ],
+            "release_blocking": false,
+            "support_tier": "experimental"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "almalinux9",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "almalinux9",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "any",
+            "libc": "n/a",
+            "nginx_minor": "1.28",
+            "os": "any",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "debian12",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "debian12",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "linux",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "linux",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.28",
+            "os": "linux",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.28",
+            "os": "linux",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "ubuntu-26.04",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "os": "ubuntu-26.04",
+            "patches": [
+              "1.28.3"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "almalinux9",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "almalinux9",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "debian12",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "debian12",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "linux",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "linux",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.30",
+            "os": "linux",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.30",
+            "os": "linux",
+            "patches": [
+              "1.30.4",
+              "1.30.5"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.30",
+            "os": "ubuntu-24.04",
+            "patches": [
+              "1.30.4"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "almalinux9",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "almalinux9",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.31",
+            "os": "alpine3.24",
+            "patches": [
+              "1.31.5"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.31",
+            "os": "alpine3.24",
+            "patches": [
+              "1.31.5"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "debian12",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "debian12",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "linux",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "linux",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "musl",
+            "nginx_minor": "1.31",
+            "os": "linux",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "musl",
+            "nginx_minor": "1.31",
+            "os": "linux",
+            "patches": [
+              "1.31.5",
+              "1.31.6"
+            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.31",
+            "os": "ubuntu-24.04",
+            "patches": [
+              "1.31.5"
+            ],
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          }
+        ]
+      }
+    },
+    "reasons": {
+      "count": 25,
+      "entries": [
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 0,
+          "key": "converted",
+          "operator_visible": true,
+          "outcome": "converted",
+          "stage": "conversion"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 1,
+          "key": "skipped_accept",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 2,
+          "key": "skipped_no_accept",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 3,
+          "key": "skipped_conditional",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [
+            "internal"
+          ],
+          "default_origin": "internal",
+          "discriminant": 4,
+          "key": "decompression_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        },
+        {
+          "allowed_origins": [
+            "memory_budget"
+          ],
+          "default_origin": "memory_budget",
+          "discriminant": 5,
+          "key": "decompression_budget_exceeded",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        },
+        {
+          "allowed_origins": [
+            "format"
+          ],
+          "default_origin": "format",
+          "discriminant": 6,
+          "key": "decompression_format_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        },
+        {
+          "allowed_origins": [
+            "truncated"
+          ],
+          "default_origin": "truncated",
+          "discriminant": 7,
+          "key": "decompression_truncated_input",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        },
+        {
+          "allowed_origins": [
+            "downstream"
+          ],
+          "default_origin": "downstream",
+          "discriminant": 8,
+          "key": "decompression_io_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        },
+        {
+          "allowed_origins": [
+            "timeout"
+          ],
+          "default_origin": "timeout",
+          "discriminant": 9,
+          "key": "timeout",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "parsing"
+        },
+        {
+          "allowed_origins": [
+            "memory_budget"
+          ],
+          "default_origin": "memory_budget",
+          "discriminant": 10,
+          "key": "budget_exceeded",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "parsing"
+        },
+        {
+          "allowed_origins": [
+            "allocation"
+          ],
+          "default_origin": "allocation",
+          "discriminant": 11,
+          "key": "replay_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "precommit"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 12,
+          "key": "skipped_accept_reject",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [
+            "internal"
+          ],
+          "default_origin": "internal",
+          "discriminant": 13,
+          "key": "ffi_panic",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "conversion"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 14,
+          "key": "not_eligible",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 15,
+          "key": "disabled",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [
+            "allocation",
+            "downstream",
+            "format",
+            "internal",
+            "invariant",
+            "memory_budget",
+            "timeout",
+            "truncated"
+          ],
+          "default_origin": "downstream",
+          "discriminant": 16,
+          "key": "failed_open",
+          "operator_visible": true,
+          "outcome": "failed_open",
+          "stage": "delivery"
+        },
+        {
+          "allowed_origins": [
+            "allocation",
+            "downstream",
+            "format",
+            "internal",
+            "invariant",
+            "memory_budget",
+            "timeout",
+            "truncated"
+          ],
+          "default_origin": "downstream",
+          "discriminant": 17,
+          "key": "failed_closed",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "delivery"
+        },
+        {
+          "allowed_origins": [
+            "format",
+            "internal"
+          ],
+          "default_origin": "internal",
+          "discriminant": 18,
+          "key": "conversion_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "conversion"
+        },
+        {
+          "allowed_origins": [
+            "memory_budget"
+          ],
+          "default_origin": "memory_budget",
+          "discriminant": 19,
+          "key": "memory_budget_exceeded",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "conversion"
+        },
+        {
+          "allowed_origins": [
+            "allocation"
+          ],
+          "default_origin": "allocation",
+          "discriminant": 20,
+          "key": "overload",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [
+            "allocation",
+            "invariant"
+          ],
+          "default_origin": "invariant",
+          "discriminant": 21,
+          "key": "header_plan_apply_error",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "precommit"
+        },
+        {
+          "allowed_origins": [
+            "allocation",
+            "downstream",
+            "internal",
+            "invariant"
+          ],
+          "default_origin": "internal",
+          "discriminant": 22,
+          "key": "streaming_mid_flight_error",
+          "operator_visible": true,
+          "outcome": "aborted",
+          "stage": "delivery"
+        },
+        {
+          "allowed_origins": [],
+          "default_origin": "none",
+          "discriminant": 23,
+          "key": "bypass_no_transform",
+          "operator_visible": true,
+          "outcome": "skipped",
+          "stage": "eligibility"
+        },
+        {
+          "allowed_origins": [
+            "format"
+          ],
+          "default_origin": "format",
+          "discriminant": 24,
+          "key": "encoding_header_invalid",
+          "operator_visible": true,
+          "outcome": "failed_closed",
+          "stage": "decompression"
+        }
+      ],
+      "registry_schema_version": 1
+    }
+  }
+}
