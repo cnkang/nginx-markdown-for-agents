@@ -71,6 +71,17 @@ def _regular_file(path: pathlib.Path, label: str) -> None:
         raise QualificationReuseError(f"{label} must be a regular file")
 
 
+def _sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _tree_files(root: pathlib.Path) -> dict[str, str]:
     if root.is_symlink() or not root.is_dir():
         raise QualificationReuseError("qualification bundle directory is missing")
@@ -86,11 +97,7 @@ def _tree_files(root: pathlib.Path) -> dict[str, str]:
             relative = path.relative_to(root).as_posix()
             if relative == ATTESTATION_NAME:
                 continue
-            digest = hashlib.sha256()
-            with path.open("rb") as stream:
-                while chunk := stream.read(64 * 1024):
-                    digest.update(chunk)
-            files[relative] = digest.hexdigest()
+            files[relative] = _sha256_file(path)
     return dict(sorted(files.items()))
 
 
