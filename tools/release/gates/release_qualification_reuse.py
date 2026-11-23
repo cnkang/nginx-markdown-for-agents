@@ -42,6 +42,14 @@ CANDIDATE_SHA_LABEL = "candidate SHA"
 FUZZ_RECORD_LABEL = "fuzz record"
 SOAK_MANIFEST_LABEL = "short-soak manifest"
 SOAK_RECORD_LABEL = "short-soak record"
+QUALIFICATION_BUNDLE_LABEL = "qualification bundle"
+QUALIFICATION_BUNDLE_MISSING_ERROR = (
+    f"{QUALIFICATION_BUNDLE_LABEL} directory is missing"
+)
+RELEASE_EVIDENCE_DIR_LABEL = "release evidence directory"
+FUZZ_LOGS_LABEL = "fuzz logs"
+FUZZ_LOGS_DIRECTORY_ERROR = f"{FUZZ_LOGS_LABEL} must be a regular directory"
+QUALIFICATION_ATTESTATION_LABEL = "qualification attestation"
 FUZZ_BLOCKING_PASS_ERROR = f"{FUZZ_RECORD_LABEL} is not a blocking pass"
 SOAK_PASS_ERROR = f"{SOAK_RECORD_LABEL} is not a pass"
 
@@ -110,11 +118,24 @@ def _write_path_within(path: pathlib.Path | str, root: pathlib.Path,
 
 def _read_json(path: pathlib.Path, label: str, *, root: pathlib.Path) -> dict:
     try:
-        safe_path = _read_path_within(path, root, label)
+        safe_root = validate_read_path(root, purpose=f"{label} root")
+        safe_path = validate_read_path(
+            path, must_exist=False, purpose=label
+        )
+        try:
+            safe_path.relative_to(safe_root)
+        except ValueError as exc:
+            raise QualificationReuseError(
+                f"{label} is outside its trusted root"
+            ) from exc
         _regular_file(safe_path, label)
         value = json.loads(safe_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise QualificationReuseError(f"{label} is missing or malformed") from exc
+    except ValueError as exc:
+        raise QualificationReuseError(
+            f"{label} is outside its trusted root"
+        ) from exc
     if not isinstance(value, dict):
         raise QualificationReuseError(f"{label} must be a JSON object")
     return value
@@ -139,10 +160,10 @@ def _sha256_file(path: pathlib.Path) -> str:
 
 def _tree_files(root: pathlib.Path) -> dict[str, str]:
     if root.is_symlink():
-        raise QualificationReuseError("qualification bundle directory is missing")
-    root = validate_read_path(root, purpose="qualification bundle")
+        raise QualificationReuseError(QUALIFICATION_BUNDLE_MISSING_ERROR)
+    root = validate_read_path(root, purpose=QUALIFICATION_BUNDLE_LABEL)
     if not root.is_dir():
-        raise QualificationReuseError("qualification bundle directory is missing")
+        raise QualificationReuseError(QUALIFICATION_BUNDLE_MISSING_ERROR)
     files: dict[str, str] = {}
     for current, directories, names in os.walk(
         root, followlinks=False, onerror=_raise_walk_failure
@@ -300,10 +321,10 @@ def _validate_qualification_records(records: dict, candidate_sha: str) -> None:
 def _copy_bundle_inputs(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
                         *, trusted_root: pathlib.Path) -> None:
     source_dir = _read_path_within(
-        source_dir, trusted_root, "release evidence directory"
+        source_dir, trusted_root, RELEASE_EVIDENCE_DIR_LABEL
     )
     bundle_dir = _write_path_within(
-        bundle_dir, trusted_root, "qualification bundle"
+        bundle_dir, trusted_root, QUALIFICATION_BUNDLE_LABEL
     )
     bundle_dir.mkdir(parents=True)
     for name in (FUZZ_RECORD, SOAK_MANIFEST, SOAK_RECORD):
@@ -319,18 +340,20 @@ def _copy_bundle_inputs(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
 def _copy_fuzz_logs(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
                     *, trusted_root: pathlib.Path) -> None:
     source_dir = _read_path_within(
-        source_dir, trusted_root, "release evidence directory"
+        source_dir, trusted_root, RELEASE_EVIDENCE_DIR_LABEL
     )
     bundle_dir = _write_path_within(
-        bundle_dir, trusted_root, "qualification bundle"
+        bundle_dir, trusted_root, QUALIFICATION_BUNDLE_LABEL
     )
     fuzz_logs = source_dir / "fuzz-logs"
     if fuzz_logs.exists() or fuzz_logs.is_symlink():
         if fuzz_logs.is_symlink() or not fuzz_logs.is_dir():
-            raise QualificationReuseError("fuzz logs must be a regular directory")
-        safe_source = _read_path_within(fuzz_logs, source_dir, "fuzz logs")
+            raise QualificationReuseError(FUZZ_LOGS_DIRECTORY_ERROR)
+        safe_source = _read_path_within(
+            fuzz_logs, source_dir, FUZZ_LOGS_LABEL
+        )
         safe_destination = _write_path_within(
-            bundle_dir / "fuzz-logs", bundle_dir, "fuzz logs"
+            bundle_dir / "fuzz-logs", bundle_dir, FUZZ_LOGS_LABEL
         )
         shutil.copytree(safe_source, safe_destination, symlinks=True)
         _tree_files(bundle_dir)
@@ -350,7 +373,9 @@ def _write_attestation(bundle_dir: pathlib.Path, candidate_sha: str,
         "files": _tree_files(bundle_dir),
     }
     attestation_path = _write_path_within(
-        bundle_dir / ATTESTATION_NAME, bundle_dir, "qualification attestation"
+        bundle_dir / ATTESTATION_NAME,
+        bundle_dir,
+        QUALIFICATION_ATTESTATION_LABEL,
     )
     attestation_path.write_text(
         json.dumps(attestation, indent=2, sort_keys=True) + "\n",
@@ -362,12 +387,12 @@ def create_bundle(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
                   context: dict, *, trusted_root: pathlib.Path) -> None:
     """Copy successful qualification records and write their attestation."""
     source_dir = _read_path_within(
-        source_dir, trusted_root, "release evidence directory"
+        source_dir, trusted_root, RELEASE_EVIDENCE_DIR_LABEL
     )
     if not source_dir.is_dir():
         raise QualificationReuseError("release evidence directory is missing")
     bundle_dir = _write_path_within(
-        bundle_dir, trusted_root, "qualification bundle"
+        bundle_dir, trusted_root, QUALIFICATION_BUNDLE_LABEL
     )
     if bundle_dir.exists() or bundle_dir.is_symlink():
         raise QualificationReuseError("qualification bundle output already exists")
@@ -399,14 +424,14 @@ def _validate_bundle_files(bundle_dir: pathlib.Path, expected_sha: str,
                            expected_version: str,
                            *, trusted_root: pathlib.Path) -> dict:
     bundle_dir = _read_path_within(
-        bundle_dir, trusted_root, "qualification bundle"
+        bundle_dir, trusted_root, QUALIFICATION_BUNDLE_LABEL
     )
     if not bundle_dir.is_dir():
-        raise QualificationReuseError("qualification bundle directory is missing")
-    _regular_file(bundle_dir / ATTESTATION_NAME, "qualification attestation")
+        raise QualificationReuseError(QUALIFICATION_BUNDLE_MISSING_ERROR)
+    _regular_file(bundle_dir / ATTESTATION_NAME, QUALIFICATION_ATTESTATION_LABEL)
     attestation = _read_json(
         bundle_dir / ATTESTATION_NAME,
-        "qualification attestation",
+        QUALIFICATION_ATTESTATION_LABEL,
         root=trusted_root,
     )
     if attestation.get("schema_version") != SCHEMA_VERSION:
@@ -655,10 +680,10 @@ def _discover_from_env() -> int:
 def _create_from_env(args: argparse.Namespace) -> int:
     workspace = _environment_root("GITHUB_WORKSPACE")
     source_dir = _read_path_within(
-        args.source_dir, workspace, "release evidence directory"
+        args.source_dir, workspace, RELEASE_EVIDENCE_DIR_LABEL
     )
     bundle_dir = _write_path_within(
-        args.bundle_dir, workspace, "qualification bundle"
+        args.bundle_dir, workspace, QUALIFICATION_BUNDLE_LABEL
     )
     create_bundle(
         source_dir,
@@ -673,7 +698,7 @@ def _create_from_env(args: argparse.Namespace) -> int:
 def _verify_from_args(args: argparse.Namespace) -> int:
     runner_temp = _environment_root("RUNNER_TEMP")
     bundle_dir = _read_path_within(
-        args.bundle_dir, runner_temp, "qualification bundle"
+        args.bundle_dir, runner_temp, QUALIFICATION_BUNDLE_LABEL
     )
     source_run_path = _read_path_within(
         args.source_run, runner_temp, "GitHub source run metadata"
@@ -715,10 +740,10 @@ def _restore_one(bundle_dir: pathlib.Path, output_root: pathlib.Path,
         raise QualificationReuseError(f"refusing to overwrite {destination}")
     if name == "fuzz-logs":
         if not source.is_dir():
-            raise QualificationReuseError("fuzz logs must be a regular directory")
-        safe_source = _read_path_within(source, bundle_dir, "fuzz logs")
+            raise QualificationReuseError(FUZZ_LOGS_DIRECTORY_ERROR)
+        safe_source = _read_path_within(source, bundle_dir, FUZZ_LOGS_LABEL)
         safe_destination = _write_path_within(
-            destination, output_root, "fuzz logs"
+            destination, output_root, FUZZ_LOGS_LABEL
         )
         shutil.copytree(safe_source, safe_destination)
         _tree_files(output_root)
@@ -765,7 +790,7 @@ def _restore_from_args(args: argparse.Namespace, kind: str) -> int:
     runner_temp = _environment_root("RUNNER_TEMP")
     workspace = _environment_root("GITHUB_WORKSPACE")
     bundle_dir = _read_path_within(
-        args.bundle_dir, runner_temp, "qualification bundle"
+        args.bundle_dir, runner_temp, QUALIFICATION_BUNDLE_LABEL
     )
     _validate_bundle_files(
         bundle_dir, args.candidate_sha, version, trusted_root=runner_temp
