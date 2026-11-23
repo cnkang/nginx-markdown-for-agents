@@ -26,6 +26,7 @@ from tools.compatibility.compare import (
 )
 from tools.compatibility.extract import extract_surfaces
 from tools.compatibility.model import SURFACES, contract_digest, surface_digests
+from tools.lib.path_validation import validate_read_path
 from tools.compatibility.sources import (
     SourceReader,
     repo_root_for,
@@ -54,7 +55,10 @@ def index_document():
 def _anchor_manifest(index: dict, tag: str) -> dict:
     """Load one anchor manifest from the index."""
     anchor = [item for item in index["anchors"] if item["tag"] == tag][0]
-    with open(INDEX.parent / anchor["manifest"], "r", encoding="utf-8") as handle:
+    resolved = validate_read_path(
+        INDEX.parent / anchor["manifest"], purpose="anchor manifest"
+    )
+    with open(resolved, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 

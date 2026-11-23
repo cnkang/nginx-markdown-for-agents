@@ -10,10 +10,18 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from .model import ContractError
+# Bootstrap the repository root before the tools.* import so the module also
+# resolves when another script loads it from outside the package tree.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from tools.compatibility.model import ContractError  # noqa: E402
+from tools.lib.path_validation import validate_read_path  # noqa: E402
 
 GIT_TIMEOUT_SECONDS = 120
 
@@ -131,7 +139,8 @@ class SourceReader:
                 raise ContractError(
                     "contract input {} is missing from the working tree".format(path)
                 )
-            with open(absolute, "rb") as handle:
+            resolved = validate_read_path(absolute, purpose="contract input")
+            with open(resolved, "rb") as handle:
                 payload = handle.read()
         else:
             try:

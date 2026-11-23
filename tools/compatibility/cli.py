@@ -50,21 +50,16 @@ from tools.compatibility.sources import (  # noqa: E402
     resolve_worktree,
     verify_tag_commit,
 )
-from tools.lib.path_validation import validate_write_path_within_root  # noqa: E402
+from tools.lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 DEFAULT_INDEX = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "contracts", "INDEX.json"
 )
 INDEX_FILE = "INDEX.json"
 WORKTREE_TOKEN = "WORKTREE"
-
-
-def _validated_write_path(raw: str, root: str, purpose: str) -> str:
-    """Resolve a CLI-derived write path and keep it inside ``root``."""
-    try:
-        return str(validate_write_path_within_root(raw, root, purpose=purpose))
-    except ValueError as error:
-        raise ContractError(str(error))
 
 
 def _contracts_dir(index_path: str) -> str:
@@ -85,7 +80,8 @@ def _safe_join(base: str, relative: str) -> str:
 def _read_json(path: str) -> Any:
     """Read a JSON file, failing closed on malformed content."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        resolved = validate_read_path(path, purpose="JSON input")
+        with open(resolved, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except FileNotFoundError:
         raise ContractError("missing file: {}".format(path))
@@ -161,7 +157,8 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
     tag = anchor["tag"]
     path = _safe_join(contracts_dir, anchor["manifest"])
     try:
-        with open(path, "rb") as handle:
+        resolved = validate_read_path(path, purpose="anchor manifest")
+        with open(resolved, "rb") as handle:
             payload = handle.read()
     except FileNotFoundError:
         raise ContractError("missing file: {}".format(path))
@@ -369,7 +366,7 @@ def _compare_candidate(
 
 def _write_report(path: str, root: str, payload: Dict[str, Any]) -> None:
     """Write the machine-readable report inside the repository root."""
-    target = _validated_write_path(path, root, "report")
+    target = validate_write_path_within_root(path, root, purpose="report")
     with open(target, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
@@ -442,7 +439,9 @@ def extract_command(args: argparse.Namespace) -> int:
     manifest = build_manifest(repo_root, revision, version)
     payload = dump_manifest(manifest)
     if args.out:
-        target = _validated_write_path(args.out, os.getcwd(), "manifest")
+        target = validate_write_path_within_root(
+            args.out, os.getcwd(), purpose="manifest"
+        )
         with open(target, "w", encoding="utf-8") as handle:
             handle.write(payload)
         print("wrote {} ({})".format(target, manifest["contract_digest"]))
@@ -470,7 +469,9 @@ def freeze_command(args: argparse.Namespace) -> int:
                 )
             )
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    target = _validated_write_path(target, contracts_dir, "anchor manifest")
+    target = validate_write_path_within_root(
+        target, contracts_dir, purpose="anchor manifest"
+    )
     payload = dump_manifest(manifest)
     with open(target, "w", encoding="utf-8") as handle:
         handle.write(payload)
