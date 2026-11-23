@@ -1,0 +1,59 @@
+{
+  "index_schema": 1,
+  "extractor": {
+    "name": "compatibility-contract",
+    "version": "1"
+  },
+  "baseline": "v0.9.4",
+  "policy": {
+    "note": "Candidate comparisons fail closed on BREAKING, REVIEW_REQUIRED, and UNVERIFIED findings. Only an explicit --approvals file can waive an exact REVIEW_REQUIRED finding. A BREAKING finding is never waivable.",
+    "blocking_verdicts": [
+      "BREAKING",
+      "REVIEW_REQUIRED",
+      "UNVERIFIED"
+    ]
+  },
+  "anchors": [
+    {
+      "tag": "v0.9.2",
+      "role": "breaking-freeze",
+      "commit": "9b8596c6242ca76f51d5f57451eb99519a27735f",
+      "tag_object": "a3ca1865510930e82a7e5c9a10649695fb9a6383",
+      "manifest": "nginx-markdown-0.9.2.json",
+      "manifest_sha256": "sha256:c774aaa2d82e4e3e09f6c523abd5650dd5a02d31fcb4cd923d62f1eff4d0e1e8",
+      "contract_digest": "sha256:9443a1f686b1a16152d6cdfdfe636ff3cafb95740e687b5965011c36b41bea64"
+    },
+    {
+      "tag": "v0.9.4",
+      "role": "maintenance-baseline",
+      "commit": "3df390f831e94719a5f0399e0bd486c6489f5ec4",
+      "tag_object": "4eac4c115fd2159a455d1eed8de00a740390f222",
+      "manifest": "nginx-markdown-0.9.4.json",
+      "manifest_sha256": "sha256:0c7acd8ceb1328a9a0d6aa3cd3cf00a3c16d4481f4236cf90de66012b59caa34",
+      "contract_digest": "sha256:04b5ef65e67ca116c1cf234558b1f573c4bc781c0af58bc5b3fdb8b5d17df7c4"
+    }
+  ],
+  "comparisons": [
+    {
+      "from": "v0.9.2",
+      "to": "v0.9.4",
+      "expect": "contract_stable",
+      "rationale": "The five frozen contract surfaces are identical at both tags: the directive command table, the metrics registry and rendered wire set, the reason registry, the diagnostics v3 schema, and the generated FFI header all digest equally. The recorded deltas are the release-matrix consolidation and one non-behavioural test edit. v0.9.4 reduced the 71-row matrix to 43 rows by keeping one row per effective target: the 1.30 and 1.31 branches stay supported through the nginx.org tarball channel and no longer appear in the distro-specific rows, while 1.24/ubuntu-24.04 and 1.28/ubuntu-26.04 moved from best-effort to supported. stream_commit_test.c changed only the const qualifier of a mock signature. This record documents the delta instead of reporting a false zero diff.",
+      "documented_delta": [
+        "http:test-changed:components/nginx-module/tests/unit/stream_commit_test.c",
+        "packaging:support-target-removed:1.30/almalinux9/glibc/amd64",
+        "packaging:support-target-removed:1.30/almalinux9/glibc/arm64",
+        "packaging:support-target-removed:1.30/debian12/glibc/amd64",
+        "packaging:support-target-removed:1.30/debian12/glibc/arm64",
+        "packaging:support-target-removed:1.30/ubuntu-24.04/glibc/amd64",
+        "packaging:support-target-removed:1.31/almalinux9/glibc/amd64",
+        "packaging:support-target-removed:1.31/almalinux9/glibc/arm64",
+        "packaging:support-target-removed:1.31/alpine3.24/musl/amd64",
+        "packaging:support-target-removed:1.31/alpine3.24/musl/arm64",
+        "packaging:support-target-removed:1.31/debian12/glibc/amd64",
+        "packaging:support-target-removed:1.31/debian12/glibc/arm64",
+        "packaging:support-target-removed:1.31/ubuntu-24.04/glibc/amd64"
+      ]
+    }
+  ]
+}

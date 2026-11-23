@@ -89,7 +89,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
-        harness-check harness-check-full harness-security-checks test-harness workflow-context-check regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
+        harness-check harness-check-full harness-security-checks test-harness workflow-context-check regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check compatibility-contract-check compatibility-contract-tests package-version-ordering-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -371,6 +371,9 @@ TEST_ALL_CORE := \
 	test-harness \
 	public-surface-drift-check \
 	schema-drift-check \
+	compatibility-contract-check \
+	compatibility-contract-tests \
+	package-version-ordering-check \
 	reason-codegen-check \
 	release-gates-check \
 	release-gates-check-070-strict \
@@ -622,6 +625,44 @@ harness-check:
 public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
 	python3 tools/release/gates/compute_abi_fingerprints.py
+
+# compatibility-contract-check: blocking cross-release contract gate.
+#
+# public-surface-drift-check proves the implementation agrees with the CURRENT
+# inventory, which one change can satisfy by editing both.  This gate compares
+# the candidate against a frozen manifest of a published release tag, so a
+# coordinated edit of source and inventory cannot hide a breaking change.  It
+# fails closed on a missing anchor, a digest mismatch, an unreachable tag, or a
+# schema it cannot parse.  Classification: BLOCKING.
+COMPAT_CONTRACT_INDEX ?= tools/compatibility/contracts/INDEX.json
+COMPAT_CONTRACT_REPORT ?= build/reports/compatibility-contract.json
+
+compatibility-contract-check:
+	@echo "=== Cross-Release Compatibility Contract Check ==="
+	@mkdir -p "$(dir $(COMPAT_CONTRACT_REPORT))"
+	PYTHONPATH=. python3 -m tools.compatibility check \
+		--index "$(COMPAT_CONTRACT_INDEX)" \
+		--repo-root . \
+		--json-report "$(COMPAT_CONTRACT_REPORT)"
+	@echo "  report: $(COMPAT_CONTRACT_REPORT)"
+	@echo "  Cross-Release Compatibility Contract Check: PASSED"
+
+# compatibility-contract-tests: extraction, comparison, and negative fixtures.
+# The negative suite mutates one contract input at a time in an isolated
+# worktree; a case that stops failing means the gate lost its teeth.
+compatibility-contract-tests:
+	@echo "=== Cross-Release Compatibility Contract Tests ==="
+	PYTHONPATH=. python3 -m pytest tools/compatibility/tests/ -q --tb=short $(PYTEST_JOBS)
+	@echo "  Cross-Release Compatibility Contract Tests: PASSED"
+
+# package-version-ordering-check: prove the RC package version mapping with the
+# real package tools.  Debian ordering uses dpkg; RPM ordering and the install
+# sequence run in containers, so a host without Docker reports NOT_RUN instead
+# of a pass.  Pass REQUIRE_ALL=1 to turn NOT_RUN into a failure.
+package-version-ordering-check:
+	@echo "=== Package Version Ordering Check ==="
+	bash packaging/tests/test-version-ordering.sh $(if $(filter 1,$(REQUIRE_ALL)),--require-all,)
+	@echo "  Package Version Ordering Check: PASSED"
 
 schema-drift-check:
 	python3 tools/release/gates/generate_schema_artifacts.py --check --version "$(SCHEMA_RELEASE_VERSION)"
@@ -991,6 +1032,18 @@ release-gates-check-070:
 				mkdir -p dist; \
 				pkg_version="$${PKG_VERSION:-0.9.2}"; \
 				nginx_version="$${NGINX_VERSION:-1.26.3}"; \
+				DEB_VERSION="$$(python3 packaging/scripts/release_version.py \
+					--version "$$pkg_version" --nginx-version "$$nginx_version" --field deb_version)" || { \
+					echo "FAIL: cannot map $$pkg_version onto a Debian version" >&2; exit 1; }; \
+				DEB_RELEASE="$$(python3 packaging/scripts/release_version.py \
+					--version "$$pkg_version" --nginx-version "$$nginx_version" --field deb_release)" || { \
+					echo "FAIL: cannot map $$pkg_version onto a Debian release" >&2; exit 1; }; \
+				RPM_VERSION="$$(python3 packaging/scripts/release_version.py \
+					--version "$$pkg_version" --nginx-version "$$nginx_version" --field rpm_version)" || { \
+					echo "FAIL: cannot map $$pkg_version onto an RPM version" >&2; exit 1; }; \
+				RPM_RELEASE="$$(python3 packaging/scripts/release_version.py \
+					--version "$$pkg_version" --nginx-version "$$nginx_version" --field rpm_release)" || { \
+					echo "FAIL: cannot map $$pkg_version onto an RPM release" >&2; exit 1; }; \
 				nginx_version_ceil="$$(awk 'BEGIN { split(ARGV[1], p, "."); printf "%d.%d.%d", p[1], p[2], p[3] + 1 }' "$$nginx_version")"; \
 				nfpm_preinstall="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preinstall.XXXXXX")"; \
 				nfpm_preremove="$$(mktemp "$${TMPDIR:-/tmp}/nginx-markdown-preremove.XXXXXX")"; \
@@ -1003,16 +1056,16 @@ release-gates-check-070:
 				sed -e "s|./packaging/nfpm/scripts/preinstall.sh|$$nfpm_preinstall|" \
 				    -e "s|./packaging/nfpm/scripts/preremove.sh|$$nfpm_preremove|" \
 					packaging/nfpm/nfpm.yaml > "$$nfpm_config"; \
-				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+				PKG_VERSION="$${DEB_VERSION}" NFPM_RELEASE="$${DEB_RELEASE}" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager deb \
-					--target "dist/nginx-module-markdown-for-agents_$${pkg_version}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
-				PKG_VERSION="$$pkg_version" NGINX_VERSION="$$nginx_version" \
+					--target "dist/nginx-module-markdown-for-agents_$${DEB_VERSION}_nginx-$${nginx_version}_$${nfpm_arch}.deb"; \
+				PKG_VERSION="$${RPM_VERSION}" NFPM_RELEASE="$${RPM_RELEASE}" NGINX_VERSION="$$nginx_version" \
 					NGINX_VERSION_CEIL="$$nginx_version_ceil" \
 					NFPM_ARCH="$$nfpm_arch" \
 					nfpm package --config "$$nfpm_config" --packager rpm \
-					--target "dist/nginx-module-markdown-for-agents-$${pkg_version}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
+					--target "dist/nginx-module-markdown-for-agents-$${RPM_VERSION}-nginx$${nginx_version}-1.$${rpm_arch}.rpm"; \
 			else \
 				echo "FAIL: no package files in dist/ and nfpm is unavailable." >&2; \
 				echo "  To fix, either:" >&2; \
@@ -1494,27 +1547,32 @@ release-gates-check-093:
 # need the frozen candidate SHA and hours of runtime.
 release-gates-check-094: release-matrix-check
 	@echo "=== 0.9.4 Release Gates (blocking) ==="
-	@echo "  [1/7] Compatibility evidence"
+	@echo "  [1/8] Compatibility evidence"
 	$(MAKE) compatibility-evidence-check
-	@echo "  [2/7] Version consistency"
+	@echo "  [2/8] Version consistency"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [3/7] Official build feature manifest ($(RELEASE_LINE))"
+	@echo "  [3/8] Official build feature manifest ($(RELEASE_LINE))"
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	git diff --exit-code -- \
 		artifacts/release/$(RELEASE_LINE)/official-build-feature-manifest.json
-	@echo "  [4/7] Reason code registry"
+	@echo "  [4/8] Reason code registry"
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
 	git diff --exit-code -- \
 		artifacts/release/$(RELEASE_LINE)/reason-registry-report.json \
 		artifacts/release/$(RELEASE_LINE)/generated-reason-artifacts.json
-	@echo "  [5/7] Public surface and schema drift"
+	@echo "  [5/8] Public surface and schema drift"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(RELEASE_LINE)
-	@echo "  [6/7] Documentation and release-state contract"
+	@echo "  [6/8] Cross-release compatibility contract"
+	$(MAKE) compatibility-contract-check
+	$(MAKE) compatibility-contract-tests
+	@echo "  [6b] Package version ordering (RC prerelease mapping)"
+	$(MAKE) package-version-ordering-check REQUIRE_ALL=1
+	@echo "  [7/8] Documentation and release-state contract"
 	$(MAKE) docs-check
-	@echo "  [7/7] Harness quick checks"
+	@echo "  [8/8] Harness quick checks"
 	$(MAKE) harness-quick-checks
 	@echo "=== 0.9.4 Release Gates: PASS ==="
 
@@ -1978,6 +2036,9 @@ help:
 	@echo "  sonar-encoding-check     - Validate UTF-8 source files and declared exceptions"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
+	@echo "  compatibility-contract-check - Blocking cross-release compatibility gate against frozen release anchors"
+	@echo "  compatibility-contract-tests - Extraction, comparison, and negative fixtures for the compatibility gate"
+	@echo "  package-version-ordering-check - Prove the RC package version ordering with dpkg and rpm"
 	@echo "  release-gates-check      - Validate the current release contract baseline"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
