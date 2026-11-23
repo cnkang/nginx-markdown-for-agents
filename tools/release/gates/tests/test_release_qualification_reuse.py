@@ -143,10 +143,11 @@ def test_create_bundle_rejects_paths_outside_trusted_root(
         source_root if escape_source else trusted_root / "source"
     )
     bundle = trusted_root / "bundle" if escape_source else bundle_root
+    context = _context()
 
     with pytest.raises(reuse.QualificationReuseError, match="trusted root"):
         reuse.create_bundle(
-            source, bundle, _context(), trusted_root=trusted_root
+            source, bundle, context, trusted_root=trusted_root
         )
 
     assert not bundle.exists()
@@ -155,6 +156,24 @@ def test_create_bundle_rejects_paths_outside_trusted_root(
 def test_release_version_rejects_non_ascii_digits() -> None:
     with pytest.raises(reuse.QualificationReuseError, match="malformed"):
         reuse._require_version("٠.9.4")
+
+
+def test_read_json_rejects_paths_outside_trusted_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}\n", encoding="utf-8")
+
+    def fail_if_checked_before_validation(path: Path, label: str) -> None:
+        pytest.fail(f"checked {label} before trusted-root validation: {path}")
+
+    monkeypatch.setattr(
+        reuse, "_regular_file", fail_if_checked_before_validation
+    )
+    with pytest.raises(reuse.QualificationReuseError, match="trusted root"):
+        reuse._read_json(outside, "metadata", root=trusted_root)
 
 
 def test_dispatch_context_requires_matching_workflow_and_release_inputs(
@@ -269,11 +288,10 @@ def test_lookup_uses_newest_successful_run_with_unexpired_exact_artifact(
 
     assert found == (older_with_artifact,
                      f"release-qualification-{CANDIDATE_SHA}-2")
+    artifact_api = "https://api.github.com/repos/cnkang/nginx-markdown-for-agents"
     assert artifact_urls == [
-        "https://api.github.com/repos/cnkang/nginx-markdown-for-agents/"
-        "actions/runs/200/artifacts?per_page=100",
-        "https://api.github.com/repos/cnkang/nginx-markdown-for-agents/"
-        "actions/runs/100/artifacts?per_page=100",
+        f"{artifact_api}/actions/runs/200/artifacts?per_page=100",
+        f"{artifact_api}/actions/runs/100/artifacts?per_page=100",
     ]
 
 
