@@ -18,16 +18,42 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPAT_MODULE = "tools.compatibility"
+# An inherited repository location would point fixture commands at a
+# different checkout than the one under test.
+GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+    "GIT_CEILING_DIRECTORIES",
+)
+
+
+def sanitized_environment(extra=None) -> dict:
+    """Return the environment without inherited git repository locations."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in GIT_LOCATION_VARS
+    }
+    env.pop("VIRTUAL_ENV", None)
+    if extra:
+        env.update(extra)
+    return env
 
 
 def _run(args: List[str], cwd: Path, env=None) -> subprocess.CompletedProcess:
-    """Run a subprocess with captured output."""
+    """Run a subprocess with captured output and a sanitized environment."""
     return subprocess.run(
         args,
         cwd=str(cwd),
         capture_output=True,
         text=True,
-        env=env,
+        env=sanitized_environment(env),
         check=False,
     )
 
@@ -85,9 +111,7 @@ def isolated_worktree(tmp_path: Path):
 
 def run_compat_check(worktree: Path, *extra: str) -> subprocess.CompletedProcess:
     """Run the compatibility gate inside an isolated worktree."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(worktree)
-    env.pop("VIRTUAL_ENV", None)
+    env = {"PYTHONPATH": str(worktree)}
     return _run(
         [
             "python3",

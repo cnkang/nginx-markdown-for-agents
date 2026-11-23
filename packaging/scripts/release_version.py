@@ -77,10 +77,23 @@ def _split_semver(version: str) -> Dict[str, Any]:
     }
 
 
-def _package_token(prerelease: str) -> str:
-    """Return a prerelease token both package families can order and parse."""
-    token = prerelease.lower().replace("-", "_")
-    return token.replace(".", "")
+def _debian_prerelease(prerelease: str) -> str:
+    """Return the Debian upstream suffix, preserving identifier boundaries.
+
+    Debian upstream versions may contain letters, digits, dots, plus signs,
+    tildes, and hyphens, so the SemVer text survives unchanged.  Collapsing the
+    separators would map ``rc.1`` and ``rc1`` onto the same package version.
+    """
+    return prerelease
+
+
+def _rpm_prerelease(prerelease: str) -> str:
+    """Return the RPM version suffix, which may not contain a hyphen.
+
+    A SemVer identifier allows only letters, digits, and hyphens, so replacing
+    a hyphen with an underscore cannot collide with a valid identifier.
+    """
+    return prerelease.replace("-", "_")
 
 
 def packaging_versions(version: str, nginx_version: Optional[str] = None) -> Dict[str, Any]:
@@ -88,9 +101,9 @@ def packaging_versions(version: str, nginx_version: Optional[str] = None) -> Dic
     parsed = _split_semver(version)
     prerelease = parsed["prerelease"]
     is_prerelease = bool(prerelease)
-    token = _package_token(prerelease) if prerelease else ""
     deb_version = "{}{}".format(
-        parsed["core"], "~" + token if is_prerelease else ""
+        parsed["core"],
+        "~" + _debian_prerelease(prerelease) if is_prerelease else "",
     )
     result: Dict[str, Any] = {
         "input": version,
@@ -99,7 +112,8 @@ def packaging_versions(version: str, nginx_version: Optional[str] = None) -> Dic
         "is_prerelease": is_prerelease,
         "deb_version": deb_version,
         "rpm_version": "{}{}".format(
-            parsed["core"], "~" + token if is_prerelease else ""
+            parsed["core"],
+            "~" + _rpm_prerelease(prerelease) if is_prerelease else "",
         ),
         "rpm_release": "",
         "deb_release": "",

@@ -224,17 +224,20 @@ def test_approvals_waive_review_but_never_break_candidates():
     result = Comparison(baseline_label="a", candidate_label="b")
     result.add("http", REVIEW_REQUIRED, "test-changed:x", "review me")
     result.add("directives", BREAKING, "default-changed:y", "break")
+    by_id = {finding.finding_id: finding for finding in result.findings}
     approvals = {
         "schema": 1,
         "exceptions": [
             {
                 "finding_id": "http:test-changed:x",
+                "evidence_fingerprint": by_id["http:test-changed:x"].fingerprint,
                 "reason": "non-behavioural test edit",
                 "approved_by": "maintainer",
                 "approved_at": "2026-11-23",
             },
             {
                 "finding_id": "directives:default-changed:y",
+                "evidence_fingerprint": by_id["directives:default-changed:y"].fingerprint,
                 "reason": "attempted waiver",
                 "approved_by": "maintainer",
                 "approved_at": "2026-11-23",
@@ -256,7 +259,13 @@ def test_approval_file_requires_named_approver():
             result,
             {
                 "schema": 1,
-                "exceptions": [{"finding_id": "http:test-changed:x", "reason": "r"}],
+                "exceptions": [
+                    {
+                        "finding_id": "http:test-changed:x",
+                        "evidence_fingerprint": "sha256:" + "0" * 64,
+                        "reason": "r",
+                    }
+                ],
             },
             "approvals.json",
         )
@@ -281,3 +290,45 @@ def test_cli_rejects_an_unknown_surface():
 def test_repo_root_is_discovered_from_the_contracts_directory():
     """The default repository root resolves to this checkout."""
     assert os.path.realpath(repo_root_for(str(INDEX.parent))) == os.path.realpath(REPO)
+
+
+def test_inherited_git_location_cannot_select_another_repository(tmp_path, monkeypatch):
+    """GIT_DIR from the environment must not redirect a read to another repo."""
+    import subprocess
+
+    from tools.compatibility.sources import resolve_commit, resolve_worktree
+
+    repos = []
+    for name in ("selected", "inherited"):
+        path = tmp_path / name
+        path.mkdir()
+        subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+        (path / "marker.txt").write_text(name, encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(path), "add", "marker.txt"], check=True, capture_output=True
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-m",
+                name,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        repos.append(path)
+
+    selected, inherited = repos
+    selected_head = resolve_commit(str(selected), "HEAD").commit
+    inherited_head = resolve_commit(str(inherited), "HEAD").commit
+    assert selected_head != inherited_head
+
+    monkeypatch.setenv("GIT_DIR", str(inherited / ".git"))
+    assert resolve_worktree(str(selected)).commit == selected_head
