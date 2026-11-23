@@ -18,6 +18,14 @@ The mapping is deliberately a pure function of the version string and the
 target NGINX version, so the release workflow, the local packaging target, and
 the ordering tests all derive the same answer.
 
+One limit is worth stating.  Both package comparators rank a digit run
+numerically, while SemVer compares an alphanumeric identifier lexically.  A
+prerelease spelled with numeric identifiers (`alpha.2`, `alpha.10`) therefore
+gets SemVer precedence in both families, and the ordering test proves it.  A
+mixed identifier written as one token (`alpha10` against `alpha2`) keeps the
+package-manager order instead.  Use the dotted form for a release where that
+distinction matters.
+
 Usage:
     release_version.py --version 1.0.0-rc.1 --nginx-version 1.28.3
     release_version.py --version 1.0.0-rc.1 --nginx-version 1.28.3 --field deb_version

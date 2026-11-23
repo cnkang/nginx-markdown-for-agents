@@ -48,7 +48,6 @@ from tools.compatibility.sources import (  # noqa: E402
     resolve_commit,
     resolve_tag,
     resolve_worktree,
-    verify_tag_commit,
 )
 from tools.lib.path_validation import (  # noqa: E402
     validate_read_path,
@@ -223,10 +222,30 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
                 anchor["manifest"], manifest["source"]["commit"], anchor["commit"]
             )
         )
-    verify_tag_commit(repo_root, tag, anchor["commit"])
-    extracted = build_manifest(
-        repo_root, resolve_tag(repo_root, tag), manifest["product_version"]
-    )
+    # Resolve the tag once.  Verification and extraction must describe the
+    # same object even if the tag moves while the gate runs.
+    revision = resolve_tag(repo_root, tag)
+    if revision.commit != anchor["commit"]:
+        raise ContractError(
+            "tag {} resolves to {}, but the anchor records {}".format(
+                tag, revision.commit, anchor["commit"]
+            )
+        )
+    expected_tag_object = anchor.get("tag_object")
+    if expected_tag_object is not None and revision.tag_object != expected_tag_object:
+        raise ContractError(
+            "tag {} no longer resolves to the recorded tag object {}".format(
+                tag, expected_tag_object
+            )
+        )
+    manifest_tag_object = manifest["source"].get("tag_object")
+    if manifest_tag_object is not None and revision.tag_object != manifest_tag_object:
+        raise ContractError(
+            "{} records tag object {} but the tag resolves to {}".format(
+                anchor["manifest"], manifest_tag_object, revision.tag_object
+            )
+        )
+    extracted = build_manifest(repo_root, revision, manifest["product_version"])
     if extracted["contract_digest"] != recorded_digest:
         raise ContractError(
             "re-extracting {} from tag {} produced digest {}, but the manifest records {}".format(
@@ -235,8 +254,8 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
         )
     return {
         "tag": tag,
-        "commit": anchor["commit"],
-        "tag_object": anchor.get("tag_object"),
+        "commit": revision.commit,
+        "tag_object": revision.tag_object,
         "manifest": anchor["manifest"],
         "manifest_sha256": actual_file_digest,
         "contract_digest": recorded_digest,

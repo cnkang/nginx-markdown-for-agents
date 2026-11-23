@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:5bc4969ce8dcd8f38158d25ce838739eaa842a9403d51d4acd8b45669b3e48b6",
+  "contract_digest": "sha256:e7c4ed090c9cbb951c7df84dd6473eb1e5d118606b10aa8e434ba5f7994ae3ab",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -13,7 +13,7 @@
     "tag_object": "4eac4c115fd2159a455d1eed8de00a740390f222"
   },
   "surface_digests": {
-    "diagnostics": "sha256:c547aa6f6e2926cd418c61a0ec5823ff5a6851ece7403a51eadd8251ba0f557f",
+    "diagnostics": "sha256:d151269a5be2489d2de21777a254c4aeea3e4f25d7ebe0e5eee5d143c3fe01f3",
     "directives": "sha256:77b50891a6616b653326dfc25a899d31350a66b0009f2a84768cd73a40a708da",
     "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
     "http": "sha256:3b4a505b6d43bedde37adb7286f23140175341d182cd6b7cff5f21233eb0ca3f",
@@ -31,6 +31,10 @@
           "nullable": false,
           "properties": [
             {
+              "enum": [
+                "development",
+                "release"
+              ],
               "name": "build_kind",
               "type": "string"
             },
@@ -115,6 +119,17 @@
               "type": "number"
             },
             {
+              "enum": [
+                "allocation",
+                "downstream",
+                "format",
+                "internal",
+                "invariant",
+                "memory_budget",
+                "timeout",
+                "truncated",
+                null
+              ],
               "name": "error_origin",
               "type": [
                 "string",
@@ -122,6 +137,13 @@
               ]
             },
             {
+              "enum": [
+                "aborted",
+                "converted",
+                "failed_closed",
+                "failed_open",
+                "skipped"
+              ],
               "name": "outcome",
               "type": "string"
             },
@@ -130,6 +152,15 @@
               "type": "string"
             },
             {
+              "enum": [
+                "conversion",
+                "decompression",
+                "delivery",
+                "eligibility",
+                "parsing",
+                "postcommit",
+                "precommit"
+              ],
               "name": "stage",
               "type": "string"
             },
@@ -158,6 +189,11 @@
           "nullable": false,
           "properties": [
             {
+              "enum": [
+                "active",
+                "degraded_allocation_failure",
+                "disabled"
+              ],
               "name": "diagnostics_recording",
               "type": "string"
             },
