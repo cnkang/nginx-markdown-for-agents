@@ -121,6 +121,31 @@ class TestGenerateManifest(unittest.TestCase):
             self.assertIn(pkg["arch"], ("amd64", "arm64"))
             self.assertIn(pkg["rpm_arch"], ("x86_64", "aarch64"))
 
+    def test_deb_and_rpm_prerelease(self):
+        """A prerelease identity parses from both package filename shapes."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_1.0.0-rc.1_nginx-1.28.0_amd64.deb"
+        )
+        self._write_package(
+            "nginx-module-markdown-for-agents-1.0.0-rc.1-nginx1.28.0-1.x86_64.rpm"
+        )
+
+        result = self._run_generate([
+            "--version", "1.0.0-rc.1",
+            "--tag", "v1.0.0-rc.1",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+            "--source-sha", "a" * 64,
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        manifest = json.loads(result.stdout)
+        versions = {pkg["version"] for pkg in manifest["packages"]}
+        self.assertEqual(versions, {"1.0.0-rc.1"})
+        self.assertEqual(
+            {pkg["format"] for pkg in manifest["packages"]}, {"deb", "rpm"}
+        )
+
     def test_tag_without_source_digest_fails(self):
         """A tag manifest has to carry the published bundle's digest."""
         self._write_package(

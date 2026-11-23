@@ -39,6 +39,7 @@ The configuration uses template variables injected by the CI matrix:
 | `NGINX_VERSION_CEIL` | Exclusive upper bound of the pinned NGINX version (X.Y.Z -> X.Y.Z+1) required by the DEB dependency interval | `1.26.4` |
 | `NGINX_VERSION` | Exact upstream version for the RPM dependency floor (the `%pre` scriptlet enforces the exact version) | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
+| `NFPM_RELEASE` | Package release for this packager | `nginx1.28.3` for DEB, `nginx1.28.3.1` for RPM |
 
 ### Building Packages Locally
 
@@ -46,6 +47,15 @@ The configuration uses template variables injected by the CI matrix:
 # Set required environment variables
 export PKG_VERSION="0.9.3"
 export NGINX_VERSION="1.26.3"
+# A prerelease release identity needs the family mapping from
+# packaging/scripts/release_version.py.  Read the two values instead of
+# deriving them by hand.
+export DEB_VERSION="$(python3 packaging/scripts/release_version.py \
+  --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field deb_version)"
+export RPM_VERSION="$(python3 packaging/scripts/release_version.py \
+  --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field rpm_version)"
+export RPM_RELEASE="$(python3 packaging/scripts/release_version.py \
+  --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field rpm_release)"
 export NGINX_VERSION_CEIL="$(awk 'BEGIN {
   split(ARGV[1], parts, ".");
   printf "%d.%d.%d", parts[1], parts[2], parts[3] + 1;
@@ -68,8 +78,9 @@ sed -e "s|./packaging/nfpm/scripts/preinstall.sh|${NFPM_TMP}/preinstall.sh|" \
   -e "s|./packaging/nfpm/scripts/preremove.sh|${NFPM_TMP}/preremove.sh|" \
   packaging/nfpm/nfpm.yaml > "${NFPM_TMP}/nfpm.yaml"
 
-# Generate DEB
-nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager deb \
+# Generate DEB.  The Debian upstream version carries the prerelease behind `~`.
+PKG_VERSION="${DEB_VERSION}" NFPM_RELEASE="nginx${NGINX_VERSION}" \
+  nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager deb \
   --target "dist/nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
 
 # Generate RPM
@@ -78,7 +89,9 @@ case "${NFPM_ARCH}" in
   arm64) RPM_ARCH=aarch64 ;;
   *) echo "unsupported NFPM_ARCH: ${NFPM_ARCH}" >&2; exit 1 ;;
 esac
-nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager rpm \
+# The RPM version carries the prerelease behind `~` and keeps the release.
+PKG_VERSION="${RPM_VERSION}" NFPM_RELEASE="${RPM_RELEASE}" \
+  nfpm package --config "${NFPM_TMP}/nfpm.yaml" --packager rpm \
   --target "dist/nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 ```
 

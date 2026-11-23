@@ -4,7 +4,13 @@
 # Generates both .deb and .rpm packages from pre-built Module_SO artifacts.
 #
 # Environment variables (injected by workflow matrix):
-#   PKG_VERSION          - Project version (e.g. 0.8.2)
+#   PKG_VERSION          - Package version for this packager.  The DEB step
+#                          passes the Debian upstream version (for example
+#                          1.0.0~rc1); the RPM step passes the base version
+#                          (1.0.0) and carries the prerelease in NFPM_RELEASE.
+#   NFPM_RELEASE         - Package release.  Stable: nginx<ver>; prerelease:
+#                          0.<token>.nginx<ver>.  See
+#                          packaging/scripts/release_version.py.
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
 #   NGINX_VERSION_CEIL   - Upper NGINX version bound for the dependency range
 #   RPM dependencies use the epoch-free version floor; the %pre scriptlet
@@ -30,7 +36,7 @@ name: "nginx-module-markdown-for-agents"
 arch: "${NFPM_ARCH}"
 platform: "linux"
 version: "${PKG_VERSION}"
-release: "nginx${NGINX_VERSION}"
+release: "${NFPM_RELEASE}"
 maintainer: "nginx-markdown-for-agents maintainers"
 description: |
   NGINX dynamic module for HTML-to-Markdown conversion.

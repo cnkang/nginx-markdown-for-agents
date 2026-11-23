@@ -1000,7 +1000,11 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         steps, "Upload candidate-bound short-soak evidence"
     )
     gates = _step_by_name(steps, "Run release gates")
+    # The release identity is a workflow-level literal validated against
+    # Cargo.toml by the version consistency and 0.8.x release gates.  This test
+    # only proves the soak manifest consumes that same value.
     release_version = workflow["env"]["RELEASE_VERSION"]
+    assert "${{" not in str(release_version)
 
     assert (
         names.index("Generate candidate-bound release gate inputs")
@@ -1033,7 +1037,6 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     ]
     assert '"${REUSED_SOAK_EVIDENCE}" == "true"' in soak["run"]
     assert '--candidate-sha "${GITHUB_SHA}"' in manifest["run"]
-    assert release_version == "0.9.4"
     assert '--version "${RELEASE_VERSION}"' in manifest["run"]
     assert 'git rev-parse HEAD' in manifest["run"]
     assert "make test-e2e-rust-soak" in soak["run"]

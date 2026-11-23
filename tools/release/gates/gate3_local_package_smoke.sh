@@ -238,6 +238,23 @@ build_module() {
             | head -1 | sed 's/.*"\(.*\)".*/\1/')"
     fi
 
+    # Map the release identity onto the two package families.  The DEB upstream
+    # version and the RPM version/release pair differ for a prerelease, and one
+    # config cannot carry both.
+    local deb_version rpm_version rpm_release
+    if ! deb_version="$(python3 "${PROJECT_ROOT}/packaging/scripts/release_version.py" \
+        --version "$pkg_version" --nginx-version "$nginx_version" --field deb_version)"; then
+        die "Cannot map ${pkg_version} onto a Debian version"
+    fi
+    if ! rpm_version="$(python3 "${PROJECT_ROOT}/packaging/scripts/release_version.py" \
+        --version "$pkg_version" --nginx-version "$nginx_version" --field rpm_version)"; then
+        die "Cannot map ${pkg_version} onto an RPM version"
+    fi
+    if ! rpm_release="$(python3 "${PROJECT_ROOT}/packaging/scripts/release_version.py" \
+        --version "$pkg_version" --nginx-version "$nginx_version" --field rpm_release)"; then
+        die "Cannot map ${pkg_version} onto an RPM release"
+    fi
+
     info "Building module: version=${pkg_version}, nginx=${nginx_version}, arch=${ARCH} (${DOCKER_PLATFORM})"
 
     # Create build Dockerfile
@@ -332,6 +349,9 @@ ARG NGINX_VERSION=${nginx_version}
 ARG NGINX_VERSION_CEIL=${nginx_version_ceil}
 ARG NFPM_ARCH=${ARCH}
 ARG RPM_ARCH=${RPM_ARCH}
+ARG DEB_VERSION=${deb_version}
+ARG RPM_VERSION=${rpm_version}
+ARG RPM_RELEASE=${rpm_release}
 
 ENV PKG_VERSION=\${PKG_VERSION}
 ENV NGINX_VERSION=\${NGINX_VERSION}
@@ -348,10 +368,10 @@ RUN packaging/nfpm/scripts/render-nfpm-config.sh \\
     && grep -Fq 'preinstall: "/tmp/preinstall.sh"' /tmp/nfpm.yaml \\
     && grep -Fq 'preremove: "/tmp/preremove.sh"' /tmp/nfpm.yaml \\
     && mkdir -p /dist \\
-    && nfpm package --config /tmp/nfpm.yaml --packager deb \\
-       --target "/dist/nginx-module-markdown-for-agents_\${PKG_VERSION}_nginx-\${NGINX_VERSION}_\${NFPM_ARCH}.deb" \\
-    && nfpm package --config /tmp/nfpm.yaml --packager rpm \\
-       --target "/dist/nginx-module-markdown-for-agents-\${PKG_VERSION}-nginx\${NGINX_VERSION}-1.\${RPM_ARCH}.rpm"
+    && PKG_VERSION="\${DEB_VERSION}" NFPM_RELEASE="nginx\${NGINX_VERSION}" nfpm package --config /tmp/nfpm.yaml --packager deb \\
+       --target "/dist/nginx-module-markdown-for-agents_\${DEB_VERSION}_nginx-\${NGINX_VERSION}_\${NFPM_ARCH}.deb" \\
+    && PKG_VERSION="\${RPM_VERSION}" NFPM_RELEASE="\${RPM_RELEASE}" nfpm package --config /tmp/nfpm.yaml --packager rpm \\
+       --target "/dist/nginx-module-markdown-for-agents-\${RPM_VERSION}-nginx\${NGINX_VERSION}-1.\${RPM_ARCH}.rpm"
 DOCKERFILE
 
     # Build

@@ -50,7 +50,7 @@ DEB_PATTERN = re.compile(
     r"^nginx-module-markdown-for-agents_(?P<version>[^_]+)_nginx-(?P<nginx_version>[0-9][^-]*)_(?P<arch>[a-z0-9]+)\.deb$"
 )
 RPM_PATTERN = re.compile(
-    r"^nginx-module-markdown-for-agents-(?P<version>[0-9][^-]*)-nginx(?P<nginx_version>[0-9][^-]*)-[0-9]+\.(?P<rpm_arch>x86_64|aarch64)\.rpm$"
+    r"^nginx-module-markdown-for-agents-(?P<version>[0-9][^-]*(?:-[^-]+)*?)-nginx(?P<nginx_version>[0-9][^-]*)-[0-9]+\.(?P<rpm_arch>x86_64|aarch64)\.rpm$"
 )
 # Ubuntu-native DEB built from the Canonical source package. The name carries
 # the suite and the exact package revision, so an Ubuntu asset can never be
