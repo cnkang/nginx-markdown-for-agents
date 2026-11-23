@@ -17,6 +17,7 @@ import pytest
 from tools.compatibility.compare import (
     ADDITIVE,
     BREAKING,
+    compare_diagnostics,
     OK,
     REVIEW_REQUIRED,
     UNVERIFIED,
@@ -26,6 +27,7 @@ from tools.compatibility.compare import (
 )
 from tools.compatibility.extract import extract_surfaces
 from tools.compatibility.model import SURFACES, contract_digest, surface_digests
+from tools.compatibility.tests.conftest import sanitized_environment
 from tools.lib.path_validation import validate_read_path
 from tools.compatibility.sources import (
     SourceReader,
@@ -302,10 +304,18 @@ def test_inherited_git_location_cannot_select_another_repository(tmp_path, monke
     for name in ("selected", "inherited"):
         path = tmp_path / name
         path.mkdir()
-        subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "init", str(path)],
+            check=True,
+            capture_output=True,
+            env=sanitized_environment(),
+        )
         (path / "marker.txt").write_text(name, encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(path), "add", "marker.txt"], check=True, capture_output=True
+            ["git", "-C", str(path), "add", "marker.txt"],
+            check=True,
+            capture_output=True,
+            env=sanitized_environment(),
         )
         subprocess.run(
             [
@@ -322,6 +332,7 @@ def test_inherited_git_location_cannot_select_another_repository(tmp_path, monke
             ],
             check=True,
             capture_output=True,
+            env=sanitized_environment(),
         )
         repos.append(path)
 
@@ -332,3 +343,35 @@ def test_inherited_git_location_cannot_select_another_repository(tmp_path, monke
 
     monkeypatch.setenv("GIT_DIR", str(inherited / ".git"))
     assert resolve_worktree(str(selected)).commit == selected_head
+
+
+def test_compare_reports_an_array_item_field_type_change():
+    """A type change inside an array item is a diagnostics difference."""
+    baseline = {
+        "schema_version": 3,
+        "type": "object",
+        "additional_properties": False,
+        "required": ["recent_decisions"],
+        "fields": [
+            {
+                "name": "recent_decisions",
+                "required": True,
+                "type": "array",
+                "nullable": False,
+                "items_type": "object",
+                "items_required": ["duration_ms"],
+                "items_additional_properties": False,
+                "items_properties": [{"name": "duration_ms", "type": "number"}],
+            }
+        ],
+    }
+    candidate = json.loads(json.dumps(baseline))
+    candidate["fields"][0]["items_properties"][0]["type"] = "string"
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(result, baseline, candidate)
+    verdicts = {finding.finding_id: finding.verdict for finding in result.findings}
+    assert (
+        verdicts["diagnostics:child-type-changed:recent_decisions[]:duration_ms"]
+        == BREAKING
+    )

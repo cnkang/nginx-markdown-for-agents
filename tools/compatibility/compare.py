@@ -467,6 +467,7 @@ def compare_metrics(
     for name in sorted(set(old_map) & set(new_map)):
         _compare_metric_family(result, name, old_map[name], new_map[name])
     _compare_emitted(result, baseline, candidate)
+    _compare_unlabelled_samples(result, baseline, candidate)
 
 
 def _compare_reason(
@@ -713,6 +714,48 @@ def _compare_properties(
                 old_children[child]["type"],
                 new_children[child]["type"],
             )
+        old_enum = set(old_children[child].get("enum") or [])
+        new_enum = set(new_children[child].get("enum") or [])
+        if old_children[child].get("enum") is not None and (
+            new_children[child].get("enum") is None
+        ):
+            result.add(
+                "diagnostics",
+                ADDITIVE,
+                "child-enum-removed:{}:{}".format(name, child),
+                "diagnostics field {} no longer restricts {}".format(name, child),
+                sorted(old_enum),
+                None,
+            )
+        elif new_children[child].get("enum") is not None and (
+            old_children[child].get("enum") is None
+        ):
+            result.add(
+                "diagnostics",
+                BREAKING,
+                "child-enum-added:{}:{}".format(name, child),
+                "diagnostics field {} gained a closed value set".format(name, child),
+                None,
+                sorted(new_enum),
+            )
+        elif old_enum - new_enum:
+            result.add(
+                "diagnostics",
+                BREAKING,
+                "child-enum-narrowed:{}:{}".format(name, child),
+                "diagnostics field {} lost an allowed value".format(name, child),
+                sorted(old_enum - new_enum),
+                None,
+            )
+        elif new_enum - old_enum:
+            result.add(
+                "diagnostics",
+                ADDITIVE,
+                "child-enum-widened:{}:{}".format(name, child),
+                "diagnostics field {} gained an allowed value".format(name, child),
+                None,
+                sorted(new_enum - old_enum),
+            )
 
 
 def _compare_field_items(
@@ -775,14 +818,14 @@ def _compare_diagnostics_field(
     _compare_field_type(result, name, old, new)
     _compare_field_nullability(result, name, old, new)
     _compare_field_enum(result, name, old, new)
+    if "items_type" in old or "items_type" in new:
+        _compare_field_items(result, name, old, new)
     if "required_children" not in old and "required_children" not in new:
         return
     _compare_field_closed_object(result, name, old, new)
     _compare_field_required_children(result, name, old, new)
     if old.get("properties") is not None and new.get("properties") is not None:
         _compare_properties(result, name, old["properties"], new["properties"])
-    if "items_type" in old or "items_type" in new:
-        _compare_field_items(result, name, old, new)
 
 
 def _compare_diagnostics_header(
@@ -896,6 +939,32 @@ def compare_diagnostics(
         _compare_diagnostics_field(result, name, old_map[name], new_map[name])
 
 
+def _compare_unlabelled_samples(
+    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+) -> None:
+    """Compare the families the renderer emits without any label block."""
+    old_samples = set(baseline["emitted"].get("unlabelled_samples") or [])
+    new_samples = set(candidate["emitted"].get("unlabelled_samples") or [])
+    for name in sorted(old_samples - new_samples):
+        result.add(
+            "metrics",
+            BREAKING,
+            "unlabelled-sample-removed:{}".format(name),
+            "the renderer stopped emitting the unlabelled sample of {}".format(name),
+            name,
+            None,
+        )
+    for name in sorted(new_samples - old_samples):
+        result.add(
+            "metrics",
+            ADDITIVE,
+            "unlabelled-sample-added:{}".format(name),
+            "the renderer emits an unlabelled sample of {}".format(name),
+            None,
+            name,
+        )
+
+
 def compare_http(
     result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
 ) -> None:
@@ -993,49 +1062,68 @@ def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return groups
 
 
-def _best_tier(tiers: List[str]) -> str:
-    """Return the highest support tier in one group."""
-    return max(tiers, key=lambda tier: SUPPORT_TIER_RANK.get(tier, -1))
+def _support_row_key(row: Dict[str, Any]) -> str:
+    """Identify one matrix row by its exact target and patch version."""
+    return "{}|{}/{}/{}".format(
+        row["nginx_version"], row["os"], row["libc"], row["arch"]
+    )
+
+
+def _compare_support_rows(
+    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+) -> None:
+    """Compare the retained matrix rows one by one.
+
+    A group aggregate would hide a demotion on one row whenever a sibling row
+    keeps the higher tier, so each retained row is compared on its own.
+    """
+    old_rows = {
+        _support_row_key(row): row for row in baseline["support"]["targets"]
+    }
+    new_rows = {
+        _support_row_key(row): row for row in candidate["support"]["targets"]
+    }
+    for key in sorted(set(old_rows) & set(new_rows)):
+        old_row = old_rows[key]
+        new_row = new_rows[key]
+        if old_row["support_tier"] != new_row["support_tier"]:
+            old_rank = SUPPORT_TIER_RANK.get(old_row["support_tier"], -1)
+            new_rank = SUPPORT_TIER_RANK.get(new_row["support_tier"], -1)
+            verdict = ADDITIVE if new_rank > old_rank else BREAKING
+            result.add(
+                "packaging",
+                verdict,
+                "row-tier-changed:{}".format(key),
+                "support tier changed for row {} from {} to {}".format(
+                    key, old_row["support_tier"], new_row["support_tier"]
+                ),
+                old_row["support_tier"],
+                new_row["support_tier"],
+            )
+        if old_row["release_blocking"] and not new_row["release_blocking"]:
+            result.add(
+                "packaging",
+                BREAKING,
+                "row-release-blocking-dropped:{}".format(key),
+                "row {} stopped being release blocking".format(key),
+                old_row["release_blocking"],
+                new_row["release_blocking"],
+            )
+        if not old_row["release_blocking"] and new_row["release_blocking"]:
+            result.add(
+                "packaging",
+                ADDITIVE,
+                "row-release-blocking-added:{}".format(key),
+                "row {} became release blocking".format(key),
+                old_row["release_blocking"],
+                new_row["release_blocking"],
+            )
 
 
 def _compare_support_target(
     result: Comparison, key: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
-    """Compare one supported target group."""
-    old_tier = _best_tier(old["tiers"])
-    new_tier = _best_tier(new["tiers"])
-    if old_tier != new_tier:
-        old_rank = SUPPORT_TIER_RANK.get(old_tier, -1)
-        new_rank = SUPPORT_TIER_RANK.get(new_tier, -1)
-        verdict = ADDITIVE if new_rank > old_rank else BREAKING
-        result.add(
-            "packaging",
-            verdict,
-            "support-tier-changed:{}".format(key),
-            "support tier changed for {} from {} to {}".format(
-                key, old_tier, new_tier
-            ),
-            old["tiers"],
-            new["tiers"],
-        )
-    if old["blocking"] and not new["blocking"]:
-        result.add(
-            "packaging",
-            BREAKING,
-            "release-blocking-dropped:{}".format(key),
-            "{} stopped being release blocking".format(key),
-            old["blocking"],
-            new["blocking"],
-        )
-    if not old["blocking"] and new["blocking"]:
-        result.add(
-            "packaging",
-            ADDITIVE,
-            "release-blocking-added:{}".format(key),
-            "{} became release blocking".format(key),
-            old["blocking"],
-            new["blocking"],
-        )
+    """Report patch progression for one supported target group."""
     if old["patches"] != new["patches"]:
         result.add(
             "packaging",
@@ -1134,6 +1222,7 @@ def compare_packaging(
         )
     for key in sorted(set(old_groups) & set(new_groups)):
         _compare_support_target(result, key, old_groups[key], new_groups[key])
+    _compare_support_rows(result, baseline, candidate)
 
 
 def compare_ffi(
@@ -1227,6 +1316,30 @@ def compare_contracts(
     return result
 
 
+_APPROVAL_FIELDS = (
+    "finding_id",
+    "evidence_fingerprint",
+    "reason",
+    "approved_by",
+    "approved_at",
+)
+
+
+def _approval_key(entry: Dict[str, Any], approval_path: str) -> tuple:
+    """Validate one approval and return its matching key."""
+    for field in _APPROVAL_FIELDS:
+        value = entry.get(field)
+        if not value:
+            raise ValueError(
+                "approval in {} is missing {}".format(approval_path, field)
+            )
+        if not isinstance(value, str):
+            raise ValueError(
+                "approval in {} has a non-string {}".format(approval_path, field)
+            )
+    return (entry["finding_id"], entry["evidence_fingerprint"])
+
+
 def apply_approvals(
     result: Comparison, approvals: Dict[str, Any], approval_path: str
 ) -> List[str]:
@@ -1243,18 +1356,7 @@ def apply_approvals(
         raise ValueError("approval file must declare \"schema\": 1")
     approved: Dict[tuple, Dict[str, Any]] = {}
     for entry in entries:
-        for field in (
-            "finding_id",
-            "evidence_fingerprint",
-            "reason",
-            "approved_by",
-            "approved_at",
-        ):
-            if not entry.get(field):
-                raise ValueError(
-                    "approval in {} is missing {}".format(approval_path, field)
-                )
-        approved[(entry["finding_id"], entry["evidence_fingerprint"])] = entry
+        approved[_approval_key(entry, approval_path)] = entry
     used = set()
     for finding in result.findings:
         if finding.verdict != REVIEW_REQUIRED:

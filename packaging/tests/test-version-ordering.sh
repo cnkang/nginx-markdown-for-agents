@@ -132,6 +132,18 @@ if command -v dpkg >/dev/null 2>&1; then
     check_dpkg_lt "dpkg: 0.9.4 < 1.0.0~rc.1" "${DEB_094}" "${DEB_RC1}"
     check_dpkg_lt "dpkg: 1.0.0~rc.1 < 1.0.0~rc.2" "${DEB_RC1}" "${DEB_RC2}"
     check_dpkg_lt "dpkg: 1.0.0~rc.2 < 1.0.0" "${DEB_RC2}" "${DEB_GA}"
+    check_dpkg_lt "dpkg: 1.0.0~alpha.2 < 1.0.0~alpha.10" \
+        "1.0.0~alpha.2-nginx${NGINX_VERSION}" "1.0.0~alpha.10-nginx${NGINX_VERSION}"
+    # Known limit: a mixed identifier such as `alpha10` compares digit runs
+    # numerically in dpkg, while SemVer compares it lexically (`alpha10` <
+    # `alpha2`).  The check pins the package-manager behavior so the limit is
+    # explicit; spell numeric sequences with a dot to get SemVer precedence.
+    if dpkg --compare-versions "1.0.0~alpha10-nginx${NGINX_VERSION}" gt \
+        "1.0.0~alpha2-nginx${NGINX_VERSION}"; then
+        pass "dpkg: mixed identifier alpha10 sorts after alpha2 (documented SemVer limit)"
+    else
+        fail "dpkg: expected the documented mixed-identifier ordering"
+    fi
     # The trap this mapping exists for: the plain hyphen form sorts ABOVE the
     # final release, so a naive mapping would make RC the newest version.
     if dpkg --compare-versions "1.0.0-rc1-nginx${NGINX_VERSION}" gt "${DEB_GA}"; then
@@ -219,15 +231,17 @@ cmp() {
 rc1_vs_094="$(cmp "$RPM_RC1" "$RPM_094")"
 rc1_vs_rc2="$(cmp "$RPM_RC1" "$RPM_RC2")"
 rc2_vs_ga="$(cmp "$RPM_RC2" "$RPM_GA")"
+alpha_numeric="$(cmp "1.0.0~alpha.2-nginx${NGINX_VERSION}.1" "1.0.0~alpha.10-nginx${NGINX_VERSION}.1")"
+alpha_mixed="$(cmp "1.0.0~alpha10-nginx${NGINX_VERSION}.1" "1.0.0~alpha2-nginx${NGINX_VERSION}.1")"
 # A Release-first prerelease marker such as 0.rc1 would sort above the
 # nginx<ver>.1 release, because rpmvercmp ranks a numeric segment above a
 # letter segment.  Assert the naive shape really is wrong so the mapping
 # cannot silently regress to it.
 naive="$(cmp "$(printf "%s-0.rc1.nginx%s" "1.0.0" "$NGINX_VERSION")" "$RPM_GA")"
-echo "RC1_VS_094=$rc1_vs_094 RC1_VS_RC2=$rc1_vs_rc2 RC2_VS_GA=$rc2_vs_ga NAIVE=$naive"
+echo "RC1_VS_094=$rc1_vs_094 RC1_VS_RC2=$rc1_vs_rc2 RC2_VS_GA=$rc2_vs_ga NAIVE=$naive ALPHA_NUMERIC=$alpha_numeric ALPHA_MIXED=$alpha_mixed"
 ' 2>&1)"
-    if [[ "${rpm_smoke}" == *"RC1_VS_094=1 RC1_VS_RC2=-1 RC2_VS_GA=-1 NAIVE=1"* ]]; then
-        pass "rpmvercmp: 0.9.4 < 1.0.0~rc.1 < 1.0.0~rc.2 < 1.0.0 (Release-first marker rejected)"
+    if [[ "${rpm_smoke}" == *"RC1_VS_094=1 RC1_VS_RC2=-1 RC2_VS_GA=-1 NAIVE=1 ALPHA_NUMERIC=-1 ALPHA_MIXED=1"* ]]; then
+        pass "rpmvercmp: 0.9.4 < rc.1 < rc.2 < 1.0.0, alpha.2 < alpha.10, mixed identifier pinned"
     else
         fail "rpmvercmp ordering failed: ${rpm_smoke}"
     fi

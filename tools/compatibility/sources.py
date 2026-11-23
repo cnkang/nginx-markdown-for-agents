@@ -251,8 +251,13 @@ class SourceReader:
                 raise ContractError(
                     "contract input {} escapes the repository".format(path)
                 )
-            with open(resolved, "rb") as handle:
-                payload = handle.read()
+            try:
+                with open(resolved, "rb") as handle:
+                    payload = handle.read()
+            except OSError as error:
+                raise ContractError(
+                    "cannot read {} from the working tree: {}".format(path, error)
+                )
         else:
             try:
                 completed = subprocess.run(
@@ -266,6 +271,7 @@ class SourceReader:
                     capture_output=True,
                     timeout=GIT_TIMEOUT_SECONDS,
                     check=False,
+                    env=_git_environment(),
                 )
             except (OSError, subprocess.SubprocessError) as error:
                 raise ContractError(
@@ -291,15 +297,3 @@ class SourceReader:
             raise ContractError(
                 "contract input {} is not valid UTF-8: {}".format(path, error)
             )
-
-
-def verify_tag_commit(repo_root: str, tag: str, recorded_commit: str) -> None:
-    """Fail when a tag no longer resolves to the recorded commit."""
-    validate_commit(recorded_commit, "recorded commit")
-    actual = resolve_tag(repo_root, tag)
-    if actual.commit != recorded_commit:
-        raise ContractError(
-            "tag {} resolves to {}, but the anchor records {}".format(
-                tag, actual.commit, recorded_commit
-            )
-        )

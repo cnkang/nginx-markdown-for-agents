@@ -63,15 +63,23 @@ def _changed_paths(repo: Path) -> List[str]:
     completed = _run(["git", "status", "--porcelain=v1", "-z"], repo)
     if completed.returncode != 0:
         raise RuntimeError("git status failed: {}".format(completed.stderr))
-    paths = []
-    for record in completed.stdout.split("\0"):
+    fields = completed.stdout.split("\0")
+    paths: List[str] = []
+    index = 0
+    while index < len(fields):
+        record = fields[index]
+        index += 1
         if len(record) < 4:
             continue
         status = record[:2]
-        path = record[3:]
+        paths.append(record[3:])
         if "R" in status or "C" in status:
-            continue
-        paths.append(path)
+            # A rename or copy record carries the origin path in the next
+            # NUL-separated field, which the overlay has to remove as well.
+            origin = fields[index] if index < len(fields) else ""
+            index += 1
+            if origin:
+                paths.append(origin)
     return paths
 
 

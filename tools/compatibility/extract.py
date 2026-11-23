@@ -507,15 +507,23 @@ def _resolve_ref(schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0) -
     return _resolve_ref(target, defs, depth + 1)
 
 
+def _sorted_enum(values: List[Any]) -> List[Any]:
+    """Sort an enum deterministically, tolerating a null entry."""
+    return sorted(values, key=lambda value: (value is None, str(value)))
+
+
 def _schema_properties(schema: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Project the child fields of a resolved object schema."""
-    return sorted(
-        (
-            {"name": child, "type": child_schema.get("type")}
-            for child, child_schema in (schema.get("properties") or {}).items()
-        ),
-        key=lambda item: item["name"],
-    )
+    children = []
+    for child, child_schema in (schema.get("properties") or {}).items():
+        field: Dict[str, Any] = {
+            "name": child,
+            "type": child_schema.get("type"),
+        }
+        if "enum" in child_schema:
+            field["enum"] = _sorted_enum(child_schema["enum"])
+        children.append(field)
+    return sorted(children, key=lambda item: item["name"])
 
 
 def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any]:
@@ -544,7 +552,7 @@ def _schema_field(
         else False,
     }
     if "enum" in schema:
-        field["enum"] = sorted(schema["enum"])
+        field["enum"] = _sorted_enum(schema["enum"])
     if schema.get("type") == "object" or "properties" in schema:
         field["additional_properties"] = schema.get("additionalProperties")
         field["required_children"] = sorted(schema.get("required") or [])
@@ -580,12 +588,13 @@ def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
 def extract_ffi(reader: SourceReader) -> Dict[str, Any]:
     """Extract the generated header's export set and ABI handshake version."""
     header = reader.read_text(FFI_HEADER)
-    version_match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", header)
+    live_header = _mask_comments(header)
+    version_match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", live_header)
     if version_match is None:
         raise ContractError("generated FFI header has no ABI version")
     prototypes: List[str] = []
     buffer = ""
-    for line in _mask_comments(header).splitlines():
+    for line in live_header.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped.startswith("*"):
             continue
@@ -674,15 +683,25 @@ def _contents_block_ended(raw: str, stripped: str) -> bool:
     return bool(stripped) and not raw.startswith(" ") and not stripped.startswith("-")
 
 
-def _contents_entry_line(stripped: str) -> Tuple[str, str]:
-    """Classify one line inside the ``contents`` block."""
-    if stripped.startswith("- src:"):
-        return ("entry", "")
-    if stripped.startswith("dst:"):
-        return ("dst", stripped[len("dst:"):].strip().strip('"'))
-    if stripped.startswith("packager:"):
-        return ("packager", stripped[len("packager:"):].strip().strip('"'))
+def _contents_field(line: str) -> Tuple[str, str]:
+    """Classify one mapping line inside a ``contents`` entry."""
+    if line.startswith("dst:"):
+        return ("dst", line[len("dst:"):].strip().strip('"'))
+    if line.startswith("packager:"):
+        return ("packager", line[len("packager:"):].strip().strip('"'))
     return ("", "")
+
+
+def _contents_entry_line(stripped: str) -> Tuple[str, str]:
+    """Classify one line inside the ``contents`` block.
+
+    A list item may start with any key, and the remaining keys of that item may
+    appear in any order, so the first key of an item is read from the same line
+    the item starts on.
+    """
+    if stripped.startswith("- "):
+        return _contents_field(stripped[2:].strip())
+    return _contents_field(stripped)
 
 
 def _nfpm_contents(text: str) -> List[Dict[str, str]]:
@@ -698,10 +717,10 @@ def _nfpm_contents(text: str) -> List[Dict[str, str]]:
             continue
         if _contents_block_ended(raw, stripped):
             break
-        kind, value = _contents_entry_line(stripped)
-        if kind == "entry":
+        if stripped.startswith("- "):
             entries.append({"dst": "", "packager": ""})
-        elif kind and entries:
+        kind, value = _contents_entry_line(stripped)
+        if kind and entries:
             entries[-1][kind] = value
     return [entry for entry in entries if entry["dst"]]
 
