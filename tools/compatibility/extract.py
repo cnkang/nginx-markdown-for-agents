@@ -507,7 +507,7 @@ def _resolve_ref(schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0) -
     return _resolve_ref(target, defs, depth + 1)
 
 
-def _schema_properties(schema: Dict[str, Any], defs: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _schema_properties(schema: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Project the child fields of a resolved object schema."""
     return sorted(
         (
@@ -527,7 +527,7 @@ def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any
         "items_type": item.get("type"),
         "items_required": sorted(item.get("required") or []),
         "items_additional_properties": item.get("additionalProperties"),
-        "items_properties": _schema_properties(item, defs),
+        "items_properties": _schema_properties(item),
     }
 
 
@@ -548,7 +548,7 @@ def _schema_field(
     if schema.get("type") == "object" or "properties" in schema:
         field["additional_properties"] = schema.get("additionalProperties")
         field["required_children"] = sorted(schema.get("required") or [])
-        field["properties"] = _schema_properties(schema, defs)
+        field["properties"] = _schema_properties(schema)
     if schema.get("type") == "array":
         field.update(_schema_items(schema, defs))
     return field
