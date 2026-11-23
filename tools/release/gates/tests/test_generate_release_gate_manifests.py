@@ -50,6 +50,45 @@ def test_artifact_index_accepts_ubuntu_native_deb(monkeypatch, tmp_path: Path) -
     assert artifact["candidate_sha"] == CANDIDATE_SHA
 
 
+def test_inputs_phase_can_leave_soak_manifest_for_reuse_restore(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    written: list[Path] = []
+    output_root = tmp_path / "release"
+    output_root.mkdir()
+    monkeypatch.setattr(generator, "_candidate_sha", lambda requested: requested)
+    monkeypatch.setattr(generator, "_utc_now", lambda: GENERATED_AT)
+    monkeypatch.setattr(
+        generator,
+        "_release_state",
+        lambda: ("0.9.4", Path("artifacts/release/0.9.4"), output_root),
+    )
+    monkeypatch.setattr(generator, "build_candidate_manifest", lambda *_: {})
+    monkeypatch.setattr(generator, "build_fuzz_manifests", lambda *_: ({}, {}))
+    monkeypatch.setattr(
+        generator, "_write_json", lambda path, value: written.append(Path(path))
+    )
+    monkeypatch.setattr(
+        generator,
+        "_load_json",
+        lambda *_: pytest.fail("short-soak scope must not be read"),
+    )
+    monkeypatch.setattr(
+        generator,
+        "build_manifest",
+        lambda *_: pytest.fail("short-soak manifest must not be generated"),
+    )
+
+    assert generator.main([
+        "--phase", "inputs",
+        "--candidate-sha", CANDIDATE_SHA,
+        "--skip-short-soak-manifest",
+    ]) == 0
+
+    assert len(written) == 3
+    assert all(path.name != "short-soak-scenario-manifest.json" for path in written)
+
+
 def _write_fuzz_record(tmp_path: Path, record: dict) -> None:
     """Write one record at the path consumed by final-evidence generation."""
     path = _release_root(tmp_path) / generator.FUZZ_QUALIFICATION_RECORD_NAME
