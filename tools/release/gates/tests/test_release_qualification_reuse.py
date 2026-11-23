@@ -163,7 +163,9 @@ def test_read_json_rejects_paths_outside_trusted_root(
 ) -> None:
     trusted_root = tmp_path / "trusted"
     trusted_root.mkdir()
-    outside = tmp_path / "outside.json"
+    outside_dir = tmp_path / "trusted-sibling"
+    outside_dir.mkdir()
+    outside = outside_dir / "outside.json"
     outside.write_text("{}\n", encoding="utf-8")
 
     def fail_if_checked_before_validation(path: Path, label: str) -> None:

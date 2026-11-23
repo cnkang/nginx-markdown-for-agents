@@ -122,12 +122,16 @@ def _read_json(path: pathlib.Path, label: str, *, root: pathlib.Path) -> dict:
         safe_path = validate_read_path(
             path, must_exist=False, purpose=label
         )
-        try:
-            safe_path.relative_to(safe_root)
-        except ValueError as exc:
+        safe_root_text = os.path.normcase(os.fspath(safe_root))
+        safe_path_text = os.path.normcase(os.fspath(safe_path))
+        root_prefix = safe_root_text.rstrip(os.sep) + os.sep
+        if (
+            safe_path_text != safe_root_text
+            and not safe_path_text.startswith(root_prefix)
+        ):
             raise QualificationReuseError(
                 f"{label} is outside its trusted root"
-            ) from exc
+            )
         _regular_file(safe_path, label)
         value = json.loads(safe_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
