@@ -66,7 +66,9 @@ def _overlay(repo: Path, worktree: Path) -> None:
 @pytest.fixture()
 def isolated_worktree(tmp_path: Path):
     """Provide a detached worktree that mirrors the working tree, then clean it."""
-    worktree = tmp_path / "repo"
+    # A unique basename keeps two parallel workers from colliding on the
+    # administrative entry git derives from the directory name.
+    worktree = tmp_path / "repo-{}".format(os.getpid())
     added = _run(
         ["git", "worktree", "add", "--detach", str(worktree), "HEAD"], REPO_ROOT
     )
@@ -76,8 +78,9 @@ def isolated_worktree(tmp_path: Path):
         _overlay(REPO_ROOT, worktree)
         yield worktree
     finally:
+        # Only remove this worktree.  A repository-wide prune would race a
+        # sibling worker that is still using its own checkout.
         _run(["git", "worktree", "remove", "--force", str(worktree)], REPO_ROOT)
-        _run(["git", "worktree", "prune"], REPO_ROOT)
 
 
 def run_compat_check(worktree: Path, *extra: str) -> subprocess.CompletedProcess:
