@@ -90,8 +90,14 @@ _SAFE_GIT_TOKEN = re.compile(r"[A-Za-z0-9._/@{}:=+~^-]{1,4096}")
 _SAFE_GIT_PATH = re.compile(r"[A-Za-z0-9._/ @+,:=~^-]{1,4096}")
 
 
-def _check_git_arguments(repo_root: str, args: tuple) -> None:
-    """Reject any git argument outside the allowlist before it reaches git."""
+def _git(repo_root: str, *args: str) -> str:
+    """Run one git command and return stripped stdout, failing closed.
+
+    The working directory and every argument pass an allowlist before the
+    command starts.  Only known option words are accepted, and every other
+    token must be a plain reference, commit, or path, so a crafted value cannot
+    add an option or a second command.
+    """
     if _SAFE_GIT_PATH.fullmatch(repo_root) is None or ".." in repo_root.split("/"):
         raise ContractError("unsafe git working directory: {!r}".format(repo_root))
     for argument in args:
@@ -99,11 +105,6 @@ def _check_git_arguments(repo_root: str, args: tuple) -> None:
             continue
         if _SAFE_GIT_TOKEN.fullmatch(argument) is None or argument.startswith("-"):
             raise ContractError("unsafe git argument: {!r}".format(argument))
-
-
-def _git(repo_root: str, *args: str) -> str:
-    """Run one git command and return stripped stdout, failing closed."""
-    _check_git_arguments(repo_root, args)
     try:
         completed = subprocess.run(
             ["git", "-C", repo_root, *args],
