@@ -215,7 +215,9 @@ STANDALONE_RPM_PREREMOVE_RENDER_SNIPPET = '          mkdir -p "${RUNNER_TEMP:-/t
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     "NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}",
-    './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
+    # The legacy workflow cannot map a prerelease onto RPM metadata, so it must
+    # ask the shared validator for the stable-only contract.
+    './packaging/scripts/validate-version.sh --stable-only "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/guides/PACKAGE_INSTALLATION.md",
