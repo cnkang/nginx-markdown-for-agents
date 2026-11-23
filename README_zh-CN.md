@@ -263,6 +263,7 @@ curl -sS -D - -o /dev/null \
 | 了解功能 | [功能索引](docs/features/README.md)、[解压缩](docs/features/DECOMPRESSION.md)、[流式转换](docs/features/STREAMING_COMPATIBILITY.md) |
 | 了解架构 | [架构索引](docs/architecture/README.md)、[系统架构](docs/architecture/SYSTEM_ARCHITECTURE.md) |
 | 验证或贡献 | [测试索引](docs/testing/README.md)、[Harness 索引](docs/harness/README.md) |
+| 准备正式发布 | [同一 SHA 资格复用指南](docs/guides/RELEASE-QUALIFICATION-REUSE.md) |
 | 参与贡献或报告漏洞 | [贡献指南](CONTRIBUTING.md)、[安全政策](SECURITY.md) |
 
 ## 开发与验证
@@ -282,6 +283,11 @@ make test-e2e-rust
 make docs-check
 make harness-check
 ```
+
+发布前可先对候选分支运行完整的 release workflow 预演。若正式 tag 指向同一完整 SHA，
+tag 工作流会在重新校验来源 run、artifact、attestation 和资格记录后复用 fuzz 与 short soak
+结果；软件包构建、兼容性取证、RC 和性能门禁仍会重新执行。任一证据缺失或不匹配时，
+工作流会重新运行这两项长测。详情见[资格复用指南](docs/guides/RELEASE-QUALIFICATION-REUSE.md)。
 
 提交变更前，请运行完整的本地门禁和推送检查：
 
@@ -320,6 +326,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 0.9.4 | 2026-11-23 | 增加同一 SHA 发布预演资格复用说明。 |
 | 0.9.2 | 2026-10-08 | 发布日期统一为 2026-10-08，按已发布状态表述，支持矩阵新增 Ubuntu 26.04 默认仓库 NGINX 1.28.3 条目 |
 | 0.9.2 | 2026-10-03 | 同步发布目标日期、中英文结构、迁移说明与完整验证命令 |
 | 0.9.2 | 2026-09-30 | 将入口文档定稿为 v0.9.2 正式发布状态（发布日期与状态）。 |

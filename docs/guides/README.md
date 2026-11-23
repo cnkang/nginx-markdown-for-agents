@@ -14,6 +14,7 @@ Use these documents when you need decisions and procedures you can act on direct
 6. [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) if you are building from source or working locally.
 7. [ROLLOUT_COOKBOOK.md](ROLLOUT_COOKBOOK.md) if you are planning a controlled enablement.
 8. [HOMEBREW_TAP_RELEASE.md](HOMEBREW_TAP_RELEASE.md) if you publish via a dedicated Homebrew tap.
+9. [RELEASE-QUALIFICATION-REUSE.md](RELEASE-QUALIFICATION-REUSE.md) if you are preparing an exact-SHA release preflight.
 
 ## Guide Index
 
@@ -46,6 +47,7 @@ Use these documents when you need decisions and procedures you can act on direct
 | [streaming-troubleshooting.md](streaming-troubleshooting.md) | Streaming-specific troubleshooting |
 | [GPG_KEY_MANAGEMENT.md](GPG_KEY_MANAGEMENT.md) | Release signing key management |
 | [HOMEBREW_TAP_RELEASE.md](HOMEBREW_TAP_RELEASE.md) | Homebrew tap publication and post-release macOS verification |
+| [RELEASE-QUALIFICATION-REUSE.md](RELEASE-QUALIFICATION-REUSE.md) | Same-SHA release preflight, qualification reuse, and fallback behavior |
 
 ## Scope
 
