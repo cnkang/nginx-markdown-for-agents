@@ -106,12 +106,11 @@ def _git(repo_root: str, *args: str) -> str:
         if _SAFE_GIT_TOKEN.fullmatch(argument) is None or argument.startswith("-"):
             raise ContractError("unsafe git argument: {!r}".format(argument))
     try:
-        # NOSONAR(pythonsecurity:S6350): every element below passed the
-        # allowlist above.  The working directory is a real path with no
-        # traversal component, each option word is a known constant, and each
+        # Every element passed the allowlist above: the working directory has
+        # no traversal component, each option word is a known constant, and each
         # operand is limited to reference, commit, and path characters and may
-        # not start with a dash, so no value can become an option.
-        completed = subprocess.run(
+        # not start with a dash.  No value can become an option.
+        completed = subprocess.run(  # NOSONAR: guarded by the allowlist above
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
