@@ -616,8 +616,10 @@ def _compare_field_required_children(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
     """Compare the required child fields of one diagnostics object."""
-    old_children = {child for child in old.get("required_children") or []}
-    new_children = {child for child in new.get("required_children") or []}
+    old_list = old.get("required_children") or []
+    new_list = new.get("required_children") or []
+    old_children = set(old_list)
+    new_children = set(new_list)
     if old_children - new_children:
         result.add(
             "diagnostics",
@@ -731,8 +733,8 @@ def _compare_diagnostics_top_level(
             None,
         )
     added = sorted(
-        set(field["name"] for field in candidate["fields"])
-        - set(field["name"] for field in baseline["fields"])
+        {field["name"] for field in candidate["fields"]}
+        - {field["name"] for field in baseline["fields"]}
     )
     for name in added:
         verdict = ADDITIVE if name == DIAGNOSTICS_EXTENSION_FIELD else BREAKING

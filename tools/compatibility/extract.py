@@ -308,7 +308,7 @@ def extract_directives(reader: SourceReader) -> Dict[str, Any]:
         len(names_seen) == len(set(names_seen)),
         "duplicate directive names in the command table",
     )
-    declared = sorted({found for found in re.findall(r'"([^"]+)"', names)})
+    declared = sorted(set(re.findall(r'"([^"]+)"', names)))
     require(
         set(names_seen) <= set(declared),
         "command table registers a name absent from the directive name inventory",
@@ -655,7 +655,7 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
             )
         ),
         "deb_nginx_constraints": [list(item) for item in deb_depends],
-        "rpm_nginx_constraints": list(rpm_depends),
+        "rpm_nginx_constraints": rpm_depends,
     }
 
 

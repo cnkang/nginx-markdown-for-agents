@@ -9,6 +9,7 @@ to prevent.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -79,8 +80,30 @@ class SourceRevision:
         return record
 
 
+# Only these option words may reach git.  Every other argument must be a plain
+# reference, commit, or path token, so a crafted value cannot add an option.
+_ALLOWED_GIT_OPTIONS = frozenset(
+    {"-C", "-t", "--verify", "--show-toplevel", "rev-parse", "cat-file", "show"}
+)
+_SAFE_GIT_TOKEN = re.compile(r"[A-Za-z0-9._/@{}:=+~^-]{1,4096}")
+# A directory path may carry a space or a comma; a reference may not.
+_SAFE_GIT_PATH = re.compile(r"[A-Za-z0-9._/ @+,:=~^-]{1,4096}")
+
+
+def _check_git_arguments(repo_root: str, args: tuple) -> None:
+    """Reject any git argument outside the allowlist before it reaches git."""
+    if _SAFE_GIT_PATH.fullmatch(repo_root) is None or ".." in repo_root.split("/"):
+        raise ContractError("unsafe git working directory: {!r}".format(repo_root))
+    for argument in args:
+        if argument in _ALLOWED_GIT_OPTIONS:
+            continue
+        if _SAFE_GIT_TOKEN.fullmatch(argument) is None or argument.startswith("-"):
+            raise ContractError("unsafe git argument: {!r}".format(argument))
+
+
 def _git(repo_root: str, *args: str) -> str:
     """Run one git command and return stripped stdout, failing closed."""
+    _check_git_arguments(repo_root, args)
     try:
         completed = subprocess.run(
             ["git", "-C", repo_root, *args],
