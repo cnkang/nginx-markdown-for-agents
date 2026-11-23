@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
+from .model import digest_of
+
 OK = "OK"
 ADDITIVE = "ADDITIVE"
 REVIEW_REQUIRED = "REVIEW_REQUIRED"
@@ -41,10 +43,20 @@ class Finding:
     baseline: Optional[Any] = None
     candidate: Optional[Any] = None
 
+    @property
+    def fingerprint(self) -> str:
+        """Identify this finding by its id and both evidence values.
+
+        An approval names this value, so the same finding id with different
+        evidence cannot inherit an earlier decision.
+        """
+        return digest_of([self.finding_id, self.baseline, self.candidate])
+
     def as_dict(self) -> Dict[str, Any]:
         """Return a JSON-serializable finding."""
         record: Dict[str, Any] = {
             "id": self.finding_id,
+            "fingerprint": self.fingerprint,
             "surface": self.surface,
             "verdict": self.verdict,
             "message": self.message,
@@ -572,7 +584,34 @@ def _compare_field_nullability(
 def _compare_field_enum(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
-    """Compare the allowed values of one diagnostics field."""
+    """Compare the allowed values of one diagnostics field.
+
+    A field without an ``enum`` accepts any value, so declaring one narrows the
+    contract and removing one widens it.  Comparing set differences alone would
+    invert both cases.
+    """
+    old_declares = "enum" in old
+    new_declares = "enum" in new
+    if not old_declares and new_declares:
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "enum-added:{}".format(name),
+            "diagnostics field {} gained a closed value set".format(name),
+            None,
+            sorted(new.get("enum") or []),
+        )
+        return
+    if old_declares and not new_declares:
+        result.add(
+            "diagnostics",
+            ADDITIVE,
+            "enum-removed:{}".format(name),
+            "diagnostics field {} no longer restricts its values".format(name),
+            sorted(old.get("enum") or []),
+            None,
+        )
+        return
     old_enum = set(old.get("enum") or [])
     new_enum = set(new.get("enum") or [])
     if old_enum - new_enum:
@@ -640,12 +679,12 @@ def _compare_field_required_children(
         )
 
 
-def _compare_field_children(
-    result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
+def _compare_properties(
+    result: Comparison, name: str, old: List[Dict[str, Any]], new: List[Dict[str, Any]]
 ) -> None:
-    """Compare the child field set of one diagnostics object."""
-    old_children = _by_name(old.get("properties") or [])
-    new_children = _by_name(new.get("properties") or [])
+    """Compare a projected child field set, including shared field types."""
+    old_children = _by_name(old)
+    new_children = _by_name(new)
     for child in sorted(set(old_children) - set(new_children)):
         result.add(
             "diagnostics",
@@ -664,6 +703,69 @@ def _compare_field_children(
             None,
             new_children[child]["type"],
         )
+    for child in sorted(set(old_children) & set(new_children)):
+        if old_children[child]["type"] != new_children[child]["type"]:
+            result.add(
+                "diagnostics",
+                BREAKING,
+                "child-type-changed:{}:{}".format(name, child),
+                "diagnostics object {} changed the type of field {}".format(name, child),
+                old_children[child]["type"],
+                new_children[child]["type"],
+            )
+
+
+def _compare_field_items(
+    result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
+) -> None:
+    """Compare the item schema of an array field."""
+    if old.get("items_type") != new.get("items_type"):
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "items-type-changed:{}".format(name),
+            "diagnostics array {} changed its item type".format(name),
+            old.get("items_type"),
+            new.get("items_type"),
+        )
+    old_required = set(old.get("items_required") or [])
+    new_required = set(new.get("items_required") or [])
+    if old_required - new_required:
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "items-required-removed:{}".format(name),
+            "diagnostics array {} no longer requires an item field".format(name),
+            sorted(old_required - new_required),
+            None,
+        )
+    if new_required - old_required:
+        result.add(
+            "diagnostics",
+            REVIEW_REQUIRED,
+            "items-required-added:{}".format(name),
+            "diagnostics array {} requires an additional item field".format(name),
+            None,
+            sorted(new_required - old_required),
+        )
+    if (
+        old.get("items_additional_properties") is False
+        and new.get("items_additional_properties") is not False
+    ):
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "items-additional-properties-weakened:{}".format(name),
+            "diagnostics array items for {} stopped rejecting unknown fields".format(name),
+            old.get("items_additional_properties"),
+            new.get("items_additional_properties"),
+        )
+    _compare_properties(
+        result,
+        name + "[]",
+        old.get("items_properties") or [],
+        new.get("items_properties") or [],
+    )
 
 
 def _compare_diagnostics_field(
@@ -678,7 +780,9 @@ def _compare_diagnostics_field(
     _compare_field_closed_object(result, name, old, new)
     _compare_field_required_children(result, name, old, new)
     if old.get("properties") is not None and new.get("properties") is not None:
-        _compare_field_children(result, name, old, new)
+        _compare_properties(result, name, old["properties"], new["properties"])
+    if "items_type" in old or "items_type" in new:
+        _compare_field_items(result, name, old, new)
 
 
 def _compare_diagnostics_header(
@@ -731,6 +835,15 @@ def _compare_diagnostics_top_level(
             "top-level diagnostics fields are no longer required",
             sorted(old_fields - new_fields),
             None,
+        )
+    for name in sorted(new_fields - old_fields):
+        result.add(
+            "diagnostics",
+            REVIEW_REQUIRED,
+            "required-added:{}".format(name),
+            "diagnostics field {} became required".format(name),
+            None,
+            name,
         )
     added = sorted(
         {field["name"] for field in candidate["fields"]}
@@ -845,41 +958,83 @@ def compare_http(
 SUPPORT_TIER_RANK = {"experimental": 0, "best-effort": 1, "supported": 2}
 
 
+def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Group matrix rows by the target the comparison reports on.
+
+    Every row keeps its own tier, so a group can report more than one value.
+    The group takes the highest tier and the blocking flag of any member, which
+    makes the comparison independent of row order and of patch progression.
+    """
+    groups: Dict[str, Dict[str, Any]] = {}
+    for row in contract["support"]["targets"]:
+        key = "{}/{}/{}/{}".format(
+            row["nginx_minor"], row["os"], row["libc"], row["arch"]
+        )
+        bucket = groups.setdefault(
+            key,
+            {
+                "nginx_minor": row["nginx_minor"],
+                "os": row["os"],
+                "libc": row["libc"],
+                "arch": row["arch"],
+                "tiers": set(),
+                "blocking": False,
+                "patches": [],
+            },
+        )
+        bucket["tiers"].add(row["support_tier"])
+        bucket["blocking"] = bucket["blocking"] or row["release_blocking"]
+        bucket["patches"].append(row["nginx_version"])
+    for bucket in groups.values():
+        bucket["patches"].sort()
+        bucket["tiers"] = sorted(
+            bucket["tiers"], key=lambda tier: SUPPORT_TIER_RANK.get(tier, -1)
+        )
+    return groups
+
+
+def _best_tier(tiers: List[str]) -> str:
+    """Return the highest support tier in one group."""
+    return max(tiers, key=lambda tier: SUPPORT_TIER_RANK.get(tier, -1))
+
+
 def _compare_support_target(
     result: Comparison, key: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
-    """Compare one supported target aggregation."""
-    if old["support_tier"] != new["support_tier"]:
-        old_rank = SUPPORT_TIER_RANK.get(old["support_tier"], -1)
-        new_rank = SUPPORT_TIER_RANK.get(new["support_tier"], -1)
+    """Compare one supported target group."""
+    old_tier = _best_tier(old["tiers"])
+    new_tier = _best_tier(new["tiers"])
+    if old_tier != new_tier:
+        old_rank = SUPPORT_TIER_RANK.get(old_tier, -1)
+        new_rank = SUPPORT_TIER_RANK.get(new_tier, -1)
         verdict = ADDITIVE if new_rank > old_rank else BREAKING
         result.add(
             "packaging",
             verdict,
             "support-tier-changed:{}".format(key),
             "support tier changed for {} from {} to {}".format(
-                key, old["support_tier"], new["support_tier"]
+                key, old_tier, new_tier
             ),
-            old["support_tier"],
-            new["support_tier"],
+            old["tiers"],
+            new["tiers"],
         )
-    if old["release_blocking"] and not new["release_blocking"]:
+    if old["blocking"] and not new["blocking"]:
         result.add(
             "packaging",
             BREAKING,
             "release-blocking-dropped:{}".format(key),
             "{} stopped being release blocking".format(key),
-            old["release_blocking"],
-            new["release_blocking"],
+            old["blocking"],
+            new["blocking"],
         )
-    if not old["release_blocking"] and new["release_blocking"]:
+    if not old["blocking"] and new["blocking"]:
         result.add(
             "packaging",
             ADDITIVE,
             "release-blocking-added:{}".format(key),
             "{} became release blocking".format(key),
-            old["release_blocking"],
-            new["release_blocking"],
+            old["blocking"],
+            new["blocking"],
         )
     if old["patches"] != new["patches"]:
         result.add(
@@ -891,6 +1046,30 @@ def _compare_support_target(
             ),
             old["patches"],
             new["patches"],
+        )
+
+
+def _compare_install_paths(
+    result: Comparison, key: str, old: List[str], new: List[str]
+) -> None:
+    """Compare one family's effective install path list."""
+    for path in sorted(set(old) - set(new)):
+        result.add(
+            "packaging",
+            BREAKING,
+            "{}-path-removed:{}".format(key, path),
+            "the {} package no longer installs {}".format(key, path),
+            path,
+            None,
+        )
+    for path in sorted(set(new) - set(old)):
+        result.add(
+            "packaging",
+            ADDITIVE,
+            "{}-path-added:{}".format(key, path),
+            "the {} package installs {}".format(key, path),
+            None,
+            path,
         )
 
 
@@ -912,7 +1091,7 @@ def compare_packaging(
             result.add(
                 "packaging",
                 BREAKING,
-                CHANGED_ID.format(key.replace("_", "-")),
+                "{}-changed".format(key.replace("_", "-")),
                 "the installed module path changed for {}".format(key),
                 baseline[key],
                 candidate[key],
@@ -922,43 +1101,39 @@ def compare_packaging(
             result.add(
                 "packaging",
                 REVIEW_REQUIRED,
-                CHANGED_ID.format(key.replace("_", "-")),
+                "{}-changed".format(key.replace("_", "-")),
                 "the packaging {} contract changed".format(key),
                 baseline[key],
                 candidate[key],
             )
-    old_targets = {
-        "{}/{}/{}/{}".format(
-            item["nginx_minor"], item["os"], item["libc"], item["arch"]
-        ): item
-        for item in baseline["support"]["targets"]
-    }
-    new_targets = {
-        "{}/{}/{}/{}".format(
-            item["nginx_minor"], item["os"], item["libc"], item["arch"]
-        ): item
-        for item in candidate["support"]["targets"]
-    }
-    for key in sorted(set(old_targets) - set(new_targets)):
+    _compare_install_paths(
+        result, "deb", baseline.get("deb_install_paths") or [], candidate.get("deb_install_paths") or []
+    )
+    _compare_install_paths(
+        result, "rpm", baseline.get("rpm_install_paths") or [], candidate.get("rpm_install_paths") or []
+    )
+    old_groups = _support_groups(baseline)
+    new_groups = _support_groups(candidate)
+    for key in sorted(set(old_groups) - set(new_groups)):
         result.add(
             "packaging",
             BREAKING,
             "support-target-removed:{}".format(key),
             "supported target {} was removed from the matrix".format(key),
-            old_targets[key]["support_tier"],
+            old_groups[key]["tiers"],
             None,
         )
-    for key in sorted(set(new_targets) - set(old_targets)):
+    for key in sorted(set(new_groups) - set(old_groups)):
         result.add(
             "packaging",
             ADDITIVE,
             "support-target-added:{}".format(key),
             "supported target {} was added to the matrix".format(key),
             None,
-            new_targets[key]["support_tier"],
+            new_groups[key]["tiers"],
         )
-    for key in sorted(set(old_targets) & set(new_targets)):
-        _compare_support_target(result, key, old_targets[key], new_targets[key])
+    for key in sorted(set(old_groups) & set(new_groups)):
+        _compare_support_target(result, key, old_groups[key], new_groups[key])
 
 
 def compare_ffi(
@@ -1066,30 +1241,37 @@ def apply_approvals(
     require_shape = approvals.get("schema") == 1
     if not require_shape:
         raise ValueError("approval file must declare \"schema\": 1")
-    approved: Dict[str, Dict[str, Any]] = {}
+    approved: Dict[tuple, Dict[str, Any]] = {}
     for entry in entries:
-        for field in ("finding_id", "reason", "approved_by", "approved_at"):
+        for field in (
+            "finding_id",
+            "evidence_fingerprint",
+            "reason",
+            "approved_by",
+            "approved_at",
+        ):
             if not entry.get(field):
                 raise ValueError(
                     "approval in {} is missing {}".format(approval_path, field)
                 )
-        approved[entry["finding_id"]] = entry
+        approved[(entry["finding_id"], entry["evidence_fingerprint"])] = entry
     used = set()
     for finding in result.findings:
         if finding.verdict != REVIEW_REQUIRED:
             continue
-        entry = approved.get(finding.finding_id)
+        key = (finding.finding_id, finding.fingerprint)
+        entry = approved.get(key)
         if entry is None:
             continue
         finding.verdict = OK
         finding.message = "{} [approved by {}: {}]".format(
             finding.message, entry["approved_by"], entry["reason"]
         )
-        used.add(finding.finding_id)
-    for finding_id in sorted(set(approved) - used):
+        used.add(key)
+    for finding_id, fingerprint in sorted(set(approved) - used):
         notices.append(
-            "approval {} in {} matches no REVIEW_REQUIRED finding".format(
-                finding_id, approval_path
+            "approval {}({}) in {} matches no REVIEW_REQUIRED finding".format(
+                finding_id, fingerprint[:19], approval_path
             )
         )
     return notices

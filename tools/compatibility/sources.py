@@ -87,7 +87,34 @@ _ALLOWED_GIT_OPTIONS = frozenset(
 )
 _SAFE_GIT_TOKEN = re.compile(r"[A-Za-z0-9._/@{}:=+~^-]{1,4096}")
 # A directory path may carry a space or a comma; a reference may not.
-_SAFE_GIT_PATH = re.compile(r"[A-Za-z0-9._/ @+,:=~^-]{1,4096}")
+# A checkout path is passed to `git -C`, which consumes it as a directory, so
+# the guard rejects control characters and traversal components rather than
+# restricting the characters a real path may contain.
+_SAFE_GIT_PATH = re.compile(r"[^\x00-\x1f\x7f]{1,4096}")
+
+
+# Location variables would make `git -C` operate on a different repository
+# than the one the caller selected.
+_GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+    "GIT_CEILING_DIRECTORIES",
+)
+
+
+def _git_environment() -> dict:
+    """Return the process environment without inherited repository locations."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _GIT_LOCATION_VARS
+    }
 
 
 def _git(repo_root: str, *args: str) -> str:
@@ -100,6 +127,10 @@ def _git(repo_root: str, *args: str) -> str:
     """
     if _SAFE_GIT_PATH.fullmatch(repo_root) is None or ".." in repo_root.split("/"):
         raise ContractError("unsafe git working directory: {!r}".format(repo_root))
+    if not os.path.isdir(repo_root):
+        raise ContractError(
+            "git working directory is not a directory: {!r}".format(repo_root)
+        )
     for argument in args:
         if argument in _ALLOWED_GIT_OPTIONS:
             continue
@@ -116,6 +147,7 @@ def _git(repo_root: str, *args: str) -> str:
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
+            env=_git_environment(),
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ContractError("git {} failed: {}".format(" ".join(args), error))
@@ -147,20 +179,29 @@ def repo_root_for(path: str) -> str:
 
 
 def resolve_tag(repo_root: str, tag: str) -> SourceRevision:
-    """Resolve a release tag to its commit and record the tag object."""
+    """Resolve a release tag through ``refs/tags`` and record both objects.
+
+    Resolving the bare name could pick a branch of the same name, so the
+    reference is qualified first and the resolved object is peeled afterwards.
+    """
     validate_ref(tag, "tag")
-    commit = _git(repo_root, "rev-parse", "--verify", "{}^{{commit}}".format(tag))
-    object_type = _git(repo_root, "cat-file", "-t", tag)
+    reference = "refs/tags/{}".format(tag)
+    object_id = _git(repo_root, "rev-parse", "--verify", reference)
+    validate_commit(object_id, "tag object")
+    object_type = _git(repo_root, "cat-file", "-t", object_id)
     if object_type == "tag":
-        tag_object = _git(repo_root, "rev-parse", "--verify", tag)
+        tag_object = object_id
+        commit = _git(
+            repo_root, "rev-parse", "--verify", "{}^{{commit}}".format(object_id)
+        )
     elif object_type == "commit":
         tag_object = None
+        commit = object_id
     else:
         raise ContractError(
             "tag {} resolves to unsupported object type {}".format(tag, object_type)
         )
-    if len(commit) != 40:
-        raise ContractError("tag {} did not resolve to a full commit SHA".format(tag))
+    validate_commit(commit, "tag commit")
     return SourceRevision(
         kind="release-tag", label=tag, commit=commit, tag_object=tag_object
     )
@@ -202,6 +243,14 @@ class SourceReader:
                     "contract input {} is missing from the working tree".format(path)
                 )
             resolved = validate_read_path(absolute, purpose="contract input")
+            repository_root = os.path.realpath(self.repo_root)
+            if (
+                os.path.commonpath([repository_root, os.path.realpath(resolved)])
+                != repository_root
+            ):
+                raise ContractError(
+                    "contract input {} escapes the repository".format(path)
+                )
             with open(resolved, "rb") as handle:
                 payload = handle.read()
         else:

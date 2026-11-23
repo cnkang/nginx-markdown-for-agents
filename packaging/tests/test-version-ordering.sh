@@ -28,6 +28,30 @@ FAIL_COUNT=0
 NOT_RUN_COUNT=0
 REQUIRE_ALL=0
 
+usage() {
+    printf 'Usage: %s [--require-all]\n' "${0##*/}" >&2
+    printf '  --require-all   Treat a check that could not run as a failure\n' >&2
+    return 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --require-all)
+            REQUIRE_ALL=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'ERROR: unknown argument: %s\n' "$1" >&2
+            usage
+            exit 2
+            ;;
+    esac
+    shift
+done
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAPPER="${REPO_ROOT}/packaging/scripts/release_version.py"
 NGINX_VERSION="1.28.3"
@@ -57,17 +81,27 @@ check_expected() {
 check_expected "0.9.4 DEB version" "0.9.4" "$(matrix_field 0.9.4 deb_version)"
 check_expected "0.9.4 RPM release" "nginx${NGINX_VERSION}.1" \
     "$(matrix_field 0.9.4 rpm_release)"
-check_expected "1.0.0-rc.1 DEB version" "1.0.0~rc1" \
+check_expected "1.0.0-rc.1 DEB version" "1.0.0~rc.1" \
     "$(matrix_field 1.0.0-rc.1 deb_version)"
-check_expected "1.0.0-rc.1 RPM version" "1.0.0~rc1" \
+check_expected "1.0.0-rc.1 RPM version" "1.0.0~rc.1" \
     "$(matrix_field 1.0.0-rc.1 rpm_version)"
 check_expected "1.0.0-rc.1 RPM release" "nginx${NGINX_VERSION}.1" \
     "$(matrix_field 1.0.0-rc.1 rpm_release)"
-check_expected "1.0.0-rc.2 DEB version" "1.0.0~rc2" \
+check_expected "1.0.0-rc.2 DEB version" "1.0.0~rc.2" \
     "$(matrix_field 1.0.0-rc.2 deb_version)"
 check_expected "1.0.0 DEB version" "1.0.0" "$(matrix_field 1.0.0 deb_version)"
 check_expected "1.0.0 RPM release" "nginx${NGINX_VERSION}.1" \
     "$(matrix_field 1.0.0 rpm_release)"
+
+# Distinct SemVer prereleases must not collapse onto one package version.
+RC_DOT="$(matrix_field 1.0.0-rc.1 deb_version)"
+RC_PLAIN="$(matrix_field 1.0.0-rc1 deb_version)"
+RC_UPPER="$(matrix_field 1.0.0-RC.1 deb_version)"
+if [[ "${RC_DOT}" != "${RC_PLAIN}" && "${RC_DOT}" != "${RC_UPPER}" && "${RC_PLAIN}" != "${RC_UPPER}" ]]; then
+    pass "distinct prerelease identifiers keep distinct package versions"
+else
+    fail "prerelease identifiers collided: ${RC_DOT} ${RC_PLAIN} ${RC_UPPER}"
+fi
 
 for rejected in "1.0" "01.0.0" "1.0.0-" "1.0.0-rc..1" "1.0.0+build" "1.0.0-rc.01"; do
     if python3 "${MAPPER}" --version "${rejected}" >/dev/null 2>&1; then
@@ -95,9 +129,9 @@ if command -v dpkg >/dev/null 2>&1; then
             fail "$1 ($2 is not lower than $3)"
         fi
     }
-    check_dpkg_lt "dpkg: 0.9.4 < 1.0.0~rc1" "${DEB_094}" "${DEB_RC1}"
-    check_dpkg_lt "dpkg: 1.0.0~rc1 < 1.0.0~rc2" "${DEB_RC1}" "${DEB_RC2}"
-    check_dpkg_lt "dpkg: 1.0.0~rc2 < 1.0.0" "${DEB_RC2}" "${DEB_GA}"
+    check_dpkg_lt "dpkg: 0.9.4 < 1.0.0~rc.1" "${DEB_094}" "${DEB_RC1}"
+    check_dpkg_lt "dpkg: 1.0.0~rc.1 < 1.0.0~rc.2" "${DEB_RC1}" "${DEB_RC2}"
+    check_dpkg_lt "dpkg: 1.0.0~rc.2 < 1.0.0" "${DEB_RC2}" "${DEB_GA}"
     # The trap this mapping exists for: the plain hyphen form sorts ABOVE the
     # final release, so a naive mapping would make RC the newest version.
     if dpkg --compare-versions "1.0.0-rc1-nginx${NGINX_VERSION}" gt "${DEB_GA}"; then
@@ -154,7 +188,7 @@ fi
 ' 2>&1)"
     case "${deb_smoke}" in
         *INSTALL_UPGRADE_OK*)
-            pass "dpkg install order: rc1 -> rc2 -> 1.0.0 upgrades, rc1 downgrade refused"
+            pass "dpkg install order: rc1 -> rc2 -> 1.0.0 upgrades and the comparator agrees"
             ;;
         *)
             fail "dpkg install order failed: ${deb_smoke}"
@@ -193,7 +227,7 @@ naive="$(cmp "$(printf "%s-0.rc1.nginx%s" "1.0.0" "$NGINX_VERSION")" "$RPM_GA")"
 echo "RC1_VS_094=$rc1_vs_094 RC1_VS_RC2=$rc1_vs_rc2 RC2_VS_GA=$rc2_vs_ga NAIVE=$naive"
 ' 2>&1)"
     if [[ "${rpm_smoke}" == *"RC1_VS_094=1 RC1_VS_RC2=-1 RC2_VS_GA=-1 NAIVE=1"* ]]; then
-        pass "rpmvercmp: 0.9.4 < 1.0.0~rc1 < 1.0.0~rc2 < 1.0.0 (Release-first marker rejected)"
+        pass "rpmvercmp: 0.9.4 < 1.0.0~rc.1 < 1.0.0~rc.2 < 1.0.0 (Release-first marker rejected)"
     else
         fail "rpmvercmp ordering failed: ${rpm_smoke}"
     fi

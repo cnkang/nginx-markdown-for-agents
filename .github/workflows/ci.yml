@@ -272,6 +272,9 @@ jobs:
               - 'tools/e2e/**'
               - 'tools/release-matrix.json'
               - 'packaging/nfpm/nfpm.yaml'
+              - 'packaging/scripts/release_version.py'
+              - 'packaging/scripts/validate-version.sh'
+              - 'packaging/tests/test-version-ordering.sh'
               - 'docs/harness/public-surface-inventory.json'
               - 'Makefile'
             workflows:

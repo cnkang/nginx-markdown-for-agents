@@ -19,6 +19,17 @@ TAG_PATTERN = re.compile(
 )
 
 
+def _prerelease_has_leading_zero(ref_name: str) -> bool:
+    """Whether a numeric prerelease identifier carries a leading zero."""
+    _, separator, prerelease = ref_name.partition("-")
+    if not separator:
+        return False
+    for identifier in prerelease.split("."):
+        if identifier.isdigit() and len(identifier) > 1 and identifier[0] == "0":
+            return True
+    return False
+
+
 def verify_tag_candidate(
     *,
     tag_sha: str,
@@ -31,7 +42,7 @@ def verify_tag_candidate(
     """Raise ``ValueError`` unless all release promotion inputs are valid."""
     if ref_type != "tag":
         raise ValueError("release promotion requires a tag ref")
-    if not TAG_PATTERN.fullmatch(ref_name):
+    if not TAG_PATTERN.fullmatch(ref_name) or _prerelease_has_leading_zero(ref_name):
         raise ValueError("release ref name must be a version tag")
     if default_branch != "main":
         raise ValueError(

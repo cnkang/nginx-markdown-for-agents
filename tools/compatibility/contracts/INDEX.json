@@ -20,8 +20,8 @@
       "commit": "9b8596c6242ca76f51d5f57451eb99519a27735f",
       "tag_object": "a3ca1865510930e82a7e5c9a10649695fb9a6383",
       "manifest": "nginx-markdown-0.9.2.json",
-      "manifest_sha256": "sha256:c774aaa2d82e4e3e09f6c523abd5650dd5a02d31fcb4cd923d62f1eff4d0e1e8",
-      "contract_digest": "sha256:9443a1f686b1a16152d6cdfdfe636ff3cafb95740e687b5965011c36b41bea64"
+      "manifest_sha256": "sha256:fdeff3d8b6c5627399de2f1f976262078c10a8b0f2c540b9c5b144bfd6bb360f",
+      "contract_digest": "sha256:3ffefcfa5706d3f7fe77d0c8f4b096131f8ce5981a563d2986fe213682d57580"
     },
     {
       "tag": "v0.9.4",
@@ -29,8 +29,8 @@
       "commit": "3df390f831e94719a5f0399e0bd486c6489f5ec4",
       "tag_object": "4eac4c115fd2159a455d1eed8de00a740390f222",
       "manifest": "nginx-markdown-0.9.4.json",
-      "manifest_sha256": "sha256:0c7acd8ceb1328a9a0d6aa3cd3cf00a3c16d4481f4236cf90de66012b59caa34",
-      "contract_digest": "sha256:04b5ef65e67ca116c1cf234558b1f573c4bc781c0af58bc5b3fdb8b5d17df7c4"
+      "manifest_sha256": "sha256:aa5660f91a027fff04812c460b8617bed54f1a941d9f712ccdcbb41f6df8d64c",
+      "contract_digest": "sha256:5bc4969ce8dcd8f38158d25ce838739eaa842a9403d51d4acd8b45669b3e48b6"
     }
   ],
   "comparisons": [

@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .conftest import REPO_ROOT, _run, run_compat_check
+from .conftest import REPO_ROOT, _run, run_compat_check, sanitized_environment
 
 DIRECTIVES = (
     "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
@@ -75,6 +75,16 @@ def _flip_filter_default(worktree: Path) -> None:
         DEFAULT_ANCHOR,
         DEFAULT_ANCHOR.replace("Default: off", "Default: on"),
     )
+
+
+def _fingerprint_for(output: str, finding_id: str) -> str:
+    """Read the evidence fingerprint the report printed for one finding."""
+    marker = "{} (fingerprint ".format(finding_id)
+    start = output.find(marker)
+    assert start >= 0, "no fingerprint for {} in:\n{}".format(finding_id, output)
+    start += len(marker)
+    end = output.find(")", start)
+    return output[start:end]
 
 
 def test_clean_worktree_passes(isolated_worktree):
@@ -299,6 +309,7 @@ def test_negative_unused_approval_is_reported(isolated_worktree):
                 "exceptions": [
                     {
                         "finding_id": "directives:default-changed:markdown_filter",
+                        "evidence_fingerprint": "sha256:" + "0" * 64,
                         "reason": "not applicable",
                         "approved_by": "maintainer",
                         "approved_at": "2026-11-23",
@@ -318,6 +329,12 @@ def test_negative_unused_approval_is_reported(isolated_worktree):
 def test_negative_approval_cannot_waive_breaking(isolated_worktree):
     """A BREAKING finding stays blocking even with an approval file."""
     _flip_filter_default(isolated_worktree)
+    reported = _assert_fails(
+        isolated_worktree, "directives:default-changed:markdown_filter"
+    )
+    fingerprint = _fingerprint_for(
+        reported, "directives:default-changed:markdown_filter"
+    )
     approvals = isolated_worktree / "approvals.json"
     approvals.write_text(
         json.dumps(
@@ -326,6 +343,7 @@ def test_negative_approval_cannot_waive_breaking(isolated_worktree):
                 "exceptions": [
                     {
                         "finding_id": "directives:default-changed:markdown_filter",
+                        "evidence_fingerprint": fingerprint,
                         "reason": "attempted waiver",
                         "approved_by": "maintainer",
                         "approved_at": "2026-11-23",
@@ -335,7 +353,6 @@ def test_negative_approval_cannot_waive_breaking(isolated_worktree):
         ),
         encoding="utf-8",
     )
-    _assert_fails(isolated_worktree, "directives:default-changed:markdown_filter")
     completed = run_compat_check(isolated_worktree, "--approvals", str(approvals))
     assert completed.returncode == 1
 
@@ -348,6 +365,7 @@ def test_negative_shallow_history_fails_closed(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        env=sanitized_environment(),
     )
     assert clone.returncode == 0, clone.stderr
     overlay = _run(["git", "checkout", "--detach", "HEAD"], shallow)

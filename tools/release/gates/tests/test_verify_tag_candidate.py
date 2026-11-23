@@ -71,6 +71,7 @@ def test_prerelease_tag_is_accepted(ref_name: str) -> None:
         "v1.0.0-",  # trailing separator
         "v1.0.0-rc..1",  # empty identifier
         "v1.0.0+build.1",  # build metadata has no package identity
+        "v1.0.0-rc.01",  # numeric identifier with a leading zero
     ],
 )
 def test_malformed_release_tag_is_rejected(ref_name: str) -> None:

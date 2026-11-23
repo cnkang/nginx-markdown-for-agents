@@ -68,13 +68,15 @@ HTTP_CONTRACT_TESTS = {
 # this gate: the gate proves the contract text did not move, the targets prove
 # the behaviour still holds.
 HTTP_EXECUTION_TARGETS = {
-    "accept_negotiation": UNIT_SUITE_TARGET + " / make test-all-e2e",
-    "conditional_304": UNIT_SUITE_TARGET + " / make test-all-e2e",
+    "accept_negotiation": UNIT_SUITE_TARGET
+    + " / bash tools/e2e/verify_accept_negotiation_e2e.sh",
+    "conditional_304": UNIT_SUITE_TARGET
+    + " / bash tools/e2e/verify_conditional_requests_e2e.sh",
     "head_request": UNIT_SUITE_TARGET,
     "header_plan_vary_content_type": UNIT_SUITE_TARGET,
     "pre_post_commit": UNIT_SUITE_TARGET,
-    "status_and_range": "make test-all-e2e",
-    "auth_and_cache": "make test-all-e2e",
+    "status_and_range": "bash tools/e2e/verify_status_codes_e2e.sh",
+    "auth_and_cache": "bash tools/e2e/verify_auth_cache_e2e.sh",
 }
 
 _CONTEXT_FLAGS = (
@@ -167,8 +169,14 @@ def _split_fields(entry: str) -> List[str]:
     return fields
 
 
+def _flag_tokens(flags: str) -> set:
+    """Split a command-flag expression into exact tokens."""
+    return {token.strip() for token in flags.split("|") if token.strip()}
+
+
 def _args_contract(flags: str) -> str:
     """Map NGINX command flags to the inventory argument contract."""
+    tokens = _flag_tokens(flags)
     for token, value in (
         ("NGX_CONF_NOARGS", "no_args"),
         ("NGX_CONF_TAKE12", "1_or_2"),
@@ -177,14 +185,15 @@ def _args_contract(flags: str) -> str:
         ("NGX_CONF_FLAG", "flag"),
         ("NGX_CONF_TAKE1", "1"),
     ):
-        if token in flags:
+        if token in tokens:
             return value
     return "unknown"
 
 
 def _context_contract(flags: str) -> List[str]:
     """Return the directive contexts declared by the command flags."""
-    return [name for token, name in _CONTEXT_FLAGS if token in flags]
+    tokens = _flag_tokens(flags)
+    return [name for token, name in _CONTEXT_FLAGS if token in tokens]
 
 
 def _preceding_comment(block: str, entry_brace: int) -> str:
@@ -394,8 +403,20 @@ def _collect_series(
     return raw_series, labels
 
 
+def _unlabelled_samples(joined: str, families: Dict[str, str]) -> List[str]:
+    """Return the families the renderer emits without any label block."""
+    present = set()
+    for chunk in joined.split("\\n"):
+        text = chunk.lstrip('" \t')
+        for name in families:
+            if text.startswith(name + " "):
+                present.add(name)
+                break
+    return sorted(present)
+
+
 def _emitted_series(renderer: str) -> Dict[str, Any]:
-    """Extract emitted families, types, label names, and literal series."""
+    """Extract emitted families, types, label names, literal series, samples."""
     joined = _join_c_string_literals(renderer)
     families = _type_families(joined)
     raw_series, labels = _collect_series(joined, families)
@@ -407,6 +428,7 @@ def _emitted_series(renderer: str) -> Dict[str, Any]:
         "families": {name: families[name] for name in sorted(families)},
         "label_sets": {name: labels[name] for name in sorted(labels)},
         "series": series,
+        "unlabelled_samples": _unlabelled_samples(joined, families),
     }
 
 
@@ -454,6 +476,11 @@ def extract_reasons(reader: SourceReader) -> Dict[str, Any]:
         discriminants == list(range(len(discriminants))),
         "reason discriminants are not a contiguous 0..N-1 set",
     )
+    keys = [entry["key"] for entry in ordered]
+    require(
+        len(keys) == len(set(keys)),
+        "reason registry declares a duplicate key",
+    )
     return {
         "registry_schema_version": (registry.get("metadata") or {}).get("schema_version"),
         "count": len(ordered),
@@ -461,7 +488,52 @@ def extract_reasons(reader: SourceReader) -> Dict[str, Any]:
     }
 
 
-def _schema_field(name: str, schema: Dict[str, Any], required: bool) -> Dict[str, Any]:
+_REF_PREFIX = "#/$defs/"
+_REF_DEPTH_LIMIT = 8
+
+
+def _resolve_ref(schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
+    """Resolve a local ``$ref`` chain, failing closed when it cannot."""
+    reference = schema.get("$ref")
+    if reference is None:
+        return schema
+    if depth > _REF_DEPTH_LIMIT:
+        raise ContractError("schema $ref chain is too deep: {}".format(reference))
+    if not isinstance(reference, str) or not reference.startswith(_REF_PREFIX):
+        raise ContractError("unsupported schema $ref: {!r}".format(reference))
+    target = defs.get(reference[len(_REF_PREFIX):])
+    if not isinstance(target, dict):
+        raise ContractError("unresolved schema $ref: {!r}".format(reference))
+    return _resolve_ref(target, defs, depth + 1)
+
+
+def _schema_properties(schema: Dict[str, Any], defs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Project the child fields of a resolved object schema."""
+    return sorted(
+        (
+            {"name": child, "type": child_schema.get("type")}
+            for child, child_schema in (schema.get("properties") or {}).items()
+        ),
+        key=lambda item: item["name"],
+    )
+
+
+def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any]:
+    """Project the item schema of an array field, resolving a ``$ref``."""
+    item = _resolve_ref(schema.get("items") or {}, defs)
+    if not item:
+        raise ContractError("array field declares no item schema")
+    return {
+        "items_type": item.get("type"),
+        "items_required": sorted(item.get("required") or []),
+        "items_additional_properties": item.get("additionalProperties"),
+        "items_properties": _schema_properties(item, defs),
+    }
+
+
+def _schema_field(
+    name: str, schema: Dict[str, Any], required: bool, defs: Dict[str, Any]
+) -> Dict[str, Any]:
     """Normalize one diagnostics schema property."""
     field: Dict[str, Any] = {
         "name": name,
@@ -475,34 +547,22 @@ def _schema_field(name: str, schema: Dict[str, Any], required: bool) -> Dict[str
         field["enum"] = sorted(schema["enum"])
     if schema.get("type") == "object" or "properties" in schema:
         field["additional_properties"] = schema.get("additionalProperties")
-        child_required = sorted(schema.get("required") or [])
-        field["required_children"] = child_required
-        field["properties"] = sorted(
-            (
-                {
-                    "name": child,
-                    "type": child_schema.get("type"),
-                }
-                for child, child_schema in (schema.get("properties") or {}).items()
-            ),
-            key=lambda item: item["name"],
-        )
+        field["required_children"] = sorted(schema.get("required") or [])
+        field["properties"] = _schema_properties(schema, defs)
     if schema.get("type") == "array":
-        item = schema.get("items") or {}
-        field["items_type"] = item.get("type")
-        field["items_required"] = sorted(item.get("required") or [])
-        field["items_additional_properties"] = item.get("additionalProperties")
+        field.update(_schema_items(schema, defs))
     return field
 
 
 def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
     """Extract the diagnostics wire schema contract."""
     schema = json.loads(reader.read_text(DIAGNOSTICS_SCHEMA))
+    defs = schema.get("$defs") or {}
     required = schema.get("required") or []
     properties = schema.get("properties") or {}
     require(len(properties) > 0, "diagnostics schema declares no properties")
     fields = [
-        _schema_field(name, properties[name], name in required)
+        _schema_field(name, properties[name], name in required, defs)
         for name in sorted(properties)
     ]
     version_field = properties.get("schema_version") or {}
@@ -525,7 +585,7 @@ def extract_ffi(reader: SourceReader) -> Dict[str, Any]:
         raise ContractError("generated FFI header has no ABI version")
     prototypes: List[str] = []
     buffer = ""
-    for line in header.splitlines():
+    for line in _mask_comments(header).splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped.startswith("*"):
             continue
@@ -579,26 +639,12 @@ def _matrix_target(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate rows into the support-set contract used for comparison."""
-    grouped: Dict[tuple, Dict[str, Any]] = {}
-    for row in rows:
-        key = (row["nginx_minor"], row["os"], row["libc"], row["arch"])
-        bucket = grouped.setdefault(
-            key,
-            {
-                "nginx_minor": row["nginx_minor"],
-                "os": row["os"],
-                "libc": row["libc"],
-                "arch": row["arch"],
-                "support_tier": row["support_tier"],
-                "release_blocking": row["release_blocking"],
-                "patches": [],
-            },
-        )
-        if row["nginx_version"] not in bucket["patches"]:
-            bucket["patches"].append(row["nginx_version"])
-    for bucket in grouped.values():
-        bucket["patches"].sort()
+    """Return the support contract as one entry per matrix row.
+
+    Every row keeps its exact patch version and its own tier, so two patches of
+    the same minor that disagree cannot collapse into one value.  The
+    comparator groups by minor version when it evaluates coverage.
+    """
     return {
         "counts": {
             "total": len(rows),
@@ -612,9 +658,9 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "release_blocking": sum(1 for row in rows if row["release_blocking"]),
         },
         "targets": sorted(
-            grouped.values(),
+            rows,
             key=lambda item: (
-                item["nginx_minor"],
+                item["nginx_version"],
                 item["os"],
                 item["libc"],
                 item["arch"],
@@ -623,18 +669,61 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _contents_block_ended(raw: str, stripped: str) -> bool:
+    """Whether a line closes the ``contents`` block."""
+    return bool(stripped) and not raw.startswith(" ") and not stripped.startswith("-")
+
+
+def _contents_entry_line(stripped: str) -> Tuple[str, str]:
+    """Classify one line inside the ``contents`` block."""
+    if stripped.startswith("- src:"):
+        return ("entry", "")
+    if stripped.startswith("dst:"):
+        return ("dst", stripped[len("dst:"):].strip().strip('"'))
+    if stripped.startswith("packager:"):
+        return ("packager", stripped[len("packager:"):].strip().strip('"'))
+    return ("", "")
+
+
+def _nfpm_contents(text: str) -> List[Dict[str, str]]:
+    """Parse the nFPM ``contents`` list with each entry's packager scope."""
+    entries: List[Dict[str, str]] = []
+    started = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped == "contents:":
+            started = True
+            continue
+        if not started:
+            continue
+        if _contents_block_ended(raw, stripped):
+            break
+        kind, value = _contents_entry_line(stripped)
+        if kind == "entry":
+            entries.append({"dst": "", "packager": ""})
+        elif kind and entries:
+            entries[-1][kind] = value
+    return [entry for entry in entries if entry["dst"]]
+
+
+def _layout_paths(entries: List[Dict[str, str]], packager: str) -> List[str]:
+    """Return the effective install paths for one package family."""
+    return sorted(
+        entry["dst"]
+        for entry in entries
+        if entry["packager"] in ("", packager)
+    )
+
+
 def _nfpm_contract(text: str) -> Dict[str, Any]:
     """Extract the package name, install layout, and dependency shape."""
     name_match = re.search(r'^name:\s*"?([A-Za-z0-9._-]+)"?\s*$', text, re.MULTILINE)
     if name_match is None:
         raise ContractError("nFPM config declares no package name")
-    destinations = sorted(set(re.findall(r'dst:\s*"([^"]+)"', text)))
-    deb_paths = sorted(
-        path for path in destinations if path.startswith("/usr/lib/nginx/modules")
-    )
-    rpm_paths = sorted(
-        path for path in destinations if path.startswith("/usr/lib64/nginx/modules")
-    )
+    entries = _nfpm_contents(text)
+    require(len(entries) > 0, "nFPM config declares no contents entries")
+    deb_paths = _layout_paths(entries, "deb")
+    rpm_paths = _layout_paths(entries, "rpm")
     deb_depends = sorted(set(re.findall(r'"nginx \(([=<>!]+) \$\{([A-Z_]+)\}\)"', text)))
     rpm_depends = sorted(
         {
@@ -646,13 +735,12 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
     )
     return {
         "package_name": name_match.group(1),
-        "deb_module_path": deb_paths,
-        "rpm_module_path": rpm_paths,
+        "deb_install_paths": deb_paths,
+        "rpm_install_paths": rpm_paths,
+        "deb_module_path": [path for path in deb_paths if path.endswith(".so")],
+        "rpm_module_path": [path for path in rpm_paths if path.endswith(".so")],
         "load_snippet_paths": sorted(
-            filter(
-                lambda path: "/modules" in path and path.endswith(".conf"),
-                destinations,
-            )
+            path for path in set(deb_paths) | set(rpm_paths) if path.endswith(".conf")
         ),
         "deb_nginx_constraints": [list(item) for item in deb_depends],
         "rpm_nginx_constraints": rpm_depends,

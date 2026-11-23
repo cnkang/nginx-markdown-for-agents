@@ -194,7 +194,23 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
             )
         )
     manifest = _load_manifest(path, contracts_dir)
-    recorded_digest = manifest.get("contract_digest")
+    # Recompute from the surfaces: a stored digest that does not describe the
+    # content it sits next to proves nothing.
+    recomputed_digest = contract_digest(manifest["surfaces"])
+    recomputed_surfaces = surface_digests(manifest["surfaces"])
+    if manifest.get("surface_digests") != recomputed_surfaces:
+        raise ContractError(
+            "{} records surface digests that do not describe its surfaces".format(
+                anchor["manifest"]
+            )
+        )
+    if manifest.get("contract_digest") != recomputed_digest:
+        raise ContractError(
+            "{} records contract digest {} but its surfaces digest to {}".format(
+                anchor["manifest"], manifest.get("contract_digest"), recomputed_digest
+            )
+        )
+    recorded_digest = recomputed_digest
     if recorded_digest != anchor["contract_digest"]:
         raise ContractError(
             "{} records contract digest {} but the anchor expects {}".format(
@@ -323,7 +339,11 @@ def _print_findings(report: Dict[str, Any], limit: int = 60) -> None:
         if shown >= limit:
             print("  ... additional findings suppressed; see the JSON report")
             break
-        print("  [{}] {}".format(finding["verdict"], finding["id"]))
+        print(
+            "  [{}] {} (fingerprint {})".format(
+                finding["verdict"], finding["id"], finding["fingerprint"]
+            )
+        )
         print("      {}".format(finding["message"]))
         if "baseline" in finding:
             print("      baseline:  {}".format(json.dumps(finding["baseline"])))

@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:04b5ef65e67ca116c1cf234558b1f573c4bc781c0af58bc5b3fdb8b5d17df7c4",
+  "contract_digest": "sha256:5bc4969ce8dcd8f38158d25ce838739eaa842a9403d51d4acd8b45669b3e48b6",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -13,12 +13,12 @@
     "tag_object": "4eac4c115fd2159a455d1eed8de00a740390f222"
   },
   "surface_digests": {
-    "diagnostics": "sha256:b301d95d09c8c7c6372a5fc64ddec61750154cc657d9b19e49b94ebdf56d16ce",
+    "diagnostics": "sha256:c547aa6f6e2926cd418c61a0ec5823ff5a6851ece7403a51eadd8251ba0f557f",
     "directives": "sha256:77b50891a6616b653326dfc25a899d31350a66b0009f2a84768cd73a40a708da",
-    "ffi": "sha256:4d559d824ff826febcca88b072aabcf9f8d16aab1b9ae26fa8b859172e2b880f",
-    "http": "sha256:525f138dfa4267cb726d7f8abadb3152ea998330557562586444bfbd0b73761c",
-    "metrics": "sha256:dfe5c82d58e732c9715a2b7f72901dd7848c151940b368699b67d001a1d358f0",
-    "packaging": "sha256:87a811c12f5b94fe734ec7b5ae4ad606b110dc50be1059ac7e5c96222216d61d",
+    "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
+    "http": "sha256:3b4a505b6d43bedde37adb7286f23140175341d182cd6b7cff5f21233eb0ca3f",
+    "metrics": "sha256:ca9bf5b79398c7060c40ea79fb9406a7386535d5542cf888e95905061b4bca52",
+    "packaging": "sha256:9c09dcec9b6a8ab6e8ccf1f8cc431084f4edd45471b176ca437ce340751df869",
     "reasons": "sha256:5122f7145d533c310888f1edda0196065cbdf8395f59a0f1359327005392c0e3"
   },
   "surfaces": {
@@ -108,9 +108,45 @@
           "type": "string"
         },
         {
-          "items_additional_properties": null,
-          "items_required": [],
-          "items_type": null,
+          "items_additional_properties": false,
+          "items_properties": [
+            {
+              "name": "duration_ms",
+              "type": "number"
+            },
+            {
+              "name": "error_origin",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            {
+              "name": "outcome",
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "type": "string"
+            },
+            {
+              "name": "stage",
+              "type": "string"
+            },
+            {
+              "name": "timestamp",
+              "type": "string"
+            }
+          ],
+          "items_required": [
+            "duration_ms",
+            "error_origin",
+            "outcome",
+            "reason",
+            "stage",
+            "timestamp"
+          ],
+          "items_type": "object",
           "name": "recent_decisions",
           "nullable": false,
           "required": true,
@@ -614,200 +650,200 @@
       "symbols": [
         {
           "name": "markdown_abi_header_hash",
-          "return_type": "/ * * uint64_t",
-          "signature": "/** uint64_t markdown_abi_header_hash(void)"
+          "return_type": "uint64_t",
+          "signature": "uint64_t markdown_abi_header_hash(void)"
         },
         {
           "name": "markdown_abi_layout_fingerprint",
-          "return_type": "/ * * uint64_t",
-          "signature": "/** uint64_t markdown_abi_layout_fingerprint(void)"
+          "return_type": "uint64_t",
+          "signature": "uint64_t markdown_abi_layout_fingerprint(void)"
         },
         {
           "name": "markdown_abi_symbol_set_hash",
-          "return_type": "/ * * uint64_t",
-          "signature": "/** uint64_t markdown_abi_symbol_set_hash(void)"
+          "return_type": "uint64_t",
+          "signature": "uint64_t markdown_abi_symbol_set_hash(void)"
         },
         {
           "name": "markdown_abi_version",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_abi_version(void)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_abi_version(void)"
         },
         {
           "name": "markdown_base_url_input_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_base_url_input_init(struct FFIBaseUrlInput *result)"
+          "return_type": "void",
+          "signature": "void markdown_base_url_input_init(struct FFIBaseUrlInput *result)"
         },
         {
           "name": "markdown_build_header_plan",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_build_header_plan(const uint8_t *content_type, uintptr_t content_type_len, uint8_t has_etag, struct FFIHeaderPlan *result)"
+          "return_type": "void",
+          "signature": "void markdown_build_header_plan(const uint8_t *content_type, uintptr_t content_type_len, uint8_t has_etag, struct FFIHeaderPlan *result)"
         },
         {
           "name": "markdown_chain_decode_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_chain_decode_free(struct FFIChainDecodeResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_chain_decode_free(struct FFIChainDecodeResult *result)"
         },
         {
           "name": "markdown_chain_decode_result_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result)"
         },
         {
           "name": "markdown_classify_error_code",
-          "return_type": "/ * * uint8_t",
-          "signature": "/** uint8_t markdown_classify_error_code(uint32_t error_code)"
+          "return_type": "uint8_t",
+          "signature": "uint8_t markdown_classify_error_code(uint32_t error_code)"
         },
         {
           "name": "markdown_convert",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_convert(struct MarkdownConverterHandle *handle, const uint8_t *html, uintptr_t html_len, const struct MarkdownOptions *options, struct MarkdownResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_convert(struct MarkdownConverterHandle *handle, const uint8_t *html, uintptr_t html_len, const struct MarkdownOptions *options, struct MarkdownResult *result)"
         },
         {
           "name": "markdown_converter_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_converter_free(struct MarkdownConverterHandle *handle)"
+          "return_type": "void",
+          "signature": "void markdown_converter_free(struct MarkdownConverterHandle *handle)"
         },
         {
           "name": "markdown_converter_new",
-          "return_type": "/ * * struct MarkdownConverterHandle  *",
-          "signature": "/** struct MarkdownConverterHandle *markdown_converter_new(void)"
+          "return_type": "struct MarkdownConverterHandle  *",
+          "signature": "struct MarkdownConverterHandle *markdown_converter_new(void)"
         },
         {
           "name": "markdown_decide_base_url",
-          "return_type": "/ * * uint8_t",
-          "signature": "/** uint8_t markdown_decide_base_url(const struct FFIBaseUrlInput *input, uint8_t *out_buf, uintptr_t out_buf_cap, struct FFIBaseUrlDecision *out)"
+          "return_type": "uint8_t",
+          "signature": "uint8_t markdown_decide_base_url(const struct FFIBaseUrlInput *input, uint8_t *out_buf, uintptr_t out_buf_cap, struct FFIBaseUrlDecision *out)"
         },
         {
           "name": "markdown_decide_conditional",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_decide_conditional(const struct FFIConditionalInput *input, struct FFIConditionalDecision *out)"
+          "return_type": "void",
+          "signature": "void markdown_decide_conditional(const struct FFIConditionalInput *input, struct FFIConditionalDecision *out)"
         },
         {
           "name": "markdown_decide_eligibility",
-          "return_type": "/ * * uint8_t",
-          "signature": "/** uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input)"
+          "return_type": "uint8_t",
+          "signature": "uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input)"
         },
         {
           "name": "markdown_decode_encoding_chain",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_decode_encoding_chain(const uint8_t *input, uintptr_t input_len, const uint8_t *layers, uint32_t layer_count, uintptr_t max_output, uint64_t ratio, struct FFIChainDecodeResult *result)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_decode_encoding_chain(const uint8_t *input, uintptr_t input_len, const uint8_t *layers, uint32_t layer_count, uintptr_t max_output, uint64_t ratio, struct FFIChainDecodeResult *result)"
         },
         {
           "name": "markdown_decomp_result_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_decomp_result_init(struct FFIDecompResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_decomp_result_init(struct FFIDecompResult *result)"
         },
         {
           "name": "markdown_decompress_bounded",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_decompress_bounded(const uint8_t *input, uintptr_t input_len, uint8_t format, uintptr_t budget, uint64_t ratio, struct FFIDecompResult *result)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_decompress_bounded(const uint8_t *input, uintptr_t input_len, uint8_t format, uintptr_t budget, uint64_t ratio, struct FFIDecompResult *result)"
         },
         {
           "name": "markdown_decompress_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_decompress_free(struct FFIDecompResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_decompress_free(struct FFIDecompResult *result)"
         },
         {
           "name": "markdown_header_plan_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_header_plan_free(struct FFIHeaderPlan *plan)"
+          "return_type": "void",
+          "signature": "void markdown_header_plan_free(struct FFIHeaderPlan *plan)"
         },
         {
           "name": "markdown_header_plan_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_header_plan_init(struct FFIHeaderPlan *result)"
+          "return_type": "void",
+          "signature": "void markdown_header_plan_init(struct FFIHeaderPlan *result)"
         },
         {
           "name": "markdown_negotiate_accept",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_negotiate_accept(const uint8_t *accept_header, uintptr_t accept_header_len, struct FFIAcceptResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_negotiate_accept(const uint8_t *accept_header, uintptr_t accept_header_len, struct FFIAcceptResult *result)"
         },
         {
           "name": "markdown_options_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_options_init(struct MarkdownOptions *result)"
+          "return_type": "void",
+          "signature": "void markdown_options_init(struct MarkdownOptions *result)"
         },
         {
           "name": "markdown_parse_encoding_chain",
-          "return_type": "/ * * uint8_t",
-          "signature": "/** uint8_t markdown_parse_encoding_chain(const uint8_t *value, uintptr_t value_len, struct FFIEncodingChainResult *result)"
+          "return_type": "uint8_t",
+          "signature": "uint8_t markdown_parse_encoding_chain(const uint8_t *value, uintptr_t value_len, struct FFIEncodingChainResult *result)"
         },
         {
           "name": "markdown_reason_code_count",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_reason_code_count(void)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_reason_code_count(void)"
         },
         {
           "name": "markdown_reason_code_metric_key",
-          "return_type": "/ * * const uint8_t  *",
-          "signature": "/** const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len)"
+          "return_type": "const uint8_t  *",
+          "signature": "const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len)"
         },
         {
           "name": "markdown_reason_code_str",
-          "return_type": "/ * * const uint8_t  *",
-          "signature": "/** const uint8_t *markdown_reason_code_str(uint32_t code, uintptr_t *out_len)"
+          "return_type": "const uint8_t  *",
+          "signature": "const uint8_t *markdown_reason_code_str(uint32_t code, uintptr_t *out_len)"
         },
         {
           "name": "markdown_result_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_result_free(struct MarkdownResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_result_free(struct MarkdownResult *result)"
         },
         {
           "name": "markdown_result_init",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_result_init(struct MarkdownResult *result)"
+          "return_type": "void",
+          "signature": "void markdown_result_init(struct MarkdownResult *result)"
         },
         {
           "name": "markdown_streaming_abort",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_streaming_abort(struct StreamingConverterHandle *handle)"
+          "return_type": "void",
+          "signature": "void markdown_streaming_abort(struct StreamingConverterHandle *handle)"
         },
         {
           "name": "markdown_streaming_feed",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle, const uint8_t *data, uintptr_t data_len, uint8_t **out_data, uintptr_t *out_len)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle, const uint8_t *data, uintptr_t data_len, uint8_t **out_data, uintptr_t *out_len)"
         },
         {
           "name": "markdown_streaming_finalize",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle, struct MarkdownResult *result)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle, struct MarkdownResult *result)"
         },
         {
           "name": "markdown_streaming_new_with_code",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options, struct StreamingConverterHandle **out_handle)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options, struct StreamingConverterHandle **out_handle)"
         },
         {
           "name": "markdown_streaming_output_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_streaming_output_free(uint8_t *data, uintptr_t len)"
+          "return_type": "void",
+          "signature": "void markdown_streaming_output_free(uint8_t *data, uintptr_t len)"
         },
         {
           "name": "markdown_streaming_safe_finish",
-          "return_type": "/ * * uint32_t",
-          "signature": "/** uint32_t markdown_streaming_safe_finish(struct StreamingConverterHandle *handle, uint8_t **out_data, uintptr_t *out_len)"
+          "return_type": "uint32_t",
+          "signature": "uint32_t markdown_streaming_safe_finish(struct StreamingConverterHandle *handle, uint8_t **out_data, uintptr_t *out_len)"
         },
         {
           "name": "markdown_trusted_proxies_free",
-          "return_type": "/ * * void",
-          "signature": "/** void markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)"
+          "return_type": "void",
+          "signature": "void markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)"
         },
         {
           "name": "markdown_trusted_proxies_new",
-          "return_type": "/ * * struct MarkdownTrustedProxies  *",
-          "signature": "/** struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void)"
+          "return_type": "struct MarkdownTrustedProxies  *",
+          "signature": "struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void)"
         },
         {
           "name": "markdown_trusted_proxies_push",
-          "return_type": "/ * * uint8_t",
-          "signature": "/** uint8_t markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle, const uint8_t *cidr, uintptr_t cidr_len)"
+          "return_type": "uint8_t",
+          "signature": "uint8_t markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle, const uint8_t *cidr, uintptr_t cidr_len)"
         }
       ]
     },
     "http": {
       "behaviours": {
         "accept_negotiation": {
-          "executed_by": "make test-nginx-unit / make test-all-e2e",
+          "executed_by": "make test-nginx-unit / bash tools/e2e/verify_accept_negotiation_e2e.sh",
           "tests": [
             "components/nginx-module/tests/unit/accept_negotiation_test.c",
             "components/nginx-module/tests/unit/accept_production_test.c",
@@ -815,13 +851,13 @@
           ]
         },
         "auth_and_cache": {
-          "executed_by": "make test-all-e2e",
+          "executed_by": "bash tools/e2e/verify_auth_cache_e2e.sh",
           "tests": [
             "tools/e2e/verify_auth_cache_e2e.sh"
           ]
         },
         "conditional_304": {
-          "executed_by": "make test-nginx-unit / make test-all-e2e",
+          "executed_by": "make test-nginx-unit / bash tools/e2e/verify_conditional_requests_e2e.sh",
           "tests": [
             "components/nginx-module/tests/unit/conditional_production_test.c",
             "tools/e2e/verify_conditional_requests_e2e.sh"
@@ -849,7 +885,7 @@
           ]
         },
         "status_and_range": {
-          "executed_by": "make test-all-e2e",
+          "executed_by": "bash tools/e2e/verify_status_codes_e2e.sh",
           "tests": [
             "tools/e2e/verify_status_codes_e2e.sh"
           ]
@@ -1113,7 +1149,12 @@
               "reason=converted"
             ]
           ]
-        }
+        },
+        "unlabelled_samples": [
+          "nginx_markdown_conversion_peak_memory_bytes",
+          "nginx_markdown_input_bytes_total",
+          "nginx_markdown_output_bytes_total"
+        ]
       },
       "families": [
         {
@@ -1325,6 +1366,16 @@
       "registry_schema_version": 2
     },
     "packaging": {
+      "deb_install_paths": [
+        "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
+        "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+        "/usr/share/doc/nginx-markdown-for-agents/INSTALLATION.md",
+        "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md",
+        "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
+        "/usr/share/doc/nginx-markdown-for-agents/README.md",
+        "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
+        "/usr/share/nginx/modules-available/mod-markdown.conf"
+      ],
       "deb_module_path": [
         "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
       ],
@@ -1344,6 +1395,16 @@
       ],
       "matrix_schema_version": "1.1",
       "package_name": "nginx-module-markdown-for-agents",
+      "rpm_install_paths": [
+        "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
+        "/usr/share/doc/nginx-markdown-for-agents/INSTALL.md",
+        "/usr/share/doc/nginx-markdown-for-agents/INSTALLATION.md",
+        "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_COMPATIBILITY.md",
+        "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
+        "/usr/share/doc/nginx-markdown-for-agents/README.md",
+        "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
+        "/usr/share/nginx/modules/mod-markdown.conf"
+      ],
       "rpm_module_path": [
         "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so"
       ],
@@ -1364,10 +1425,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "almalinux9",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1375,10 +1434,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "almalinux9",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1386,10 +1443,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "debian12",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1397,10 +1452,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "debian12",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1408,10 +1461,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "linux",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1419,10 +1470,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "linux",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1430,10 +1479,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "linux",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1441,10 +1488,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "linux",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1452,10 +1497,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "ubuntu-24.04",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1463,10 +1506,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "ubuntu-24.04",
-            "patches": [
-              "1.24.0"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1474,10 +1515,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "almalinux9",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1485,10 +1524,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "almalinux9",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1496,10 +1533,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "alpine3.20",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1507,10 +1542,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "alpine3.20",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1518,10 +1551,8 @@
             "arch": "any",
             "libc": "n/a",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "any",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": false,
             "support_tier": "best-effort"
           },
@@ -1529,21 +1560,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "debian12",
-            "patches": [
-              "1.26.3"
-            ],
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.26",
-            "os": "debian12",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1551,10 +1569,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.26",
-            "os": "linux",
-            "patches": [
-              "1.26.3"
-            ],
+            "nginx_version": "1.26.3",
+            "os": "debian12",
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1562,10 +1578,35 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "linux",
-            "patches": [
-              "1.26.3"
-            ],
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "linux",
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1573,10 +1614,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "linux",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1584,10 +1623,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "linux",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1595,10 +1632,8 @@
             "arch": "arm64",
             "libc": "darwin",
             "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
             "os": "macos",
-            "patches": [
-              "1.26.3"
-            ],
             "release_blocking": false,
             "support_tier": "experimental"
           },
@@ -1606,10 +1641,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "almalinux9",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1617,10 +1650,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "almalinux9",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1628,10 +1659,8 @@
             "arch": "any",
             "libc": "n/a",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "any",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": false,
             "support_tier": "best-effort"
           },
@@ -1639,10 +1668,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "debian12",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1650,10 +1677,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "debian12",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1661,10 +1686,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "linux",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1672,10 +1695,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "linux",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1683,10 +1704,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "linux",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1694,10 +1713,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "linux",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1705,10 +1722,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "ubuntu-26.04",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1716,10 +1731,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
             "os": "ubuntu-26.04",
-            "patches": [
-              "1.28.3"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1727,10 +1740,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.30",
+            "nginx_version": "1.30.7",
             "os": "linux",
-            "patches": [
-              "1.30.7"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1738,10 +1749,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.30",
+            "nginx_version": "1.30.7",
             "os": "linux",
-            "patches": [
-              "1.30.7"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1749,10 +1758,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.30",
+            "nginx_version": "1.30.7",
             "os": "linux",
-            "patches": [
-              "1.30.7"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1760,10 +1767,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.30",
+            "nginx_version": "1.30.7",
             "os": "linux",
-            "patches": [
-              "1.30.7"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1771,10 +1776,8 @@
             "arch": "amd64",
             "libc": "glibc",
             "nginx_minor": "1.31",
+            "nginx_version": "1.31.9",
             "os": "linux",
-            "patches": [
-              "1.31.9"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1782,10 +1785,8 @@
             "arch": "arm64",
             "libc": "glibc",
             "nginx_minor": "1.31",
+            "nginx_version": "1.31.9",
             "os": "linux",
-            "patches": [
-              "1.31.9"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1793,10 +1794,8 @@
             "arch": "amd64",
             "libc": "musl",
             "nginx_minor": "1.31",
+            "nginx_version": "1.31.9",
             "os": "linux",
-            "patches": [
-              "1.31.9"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           },
@@ -1804,10 +1803,8 @@
             "arch": "arm64",
             "libc": "musl",
             "nginx_minor": "1.31",
+            "nginx_version": "1.31.9",
             "os": "linux",
-            "patches": [
-              "1.31.9"
-            ],
             "release_blocking": true,
             "support_tier": "supported"
           }
