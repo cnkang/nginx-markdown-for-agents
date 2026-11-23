@@ -288,9 +288,10 @@ def test_negative_undocumented_historical_delta(isolated_worktree):
     assert "undocumented change" in completed.stdout + completed.stderr
 
 
-def test_negative_unused_approval_is_reported(isolated_worktree, tmp_path):
+def test_negative_unused_approval_is_reported(isolated_worktree):
     """A stale approval is reported rather than silently ignored."""
-    approvals = tmp_path / "approvals.json"
+    # The gate only reads inputs inside the repository it audits.
+    approvals = isolated_worktree / "approvals.json"
     approvals.write_text(
         json.dumps(
             {
@@ -314,10 +315,10 @@ def test_negative_unused_approval_is_reported(isolated_worktree, tmp_path):
     assert "matches no REVIEW_REQUIRED finding" in completed.stdout
 
 
-def test_negative_approval_cannot_waive_breaking(isolated_worktree, tmp_path):
+def test_negative_approval_cannot_waive_breaking(isolated_worktree):
     """A BREAKING finding stays blocking even with an approval file."""
     _flip_filter_default(isolated_worktree)
-    approvals = tmp_path / "approvals.json"
+    approvals = isolated_worktree / "approvals.json"
     approvals.write_text(
         json.dumps(
             {

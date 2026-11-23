@@ -25,6 +25,38 @@ from tools.lib.path_validation import validate_read_path  # noqa: E402
 
 GIT_TIMEOUT_SECONDS = 120
 
+# Git references come from the anchor index, which is file content.  An
+# allowlist keeps a crafted value from becoming a git option or a second
+# argument, and it excludes every revision expression that could execute a
+# hook or reach outside the repository.
+_REF_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-"
+)
+_COMMIT_CHARS = set("0123456789abcdef")
+
+
+def validate_ref(ref: str, purpose: str = "git reference") -> str:
+    """Return ``ref`` when it is a safe single git revision or tag name."""
+    if (
+        not ref
+        or ref.startswith("-")
+        or ".." in ref
+        or set(ref) - _REF_CHARS
+    ):
+        raise ContractError("unsafe {}: {!r}".format(purpose, ref))
+    return ref
+
+
+def validate_commit(commit: str, purpose: str = "commit") -> str:
+    """Return ``commit`` when it is a full lowercase hexadecimal SHA."""
+    if len(commit) != 40 or set(commit) - _COMMIT_CHARS:
+        raise ContractError(
+            "{} must be 40 lowercase hexadecimal characters: {!r}".format(
+                purpose, commit
+            )
+        )
+    return commit
+
 
 @dataclass(frozen=True)
 class SourceRevision:
@@ -88,6 +120,7 @@ def repo_root_for(path: str) -> str:
 
 def resolve_tag(repo_root: str, tag: str) -> SourceRevision:
     """Resolve a release tag to its commit and record the tag object."""
+    validate_ref(tag, "tag")
     commit = _git(repo_root, "rev-parse", "--verify", "{}^{{commit}}".format(tag))
     object_type = _git(repo_root, "cat-file", "-t", tag)
     if object_type == "tag":
@@ -107,6 +140,7 @@ def resolve_tag(repo_root: str, tag: str) -> SourceRevision:
 
 def resolve_commit(repo_root: str, revision: str) -> SourceRevision:
     """Resolve a commit-ish to a full commit SHA."""
+    validate_ref(revision, "revision")
     commit = _git(repo_root, "rev-parse", "--verify", "{}^{{commit}}".format(revision))
     if len(commit) != 40:
         raise ContractError(
@@ -184,6 +218,7 @@ class SourceReader:
 
 def verify_tag_commit(repo_root: str, tag: str, recorded_commit: str) -> None:
     """Fail when a tag no longer resolves to the recorded commit."""
+    validate_commit(recorded_commit, "recorded commit")
     actual = resolve_tag(repo_root, tag)
     if actual.commit != recorded_commit:
         raise ContractError(

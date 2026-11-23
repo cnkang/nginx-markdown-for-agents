@@ -76,6 +76,12 @@ FILE_SCOPED_VALIDATORS: dict[str, set[str]] = {
         "_resolve_regular_file",
         "_resolve_write_target",
     },
+    # The compatibility gate reads two shapes of input.  `_contained_file`
+    # resolves the real path and requires it to stay inside the audited
+    # repository.  `_manifest_path` accepts a single path component from an
+    # allowlist that excludes every separator, so a traversal cannot even be
+    # expressed.
+    "tools/compatibility/cli.py": {"_manifest_path"},
 }
 
 # Trusted fixture names that pytest provides — paths derived from

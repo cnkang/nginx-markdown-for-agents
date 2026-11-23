@@ -20,6 +20,8 @@ UNVERIFIED = "UNVERIFIED"
 
 BLOCKING_VERDICTS = (BREAKING, REVIEW_REQUIRED, UNVERIFIED)
 SEVERITY_ORDER = {BREAKING: 0, UNVERIFIED: 1, REVIEW_REQUIRED: 2, ADDITIVE: 3, OK: 4}
+# One suffix for every "this surface changed" finding id.
+CHANGED_ID = "{}-changed"
 
 # The diagnostics endpoint freezes exactly these top-level fields.  Additive
 # state belongs in ``extensions``, so a new top-level field is a contract change
@@ -89,7 +91,7 @@ class Comparison:
 
     def counts(self) -> Dict[str, int]:
         """Count findings per verdict."""
-        counts = {verdict: 0 for verdict in SEVERITY_ORDER}
+        counts = dict.fromkeys(SEVERITY_ORDER, 0)
         for item in self.findings:
             counts[item.verdict] = counts.get(item.verdict, 0) + 1
         return counts
@@ -416,7 +418,7 @@ def compare_metrics(
             result.add(
                 "metrics",
                 BREAKING,
-                "{}-changed".format(key.replace("_", "-")),
+                CHANGED_ID.format(key.replace("_", "-")),
                 "the metrics registry {} changed".format(key),
                 baseline.get(key),
                 candidate.get(key),
@@ -614,8 +616,8 @@ def _compare_field_required_children(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
     """Compare the required child fields of one diagnostics object."""
-    old_children = set(old.get("required_children") or [])
-    new_children = set(new.get("required_children") or [])
+    old_children = {child for child in old.get("required_children") or []}
+    new_children = {child for child in new.get("required_children") or []}
     if old_children - new_children:
         result.add(
             "diagnostics",
@@ -908,7 +910,7 @@ def compare_packaging(
             result.add(
                 "packaging",
                 BREAKING,
-                "{}-changed".format(key.replace("_", "-")),
+                CHANGED_ID.format(key.replace("_", "-")),
                 "the installed module path changed for {}".format(key),
                 baseline[key],
                 candidate[key],
@@ -918,7 +920,7 @@ def compare_packaging(
             result.add(
                 "packaging",
                 REVIEW_REQUIRED,
-                "{}-changed".format(key.replace("_", "-")),
+                CHANGED_ID.format(key.replace("_", "-")),
                 "the packaging {} contract changed".format(key),
                 baseline[key],
                 candidate[key],

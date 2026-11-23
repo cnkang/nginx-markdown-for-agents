@@ -63,7 +63,7 @@ def _overlay(repo: Path, worktree: Path) -> None:
             target.unlink()
 
 
-@pytest.fixture()
+@pytest.fixture
 def isolated_worktree(tmp_path: Path):
     """Provide a detached worktree that mirrors the working tree, then clean it."""
     # A unique basename keeps two parallel workers from colliding on the

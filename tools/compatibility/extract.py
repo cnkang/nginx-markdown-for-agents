@@ -21,6 +21,8 @@ DIRECTIVES_IMPL = "components/nginx-module/src/ngx_http_markdown_config_directiv
 DIRECTIVE_NAMES = "components/nginx-module/src/ngx_http_markdown_directive_names.h"
 METRICS_REGISTRY = "schemas/metrics-v1.registry.json"
 METRICS_RENDERER = "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
+# Both HTTP contract groups below run through the C unit suite.
+UNIT_SUITE_TARGET = "make test-nginx-unit"
 REASON_REGISTRY = "components/rust-converter/reason_registry.toml"
 DIAGNOSTICS_SCHEMA = "schemas/diagnostics.schema.json"
 FFI_HEADER = "components/rust-converter/include/markdown_converter.h"
@@ -66,11 +68,11 @@ HTTP_CONTRACT_TESTS = {
 # this gate: the gate proves the contract text did not move, the targets prove
 # the behaviour still holds.
 HTTP_EXECUTION_TARGETS = {
-    "accept_negotiation": "make test-nginx-unit / make test-all-e2e",
-    "conditional_304": "make test-nginx-unit / make test-all-e2e",
-    "head_request": "make test-nginx-unit",
-    "header_plan_vary_content_type": "make test-nginx-unit",
-    "pre_post_commit": "make test-nginx-unit",
+    "accept_negotiation": UNIT_SUITE_TARGET + " / make test-all-e2e",
+    "conditional_304": UNIT_SUITE_TARGET + " / make test-all-e2e",
+    "head_request": UNIT_SUITE_TARGET,
+    "header_plan_vary_content_type": UNIT_SUITE_TARGET,
+    "pre_post_commit": UNIT_SUITE_TARGET,
     "status_and_range": "make test-all-e2e",
     "auth_and_cache": "make test-all-e2e",
 }
@@ -306,7 +308,7 @@ def extract_directives(reader: SourceReader) -> Dict[str, Any]:
         len(names_seen) == len(set(names_seen)),
         "duplicate directive names in the command table",
     )
-    declared = sorted(set(re.findall(r'"([^"]+)"', names)))
+    declared = sorted({found for found in re.findall(r'"([^"]+)"', names)})
     require(
         set(names_seen) <= set(declared),
         "command table registers a name absent from the directive name inventory",
@@ -647,12 +649,13 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
         "deb_module_path": deb_paths,
         "rpm_module_path": rpm_paths,
         "load_snippet_paths": sorted(
-            path
-            for path in destinations
-            if "/modules" in path and path.endswith(".conf")
+            filter(
+                lambda path: "/modules" in path and path.endswith(".conf"),
+                destinations,
+            )
         ),
         "deb_nginx_constraints": [list(item) for item in deb_depends],
-        "rpm_nginx_constraints": [item for item in rpm_depends],
+        "rpm_nginx_constraints": list(rpm_depends),
     }
 
 

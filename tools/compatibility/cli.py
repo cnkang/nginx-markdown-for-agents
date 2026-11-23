@@ -67,20 +67,34 @@ def _contracts_dir(index_path: str) -> str:
     return os.path.dirname(os.path.abspath(index_path))
 
 
-def _safe_join(base: str, relative: str) -> str:
-    """Resolve a manifest path inside the contracts directory, failing closed."""
-    if os.path.isabs(relative) or relative.startswith(".."):
-        raise ContractError("manifest path escapes the contracts directory")
-    target = os.path.normpath(os.path.join(base, relative))
-    if os.path.commonpath([base, target]) != base:
-        raise ContractError("manifest path escapes the contracts directory")
-    return target
+# Manifest names are single path components.  An allowlist that excludes every
+# separator makes a traversal impossible, and it keeps the value usable as a
+# git argument or a file name without further escaping.
+_NAME_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+)
 
 
-def _read_json(path: str) -> Any:
-    """Read a JSON file, failing closed on malformed content."""
+def _manifest_path(base: str, name: str) -> str:
+    """Resolve a single-component manifest name inside the contracts directory."""
+    if not name or name in {".", ".."} or set(name) - _NAME_CHARS:
+        raise ContractError(
+            "manifest name is not a single safe path component: {!r}".format(name)
+        )
+    return os.path.join(os.path.realpath(base), name)
+
+
+
+
+def _read_json(path: str, root: str) -> Any:
+    """Read a JSON file that must live inside ``root``, failing closed."""
     try:
         resolved = validate_read_path(path, purpose="JSON input")
+        resolved_root = os.path.realpath(root)
+        if os.path.commonpath([resolved_root, os.path.realpath(resolved)]) != resolved_root:
+            raise ContractError(
+                "JSON input escapes {}: {}".format(resolved_root, resolved)
+            )
         with open(resolved, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except FileNotFoundError:
@@ -89,9 +103,14 @@ def _read_json(path: str) -> Any:
         raise ContractError("malformed JSON in {}: {}".format(path, error))
 
 
-def load_index(index_path: str) -> Dict[str, Any]:
+def _repo_root(args: argparse.Namespace, contracts_dir: str) -> str:
+    """Return the repository root the gate audits."""
+    return args.repo_root or repo_root_for(contracts_dir)
+
+
+def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
     """Load and validate the anchor index."""
-    index = _read_json(index_path)
+    index = _read_json(index_path, repo_root)
     if index.get("index_schema") != INDEX_SCHEMA:
         raise ContractError(
             "anchor index schema must be {}".format(INDEX_SCHEMA)
@@ -139,9 +158,9 @@ def _tag_product_version(tag: str) -> str:
     return tag[1:]
 
 
-def _load_manifest(path: str) -> Dict[str, Any]:
-    """Load and lightly validate a frozen manifest."""
-    manifest = _read_json(path)
+def _load_manifest(path: str, root: str) -> Dict[str, Any]:
+    """Load and lightly validate a frozen manifest inside ``root``."""
+    manifest = _read_json(path, root)
     if manifest.get("manifest_schema") != MANIFEST_SCHEMA:
         raise ContractError("{} has an unexpected manifest schema".format(path))
     missing = [name for name in SURFACES if name not in (manifest.get("surfaces") or {})]
@@ -155,9 +174,14 @@ def _load_manifest(path: str) -> Dict[str, Any]:
 def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) -> Dict[str, Any]:
     """Prove one anchor still matches its manifest and its release tag."""
     tag = anchor["tag"]
-    path = _safe_join(contracts_dir, anchor["manifest"])
+    path = _manifest_path(contracts_dir, anchor["manifest"])
     try:
         resolved = validate_read_path(path, purpose="anchor manifest")
+        resolved_root = os.path.realpath(contracts_dir)
+        if os.path.commonpath([resolved_root, os.path.realpath(resolved)]) != resolved_root:
+            raise ContractError(
+                "anchor manifest escapes {}: {}".format(resolved_root, resolved)
+            )
         with open(resolved, "rb") as handle:
             payload = handle.read()
     except FileNotFoundError:
@@ -169,7 +193,7 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
                 anchor["manifest"], actual_file_digest, anchor["manifest_sha256"]
             )
         )
-    manifest = _load_manifest(path)
+    manifest = _load_manifest(path, contracts_dir)
     recorded_digest = manifest.get("contract_digest")
     if recorded_digest != anchor["contract_digest"]:
         raise ContractError(
@@ -205,7 +229,6 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
 
 
 def _historical_comparison(
-    repo_root: str,
     index: Dict[str, Any],
     record: Dict[str, Any],
     contracts_dir: str,
@@ -213,8 +236,12 @@ def _historical_comparison(
     """Audit one declared tag-to-tag comparison against its documented delta."""
     baseline_anchor = _anchor_by_tag(index, record["from"])
     candidate_anchor = _anchor_by_tag(index, record["to"])
-    baseline = _load_manifest(_safe_join(contracts_dir, baseline_anchor["manifest"]))
-    candidate = _load_manifest(_safe_join(contracts_dir, candidate_anchor["manifest"]))
+    baseline = _load_manifest(
+        _manifest_path(contracts_dir, baseline_anchor["manifest"]), contracts_dir
+    )
+    candidate = _load_manifest(
+        _manifest_path(contracts_dir, candidate_anchor["manifest"]), contracts_dir
+    )
     result = compare_contracts(
         baseline, candidate, record["from"], record["to"]
     )
@@ -324,7 +351,7 @@ def _audit_historical(
     reports: List[Dict[str, Any]] = []
     failures: List[str] = []
     for record in index.get("comparisons") or []:
-        report, problems = _historical_comparison(repo_root, index, record, contracts_dir)
+        report, problems = _historical_comparison(index, record, contracts_dir)
         reports.append(report)
         _print_comparison(
             report, "historical {}: ".format(record.get("expect", "contract_stable"))
@@ -343,7 +370,9 @@ def _compare_candidate(
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Compare the candidate and return its report and blocking findings."""
     baseline_anchor = _anchor_by_tag(index, index["baseline"])
-    baseline = _load_manifest(_safe_join(contracts_dir, baseline_anchor["manifest"]))
+    baseline = _load_manifest(
+        _manifest_path(contracts_dir, baseline_anchor["manifest"]), contracts_dir
+    )
     revision = _candidate_revision(repo_root, args.candidate)
     candidate = build_manifest(repo_root, revision, args.product_version or "candidate")
     comparison = compare_contracts(
@@ -353,7 +382,7 @@ def _compare_candidate(
         "{}@{}".format(revision.label, revision.commit[:12]),
     )
     if args.approvals:
-        approvals = _read_json(args.approvals)
+        approvals = _read_json(args.approvals, repo_root)
         for notice in apply_approvals(comparison, approvals, args.approvals):
             print("  notice: {}".format(notice))
     report = comparison.as_dict()
@@ -377,8 +406,8 @@ def check_command(args: argparse.Namespace) -> int:
     """Run the blocking compatibility check."""
     index_path = os.path.abspath(args.index)
     contracts_dir = _contracts_dir(index_path)
-    index = load_index(index_path)
-    repo_root = args.repo_root or repo_root_for(contracts_dir)
+    repo_root = _repo_root(args, contracts_dir)
+    index = load_index(index_path, repo_root)
     _print_header(index_path)
     anchors = _verify_every_anchor(repo_root, index, contracts_dir)
     historical, failures = _audit_historical(repo_root, index, contracts_dir)
@@ -415,8 +444,8 @@ def verify_command(args: argparse.Namespace) -> int:
     """Verify the recorded anchors without comparing a candidate."""
     index_path = os.path.abspath(args.index)
     contracts_dir = _contracts_dir(index_path)
-    index = load_index(index_path)
-    repo_root = args.repo_root or repo_root_for(contracts_dir)
+    repo_root = _repo_root(args, contracts_dir)
+    index = load_index(index_path, repo_root)
     _print_header(index_path)
     for anchor in index["anchors"]:
         _print_anchor(verify_anchor(repo_root, anchor, contracts_dir))
@@ -458,7 +487,7 @@ def freeze_command(args: argparse.Namespace) -> int:
     revision = resolve_tag(repo_root, args.tag)
     manifest = build_manifest(repo_root, revision, _tag_product_version(args.tag))
     relative = "nginx-markdown-{}.json".format(args.tag[1:])
-    target = _safe_join(contracts_dir, relative)
+    target = _manifest_path(contracts_dir, relative)
     if os.path.exists(target) and not args.replace:
         existing = _load_manifest(target)
         if existing["source"]["commit"] != revision.commit:
