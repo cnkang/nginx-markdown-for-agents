@@ -10,10 +10,12 @@ import sys
 
 
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
+# SemVer core with an optional prerelease suffix.  Build metadata is not
+# accepted: the packaging identity cannot represent it, so a tag that carries
+# it would fail later in the release chain instead of at the promotion gate.
 TAG_PATTERN = re.compile(
     r"v\d+\.\d+\.\d+"
-    r"(?:-[0-9A-Za-z.-]+)?"
-    r"(?:\+[0-9A-Za-z.-]+)?"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
 
 

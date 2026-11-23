@@ -101,7 +101,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          ./packaging/scripts/validate-version.sh "$INPUT_VERSION"
+          ./packaging/scripts/validate-version.sh --stable-only "$INPUT_VERSION"
 
       - name: Resolve NGINX version
         id: nginx_version

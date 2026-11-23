@@ -65,11 +65,12 @@ on:
     inputs:
       version:
         description: >-
-          Optional version override (format: MAJOR.MINOR.PATCH, e.g. 0.7.0).
-          Prerelease suffixes (e.g. 0.7.0-rc.1) are rejected because they are
-          incompatible with RPM versioning. If empty, tag runs derive the
+          Optional version override (format: MAJOR.MINOR.PATCH with an optional
+          prerelease suffix, e.g. 0.7.0 or 1.0.0-rc.1). A prerelease is mapped
+          onto the Debian and RPM package versions by
+          packaging/scripts/release_version.py. If empty, tag runs derive the
           version from the git ref; non-tag runs use the checked-in Cargo.toml
-          package version.
+          package version. A dispatch never publishes a GitHub Release.
         required: false
         type: string
       require_blocking:
@@ -119,6 +120,9 @@ permissions: {}
 # release-packages.yml is the canonical release package workflow and official release path.
 
 env:
+  # Projection of components/rust-converter/Cargo.toml.  The version
+  # consistency gate and the 0.8.x release gate both fail when this value and
+  # the manifest disagree, so a candidate commit bumps them together.
   RELEASE_VERSION: "0.9.4"
   RUST_TOOLCHAIN: 1.98.1
   FUZZ_TOOLCHAIN: nightly-2026-09-21
@@ -164,20 +168,30 @@ jobs:
           fi
           case "${EVENT_NAME}:${REF_TYPE}" in
             push:tag)
-              if [[ ! "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "ERROR: tag pushes must use a semantic-version tag" >&2
-                exit 1
-              fi
-              if [[ "${REF_NAME#v}" != "${RELEASE_VERSION}" ]]; then
+              # The tag must be v<version>, and the version must pass the single
+              # format gate shared by every entry point.  That gate accepts a
+              # SemVer prerelease suffix and refuses build metadata, so this
+              # step keeps no second copy of the grammar.
+              case "${REF_NAME}" in
+                v*) candidate_version="${REF_NAME#v}" ;;
+                *)
+                  echo "ERROR: tag pushes must use a v-prefixed version tag" >&2
+                  exit 1
+                  ;;
+              esac
+              packaging/scripts/validate-version.sh "${candidate_version}" >/dev/null
+              if [[ "${candidate_version}" != "${RELEASE_VERSION}" ]]; then
                 echo "ERROR: tag ${REF_NAME} does not match RELEASE_VERSION ${RELEASE_VERSION}" >&2
                 exit 1
               fi
               ;;
             workflow_dispatch:branch)
-              if [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "ERROR: dispatch from a release-like branch is ambiguous; push the matching tag instead" >&2
-                exit 1
-              fi
+              case "${REF_NAME}" in
+                v[0-9]*)
+                  echo "ERROR: dispatch from a release-like branch is ambiguous; push the matching tag instead" >&2
+                  exit 1
+                  ;;
+              esac
               ;;
             workflow_dispatch:tag)
               echo "Manual dispatch from ${REF_NAME} is artifact-only; tag promotion requires a tag push." >&2
@@ -1519,6 +1533,20 @@ jobs:
 
           ./packaging/scripts/validate-version.sh "${PKG_VERSION}"
 
+          # Map the release identity onto the two package families.  A
+          # prerelease keeps the base version for RPM and moves the prerelease
+          # marker into the version field behind `~`, while Debian uses the same
+          # `~` separator in its upstream version, so that 1.0.0~rc1 sorts below
+          # 1.0.0.  See packaging/scripts/release_version.py.
+          DEB_VERSION="$(python3 packaging/scripts/release_version.py \
+            --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field deb_version)"
+          DEB_RELEASE="$(python3 packaging/scripts/release_version.py \
+            --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field deb_release)"
+          RPM_VERSION="$(python3 packaging/scripts/release_version.py \
+            --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field rpm_version)"
+          RPM_RELEASE="$(python3 packaging/scripts/release_version.py \
+            --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field rpm_release)"
+
           NFPM_ARCH="${MATRIX_ARCH}"
 
           # Map arch for RPM naming (amd64→x86_64, arm64→aarch64)
@@ -1549,6 +1577,10 @@ jobs:
           )"
           {
             echo "PKG_VERSION=${PKG_VERSION}"
+            echo "DEB_VERSION=${DEB_VERSION}"
+            echo "DEB_RELEASE=${DEB_RELEASE}"
+            echo "RPM_VERSION=${RPM_VERSION}"
+            echo "RPM_RELEASE=${RPM_RELEASE}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
             echo "NGINX_VERSION_CEIL=${NGINX_VERSION_CEIL}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
@@ -1560,6 +1592,10 @@ jobs:
           # Output for downstream reference
           {
             echo "pkg_version=${PKG_VERSION}"
+            echo "deb_version=${DEB_VERSION}"
+            echo "deb_release=${DEB_RELEASE}"
+            echo "rpm_version=${RPM_VERSION}"
+            echo "rpm_release=${RPM_RELEASE}"
             echo "deb_filename=${DEB_FILENAME}"
             echo "rpm_filename=${RPM_FILENAME}"
           } >> "$GITHUB_OUTPUT"
@@ -1599,6 +1635,9 @@ jobs:
       - name: Generate DEB package
         env:
           DEB_FILENAME: ${{ steps.pkg-env.outputs.deb_filename }}
+          # Debian carries the prerelease in the upstream version through `~`.
+          PKG_VERSION: ${{ steps.pkg-env.outputs.deb_version }}
+          NFPM_RELEASE: ${{ steps.pkg-env.outputs.deb_release }}
         run: |
           mkdir -p dist
           nfpm package \
@@ -1612,6 +1651,10 @@ jobs:
       - name: Generate RPM package
         env:
           RPM_FILENAME: ${{ steps.pkg-env.outputs.rpm_filename }}
+          # RPM carries the prerelease in the version field behind `~`, and the
+          # release stays unchanged from a final release.
+          PKG_VERSION: ${{ steps.pkg-env.outputs.rpm_version }}
+          NFPM_RELEASE: ${{ steps.pkg-env.outputs.rpm_release }}
         run: |
           nfpm package \
             --config "${NFPM_TMP}/nfpm.yaml" \
@@ -3669,13 +3712,20 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Select release announcement
+      - name: Resolve release announcement and prerelease flag
         if: github.event_name == 'push' && github.ref_type == 'tag'
         id: announcement
         run: |
           announcement="docs/releases/${RELEASE_VERSION}-announcement.md"
           if [[ -f "${announcement}" ]]; then
             echo "path=${announcement}" >> "${GITHUB_OUTPUT}"
+          fi
+          # A SemVer core cannot contain a hyphen, so a hyphen always marks a
+          # prerelease.  The tag guard already rejected every other shape.
+          if [[ "${RELEASE_VERSION}" == *-* ]]; then
+            echo "is_prerelease=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "is_prerelease=false" >> "${GITHUB_OUTPUT}"
           fi
         shell: bash
 
@@ -3772,6 +3822,11 @@ jobs:
         with:
           files: release-assets/*
           body_path: ${{ steps.announcement.outputs.path }}
+          # A prerelease must never be presented as the latest stable release.
+          # The flag is derived from the resolved version, not guessed from the
+          # tag by the action.
+          prerelease: ${{ steps.announcement.outputs.is_prerelease }}
+          make_latest: ${{ steps.announcement.outputs.is_prerelease == 'true' && 'false' || 'true' }}
 
       - name: Upload as workflow artifacts (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
