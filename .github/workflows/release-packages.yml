@@ -2236,6 +2236,7 @@ jobs:
         run: |
           python3 tools/release/gates/generate_release_gate_manifests.py \
             --phase inputs \
+            --skip-short-soak-manifest \
             --candidate-sha "$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
         shell: bash
 
@@ -2865,7 +2866,7 @@ jobs:
         shell: bash
 
       - name: Create reusable release qualification bundle
-        if: github.event_name == 'workflow_dispatch' && inputs.require_blocking && inputs.final_metadata
+        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.require_blocking && inputs.final_metadata
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REF: ${{ github.ref }}
@@ -2886,7 +2887,7 @@ jobs:
         shell: bash
 
       - name: Upload reusable release qualification bundle
-        if: github.event_name == 'workflow_dispatch' && inputs.require_blocking && inputs.final_metadata
+        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.require_blocking && inputs.final_metadata
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-qualification-${{ github.sha }}-${{ github.run_attempt }}

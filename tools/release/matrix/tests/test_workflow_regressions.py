@@ -992,6 +992,7 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     reuse_restore = _step_by_name(
         steps, "Restore reusable short-soak evidence"
     )
+    inputs = _step_by_name(steps, "Generate candidate-bound release gate inputs")
     ownership = _step_by_name(
         steps, "Restore short-soak runtime artifact ownership"
     )
@@ -1002,7 +1003,8 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
     release_version = workflow["env"]["RELEASE_VERSION"]
 
     assert (
-        names.index("Download canonical benchmark NGINX runtime")
+        names.index("Generate candidate-bound release gate inputs")
+        < names.index("Download canonical benchmark NGINX runtime")
         < names.index("Download reusable qualification handoff")
         < names.index("Restore reusable short-soak evidence")
         < names.index("Generate candidate-bound short-soak manifest")
@@ -1011,6 +1013,7 @@ def test_release_gate_runs_candidate_bound_short_soak_before_validation() -> Non
         < names.index("Upload candidate-bound short-soak evidence")
         < names.index("Run release gates")
     )
+    assert "--skip-short-soak-manifest" in inputs["run"]
     assert "generate_soak_scenario_manifest.py" in manifest["run"]
     assert manifest["env"]["REUSE_QUALIFICATION"] == (
         "${{ needs.candidate-qualification.outputs.reuse }}"
@@ -1133,13 +1136,19 @@ def test_release_qualification_reuse_is_sha_bound_and_fails_back_to_long_checks(
     )
     assert "inputs.require_blocking" in source_bundle["if"]
     assert "inputs.final_metadata" in source_bundle["if"]
+    assert "github.ref_type == 'branch'" in source_bundle["if"]
     assert "github.workflow_sha" in str(source_bundle["env"])
+    assert "github.ref_type == 'branch'" in source_upload["if"]
     assert source_upload["with"]["retention-days"] == "90"
     assert "${{ github.run_attempt }}" in source_upload["with"]["name"]
 
     for job_name in ("release-gate", "fuzz-qualification"):
         assert "candidate-qualification" in jobs[job_name]["needs"]
     fuzz_steps = _job_steps(workflow, "fuzz-qualification")
+    fuzz_inputs = _step_by_name(
+        fuzz_steps, "Generate candidate-bound release gate inputs"
+    )
+    assert "--skip-short-soak-manifest" not in fuzz_inputs["run"]
     for step_name in (
         "Install pinned Rust toolchain for fuzz qualification",
         "Run fuzz qualification",

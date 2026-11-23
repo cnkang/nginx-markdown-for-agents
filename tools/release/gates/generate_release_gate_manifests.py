@@ -934,6 +934,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--phase", choices=("inputs", "artifact", "final", "all"), default="all")
     parser.add_argument("--candidate-sha", default=None)
     parser.add_argument("--artifact-root", default="dist")
+    parser.add_argument(
+        "--skip-short-soak-manifest",
+        action="store_true",
+        help="leave short-soak manifest creation to the release-gate restore step",
+    )
     return parser
 
 
@@ -950,12 +955,15 @@ def main(argv: list[str] | None = None) -> int:
             _write_json(output_root / "blocking-fuzz-target-manifest.json", blocking)
             _write_json(output_root / "corpus-seed-manifest.json", corpus)
 
-            soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
-            soak_scope = _load_json(SHORT_SOAK_SCOPE)
-            _write_json(
-                output_root / "short-soak-scenario-manifest.json",
-                build_manifest(soak_scope, candidate_sha, soak_scope_path, created_at),
-            )
+            if not args.skip_short_soak_manifest:
+                soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
+                soak_scope = _load_json(SHORT_SOAK_SCOPE)
+                _write_json(
+                    output_root / "short-soak-scenario-manifest.json",
+                    build_manifest(
+                        soak_scope, candidate_sha, soak_scope_path, created_at
+                    ),
+                )
         if args.phase in {"artifact", "all"}:
             artifact_root = (REPO_ROOT / args.artifact_root).resolve()
             _write_json(

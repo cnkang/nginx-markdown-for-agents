@@ -19,15 +19,31 @@ import sys
 import urllib.parse
 import urllib.request
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+for _path in (str(REPO_ROOT), str(REPO_ROOT / "tools")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+from tools.lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
+
 SCHEMA_VERSION = "release.qualification-bundle.v1"
 WORKFLOW_PATH = ".github/workflows/release-packages.yml"
 ATTESTATION_NAME = "qualification-attestation.json"
 FUZZ_RECORD = "fuzz-qualification-record.json"
 SOAK_MANIFEST = "short-soak-scenario-manifest.json"
 SOAK_RECORD = "soak-qualification-record.json"
-SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SHA_RE = re.compile(r"^[\da-f]{40}$", re.ASCII)
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$", re.ASCII)
+REPOSITORY_RE = re.compile(r"^[A-Za-z\d_.-]+/[A-Za-z\d_.-]+$", re.ASCII)
+CANDIDATE_SHA_LABEL = "candidate SHA"
+FUZZ_RECORD_LABEL = "fuzz record"
+SOAK_MANIFEST_LABEL = "short-soak manifest"
+SOAK_RECORD_LABEL = "short-soak record"
+FUZZ_BLOCKING_PASS_ERROR = f"{FUZZ_RECORD_LABEL} is not a blocking pass"
+SOAK_PASS_ERROR = f"{SOAK_RECORD_LABEL} is not a pass"
 
 
 class QualificationReuseError(ValueError):
@@ -56,9 +72,47 @@ def _positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-def _read_json(path: pathlib.Path, label: str) -> dict:
+def _environment_root(name: str) -> pathlib.Path:
+    value = os.environ.get(name)
+    if not value:
+        raise QualificationReuseError(f"{name} is missing")
+    root = validate_read_path(value, purpose=name)
+    if not root.is_dir():
+        raise QualificationReuseError(f"{name} must be a directory")
+    return root
+
+
+def _read_path_within(path: pathlib.Path, root: pathlib.Path,
+                      label: str) -> pathlib.Path:
+    if path.is_symlink():
+        raise QualificationReuseError(f"{label} must not be a symbolic link")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        resolved_root = validate_read_path(root, purpose=f"{label} root")
+        resolved = validate_read_path(path, purpose=label)
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise QualificationReuseError(f"{label} is outside its trusted root") from exc
+    return resolved
+
+
+def _write_path_within(path: pathlib.Path | str, root: pathlib.Path,
+                       label: str) -> pathlib.Path:
+    try:
+        resolved_root = validate_read_path(root, purpose=f"{label} root")
+        return validate_write_path_within_root(
+            path, resolved_root, purpose=label
+        )
+    except ValueError as exc:
+        raise QualificationReuseError(
+            f"{label} is outside its trusted root"
+        ) from exc
+
+
+def _read_json(path: pathlib.Path, label: str, *, root: pathlib.Path) -> dict:
+    try:
+        safe_path = _read_path_within(path, root, label)
+        _regular_file(safe_path, label)
+        value = json.loads(safe_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise QualificationReuseError(f"{label} is missing or malformed") from exc
     if not isinstance(value, dict):
@@ -73,7 +127,8 @@ def _regular_file(path: pathlib.Path, label: str) -> None:
 
 def _sha256_file(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    safe_path = validate_read_path(path, purpose="bundle entry")
+    with safe_path.open("rb") as stream:
         while True:
             chunk = stream.read(64 * 1024)
             if not chunk:
@@ -83,10 +138,15 @@ def _sha256_file(path: pathlib.Path) -> str:
 
 
 def _tree_files(root: pathlib.Path) -> dict[str, str]:
-    if root.is_symlink() or not root.is_dir():
+    if root.is_symlink():
+        raise QualificationReuseError("qualification bundle directory is missing")
+    root = validate_read_path(root, purpose="qualification bundle")
+    if not root.is_dir():
         raise QualificationReuseError("qualification bundle directory is missing")
     files: dict[str, str] = {}
-    for current, directories, names in os.walk(root, followlinks=False):
+    for current, directories, names in os.walk(
+        root, followlinks=False, onerror=_raise_walk_failure
+    ):
         current_path = pathlib.Path(current)
         for name in directories:
             if (current_path / name).is_symlink():
@@ -101,15 +161,27 @@ def _tree_files(root: pathlib.Path) -> dict[str, str]:
     return dict(sorted(files.items()))
 
 
-def _copy_regular_file(source: pathlib.Path, destination: pathlib.Path) -> None:
-    _regular_file(source, source.name)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+def _raise_walk_failure(error: OSError) -> None:
+    raise QualificationReuseError("bundle directory cannot be enumerated") from error
+
+
+def _copy_regular_file(source: pathlib.Path, destination: pathlib.Path,
+                       *, source_root: pathlib.Path,
+                       destination_root: pathlib.Path) -> None:
+    safe_source = _read_path_within(source, source_root, source.name)
+    _regular_file(safe_source, source.name)
+    safe_destination = _write_path_within(
+        destination, destination_root, destination.name
+    )
+    safe_destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(safe_source, safe_destination)
 
 
 def _source_context_from_env() -> dict:
     repository = _require_repository(os.environ.get("GITHUB_REPOSITORY"))
-    candidate_sha = _require_sha(os.environ.get("GITHUB_SHA"), "candidate SHA")
+    candidate_sha = _require_sha(
+        os.environ.get("GITHUB_SHA"), CANDIDATE_SHA_LABEL
+    )
     version = _require_version(os.environ.get("RELEASE_VERSION"))
     ref = os.environ.get("GITHUB_REF", "")
     branch = os.environ.get("GITHUB_REF_NAME", "")
@@ -127,7 +199,9 @@ def _source_context_from_env() -> dict:
         raise QualificationReuseError("preflight branch is missing")
     expected_workflow_ref = f"{repository}/{WORKFLOW_PATH}@{ref}"
     if workflow_ref != expected_workflow_ref or workflow_sha != candidate_sha:
-        raise QualificationReuseError("workflow source does not match candidate SHA")
+        raise QualificationReuseError(
+            f"workflow source does not match {CANDIDATE_SHA_LABEL}"
+        )
     if os.environ.get("REQUIRE_BLOCKING_INPUT", "").lower() != "true":
         raise QualificationReuseError("require_blocking input must be true")
     if os.environ.get("FINAL_METADATA_INPUT", "").lower() != "true":
@@ -154,7 +228,7 @@ def _source_context_from_env() -> dict:
 
 
 def _validate_create_context(context: dict) -> tuple[str, str, str, dict]:
-    candidate_sha = _require_sha(context.get("candidate_sha"), "candidate SHA")
+    candidate_sha = _require_sha(context.get("candidate_sha"), CANDIDATE_SHA_LABEL)
     version = _require_version(context.get("release_version"))
     repository = _require_repository(context.get("repository"))
     if context.get("inputs") != {
@@ -177,7 +251,9 @@ def _validate_source_context(source: dict, candidate_sha: str,
     if source.get("event") != "workflow_dispatch":
         raise QualificationReuseError("source run event is not workflow_dispatch")
     if source.get("workflow_sha") != candidate_sha:
-        raise QualificationReuseError("workflow source does not match candidate SHA")
+        raise QualificationReuseError(
+            f"workflow source does not match {CANDIDATE_SHA_LABEL}"
+        )
     if source.get("ref") != f"refs/heads/{source.get('branch', '')}":
         raise QualificationReuseError("source branch and ref do not match")
     expected_ref = f"{repository}/{WORKFLOW_PATH}@{source['ref']}"
@@ -189,11 +265,18 @@ def _validate_source_context(source: dict, candidate_sha: str,
 
 
 def _load_qualification_records(source_dir: pathlib.Path,
-                                candidate_sha: str) -> dict:
+                                candidate_sha: str,
+                                *, trusted_root: pathlib.Path) -> dict:
     records = {
-        FUZZ_RECORD: _read_json(source_dir / FUZZ_RECORD, "fuzz record"),
-        SOAK_MANIFEST: _read_json(source_dir / SOAK_MANIFEST, "short-soak manifest"),
-        SOAK_RECORD: _read_json(source_dir / SOAK_RECORD, "short-soak record"),
+        FUZZ_RECORD: _read_json(
+            source_dir / FUZZ_RECORD, FUZZ_RECORD_LABEL, root=trusted_root
+        ),
+        SOAK_MANIFEST: _read_json(
+            source_dir / SOAK_MANIFEST, SOAK_MANIFEST_LABEL, root=trusted_root
+        ),
+        SOAK_RECORD: _read_json(
+            source_dir / SOAK_RECORD, SOAK_RECORD_LABEL, root=trusted_root
+        ),
     }
     _validate_qualification_records(records, candidate_sha)
     return records
@@ -201,33 +284,55 @@ def _load_qualification_records(source_dir: pathlib.Path,
 
 def _validate_qualification_records(records: dict, candidate_sha: str) -> None:
     identities = (
-        (FUZZ_RECORD, "fuzz record"),
-        (SOAK_MANIFEST, "short-soak manifest"),
-        (SOAK_RECORD, "short-soak record"),
+        (FUZZ_RECORD, FUZZ_RECORD_LABEL),
+        (SOAK_MANIFEST, SOAK_MANIFEST_LABEL),
+        (SOAK_RECORD, SOAK_RECORD_LABEL),
     )
     for key, label in identities:
         if records[key].get("candidate_sha") != candidate_sha:
-            raise QualificationReuseError(f"{label} candidate SHA is stale")
+            raise QualificationReuseError(f"{label} {CANDIDATE_SHA_LABEL} is stale")
     if records[FUZZ_RECORD].get("blocking_pass") is not True:
-        raise QualificationReuseError("fuzz record is not a blocking pass")
+        raise QualificationReuseError(FUZZ_BLOCKING_PASS_ERROR)
     if records[SOAK_RECORD].get("status") != "pass":
-        raise QualificationReuseError("short-soak record is not a pass")
+        raise QualificationReuseError(SOAK_PASS_ERROR)
 
 
-def _copy_bundle_inputs(source_dir: pathlib.Path,
-                        bundle_dir: pathlib.Path) -> None:
+def _copy_bundle_inputs(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
+                        *, trusted_root: pathlib.Path) -> None:
+    source_dir = _read_path_within(
+        source_dir, trusted_root, "release evidence directory"
+    )
+    bundle_dir = _write_path_within(
+        bundle_dir, trusted_root, "qualification bundle"
+    )
     bundle_dir.mkdir(parents=True)
     for name in (FUZZ_RECORD, SOAK_MANIFEST, SOAK_RECORD):
-        _copy_regular_file(source_dir / name, bundle_dir / name)
-    _copy_fuzz_logs(source_dir, bundle_dir)
+        _copy_regular_file(
+            source_dir / name,
+            bundle_dir / name,
+            source_root=source_dir,
+            destination_root=bundle_dir,
+        )
+    _copy_fuzz_logs(source_dir, bundle_dir, trusted_root=trusted_root)
 
 
-def _copy_fuzz_logs(source_dir: pathlib.Path, bundle_dir: pathlib.Path) -> None:
+def _copy_fuzz_logs(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
+                    *, trusted_root: pathlib.Path) -> None:
+    source_dir = _read_path_within(
+        source_dir, trusted_root, "release evidence directory"
+    )
+    bundle_dir = _write_path_within(
+        bundle_dir, trusted_root, "qualification bundle"
+    )
     fuzz_logs = source_dir / "fuzz-logs"
     if fuzz_logs.exists() or fuzz_logs.is_symlink():
         if fuzz_logs.is_symlink() or not fuzz_logs.is_dir():
             raise QualificationReuseError("fuzz logs must be a regular directory")
-        shutil.copytree(fuzz_logs, bundle_dir / "fuzz-logs", symlinks=True)
+        safe_source = _read_path_within(fuzz_logs, source_dir, "fuzz logs")
+        safe_destination = _write_path_within(
+            bundle_dir / "fuzz-logs", bundle_dir, "fuzz logs"
+        )
+        shutil.copytree(safe_source, safe_destination, symlinks=True)
         _tree_files(bundle_dir)
 
 
@@ -244,21 +349,33 @@ def _write_attestation(bundle_dir: pathlib.Path, candidate_sha: str,
         "checks": {"fuzz": "pass", "short_soak": "pass"},
         "files": _tree_files(bundle_dir),
     }
-    (bundle_dir / ATTESTATION_NAME).write_text(
+    attestation_path = _write_path_within(
+        bundle_dir / ATTESTATION_NAME, bundle_dir, "qualification attestation"
+    )
+    attestation_path.write_text(
         json.dumps(attestation, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
 
 def create_bundle(source_dir: pathlib.Path, bundle_dir: pathlib.Path,
-                  context: dict) -> None:
+                  context: dict, *, trusted_root: pathlib.Path) -> None:
     """Copy successful qualification records and write their attestation."""
-    source_dir = source_dir.resolve(strict=True)
+    source_dir = _read_path_within(
+        source_dir, trusted_root, "release evidence directory"
+    )
+    if not source_dir.is_dir():
+        raise QualificationReuseError("release evidence directory is missing")
+    bundle_dir = _write_path_within(
+        bundle_dir, trusted_root, "qualification bundle"
+    )
     if bundle_dir.exists() or bundle_dir.is_symlink():
         raise QualificationReuseError("qualification bundle output already exists")
     candidate_sha, version, repository, source = _validate_create_context(context)
-    _load_qualification_records(source_dir, candidate_sha)
-    _copy_bundle_inputs(source_dir, bundle_dir)
+    _load_qualification_records(
+        source_dir, candidate_sha, trusted_root=trusted_root
+    )
+    _copy_bundle_inputs(source_dir, bundle_dir, trusted_root=trusted_root)
     _write_attestation(bundle_dir, candidate_sha, version, repository, source)
 
 
@@ -279,9 +396,19 @@ def _validate_source_run(run: dict, candidate_sha: str) -> None:
 
 
 def _validate_bundle_files(bundle_dir: pathlib.Path, expected_sha: str,
-                           expected_version: str) -> dict:
+                           expected_version: str,
+                           *, trusted_root: pathlib.Path) -> dict:
+    bundle_dir = _read_path_within(
+        bundle_dir, trusted_root, "qualification bundle"
+    )
+    if not bundle_dir.is_dir():
+        raise QualificationReuseError("qualification bundle directory is missing")
     _regular_file(bundle_dir / ATTESTATION_NAME, "qualification attestation")
-    attestation = _read_json(bundle_dir / ATTESTATION_NAME, "qualification attestation")
+    attestation = _read_json(
+        bundle_dir / ATTESTATION_NAME,
+        "qualification attestation",
+        root=trusted_root,
+    )
     if attestation.get("schema_version") != SCHEMA_VERSION:
         raise QualificationReuseError("qualification attestation schema is unsupported")
     if attestation.get("candidate_sha") != expected_sha:
@@ -304,30 +431,23 @@ def _validate_bundle_files(bundle_dir: pathlib.Path, expected_sha: str,
     required = {FUZZ_RECORD, SOAK_MANIFEST, SOAK_RECORD}
     if not required.issubset(actual_files):
         raise QualificationReuseError("qualification bundle is missing a record")
-    fuzz_record = _read_json(bundle_dir / FUZZ_RECORD, "fuzz record")
-    soak_manifest = _read_json(bundle_dir / SOAK_MANIFEST, "short-soak manifest")
-    soak_record = _read_json(bundle_dir / SOAK_RECORD, "short-soak record")
-    if fuzz_record.get("candidate_sha") != expected_sha:
-        raise QualificationReuseError("fuzz record candidate SHA is stale")
-    if fuzz_record.get("blocking_pass") is not True:
-        raise QualificationReuseError("fuzz record is not a blocking pass")
-    if soak_manifest.get("candidate_sha") != expected_sha:
-        raise QualificationReuseError("short-soak manifest candidate SHA is stale")
-    if soak_record.get("candidate_sha") != expected_sha:
-        raise QualificationReuseError("short-soak record candidate SHA is stale")
-    if soak_record.get("status") != "pass":
-        raise QualificationReuseError("short-soak record is not a pass")
+    _load_qualification_records(
+        bundle_dir, expected_sha, trusted_root=trusted_root
+    )
     return attestation
 
 
 def verify_bundle(bundle_dir: pathlib.Path, candidate_sha: str,
-                  release_version: str, repository: str, source_run: dict) -> None:
+                  release_version: str, repository: str, source_run: dict,
+                  *, trusted_root: pathlib.Path) -> None:
     """Validate the artifact attestation against GitHub's run metadata."""
-    candidate_sha = _require_sha(candidate_sha, "candidate SHA")
+    candidate_sha = _require_sha(candidate_sha, CANDIDATE_SHA_LABEL)
     release_version = _require_version(release_version)
     repository = _require_repository(repository)
     _validate_source_run(source_run, candidate_sha)
-    attestation = _validate_bundle_files(bundle_dir, candidate_sha, release_version)
+    attestation = _validate_bundle_files(
+        bundle_dir, candidate_sha, release_version, trusted_root=trusted_root
+    )
     source = attestation.get("source_run")
     if not isinstance(source, dict):
         raise QualificationReuseError("attested source run is missing")
@@ -448,7 +568,7 @@ def find_reusable_run(repository: str, candidate_sha: str, api_url: str,
                       token: str) -> tuple[dict, str] | None:
     """Return the newest successful exact-SHA dispatch with a live bundle."""
     repository = _require_repository(repository)
-    candidate_sha = _require_sha(candidate_sha, "candidate SHA")
+    candidate_sha = _require_sha(candidate_sha, CANDIDATE_SHA_LABEL)
     parsed_api = urllib.parse.urlparse(api_url)
     if parsed_api.scheme != "https" or not parsed_api.netloc:
         raise QualificationReuseError("GitHub API URL must use HTTPS")
@@ -480,7 +600,14 @@ def _write_outputs(values: dict[str, object]) -> None:
     output_path = os.environ.get("GITHUB_OUTPUT")
     lines = [f"{key}={value}" for key, value in values.items()]
     if output_path:
-        with pathlib.Path(output_path).open("a", encoding="utf-8") as output:
+        safe_output = validate_read_path(
+            _write_path_within(
+                output_path, _environment_root("RUNNER_TEMP"), "GitHub output"
+            ),
+            must_exist=False,
+            purpose="GitHub output",
+        )
+        with safe_output.open("a", encoding="utf-8") as output:
             output.write("\n".join(lines) + "\n")
     else:
         print("\n".join(lines))
@@ -506,7 +633,10 @@ def _discover_from_env() -> int:
             metadata_value = os.environ.get("RELEASE_QUALIFICATION_RUN_METADATA", "")
             if not metadata_value:
                 raise QualificationReuseError("source run metadata path is missing")
-            metadata_path = pathlib.Path(metadata_value)
+            metadata_path = _write_path_within(
+                pathlib.Path(metadata_value), _environment_root("RUNNER_TEMP"),
+                "source run metadata",
+            )
             metadata_path.parent.mkdir(parents=True, exist_ok=True)
             metadata_path.write_text(
                 json.dumps(run, indent=2) + "\n", encoding="utf-8"
@@ -523,19 +653,41 @@ def _discover_from_env() -> int:
 
 
 def _create_from_env(args: argparse.Namespace) -> int:
-    create_bundle(args.source_dir, args.bundle_dir, _source_context_from_env())
+    workspace = _environment_root("GITHUB_WORKSPACE")
+    source_dir = _read_path_within(
+        args.source_dir, workspace, "release evidence directory"
+    )
+    bundle_dir = _write_path_within(
+        args.bundle_dir, workspace, "qualification bundle"
+    )
+    create_bundle(
+        source_dir,
+        bundle_dir,
+        _source_context_from_env(),
+        trusted_root=workspace,
+    )
     print(f"PASS: created qualification bundle at {args.bundle_dir}")
     return 0
 
 
 def _verify_from_args(args: argparse.Namespace) -> int:
-    source_run = _read_json(args.source_run, "GitHub source run metadata")
+    runner_temp = _environment_root("RUNNER_TEMP")
+    bundle_dir = _read_path_within(
+        args.bundle_dir, runner_temp, "qualification bundle"
+    )
+    source_run_path = _read_path_within(
+        args.source_run, runner_temp, "GitHub source run metadata"
+    )
+    source_run = _read_json(
+        source_run_path, "GitHub source run metadata", root=runner_temp
+    )
     verify_bundle(
-        args.bundle_dir,
+        bundle_dir,
         args.candidate_sha,
         args.release_version,
         args.repository,
         source_run,
+        trusted_root=runner_temp,
     )
     print("PASS: reusable qualification bundle matches the successful source run")
     return 0
@@ -564,20 +716,66 @@ def _restore_one(bundle_dir: pathlib.Path, output_root: pathlib.Path,
     if name == "fuzz-logs":
         if not source.is_dir():
             raise QualificationReuseError("fuzz logs must be a regular directory")
-        shutil.copytree(source, destination)
+        safe_source = _read_path_within(source, bundle_dir, "fuzz logs")
+        safe_destination = _write_path_within(
+            destination, output_root, "fuzz logs"
+        )
+        shutil.copytree(safe_source, safe_destination)
         _tree_files(output_root)
         return
-    _copy_regular_file(source, destination)
+    _copy_regular_file(
+        source,
+        destination,
+        source_root=bundle_dir,
+        destination_root=output_root,
+    )
+
+
+def _remove_restore_target(path: pathlib.Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _restore_transaction(bundle_dir: pathlib.Path, output_root: pathlib.Path,
+                         entries: tuple[tuple[str, bool], ...]) -> None:
+    targets = [output_root / name for name, _ in entries]
+    if any(path.exists() or path.is_symlink() for path in targets):
+        raise QualificationReuseError("refusing to overwrite release evidence")
+    try:
+        for name, optional in entries:
+            _restore_one(bundle_dir, output_root, name, optional)
+    except (OSError, QualificationReuseError) as restore_error:
+        cleanup_error = None
+        for path in targets:
+            try:
+                _remove_restore_target(path)
+            except OSError as error:
+                cleanup_error = cleanup_error or error
+        if cleanup_error:
+            raise QualificationReuseError(
+                "failed to clean up partial qualification restore"
+            ) from restore_error
+        raise
 
 
 def _restore_from_args(args: argparse.Namespace, kind: str) -> int:
     version = _require_version(args.release_version)
-    _validate_bundle_files(args.bundle_dir, args.candidate_sha, version)
-    output_root = pathlib.Path(args.output_root) / version
+    runner_temp = _environment_root("RUNNER_TEMP")
+    workspace = _environment_root("GITHUB_WORKSPACE")
+    bundle_dir = _read_path_within(
+        args.bundle_dir, runner_temp, "qualification bundle"
+    )
+    _validate_bundle_files(
+        bundle_dir, args.candidate_sha, version, trusted_root=runner_temp
+    )
+    output_root = _write_path_within(
+        args.output_root, workspace, "release evidence root"
+    ) / version
     if output_root.is_symlink() or not output_root.is_dir():
         raise QualificationReuseError("release evidence output directory is missing")
-    for name, optional in _restore_names(kind):
-        _restore_one(args.bundle_dir, output_root, name, optional)
+    _restore_transaction(bundle_dir, output_root, _restore_names(kind))
     print(f"PASS: restored reusable {kind} qualification evidence")
     return 0
 
