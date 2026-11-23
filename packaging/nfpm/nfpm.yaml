@@ -4,12 +4,13 @@
 # Generates both .deb and .rpm packages from pre-built Module_SO artifacts.
 #
 # Environment variables (injected by workflow matrix):
-#   PKG_VERSION          - Package version for this packager.  The DEB step
-#                          passes the Debian upstream version (for example
-#                          1.0.0~rc1); the RPM step passes the base version
-#                          (1.0.0) and carries the prerelease in NFPM_RELEASE.
-#   NFPM_RELEASE         - Package release.  Stable: nginx<ver>; prerelease:
-#                          0.<token>.nginx<ver>.  See
+#   PKG_VERSION          - Package version for this packager.  Both families
+#                          receive the mapped version, which carries a
+#                          prerelease behind `~` (for example 1.0.0~rc1).
+#   NFPM_RELEASE         - Package release.  Debian: nginx<ver>.  RPM:
+#                          nginx<ver>.1.  The prerelease never moves into the
+#                          RPM release, because rpmvercmp ranks a numeric
+#                          leading segment above a letter segment.  See
 #                          packaging/scripts/release_version.py.
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
 #   NGINX_VERSION_CEIL   - Upper NGINX version bound for the dependency range
