@@ -115,24 +115,39 @@ satisfies the contract a previous stable release published. One change can edit
 both the source and its inventory. They can still look consistent while a
 contract breaks.
 
-Before the v1.0 line is frozen, a machine-readable baseline comparison must
-exist that covers at least:
+The repository now carries that gate.  `make compatibility-contract-check`
+compares a candidate against frozen manifests of the published release tags.
+The manifests live in `tools/compatibility/contracts/`, and the extractor that
+produces them lives in `tools/compatibility/`.  The gate covers:
 
 - directives,
-- metrics,
-- reason-code discriminants,
-- diagnostics compatibility rules, and
+- metrics, both the declared registry and the emitted wire set,
+- reason-code discriminants and their stable metadata,
+- diagnostics compatibility rules,
+- the behavioural HTTP contract, bound to the tests that execute it,
+- the package identity, install layout, and support tiers, and
 - the FFI ABI and versioning policy.
 
-The comparison needs a frozen previous-release baseline, a reproducible way to
-produce it, and per-surface compatibility rules that distinguish an additive
-extension from a break.  Negative fixtures must show that editing source and the
-new inventory together cannot hide a breaking change.  The gate belongs behind a
-generic target, not one whose name cites a specification number.
+Three properties make the comparison trustworthy.
 
-The compatibility gate is deliberately not part of v0.9.2. The release keeps
-the detector and its current-release shape constants as they are. The
-compatibility gate is a v1.0 deliverable, not a late pre-release design change.
+- A manifest records the tag, the tag object, the commit, and a digest per
+  surface. The gate re-extracts each anchor from its tag, so a manifest cannot
+  drift from the release it describes.
+- A missing tag, a missing manifest, a digest mismatch, or an unparseable
+  source fails closed. None of those conditions can produce a pass.
+- The negative fixtures under `tools/compatibility/tests/` edit one contract
+  input at a time in an isolated worktree. One fixture edits the
+  implementation and the current inventory together and still fails the gate.
+  The earlier detector cannot catch that case.
+
+Additive extensions stay permitted under a per-surface policy. A breaking
+change needs an explicit maintainer decision. The approval file that records it
+can waive a review finding but never a breaking finding.
+
+The historical audit of v0.9.2 against v0.9.4 found the five frozen contract
+surfaces identical. It also found a documented reduction of the support matrix
+and one non-behavioral test edit. `INDEX.json` records those deltas with their
+rationale, so the audit reports what changed instead of claiming a zero diff.
 
 ## Post-v1.0 Compatibility Policy
 
