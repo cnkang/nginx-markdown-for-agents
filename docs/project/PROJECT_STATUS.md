@@ -31,6 +31,23 @@ and harness-specific validation entrypoints, along with documentation covering
 installation, configuration, operations, architecture, and contributor-facing
 harness maintenance.
 
+### 1.0 Preparation
+
+**Status:** in progress. Two capabilities landed for the 1.0 line.
+
+- `make compatibility-contract-check` compares a candidate against frozen
+  manifests of the published release tags. It catches a breaking change that a
+  coordinated edit of the implementation and the current inventory would hide.
+- `packaging/scripts/release_version.py` maps a SemVer release identity onto the
+  Debian and RPM package versions, so a prerelease sorts below its final
+  release in both families.
+
+The Week 1 record is in
+[1.0.0-week1-results.md](../development/1.0.0-week1-results.md), and the release
+verdict is in
+[1.0.0-rc1-readiness.md](../development/1.0.0-rc1-readiness.md). No 1.0 tag or
+release exists.
+
 ### Current Release Line 0.9.3
 
 **Status:** Stable release, published 2026-11-02. 0.9.2 was the previous
@@ -489,6 +506,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-11-23 | Kang | Added the cross-release compatibility contract gate, its frozen v0.9.2 and v0.9.4 anchors, and the prerelease package version mapping |
 | 0.9.4 | 2026-11-22 | Codex | Recorded v0.9.4 release status and synchronized release documentation |
 | 0.9.4 | 2026-11-20 | Codex | Prepared an unpublished compatibility candidate; evidence remains pending |
 | 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state for 2026-11-02 |
