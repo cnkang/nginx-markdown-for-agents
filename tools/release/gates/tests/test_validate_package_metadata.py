@@ -476,7 +476,9 @@ class TestReleaseGateSnippetExpectations:
     def test_standalone_rpm_workflow_validate_input_version(self) -> None:
         """Ensure workflow expressions are isolated from shell evaluation."""
         env_binding = "INPUT_VERSION: ${{ inputs.version }}"
-        validator_cmd = './packaging/scripts/validate-version.sh "$INPUT_VERSION"'
+        validator_cmd = (
+            './packaging/scripts/validate-version.sh --stable-only "$INPUT_VERSION"'
+        )
         direct_interpolation = (
             './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         )
