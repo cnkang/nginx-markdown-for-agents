@@ -1091,7 +1091,7 @@ def compare_packaging(
             result.add(
                 "packaging",
                 BREAKING,
-                "{}-changed".format(key.replace("_", "-")),
+                CHANGED_ID.format(key.replace("_", "-")),
                 "the installed module path changed for {}".format(key),
                 baseline[key],
                 candidate[key],
@@ -1101,7 +1101,7 @@ def compare_packaging(
             result.add(
                 "packaging",
                 REVIEW_REQUIRED,
-                "{}-changed".format(key.replace("_", "-")),
+                CHANGED_ID.format(key.replace("_", "-")),
                 "the packaging {} contract changed".format(key),
                 baseline[key],
                 candidate[key],
