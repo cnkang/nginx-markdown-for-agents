@@ -337,10 +337,18 @@ the module from source against your local NGINX installation.
 
 | NGINX Version | Channel | OS | libc | Arch | Artifact | Required Test Level | Tier | State | Blocking | Workflow |
 |---------------|---------|-----|------|------|----------|---------------------|------|-------|----------|----------|
+| 1.31.10 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.31.10 | mainline | linux | musl | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.31.10 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.31.10 | mainline | linux | musl | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
 | 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.8 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.30.8 | stable | linux | musl | arm64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.30.8 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
+| 1.30.8 | stable | linux | musl | amd64 | dynamic-module | smoke-test | best-effort | pending | No | `.github/workflows/release-packages.yml` |
 | 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.7 | stable | linux | musl | arm64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |
 | 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | verified | Yes | `.github/workflows/release-packages.yml` |

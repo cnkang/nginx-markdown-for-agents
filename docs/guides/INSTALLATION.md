@@ -707,26 +707,36 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 <!-- BEGIN AUTO-GENERATED MATRIX -->
 | NGINX Version | OS Type | Architecture | Support Tier |
 |---------------|---------|--------------|--------------|
-| 1.24.0 | glibc | aarch64 | Supported |
-| 1.24.0 | glibc | x86_64 | Supported |
-| 1.24.0 | musl | aarch64 | Supported |
-| 1.24.0 | musl | x86_64 | Supported |
-| 1.26.3 | glibc | aarch64 | Supported |
-| 1.26.3 | glibc | x86_64 | Supported |
-| 1.26.3 | musl | aarch64 | Supported |
-| 1.26.3 | musl | x86_64 | Supported |
-| 1.28.3 | glibc | aarch64 | Supported |
-| 1.28.3 | glibc | x86_64 | Supported |
-| 1.28.3 | musl | aarch64 | Supported |
-| 1.28.3 | musl | x86_64 | Supported |
-| 1.30.7 | glibc | aarch64 | Supported |
-| 1.30.7 | glibc | x86_64 | Supported |
-| 1.30.7 | musl | aarch64 | Supported |
-| 1.30.7 | musl | x86_64 | Supported |
-| 1.31.9 | glibc | aarch64 | Supported |
-| 1.31.9 | glibc | x86_64 | Supported |
-| 1.31.9 | musl | aarch64 | Supported |
-| 1.31.9 | musl | x86_64 | Supported |
+| 1.24.0 | glibc | aarch64 | Full |
+| 1.24.0 | glibc | x86_64 | Full |
+| 1.24.0 | musl | aarch64 | Full |
+| 1.24.0 | musl | x86_64 | Full |
+| 1.26.3 | glibc | aarch64 | Full |
+| 1.26.3 | glibc | x86_64 | Full |
+| 1.26.3 | musl | aarch64 | Full |
+| 1.26.3 | musl | x86_64 | Full |
+| 1.26.3 | unlisted | unlisted | Source Only |
+| 1.28.3 | glibc | aarch64 | Full |
+| 1.28.3 | glibc | x86_64 | Full |
+| 1.28.3 | musl | aarch64 | Full |
+| 1.28.3 | musl | x86_64 | Full |
+| 1.28.3 | unlisted | unlisted | Source Only |
+| 1.30.7 | glibc | aarch64 | Full |
+| 1.30.7 | glibc | x86_64 | Full |
+| 1.30.7 | musl | aarch64 | Full |
+| 1.30.7 | musl | x86_64 | Full |
+| 1.30.8 | glibc | aarch64 | Best-Effort |
+| 1.30.8 | glibc | x86_64 | Best-Effort |
+| 1.30.8 | musl | aarch64 | Best-Effort |
+| 1.30.8 | musl | x86_64 | Best-Effort |
+| 1.31.9 | glibc | aarch64 | Full |
+| 1.31.9 | glibc | x86_64 | Full |
+| 1.31.9 | musl | aarch64 | Full |
+| 1.31.9 | musl | x86_64 | Full |
+| 1.31.10 | glibc | aarch64 | Best-Effort |
+| 1.31.10 | glibc | x86_64 | Best-Effort |
+| 1.31.10 | musl | aarch64 | Best-Effort |
+| 1.31.10 | musl | x86_64 | Best-Effort |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -761,10 +771,18 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier | State |
 |-------|---------|-----|------|------|------|-------|
+| 1.31.10 | mainline | linux | glibc | arm64 | best-effort | pending |
+| 1.31.10 | mainline | linux | musl | arm64 | best-effort | pending |
+| 1.31.10 | mainline | linux | glibc | amd64 | best-effort | pending |
+| 1.31.10 | mainline | linux | musl | amd64 | best-effort | pending |
 | 1.31.9 | mainline | linux | glibc | arm64 | supported | verified |
 | 1.31.9 | mainline | linux | musl | arm64 | supported | verified |
 | 1.31.9 | mainline | linux | glibc | amd64 | supported | verified |
 | 1.31.9 | mainline | linux | musl | amd64 | supported | verified |
+| 1.30.8 | stable | linux | glibc | arm64 | best-effort | pending |
+| 1.30.8 | stable | linux | musl | arm64 | best-effort | pending |
+| 1.30.8 | stable | linux | glibc | amd64 | best-effort | pending |
+| 1.30.8 | stable | linux | musl | amd64 | best-effort | pending |
 | 1.30.7 | stable | linux | glibc | arm64 | supported | verified |
 | 1.30.7 | stable | linux | musl | arm64 | supported | verified |
 | 1.30.7 | stable | linux | glibc | amd64 | supported | verified |

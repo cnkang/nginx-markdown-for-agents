@@ -207,10 +207,18 @@ curl -sS -D - -o /dev/null \
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | State | Blocking |
 |-------|---------|-----|------|------|----------|------|-------|----------|
+| 1.31.10 | mainline | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.10 | mainline | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.31.10 | mainline | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.31.10 | mainline | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
 | 1.31.9 | mainline | linux | glibc | arm64 | dynamic-module | supported | verified | Yes |
 | 1.31.9 | mainline | linux | musl | arm64 | dynamic-module | supported | verified | Yes |
 | 1.31.9 | mainline | linux | glibc | amd64 | dynamic-module | supported | verified | Yes |
 | 1.31.9 | mainline | linux | musl | amd64 | dynamic-module | supported | verified | Yes |
+| 1.30.8 | stable | linux | glibc | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.8 | stable | linux | musl | arm64 | dynamic-module | best-effort | pending | No |
+| 1.30.8 | stable | linux | glibc | amd64 | dynamic-module | best-effort | pending | No |
+| 1.30.8 | stable | linux | musl | amd64 | dynamic-module | best-effort | pending | No |
 | 1.30.7 | stable | linux | glibc | arm64 | dynamic-module | supported | verified | Yes |
 | 1.30.7 | stable | linux | musl | arm64 | dynamic-module | supported | verified | Yes |
 | 1.30.7 | stable | linux | glibc | amd64 | dynamic-module | supported | verified | Yes |
