@@ -345,7 +345,7 @@ def _verify_every_anchor(
 
 
 def _audit_historical(
-    repo_root: str, index: Dict[str, Any], contracts_dir: str
+    index: Dict[str, Any], contracts_dir: str
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Audit every declared tag-to-tag comparison."""
     reports: List[Dict[str, Any]] = []
@@ -410,7 +410,7 @@ def check_command(args: argparse.Namespace) -> int:
     index = load_index(index_path, repo_root)
     _print_header(index_path)
     anchors = _verify_every_anchor(repo_root, index, contracts_dir)
-    historical, failures = _audit_historical(repo_root, index, contracts_dir)
+    historical, failures = _audit_historical(index, contracts_dir)
     candidate_report, blocking = _compare_candidate(
         repo_root, index, contracts_dir, args
     )
@@ -489,7 +489,7 @@ def freeze_command(args: argparse.Namespace) -> int:
     relative = "nginx-markdown-{}.json".format(args.tag[1:])
     target = _manifest_path(contracts_dir, relative)
     if os.path.exists(target) and not args.replace:
-        existing = _load_manifest(target)
+        existing = _load_manifest(target, contracts_dir)
         if existing["source"]["commit"] != revision.commit:
             raise ContractError(
                 "{} already anchors commit {}; pass --replace only after a "
