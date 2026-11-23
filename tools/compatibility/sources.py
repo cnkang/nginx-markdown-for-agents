@@ -110,7 +110,7 @@ def _git(repo_root: str, *args: str) -> str:
         # no traversal component, each option word is a known constant, and each
         # operand is limited to reference, commit, and path characters and may
         # not start with a dash.  No value can become an option.
-        completed = subprocess.run(  # NOSONAR: guarded by the allowlist above
+        completed = subprocess.run(  # NOSONAR
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
