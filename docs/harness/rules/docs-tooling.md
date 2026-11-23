@@ -73,7 +73,10 @@ Required:
   resolve a baseline version, except the versions documented in
   `CROSS_LOCK_ALLOWED_DIVERGENCES`. Rebuild with a targeted
   `cargo update -p <crate>@<stale> --precise <baseline version>`; a full
-  lock rebuild would rewrite the documented divergences.
+  lock rebuild would rewrite the documented divergences. A targeted update
+  can also move a shared transitive dependency past a later planned entry,
+  so the sync tool rechecks each package against the lock before it runs
+  that package's cargo command.
 - Verify all dependency surfaces with one command:
   `python3 tools/ci/sync_dependency_surfaces.py --check`. The check mode
   writes nothing and runs no cargo, so it is safe offline. Apply the sync by

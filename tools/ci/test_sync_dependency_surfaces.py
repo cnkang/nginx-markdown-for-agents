@@ -165,6 +165,94 @@ class SyncDependencySurfacesTests(unittest.TestCase):
         self.output = stdout.getvalue()
         return code
 
+    def _write_cascade_stub(
+        self, replacements: list[tuple[str, str]]
+    ) -> tuple[Path, Path]:
+        """Write a cargo stub that rewrites the fuzz lock on every call.
+
+        Models cargo moving a shared transitive dependency as a side effect of
+        updating another package: the plan records the pre-cascade versions,
+        and every stub invocation applies the recorded rewrite.
+        """
+        command_log = self.root / "cargo-commands.log"
+        stub = self.root / "stub-cargo"
+        stub.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            f"with pathlib.Path({str(command_log)!r}).open("
+            "'a', encoding='utf-8') as log:\n"
+            "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"lock = pathlib.Path({str(self.fuzz_lock)!r})\n"
+            "text = lock.read_text(encoding='utf-8')\n"
+            f"for old, new in {replacements!r}:\n"
+            "    text = text.replace(old, new)\n"
+            "lock.write_text(text, encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return stub, command_log
+
+    def _use_cascade_fixture(
+        self, fuzz_lock: str, notices: str
+    ) -> None:
+        """Install a baseline/fuzz/e2e/notices set for cascade tests."""
+        self.allowed = {str(self.e2e_lock): {"brotli": {"8.0.4"}}}
+        self.baseline_lock.write_text(
+            '[[package]]\nname = "brotli"\nversion = "9.1.1"\n'
+            '\n[[package]]\nname = "regex"\nversion = "1.13.2"\n'
+            '\n[[package]]\nname = "regex-automata"\nversion = "0.4.19"\n',
+            encoding="utf-8",
+        )
+        self.fuzz_lock.write_text(fuzz_lock, encoding="utf-8")
+        self.e2e_lock.write_text(
+            '[[package]]\nname = "brotli"\nversion = "8.0.4"\n'
+            '\n[[package]]\nname = "regex"\nversion = "1.13.2"\n',
+            encoding="utf-8",
+        )
+        self.notices_path.write_text(notices, encoding="utf-8")
+
+    def test_apply_skips_package_moved_by_a_transitive_cascade(self) -> None:
+        """A package an earlier update already moved is not re-run as a failure."""
+        self._use_cascade_fixture(
+            '[[package]]\nname = "regex"\nversion = "1.13.1"\n'
+            '\n[[package]]\nname = "regex-automata"\nversion = "0.4.16"\n',
+            "Section B: crates\n\n9.  regex 1.13.2\n"
+            "12. brotli 9.1.1 (Rust crate)\n",
+        )
+        stub, command_log = self._write_cascade_stub(
+            [('"1.13.1"', '"1.13.2"'), ('"0.4.16"', '"0.4.19"')]
+        )
+
+        exit_code = self._run_sync(check_only=False, cargo=str(stub))
+
+        self.assertEqual(exit_code, 0)
+        commands = command_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(commands), 1)
+        self.assertIn("regex@1.13.1", commands[0])
+        self.assertNotIn("regex-automata@0.4.16", "\n".join(commands))
+        self.assertNotIn("cargo update failed", self.output)
+
+    def test_apply_retargets_a_cascade_to_another_stale_version(self) -> None:
+        """A cascade that lands on a different stale version is re-targeted."""
+        self._use_cascade_fixture(
+            '[[package]]\nname = "regex"\nversion = "1.13.1"\n'
+            '\n[[package]]\nname = "regex-automata"\nversion = "0.4.16"\n',
+            "Section B: crates\n\n9.  regex 1.13.2\n"
+            "12. brotli 9.1.1 (Rust crate)\n",
+        )
+        stub, command_log = self._write_cascade_stub(
+            [('"1.13.1"', '"1.13.2"'), ('"0.4.16"', '"0.4.20"')]
+        )
+
+        exit_code = self._run_sync(check_only=False, cargo=str(stub))
+
+        self.assertEqual(exit_code, 0)
+        commands = command_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(commands), 2)
+        self.assertIn("regex-automata@0.4.20", commands[1])
+        self.assertIn("--precise 0.4.19", commands[1])
+        self.assertNotIn("cargo update failed", self.output)
+
     def test_check_mode_reports_every_stale_surface(self) -> None:
         """Check mode lists lock and notices findings and exits 1."""
         self.allowed = {}
