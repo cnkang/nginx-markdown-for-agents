@@ -734,7 +734,7 @@ def _compare_properties(
                 "diagnostics",
                 BREAKING,
                 "child-enum-added:{}:{}".format(name, child),
-                "diagnostics field {} gained a closed value set".format(name, child),
+                "diagnostics field {} of {} gained a closed value set".format(name, child),
                 None,
                 sorted(new_enum),
             )
@@ -743,7 +743,7 @@ def _compare_properties(
                 "diagnostics",
                 BREAKING,
                 "child-enum-narrowed:{}:{}".format(name, child),
-                "diagnostics field {} lost an allowed value".format(name, child),
+                "diagnostics field {} of {} lost an allowed value".format(name, child),
                 sorted(old_enum - new_enum),
                 None,
             )
@@ -752,7 +752,7 @@ def _compare_properties(
                 "diagnostics",
                 ADDITIVE,
                 "child-enum-widened:{}:{}".format(name, child),
-                "diagnostics field {} gained an allowed value".format(name, child),
+                "diagnostics field {} of {} gained an allowed value".format(name, child),
                 None,
                 sorted(new_enum - old_enum),
             )
