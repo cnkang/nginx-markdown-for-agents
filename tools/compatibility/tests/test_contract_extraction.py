@@ -1595,3 +1595,57 @@ def test_enum_comparison_follows_json_schema_equality():
         "diagnostics:enum-widened:state": ADDITIVE,
         "diagnostics:child-enum-narrowed:box:mode": BREAKING,
     }
+
+
+def test_schema_paths_distinguish_dotted_names_from_nesting():
+    """Approving a nested finding leaves a dotted-name finding blocking."""
+    def configuration(minimum):
+        return {
+            "name": "configuration",
+            "type": "object",
+            "nullable": False,
+            "additional_properties": False,
+            "required_children": [],
+            "properties": [
+                {"name": "a.b", "type": "integer", "constraints": {"minimum": minimum}},
+                {
+                    "name": "a",
+                    "type": "object",
+                    "additional_properties": False,
+                    "required_children": [],
+                    "properties": [
+                        {"name": "b", "type": "integer", "constraints": {"minimum": minimum}}
+                    ],
+                },
+            ],
+        }
+
+    flat = "diagnostics:schema-constraints-changed:configuration.a%2Eb"
+    nested = "diagnostics:schema-constraints-changed:configuration.a.b"
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(
+        result,
+        _diagnostics_surface(configuration(1)),
+        _diagnostics_surface(configuration(2)),
+    )
+    by_id = {finding.finding_id: finding for finding in result.findings}
+    assert sorted(by_id) == [flat, nested]
+
+    apply_approvals(
+        result,
+        {
+            "schema": 1,
+            "exceptions": [
+                {
+                    "finding_id": nested,
+                    "evidence_fingerprint": by_id[nested].fingerprint,
+                    "reason": "reviewed nested constraint",
+                    "approved_by": "maintainer",
+                    "approved_at": "2026-11-24",
+                }
+            ],
+        },
+        "approvals.json",
+    )
+    assert by_id[nested].verdict == OK
+    assert [finding.finding_id for finding in result.blocking()] == [flat]
