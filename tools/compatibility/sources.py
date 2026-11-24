@@ -25,6 +25,8 @@ from tools.compatibility.model import ContractError  # noqa: E402
 from tools.lib.path_validation import validate_read_path  # noqa: E402
 
 GIT_TIMEOUT_SECONDS = 120
+# One message for every failed read of a committed contract input.
+_READ_AT_REVISION_ERROR = "cannot read {} at {}: {}"
 
 # Git references come from the anchor index, which is file content.  An
 # allowlist keeps a crafted value from becoming a git option or a second
@@ -281,7 +283,7 @@ class SourceReader:
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise ContractError(
-                "cannot read {} at {}: {}".format(path, self.revision.label, error)
+                _READ_AT_REVISION_ERROR.format(path, self.revision.label, error)
             )
         if metadata.returncode != 0:
             raise ContractError(
@@ -326,11 +328,11 @@ class SourceReader:
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise ContractError(
-                "cannot read {} at {}: {}".format(path, self.revision.label, error)
+                _READ_AT_REVISION_ERROR.format(path, self.revision.label, error)
             )
         if completed.returncode != 0:
             raise ContractError(
-                "cannot read {} at {}: {}".format(
+                _READ_AT_REVISION_ERROR.format(
                     path,
                     self.revision.label,
                     (completed.stderr or b"").decode("utf-8", "replace").strip(),
