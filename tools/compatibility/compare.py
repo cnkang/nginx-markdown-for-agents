@@ -10,7 +10,7 @@ treated as a pass.  ``ADDITIVE`` and ``OK`` are compatible outcomes.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .model import digest_of
 
@@ -143,6 +143,45 @@ def _by_name(entries: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
 def _sort_mixed_values(values: Iterable[Any]) -> List[Any]:
     """Sort JSON enum values without comparing unlike Python types."""
     return sorted(values, key=lambda value: (value is not None, str(value)))
+
+
+def _json_equality_key(value: Any) -> Any:
+    """Return a hashable key that follows JSON Schema instance equality.
+
+    Booleans stay distinct from numbers, numerically equal numbers such as 1
+    and 1.0 share one key, and arrays and objects compare by content.
+    """
+    if value is None:
+        return ("null",)
+    if isinstance(value, bool):
+        return ("boolean", value)
+    if isinstance(value, (int, float)):
+        return ("number", value)
+    if isinstance(value, str):
+        return ("string", value)
+    if isinstance(value, list):
+        return ("array", tuple(_json_equality_key(item) for item in value))
+    if isinstance(value, dict):
+        return (
+            "object",
+            tuple(
+                sorted(
+                    (key, _json_equality_key(item)) for key, item in value.items()
+                )
+            ),
+        )
+    raise TypeError(f"enum value is not JSON data: {value!r}")
+
+
+def _enum_difference(
+    old_values: List[Any], new_values: List[Any]
+) -> Tuple[List[Any], List[Any]]:
+    """Return the enum values only the baseline or only the candidate allows."""
+    old_keys = {_json_equality_key(value): value for value in old_values}
+    new_keys = {_json_equality_key(value): value for value in new_values}
+    removed = [old_keys[key] for key in old_keys.keys() - new_keys.keys()]
+    added = [new_keys[key] for key in new_keys.keys() - old_keys.keys()]
+    return _sort_mixed_values(removed), _sort_mixed_values(added)
 
 
 def _compare_directive(
@@ -650,25 +689,24 @@ def _compare_field_enum(
             None,
         )
         return
-    old_enum = set(old.get("enum") or [])
-    new_enum = set(new.get("enum") or [])
-    if old_enum - new_enum:
+    removed, added = _enum_difference(old.get("enum") or [], new.get("enum") or [])
+    if removed:
         result.add(
             "diagnostics",
             BREAKING,
             f"enum-narrowed:{name}",
             f"diagnostics field {name} lost an allowed value",
-            _sort_mixed_values(old_enum - new_enum),
+            removed,
             None,
         )
-    if new_enum - old_enum:
+    if added:
         result.add(
             "diagnostics",
             ADDITIVE,
             f"enum-widened:{name}",
             f"diagnostics field {name} gained an allowed value",
             None,
-            _sort_mixed_values(new_enum - old_enum),
+            added,
         )
 
 
@@ -722,43 +760,44 @@ def _compare_child_enum(
     result: Comparison, name: str, child: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
     """Compare the allowed values of one child field of a diagnostics object."""
-    old_enum = set(old.get("enum") or [])
-    new_enum = set(new.get("enum") or [])
     if old.get("enum") is not None and new.get("enum") is None:
         result.add(
             "diagnostics",
             ADDITIVE,
             f"child-enum-removed:{name}:{child}",
             f"diagnostics field {name} no longer restricts {child}",
-            _sort_mixed_values(old_enum),
+            _enum_difference(old["enum"], [])[0],
             None,
         )
-    elif new.get("enum") is not None and old.get("enum") is None:
+        return
+    if new.get("enum") is not None and old.get("enum") is None:
         result.add(
             "diagnostics",
             BREAKING,
             f"child-enum-added:{name}:{child}",
             f"diagnostics field {name} of {child} gained a closed value set",
             None,
-            _sort_mixed_values(new_enum),
+            _enum_difference([], new["enum"])[1],
         )
-    elif old_enum - new_enum:
+        return
+    removed, added = _enum_difference(old.get("enum") or [], new.get("enum") or [])
+    if removed:
         result.add(
             "diagnostics",
             BREAKING,
             f"child-enum-narrowed:{name}:{child}",
             f"diagnostics field {name} of {child} lost an allowed value",
-            _sort_mixed_values(old_enum - new_enum),
+            removed,
             None,
         )
-    elif new_enum - old_enum:
+    elif added:
         result.add(
             "diagnostics",
             ADDITIVE,
             f"child-enum-widened:{name}:{child}",
             f"diagnostics field {name} of {child} gained an allowed value",
             None,
-            _sort_mixed_values(new_enum - old_enum),
+            added,
         )
 
 
