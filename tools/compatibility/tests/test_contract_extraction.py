@@ -1047,3 +1047,57 @@ def test_anchor_verification_checks_lightweight_to_annotated_tag_change(
 
     with pytest.raises(ContractError, match="tag object"):
         cli.verify_anchor(str(tmp_path), anchor, str(contracts))
+
+
+def _init_committed_repo(repo: Path) -> None:
+    """Create a git repository whose tracked files are already committed."""
+    import subprocess
+
+    subprocess.run(
+        ["git", "init", str(repo)],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "-A"],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+
+
+def test_worktree_reader_rejects_symlinked_contract_inputs(tmp_path):
+    """Working-tree reads accept only regular files, as commit mode does."""
+    repo = tmp_path / "repo"
+    (repo / "real").mkdir(parents=True)
+    (repo / "regular.txt").write_text("regular", encoding="utf-8")
+    (repo / "real" / "child.txt").write_text("child", encoding="utf-8")
+    os.symlink("regular.txt", repo / "link.txt")
+    os.symlink("real", repo / "linked")
+    _init_committed_repo(repo)
+    reader = SourceReader(str(repo), resolve_worktree(str(repo)))
+
+    assert reader.read_bytes("regular.txt") == b"regular"
+    assert reader.read_bytes("real/child.txt") == b"child"
+    for path in ("link.txt", "linked/child.txt"):
+        with pytest.raises(ContractError, match="not a regular file"):
+            reader.read_bytes(path)
