@@ -1034,6 +1034,20 @@ def _http_binding_digests(
     return {path: digests.get(path) for path in behaviour["tests"]}
 
 
+def _http_addition_evidence(
+    behaviour: Dict[str, Any], digests: Dict[str, str]
+) -> Dict[str, Any]:
+    """Return the full binding of a new behaviour: its tests and executor.
+
+    The approval fingerprint covers this value, so a different executor
+    invalidates an earlier approval while an unchanged binding still matches.
+    """
+    return {
+        "tests": _http_binding_digests(behaviour, digests),
+        "executed_by": behaviour["executed_by"],
+    }
+
+
 def _compare_removed_http_behaviours(
     result: Comparison,
     old: Dict[str, Any],
@@ -1066,7 +1080,7 @@ def _compare_added_http_behaviours(
             "behaviour-added:{}".format(name),
             "HTTP behaviour {} was added to the contract".format(name),
             None,
-            _http_binding_digests(new[name], digests),
+            _http_addition_evidence(new[name], digests),
         )
 
 
