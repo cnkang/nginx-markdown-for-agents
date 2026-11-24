@@ -727,8 +727,9 @@ def test_diagnostics_root_enum_fails_closed():
                 }
             )
 
+    reader = SchemaReader()
     with pytest.raises(ContractError, match="root-level enum"):
-        extract_module.extract_diagnostics(SchemaReader())
+        extract_module.extract_diagnostics(reader)
 
 
 def test_boolean_diagnostics_schema_fails_closed():
