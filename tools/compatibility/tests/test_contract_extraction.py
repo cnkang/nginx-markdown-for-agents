@@ -1162,6 +1162,36 @@ def test_default_index_requires_the_directed_historical_pair(tmp_path, monkeypat
     assert custom["comparisons"] == [{"from": "v0.9.4", "to": "v0.9.4"}]
 
 
+def test_index_comparison_records_must_name_anchor_tags(tmp_path, monkeypatch, capsys):
+    """A malformed comparison record fails through the FAIL diagnostic."""
+    from tools.compatibility import cli
+
+    custom = str(tmp_path / "custom.json")
+    for record in (
+        "v0.9.2",
+        {"from": "v0.9.2"},
+        {"from": "v0.9.2", "to": 4},
+        {"from": "v0.9.1", "to": "v0.9.4"},
+    ):
+        index = _index_with_pair("v0.9.2", "v0.9.4")
+        index["comparisons"] = [record]
+        monkeypatch.setattr(cli, "_read_json", lambda *_, value=index: value)
+        with pytest.raises(ContractError, match="comparison"):
+            cli.load_index(custom, str(REPO))
+        arguments = ["verify-anchors", "--index", custom, "--repo-root", str(REPO)]
+        assert cli.main(arguments) == 1
+        assert "FAIL: anchor index comparison" in capsys.readouterr().err
+
+    index = _index_with_pair("v0.9.2", "v0.9.4")
+    index["comparisons"] = [
+        {"from": "v0.9.2", "to": "v0.9.4"},
+        {"from": "v0.9.2", "to": 4},
+    ]
+    monkeypatch.setattr(cli, "_read_json", lambda *_: index)
+    with pytest.raises(ContractError, match="comparison"):
+        cli.load_index(str(INDEX), str(REPO))
+
+
 def _added_behaviour_finding(executor: str):
     """Return the behaviour-added finding for one new HTTP binding."""
     result = Comparison(baseline_label="a", candidate_label="b")

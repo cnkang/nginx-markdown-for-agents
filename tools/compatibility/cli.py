@@ -133,8 +133,14 @@ def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
         raise ContractError("anchor index declares a duplicate tag")
     if index.get("baseline") not in tags:
         raise ContractError("anchor index baseline is not one of its anchors")
-    if _is_default_index(index_path, repo_root):
-        _require_default_historical_pair(index)
+    pairs = _comparison_pairs(index, set(tags))
+    is_default = _is_default_index(index_path, repo_root)
+    if is_default and DEFAULT_HISTORICAL_PAIR not in pairs:
+        raise ContractError(
+            "the default anchor index must compare {} -> {}".format(
+                *DEFAULT_HISTORICAL_PAIR
+            )
+        )
     return index
 
 
@@ -147,25 +153,32 @@ def _is_default_index(index_path: str, repo_root: str) -> bool:
     return os.path.realpath(index_path) in candidates
 
 
-def _require_default_historical_pair(index: Dict[str, Any]) -> None:
-    """Require the checked-in index to audit the expected directed pair.
+def _comparison_pairs(index: Dict[str, Any], tags: set) -> set:
+    """Validate every comparison record and return its directed tag pairs.
 
-    A custom index keeps its own comparison records without this restriction.
+    Each record must name two anchor tags, so a malformed record fails here
+    instead of breaking the historical audit later.  A custom index may pair
+    any of its anchors.
     """
     comparisons = index.get("comparisons")
+    if comparisons is None:
+        comparisons = []
     if not isinstance(comparisons, list):
         raise ContractError("anchor index comparisons must be a list")
-    pairs = {
-        (record.get("from"), record.get("to"))
-        for record in comparisons
-        if isinstance(record, dict)
-    }
-    if DEFAULT_HISTORICAL_PAIR not in pairs:
-        raise ContractError(
-            "the default anchor index must compare {} -> {}".format(
-                *DEFAULT_HISTORICAL_PAIR
+    pairs = set()
+    for record in comparisons:
+        if not isinstance(record, dict):
+            raise ContractError("anchor index comparisons must be JSON objects")
+        source = record.get("from")
+        target = record.get("to")
+        if not all(isinstance(tag, str) and tag in tags for tag in (source, target)):
+            raise ContractError(
+                "anchor index comparison {!r} -> {!r} must name two anchor tags".format(
+                    source, target
+                )
             )
-        )
+        pairs.add((source, target))
+    return pairs
 
 
 def _anchor_by_tag(index: Dict[str, Any], tag: str) -> Dict[str, Any]:
