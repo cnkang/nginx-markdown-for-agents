@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -237,13 +238,37 @@ class SourceReader:
         self.revision = revision
         self._cache: Dict[str, bytes] = {}
 
-    def _read_worktree_file(self, path: str) -> bytes:
-        """Read one regular file from the selected working tree."""
-        absolute = os.path.join(self.repo_root, path)
-        if not os.path.isfile(absolute):
+    def _require_worktree_regular_file(self, path: str, absolute: str) -> None:
+        """Require a regular file that no symbolic link reaches.
+
+        Commit mode accepts only regular blobs, and git cannot store a file
+        below a symbolic link.  The working tree applies the same rule, so a
+        link cannot point the manifest at content outside the selected path.
+        """
+        try:
+            mode = os.lstat(absolute).st_mode
+        except FileNotFoundError:
             raise ContractError(
                 "contract input {} is missing from the working tree".format(path)
             )
+        except OSError as error:
+            raise ContractError(
+                "cannot read {} from the working tree: {}".format(path, error)
+            )
+        lexical = os.path.join(
+            os.path.realpath(self.repo_root), os.path.normpath(path)
+        )
+        if not stat.S_ISREG(mode) or os.path.realpath(absolute) != lexical:
+            raise ContractError(
+                "contract input {} is not a regular file in the working tree".format(
+                    path
+                )
+            )
+
+    def _read_worktree_file(self, path: str) -> bytes:
+        """Read one regular file from the selected working tree."""
+        absolute = os.path.join(self.repo_root, path)
+        self._require_worktree_regular_file(path, absolute)
         try:
             resolved = validate_read_path(absolute, purpose="contract input")
             repository_root = os.path.realpath(self.repo_root)
