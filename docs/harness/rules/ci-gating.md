@@ -22,7 +22,7 @@ Required:
 - Update workflow path filters whenever checks depend on new file paths.
 - Baseline/bootstrap modes must not upload/compare artifacts incorrectly.
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
--  **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow run
+- **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow run
   block must define each `$VAR` it references in scope. Use the same step's
   `env:`, the job's `env:`, or the workflow's `env:`. Other options are an
   earlier `GITHUB_ENV` export in the same job or a shell assignment inside the
@@ -305,6 +305,6 @@ Verification:
   `make test-c-unit-gcc`.  Clean container artifacts afterwards
   (`make clean` in `components/nginx-module/tests`), because Linux ELF
   binaries cannot execute on macOS.
--  This gate is additive to the local clang run (`make test-nginx-unit`) and
+- This gate is additive to the local clang run (`make test-nginx-unit`) and
   does not replace it. Both must pass before push when the change touches C.
 - Verification: `make test-c-unit-gcc` exits 0 (requires Docker).

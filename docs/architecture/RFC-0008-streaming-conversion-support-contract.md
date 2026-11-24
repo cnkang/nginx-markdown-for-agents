@@ -93,7 +93,7 @@ True streaming does NOT cover:
   or any response without a well-defined end boundary or with continuously
   mutating semantics.
 - **Non-HTML content**: JSON APIs, file downloads, images, CSS, JavaScript.
--  **Features requiring full-document correctness** unless that feature already
+- **Features requiring full-document correctness** unless that feature already
   has an incremental implementation. For example strict Markdown-variant ETag
   comparison, full-text-scan front matter, and normalization modes requiring the
   complete document.
@@ -369,7 +369,7 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
--  a section 2.2 pre-selection guard routes an otherwise eligible response to
+- a section 2.2 pre-selection guard routes an otherwise eligible response to
   the bounded full-buffer engine (for example a policy other than `auto`/
   `force`). The guard selects the engine: a response that fails it runs on the
   bounded full-buffer engine and is not a streaming candidate. A

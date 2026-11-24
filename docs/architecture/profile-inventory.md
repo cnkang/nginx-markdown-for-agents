@@ -405,7 +405,7 @@ streaming, no caching overhead, wildcard Accept.
 - Forced-field conflict detection belonged in `merge_conf` (or a post-merge
   validation step) and in the Rust `detect_conflicts` FFI for dynconf
   dry-run.
--  The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not need
+- The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not need
   profile awareness. Profiles resolved entirely at config parse time and the
   parser cached them in the merged `ngx_http_markdown_conf_t`.
 

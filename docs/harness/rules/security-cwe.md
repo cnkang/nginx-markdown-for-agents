@@ -27,7 +27,7 @@ different threat models and MUST NOT merge or import from each other:
   `/opt/homebrew/bin` (developer tools), excludes `/sbin` (not needed for
   non-root repo operations). Validated by the `validate_executable()` helper.
 
--  Packaging trusted PATH (maintainer scripts): serves production hosts running
+- Packaging trusted PATH (maintainer scripts): serves production hosts running
   as root during package install/remove. Uses the strict POSIX subset
   `/usr/sbin:/usr/bin:/sbin:/bin`. Includes `/sbin` for system administration
   commands (for example, `nginx` on some distros), excludes developer-only
@@ -56,11 +56,11 @@ Required:
 - Every narrowing conversion (for example `size_t → uInt`, `ngx_uint_t → uint8_t`,
   `ngx_uint_t → uint32_t`) requires an explicit upper-bound check before the cast,
   against the destination type's maximum value, with an error/clamp path.
--  Size-value parsing through `ngx_parse_size()` must go through
+- Size-value parsing through `ngx_parse_size()` must go through
   `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
   parse→validate→safe-cast helper). Direct calls to `ngx_parse_size()` with
   immediate `(size_t)` cast are forbidden in new code.
--  In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
+- In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
   explicit non-negative check first (for example
   `if value < 0 { return Err(...)
   }` or `value.try_into()`). Before converting, follow that check with the
@@ -121,7 +121,7 @@ Required:
   is inside the repository and executable is insufficient because an in-tree
   symlink can target an arbitrary external command. The executable passed to
   `subprocess` must come from the fixed allowlist, not from the raw CLI value.
--  **ValueError propagation from validate_read_path**: When wrapping
+- **ValueError propagation from validate_read_path**: When wrapping
   `validate_read_path()` in a try/except block, do NOT catch `ValueError`.
   `validate_read_path()` raises `ValueError` when the path validator catches a
   traversal attempt (for example `..` components). Catching `ValueError`
@@ -175,7 +175,7 @@ Required:
 - Handlers that never reject methods are exempt.
 
 Verification:
--  `python3 tools/harness/detect_access_before_method.py` — advisory local gate.
+- `python3 tools/harness/detect_access_before_method.py` — advisory local gate.
   `--strict` promotes findings to violations (blocking harness-tooling CI check
   through `make harness-security-checks` for selected `harness_tooling` paths).
 - `PYTHONPATH=tools python3 -m pytest

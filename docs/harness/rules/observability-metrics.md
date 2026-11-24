@@ -13,11 +13,11 @@ paths:
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
 
 Required:
--  Encode skip-reason mapping explicitly. Do not rely on indirect checks that
+- Encode skip-reason mapping explicitly. Do not rely on indirect checks that
   can misclassify edge cases.
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
--  When adding a new reason code string definition and accessor function, the
+- When adding a new reason code string definition and accessor function, the
   developer must add corresponding logger callsites in the same changeset.
   Add `ngx_http_markdown_log_decision()` callsites for non-failure branches.
   For failure branches, add `ngx_http_markdown_log_failure_decision()`
@@ -58,7 +58,7 @@ Required:
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
 
 Required:
--  Detect and fail on response rendering truncation. Never silently emit partial
+- Detect and fail on response rendering truncation. Never silently emit partial
   metrics payloads.
 - Set response metadata (status/content-length/content-type) only after final body length is known.
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
@@ -69,7 +69,7 @@ Required:
 - Keep Prometheus metric families semantically non-overlapping: aggregate outcome
   series must be mutually exclusive, and detailed breakdown counters must live in
   a separate metric family/label space to avoid double-counting.
--  Every metric field exposed in the metrics struct, snapshot, and output
+- Every metric field exposed in the metrics struct, snapshot, and output
   renderers (JSON/text/Prometheus) must have at least one runtime write path
   that populates it with a real value. Do not expose a gauge or counter that is
   never assigned. A permanently-zero metric misleads operators and masks real
@@ -81,7 +81,7 @@ Required:
   write site must fire at the first-byte event, not at finalize or request
   completion.  Semantic mismatch between name and measurement is a bug, not a
   documentation issue.
--  Metric names that encode a unit of measurement (for example `_us` for
+- Metric names that encode a unit of measurement (for example `_us` for
   microseconds, `_ms` for milliseconds, `_bytes`) must use a time source or data
   source whose resolution matches the claimed unit. If the underlying time
   source provides only millisecond granularity, the metric name must reflect
@@ -129,7 +129,7 @@ Required:
   `max_slope` in code), use explicit fallback logic that tries both names
   with a comment explaining the discrepancy.  Prefer aligning the names
   across config and code in the same change set.
--  When a data producer and consumer use different names for a field, the
+- When a data producer and consumer use different names for a field, the
   consumer must accept **both** names with a fallback chain. For example, a
   Rust benchmark binary can emit `html_bytes` while a Python evidence
   generator reads `input_bytes`. An example fallback chain is
@@ -150,7 +150,7 @@ iterations, but durations did not. Markdown/token averages used `total_iters`
 as the divisor, but p50/p95 used only measured iterations.
 
 Required:
--  All per-iteration averages (latency, throughput, markdown size, token
+- All per-iteration averages (latency, throughput, markdown size, token
   estimates, flush count) must use the **same denominator**. The count of
   iterations that contributed to the duration sample (non-warmup, non-error,
   non-fallback). Do not mix `total_iters` for some metrics and `measured_iters`
@@ -186,7 +186,7 @@ Required:
   static string definition → accessor function → `ngx_http_markdown_log_decision()`
   callsite at the corresponding runtime branch.  A reason code that appears
   and documented but never emitted is a contract violation.
--  Gauge metrics that claim to measure a specific event (for example
+- Gauge metrics that claim to measure a specific event (for example
   "time-to-first-byte") must write their value at that event, not at a later
   event (for example finalize). Use a one-shot latch flag in the per-request
   context to make sure the gauge is written exactly once at the correct moment.
@@ -246,7 +246,7 @@ mismatches that are expensive to debug.
   each spec-required field: it logs the field, records it to metrics, or uses
   it in logic. If the path skips the field instead, confirm that the
   documentation explicitly identifies the intentional skip and explains why.
--  When the same metric can be written from multiple code paths (primary path,
+- When the same metric can be written from multiple code paths (primary path,
   retry/resume path, fallback path), all paths must apply the **same** success
   condition. Do not weaken the guard in a secondary path. If the primary path
   requires `rc == OK`, the resume path must also require `rc == OK`, not merely
@@ -271,7 +271,7 @@ mismatches that are expensive to debug.
   defer, everything else → failure), then apply the matching side-effects
   on every path.  Asymmetric metric treatment causes "observed success but
   actual failure" drift that is expensive to debug in production.
--  **The code can use a deferred-state latch (flag, buffer, or pending marker)
+- **The code can use a deferred-state latch (flag, buffer, or pending marker)
   to bridge `NGX_AGAIN` across calls. When it does, every function that can
   encounter `NGX_AGAIN` for the same logical operation must set that latch**.
   Do not assume "only the first caller can hit backpressure". Any function that
@@ -283,7 +283,7 @@ mismatches that are expensive to debug.
   state on re-entry (for example double-counting success on a subsequent
   unrelated drain). The cleanup should be the first action in the failure
   branch, before recording failure metrics.
--  **Gauge metrics should update unconditionally on every successful sample**,
+- **Gauge metrics should update unconditionally on every successful sample**,
   not guarded by value-range conditions (for example `> 0`). A gauge represents
   "the most recent sample". Skipping the update for a zero or empty value
   leaves the gauge with a stale value from a previous request. This misleads
@@ -295,7 +295,7 @@ mismatches that are expensive to debug.
   exercise each newly covered value individually.  Without per-value test
   coverage, the fix can silently regress when the branch condition is later
   modified.
--  **Format string argument matching**: The Prometheus v1 renderer uses
+- **Format string argument matching**: The Prometheus v1 renderer uses
   `ngx_snprintf` or `ngx_slprintf`. When adding new metric fields, manually
   verify that the format specifiers and arguments match exactly in number and
   type. Format specifiers include `%V`, `%uA`, `%uz`, `%O`, `%i`, `%T`, and
@@ -304,7 +304,7 @@ mismatches that are expensive to debug.
   specifiers and arguments side-by-side. Prefer extracting per-metric
   `ngx_snprintf` calls over monolithic format strings when the argument list
   exceeds 10 items.
--  **`ngx_log_debugN` argument count matching**: the NGINX debug logging macros
+- **`ngx_log_debugN` argument count matching**: the NGINX debug logging macros
   `ngx_log_debug0` through `ngx_log_debug8` encode the argument count in the
   macro name suffix. When adding or modifying a `ngx_log_debugN` call, verify
   that the suffix digit exactly matches the number of format arguments passed
@@ -327,19 +327,19 @@ Required:
 - `ngx_http_markdown_metrics_to_v1` must partition the conversion-failure
   space without double counting:
   `conversions_failed = failed_open + failed_closed + aborted`.
--  `v1->requests.failed_open` reads `results.failopen_count`. The derived
+- `v1->requests.failed_open` reads `results.failopen_count`. The derived
   `failed_closed` must deduct `failopen_count` and (streaming build)
   `terminal_aborted_total` from `conversions_failed`. `v1->requests.aborted`
   must read `terminal_aborted_total`, never the per-path counter
   `streaming_failure_postcommit_abort` (that counter classifies the failure
   path, it is not a terminal outcome).
--  Multi-statement derivations (subtract each outcome independently) must deduct
+- Multi-statement derivations (subtract each outcome independently) must deduct
   every classified outcome before the saturating floor. A missing deduction
   silently re-classifies failures as `failed_closed`.
 - `v1->requests.aborted = 0` is correct only in the non-streaming build.
 
 Verification:
--  `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` —
+- `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` —
   blocking harness-tooling CI check through `make harness-security-checks` for
   selected `harness_tooling` paths, and a local full-gate check.
 - `PYTHONPATH=tools/harness python3 -m pytest

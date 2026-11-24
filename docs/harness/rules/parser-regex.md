@@ -54,13 +54,13 @@ Required:
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
     not trigger this broad advisory check. They still pass through the normal
     structural ReDoS checks.
--  The detector extracts Python regex usage through the standard library `ast`
+- The detector extracts Python regex usage through the standard library `ast`
   module, covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
   `re.findall`, `re.finditer`, `re.split`, `re.sub`, `re.subn`, and
   compiled-pattern methods. The detector supports both positional and keyword
   argument forms (`pattern=`, `string=`, `flags=`). Import aliases the detector
   resolves (`import re as X`, `from re import Y as Z`).
--  Scope-aware static string constant propagation using a unified `_Binding` /
+- Scope-aware static string constant propagation using a unified `_Binding` /
   `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
   Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
   the detector resolves them when used as patterns. It propagates finite static
@@ -118,7 +118,7 @@ Modules without the future import analyze eagerly. Postponed annotation strings
   `REVIEW` (unescaped dynamic or unresolved UNKNOWN), `INFO` (static safe).
 - The detector treats UNKNOWN pattern sources as REVIEW (never silently downgraded
   to INFO) so unresolvable regex origins require manual attention.
--  Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
+- Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
   flags (`grep -P`/`--perl-regexp`, `rg -P`/`--pcre2`, `perl` itself) are
   separate. Without a PCRE flag, `grep -e`/`rg -e` use the command's default
   engine (BRE/ERE for grep, Rust regex NFA for rg). The detector does NOT
@@ -153,14 +153,14 @@ They do not become spurious pattern candidates. Shell argument parsing
 - C/PCRE2: NGINX build depends on PCRE2, but the module does not own
   PCRE2 pattern/match context. No `pcre2_compile()` or `pcre2_match()`
   calls in module code.
--  Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
+- Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
   File-level or directory-level suppressions are not allowed. The detector
   checks them at the call site, the preceding line, and upward through
   consecutive comment/blank lines (up to 30). A comment block above a multi-line
   `re.compile(...)` statement can suppress calls.
 
 CLI contract:
--  Default (no flags): advisory exit 0 regardless of findings. Scan/read errors
+- Default (no flags): advisory exit 0 regardless of findings. Scan/read errors
   exit 1 even here, because an incomplete scan is never a pass.
 - `--strict`: exit 1 on ERROR findings, parse errors, or scan/read errors.
   REVIEW findings are non-blocking.

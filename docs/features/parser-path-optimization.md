@@ -208,7 +208,7 @@ All other elements return `Traverse` and get normal handling.
   content heuristics, no `role` attribute matching.
 - The `RcDom` tree never mutates. Pruning operates at the traversal layer
   by returning early from `handle_element_internal`.
--  Call order per element: pruning (`should_prune_with_config`) runs first, then
+- Call order per element: pruning (`should_prune_with_config`) runs first, then
   `SecurityValidator::check_element`. For `SkipChildren`, the pruning decision
   returns before the security validator runs. The element node and its children
   are never visited by the validator. For `SkipSubtree`: the element and its
@@ -398,14 +398,14 @@ threshold use the standard `normalize_output` two-pass approach.
 
 ### Known limitations
 
--  The fused normalizer processes the traversal output line-by-line after
+- The fused normalizer processes the traversal output line-by-line after
   traversal completes. It does not interleave with traversal itself. The
   intermediate `output` string is fully built before normalization begins.
   CRLF normalization happens inline in `push_line` (stripping trailing `\r`).
   The code needs no separate `replace("\r\n", "\n")` allocation. The saving is
   one full O(n) allocation and copy compared to the two-pass `normalize_output`
   path.
--  For large documents, the initial traversal buffer pre-allocates
+- For large documents, the initial traversal buffer pre-allocates
   proportionally to the input HTML size (through `estimate_output_capacity`)
   when the full-buffer FFI caller provides an input size hint exceeding
   `LARGE_BODY_THRESHOLD`. For small documents or callers that do not set the
@@ -413,7 +413,7 @@ threshold use the standard `normalize_output` two-pass approach.
   activates after traversal, it receives the actual traversal output length as
   its capacity. This avoids the underestimate from applying the 0.4 factor to
   already-converted Markdown text.
--  Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
+- Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
   from the input size hint. The fused normalizer receives the actual traversal
   output length. It does not inherit an input/output compression-ratio estimate.
   The traversal estimate remains bounded to 4 KB–4 MB.

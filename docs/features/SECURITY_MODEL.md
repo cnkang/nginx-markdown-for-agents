@@ -84,7 +84,7 @@ The converter classifies elements into three categories using `SanitizeAction`:
 This policy favors page descriptions over form state. The module must not expose user-entered, restored, or prefilled values to AI-facing Markdown. It may expose a visible caption from a button or a submit/reset control.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
--  `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the
+- `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the
   `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the
   `title` attribute as the link label when available. Fallback child text
   between the tags stays in the output. It suppresses dangerous URL schemes
@@ -92,7 +92,7 @@ This policy favors page descriptions over form state. The module must not expose
   module blocks unsafe schemes entirely.
 
 **Media Elements — URL Extracted, Fallback Preserved** (handled in traversal):
--  `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link
+- `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link
   (with `title` as label). Video `poster` thumbnails become Markdown images.
   Fallback child text stays through normal child traversal.
 - `<source>` - The module extracts the `src` URL as a Markdown link with `type` as label (for example `[video/mp4](url)`).
@@ -332,7 +332,7 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Bypass of one layer does not compromise security
 
 ### 4. Secure Defaults
--  Conservative resource limits: `decompressed_size` 10MB (cumulative
+- Conservative resource limits: `decompressed_size` 10MB (cumulative
   decompressed-output cap), `conversion_memory` 64MB (input admission +
   generated-output budget), `conversion_timeout` 30s, `parser_timeout` 10s,
   `parser_budget` 32MB, `streaming_buffer` 2MB. With cooperative parser

@@ -17,7 +17,7 @@ gate is now implemented. This ADR preserves the original planning context.
 
 ### Frozen names (1.0-stable)
 
--  Make target: `make release-gates-check-090` (new at the time of writing. The
+- Make target: `make release-gates-check-090` (new at the time of writing. The
   Makefile later retired it together with the 0.9.0-specific validator chain.
   This section preserves the historical contract).
 - Validators: the historical 0.9.0 validator chain, plus

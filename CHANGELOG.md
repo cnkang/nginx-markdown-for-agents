@@ -107,7 +107,7 @@ reason-code registry, and the FFI ABI version 3 also do not change.
 - `docs/guides/PACKAGE_COMPATIBILITY.md` now states that NGINX rejects an
   incompatible module at the binary compatibility signature, not at a version
   string comparison.
--  `promote_matrix.py` keeps its sidecar lock file. Removing the file after the
+- `promote_matrix.py` keeps its sidecar lock file. Removing the file after the
   unlock let a waiter and a newcomer lock different inodes, so two promotions
   could enter the critical section at once and one could be lost. The tool also
   skips the lock for `--check` and `--dry-run`. A read-only checkout can report
@@ -177,7 +177,7 @@ before/after examples.
   key=value syntax for
   `streaming_buffer=`,
   `parser_timeout=`, `parser_budget=`, and `decompressed_size=`.
--  **Rust API removals: LLM adapter and the incremental API.** The release
+- **Rust API removals: LLM adapter and the incremental API.** The release
   deletes the `llm_adapter` module and its provider abstraction, so token
   estimation uses the fixed built-in ratio instead of a per-provider table.
   The release also deletes the `incremental` feature and the whole
@@ -187,7 +187,7 @@ before/after examples.
   and the `markdown_large_body_threshold` routing directive. The `streaming`
   feature is now the only processing-path feature. Its default feature list no
   longer contains `incremental`.
--  **FFI/ABI break.** The bundled Rust/C boundary moves from ABI version 1 to
+- **FFI/ABI break.** The bundled Rust/C boundary moves from ABI version 1 to
   ABI version 3. `MarkdownOptions` shrank from 128 to 96 bytes with the removal
   of the custom-selector and LLM-provider fields. The release removes
   `FFIDynconfResult` and its three exports. The export set is 38 symbols.
@@ -203,7 +203,7 @@ before/after examples.
   response through `markdown_error_policy`. `fail_closed` rejects with the
   internal default status, and `status <429|503>` stores that code in the
   effective configuration. No separate reject-action symbol exists in 0.9.2.
--  **Token estimation uses one effective ratio.** The clamped
+- **Token estimation uses one effective ratio.** The clamped
   characters-per-token value feeds both the header estimate and the body
   estimate. A configured ratio outside the accepted range cannot skew one path
   relative to the other.
@@ -244,7 +244,7 @@ before/after examples.
   such as Content-Digest and Repr-Digest, propagating with the Markdown body.
   All conversion paths (full-buffer, streaming, 304, HEAD) now clear the
   trailer list (`ngx_http_markdown_clear_trailers`).
--  DEB/RPM packages now require the EXACT NGINX version that builds them. The
+- DEB/RPM packages now require the EXACT NGINX version that builds them. The
   `preinstall.sh` script rejects any full-version difference as fatal, including
   a patch release. The DEB dependency metadata keeps the pinned version
   installable across distro revisions. It refuses any next-patch NGINX upgrade
@@ -254,7 +254,7 @@ before/after examples.
   "--with-compat same-minor compatibility" claim. NGINX's dynamic module loader
   rejects a version mismatch before signature checks. The previous branch-scoped
   tolerance produced packages that installed but failed to load.
--  DEB enablement for nginx.org builds now uses a main-context `load_module`
+- DEB enablement for nginx.org builds now uses a main-context `load_module`
   directive. The previous guidance told users to symlink into
   `/etc/nginx/modules-enabled/`, which the nginx.org default `nginx.conf` never
   includes. The module was silently never loaded. The install smoke test now
@@ -269,7 +269,7 @@ before/after examples.
 - Every surface publishes reason codes in lowercase_snake_case. The
   decision-reason helper now matches the registry (`converted`), completing
   the lowercase renaming.
--  Decompression (deflate): the full-buffer decoder replays a zlib-wrapped RFC
+- Decompression (deflate): the full-buffer decoder replays a zlib-wrapped RFC
   1950 format error as raw RFC 1951 from the start. The streaming decoder
   instead commits to the framing implied by the first two bytes. For a
   misclassified stream, it fails with a decompression error that follows the
@@ -304,7 +304,7 @@ before/after examples.
 
 ### Added
 
--  Rust source-build baseline raised to 1.98.1 (MSRV 1.98). Repository, CI, and
+- Rust source-build baseline raised to 1.98.1 (MSRV 1.98). Repository, CI, and
   release builds pin the exact toolchain through `rust-toolchain.toml`. Source
   builders must run `rustup toolchain install 1.98.1`. Prebuilt module users do
   not need Rust.
@@ -320,7 +320,7 @@ before/after examples.
 - Release gates 0.9.2 (`make release-gates-check-092`) use one current
   candidate-bound blocking contract. Focused 0.7.0/0.8.0 compatibility checks
   remain as regression inputs. The obsolete 0.9.0/0.9.1 wrapper chain is gone.
--  Harness and docs gates close four drift gaps. The scratch-file detector reads
+- Harness and docs gates close four drift gaps. The scratch-file detector reads
   Git path output as NUL-delimited bytes. Thus, a non-UTF-8 tracked name no
   longer aborts the scan. A malformed allowlist entry now fails the check
   instead of silently dropping its exemption. The Document Updates ordering
@@ -422,7 +422,7 @@ contract begins.
   framing probe does not match. Current Rust and C paths enforce the same
   framing and truncation rules.
   Gzip is member-aware across chunks.
--  Brotli streaming decompression: Brotli-compressed upstream responses now
+- Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally through the streaming path (same as gzip/deflate)
   under `streaming_first` with `markdown_auto_decompress on` and
   `markdown_cache_validation` not `full`. Hardening adds trailing-data
@@ -459,7 +459,7 @@ ADR-0024 documents the decision.
 
 ### Fixed
 
--  Documentation referenced `markdown_auto_decompress` in 8+ files as a
+- Documentation referenced `markdown_auto_decompress` in 8+ files as a
   user-configurable directive. The `ngx_command_t` table never registered it.
   `nginx -t` would reject user configs using it. The table now registers it as a
   `NGX_CONF_FLAG` directive.
@@ -716,7 +716,7 @@ release-line documentation.
   and caches (Rule 48).
 - Updated `THIRD-PARTY-NOTICES` with current dependency versions.
 - Clarified header plan safety contract in C headers.
--  **C module deduplication**: extracted shared helpers across five C source
+- **C module deduplication**: extracted shared helpers across five C source
   files. In `reason_ffi.c`, this extracted `fill_str_from_rust`. In
   `decompression.c`, it extracted `decomp_collect_input`,
   `decomp_build_output_chain`, and `decomp_alloc_output`. In `header_plan.c`,
@@ -750,7 +750,7 @@ release-line documentation.
   language strings against malformed input.
 - **FFI header plan panic safety**: centralized FFI header plan reset so that
   panic-safe cleanup always restores a consistent state.
--  **FFI catch_unwind fallback hardening**: the `catch_unwind` fallback path now
+- **FFI catch_unwind fallback hardening**: the `catch_unwind` fallback path now
   initializes output structs to safe defaults (fail-closed) and writes return
   values only after the closure succeeds. Drop guards within `catch_unwind` make
   sure panic-safe resource cleanup (Rule 15).
@@ -768,7 +768,7 @@ release-line documentation.
   callback signature mandates the cast (Rule 24).
 - **Header plan `copy_value_to_pool` empty value**: `copy_value_to_pool()` now
   handles empty values without abnormal behavior.
--  **CLI path validation (CWE-22)**: `render_release_matrix_docs.py` now
+- **CLI path validation (CWE-22)**: `render_release_matrix_docs.py` now
   validates `--matrix` and `--previous` paths through `validate_read_path` at
   the CLI entry point before passing to `load_matrix`, breaking the unsanitized
   taint flow (Rule 33).
@@ -842,7 +842,7 @@ tooling.
   failure), the handle is no longer consumed by Rust. The NGINX C module now
   calls `markdown_streaming_abort()` to free the unconsumed handle, preventing
   a resource leak.
--  **Eligibility Content-Type OWS compliance (#149)**: Content-Type matching in
+- **Eligibility Content-Type OWS compliance (#149)**: Content-Type matching in
   `ngx_http_markdown_check_content_type()`, `ngx_http_markdown_is_streaming()`,
   and `ngx_http_markdown_stream_type_excluded()` now accepts HTAB as an optional
   whitespace separator per RFC 7230, also to SP. Trailing OWS stripping also
@@ -1455,7 +1455,7 @@ budget.
 
 - **Streaming is now the default engine.** The `markdown_streaming_engine` directive defaults to `auto`, which selects the streaming path for eligible responses. To retain the previous full-buffer-only behavior, set `markdown_streaming_engine off;` in your nginx configuration.
 - **Noise pruning is now enabled by default.** The `markdown_prune_noise` directive defaults to `on`. To disable it, set `markdown_prune_noise off;`.
--  **Unified memory budget.** The `markdown_memory_budget` directive supersedes
+- **Unified memory budget.** The `markdown_memory_budget` directive supersedes
   the dual `markdown_max_size` + `markdown_streaming_budget` pattern. Existing
   configurations with the old directives continue to work. The project
   recommends `markdown_memory_budget` for new deployments.
@@ -1688,7 +1688,7 @@ This release focuses on operational visibility, rollout safety, and conversion p
 ### Added
 - Prometheus-compatible metrics endpoint via `markdown_metrics_format prometheus` directive with text exposition format output
 - `markdown_metrics_format` configuration directive (`auto|prometheus`) for opt-in Prometheus text exposition format on the existing `markdown_metrics` endpoint
--  Prometheus text exposition format (`text/plain; version=0.0.4;
+- Prometheus text exposition format (`text/plain; version=0.0.4;
   charset=utf-8`) output on the `markdown_metrics` endpoint, selected through
   Accept header content negotiation when enabled
 - New shared-memory counters: `requests_entered`, skip-reason breakdown (`skips.config`, `skips.method`, `skips.status`, `skips.content_type`, `skips.size`, `skips.streaming`, `skips.auth`, `skips.range`, `skips.accept`), `failopen_count`, `estimated_token_savings`

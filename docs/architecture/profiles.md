@@ -61,7 +61,7 @@ Key characteristics:
 Target: general-purpose deployment. Recommended starting point for most sites.
 
 Key characteristics:
--  `markdown_cache_validation ims_only` — avoids ETag computation overhead while
+- `markdown_cache_validation ims_only` — avoids ETag computation overhead while
   still supporting `If-Modified-Since` through the upstream's `Last-Modified`.
 - `markdown_streaming auto` — large responses stream. Small ones buffer.
 - No forced fields — all defaults can be overridden.
@@ -77,7 +77,7 @@ Key characteristics:
 - `markdown_streaming force` (**forced**) — all eligible responses stream.
 - `markdown_cache_validation off` (**forced**) — no caching overhead. Streaming
   responses cannot carry an ETag.
--  `markdown_accept wildcard` in the historical record — the retired profile set
+- `markdown_accept wildcard` in the historical record — the retired profile set
   the converter's `AcceptMode::Wildcard`. The profile produced the streamed
   response regardless of the Accept header. The wildcard value retired with the
   profile system, and 0.9.2 `markdown_accept` accepts only `strict` or `force`
