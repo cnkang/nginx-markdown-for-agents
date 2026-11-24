@@ -88,7 +88,7 @@ class Comparison:
         """Record one finding."""
         self.findings.append(
             Finding(
-                finding_id="{}:{}".format(surface, finding_id),
+                finding_id=f"{surface}:{finding_id}",
                 surface=surface,
                 verdict=verdict,
                 message=message,
@@ -153,8 +153,8 @@ def _compare_directive(
         result.add(
             "directives",
             BREAKING,
-            "handler-changed:{}".format(name),
-            "directive {} changed handler, which changes whether it is active".format(name),
+            f"handler-changed:{name}",
+            f"directive {name} changed handler, which changes whether it is active",
             old["handler"],
             new["handler"],
         )
@@ -162,8 +162,8 @@ def _compare_directive(
         result.add(
             "directives",
             BREAKING,
-            "args-changed:{}".format(name),
-            "directive {} changed its argument contract".format(name),
+            f"args-changed:{name}",
+            f"directive {name} changed its argument contract",
             old["args"],
             new["args"],
         )
@@ -173,8 +173,8 @@ def _compare_directive(
         result.add(
             "directives",
             ADDITIVE,
-            "context-widened:{}".format(name),
-            "directive {} accepts an additional context".format(name),
+            f"context-widened:{name}",
+            f"directive {name} accepts an additional context",
             sorted(old_context),
             sorted(new_context),
         )
@@ -182,8 +182,8 @@ def _compare_directive(
         result.add(
             "directives",
             BREAKING,
-            "context-narrowed:{}".format(name),
-            "directive {} no longer accepts a context it used to accept".format(name),
+            f"context-narrowed:{name}",
+            f"directive {name} no longer accepts a context it used to accept",
             sorted(old_context),
             sorted(new_context),
         )
@@ -191,8 +191,8 @@ def _compare_directive(
         result.add(
             "directives",
             BREAKING,
-            "default-changed:{}".format(name),
-            "directive {} changed its documented default".format(name),
+            f"default-changed:{name}",
+            f"directive {name} changed its documented default",
             old["default"],
             new["default"],
         )
@@ -200,8 +200,8 @@ def _compare_directive(
         result.add(
             "directives",
             BREAKING,
-            "syntax-changed:{}".format(name),
-            "directive {} changed its accepted value syntax".format(name),
+            f"syntax-changed:{name}",
+            f"directive {name} changed its accepted value syntax",
             old["syntax"],
             new["syntax"],
         )
@@ -209,8 +209,8 @@ def _compare_directive(
         result.add(
             "directives",
             REVIEW_REQUIRED,
-            "documented-context-changed:{}".format(name),
-            "directive {} documentation changed its context list".format(name),
+            f"documented-context-changed:{name}",
+            f"directive {name} documentation changed its context list",
             old["documented_context"],
             new["documented_context"],
         )
@@ -218,8 +218,8 @@ def _compare_directive(
         result.add(
             "directives",
             REVIEW_REQUIRED,
-            "documentation-changed:{}".format(name),
-            "directive {} documentation text changed".format(name),
+            f"documentation-changed:{name}",
+            f"directive {name} documentation text changed",
             old["documentation"],
             new["documentation"],
         )
@@ -235,8 +235,8 @@ def compare_directives(
         result.add(
             "directives",
             BREAKING,
-            "removed:{}".format(name),
-            "stable directive {} is no longer registered".format(name),
+            f"removed:{name}",
+            f"stable directive {name} is no longer registered",
             old_map[name]["syntax"],
             None,
         )
@@ -244,8 +244,8 @@ def compare_directives(
         result.add(
             "directives",
             ADDITIVE,
-            "added:{}".format(name),
-            "new directive {} is registered".format(name),
+            f"added:{name}",
+            f"new directive {name} is registered",
             None,
             new_map[name]["syntax"],
         )
@@ -258,7 +258,7 @@ def compare_directives(
             result.add(
                 "directives",
                 REVIEW_REQUIRED,
-                "runtime-default-source-changed:{}".format(path),
+                f"runtime-default-source-changed:{path}",
                 "directive runtime default source changed; verify documented defaults",
                 old_sources.get(path),
                 new_sources.get(path),
@@ -282,8 +282,8 @@ def _compare_metric_family(
         result.add(
             "metrics",
             BREAKING,
-            "type-changed:{}".format(name),
-            "metric family {} changed its Prometheus type".format(name),
+            f"type-changed:{name}",
+            f"metric family {name} changed its Prometheus type",
             old["type"],
             new["type"],
         )
@@ -291,8 +291,8 @@ def _compare_metric_family(
         result.add(
             "metrics",
             BREAKING,
-            "buckets-changed:{}".format(name),
-            "metric family {} changed its histogram buckets".format(name),
+            f"buckets-changed:{name}",
+            f"metric family {name} changed its histogram buckets",
             old.get("bucket_boundaries"),
             new.get("bucket_boundaries"),
         )
@@ -302,8 +302,8 @@ def _compare_metric_family(
         result.add(
             "metrics",
             BREAKING,
-            "label-removed:{}:{}".format(name, label),
-            "metric family {} dropped label {}".format(name, label),
+            f"label-removed:{name}:{label}",
+            f"metric family {name} dropped label {label}",
             label,
             None,
         )
@@ -311,10 +311,8 @@ def _compare_metric_family(
         result.add(
             "metrics",
             BREAKING,
-            "label-added:{}:{}".format(name, label),
-            "metric family {} gained label {}, which changes series identity".format(
-                name, label
-            ),
+            f"label-added:{name}:{label}",
+            f"metric family {name} gained label {label}, which changes series identity",
             None,
             label,
         )
@@ -325,10 +323,8 @@ def _compare_metric_family(
             result.add(
                 "metrics",
                 BREAKING,
-                "label-dynamic-changed:{}:{}".format(name, label),
-                "label {} of {} changed between a bounded allowlist and a dynamic value".format(
-                    label, name
-                ),
+                f"label-dynamic-changed:{name}:{label}",
+                f"label {label} of {name} changed between a bounded allowlist and a dynamic value",
                 old_labels[label]["dynamic"],
                 new_labels[label]["dynamic"],
             )
@@ -336,8 +332,8 @@ def _compare_metric_family(
             result.add(
                 "metrics",
                 BREAKING,
-                "label-value-removed:{}:{}".format(name, label),
-                "label {} of {} lost a stable value".format(label, name),
+                f"label-value-removed:{name}:{label}",
+                f"label {label} of {name} lost a stable value",
                 sorted(old_values - new_values),
                 None,
             )
@@ -345,8 +341,8 @@ def _compare_metric_family(
             result.add(
                 "metrics",
                 ADDITIVE,
-                "label-value-added:{}:{}".format(name, label),
-                "label {} of {} gained a value".format(label, name),
+                f"label-value-added:{name}:{label}",
+                f"label {label} of {name} gained a value",
                 None,
                 sorted(new_values - old_values),
             )
@@ -367,8 +363,8 @@ def _compare_emitted(
         result.add(
             "metrics",
             BREAKING,
-            "emitted-family-removed:{}".format(name),
-            "the renderer no longer emits family {}".format(name),
+            f"emitted-family-removed:{name}",
+            f"the renderer no longer emits family {name}",
             old["families"][name],
             None,
         )
@@ -376,8 +372,8 @@ def _compare_emitted(
         result.add(
             "metrics",
             ADDITIVE,
-            "emitted-family-added:{}".format(name),
-            "the renderer emits a new family {}".format(name),
+            f"emitted-family-added:{name}",
+            f"the renderer emits a new family {name}",
             None,
             new["families"][name],
         )
@@ -386,8 +382,8 @@ def _compare_emitted(
             result.add(
                 "metrics",
                 BREAKING,
-                "emitted-type-changed:{}".format(name),
-                "the renderer changed the emitted type of {}".format(name),
+                f"emitted-type-changed:{name}",
+                f"the renderer changed the emitted type of {name}",
                 old["families"][name],
                 new["families"][name],
             )
@@ -397,8 +393,8 @@ def _compare_emitted(
             result.add(
                 "metrics",
                 BREAKING,
-                "emitted-labels-changed:{}".format(name),
-                "the renderer changed the label set of {}".format(name),
+                f"emitted-labels-changed:{name}",
+                f"the renderer changed the label set of {name}",
                 old["label_sets"].get(name),
                 new["label_sets"].get(name),
             )
@@ -408,8 +404,8 @@ def _compare_emitted(
             result.add(
                 "metrics",
                 BREAKING,
-                "emitted-series-removed:{}:{}".format(name, ",".join(removed)),
-                "the renderer stopped emitting a series of {}".format(name),
+                f'emitted-series-removed:{name}:{",".join(removed)}',
+                f"the renderer stopped emitting a series of {name}",
                 list(removed),
                 None,
             )
@@ -417,8 +413,8 @@ def _compare_emitted(
             result.add(
                 "metrics",
                 ADDITIVE,
-                "emitted-series-added:{}:{}".format(name, ",".join(added)),
-                "the renderer emits a new series of {}".format(name),
+                f'emitted-series-added:{name}:{",".join(added)}',
+                f"the renderer emits a new series of {name}",
                 None,
                 list(added),
             )
@@ -455,7 +451,7 @@ def compare_metrics(
                 "metrics",
                 BREAKING,
                 CHANGED_ID.format(key.replace("_", "-")),
-                "the metrics registry {} changed".format(key),
+                f"the metrics registry {key} changed",
                 baseline.get(key),
                 candidate.get(key),
             )
@@ -474,8 +470,8 @@ def compare_metrics(
         result.add(
             "metrics",
             BREAKING,
-            "declared-family-removed:{}".format(name),
-            "the registry no longer declares family {}".format(name),
+            f"declared-family-removed:{name}",
+            f"the registry no longer declares family {name}",
             old_map[name]["type"],
             None,
         )
@@ -483,8 +479,8 @@ def compare_metrics(
         result.add(
             "metrics",
             ADDITIVE,
-            "declared-family-added:{}".format(name),
-            "the registry declares a new family {}".format(name),
+            f"declared-family-added:{name}",
+            f"the registry declares a new family {name}",
             None,
             new_map[name]["type"],
         )
@@ -502,8 +498,8 @@ def _compare_reason(
         result.add(
             "reasons",
             BREAKING,
-            "discriminant-changed:{}".format(key),
-            "reason {} changed its numeric discriminant".format(key),
+            f"discriminant-changed:{key}",
+            f"reason {key} changed its numeric discriminant",
             old["discriminant"],
             new["discriminant"],
         )
@@ -512,8 +508,8 @@ def _compare_reason(
             result.add(
                 "reasons",
                 BREAKING,
-                "{}-changed:{}".format(field_name.replace("_", "-"), key),
-                "reason {} changed its {}".format(key, field_name),
+                f'{field_name.replace("_", "-")}-changed:{key}',
+                f"reason {key} changed its {field_name}",
                 old[field_name],
                 new[field_name],
             )
@@ -523,8 +519,8 @@ def _compare_reason(
         result.add(
             "reasons",
             BREAKING,
-            "origins-removed:{}".format(key),
-            "reason {} no longer allows an origin it used to allow".format(key),
+            f"origins-removed:{key}",
+            f"reason {key} no longer allows an origin it used to allow",
             sorted(old_origins - new_origins),
             None,
         )
@@ -532,8 +528,8 @@ def _compare_reason(
         result.add(
             "reasons",
             ADDITIVE,
-            "origins-added:{}".format(key),
-            "reason {} allows an additional origin".format(key),
+            f"origins-added:{key}",
+            f"reason {key} allows an additional origin",
             None,
             sorted(new_origins - old_origins),
         )
@@ -549,8 +545,8 @@ def compare_reasons(
         result.add(
             "reasons",
             BREAKING,
-            "removed:{}".format(key),
-            "reason {} was removed from the registry".format(key),
+            f"removed:{key}",
+            f"reason {key} was removed from the registry",
             old_map[key]["discriminant"],
             None,
         )
@@ -558,8 +554,8 @@ def compare_reasons(
         result.add(
             "reasons",
             ADDITIVE,
-            "added:{}".format(key),
-            "reason {} was added to the registry".format(key),
+            f"added:{key}",
+            f"reason {key} was added to the registry",
             None,
             new_map[key]["discriminant"],
         )
@@ -575,8 +571,8 @@ def _compare_field_type(
         result.add(
             "diagnostics",
             BREAKING,
-            "type-changed:{}".format(name),
-            "diagnostics field {} changed type".format(name),
+            f"type-changed:{name}",
+            f"diagnostics field {name} changed type",
             old["type"],
             new["type"],
         )
@@ -592,8 +588,8 @@ def _compare_schema_constraints(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            "schema-constraints-changed:{}".format(name),
-            "diagnostics schema constraints changed for {}".format(name),
+            f"schema-constraints-changed:{name}",
+            f"diagnostics schema constraints changed for {name}",
             old_constraints,
             new_constraints,
         )
@@ -607,8 +603,8 @@ def _compare_field_nullability(
         result.add(
             "diagnostics",
             BREAKING,
-            "nullability-narrowed:{}".format(name),
-            "diagnostics field {} no longer permits null".format(name),
+            f"nullability-narrowed:{name}",
+            f"diagnostics field {name} no longer permits null",
             old["nullable"],
             new["nullable"],
         )
@@ -616,8 +612,8 @@ def _compare_field_nullability(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            "nullability-widened:{}".format(name),
-            "diagnostics field {} now permits null".format(name),
+            f"nullability-widened:{name}",
+            f"diagnostics field {name} now permits null",
             old["nullable"],
             new["nullable"],
         )
@@ -638,8 +634,8 @@ def _compare_field_enum(
         result.add(
             "diagnostics",
             BREAKING,
-            "enum-added:{}".format(name),
-            "diagnostics field {} gained a closed value set".format(name),
+            f"enum-added:{name}",
+            f"diagnostics field {name} gained a closed value set",
             None,
             _sort_mixed_values(new.get("enum") or []),
         )
@@ -648,8 +644,8 @@ def _compare_field_enum(
         result.add(
             "diagnostics",
             ADDITIVE,
-            "enum-removed:{}".format(name),
-            "diagnostics field {} no longer restricts its values".format(name),
+            f"enum-removed:{name}",
+            f"diagnostics field {name} no longer restricts its values",
             _sort_mixed_values(old.get("enum") or []),
             None,
         )
@@ -660,8 +656,8 @@ def _compare_field_enum(
         result.add(
             "diagnostics",
             BREAKING,
-            "enum-narrowed:{}".format(name),
-            "diagnostics field {} lost an allowed value".format(name),
+            f"enum-narrowed:{name}",
+            f"diagnostics field {name} lost an allowed value",
             _sort_mixed_values(old_enum - new_enum),
             None,
         )
@@ -669,8 +665,8 @@ def _compare_field_enum(
         result.add(
             "diagnostics",
             ADDITIVE,
-            "enum-widened:{}".format(name),
-            "diagnostics field {} gained an allowed value".format(name),
+            f"enum-widened:{name}",
+            f"diagnostics field {name} gained an allowed value",
             None,
             _sort_mixed_values(new_enum - old_enum),
         )
@@ -687,8 +683,8 @@ def _compare_field_closed_object(
         result.add(
             "diagnostics",
             BREAKING,
-            "additional-properties-{}:{}".format(direction, name),
-            "diagnostics object {} changed its unknown-property contract".format(name),
+            f"additional-properties-{direction}:{name}",
+            f"diagnostics object {name} changed its unknown-property contract",
             old_value,
             new_value,
         )
@@ -706,8 +702,8 @@ def _compare_field_required_children(
         result.add(
             "diagnostics",
             BREAKING,
-            "required-child-removed:{}".format(name),
-            "diagnostics object {} no longer requires a field".format(name),
+            f"required-child-removed:{name}",
+            f"diagnostics object {name} no longer requires a field",
             sorted(old_children - new_children),
             None,
         )
@@ -715,8 +711,8 @@ def _compare_field_required_children(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            "required-child-added:{}".format(name),
-            "diagnostics object {} requires an additional field".format(name),
+            f"required-child-added:{name}",
+            f"diagnostics object {name} requires an additional field",
             None,
             sorted(new_children - old_children),
         )
@@ -732,8 +728,8 @@ def _compare_child_enum(
         result.add(
             "diagnostics",
             ADDITIVE,
-            "child-enum-removed:{}:{}".format(name, child),
-            "diagnostics field {} no longer restricts {}".format(name, child),
+            f"child-enum-removed:{name}:{child}",
+            f"diagnostics field {name} no longer restricts {child}",
             _sort_mixed_values(old_enum),
             None,
         )
@@ -741,8 +737,8 @@ def _compare_child_enum(
         result.add(
             "diagnostics",
             BREAKING,
-            "child-enum-added:{}:{}".format(name, child),
-            "diagnostics field {} of {} gained a closed value set".format(name, child),
+            f"child-enum-added:{name}:{child}",
+            f"diagnostics field {name} of {child} gained a closed value set",
             None,
             _sort_mixed_values(new_enum),
         )
@@ -750,8 +746,8 @@ def _compare_child_enum(
         result.add(
             "diagnostics",
             BREAKING,
-            "child-enum-narrowed:{}:{}".format(name, child),
-            "diagnostics field {} of {} lost an allowed value".format(name, child),
+            f"child-enum-narrowed:{name}:{child}",
+            f"diagnostics field {name} of {child} lost an allowed value",
             _sort_mixed_values(old_enum - new_enum),
             None,
         )
@@ -759,8 +755,8 @@ def _compare_child_enum(
         result.add(
             "diagnostics",
             ADDITIVE,
-            "child-enum-widened:{}:{}".format(name, child),
-            "diagnostics field {} of {} gained an allowed value".format(name, child),
+            f"child-enum-widened:{name}:{child}",
+            f"diagnostics field {name} of {child} gained an allowed value",
             None,
             _sort_mixed_values(new_enum - old_enum),
         )
@@ -774,13 +770,13 @@ def _compare_retained_child(
         result.add(
             "diagnostics",
             BREAKING,
-            "child-type-changed:{}:{}".format(name, child),
-            "diagnostics object {} changed the type of field {}".format(name, child),
+            f"child-type-changed:{name}:{child}",
+            f"diagnostics object {name} changed the type of field {child}",
             old["type"],
             new["type"],
         )
     _compare_child_enum(result, name, child, old, new)
-    path = "{}.{}".format(name, child)
+    path = f"{name}.{child}"
     _compare_schema_constraints(result, path, old, new, "constraints")
     _compare_nested_structure(result, path, old, new)
 
@@ -795,8 +791,8 @@ def _compare_properties(
         result.add(
             "diagnostics",
             BREAKING,
-            "child-removed:{}:{}".format(name, child),
-            "diagnostics object {} dropped field {}".format(name, child),
+            f"child-removed:{name}:{child}",
+            f"diagnostics object {name} dropped field {child}",
             old_children[child]["type"],
             None,
         )
@@ -804,8 +800,8 @@ def _compare_properties(
         result.add(
             "diagnostics",
             ADDITIVE,
-            "child-added:{}:{}".format(name, child),
-            "diagnostics object {} added field {}".format(name, child),
+            f"child-added:{name}:{child}",
+            f"diagnostics object {name} added field {child}",
             None,
             new_children[child]["type"],
         )
@@ -828,8 +824,8 @@ def _compare_field_items(
         result.add(
             "diagnostics",
             BREAKING,
-            "items-type-changed:{}".format(name),
-            "diagnostics array {} changed its item type".format(name),
+            f"items-type-changed:{name}",
+            f"diagnostics array {name} changed its item type",
             old.get("items_type"),
             new.get("items_type"),
         )
@@ -839,8 +835,8 @@ def _compare_field_items(
         result.add(
             "diagnostics",
             BREAKING,
-            "items-required-removed:{}".format(name),
-            "diagnostics array {} no longer requires an item field".format(name),
+            f"items-required-removed:{name}",
+            f"diagnostics array {name} no longer requires an item field",
             sorted(old_required - new_required),
             None,
         )
@@ -848,8 +844,8 @@ def _compare_field_items(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            "items-required-added:{}".format(name),
-            "diagnostics array {} requires an additional item field".format(name),
+            f"items-required-added:{name}",
+            f"diagnostics array {name} requires an additional item field",
             None,
             sorted(new_required - old_required),
         )
@@ -862,20 +858,20 @@ def _compare_field_items(
         result.add(
             "diagnostics",
             BREAKING,
-            "items-additional-properties-{}:{}".format(direction, name),
-            "diagnostics array items for {} changed its unknown-property contract".format(name),
+            f"items-additional-properties-{direction}:{name}",
+            f"diagnostics array items for {name} changed its unknown-property contract",
             old_additional,
             new_additional,
         )
     _compare_schema_constraints(
-        result, name + "[]", old, new, "items_constraints"
+        result, f"{name}[]", old, new, "items_constraints"
     )
     _compare_field_enum(
-        result, name + "[]", _items_enum_view(old), _items_enum_view(new)
+        result, f"{name}[]", _items_enum_view(old), _items_enum_view(new)
     )
     _compare_properties(
         result,
-        name + "[]",
+        f"{name}[]",
         old.get("items_properties") or [],
         new.get("items_properties") or [],
     )
@@ -977,8 +973,8 @@ def _compare_diagnostics_top_level(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            "required-added:{}".format(name),
-            "diagnostics field {} became required".format(name),
+            f"required-added:{name}",
+            f"diagnostics field {name} became required",
             None,
             name,
         )
@@ -991,10 +987,8 @@ def _compare_diagnostics_top_level(
         result.add(
             "diagnostics",
             verdict,
-            "top-level-field-added:{}".format(name),
-            "diagnostics added top-level field {}; the frozen contract keeps additive state in extensions".format(
-                name
-            ),
+            f"top-level-field-added:{name}",
+            f"diagnostics added top-level field {name}; the frozen contract keeps additive state in extensions",
             None,
             name,
         )
@@ -1007,7 +1001,7 @@ def _compare_diagnostics_top_level(
         result.add(
             "diagnostics",
             BREAKING,
-            "root-additional-properties-{}".format(direction),
+            f"root-additional-properties-{direction}",
             "the diagnostics root changed its unknown-property contract",
             old_additional,
             new_additional,
@@ -1026,8 +1020,8 @@ def compare_diagnostics(
         result.add(
             "diagnostics",
             BREAKING,
-            "field-removed:{}".format(name),
-            "diagnostics field {} was removed".format(name),
+            f"field-removed:{name}",
+            f"diagnostics field {name} was removed",
             old_map[name]["type"],
             None,
         )
@@ -1045,8 +1039,8 @@ def _compare_unlabelled_samples(
         result.add(
             "metrics",
             BREAKING,
-            "unlabelled-sample-removed:{}".format(name),
-            "the renderer stopped emitting the unlabelled sample of {}".format(name),
+            f"unlabelled-sample-removed:{name}",
+            f"the renderer stopped emitting the unlabelled sample of {name}",
             name,
             None,
         )
@@ -1054,8 +1048,8 @@ def _compare_unlabelled_samples(
         result.add(
             "metrics",
             ADDITIVE,
-            "unlabelled-sample-added:{}".format(name),
-            "the renderer emits an unlabelled sample of {}".format(name),
+            f"unlabelled-sample-added:{name}",
+            f"the renderer emits an unlabelled sample of {name}",
             None,
             name,
         )
@@ -1093,8 +1087,8 @@ def _compare_removed_http_behaviours(
         result.add(
             "http",
             BREAKING,
-            "behaviour-removed:{}".format(name),
-            "HTTP behaviour {} is no longer bound to a contract test".format(name),
+            f"behaviour-removed:{name}",
+            f"HTTP behaviour {name} is no longer bound to a contract test",
             _http_binding_digests(old[name], digests),
             None,
         )
@@ -1111,8 +1105,8 @@ def _compare_added_http_behaviours(
         result.add(
             "http",
             REVIEW_REQUIRED,
-            "behaviour-added:{}".format(name),
-            "HTTP behaviour {} was added to the contract".format(name),
+            f"behaviour-added:{name}",
+            f"HTTP behaviour {name} was added to the contract",
             None,
             _http_addition_evidence(new[name], digests),
         )
@@ -1131,8 +1125,8 @@ def _compare_retained_http_behaviours(
             result.add(
                 "http",
                 REVIEW_REQUIRED,
-                "binding-changed:{}".format(name),
-                "the test binding for HTTP behaviour {} changed".format(name),
+                f"binding-changed:{name}",
+                f"the test binding for HTTP behaviour {name} changed",
                 _http_binding_digests(old[name], old_digests),
                 _http_binding_digests(new[name], new_digests),
             )
@@ -1140,8 +1134,8 @@ def _compare_retained_http_behaviours(
             result.add(
                 "http",
                 REVIEW_REQUIRED,
-                "executor-changed:{}".format(name),
-                "the executing target for HTTP behaviour {} changed".format(name),
+                f"executor-changed:{name}",
+                f"the executing target for HTTP behaviour {name} changed",
                 old[name]["executed_by"],
                 new[name]["executed_by"],
             )
@@ -1156,10 +1150,8 @@ def _compare_http_test_digests(
             result.add(
                 "http",
                 REVIEW_REQUIRED,
-                "test-changed:{}".format(path),
-                "HTTP contract test {} changed; the behaviour it asserts needs review".format(
-                    path
-                ),
+                f"test-changed:{path}",
+                f"HTTP contract test {path} changed; the behaviour it asserts needs review",
                 old_digests[path],
                 new_digests[path],
             )
@@ -1191,12 +1183,9 @@ def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """
     groups: Dict[str, Dict[str, Any]] = {}
     for row in contract["support"]["targets"]:
-        key = "{}/{}/{}/{}/{}".format(
-            row["nginx_minor"],
-            row["artifact_type"],
-            row["os"],
-            row["libc"],
-            row["arch"],
+        key = (
+            f'{row["nginx_minor"]}/{row["artifact_type"]}/'
+            f'{row["os"]}/{row["libc"]}/{row["arch"]}'
         )
         bucket = groups.setdefault(
             key,
@@ -1228,12 +1217,9 @@ def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 def _support_row_key(row: Dict[str, Any]) -> str:
     """Identify one matrix row by artifact, target, and patch version."""
-    return "{}|{}|{}/{}/{}".format(
-        row["nginx_version"],
-        row["artifact_type"],
-        row["os"],
-        row["libc"],
-        row["arch"],
+    return (
+        f'{row["nginx_version"]}|{row["artifact_type"]}|'
+        f'{row["os"]}/{row["libc"]}/{row["arch"]}'
     )
 
 
@@ -1261,10 +1247,9 @@ def _compare_support_rows(
             result.add(
                 "packaging",
                 verdict,
-                "row-tier-changed:{}".format(key),
-                "support tier changed for row {} from {} to {}".format(
-                    key, old_row["support_tier"], new_row["support_tier"]
-                ),
+                f"row-tier-changed:{key}",
+                f"support tier changed for row {key} from "
+                f'{old_row["support_tier"]} to {new_row["support_tier"]}',
                 old_row["support_tier"],
                 new_row["support_tier"],
             )
@@ -1272,8 +1257,8 @@ def _compare_support_rows(
             result.add(
                 "packaging",
                 BREAKING,
-                "row-release-blocking-dropped:{}".format(key),
-                "row {} stopped being release blocking".format(key),
+                f"row-release-blocking-dropped:{key}",
+                f"row {key} stopped being release blocking",
                 old_row["release_blocking"],
                 new_row["release_blocking"],
             )
@@ -1281,8 +1266,8 @@ def _compare_support_rows(
             result.add(
                 "packaging",
                 ADDITIVE,
-                "row-release-blocking-added:{}".format(key),
-                "row {} became release blocking".format(key),
+                f"row-release-blocking-added:{key}",
+                f"row {key} became release blocking",
                 old_row["release_blocking"],
                 new_row["release_blocking"],
             )
@@ -1296,10 +1281,8 @@ def _compare_support_target(
         result.add(
             "packaging",
             OK,
-            "patch-progression:{}".format(key),
-            "{} tracks patch versions {} -> {}".format(
-                key, old["patches"], new["patches"]
-            ),
+            f"patch-progression:{key}",
+            f'{key} tracks patch versions {old["patches"]} -> {new["patches"]}',
             old["patches"],
             new["patches"],
         )
@@ -1307,8 +1290,8 @@ def _compare_support_target(
         result.add(
             "packaging",
             BREAKING,
-            "support-blocking-coverage-dropped:{}".format(key),
-            "{} no longer has a supported release-blocking matrix row".format(key),
+            f"support-blocking-coverage-dropped:{key}",
+            f"{key} no longer has a supported release-blocking matrix row",
             old["supported_blocking"],
             new["supported_blocking"],
         )
@@ -1322,8 +1305,8 @@ def _compare_install_paths(
         result.add(
             "packaging",
             BREAKING,
-            "{}-path-removed:{}".format(key, path),
-            "the {} package no longer installs {}".format(key, path),
+            f"{key}-path-removed:{path}",
+            f"the {key} package no longer installs {path}",
             path,
             None,
         )
@@ -1331,8 +1314,8 @@ def _compare_install_paths(
         result.add(
             "packaging",
             ADDITIVE,
-            "{}-path-added:{}".format(key, path),
-            "the {} package installs {}".format(key, path),
+            f"{key}-path-added:{path}",
+            f"the {key} package installs {path}",
             None,
             path,
         )
@@ -1357,7 +1340,7 @@ def compare_packaging(
                 "packaging",
                 BREAKING,
                 CHANGED_ID.format(key.replace("_", "-")),
-                "the installed module path changed for {}".format(key),
+                f"the installed module path changed for {key}",
                 baseline[key],
                 candidate[key],
             )
@@ -1367,7 +1350,7 @@ def compare_packaging(
                 "packaging",
                 REVIEW_REQUIRED,
                 CHANGED_ID.format(key.replace("_", "-")),
-                "the packaging {} contract changed".format(key),
+                f"the packaging {key} contract changed",
                 baseline[key],
                 candidate[key],
             )
@@ -1383,8 +1366,8 @@ def compare_packaging(
         result.add(
             "packaging",
             BREAKING,
-            "support-target-removed:{}".format(key),
-            "supported target {} was removed from the matrix".format(key),
+            f"support-target-removed:{key}",
+            f"supported target {key} was removed from the matrix",
             old_groups[key]["tiers"],
             None,
         )
@@ -1392,8 +1375,8 @@ def compare_packaging(
         result.add(
             "packaging",
             ADDITIVE,
-            "support-target-added:{}".format(key),
-            "supported target {} was added to the matrix".format(key),
+            f"support-target-added:{key}",
+            f"supported target {key} was added to the matrix",
             None,
             new_groups[key]["tiers"],
         )
@@ -1421,8 +1404,8 @@ def compare_ffi(
         result.add(
             "ffi",
             REVIEW_REQUIRED,
-            "symbol-removed:{}".format(name),
-            "FFI export {} was removed from the generated header".format(name),
+            f"symbol-removed:{name}",
+            f"FFI export {name} was removed from the generated header",
             old_map[name]["signature"],
             None,
         )
@@ -1430,8 +1413,8 @@ def compare_ffi(
         result.add(
             "ffi",
             ADDITIVE,
-            "symbol-added:{}".format(name),
-            "FFI export {} was added to the generated header".format(name),
+            f"symbol-added:{name}",
+            f"FFI export {name} was added to the generated header",
             None,
             new_map[name]["signature"],
         )
@@ -1440,8 +1423,8 @@ def compare_ffi(
             result.add(
                 "ffi",
                 REVIEW_REQUIRED,
-                "signature-changed:{}".format(name),
-                "FFI export {} changed signature".format(name),
+                f"signature-changed:{name}",
+                f"FFI export {name} changed signature",
                 old_map[name]["signature"],
                 new_map[name]["signature"],
             )
@@ -1479,12 +1462,12 @@ def compare_contracts(
     new_surfaces = candidate.get("surfaces") or {}
     for surface in sorted(COMPARATORS):
         if surface not in old_surfaces or surface not in new_surfaces:
-            missing = "baseline" if surface not in old_surfaces else "candidate"
+            missing = "candidate" if surface in old_surfaces else "baseline"
             result.add(
                 surface,
                 UNVERIFIED,
                 "surface-missing",
-                "the {} manifest has no {} surface".format(missing, surface),
+                f"the {missing} manifest has no {surface} surface",
                 None,
                 None,
             )
@@ -1508,11 +1491,11 @@ def _approval_key(entry: Dict[str, Any], approval_path: str) -> tuple:
         value = entry.get(field)
         if not value:
             raise ValueError(
-                "approval in {} is missing {}".format(approval_path, field)
+                f"approval in {approval_path} is missing {field}"
             )
         if not isinstance(value, str):
             raise ValueError(
-                "approval in {} has a non-string {}".format(approval_path, field)
+                f"approval in {approval_path} has a non-string {field}"
             )
     return (entry["finding_id"], entry["evidence_fingerprint"])
 
@@ -1537,9 +1520,9 @@ def apply_approvals(
     require_shape = approvals.get("schema") == 1
     if not require_shape:
         raise ValueError("approval file must declare \"schema\": 1")
-    approved: Dict[tuple, Dict[str, Any]] = {}
-    for entry in entries:
-        approved[_approval_key(entry, approval_path)] = entry
+    approved: Dict[tuple, Dict[str, Any]] = {
+        _approval_key(entry, approval_path): entry for entry in entries
+    }
     used = set()
     for finding in result.findings:
         if finding.verdict != REVIEW_REQUIRED:
@@ -1549,14 +1532,14 @@ def apply_approvals(
         if entry is None:
             continue
         finding.verdict = OK
-        finding.message = "{} [approved by {}: {}]".format(
-            finding.message, entry["approved_by"], entry["reason"]
+        finding.message = (
+            f'{finding.message} [approved by {entry["approved_by"]}: '
+            f'{entry["reason"]}]'
         )
         used.add(key)
-    for finding_id, fingerprint in sorted(set(approved) - used):
-        notices.append(
-            "approval {}({}) in {} matches no REVIEW_REQUIRED finding".format(
-                finding_id, fingerprint[:19], approval_path
-            )
-        )
+    notices.extend(
+        f"approval {finding_id}({fingerprint[:19]}) in {approval_path} "
+        "matches no REVIEW_REQUIRED finding"
+        for finding_id, fingerprint in sorted(set(approved) - used)
+    )
     return notices
