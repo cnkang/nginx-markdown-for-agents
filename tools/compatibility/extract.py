@@ -849,15 +849,22 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _nfpm_contents(document: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Project effective nFPM contents entries and packager scopes."""
-    contents = document.get("contents")
-    require(isinstance(contents, list), "nFPM contents must be a YAML list")
+# nFPM content types whose destination is a directory, not an installed file.
+_NFPM_DIRECTORY_TYPES = ("dir", "tree")
+
+
+def _nfpm_contents(contents: Any, scope: str) -> List[Dict[str, str]]:
+    """Project nFPM contents entries with their packager scope and type.
+
+    An omitted ``type`` is a regular file, as in nFPM itself.
+    """
+    require(isinstance(contents, list), "nFPM {} must be a YAML list".format(scope))
     entries = []
     for item in contents:
         require(isinstance(item, dict), "nFPM contents entries must be mappings")
         destination = item.get("dst")
         packager = item.get("packager", "")
+        content_type = item.get("type", "")
         require(
             isinstance(destination, str) and bool(destination),
             "nFPM contents entry has no destination",
@@ -866,17 +873,34 @@ def _nfpm_contents(document: Dict[str, Any]) -> List[Dict[str, str]]:
             isinstance(packager, str) and packager in ("", "deb", "rpm"),
             "nFPM contents entry has an unsupported packager",
         )
-        entries.append({"dst": destination, "packager": packager})
+        require(
+            isinstance(content_type, str),
+            "nFPM contents entry has a non-string type",
+        )
+        entries.append(
+            {"dst": destination, "packager": packager, "type": content_type}
+        )
     return entries
 
 
-def _layout_paths(entries: List[Dict[str, str]], packager: str) -> List[str]:
-    """Return the effective install paths for one package family."""
+def _layout_entries(
+    entries: List[Dict[str, str]], packager: str
+) -> List[Dict[str, str]]:
+    """Return the effective contents entries for one package family."""
     return sorted(
+        (entry for entry in entries if entry["packager"] in ("", packager)),
+        key=lambda entry: entry["dst"],
+    )
+
+
+def _module_paths(entries: List[Dict[str, str]]) -> List[str]:
+    """Return installed module files, excluding directory entries."""
+    return [
         entry["dst"]
         for entry in entries
-        if entry["packager"] in ("", packager)
-    )
+        if entry["dst"].endswith(".so")
+        and entry["type"] not in _NFPM_DIRECTORY_TYPES
+    ]
 
 
 def _load_nfpm_document(text: str) -> Dict[str, Any]:
@@ -900,20 +924,55 @@ def _nfpm_package_name(document: Dict[str, Any]) -> str:
     return package_name
 
 
-def _nfpm_dependencies(overrides: Dict[str, Any], packager: str) -> List[str]:
-    """Return one validated package family's dependency list."""
+def _nfpm_override(overrides: Dict[str, Any], packager: str) -> Dict[str, Any]:
+    """Return one package family's validated override mapping."""
     package_override = overrides.get(packager) or {}
     require(
         isinstance(package_override, dict),
         "nFPM {} override must be a YAML mapping".format(packager),
     )
-    dependencies = package_override.get("depends") or []
+    return package_override
+
+
+def _nfpm_effective(
+    document: Dict[str, Any], package_override: Dict[str, Any], key: str
+) -> Any:
+    """Return the value nFPM uses for one overridable key.
+
+    nFPM merges an override over the root configuration and skips empty
+    values, so an absent or empty override list inherits the root list.
+    """
+    value = package_override.get(key)
+    if value is None or value == []:
+        return document.get(key)
+    return value
+
+
+def _nfpm_dependencies(
+    document: Dict[str, Any], package_override: Dict[str, Any], packager: str
+) -> List[str]:
+    """Return one validated package family's effective dependency list."""
+    dependencies = _nfpm_effective(document, package_override, "depends") or []
     require(
         isinstance(dependencies, list)
         and all(isinstance(item, str) for item in dependencies),
         "nFPM {} dependencies must be a string list".format(packager),
     )
     return dependencies
+
+
+def _nfpm_layout(
+    document: Dict[str, Any], package_override: Dict[str, Any], packager: str
+) -> List[Dict[str, str]]:
+    """Return one package family's effective contents entries."""
+    if package_override.get("contents") in (None, []):
+        entries = _nfpm_contents(document.get("contents"), "contents")
+        require(len(entries) > 0, "nFPM config declares no contents entries")
+    else:
+        entries = _nfpm_contents(
+            package_override["contents"], "{} override contents".format(packager)
+        )
+    return _layout_entries(entries, packager)
 
 
 def _nfpm_deb_constraints(dependencies: List[str]) -> List[List[str]]:
@@ -942,20 +1001,26 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
     """Extract the package name, install layout, and dependency shape."""
     document = _load_nfpm_document(text)
     package_name = _nfpm_package_name(document)
-    entries = _nfpm_contents(document)
-    require(len(entries) > 0, "nFPM config declares no contents entries")
-    deb_paths = _layout_paths(entries, "deb")
-    rpm_paths = _layout_paths(entries, "rpm")
+    if document.get("contents") is not None:
+        # nFPM rejects a malformed root list even when both families
+        # override it, so the extractor validates it in that case as well.
+        _nfpm_contents(document["contents"], "contents")
     overrides = document.get("overrides") or {}
     require(isinstance(overrides, dict), "nFPM overrides must be a YAML mapping")
-    deb_dependencies = _nfpm_dependencies(overrides, "deb")
-    rpm_dependencies = _nfpm_dependencies(overrides, "rpm")
+    deb_override = _nfpm_override(overrides, "deb")
+    rpm_override = _nfpm_override(overrides, "rpm")
+    deb_entries = _nfpm_layout(document, deb_override, "deb")
+    rpm_entries = _nfpm_layout(document, rpm_override, "rpm")
+    deb_paths = [entry["dst"] for entry in deb_entries]
+    rpm_paths = [entry["dst"] for entry in rpm_entries]
+    deb_dependencies = _nfpm_dependencies(document, deb_override, "deb")
+    rpm_dependencies = _nfpm_dependencies(document, rpm_override, "rpm")
     return {
         "package_name": package_name,
         "deb_install_paths": deb_paths,
         "rpm_install_paths": rpm_paths,
-        "deb_module_path": [path for path in deb_paths if path.endswith(".so")],
-        "rpm_module_path": [path for path in rpm_paths if path.endswith(".so")],
+        "deb_module_path": _module_paths(deb_entries),
+        "rpm_module_path": _module_paths(rpm_entries),
         "load_snippet_paths": sorted(
             path for path in set(deb_paths) | set(rpm_paths) if path.endswith(".conf")
         ),

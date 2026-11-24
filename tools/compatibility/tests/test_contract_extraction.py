@@ -1188,3 +1188,91 @@ def test_http_addition_fingerprint_includes_the_executor():
     }
     assert first.fingerprint == unchanged.fingerprint
     assert first.fingerprint != moved.fingerprint
+
+
+def test_nfpm_dependencies_follow_the_effective_override():
+    """An override without depends inherits the root dependency list."""
+    inherited = _nfpm_contract(
+        """
+name: sample
+depends:
+  - "nginx (>= ${NGINX_VERSION})"
+overrides:
+  deb:
+    conflicts:
+      - other
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+"""
+    )
+    overridden = _nfpm_contract(
+        """
+name: sample
+depends:
+  - "nginx (<< ${NGINX_VERSION_CEIL})"
+overrides:
+  deb:
+    depends:
+      - "nginx (>= ${NGINX_VERSION})"
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+"""
+    )
+
+    assert inherited["deb_nginx_constraints"] == [[">=", "NGINX_VERSION"]]
+    assert overridden["deb_nginx_constraints"] == [[">=", "NGINX_VERSION"]]
+
+
+def test_nfpm_layout_follows_non_empty_override_contents():
+    """A non-empty override contents list replaces the root list."""
+    contract = _nfpm_contract(
+        """
+name: sample
+overrides:
+  deb:
+    contents:
+      - dst: /usr/lib/nginx/modules/override.so
+  rpm:
+    contents: []
+contents:
+  - dst: /usr/lib64/nginx/modules/root.so
+"""
+    )
+
+    assert contract["deb_install_paths"] == ["/usr/lib/nginx/modules/override.so"]
+    assert contract["deb_module_path"] == ["/usr/lib/nginx/modules/override.so"]
+    assert contract["rpm_install_paths"] == ["/usr/lib64/nginx/modules/root.so"]
+
+    with pytest.raises(ContractError, match="no destination"):
+        _nfpm_contract(
+            """
+name: sample
+overrides:
+  deb:
+    contents:
+      - src: module.so
+contents:
+  - dst: /usr/lib/nginx/modules/root.so
+"""
+        )
+
+
+def test_nfpm_module_paths_exclude_directory_entries():
+    """A directory entry is not an installed module file."""
+    contract = _nfpm_contract(
+        """
+name: sample
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+    packager: deb
+  - dst: /usr/lib/nginx/modules/legacy.so
+    type: dir
+    packager: deb
+"""
+    )
+
+    assert contract["deb_module_path"] == ["/usr/lib/nginx/modules/module.so"]
+    assert contract["deb_install_paths"] == [
+        "/usr/lib/nginx/modules/legacy.so",
+        "/usr/lib/nginx/modules/module.so",
+    ]
