@@ -679,7 +679,7 @@ def test_metrics_histogram_samples_and_label_order_are_preserved():
     assert series[family] == {
         ("bucket", ("le=1", "region=west")),
     }
-    assert labels[family] == [["le", "region"]]
+    assert labels[family] == [["@component=bucket", "le", "region"]]
     assert _unlabelled_samples(
         family + r"_sum 2\n" + family + "_count 2",
         {family: "histogram"},
@@ -1275,4 +1275,51 @@ contents:
     assert contract["deb_install_paths"] == [
         "/usr/lib/nginx/modules/legacy.so",
         "/usr/lib/nginx/modules/module.so",
+    ]
+
+
+def test_unlabelled_samples_accept_a_tab_separator():
+    """A tab after the sample name still identifies the sample."""
+    family = "nginx_markdown_latency"
+
+    assert _unlabelled_samples(
+        family + r"_sum\t2\n" + family + "_count\t2",
+        {family: "histogram"},
+    ) == [family + ":count", family + ":sum"]
+
+
+def test_metrics_label_sets_ignore_histogram_sample_order():
+    """Reordered histogram lines keep the label-set contract unchanged."""
+    family = "nginx_markdown_latency"
+    bucket = family + r'_bucket{engine=\"rust\",le=\"1\"} 2\n'
+    count = family + r'_count{engine=\"rust\"} 2\n'
+    _, forward = _collect_series(bucket + count, {family: "histogram"})
+    _, reverse = _collect_series(count + bucket, {family: "histogram"})
+    assert forward == reverse
+
+    def emitted(label_sets):
+        return {
+            "emitted": {
+                "families": {family: "histogram"},
+                "label_sets": {family: label_sets},
+                "series": {family: []},
+            }
+        }
+
+    bucket_set = ["@component=bucket", "engine", "le"]
+    count_set = ["@component=count", "engine"]
+    reordered = Comparison(baseline_label="a", candidate_label="b")
+    _compare_emitted(
+        reordered, emitted([bucket_set, count_set]), emitted([count_set, bucket_set])
+    )
+    assert reordered.findings == []
+
+    added = Comparison(baseline_label="a", candidate_label="b")
+    _compare_emitted(
+        added,
+        emitted([count_set]),
+        emitted([count_set, ["@component=sum", "engine"]]),
+    )
+    assert [finding.finding_id for finding in added.findings] == [
+        "metrics:emitted-labels-changed:" + family
     ]

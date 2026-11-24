@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:5e92f3f11f071780bcb05f9b898e1b18c305633975dc50f7fd0fb899ea56b34c",
+  "contract_digest": "sha256:0c4a40a4b2d66d3965987a49f4ba6c7633be7363af691ac35a637e3a3ecb5437",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -17,7 +17,7 @@
     "directives": "sha256:832d3a866ed95b722ddc62b78bd5e8b5c59b6135e7b950c52447b298fae3389f",
     "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
     "http": "sha256:3b4a505b6d43bedde37adb7286f23140175341d182cd6b7cff5f21233eb0ca3f",
-    "metrics": "sha256:74863ddaf8d310349b33b4609aa13c03ffcfbf57f585fbce9609223685bcda25",
+    "metrics": "sha256:36a0594eacb9e9a4e459e899229d3c91e6931d8198867d3fe6c13e76eadbc8e4",
     "packaging": "sha256:df3a8ead973a673227312457011bda73e928f31ca9220b2a7b0d2cdd8e26537f",
     "reasons": "sha256:5122f7145d533c310888f1edda0196065cbdf8395f59a0f1359327005392c0e3"
   },
@@ -1058,10 +1058,16 @@
           ],
           "nginx_markdown_conversion_duration_seconds": [
             [
+              "@component=bucket",
               "engine",
               "le"
             ],
             [
+              "@component=count",
+              "engine"
+            ],
+            [
+              "@component=sum",
               "engine"
             ]
           ],
