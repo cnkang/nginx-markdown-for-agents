@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:114e8f41e7a49280ea332e5c600169d4b274ae2873a704ef9ced93bc44056783",
+  "contract_digest": "sha256:d519e044620ea7a04cc42eff0b222b37d873111b866a76933ac51da8ee99edeb",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -13,7 +13,7 @@
     "tag_object": "a3ca1865510930e82a7e5c9a10649695fb9a6383"
   },
   "surface_digests": {
-    "diagnostics": "sha256:232a84f970ba7ec73adf84af9fe36ebcdfdb386c640a7d740e5f3ed531fca7a4",
+    "diagnostics": "sha256:9a491a4fbfa7f1d838758a2fe96610e56c279f289c48b4d50dfdc304f7bc8c70",
     "directives": "sha256:b58c3cc7f95de04fc71d821b39af5e3e7680633f5b4c7ec30b4fadb1df72539e",
     "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
     "http": "sha256:a222d7d01789da24e232ea00d129751a7b168246c9f5c96123169673b67b4244",
@@ -59,6 +59,13 @@
                 "maxItems": 20,
                 "minItems": 0
               },
+              "items_additional_properties": null,
+              "items_constraints": {
+                "minLength": 1
+              },
+              "items_properties": [],
+              "items_required": [],
+              "items_type": "string",
               "name": "features",
               "type": "array"
             },
@@ -117,11 +124,121 @@
           "nullable": false,
           "properties": [
             {
+              "additional_properties": false,
               "name": "effective",
+              "properties": [
+                {
+                  "enum": [
+                    "fail_closed",
+                    "pass",
+                    "status 429",
+                    "status 503"
+                  ],
+                  "name": "error_policy",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "off",
+                    "on"
+                  ],
+                  "name": "filter",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "debug",
+                    "error",
+                    "info",
+                    "warn"
+                  ],
+                  "name": "log_verbosity",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "off",
+                    "on"
+                  ],
+                  "name": "prune_noise",
+                  "type": "string"
+                },
+                {
+                  "constraints": {
+                    "maximum": 1073741824,
+                    "minimum": 65536
+                  },
+                  "name": "streaming_buffer",
+                  "type": "integer"
+                }
+              ],
+              "required_children": [
+                "error_policy",
+                "filter",
+                "log_verbosity",
+                "prune_noise",
+                "streaming_buffer"
+              ],
               "type": "object"
             },
             {
+              "additional_properties": false,
               "name": "effective_sources",
+              "properties": [
+                {
+                  "enum": [
+                    "default",
+                    "http_baseline",
+                    "static"
+                  ],
+                  "name": "error_policy",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "default",
+                    "http_baseline",
+                    "request_variable",
+                    "static"
+                  ],
+                  "name": "filter",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "default",
+                    "http_baseline",
+                    "static"
+                  ],
+                  "name": "log_verbosity",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "default",
+                    "http_baseline",
+                    "static"
+                  ],
+                  "name": "prune_noise",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "default",
+                    "http_baseline",
+                    "static"
+                  ],
+                  "name": "streaming_buffer",
+                  "type": "string"
+                }
+              ],
+              "required_children": [
+                "error_policy",
+                "filter",
+                "log_verbosity",
+                "prune_noise",
+                "streaming_buffer"
+              ],
               "type": "object"
             },
             {
@@ -265,7 +382,45 @@
               "type": "integer"
             },
             {
+              "additional_properties": false,
               "name": "module_metrics",
+              "properties": [
+                {
+                  "constraints": {
+                    "minimum": 0
+                  },
+                  "name": "copied_output_total",
+                  "type": "integer"
+                },
+                {
+                  "constraints": {
+                    "maximum": 2,
+                    "minimum": 0
+                  },
+                  "name": "diagnostics_recording_state",
+                  "type": "integer"
+                },
+                {
+                  "constraints": {
+                    "minimum": 0
+                  },
+                  "name": "precommit_failopen_total",
+                  "type": "integer"
+                },
+                {
+                  "constraints": {
+                    "minimum": 0
+                  },
+                  "name": "streaming_requests_total",
+                  "type": "integer"
+                }
+              ],
+              "required_children": [
+                "copied_output_total",
+                "diagnostics_recording_state",
+                "precommit_failopen_total",
+                "streaming_requests_total"
+              ],
               "type": "object"
             },
             {
