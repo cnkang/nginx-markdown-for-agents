@@ -1160,3 +1160,31 @@ def test_default_index_requires_the_directed_historical_pair(tmp_path, monkeypat
     )
     custom = cli.load_index(str(tmp_path / "custom.json"), str(REPO))
     assert custom["comparisons"] == [{"from": "v0.9.4", "to": "v0.9.4"}]
+
+
+def _added_behaviour_finding(executor: str):
+    """Return the behaviour-added finding for one new HTTP binding."""
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_http(
+        result,
+        {"behaviours": {}, "test_file_digests": {}},
+        {
+            "behaviours": {"status": {"tests": ["a.c"], "executed_by": executor}},
+            "test_file_digests": {"a.c": "sha256:a"},
+        },
+    )
+    return next(item for item in result.findings if "behaviour-added" in item.finding_id)
+
+
+def test_http_addition_fingerprint_includes_the_executor():
+    """An executor change invalidates an approval for a new behaviour."""
+    first = _added_behaviour_finding("make test-nginx-unit")
+    unchanged = _added_behaviour_finding("make test-nginx-unit")
+    moved = _added_behaviour_finding("bash tools/e2e/other.sh")
+
+    assert first.candidate == {
+        "tests": {"a.c": "sha256:a"},
+        "executed_by": "make test-nginx-unit",
+    }
+    assert first.fingerprint == unchanged.fingerprint
+    assert first.fingerprint != moved.fingerprint
