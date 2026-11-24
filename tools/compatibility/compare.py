@@ -210,6 +210,12 @@ def _by_segment(entries: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {_schema_segment(entry["name"]): entry for entry in entries}
 
 
+def _is_block_directive(entry: Dict[str, Any]) -> bool:
+    """Return whether a directive's command flags declare a block form."""
+    flags = entry.get("source_flags") or ""
+    return "NGX_CONF_BLOCK" in {token.strip() for token in flags.split("|")}
+
+
 def _compare_directive(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
@@ -231,6 +237,17 @@ def _compare_directive(
             f"directive {name} changed its argument contract",
             old["args"],
             new["args"],
+        )
+    old_block = _is_block_directive(old)
+    new_block = _is_block_directive(new)
+    if old_block != new_block:
+        result.add(
+            "directives",
+            BREAKING,
+            f"block-form-changed:{name}",
+            f"directive {name} changed between a block and a non-block form",
+            old.get("source_flags"),
+            new.get("source_flags"),
         )
     old_context = set(old["context"])
     new_context = set(new["context"])
@@ -360,6 +377,19 @@ def _compare_metric_family(
             f"metric family {name} changed its histogram buckets",
             old.get("bucket_boundaries"),
             new.get("bucket_boundaries"),
+        )
+    # A registry entry may pin a fixed sample value (build info is the only
+    # one today).  That declaration is contract, not a live reading: a change
+    # to it, including declaring or dropping it, changes what the renderer
+    # publishes.
+    if ("value" in old) != ("value" in new) or old.get("value") != new.get("value"):
+        result.add(
+            "metrics",
+            BREAKING,
+            f"fixed-value-changed:{name}",
+            f"metric family {name} changed its declared fixed value",
+            old.get("value"),
+            new.get("value"),
         )
     old_labels = _by_name(old["labels"])
     new_labels = _by_name(new["labels"])
@@ -649,7 +679,9 @@ def _compare_schema_constraints(
     """Require review when a projected JSON Schema constraint changes."""
     old_constraints = old.get(key) or {}
     new_constraints = new.get(key) or {}
-    if old_constraints != new_constraints:
+    # JSON Schema equality keeps booleans distinct from numbers while 1 and
+    # 1.0 stay equal, so Python dict equality is the wrong test here.
+    if _json_equality_key(old_constraints) != _json_equality_key(new_constraints):
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,

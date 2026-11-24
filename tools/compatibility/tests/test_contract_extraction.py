@@ -265,6 +265,79 @@ def test_compare_classifies_context_widening_as_additive():
     assert BREAKING not in verdicts.values()
 
 
+def test_compare_reports_a_changed_fixed_metric_value():
+    """A registry-pinned sample value is part of the metrics contract."""
+    baseline = {
+        "families": [
+            {
+                "name": "nginx_markdown_build_info",
+                "type": "gauge",
+                "labels": [],
+                "value": 1,
+            }
+        ],
+        "emitted": {"families": {}, "label_sets": {}, "series": {}},
+    }
+    changed = json.loads(json.dumps(baseline))
+    changed["families"][0]["value"] = 2
+    verdicts = {
+        finding.finding_id: finding.verdict
+        for finding in _synthetic_pair("metrics", baseline, changed).findings
+    }
+    assert (
+        verdicts["metrics:fixed-value-changed:nginx_markdown_build_info"] == BREAKING
+    )
+
+    dropped = json.loads(json.dumps(baseline))
+    del dropped["families"][0]["value"]
+    assert "metrics:fixed-value-changed:nginx_markdown_build_info" in {
+        finding.finding_id
+        for finding in _synthetic_pair("metrics", baseline, dropped).findings
+    }
+
+
+def test_compare_reports_a_directive_block_form_change():
+    """NGX_CONF_BLOCK changes whether a directive accepts a block."""
+    flags = "NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1"
+    baseline = _directive_surface(flags)
+    blocked = _directive_surface(flags + "|NGX_CONF_BLOCK")
+
+    verdicts = {
+        finding.finding_id: finding.verdict
+        for finding in _synthetic_pair("directives", baseline, blocked).findings
+    }
+
+    assert verdicts["directives:block-form-changed:markdown_filter"] == BREAKING
+    reordered = _directive_surface("NGX_CONF_TAKE1|NGX_HTTP_LOC_CONF")
+    assert not [
+        finding
+        for finding in _synthetic_pair("directives", baseline, reordered).findings
+        if finding.surface == "directives"
+    ]
+
+
+def _directive_surface(flags: str) -> dict:
+    """Return a single-directive contract surface with the given flags."""
+    return {
+        "count": 1,
+        "reject_only_count": 0,
+        "entries": [
+            {
+                "name": "markdown_filter",
+                "context": ["location"],
+                "documented_context": ["location"],
+                "args": "1",
+                "handler": "handler",
+                "conf_offset": "offset",
+                "source_flags": flags,
+                "syntax": "on|off",
+                "default": "off",
+                "documentation": "doc",
+            }
+        ],
+    }
+
+
 def test_approvals_waive_review_but_never_break_candidates():
     """An approval converts REVIEW_REQUIRED only."""
     result = Comparison(baseline_label="a", candidate_label="b")
@@ -1711,6 +1784,24 @@ def test_enum_comparison_follows_json_schema_equality():
         "diagnostics:enum-widened:state": ADDITIVE,
         "diagnostics:child-enum-narrowed:box:mode": BREAKING,
     }
+
+
+def test_diagnostics_constraints_follow_json_schema_equality():
+    """Constraints keep booleans distinct from numbers but not 1 from 1.0."""
+    def surface(constraint):
+        return _diagnostics_surface(
+            {
+                "name": "value",
+                "type": None,
+                "nullable": False,
+                "constraints": constraint,
+            }
+        )
+
+    assert _diagnostics_verdicts(surface({"const": True}), surface({"const": 1})) == {
+        "diagnostics:schema-constraints-changed:value": REVIEW_REQUIRED
+    }
+    assert _diagnostics_verdicts(surface({"minimum": 1}), surface({"minimum": 1.0})) == {}
 
 
 def test_schema_paths_distinguish_dotted_names_from_nesting():
