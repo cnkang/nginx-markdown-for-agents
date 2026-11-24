@@ -50,6 +50,7 @@ from tools.compatibility.model import (
 from tools.compatibility.tests.conftest import (
     _changed_paths,
     _overlay,
+    _overlay_entry,
     sanitized_environment,
 )
 from tools.lib.path_validation import validate_read_path
@@ -1737,3 +1738,18 @@ contents:
     ]
     assert contract["rpm_load_snippet_paths"] == ["/usr/share/nginx/modules/mod.conf"]
     assert "load_snippet_paths" not in contract
+
+
+def test_fixture_directory_overlay_preserves_nested_symlinks(tmp_path):
+    """A copied directory keeps nested links instead of their targets."""
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    (source / "nested").mkdir(parents=True)
+    (source / "nested" / "real.txt").write_text("real", encoding="utf-8")
+    os.symlink("real.txt", source / "nested" / "link.txt")
+
+    _overlay_entry(source, target)
+
+    assert (target / "nested" / "link.txt").is_symlink()
+    assert os.readlink(target / "nested" / "link.txt") == "real.txt"
+    assert (target / "nested" / "real.txt").read_text(encoding="utf-8") == "real"
