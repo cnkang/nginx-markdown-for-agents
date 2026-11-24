@@ -347,9 +347,9 @@ before/after examples.
 
 ## [0.9.1] - 2026-07-29
 
-Final pre-v1.0 baseline-consolidation and compatibility-reset release. also to
-performance readiness and release evidence, this release closes toolchain and
-public-contract debt before the v1.0 compatibility freeze.
+Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
+addition to performance readiness and release evidence, this release closes
+toolchain and public-contract debt before the v1.0 compatibility freeze.
 
 The project released v0.9.0 intending it to be the last breaking release
 before v1.0. The project deliberately extended the freeze through v0.9.1.
@@ -752,8 +752,8 @@ release-line documentation.
   panic-safe cleanup always restores a consistent state.
 - **FFI catch_unwind fallback hardening**: the `catch_unwind` fallback path now
   initializes output structs to safe defaults (fail-closed) and writes return
-  values only after the closure succeeds. Drop guards within `catch_unwind` make
-  sure panic-safe resource cleanup (Rule 15).
+  values only after the closure succeeds. Drop guards within `catch_unwind`
+  make sure resource cleanup stays panic-safe (Rule 15).
 - **FFI atomic writes**: `markdown_build_header_plan` now aligns with the
   atomic-write-after-catch pattern — closure computes return values, fields
   are written only after `Ok`.
@@ -845,7 +845,7 @@ tooling.
 - **Eligibility Content-Type OWS compliance (#149)**: Content-Type matching in
   `ngx_http_markdown_check_content_type()`, `ngx_http_markdown_is_streaming()`,
   and `ngx_http_markdown_stream_type_excluded()` now accepts HTAB as an optional
-  whitespace separator per RFC 7230, also to SP. Trailing OWS stripping also
+  whitespace separator per RFC 7230, in addition to SP. Trailing OWS stripping also
   handles HTAB.
 - **Full-buffer backpressure tail duplication**: when the downstream NGINX
   copy filter returns `NGX_AGAIN`, resume now drains the filter's retained

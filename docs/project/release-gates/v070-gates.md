@@ -39,7 +39,8 @@ release record must state which of these establishes the independence. Reusing
 the same environment run for both tests without a recorded distinction is an
 incomplete release record. Gate 4 passes through chart lint/render validation,
 promoted cluster smoke, and F5 assessment evidence. Final Go requires the
-package-signature and upgrade/rollback records also to the Gate 4 records.
+package-signature and upgrade/rollback records in addition to the Gate 4
+records.
 
 Gate 4 image evidence must bind the immutable multi-platform index digest and
 the matching platform manifest digest for every Ready pod. Missing records
