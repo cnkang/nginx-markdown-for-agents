@@ -217,7 +217,11 @@ Conversion runs at the reverse-proxy layer closest to the application, not at th
 
 This positioning aligns with the HTTP content negotiation model. The origin (or its reverse proxy) selects the best representation of a resource based on the client's Accept header. Cache semantics are simpler because the CDN layer caches the already-converted variant like any other response.
 
-The tradeoff is that conversion cost falls on the origin or reverse-proxy server. It is not distributed across edge nodes. The operator must be able to install and configure the module. Edge-layer conversion (as Cloudflare's Markdown for Agents demonstrates) serves a different operational model. It offers zero-touch enablement without origin changes. The two approaches can coexist.
+The tradeoff is that conversion cost falls on the origin or reverse-proxy
+server. It is not distributed across edge nodes. The operator must can install
+and configure the module. Edge-layer conversion (as Cloudflare's Markdown for
+Agents demonstrates) serves a different operational model. It offers zero-touch
+enablement without origin changes. The two approaches can coexist.
 
 This decision appears in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
 
@@ -290,8 +294,8 @@ improving testability and safety:
 ### Accept Negotiator (`negotiator.rs`)
 Parses `Accept` headers per RFC 9110 §12.5.1, performs q-value comparison
 between `text/markdown` and `text/html`, and determines whether conversion
-should proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept`
-FFI.
+should proceed. Exposed through `FFIAcceptResult` and
+`markdown_negotiate_accept` FFI.
 
 ### Conditional Request Handler (`conditional.rs`)
 Implements `If-None-Match` (ETag strong/weak comparison) and
@@ -419,6 +423,6 @@ The project applied internal optimizations to the full-buffer path. They reduce 
 ### Performance Evidence & Gates
 Strict performance evidence gates guard the 0.9.2 release. The consolidated
 `make release-gates-check-092` target must pass, and operators monitor
-performance regression via `make perf-evidence-check`. Operators can use
+performance regression through `make perf-evidence-check`. Operators can use
 `python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh`
 to tune the module for their specific workload.

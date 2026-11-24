@@ -35,16 +35,16 @@ verbatim from the real canonical run: `streaming_path_hits`,
 scenario status and metadata, platform, load generator, and NGINX version.
 
 For long-lived release thresholds, RPS may round downward or lower and
-latency/TTFB may round upward or raise. RPS must not increase,
-latency/TTFB must not decrease, and path, fallback, output, memory, or
-environment evidence must not change. This makes the threshold more
-conservative without improving or fabricating measured evidence. All
-adjustments must stay within a documented bound — a fixed precision or
-maximum adjustment (for example ±5% of the measured value, or rounding to
-at most one significant digit) recorded in the `baseline_policy` metadata.
-The gate rejects arbitrary downward RPS or upward latency/TTFB changes beyond
-that bound, and it also fails repeated small adjustments that accumulate past
-it.
+latency/TTFB may round upward or raise. RPS must not increase, latency/TTFB must
+not decrease, and path, fallback, output, memory, or environment evidence must
+not change. This makes the threshold more conservative without improving or
+fabricating measured evidence. All adjustments must stay within a documented
+bound. A fixed precision or maximum adjustment (for example ±5% of the measured
+value, or rounding to at most one significant digit) recorded in the
+`baseline_policy` metadata. The gate rejects arbitrary downward RPS or upward
+latency/TTFB changes beyond that bound.
+
+It also fails repeated small adjustments that accumulate past it.
 
 Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
@@ -69,19 +69,21 @@ environment-consistency validation only when present.
 
 The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
-output path. The workflow validates `.headers`, `.body`, and `.json` files
-for all eight scenarios. Each scenario must produce a non-empty `.headers`
-and `.json` file. The `.body` file must **exist** for every scenario, but an
-empty body is valid for bodyless responses (for example 304/HEAD), so the
-workflow must not require non-zero body content. It verifies each probe's
-verdict, curl exit code, and body SHA-256 (the empty-body digest is the
-SHA-256 of zero bytes). It validates the complete response-correctness schema
-(`http_status`, normalized `headers`, content metadata, body metadata,
-correctness markers, verdict, failure reason, and artifact names). It parses
-the final HTTP response block from each retained `.headers` artifact and
-requires the parsed status, headers, content type, and content encoding to
-match the probe JSON. The finalized `response_correctness` object must then
-match each probe object exactly before uploading canonical evidence. The workflow retains canonical artifacts for 30 days for release audit review.
+output path. The workflow validates `.headers`, `.body`, and `.json` files for
+all eight scenarios. Each scenario must produce a non-empty `.headers` and
+`.json` file. The `.body` file must **exist** for every scenario, but an empty
+body is valid for bodyless responses (for example 304/HEAD). The workflow must
+not require non-zero body content. It verifies each probe's verdict, curl exit
+code, and body SHA-256 (the empty-body digest is the SHA-256 of zero bytes).
+
+It validates the complete response-correctness schema (`http_status`, normalized
+`headers`, content metadata, body metadata, correctness markers, verdict,
+failure reason, and artifact names). It parses the final HTTP response block
+from each retained `.headers` artifact and requires the parsed status, headers,
+content type, and content encoding to match the probe JSON. The finalized
+`response_correctness` object must then match each probe object exactly before
+uploading canonical evidence. The workflow retains canonical artifacts for 30
+days for release audit review.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review. They are not merge-blocking thresholds yet.
 
@@ -206,7 +208,9 @@ Source output from `./test_conditional_requests_real --bench-conditional`:
 
 ### Interpretation
 
-- `full_support` is significantly more expensive than `if_modified_since_only`. `full` performs conversion to generate/compare ETag, so the gap follows. The extra conversion work explains it. The benchmark measures this difference.
+-  `full_support` is significantly more expensive than `if_modified_since_only`.
+  `full` performs conversion to generate/compare ETag. The gap follows. The
+  extra conversion work explains it. The benchmark measures this difference.
 - The matching path is slower than the non-matching path in this microbench due to the extra 304 response setup path in the harness.
 
 ## Memory Usage (Process-Level, `/usr/bin/time -l`)
@@ -298,19 +302,19 @@ Memory peak values in this document come from `tools/perf/memory_observer.sh`. T
 ### Linux — `os_reported_peak`
 
 On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` and stores the
-last successfully read value **before the target process exits or the OS
-reaps it**: once the status file becomes unreadable (process gone), the
-observer reports that stored sample as `os_reported_peak`. `VmHWM` is the
-kernel-tracked high-water mark for resident set size over the entire process
-lifetime. The entry disappears once the OS reaps the process, so the observer
-reports the last successful pre-exit sample, not a value captured at exit time. The observer also polls `VmRSS`
-during the run as a fallback when `VmHWM` cannot be read at exit (the caller
-has already reaped the process). When the observer uses the fallback, the
-reported value is the last successfully sampled `VmRSS` reading — the last
-observed
-value, not an exact kernel-tracked peak (exactness applies only when the
-final allocation is known to precede that successful read and the `VmHWM`
-read succeeded).
+last successfully read value **before the target process exits or the OS reaps
+it**: once the status file becomes unreadable (process gone), the observer
+reports that stored sample as `os_reported_peak`. `VmHWM` is the kernel-tracked
+high-water mark for resident set size over the entire process lifetime. The
+entry disappears once the OS reaps the process. The observer reports the last
+successful pre-exit sample, not a value captured at exit time. The observer also
+polls `VmRSS` during the run as a fallback when `VmHWM` cannot be read at exit
+(the caller has already reaped the process). When the observer uses the
+fallback, the reported value is the last successfully sampled `VmRSS` reading.
+
+The last observed value, not an exact kernel-tracked peak (exactness applies
+only when the final allocation is known to precede that successful read and the
+`VmHWM` read succeeded).
 
 ### macOS — `sampled_peak`
 
@@ -343,11 +347,11 @@ The output JSON includes a `memory_peak_method` field (`os_reported_peak` or `sa
 
 The `brotli-streaming-first` scenario exercises Brotli streaming decompression
 with a 1 MiB chunked response compressed at Brotli quality 6. The retained
-archival run used the exact implementation commit `9734d12e`, NGINX 1.30.4,
-Rust 1.97.0, and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`. This
-record is the 2026-07-19 historical measurement flagged as archival at the
-top of this document — the 2026-07-31 native Linux (NGINX 1.24.0) record is
-the canonical source of truth for release baseline claims.
+archival run used the exact implementation commit `9734d12e`, NGINX 1.30.4, Rust
+1.97.0, and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`. This record is the
+2026-07-19 historical measurement flagged as archival at the top of this
+document. The 2026-07-31 native Linux (NGINX 1.24.0) record is the canonical
+source of truth for release baseline claims.
 
 The archival 1000-request run completed with zero failed or non-2xx requests,
 zero pre-commit fail-open events, 1030 streaming decompressions (including
@@ -374,15 +378,15 @@ production-capacity claim.
 - `ttfb_p50_ms` — time to first decompressed byte (streaming path advantage)
 - `latency_p50_ms` / `latency_p95_ms` — total request latency
 - `streaming_requests_total` — request count routed through streaming
-- `decompression_streaming_total` — decompressions completed via streaming
+-  `decompression_streaming_total` — decompressions completed through streaming
 - `precommit_failopen_total` — pre-commit fail-open count (must be zero in canonical baseline)
 - `peak_rss_bytes` / `baseline_rss_bytes` — memory regression evidence
 
 The release gate requires this completed scenario, validates its metadata and
-real path counters, rejects missing output or excessive fail-open evidence,
-and evaluates latency and memory against the recorded baseline. A direct
-Brotli full-buffer comparison was not part of this retained run, so these data
-do not claim a measured relative speedup.
+real path counters, rejects missing output or excessive fail-open evidence, and
+evaluates latency and memory against the recorded baseline. A direct Brotli
+full-buffer comparison was not part of this retained run. These data do not
+claim a measured relative speedup.
 
 ## Next Actions (Data-Driven)
 

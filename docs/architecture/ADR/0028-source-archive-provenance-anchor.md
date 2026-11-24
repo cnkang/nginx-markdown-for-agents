@@ -31,21 +31,21 @@ it alone.
 
 ## Decision
 
-- The provenance anchor is the **commit identity**, and the release workflow
-  derives the source artifact from it. During a tag release the workflow builds a
-  canonical source bundle with `git archive --format=tar` from the released
+-  The provenance anchor is the **commit identity**, and the release workflow
+  derives the source artifact from it. During a tag release the workflow builds
+  a canonical source bundle with `git archive --format=tar` from the released
   commit, piped through `gzip -n`. The commit fixes every entry's timestamp and
-  `gzip -n` drops the archive name and timestamp, so the same commit always
+  `gzip -n` drops the archive name and timestamp. The same commit always
   produces the same bytes whatever day the run happens.
 - The manifest records that bundle's SHA-256 and its release URL, and the workflow publishes the bundle next to the other release assets and
   lists it in `SHA256SUMS` before signing. The chain is self-contained: immutable commit to workflow-built bundle
   to SHA-256 to manifest to signed checksums.
 - The validator **requires** `source.sha256` for tag releases, and the release
   step fails before publication when the bundle step produced no digest. A manifest without a digest can no longer reach a release.
-- The registry under `packaging/` becomes an **audit record**. When an entry
+-  The registry under `packaging/` becomes an **audit record**. When an entry
   exists, the release step compares it with the digest computed for the release
   and fails on disagreement, so the two records cannot drift apart silently. Its
-  absence no longer blocks a release, and this comparison replaces the previous
+  absence no longer blocks a release. This comparison replaces the previous
   `::warning::` that let one through.
 - No document claims that a later release of the same tag reads the registry. A
   rerun of a tag checks out that tag's tree and cannot see a commit made after it,

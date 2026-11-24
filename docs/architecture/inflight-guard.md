@@ -74,8 +74,8 @@ markdown_limits max_inflight=64;
 - **Default**: 64
 - **Scope**: `http` only — the module rejects `max_inflight` in `server` and
   `location` contexts
-- **Value 0**: Rejected at config time — `max_inflight` must be an integer
-  from 1 to 65535 (there is no "unlimited" value; see Overload Behavior)
+-  **Value 0**: Rejected at config time — `max_inflight` must be an integer from
+  1 to 65535 (there is no "unlimited" value. See Overload Behavior)
 
 The default value of 64 is a conservative guardrail, not a capacity or
 concurrency promise. The actual per-worker working set depends on the
@@ -86,16 +86,16 @@ concurrency is not used as a safety assumption.
 
 ## Overload Behavior
 
-The overload condition applies only when a positive bound is set.
-Config time validates `max_inflight` as an integer greater than 0
-(1–65535), so **`max_inflight=0` is never accepted** — there is no
-"unlimited" configuration value. The overload branch triggers when
-`current >= max_inflight`. With the enforced positive bound the worker
-has always reached the configured limit at that point.
+The overload condition applies only when a positive bound is set. Config time
+validates `max_inflight` as an integer greater than 0 (1–65535), so
+**`max_inflight=0` is never accepted**. There is no "unlimited" configuration
+value. The overload branch triggers when `current >= max_inflight`. With the
+enforced positive bound the worker has always reached the configured limit at
+that point.
 
-1. The module logs `reason="overload"` and counts the request as bypassed.
-   The frozen Prometheus `requests_total` family has no `overload` series, so
-   the event is visible in the decision log and diagnostics only.
+1.  The module logs `reason="overload"` and counts the request as bypassed. The
+   frozen Prometheus `requests_total` family has no `overload` series. The event
+   is visible in the decision log and diagnostics only.
 2. The request is **not** counted in the inflight counter
 3. The configured error policy determines behavior:
    - **pass** (default): Original response passed through unmodified

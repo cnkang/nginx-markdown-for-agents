@@ -15,7 +15,7 @@ toolchain, dependency, configuration, and ABI audit found cleanup worth
 completing before the long-lived contract begins.
 
 If you are running 0.9.0 in production, you must follow this guide before
-upgrading. There is **no backward-compatible mode** — 0.9.1 rejects old
+upgrading. There is **no backward-compatible mode**. 0.9.1 rejects old
 directives and configurations at `nginx -t` time with actionable migration
 hints.
 

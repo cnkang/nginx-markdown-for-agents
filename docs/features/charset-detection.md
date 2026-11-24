@@ -11,7 +11,10 @@ decoding instead of causing rejection.
 
 ## Requirements
 
-- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset parameter, THE Module SHALL record that charset for diagnostics and policy. The module transcodes the source bytes to UTF-8 through `encoding_rs` before passing them to the parser.
+-  **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset
+  parameter, THE Module must record that charset for diagnostics and policy. The
+  module transcodes the source bytes to UTF-8 through `encoding_rs` before
+  passing them to the parser.
 - **FR-05.2**: WHEN the Upstream_Response Content-Type does not include a charset parameter, THE Module SHALL attempt to detect charset from HTML meta tags
 - **FR-05.3**: WHEN charset detection fails, THE Module SHALL use a default charset (UTF-8 recommended)
 

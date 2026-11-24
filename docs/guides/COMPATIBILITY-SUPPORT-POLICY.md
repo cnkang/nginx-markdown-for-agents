@@ -90,11 +90,13 @@ load, request, and package evidence. Do not merge or publish until that run
 also passes the release gate and produces the required manifest and checksums.
 
 A matching ABI or `--with-compat` does not prove compatibility across revisions.
-Support requires real build, load, and request evidence for the exact package revision.
-Ubuntu backports security fixes, so an older upstream version can remain supported.
-APT can hold NGINX or propose module removal after an ABI change.
-The dependency guard does not guarantee upgrade, restart, or rollback success.
-Operators must disable all module directives before running NGINX without the module.
+Support requires real build, load, and request evidence for the exact package
+revision. Ubuntu backports security fixes. An older upstream version can remain
+supported. APT can hold NGINX or propose module removal after an ABI change. The
+dependency guard does not guarantee upgrade, restart, or rollback success.
+
+Operators must disable all module directives before running NGINX without the
+module.
 
 ## 5. Maintainer duties
 

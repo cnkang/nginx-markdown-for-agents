@@ -26,14 +26,14 @@ Required:
   full series name with labels (for example
   `nginx_markdown_streaming_events_total{transition="fallback"}`). Do not
   invent flat metric names that do not exist in the production output.
-- When docs reference derived rates (for example `decompression_failure_rate`),
+-  When docs reference derived rates (for example `decompression_failure_rate`),
   include the computation formula using real metric names so operators can
   reproduce the calculation (for example
-  `sum(rate(nginx_markdown_decompression_events_total{outcome="failure"}[5m])) / sum(rate(nginx_markdown_decompression_events_total[5m]))`).
-  Verify
-  that the denominator scopes to the same population as the numerator —
-  using a global request count as denominator for a streaming-only failure
-  count will dilute the rate during partial rollout and mask real problems.
+  `sum(rate(nginx_markdown_decompression_events_total{outcome="failure"}[5m])) /
+  sum(rate(nginx_markdown_decompression_events_total[5m]))`). Verify that the
+  denominator scopes to the same population as the numerator. Using a global
+  request count as denominator for a streaming-only failure count will dilute
+  the rate during partial rollout and mask real problems.
 - Verification commands in operator docs (curl + grep/jq/python) must specify
   an explicit `Accept` header matching the output format they parse.  The
   default plain-text format uses human-readable labels that differ from JSON
@@ -53,12 +53,12 @@ Required:
   positive and negative fixtures run through `make test-harness`.
 
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
-Historical issues: at least five manual "sync" commits (`54ed7799`,
-`0ee43e93`, `3f4442f0`, `a4c49847`, `94c5bb84`) repaired the same failure
-after Dependabot bumps: the audit gate ran `check_third_party_notices.py`,
-which reported a stale notices version and cross-workspace lock drift. The
-recurring actor is Dependabot itself: it updates only the baseline converter
-lock, so the automation (2026-11-16) applies the mechanical remainder.
+Historical issues: at least five manual "sync" commits (`54ed7799`, `0ee43e93`,
+`3f4442f0`, `a4c49847`, `94c5bb84`) repaired the same failure after Dependabot
+bumps: the audit gate ran `check_third_party_notices.py`, which reported a stale
+notices version and cross-workspace lock drift. The recurring actor is
+Dependabot itself: it updates only the baseline converter lock. The automation
+(2026-11-16) applies the mechanical remainder.
 
 Required:
 - When any dependency arrives, leaves, or changes version (in
@@ -68,31 +68,30 @@ Required:
   `Cargo.lock` (not the semver range in Cargo.toml).
 - Add new dependencies with the correct license type, copyright notice, and
   license text. Delete entries for removed dependencies.
-- Keep every sub-workspace Cargo.lock aligned with the baseline converter
-  lock (`components/rust-converter/Cargo.lock`): each shared package must
-  resolve a baseline version, except the versions documented in
-  `CROSS_LOCK_ALLOWED_DIVERGENCES`. Rebuild with a targeted
-  `cargo update -p <crate>@<stale> --precise <baseline version>`; a full
-  lock rebuild would rewrite the documented divergences. A targeted update
-  can also move a shared transitive dependency past a later planned entry,
-  so the sync tool rechecks each package against the lock before it runs
-  that package's cargo command.
-- Verify all dependency surfaces with one command:
-  `python3 tools/ci/sync_dependency_surfaces.py --check`. The check mode
-  writes nothing and runs no cargo, so it is safe offline. Apply the sync by
-  running the same script without `--check`.
-- Verify with the structured checker: `python3 tools/ci/check_third_party_notices.py`.
-  It resolves each Cargo.lock package by name and version and matches that
-  version to its corresponding `THIRD-PARTY-NOTICES` entry; do not compare
-  unrelated file-order or line-number output with `diff`.
-- Dependabot pull requests receive the sync commit automatically from
-  `.github/workflows/dependabot-sync.yml`, which runs the sync tool and
-  pushes only when the coverage checker passes. The workflow needs the
+-  Keep every sub-workspace Cargo.lock aligned with the baseline converter lock
+  (`components/rust-converter/Cargo.lock`): each shared package must resolve a
+  baseline version, except the versions documented in
+  `CROSS_LOCK_ALLOWED_DIVERGENCES`. Rebuild with a targeted `cargo update -p
+  <crate>@<stale> --precise <baseline version>`. A full lock rebuild would
+  rewrite the documented divergences. A targeted update can also move a shared
+  transitive dependency past a later planned entry. The sync tool rechecks each
+  package against the lock before it runs that package's cargo command.
+-  Verify all dependency surfaces with one command: `python3
+  tools/ci/sync_dependency_surfaces.py --check`. The check mode writes nothing
+  and runs no cargo. It is safe offline. Apply the sync by running the same
+  script without `--check`.
+-  Verify with the structured checker: `python3
+  tools/ci/check_third_party_notices.py`. It resolves each Cargo.lock package by
+  name and version and matches that version to its corresponding
+  `THIRD-PARTY-NOTICES` entry. Do not compare unrelated file-order or
+  line-number output with `diff`.
+-  Dependabot pull requests receive the sync commit automatically from
+  `.github/workflows/dependabot-sync.yml`, which runs the sync tool and pushes
+  only when the coverage checker passes. The workflow needs the
   `DEPENDENCY_SYNC_TOKEN` secret (fine-grained PAT, contents: write on this
-  repository) for the PR checks to re-run after the push; the
-  `GITHUB_TOKEN` fallback lands the commit only. The
-  `dependency-surfaces-sync` pre-commit hook enforces human changesets at
-  write time.
+  repository) for the PR checks to re-run after the push. The `GITHUB_TOKEN`
+  fallback lands the commit only. The `dependency-surfaces-sync` pre-commit hook
+  enforces human changesets at write time.
 
 ### 63. Non-native-reader writing style (STE-inspired) for maintained docs
 Historical issues: writing-pass semantic drift found in the docs/kb-pilot
@@ -114,15 +113,14 @@ Required:
   `make docs-style-check-regression` (or
   `python3 tools/docs/check_writing_style.py --changed --base REF`). The target
   requires a valid base, and invalid references fail closed.
-- The repository-wide warning budget must not grow:
-  `make docs-style-check-baseline` (or
-  `python3 tools/docs/check_writing_style.py --baseline`) fails when the
-  total exceeds the retained budget in `DEFAULT_BASELINE`
-  (`tools/docs/check_writing_style.py`). The maintained docs now pass the
-  audit with zero warnings, so any new warning fails this gate. The checker
-  exempts structural surfaces — rule-checklist items, allowlisted formal
-  titles, reference lines, and explicitly labelled source-citation lines — so the scan
-  targets genuine prose violations only.
+-  The repository-wide warning budget must not grow: `make
+  docs-style-check-baseline` (or `python3 tools/docs/check_writing_style.py
+  --baseline`) fails when the total exceeds the retained budget in
+  `DEFAULT_BASELINE` (`tools/docs/check_writing_style.py`). The maintained docs
+  now pass the audit with zero warnings, so any new warning fails this gate. The
+  checker exempts structural surfaces — rule-checklist items, allowlisted formal
+  titles, reference lines, and explicitly labeled source-citation lines — so the
+  scan targets genuine prose violations only.
 - Preserve meaning when rewriting passive voice to active: keep the
   original subject/object direction (`X is exceeded` → `the conversion
   exceeds X`, never `X exceeds`), keep the agent explicit (`the module
@@ -133,13 +131,12 @@ Required:
   `make docs-style-check-regression` for changed files. The advisory scan is
   `make docs-style-check`. The repository-wide budget runs through full
   harness or release validation with `make docs-style-check-baseline`.
-- **Write-time enforcement (2026-08-21)**: the 0.9.2 window needed two
-  post-hoc cleanup commits (`3ffc2c0b`, `6b61e3f8`) because regressions
-  surfaced at review time, not write time. A pre-commit hook
-  (`docs-style-changed` in `.pre-commit-config.yaml`) now runs the
-  changed-file gate before commit; enable hooks with `pre-commit install`.
-  The hook is advisory-fast and does not replace the blocking
-  `make docs-check`.
+-  **Write-time enforcement (2026-08-21)**: the 0.9.2 window needed two post-hoc
+  cleanup commits (`3ffc2c0b`, `6b61e3f8`) because regressions surfaced at
+  review time, not write time. A pre-commit hook (`docs-style-changed` in
+  `.pre-commit-config.yaml`) now runs the changed-file gate before commit.
+  Enable hooks with `pre-commit install`. The hook is advisory-fast and does not
+  replace the blocking `make docs-check`.
 - The scan excludes code blocks, fenced blocks, tables, headings, inline
   code, links, and HTML comments. Rule documents, release-gate
   templates, and MUST-specification clauses may retain rule-format long

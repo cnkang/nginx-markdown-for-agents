@@ -77,10 +77,10 @@ sudo apt-get install nginx-module-markdown-for-agents
 
 ### 4. Enable the module
 
-After installation, enable the module in your NGINX configuration.
-This package targets nginx.org builds, whose default `nginx.conf` does
-**not** include `/etc/nginx/modules-enabled/*.conf` — use a top-level
-`load_module` directive instead:
+After installation, enable the module in your NGINX configuration. This package
+targets nginx.org builds, whose default `nginx.conf` does **not** include
+`/etc/nginx/modules-enabled/*.conf`. Use a top-level `load_module` directive
+instead:
 
 ```bash
 # Add at the TOP LEVEL of /etc/nginx/nginx.conf (before the http block):

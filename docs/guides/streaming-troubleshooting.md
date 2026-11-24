@@ -222,15 +222,14 @@ separate budget-limit failure classification. The module records the event in
 2. Set `markdown_streaming off` (and, if needed,
    `markdown_auto_decompress off`).
 3. Run `nginx -t && nginx -s reload`.
-4. Wait for pre-reload requests to drain, then verify the **post-reload
-   delta** of `conversion_attempts_total{engine="streaming"}` stops
-   increasing: `conversion_attempts_total` is cumulative, so an absolute
-   comparison against a pre-reload value is not meaningful while in-flight
-   requests from before the reload are still converting. Compare the delta
-   from your pre-reload baseline only after diagnostics/error logs and the
-   worker lifecycle show that no pre-reload request remains in flight. A zero
-   diagnostics inflight value alone is not proof of pre-reload
-   drain because it only describes the currently observed conversion
-   population.
+4.  Wait for pre-reload requests to drain, then verify the **post-reload delta**
+   of `conversion_attempts_total{engine="streaming"}` stops increasing:
+   `conversion_attempts_total` is cumulative. An absolute comparison against a
+   pre-reload value is not meaningful while in-flight requests from before the
+   reload are still converting. Compare the delta from your pre-reload baseline
+   only after diagnostics/error logs and the worker lifecycle show that no
+   pre-reload request remains in flight. A zero diagnostics inflight value alone
+   is not proof of pre-reload drain because it only describes the currently
+   observed conversion population.
 5. Re-enable with `auto` only after reviewing the reason labels and
    compressed-input evidence.

@@ -305,7 +305,11 @@ Every pull request triggers path-filtered jobs:
 
 The project guards performance at two levels:
 
-1. **PR smoke gate** (`perf-smoke` job in `ci.yml`) — runs the `small` and `medium` benchmark tiers on every PR that touches Rust or perf-related files. The threshold engine compares measurements against platform baselines in `perf/baselines/` using thresholds defined in `perf/thresholds.json`. A regression beyond the configured threshold fails the check.
+1.  **PR smoke gate** (`perf-smoke` job in `ci.yml`). Runs the `small` and
+   `medium` benchmark tiers on every PR that touches Rust or perf-related files.
+   The threshold engine compares measurements against platform baselines in
+   `perf/baselines/` using thresholds defined in `perf/thresholds.json`. A
+   regression beyond the configured threshold fails the check.
 
 2. **Nightly full suite** (`nightly-perf.yml`) — runs daily at 03:00 UTC. Executes all tiers (`small`, `medium`, `medium-front-matter`, `large-1m`) with 3 repeats each, computes medians, and runs the threshold engine. Supports a manual `bootstrap_baseline` mode to generate fresh baseline artifacts for a new platform. The workflow uploads measurement and verdict reports as workflow artifacts.
 

@@ -50,9 +50,9 @@ and implementation outside the `#ifdef` (or provide equivalent definitions in
 both branches). This catches the common mistake of adding a function inside a
 feature guard but forgetting that non-feature-gated paths still call it.
 
-The detector enforces this today for `MARKDOWN_STREAMING_ENABLED` — the only
-feature guard that gates function visibility in the module. A new feature
-guard that gates functions must extend `GUARD_NAME` in
+The detector enforces this today for `MARKDOWN_STREAMING_ENABLED`. The only
+feature guard that gates function visibility in the module. A new feature guard
+that gates functions must extend `GUARD_NAME` in
 `detect_ifdef_guard_visibility.sh` (and its tests) before the rule claims
 coverage for it.
 
@@ -79,19 +79,18 @@ from non-streaming code paths. The team had to move the function outside the
 ## Rule 58: Workflow Input Injection
 
 **Principle**: Direct interpolation of GitHub Actions inputs (`${{ inputs.* }}`)
-into shell `run:` blocks allows command injection via crafted input values.
-Inputs must route through environment variables (`env:`) and reference
-only as env vars in shell scripts. This prevents command substitution attacks
-where a malicious input value contains shell metacharacters.
+into shell `run:` blocks allows command injection through crafted input values.
+Inputs must route through environment variables (`env:`) and reference only as
+env vars in shell scripts. This prevents command substitution attacks where a
+malicious input value contains shell metacharacters.
 
 **Shell-safety requirements**: Expand environment variables that carry
-workflow input values inside double quotes when passing them to tools
-(for example `"$VERSION"`), so the value arrives as a single argument
-even when it contains whitespace or shell metacharacters. Shells must not
-evaluate those values with `eval`, and the scripts must not rely on
-unquoted expansion or word splitting to transform them. Any validation
-of the value (regex or otherwise) must run before the scripts expand the
-value into a command.
+workflow input values inside double quotes when passing them to tools (for
+example `"$VERSION"`). The value arrives as a single argument even when it
+contains whitespace or shell metacharacters. Shells must not evaluate those
+values with `eval`, and the scripts must not rely on unquoted expansion or word
+splitting to transform them. Any validation of the value (regex or otherwise)
+must run before the scripts expand the value into a command.
 
 **Historical issue**: `d0d5730c` — the workflow interpolated `inputs.version` directly
 into shell `run:` blocks before regex validation, allowing command substitution
@@ -150,8 +149,8 @@ Required:
   justification in the detector.
 
 Verification:
-- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree
-  audit; blocking harness gate.
+-  `python3 tools/harness/detect_scratch_files.py` — full tracked-tree audit.
+  Blocking harness gate.
 - `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
   mode wired into `.pre-commit-config.yaml`.
 
@@ -170,8 +169,8 @@ must fail the scan instead of producing an empty result.
 - Parses workflow jobs and steps, while allowing reusable-workflow jobs without
   shell steps.
 - Rejects missing scan roots, malformed workflow shapes, and unreadable files.
-- Runs from `harness-quick-checks`, `harness-security-checks`, and
-  `test-harness`; the mapping records these entrypoints in
+-  Runs from `harness-quick-checks`, `harness-security-checks`, and
+  `test-harness`. The mapping records these entrypoints in
   `docs/harness/routing-manifest.json`.
 
 **Verification**: `PYTHONPATH=. python3 -m pytest

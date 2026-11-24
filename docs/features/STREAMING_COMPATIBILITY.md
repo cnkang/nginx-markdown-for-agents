@@ -28,7 +28,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 
 For an empty wire body, an identity-only `Content-Encoding` chain remains
 transparent. A declared non-identity decoder still runs at end of input and
-reports truncated input, so a missing encoded body is not accepted as a valid
+reports truncated input. A missing encoded body is not accepted as a valid
 compressed response.
 
 ## Legend
@@ -57,10 +57,9 @@ Only ETag validation requires full buffering. With `markdown_cache_validation
 ims_only`, streaming stays compatible with pass-through conditional handling:
 the module forwards the upstream `Last-Modified` for responses it does not
 convert, and NGINX's standard `If-Modified-Since` handling decides those. A
-converted streaming response is different: the stream commit clears the
-upstream `Last-Modified`, so no source-IMS 304 can apply to it. The mode
-therefore never forces the full-buffer path, and it never produces a 304 for
-converted content.
+converted streaming response is different: the stream commit clears the upstream
+`Last-Modified`, so no source-IMS 304 can apply to it. The mode therefore never
+forces the full-buffer path. It never produces a 304 for converted content.
 
 **Known constraint (user-confirmed):** the same URL can therefore
 yield an ETag when the full-buffer path serves it and no ETag when the

@@ -87,7 +87,14 @@ reclaims the request pool.
 Reservation failures fall into three cases based on decoder input consumption, tracked independently from HTTP/output commit:
 
 - **Before input consumption (pre-commit)**: The decoder has not yet processed any compressed chunk. The allocator reports an allocation failure and the module follows the existing pre-commit replay strategy (same as other decompression failures before output commitment).
-- **After input consumption but before response commit (intermediate state)**: The decoder has consumed one or more compressed chunks, but the module has not yet committed the HTTP response headers (`ngx_http_send_header()` not called). The workspace expansion failure triggers the configured pre-commit error policy (`markdown_error_policy`): `pass` replays the original upstream body, `fail_closed` or `status <code>` returns the configured error. The module cannot replay the consumed compressed input, but the original upstream response is still available for replay via the pre-commit buffer.
+-  **After input consumption but before response commit (intermediate state)**:
+  The decoder has consumed one or more compressed chunks, but the module has not
+  yet committed the HTTP response headers (`ngx_http_send_header()` not called).
+  The workspace expansion failure triggers the configured pre-commit error
+  policy (`markdown_error_policy`): `pass` replays the original upstream body,
+  `fail_closed` or `status <code>` returns the configured error. The module
+  cannot replay the consumed compressed input. The original upstream response is
+  still available for replay through the pre-commit buffer.
 - **After response commit (post-commit)**: The decoder has consumed input and `ngx_http_send_header()` has returned `NGX_OK`. The workspace expansion failure places the decoder in a terminal abort state. The module does not re-feed the consumed chunk. Existing terminal/error state fields enforce this non-retryable invariant (see the State Machine section below).
 
 Decoded output remains governed separately by the cumulative
@@ -246,11 +253,11 @@ implementation adds no runtime configuration key or default:
 
 - Adds a build-time and runtime dependency on `libbrotlidec` for
   Brotli-enabled builds (official release artifacts)
-- Brotli decoder internal allocations (ring buffers, context maps) use a
+-  Brotli decoder internal allocations (ring buffers, context maps) use a
   separate fixed 32 MiB per-worker workspace budget rather than the decoded
-  output budget. Standard RFC 7932 streams use WBITS 10–24. The module does
-  not set `BROTLI_DECODER_PARAM_LARGE_WINDOW`, so the decoder rejects the RFC
-  9841 large-window extension (WBITS > 24). Performance evidence must include
+  output budget. Standard RFC 7932 streams use WBITS 10–24. The module does not
+  set `BROTLI_DECODER_PARAM_LARGE_WINDOW`. The decoder rejects the RFC 9841
+  large-window extension (WBITS > 24). Performance evidence must include
   high-standard-window and high-compression-ratio RSS measurements.
 - CI matrix grows: the project must test both Brotli-enabled and
   Brotli-disabled builds,
@@ -292,9 +299,9 @@ Kang
 
 CVE-2026-111497 is an out-of-bounds write in the Brotli decoder that affects
 1.0.3 through 1.2.0. Upstream fixed it in 1.0.10, 1.1.1, and 1.2.1. The
-AlmaLinux 9 and Alpine 3.20 release bases did not carry a fixed Brotli
-package, so a module that linked the host `libbrotlidec` would load the
-vulnerable copy on those hosts.
+AlmaLinux 9 and Alpine 3.20 release bases did not carry a fixed Brotli package.
+A module that linked the host `libbrotlidec` would load the vulnerable copy on
+those hosts.
 
 Official Linux modules now build Brotli 1.2.1 from the checksum-pinned source
 archive and link the decoder statically. `packaging/nfpm/nfpm.yaml` no longer
@@ -307,8 +314,8 @@ text relocations, and a local `BrotliDecoderDecompressStream` symbol.
 
 `components/nginx-module/config` retries the probe with `-lbrotlicommon` when
 the first link fails. pkg-config reports `Requires.private: libbrotlicommon`
-only for `--static`, so a static-only install would otherwise fail to link.
-The Homebrew formula vendors the same checksum-pinned resource and links it
+only for `--static`. A static-only install would otherwise fail to link. The
+Homebrew formula vendors the same checksum-pinned resource and links it
 statically, because a host Homebrew Brotli can lag the fixed release.
 
 ## Document Updates

@@ -414,7 +414,10 @@ If the Content-Type is wrong or the response body looks unexpected, roll back.
 
 ### Operator Judgment
 
-Any observation checkpoint result that does not meet the "safe to continue" criteria in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) grounds for rollback. Trust your judgment — if something looks wrong, narrow scope first and investigate second.
+Any observation checkpoint result that does not meet the "safe to continue"
+criteria in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) grounds
+for rollback. Trust your judgment. If something looks wrong, narrow scope first
+and investigate second.
 
 ---
 

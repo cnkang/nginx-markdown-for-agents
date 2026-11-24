@@ -60,9 +60,9 @@ python3 tools/docs/check_docs.py
 
 ## Archive Rule
 
-`docs/archive/` is not source-of-truth for active behavior and must not serve
-as current guidance. Git ignores it, and it holds local historical notes only.
-The repository keeps historical records in tracked `docs/` paths (for example
+`docs/archive/` is not source-of-truth for active behavior and must not serve as
+current guidance. Git ignores it. It holds local historical notes only. The
+repository keeps historical records in tracked `docs/` paths (for example
 `docs/guides/MIGRATION-0.8.md`) when release gates or historical accuracy
 require them.
 

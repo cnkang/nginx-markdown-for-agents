@@ -1,10 +1,10 @@
 # Recent Git Harness Steering Analysis
 
 Analysis window: initially 2026-03-25 through 2026-04-24, then extended to
-2026-02-24 through 2026-04-24 for the 60-day reassessment.  A full-history
-scan confirmed that the earliest reachable local/remote commit is 2026-02-27,
-so the 60-day reassessment covers the complete repository history available in
-this clone.
+2026-02-24 through 2026-04-24 for the 60-day reassessment. A full-history scan
+confirmed that the earliest reachable local/remote commit is 2026-02-27. The
+60-day reassessment covers the complete repository history available in this
+clone.
 
 We refreshed remote state with `git fetch --all --prune --tags` before
 analysis. We enumerated local, remote, and tag refs from `refs/heads`,
@@ -104,8 +104,8 @@ but they were not first-class harness risk packs.
 ## Full-History Reassessment
 
 The full-history scan covered the same 40 refs and 1084 unique commits as the
-60-day scan.  The earliest reachable commit is `db24ff8f06` on 2026-02-27
-(`feat(repo): initial import as first commit`), and there are no commits before
+60-day scan. The earliest reachable commit is `db24ff8f06` on 2026-02-27
+(`feat(repo): initial import as first commit`). There are no commits before
 2026-02-24 in the local or remote-tracking refs.
 
 Because the 60-day scan already covered the complete reachable history, the

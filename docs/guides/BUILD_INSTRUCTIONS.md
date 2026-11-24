@@ -99,14 +99,16 @@ Available targets include:
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
 CI generates release and performance evidence under `artifacts/`. Git ignores
-this directory. The only exceptions are the six frozen 0.9.2 contract artifacts that release
-gates require checked in (`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,pre-lts-status}.json` —
-see the `artifacts/*` whitelist in `.gitignore`). Commit only these six files.
+this directory. The only exceptions are the six frozen 0.9.2 contract artifacts
+that release gates require checked in
+(`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,pre-lts-status}.json`.
+See the `artifacts/*` whitelist in `.gitignore`). Commit only these six files.
 All other generated evidence and any local copies must never enter the
-repository. CI validates generated evidence against checked-in source and
-schema before upload. The canonical module
-benchmark environment stays tracked as source configuration in
-`release/performance/canonical-environment.json`.
+repository.
+
+CI validates generated evidence against checked-in source and schema before
+upload. The canonical module benchmark environment stays tracked as source
+configuration in `release/performance/canonical-environment.json`.
 
 ## SonarQube C/C++ Compilation Database
 
@@ -229,7 +231,9 @@ guessing. In particular, do not combine `default` or `none` with feature names.
 
 ### Root-Level Smoke Test
 
-The top-level `make test` runs a limited smoke test via `components/nginx-module/tests`. It is useful for quick validation but does not run the full project test suite.
+The top-level `make test` runs a limited smoke test through
+`components/nginx-module/tests`. It is useful for quick validation but does not
+run the full project test suite.
 
 ```bash
 make test

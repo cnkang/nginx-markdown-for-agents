@@ -52,22 +52,21 @@ Historical issues: PR #188, CI run 29727392197 (startup warning noise from
 contradictory `markdown_streaming auto` + `markdown_cache_validation full`).
 
 Required:
-- E2E nginx.conf location blocks that use `markdown_cache_validation full`
-  must have an explicit `markdown_streaming` directive (`off`, `auto`, or
-  `force`).  Do not rely on the implicit default (`auto`) when the location
-  also uses `markdown_cache_validation full` — the implicit `auto` plus the
-  blocking directive generates a startup warning and obscures the test's
-  intent.  Location blocks that do NOT use `markdown_cache_validation full`
-  are out of scope for this detector and may rely on the implicit default.
-- When a test intends to exercise the **full-buffer** path, use
-  `markdown_streaming off`.  Do not use `markdown_streaming auto` combined
-  with a blocking directive — this is contradictory configuration that
-  generates a startup warning and obscures the test's intent.
-- When a test intends to exercise the **streaming** path, use
-  `markdown_streaming force` (or `auto` with no blocking directives).
-  Ensure the assertions actually verify streaming-specific behavior
-  (for example chunked transfer encoding, absence of Content-Length, streaming
-  metrics).
+-  E2E nginx.conf location blocks that use `markdown_cache_validation full` must
+  have an explicit `markdown_streaming` directive (`off`, `auto`, or `force`).
+  Do not rely on the implicit default (`auto`) when the location also uses
+  `markdown_cache_validation full`. The implicit `auto` plus the blocking
+  directive generates a startup warning and obscures the test's intent. Location
+  blocks that do NOT use `markdown_cache_validation full` are out of scope for
+  this detector and may rely on the implicit default.
+-  When a test intends to exercise the **full-buffer** path, use
+  `markdown_streaming off`. Do not use `markdown_streaming auto` combined with a
+  blocking directive. This is contradictory configuration that generates a
+  startup warning and obscures the test's intent.
+-  When a test intends to exercise the **streaming** path, use
+  `markdown_streaming force` (or `auto` with no blocking directives). make sure
+  the assertions actually verify streaming-specific behavior (for example
+  chunked transfer encoding, absence of Content-Length, streaming metrics).
 - The one exception: tests that **intentionally validate the runtime-block
   mechanism** (that is, verifying that `auto` + `full` correctly falls back
   to full-buffer) may use the contradictory combination, but must document

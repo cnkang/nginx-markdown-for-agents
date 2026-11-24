@@ -17,7 +17,8 @@ records the historical 0.9.1 design only.
 
 Reuse existing `markdown_streaming_output_free` FFI for deallocation. Register NGINX pool cleanup handler with a `freed` flag for double-free prevention. The buffer factory creates an `ngx_buf_t` referencing Rust memory and registers the cleanup handler atomically.
 
-The feature is **Default OFF** (`markdown_streaming_zero_copy off`) — opt-in via location-level directive, togglable via HUP reload.
+The feature is **Default OFF** (`markdown_streaming_zero_copy off`) — opt-in
+through location-level directive, togglable through HUP reload.
 
 ### Key Invariants
 - The `freed` flag is never set during `NGX_AGAIN`.

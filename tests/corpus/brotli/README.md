@@ -4,10 +4,10 @@ Brotli-compressed test data for the streaming decompression E2E test suite.
 
 ## Fixture Inventory
 
-The Brotli payloads are regenerable build products, not source. The
-regenerator stays in the repository, and the compressed `.br` outputs are
-created on demand. They are not committed, so a checkout carries no binary
-fixture that can drift from its generator.
+The Brotli payloads are regenerable build products, not source. The regenerator
+stays in the repository, and the compressed `.br` outputs are created on demand.
+They are not committed. A checkout carries no binary fixture that can drift from
+its generator.
 
 | File | Description | Committed |
 |------|-------------|-----------|

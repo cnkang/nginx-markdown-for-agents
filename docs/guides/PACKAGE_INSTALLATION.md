@@ -46,12 +46,13 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 | Ubuntu 24.04 LTS and Ubuntu 26.04 LTS with the Ubuntu package | Native DEB | `release-packages.yml` `ubuntu-native` job (GitHub Releases) |
 | musl-based Linux (Alpine, etc.) | Dynamic-module tarball | `release-packages.yml` `musl-build` job (GitHub Releases) — pair it with an ABI-compatible NGINX binary per the compatibility matrix; `release-binaries.yml` remains as the manual rebuild tool only |
 
-The release pipeline builds DEB and RPM packages on glibc-based build images,
-and those packages target glibc-based distributions only. For musl-based environments (Alpine Linux,
-and so on), use the pre-built dynamic-module tarball from the musl-build job
-of the release-packages workflow (it is a loadable module artifact, not a
-static server binary — pair it with an ABI-compatible NGINX executable, see
-the compatibility matrix in PACKAGE_COMPATIBILITY.md) or build from source.
+The release pipeline builds DEB and RPM packages on glibc-based build images.
+Those packages target glibc-based distributions only. For musl-based
+environments (Alpine Linux, and so on), use the pre-built dynamic-module tarball
+from the musl-build job of the release-packages workflow (it is a loadable
+module artifact, not a static server binary. Pair it with an ABI-compatible
+NGINX executable, see the compatibility matrix in PACKAGE_COMPATIBILITY.md) or
+build from source.
 
 DEB format for nginx.org builds:
 
@@ -229,8 +230,8 @@ sudo sed -i 's|^#load_module |load_module |' \
 #   and add to the top level of nginx.conf:  include /usr/share/nginx/modules/*.conf;
 ```
 
-This project verified the directory layout and include behaviour above
-against real packages instead of assuming them: Debian 12 (nginx 1.22.1 — `include
+This project verified the directory layout and include behavior above against
+real packages instead of assuming them: Debian 12 (nginx 1.22.1 — `include
 /etc/nginx/modules-enabled/*.conf;` at line 5, and `libnginx-mod-http-geoip2`
 installs the `.so` into both `/usr/lib/nginx/modules` and
 `/usr/share/nginx/modules`), Ubuntu 24.04 with the nginx.org repository (nginx
@@ -240,8 +241,8 @@ repository (nginx 1.30.4 — no module include, and `/etc/nginx/modules` symlink
 to `/usr/lib64/nginx/modules`), Alpine 3.21 (nginx 1.26.3 — `include
 /etc/nginx/modules/*.conf;` at line 15), the nginx.org Alpine image (nginx
 1.30.4 — no module include), and Arch (`include modules.d/*.conf;` at line 13).
-Re-check your own host with the command above: distributions change this
-between releases.
+Re-check your own host with the command above: distributions change this between
+releases.
 
 Then configure the filter in `http`, `server`, or `location` context:
 

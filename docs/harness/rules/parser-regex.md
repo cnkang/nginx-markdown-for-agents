@@ -54,51 +54,53 @@ Required:
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
     not trigger this broad advisory check; they still pass through the normal
     structural ReDoS checks.
-- The detector extracts Python regex usage via the standard library `ast` module,
-  covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
+-  The detector extracts Python regex usage through the standard library `ast`
+  module, covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
   `re.findall`, `re.finditer`, `re.split`, `re.sub`, `re.subn`, and
   compiled-pattern methods. The detector supports both positional and keyword
-  argument forms (`pattern=`, `string=`, `flags=`). Import aliases
-  the detector resolves (`import re as X`, `from re import Y as Z`).
-- Scope-aware static string constant propagation using a unified `_Binding` /
+  argument forms (`pattern=`, `string=`, `flags=`). Import aliases the detector
+  resolves (`import re as X`, `from re import Y as Z`).
+-  Scope-aware static string constant propagation using a unified `_Binding` /
   `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
   Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
   the detector resolves them when used as patterns. It propagates finite static
   string collections and fixed-width string rows through `for` loops and
-  comprehensions, including destructured targets.  Their use in f-strings or
-  the detector expands string concatenation as a bounded Cartesian product (at most
-  256 alternatives), and analyzes every resulting pattern.  Expressions
-  that exceed the bound or contain an unknown component remain REVIEW.
+  comprehensions, including destructured targets. Their use in f-strings or the
+  detector expands string concatenation as a bounded Cartesian product (at most
+  256 alternatives), and analyzes every resulting pattern. Expressions that
+  exceed the bound or contain an unknown component remain REVIEW.
   Function/class/lambda parameters, with/except targets, and augmented
-  assignments shadow outer bindings.  Reassignment of a `re` alias to a
-  non-`re` value
-  invalidates the alias.  Reassignment of a compiled-pattern variable to a
-  dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
-  `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
-  emit a REVIEW referencing the original `compile_line`; this applies to
-  Assign, AnnAssign, and AugAssign.  An initially dynamic `re.compile()` emits
-  its REVIEW at the compile site only. A second compiled-method REVIEW stays
-  reserved for actual reassignment.  Lexical `del` writes a DELETED tombstone
-  in the current scope instead of walking outer scopes, so a function-local
-  `del p` no longer removes a module binding, `global`/`nonlocal` are
-  partially modeled (honored for delete routing) and otherwise conservative.
+  assignments shadow outer bindings.
+
+Reassignment of a `re` alias to a non-`re` value invalidates the alias.
+  Reassignment of a compiled-pattern variable to a dynamic value upgrades the
+  binding to `COMPILED_DYNAMIC_PATTERN` (not plain `DYNAMIC_VALUE`) so
+  subsequent `compiled.search/match/sub/findall` calls emit a REVIEW referencing
+  the original `compile_line`. This applies to Assign, AnnAssign, and AugAssign.
+  An initially dynamic `re.compile()` emits its REVIEW at the compile site only.
+  A second compiled-method REVIEW stays reserved for actual reassignment.
+  Lexical `del` writes a DELETED tombstone in the current scope instead of
+  walking outer scopes.
+
+A function-local `del p` no longer removes a module binding, `global`/`nonlocal`
+  are partially modeled (honored for delete routing) and otherwise conservative.
   Function/lambda defaults, decorators, return annotations, and parameter
-  annotations evaluate in the enclosing scope before the function name
-  binds and before the body scope opens, matching Python's real
-  evaluation order.  Modules that import `from __future__ import annotations`
-  use postponed evaluation: their annotation AST nodes are inert string
-  constants at runtime.  The visitor detects the future import **explicitly**
-  from the AST (`visit_ImportFrom` matching `__future__` + `annotations`)
-  and skips return/parameter/annotation traversal entirely under that flag —
-  it never infers postponed mode from `ast.Constant` node shape, which is
-  ambiguous (a genuine string literal annotation without the future import
-  evaluates eagerly and still requires analysis).  Preserving the
-  annotation AST nodes matters for eager mode: the visitor walks their
-  expressions (names, attribute accesses, and any embedded constants)
-  normally.  Modules without the future import analyze eagerly; postponed
-  annotation strings intentionally produce no REVIEW.  Unknown RHS
-  expressions produce DYNAMIC_VALUE (not
-  the old static binding).  Cross-module imports are NOT resolved (those
+  annotations evaluate in the enclosing scope before the function name binds and
+  before the body scope opens, matching Python's real evaluation order. Modules
+  that import `from __future__ import annotations` use postponed evaluation:
+  their annotation AST nodes are inert string constants at runtime. The visitor
+  detects the future import **explicitly** from the AST (`visit_ImportFrom`
+  matching `__future__` + `annotations`) and skips return/parameter/annotation
+  traversal entirely under that flag. It never infers postponed mode from
+  `ast.Constant` node shape, which is ambiguous (a genuine string literal
+  annotation without the future import evaluates eagerly and still requires
+  analysis). Preserving the annotation AST nodes matters for eager mode: the
+  visitor walks their expressions (names, attribute accesses, and any embedded
+  constants) normally.
+
+Modules without the future import analyze eagerly. Postponed annotation strings
+  intentionally produce no REVIEW. Unknown RHS expressions produce DYNAMIC_VALUE
+  (not the old static binding). Cross-module imports are NOT resolved (those
   resolve to REVIEW).
 - Tokenizer: `_merge_literal_atoms` preserves the last literal atom before a
   quantifier as a separate atom so that separator detection is not lost when
@@ -116,47 +118,48 @@ Required:
   `REVIEW` (unescaped dynamic or unresolved UNKNOWN), `INFO` (static safe).
 - The detector treats UNKNOWN pattern sources as REVIEW (never silently downgraded
   to INFO) so unresolvable regex origins require manual attention.
-- Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
+-  Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
   flags (`grep -P`/`--perl-regexp`, `rg -P`/`--pcre2`, `perl` itself) are
-  separate.  `grep -e`/`rg -e` without a PCRE flag use the command's default
-  engine (BRE/ERE for grep, Rust regex NFA for rg) and are NOT analyzed for
-  PCRE catastrophic backtracking.  Only `grep -P`, `rg -P`/`--pcre2`, and
-  `perl -e`/`-E` produce `shell-pcre` findings.  Pattern extraction is
-  command-aware: it locates the regex command past pipes and env
-  assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
-  does not pick up patterns from preceding commands in a pipeline.
-  Broken multi-line command recovery matches exact command tokens rather than
-  substrings in prose or arguments. The detector models common engine/output
-  flags such as `grep -E`/`-F`/`-G`/`-c` and `rg -F` as boolean options, so they
-  do not become spurious pattern candidates.
-  Shell argument parsing classifies options into boolean flags (consume
-  nothing), required-value options (consume next token), optional-value
-  options (do not consume next token), pattern options, pattern-file
-  options, and PCRE flags.  After an unknown option, the detector
-  collects additional non-option tokens as pattern candidates so a
-  dangerous pattern cannot be hidden behind an unrecognized option.
-  Multiple `-e` patterns are all extracted.  Pattern-file options
-  (`-f`/`--file`, multiple supported) get resolved relative to the shell
-  script directory, validated to stay within the repository root
-  (the detector rejects absolute paths, `..` traversal, and symlink
-  escapes), read as UTF-8, and analyzed per line. Read/encoding
-  failures (OSError, UnicodeDecodeError, IsADirectoryError) produce a
-  ScanError plus a conservative REVIEW instead of crashing.  `shlex` parse
-  errors produce ScanError.
+  separate. `grep -e`/`rg -e` without a PCRE flag use the command's default
+  engine (BRE/ERE for grep, Rust regex NFA for rg) and are NOT analyzed for PCRE
+  catastrophic backtracking. Only `grep -P`, `rg -P`/`--pcre2`, and `perl
+  -e`/`-E` produce `shell-pcre` findings. Pattern extraction is command-aware:
+  it locates the regex command past pipes and env assignments, skips options,
+  supports `-e`/`--regexp`/`-P` and `--`, and does not pick up patterns from
+  preceding commands in a pipeline. Broken multi-line command recovery matches
+  exact command tokens rather than substrings in prose or arguments. The
+  detector models common engine/output flags such as `grep -E`/`-F`/`-G`/`-c`
+  and `rg -F` as boolean options.
+
+They do not become spurious pattern candidates. Shell argument parsing
+  classifies options into boolean flags (consume nothing), required-value
+  options (consume next token), optional-value options (do not consume next
+  token), pattern options, pattern-file options, and PCRE flags. After an
+  unknown option, the detector collects additional non-option tokens as pattern
+  candidates so a dangerous pattern cannot be hidden behind an unrecognized
+  option. Multiple `-e` patterns are all extracted. Pattern-file options
+  (`-f`/`--file`, multiple supported) get resolved relative to the shell script
+  directory, validated to stay within the repository root (the detector rejects
+  absolute paths, `..` traversal, and symlink escapes), read as UTF-8, and
+  analyzed per line. Read/encoding failures (OSError, UnicodeDecodeError,
+  IsADirectoryError) produce a ScanError plus a conservative REVIEW instead of
+  crashing.
+
+`shlex` parse errors produce ScanError.
 - Rust `regex` crate uses NFA (non-backtracking) — safe by default.
   `deny.toml` bans backtracking crates (`fancy-regex`, `pcre2`, `onig`).
 - C/PCRE2: NGINX build depends on PCRE2, but the module does not own
   PCRE2 pattern/match context. No `pcre2_compile()` or `pcre2_match()`
   calls in module code.
-- Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
+-  Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
   File-level or directory-level suppressions are not allowed. The detector
   checks them at the call site, the preceding line, and upward through
-  consecutive comment/blank lines (up to 30), so a comment block above a
-  multi-line `re.compile(...)` statement can suppress calls.
+  consecutive comment/blank lines (up to 30). A comment block above a multi-line
+  `re.compile(...)` statement can suppress calls.
 
 CLI contract:
-- Default (no flags): advisory exit 0 regardless of findings; scan/read
-  errors exit 1 even here, because an incomplete scan is never a pass.
+-  Default (no flags): advisory exit 0 regardless of findings. Scan/read errors
+  exit 1 even here, because an incomplete scan is never a pass.
 - `--strict`: exit 1 on ERROR findings, parse errors, or scan/read errors.
   REVIEW findings are non-blocking.
 - `--fail-on-review`: implies `--strict` and additionally exits 1 on REVIEW.

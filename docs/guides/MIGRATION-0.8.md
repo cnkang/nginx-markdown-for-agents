@@ -13,7 +13,7 @@
 
 v0.8.0 introduces the **true streaming contract**: the module can now convert
 HTML to Markdown incrementally without buffering the entire upstream response
-body. This is opt-in via `markdown_streaming_engine auto` (the new default)
+body. This is opt-in through `markdown_streaming_engine auto` (the new default)
 and only activates for responses that meet size/transfer criteria.
 
 **Key guarantee**: Setting `markdown_streaming_engine off` produces behavior
@@ -83,7 +83,8 @@ scrape the metrics endpoint or parse structured logs, you will see new series:
 - `nginx_markdown_streaming_failure_total{phase=...,action=...}` — post-commit failures
 - `nginx_markdown_streaming_candidate_total` — candidates evaluated
 - `nginx_markdown_true_streaming_selected_total` — final streaming selections
-- `nginx_markdown_streaming_output_bytes_total` — Markdown bytes emitted via streaming
+-  `nginx_markdown_streaming_output_bytes_total` — Markdown bytes emitted
+  through streaming
 - `nginx_markdown_excluded_content_type_total` — requests excluded by content type
 
 New reason codes (see [streaming-observability](../features/streaming-observability.md)):
@@ -118,7 +119,7 @@ have changed status in 0.8.0:
 | `markdown_streaming_auto_threshold` | **Removed** — `nginx -t` will fail with "unknown directive" | `markdown_stream_threshold` |
 
 **`markdown_streaming_auto_threshold` disappears in 0.8.0.** It is not
-deprecated — it is gone. NGINX will refuse to start if your configuration
+deprecated. It is gone. NGINX will refuse to start if your configuration
 contains this directive. You **must** update your configuration before
 upgrading:
 
@@ -226,8 +227,8 @@ v0.8.0 **does not preserve** 0.6.x streaming compatibility:
 **Impact**: Configurations that use `markdown_streaming_auto_threshold` or
 `markdown_streaming_engine $variable` **need updating before you upgrade to
 0.8.0**. NGINX will refuse to start with the old directives. You must upgrade
-C/Rust FFI in lockstep — mixing 0.7.x and 0.8.0 components causes
-FFI layout mismatches.
+C/Rust FFI in lockstep. Mixing 0.7.x and 0.8.0 components causes FFI layout
+mismatches.
 
 ### 11. Rust converter and C module need a matched upgrade
 
@@ -384,8 +385,8 @@ in the full-buffer path still serve original HTML transparently.
 ### Metrics endpoint
 
 The `/markdown-metrics` endpoint format stays unchanged. New streaming counters
-are additive — existing metric series remain with identical semantics.
-Prometheus and JSON formats are both still supported. Existing integrations keep working.
+are additive. Existing metric series remain with identical semantics. Prometheus
+and JSON formats are both still supported. Existing integrations keep working.
 
 ### Dynamic configuration (dynconf)
 

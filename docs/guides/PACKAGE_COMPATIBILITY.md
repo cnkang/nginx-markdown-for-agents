@@ -25,26 +25,25 @@ Key points:
 ### Package Dependency Scope
 
 The package manager dependency pins the exact upstream NGINX version. The DEB
-metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus
-`nginx (<< next-patch)`, so distro revisions of the pinned version stay
-installable while a plain NGINX patch upgrade no longer satisfies the
-dependency — the package manager keeps the module and NGINX versions in lock
-step. The RPM metadata additionally requires the `nginx-rX.Y.Z` capability
-published by the official nginx.org NGINX package, alongside an
-epoch-flexible floor (`nginx >= X.Y.Z`). Omitting the epoch is deliberate:
-RPM's dependency comparison treats an omitted epoch as epoch 0, so a package
-whose epoch is higher satisfies the floor even when its version component is
-below X.Y.Z — the floor is not version-scoped across epochs. The `%pre`
-scriptlet performs the exact-version check at install time. RPM therefore rejects a
-same-version package that does not provide the expected NGINX package ABI
-capability before installation.
-**The project verifies runtime compatibility only for the exact NGINX builds
-listed in the build matrix below**. NGINX checks the binary compatibility
-signature at load time. The signature covers the version number and the
-configure options that affect the ABI. A module for another build therefore
-fails with `module is not binary compatible`, even when the version string
-looks the same. Install the package only on the NGINX build that matches the
-artifact filename.
+metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus `nginx (<<
+next-patch)`, so distro revisions of the pinned version stay installable while a
+plain NGINX patch upgrade no longer satisfies the dependency — the package
+manager keeps the module and NGINX versions in lock step. The RPM metadata
+additionally requires the `nginx-rX.Y.Z` capability published by the official
+nginx.org NGINX package, alongside an epoch-flexible floor (`nginx >= X.Y.Z`).
+Omitting the epoch is deliberate: RPM's dependency comparison treats an omitted
+epoch as epoch 0. A package whose epoch is higher satisfies the floor even when
+its version component is below X.Y.Z — the floor is not version-scoped across
+epochs. The `%pre` scriptlet performs the exact-version check at install time.
+
+RPM therefore rejects a same-version package that does not provide the expected
+NGINX package ABI capability before installation. **The project verifies runtime
+compatibility only for the exact NGINX builds listed in the build matrix
+below**. NGINX checks the binary compatibility signature at load time. The
+signature covers the version number and the configure options that affect the
+ABI. A module for another build therefore fails with `module is not binary
+compatible`, even when the version string looks the same. Install the package
+only on the NGINX build that matches the artifact filename.
 
 ---
 
@@ -118,14 +117,14 @@ the module still loads with the active NGINX binary.
 
 ### Musl dynamic-module release path
 
-The compatibility matrix in this document lists `release-packages.yml` as the owner
-workflow of the musl dynamic-module rows (`release-binaries.yml` remains the manual
-rebuild tool for existing releases). For the 0.9.2 release cycle the
-`musl-build` job of `release-packages.yml` builds the musl tarballs
-**before** publication (tag + `workflow_dispatch` triggers). `release-binaries.yml`
-never runs on release publication. Both workflows consume the same
-`tools/release-matrix.json` rows, so the matrix rows are the single source of
-truth for which musl versions and architectures ship.
+The compatibility matrix in this document lists `release-packages.yml` as the
+owner workflow of the musl dynamic-module rows (`release-binaries.yml` remains
+the manual rebuild tool for existing releases). For the 0.9.2 release cycle the
+`musl-build` job of `release-packages.yml` builds the musl tarballs **before**
+publication (tag + `workflow_dispatch` triggers). `release-binaries.yml` never
+runs on release publication. Both workflows consume the same
+`tools/release-matrix.json` rows. The matrix rows are the single source of truth
+for which musl versions and architectures ship.
 
 ### Checksum signature ownership
 
@@ -133,8 +132,8 @@ truth for which musl versions and architectures ship.
 `SHA256SUMS.asc` signature: its `integrity-signature` job runs on a tag push
 inside the protected `release-signing` environment before publication.
 `release-binaries.yml` builds and verifies archives only. It uploads workflow
-artifacts and never signs or publishes release assets, so a `SHA256SUMS.asc`
-on a GitHub Release always comes from the canonical publication path.
+artifacts and never signs or publishes release assets. A `SHA256SUMS.asc` on a
+GitHub Release always comes from the canonical publication path.
 
 ---
 

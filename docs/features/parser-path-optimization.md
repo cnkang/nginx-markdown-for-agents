@@ -64,24 +64,24 @@ the large tier.
 
 ### Corpus diff: per-fixture output equivalence
 
-All 33 fixtures in the benchmark corpus (`tests/corpus/`) converted with
-both the baseline (`2af6fef`) and current code using the same converter
-configuration. The comparison checked out the baseline source,
-built it, converted all fixtures, computed blake3 hashes of each Markdown
-output, then repeated with the current source and compared the
-fixture-to-hash mappings. Each revision records its fixture path together
-with that fixture's output hash, so a hash landing on a different fixture
-counts as a diff even when the two hash sets are equal.
+All 33 fixtures in the benchmark corpus (`tests/corpus/`) converted with both
+the baseline (`2af6fef`) and current code using the same converter
+configuration. The comparison checked out the baseline source, built it,
+converted all fixtures, computed blake3 hashes of each Markdown output, then
+repeated with the current source and compared the fixture-to-hash mappings. Each
+revision records its fixture path together with that fixture's output hash. A
+hash landing on a different fixture counts as a diff even when the two hash sets
+are equal.
 
 Method: build each revision in an isolated worktree (or restore every relevant
 build input before each build), including the Rust source, `Cargo.toml`,
-`Cargo.lock`, build scripts, feature definitions, and fixtures. Then run
-`cargo build`, convert each fixture via
-`MarkdownConverter::new().convert()`, compute `blake3::hash(output)`, and
-compare the fixture-to-hash mappings between revisions. The full artifact lives at
-`docs/evidence/10-parser-path-optimization-corpus-diff.tsv` (a checked-in
-frozen evidence file, distinct from the generated `artifacts/` evidence
-policy described in `docs/guides/BUILD_INSTRUCTIONS.md`).
+`Cargo.lock`, build scripts, feature definitions, and fixtures. Then run `cargo
+build`, convert each fixture through `MarkdownConverter::new().convert()`,
+compute `blake3::hash(output)`, and compare the fixture-to-hash mappings between
+revisions. The full artifact lives at
+`docs/evidence/10-parser-path-optimization-corpus-diff.tsv` (a checked-in frozen
+evidence file, distinct from the generated `artifacts/` evidence policy
+described in `docs/guides/BUILD_INSTRUCTIONS.md`).
 
 | Category | Fixtures | Diffs | Status |
 |----------|----------|-------|--------|
@@ -207,12 +207,12 @@ All other elements return `Traverse` and get normal handling.
   content heuristics, no `role` attribute matching.
 - The `RcDom` tree never mutates. Pruning operates at the traversal layer
   by returning early from `handle_element_internal`.
-- Call order per element: pruning (`should_prune_with_config`) runs first,
-  then `SecurityValidator::check_element`. For `SkipChildren`: the pruning
-  decision returns before the security validator runs, so the element node
-  and its children are never visited by the validator. For `SkipSubtree`:
-  the element and its entire subtree skip. Elements that pass pruning are
-  then checked by the security validator, which may remove them.
+-  Call order per element: pruning (`should_prune_with_config`) runs first, then
+  `SecurityValidator::check_element`. For `SkipChildren`: the pruning decision
+  returns before the security validator runs. The element node and its children
+  are never visited by the validator. For `SkipSubtree`: the element and its
+  entire subtree skip. Elements that pass pruning are then checked by the
+  security validator, which may remove them.
 - For elements not in the pruning list, the decision is deterministic:
   `Traverse`. There is no ambiguity state.
 
@@ -260,10 +260,10 @@ nesting depth stays below the threshold, the document qualifies for the fast
 path.
 
 The fast path is a qualification gate, not a separate converter. Qualifying
-documents use the same `traverse_node` code path, but the converter can
-eliminate unreachable branches during traversal (for example table handling, form
-control handling, embedded content handling are unreachable for fast-path
-documents). `SecurityValidator` remains fully active.
+documents use the same `traverse_node` code path. The converter can eliminate
+unreachable branches during traversal (for example table handling, form control
+handling, embedded content handling are unreachable for fast-path documents).
+`SecurityValidator` remains fully active.
 
 If any unsupported node is found during the pre-scan, the entire document falls
 back to the normal path. There is no partial fast path.
@@ -341,18 +341,19 @@ The optimization targets the normalization phase (after traversal), not the
 traversal itself. The default initial traversal buffer uses a 1 KB
 pre-allocation, but when the full-buffer FFI caller provides an input size hint
 exceeding the internal `LARGE_BODY_THRESHOLD`, the buffer pre-allocates
-proportionally to the input HTML size via `estimate_output_capacity`. For small
-documents or callers that do not set the hint, the default 1 KB pre-allocation
-applies. The `RcDom` does not expose the original byte count without an
-additional tree walk. That is why the caller must provide the hint externally.
+proportionally to the input HTML size through `estimate_output_capacity`. For
+small documents or callers that do not set the hint, the default 1 KB
+pre-allocation applies. The `RcDom` does not expose the original byte count
+without an additional tree walk. That is why the caller must provide the hint
+externally.
 
 ### Buffer estimation for the fused normalizer
 
-The 0.4 estimate applies to the initial traversal buffer when an input-size
-hint is available. It is not applied again to the fused normalizer. When the
-fused path activates, `converter.rs` passes the traversal buffer capacity
-(`output.capacity()`) to `FusedNormalizer::try_new`, so the normalizer starts
-with room for at least the already-converted Markdown output:
+The 0.4 estimate applies to the initial traversal buffer when an input-size hint
+is available. It is not applied again to the fused normalizer. When the fused
+path activates, `converter.rs` passes the traversal buffer capacity
+(`output.capacity()`) to `FusedNormalizer::try_new`. The normalizer starts with
+room for at least the already-converted Markdown output:
 
 | Stage | Capacity source |
 |-------|-----------------|
@@ -382,10 +383,10 @@ The output produced by `FusedNormalizer` is identical to the output of
 
 ### Threshold
 
-The fused normalizer activates when the traversal output (intermediate
-Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
-`converter.rs`). This threshold gets checked against the traversal output length
-after `traverse_node_with_context` completes — not against the input HTML size.
+The fused normalizer activates when the traversal output (intermediate Markdown)
+exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in `converter.rs`).
+This threshold gets checked against the traversal output length after
+`traverse_node_with_context` completes. Not against the input HTML size.
 
 The 256 KB value is an implementation constant chosen well below the parser
 and streaming budgets, so ordinary documents keep the two-pass path and only
@@ -396,26 +397,25 @@ the standard `normalize_output` two-pass approach.
 
 ### Known limitations
 
-- The fused normalizer processes the traversal output line-by-line after
-  traversal completes. It does not interleave with traversal itself — the
-  intermediate `output` string is still fully built before normalization
-  begins. CRLF normalization happens inline in `push_line` (stripping
-  trailing `\r`), so the code needs no separate `replace("\r\n", "\n")`
-  allocation. The saving is one full O(n) allocation and copy compared to the
-  two-pass `normalize_output` path.
-- For large documents, the initial traversal buffer pre-allocates
-  proportionally to the input HTML size (via `estimate_output_capacity`) when
-  the full-buffer FFI caller provides an input size hint exceeding
-  `LARGE_BODY_THRESHOLD`. For small
-  documents or callers that do not set the hint, the default 1 KB
-  pre-allocation applies. When the fused normalizer activates (after
-  traversal), it receives the actual traversal output length as its capacity,
-  avoiding the underestimate that would result from applying the 0.4 factor
-  to already-converted Markdown text.
-- Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
+-  The fused normalizer processes the traversal output line-by-line after
+  traversal completes. It does not interleave with traversal itself. The
+  intermediate `output` string is still fully built before normalization begins.
+  CRLF normalization happens inline in `push_line` (stripping trailing `\r`).
+  The code needs no separate `replace("\r\n", "\n")` allocation. The saving is
+  one full O(n) allocation and copy compared to the two-pass `normalize_output`
+  path.
+-  For large documents, the initial traversal buffer pre-allocates
+  proportionally to the input HTML size (through `estimate_output_capacity`)
+  when the full-buffer FFI caller provides an input size hint exceeding
+  `LARGE_BODY_THRESHOLD`. For small documents or callers that do not set the
+  hint, the default 1 KB pre-allocation applies. When the fused normalizer
+  activates (after traversal), it receives the actual traversal output length as
+  its capacity, avoiding the underestimate that would result from applying the
+  0.4 factor to already-converted Markdown text.
+-  Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
   from the input size hint. The fused normalizer receives the actual traversal
-  output length, so it does not inherit an input/output compression-ratio
-  estimate. The traversal estimate remains bounded to 4 KB–4 MB.
+  output length. It does not inherit an input/output compression-ratio estimate.
+  The traversal estimate remains bounded to 4 KB–4 MB.
 - The threshold is a hardcoded internal constant, not configurable via NGINX
   directives. It is independent of the removed
   `markdown_large_body_threshold` directive.
@@ -446,8 +446,8 @@ validator:
 - Dangerous URL detection (`javascript:`, `data:`, and so on)
 - DOM depth validation
 
-Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive —
-it avoids visiting their children, which the security validator would remove
+Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive. It
+avoids visiting their children, which the security validator would remove
 anyway. Pruning `<nav>`, `<footer>`, `<aside>` is a content decision, not a
 security decision. These elements are not in `DANGEROUS_ELEMENTS`.
 

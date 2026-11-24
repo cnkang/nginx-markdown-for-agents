@@ -107,9 +107,9 @@ Maps to two struct fields:
 
 ### Observability / Operations
 
-The OTel entries below describe the historical configuration surface. The
-0.9.2 production contract removed OTel, so these names are not active
-profile fields in the current module.
+The OTel entries below describe the historical configuration surface. The 0.9.2
+production contract removed OTel. These names are not active profile fields in
+the current module.
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
@@ -160,13 +160,12 @@ from static NGINX configuration and the request filter variable.
 | `markdown_token_estimate` | off | http, server, location | on\|off. Emits `X-Markdown-Tokens` (decimal integer token count) |
 
 the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
-0.9.2: token estimation uses a fixed deterministic heuristic with a
-built-in 4.0 chars/token default, no provider brands. No temporary FFI fields
-survive on either side of the boundary: `MarkdownOptions` has no
-chars-per-token input, and no `llm_provider` or `chars_per_token_fixed` field
-exists in the Rust ABI structs. The internal `DecodedOptions` keeps the value
-for diagnostics only, and it always resolves to the built-in
-`DEFAULT_CHARS_PER_TOKEN` of 4.0.
+0.9.2: token estimation uses a fixed deterministic heuristic with a built-in 4.0
+chars/token default, no provider brands. No temporary FFI fields survive on
+either side of the boundary: `MarkdownOptions` has no chars-per-token input, and
+no `llm_provider` or `chars_per_token_fixed` field exists in the Rust ABI
+structs. The internal `DecodedOptions` keeps the value for diagnostics only. It
+always resolves to the built-in `DEFAULT_CHARS_PER_TOKEN` of 4.0.
 
 ---
 
@@ -406,9 +405,9 @@ streaming, no caching overhead, wildcard Accept.
 - Forced-field conflict detection belonged in `merge_conf` (or a post-merge
   validation step) and in the Rust `detect_conflicts` FFI for dynconf
   dry-run.
-- The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not
-  need profile awareness — profiles resolved entirely at config parse
-  time and the parser cached them in the merged `ngx_http_markdown_conf_t`.
+-  The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not need
+  profile awareness. Profiles resolved entirely at config parse time and the
+  parser cached them in the merged `ngx_http_markdown_conf_t`.
 
 For the current 0.9.2 contract, profiles do not exist. Use explicit
 directives (`markdown_limits`, `markdown_streaming`, `markdown_cache_validation`,

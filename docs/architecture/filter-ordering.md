@@ -44,20 +44,20 @@ configuration switches on (`tests/e2e/filter_ordering_test.sh`).
 When the module is absent from the build, the registration table and the
 runtime chain below simply omit it.
 
-Because each module prepends itself, the **runtime** chain is the reverse of
-the registration order: `markdown_filter` → `brotli` → `gunzip` → `gzip`.
-`gunzip` is conditional: it decompresses only gzip-encoded upstream
-responses, and only when the client does not accept gzip (when the client
-accepts gzip, gunzip passes the content through untouched so the gzip
-filter can re-compress the converted output). `brotli` and `gzip` do not
-stack: the response receives a single `Content-Encoding` — whichever
-compression filter runs first for the negotiated encoding.
+Because each module prepends itself, the **runtime** chain is the reverse of the
+registration order: `markdown_filter` → `brotli` → `gunzip` → `gzip`. `gunzip`
+is conditional: it decompresses only gzip-encoded upstream responses, and only
+when the client does not accept gzip (when the client accepts gzip, gunzip
+passes the content through untouched so the gzip filter can re-compress the
+converted output). `brotli` and `gzip` do not stack: the response receives a
+single `Content-Encoding`. Whichever compression filter runs first for the
+negotiated encoding.
 
-The runtime initialises the loaded module according to the effective NGINX
-module configuration.  The supported default path uses the markdown filter's
-own bounded decompressor before conversion.  It does not depend on the
-optional `gunzip` filter.  When operators configure an external decompressor,
-they must verify its effective position for that NGINX build and set
+The runtime initializes the loaded module according to the effective NGINX
+module configuration. The supported default path uses the markdown filter's own
+bounded decompressor before conversion. It does not depend on the optional
+`gunzip` filter. When operators configure an external decompressor, they must
+verify its effective position for that NGINX build and set
 `markdown_auto_decompress off`.
 
 The standard decompression/compression registration order is `gzip` before
@@ -219,18 +219,18 @@ decompression is always handled by markdown's `auto_decompress`.
 | Subsequent requests | Cache hit → the stored upstream HTML is replayed through the output-filter chain, so markdown converts it again → Markdown delivered |
 | Client receives | `Content-Type: text/markdown; charset=utf-8` on every request (converted on first request and on each cache hit) |
 
-**Key invariant:** `proxy_cache` stores the response at the proxy-module
-level — the upstream HTML as received, before the markdown body filter (and
-other output filters) transform it. A cache hit replays those stored bytes
-through the same filter chain, so the markdown filter runs again on every
-request. The cache never serves Markdown without re-conversion. Because the
-cached body is the original HTML, the response still varies by the same
-request properties (such as `Accept` and any bot-targeting variables) as a
-non-cached response. Include those properties in `proxy_cache_key` **only
-when the upstream response or another cache rule actually varies on them**
-(for example when `markdown_accept` or bot-targeting routing is active).
-An unconditional `Accept` in the key is unnecessary when the upstream never
-varies on it (see
+**Key invariant:** `proxy_cache` stores the response at the proxy-module level.
+The upstream HTML as received, before the markdown body filter (and other output
+filters) transform it. A cache hit replays those stored bytes through the same
+filter chain. The markdown filter runs again on every request. The cache never
+serves Markdown without re-conversion. Because the cached body is the original
+HTML, the response still varies by the same request properties (such as `Accept`
+and any bot-targeting variables) as a non-cached response.
+
+Include those properties in `proxy_cache_key` **only when the upstream response
+or another cache rule actually varies on them** (for example when
+`markdown_accept` or bot-targeting routing is active). An unconditional `Accept`
+in the key is unnecessary when the upstream never varies on it (see
 [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)).
 
 **cache_validation interaction (Requirement 15.3):**

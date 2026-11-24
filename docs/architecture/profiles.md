@@ -61,9 +61,8 @@ Key characteristics:
 Target: general-purpose deployment. Recommended starting point for most sites.
 
 Key characteristics:
-- `markdown_cache_validation ims_only` — avoids ETag computation overhead
-  while still supporting `If-Modified-Since` via the upstream's
-  `Last-Modified`.
+-  `markdown_cache_validation ims_only` — avoids ETag computation overhead while
+  still supporting `If-Modified-Since` through the upstream's `Last-Modified`.
 - `markdown_streaming auto` — large responses stream. Small ones buffer.
 - No forced fields — all defaults can be overridden.
 - Values are intentionally close to Config V2 built-in defaults to minimize
@@ -78,11 +77,11 @@ Key characteristics:
 - `markdown_streaming force` (**forced**) — all eligible responses stream.
 - `markdown_cache_validation off` (**forced**) — no caching overhead. Streaming
   responses cannot carry an ETag.
-- `markdown_accept wildcard` in the historical record — the retired profile
-  set the converter's `AcceptMode::Wildcard`, so the profile produced the
-  streamed response regardless of the Accept header. The wildcard value retired
-  with the profile system, and 0.9.2 `markdown_accept` accepts only `strict` or
-  `force` (`config_handlers_impl.h`).
+-  `markdown_accept wildcard` in the historical record — the retired profile set
+  the converter's `AcceptMode::Wildcard`. The profile produced the streamed
+  response regardless of the Accept header. The wildcard value retired with the
+  profile system, and 0.9.2 `markdown_accept` accepts only `strict` or `force`
+  (`config_handlers_impl.h`).
 
 ---
 
@@ -101,8 +100,8 @@ Priority (highest first):
 3. Config V2 built-in defaults (compile-time constants).
 
 When no `markdown_profile` appears in config, only built-in defaults apply (no
-implicit profile). This is intentional — 0.9.0 is a breaking release and does
-not default to any profile.
+implicit profile). This is intentional. 0.9.0 is a breaking release and does not
+default to any profile.
 
 ---
 
@@ -178,12 +177,12 @@ The project can add new profiles following these rules:
 
 ### Field Coverage
 
-If a future directive should be profile-controlled, add it to
-`ProfileDefaults` and update all three profile `defaults()` implementations.
-The merge logic handles new fields automatically via the "profile value as
-default argument" pattern. The removed `FFIProfile`, conflict-list, and
-profile snapshot types are not a future extension point. They remain as
-historical context only (see the Former FFI Boundary Design section above).
+If a future directive should be profile-controlled, add it to `ProfileDefaults`
+and update all three profile `defaults()` implementations. The merge logic
+handles new fields automatically through the "profile value as default argument"
+pattern. The removed `FFIProfile`, conflict-list, and profile snapshot types are
+not a future extension point. They remain as historical context only (see the
+Former FFI Boundary Design section above).
 
 ---
 

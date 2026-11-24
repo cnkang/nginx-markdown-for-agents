@@ -149,14 +149,13 @@ This is the recommended configuration for production rollouts. Conversion
 failures before commit do not break client responses.
 
 **Replay-exhaustion exception**: fail-open replay needs the consumed
-upstream bytes, and the module keeps them in its replay buffer. When it
-can no longer reproduce them before commit (replay-buffer limit exceeded
-or data no longer available), the module MUST fail closed — returning the
-configured error status (`429`/`503` via `markdown_error_policy status
-<code>`, or `502` via the `fail_closed` policy value) and recording the
-`failed_closed` outcome. The module cannot honor a pass policy without the
-original content. This exception GOVERNS over the `pass` policy (see
-ADR-0012).
+upstream bytes, and the module keeps them in its replay buffer. When it can no
+longer reproduce them before commit (replay-buffer limit exceeded or data no
+longer available), the module MUST fail closed. Returning the configured error
+status (`429`/`503` through `markdown_error_policy status <code>`, or `502`
+through the `fail_closed` policy value) and recording the `failed_closed`
+outcome. The module cannot honor a pass policy without the original content.
+This exception GOVERNS over the `pass` policy (see ADR-0012).
 
 If a streaming conversion fails after downstream filters have already accepted
 headers or Markdown bytes, the original HTML is no longer available for replay

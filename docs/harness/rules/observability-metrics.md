@@ -13,18 +13,19 @@ paths:
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
 
 Required:
-- Encode skip-reason mapping explicitly; do not rely on indirect checks that can misclassify edge cases.
+-  Encode skip-reason mapping explicitly. Do not rely on indirect checks that
+  can misclassify edge cases.
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
-- When adding a new reason code string definition and accessor function, the
+-  When adding a new reason code string definition and accessor function, the
   developer must add corresponding `ngx_http_markdown_log_decision()`
   callsite(s) in the same changeset for non-failure branches, or
-  `ngx_http_markdown_log_failure_decision()` callsite(s) for failure
-  branches (the dedicated failure-path logger used by
+  `ngx_http_markdown_log_failure_decision()` callsite(s) for failure branches
+  (the dedicated failure-path logger used by
   `ngx_http_markdown_handle_preaccess_failure` and every fail-open/reject
-  route).  A reason code that appears but never gets emitted at
-  runtime is a contract violation — operators and docs will reference a code
-  that never appears in logs.
+  route). A reason code that appears but never gets emitted at runtime is a
+  contract violation. Operators and docs will reference a code that never
+  appears in logs.
 - When adding a new family of reason codes (for example a `STREAMING_*`
   namespace alongside the existing `ELIGIBLE_*` / `FAIL_*` families), update
   **every classification function** that categorizes reason codes by string
@@ -58,7 +59,8 @@ Required:
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
 
 Required:
-- Detect and fail on response rendering truncation; never silently emit partial metrics payloads.
+-  Detect and fail on response rendering truncation. Never silently emit partial
+  metrics payloads.
 - Set response metadata (status/content-length/content-type) only after final body length is known.
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
 - When SHM-backed metrics struct layout changes, enforce a hot-reload compatibility strategy:
@@ -68,25 +70,24 @@ Required:
 - Keep Prometheus metric families semantically non-overlapping: aggregate outcome
   series must be mutually exclusive, and detailed breakdown counters must live in
   a separate metric family/label space to avoid double-counting.
-- Every metric field exposed in the metrics struct, snapshot, and output
+-  Every metric field exposed in the metrics struct, snapshot, and output
   renderers (JSON/text/Prometheus) must have at least one runtime write path
-  that populates it with a real value.  Do not expose a gauge or counter that
-  is never assigned — a permanently-zero metric misleads operators and masks
-  real risk.  If the data source (for example an FFI struct field) does not
-  exist yet, defer the metric to a future release instead of shipping a dead
-  field.
+  that populates it with a real value. Do not expose a gauge or counter that is
+  never assigned. A permanently-zero metric misleads operators and masks real
+  risk. If the data source (for example an FFI struct field) does not exist yet,
+  defer the metric to a future release instead of shipping a dead field.
 - Metric names and HELP text must accurately describe what is actually
   measured.  If a metric carries the name `ttfb_seconds` (time-to-first-byte), the
   write site must fire at the first-byte event, not at finalize or request
   completion.  Semantic mismatch between name and measurement is a bug, not a
   documentation issue.
-- Metric names that encode a unit of measurement (for example `_us` for
-  microseconds, `_ms` for milliseconds, `_bytes`) must use a time source or
-  data source whose resolution matches the claimed unit.  If the underlying
-  time source provides only millisecond granularity, the metric name must
-  reflect that (for example `_ms`, not `_us`).  Multiplying a coarse value
-  to fill a finer unit creates false precision — operators and dashboards
-  will interpret the metric as having resolution it does not possess.
+-  Metric names that encode a unit of measurement (for example `_us` for
+  microseconds, `_ms` for milliseconds, `_bytes`) must use a time source or data
+  source whose resolution matches the claimed unit. If the underlying time
+  source provides only millisecond granularity, the metric name must reflect
+  that (for example `_ms`, not `_us`). Multiplying a coarse value to fill a
+  finer unit creates false precision. Operators and dashboards will interpret
+  the metric as having resolution it does not possess.
 - **When a metric name implies a specific measurement semantics (for example
   `cpu_time_ms`, `wall_time_ms`, `user_cpu_ms`), the implementation must
   actually measure that quantity.  Do not alias one metric to another with a
@@ -125,13 +126,13 @@ Required:
   `max_slope` in code), use explicit fallback logic that tries both names
   with a comment explaining the discrepancy.  Prefer aligning the names
   across config and code in the same change set.
-- When a data producer (for example a Rust benchmark binary) emits a field
-  under one key name (for example `html_bytes`) and a consumer (for example
-  a Python evidence generator) reads under a different name (for example
-  `input_bytes`), the consumer must accept **both** names with a fallback
-  chain (for example `tier_data.get("html_bytes") or tier_data.get("input_bytes")`).
-  This is the consumer's responsibility — the producer's key name is the
-  source of truth.
+-  When a data producer (for example a Rust benchmark binary) emits a field
+  under one key name (for example `html_bytes`) and a consumer (for example a
+  Python evidence generator) reads under a different name (for example
+  `input_bytes`), the consumer must accept **both** names with a fallback chain
+  (for example `tier_data.get("html_bytes") or tier_data.get("input_bytes")`).
+  This is the consumer's responsibility. The producer's key name is the source
+  of truth.
 - **When the harness uses combined reports** (for example `--engine both` produces a
   single JSON with both full-buffer `tiers` and streaming `streaming_metrics`),
   every evidence evaluation function that reads streaming data must check
@@ -146,11 +147,11 @@ averages but not in durations, markdown/token averages divided by `total_iters`
 while p50/p95 computed only from measured iterations.
 
 Required:
-- All per-iteration averages (latency, throughput, markdown size, token
-  estimates, flush count) must use the **same denominator** — the count of
+-  All per-iteration averages (latency, throughput, markdown size, token
+  estimates, flush count) must use the **same denominator**. The count of
   iterations that contributed to the duration sample (non-warmup, non-error,
-  non-fallback).  Do not mix `total_iters` for some metrics and
-  `measured_iters` for others.
+  non-fallback). Do not mix `total_iters` for some metrics and `measured_iters`
+  for others.
 - For every derived metric, define one explicit inclusion predicate
   (for example “measured iteration only”) and update both the numerator and its
   sample count under that same predicate.  Do not update numerator and
@@ -182,11 +183,10 @@ Required:
   static string definition → accessor function → `ngx_http_markdown_log_decision()`
   callsite at the corresponding runtime branch.  A reason code that appears
   and documented but never emitted is a contract violation.
-- Gauge metrics that claim to measure a specific event (for example
-  "time-to-first-byte") must write their value at that event, not at a
-  later event (for example finalize).  Use a one-shot latch flag in the
-  per-request context to ensure the gauge is written exactly once at the
-  correct moment.
+-  Gauge metrics that claim to measure a specific event (for example
+  "time-to-first-byte") must write their value at that event, not at a later
+  event (for example finalize). Use a one-shot latch flag in the per-request
+  context to make sure the gauge is written exactly once at the correct moment.
 - **When a metric depends on data from any cross-boundary source (FFI struct
   field, Rust stats, external API response, upstream header, submodule
   state), verify the complete producer→consumer chain exists in the same
@@ -215,11 +215,10 @@ Required:
   - Test helper type definitions that mirror production structs
   - Documentation and spec files that describe the interface contract
 
-  Before merging, grep for all references to the modified type across
-  the language boundary and confirm each one compiles and stays
-  semantically consistent. Do not assume "the other side will get
-  updated later" — boundary drift causes silent ABI mismatches that
-  are expensive to debug.
+Before merging, grep for all references to the modified type across the language
+boundary and confirm each one compiles and stays semantically consistent. Do not
+assume "the other side will get updated later". Boundary drift causes silent ABI
+mismatches that are expensive to debug.
 - Operator-facing docs that reference metrics must validate against the
   actual output of each format (JSON key paths, Prometheus series names).
   Do not invent metric names that do not appear in any renderer.  For
@@ -243,11 +242,11 @@ Required:
   against the fields the primary path reads and confirm every spec-required
   field is either consumed (logged, recorded to metrics, or used in logic)
   or explicitly documented as intentionally skipped with rationale.
-- When the same metric can be written from multiple code paths (primary path,
+-  When the same metric can be written from multiple code paths (primary path,
   retry/resume path, fallback path), all paths must apply the **same** success
-  condition.  Do not weaken the guard in a secondary path — if the primary
-  path requires `rc == OK`, the resume path must also require `rc == OK`, not
-  merely `rc != ERROR`.
+  condition. Do not weaken the guard in a secondary path. If the primary path
+  requires `rc == OK`, the resume path must also require `rc == OK`, not merely
+  `rc != ERROR`.
 - In NGINX filter context specifically, split the meaning of `NGX_AGAIN` by
   filter phase.  In the header chain, `NGX_AGAIN` means the write filter
   accepted the header block: the headers crossed the module boundary, so
@@ -268,50 +267,48 @@ Required:
   defer, everything else → failure), then apply the matching side-effects
   on every path.  Asymmetric metric treatment causes "observed success but
   actual failure" drift that is expensive to debug in production.
-- **When the code uses a deferred-state latch (flag, buffer, or pending marker)
+-  **When the code uses a deferred-state latch (flag, buffer, or pending marker)
   to bridge `NGX_AGAIN` across calls, every function that can encounter
   `NGX_AGAIN` for the same logical operation must set that latch.** Do not
-  assume "only the first caller can hit backpressure" — any function that
-  performs downstream send can receive `NGX_AGAIN` and must participate in
-  the deferral protocol.  Grep for all call sites that perform the same
-  send/output operation and confirm each one sets the latch on `NGX_AGAIN`.
+  assume "only the first caller can hit backpressure". Any function that
+  performs downstream send can receive `NGX_AGAIN` and must participate in the
+  deferral protocol. Grep for all call sites that perform the same send/output
+  operation and confirm each one sets the latch on `NGX_AGAIN`.
 - **Deferred-state latches must clear on both success AND failure
   resume paths.** Leaving a latch set after a failure can cause stale
   state on re-entry (for example double-counting success on a subsequent
   unrelated drain). The cleanup should be the first action in the failure
   branch, before recording failure metrics.
-- **Gauge metrics should update unconditionally on every successful
-  sample**, not guarded by value-range conditions (for example `> 0`).
-  A gauge represents "the most recent sample" — skipping the update
-  because the value is zero or empty causes the gauge to retain a stale
-  value from a previous request, which misleads operators and dashboards.
-  If distinguishing "no sample" from "sample is zero" becomes necessary, add
-  a separate validity flag or sentinel metric rather than skipping the
-  write.
+-  **Gauge metrics should update unconditionally on every successful sample**,
+  not guarded by value-range conditions (for example `> 0`). A gauge represents
+  "the most recent sample". Skipping the update because the value is zero or
+  empty causes the gauge to retain a stale value from a previous request, which
+  misleads operators and dashboards. If distinguishing "no sample" from "sample
+  is zero" becomes necessary, add a separate validity flag or sentinel metric
+  rather than skipping the write.
 - When a bug fix extends a classification branch to cover additional values
   (error codes, enum variants, content types), add regression tests that
   exercise each newly covered value individually.  Without per-value test
   coverage, the fix can silently regress when the branch condition is later
   modified.
-- **Format string argument matching**: when adding new metric fields to the
-  Prometheus v1 renderer that uses `ngx_snprintf` or `ngx_slprintf`, manually verify
-  that the number and types of format specifiers (`%V`, `%uA`, `%uz`, `%O`,
-  `%i`, `%T`, and so on) exactly match the argument list.  `ngx_snprintf` does not
-  perform compile-time type checking — a mismatch silently produces corrupted
-  output or reads garbage from the stack.  After adding fields, count
-  specifiers and arguments side-by-side.  Prefer extracting per-metric
+-  **Format string argument matching**: when adding new metric fields to the
+  Prometheus v1 renderer that uses `ngx_snprintf` or `ngx_slprintf`, manually
+  verify that the number and types of format specifiers (`%V`, `%uA`, `%uz`,
+  `%O`, `%i`, `%T`, and so on) exactly match the argument list. `ngx_snprintf`
+  does not perform compile-time type checking. A mismatch silently produces
+  corrupted output or reads garbage from the stack. After adding fields, count
+  specifiers and arguments side-by-side. Prefer extracting per-metric
   `ngx_snprintf` calls over monolithic format strings when the argument list
   exceeds 10 items.
-- **`ngx_log_debugN` argument count matching**: the NGINX debug logging
-  macros `ngx_log_debug0` through `ngx_log_debug8` encode the argument
-  count in the macro name suffix.  When adding or modifying a
-  `ngx_log_debugN` call, verify that the suffix digit exactly matches
-  the number of format arguments passed after the format string.  A
-  mismatch (for example `ngx_log_debug2` with only one `%`-substitution
-  argument) silently reads garbage from the stack or corrupts the log
-  output. NGINX provides `ngx_log_error` for error logging. Validate the
-  suffix argument count only for `ngx_log_debug0` through `ngx_log_debug8`;
-  error logging has no numbered suffix to validate.
+-  **`ngx_log_debugN` argument count matching**: the NGINX debug logging macros
+  `ngx_log_debug0` through `ngx_log_debug8` encode the argument count in the
+  macro name suffix. When adding or modifying a `ngx_log_debugN` call, verify
+  that the suffix digit exactly matches the number of format arguments passed
+  after the format string. A mismatch (for example `ngx_log_debug2` with only
+  one `%`-substitution argument) silently reads garbage from the stack or
+  corrupts the log output. NGINX provides `ngx_log_error` for error logging.
+  Validate the suffix argument count only for `ngx_log_debug0` through
+  `ngx_log_debug8`. Error logging has no numbered suffix to validate.
 
 ---
 
@@ -326,21 +323,21 @@ Required:
 - `ngx_http_markdown_metrics_to_v1` must partition the conversion-failure
   space without double counting:
   `conversions_failed = failed_open + failed_closed + aborted`.
-- `v1->requests.failed_open` reads `results.failopen_count`; the derived
+-  `v1->requests.failed_open` reads `results.failopen_count`. The derived
   `failed_closed` must deduct `failopen_count` and (streaming build)
-  `terminal_aborted_total` from `conversions_failed`; `v1->requests.aborted`
+  `terminal_aborted_total` from `conversions_failed`. `v1->requests.aborted`
   must read `terminal_aborted_total`, never the per-path counter
   `streaming_failure_postcommit_abort` (that counter classifies the failure
   path, it is not a terminal outcome).
-- Multi-statement derivations (subtract each outcome independently) must
-  deduct every classified outcome before the saturating floor; a missing
-  deduction silently re-classifies failures as `failed_closed`.
+-  Multi-statement derivations (subtract each outcome independently) must deduct
+  every classified outcome before the saturating floor. A missing deduction
+  silently re-classifies failures as `failed_closed`.
 - `v1->requests.aborted = 0` is correct only in the non-streaming build.
 
 Verification:
-- `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py`
-  — blocking harness-tooling CI check via `make harness-security-checks`
-  for selected `harness_tooling` paths, and a local full-gate check.
+-  `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` —
+  blocking harness-tooling CI check through `make harness-security-checks` for
+  selected `harness_tooling` paths, and a local full-gate check.
 - `PYTHONPATH=tools/harness python3 -m pytest
   tools/harness/tests/test_detect_metrics_event_conservation.py -q --tb=short`
   — detector regression tests (clean renderer, stale aborted source,

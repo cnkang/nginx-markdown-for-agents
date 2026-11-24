@@ -58,10 +58,10 @@ Tag-name-only selectors apply to **all** elements matching the selected tag name
 ### Empty-Output Fallback (Deferred)
 
 Not implemented in 0.9.x. If pruning removes all content from the output, the
-module delivers the empty Markdown string as a converted result and reports
-the normal `converted` outcome. The delivered zero-length body and the
-conversion metrics make the emptied output observable, but the reason
-registry defines no prune-specific reason code.
+module delivers the empty Markdown string as a converted result and reports the
+normal `converted` outcome. The delivered zero-length body and the conversion
+metrics make the emptied output observable. The reason registry defines no
+prune-specific reason code.
 
 > **Future behavior (deferred)**: a future implementation MUST compare the
 > pruned output with the unpruned result before commit and preserve the
@@ -80,12 +80,12 @@ following, and none fits the 0.9.2 freeze:
    fully replayable
 
 Independent of pruning, streaming conversion failures after the replay window
-**always enforce fail-closed behavior** — replay-window exhaustion is a
-hard safety boundary, not a policy choice. The configured streaming failure
-policy (including fail-open) applies only when the pre-commit replay
-precondition remains satisfied. Operators who need to avoid empty results
-should set `markdown_prune_noise off` or use protection selectors. Retaining
-built-in selectors alone does not restore content removed by pruning.
+**always enforce fail-closed behavior**. Replay-window exhaustion is a hard
+safety boundary, not a policy choice. The configured streaming failure policy
+(including fail-open) applies only when the pre-commit replay precondition
+remains satisfied. Operators who need to avoid empty results should set
+`markdown_prune_noise off` or use protection selectors. Retaining built-in
+selectors alone does not restore content removed by pruning.
 
 ### New FFI Fields
 

@@ -105,12 +105,12 @@ python3 tools/docs/check_writing_style.py [--strict|--changed --base REF|--basel
 
 - Default: reports warnings, exits 0 — safe for CI and local use.
 - `--strict`: exits 1 when warnings exist (opt-in gate).
-- `--changed --base REF`: exits 1 when a changed file (working tree + staged
+-  `--changed --base REF`: exits 1 when a changed file (working tree + staged
   since the explicitly supplied valid commit `REF`) introduces any warning.
-  Changed mode requires a base, and invalid or unknown options fail closed.
-  This is the per-changeset gate (harness Rule 63): new or edited prose must
-  not add violations. The repository now passes the current-document audit
-  with zero warnings, so a warning in any touched file fails the gate.
+  Changed mode requires a base, and invalid or unknown options fail closed. This
+  is the per-changeset gate (harness Rule 63): new or edited prose must not add
+  violations. The repository now passes the current-document audit with zero
+  warnings. A warning in any touched file fails the gate.
 - `--baseline [N]`: exits 1 when the repository-wide warning total exceeds
   the retained budget N (default 0, see `DEFAULT_BASELINE` in the
   checker). Guards against regressions. Lower N as docs improve.

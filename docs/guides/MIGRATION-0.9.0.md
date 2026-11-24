@@ -17,8 +17,8 @@ consolidated error policy, and restructured the observability surface. The
 reduction (63 → 20 directives).
 
 If you are running 0.8.x in production, you must follow this guide before
-upgrading. There is **no backward-compatible mode** — 0.9.0 rejects old
-directive names at `nginx -t` time with actionable migration hints.
+upgrading. There is **no backward-compatible mode**. 0.9.0 rejects old directive
+names at `nginx -t` time with actionable migration hints.
 
 **Key changes at a glance:**
 
@@ -69,11 +69,11 @@ The following breaking changes require configuration and/or tooling updates:
 
 The release removes several legacy directives and replaces them with Config V2.
 In 0.9.0 and 0.9.1, removed directives stayed as **reject-only stubs**: the
-parser entry still existed, and the only behavior was to fail `nginx -t`
-with an actionable migration hint. The 0.9.2 release deleted those stubs,
-so removed directives now fail `nginx -t` with the standard `unknown
-directive` error. There is **no alias compatibility** and **no legacy
-fallback behavior** — this keeps the breaking-release boundary unambiguous.
+parser entry still existed, and the only behavior was to fail `nginx -t` with an
+actionable migration hint. The 0.9.2 release deleted those stubs, so removed
+directives now fail `nginx -t` with the standard `unknown directive` error.
+There is **no alias compatibility** and **no legacy fallback behavior**. This
+keeps the breaking-release boundary unambiguous.
 
 If a directive you use is not yet listed below, consult the `nginx -t` error
 message, which always names the replacement.

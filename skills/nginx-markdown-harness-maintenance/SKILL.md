@@ -43,10 +43,10 @@ verification families: 3
 ## Workflow
 
 1. Treat `AGENTS.md` and `docs/harness/` as canonical contract surfaces.
-2. Use `tools/harness/resolve_spec.py` before broad edits. Triage
+2.  Use `tools/harness/resolve_spec.py` before broad edits. Triage
    `WARN_NEEDS_AUTHOR_REVIEW` against the user request and current evidence.
    Record a resolved warning and continue. Ask only when missing information
-   materially affects correctness or authorized scope; pause only dependent
+   materially affects correctness or authorized scope. Pause only dependent
    work. Missing optional specs do not block an explicit task.
 3. Use `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git`
    to map changed files/hints to risk packs and verification families from
@@ -63,14 +63,14 @@ verification families: 3
      or escalate with relevant redacted error output and affected surfaces
 6. Keep optional local adapters optional. Missing local files must degrade as
    `SKIP_NOT_PRESENT`, not repository failure.
-7. If harness behavior changes, synchronize the affected truth surfaces and
+7.  If harness behavior changes, synchronize the affected truth surfaces and
    consumers in the same change set. Inspect `AGENTS.md`, `docs/harness/`,
-   `tools/harness/`, `Makefile`, and CI; edit only consumers that need changes.
+   `tools/harness/`, `Makefile`, and CI. Edit only consumers that need changes.
 8. Follow explicit user scope over skill workflow defaults. Reviews and plans
    do not authorize writes. If this skill causes a pause, link this file,
    quote the applicable instruction, and explain the unresolved dependency.
-9. Finish after applicable checks pass. Repeat checks only for new edits,
-   failures, or unresolved risks; retain required production-code gates.
+9.  Finish after applicable checks pass. Repeat checks only for new edits,
+   failures, or unresolved risks. Retain required production-code gates.
 
 ## Definition of Done
 

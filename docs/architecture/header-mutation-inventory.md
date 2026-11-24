@@ -45,11 +45,11 @@ explicit phases:
 
 **Prepare phase** (all fallible operations, returns error on failure with
 headers unchanged = no-op):
-- FFI plan application (Content-Type stale delete-all, Content-Encoding
-  delete-all, Content-Length delete-all) — performed under the snapshot
-  restore mechanism described below. The delete-alls follow the same
-  boundary as the outer prepare, so header mutations never become visible
-  until the outer commit succeeds
+-  FFI plan application (Content-Type stale delete-all, Content-Encoding
+  delete-all, Content-Length delete-all). Performed under the snapshot restore
+  mechanism described below. The delete-alls follow the same boundary as the
+  outer prepare, so header mutations never become visible until the outer commit
+  succeeds
 - ETag header slot allocation and value copy
 - Vary: Accept lookup, dedup check, append/new-slot allocation
 - X-Markdown-Tokens slot allocation and value formatting
@@ -146,12 +146,12 @@ computation, Vary append, token header, Cache-Control modification)
 MUST complete in the prepare phase. Postcommit body errors do NOT
 produce new status/header modifications.
 
-**Post-commit boundary:** once `HeaderPlan` commit succeeds and headers
-are sent, a streaming mid-flight error is NOT a pre-commit error. It does
-not follow the fail-open/fail-closed status selection because the
-downstream headers are already committed and the upstream connection is
-typically gone in streaming mode. The streaming post-commit error path
-(`ngx_http_markdown_stream_postcommit.c`) is NOT an exception — it does not
+**Post-commit boundary:** once `HeaderPlan` commit succeeds and headers are
+sent, a streaming mid-flight error is NOT a pre-commit error. It does not follow
+the fail-open/fail-closed status selection because the downstream headers are
+already committed and the upstream connection is typically gone in streaming
+mode. The streaming post-commit error path
+(`ngx_http_markdown_stream_postcommit.c`) is NOT an exception. It does not
 mutate committed headers or produce new status/header modifications.
 
 ---

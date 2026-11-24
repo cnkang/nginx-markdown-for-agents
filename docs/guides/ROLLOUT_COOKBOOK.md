@@ -737,7 +737,9 @@ http {
 }
 ```
 
-UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
+UA-based targeting depends on clients sending accurate User-Agent strings. It is
+not a security boundary. Any client can spoof a User-Agent. Use this pattern for
+convenience, not access control.
 
 Note: the module evaluates the incoming request header itself. `proxy_set_header Accept` only modifies the header sent upstream. The `markdown_accept force` directive in this pattern is therefore the part that lets matching bots through when their original `Accept` header does not include `text/markdown`.
 
@@ -845,7 +847,9 @@ Trade-offs: broader coverage than internal-only, provides statistical sampling o
 
 ### Header-Gated (Controlled Testing)
 
-Enable conversion only when a specific internal header is present. Use this for precise, on-demand testing — a developer or test harness sends the header to trigger conversion.
+Enable conversion only when a specific internal header is present. Use this for
+precise, on-demand testing. A developer or test harness sends the header to
+trigger conversion.
 
 #### Configuration
 
@@ -1056,7 +1060,20 @@ http {
 
 The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net. NGINX `map` evaluation is not simple declaration order. Exact matches and masked prefixes or suffixes take precedence over regular expressions, and competing regular expressions apply in declaration order. Place critical map exclusions so they win under those rules. A specific exclusion that appears after a broad regex that matches it never reaches its branch.
 
-Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and transition through bounded lowercase `event` values such as `engine_streaming` or `streaming_convert` — never `STREAMING_*` outcomes. The terminal outcome set stays `converted`, `failed_open`, `failed_closed`, `aborted`, and `skipped`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
+Note: Even if a risky page type is accidentally included in your conversion
+scope, the module's eligibility checks provide a safety net. The module skips
+unsupported or unbounded response types through `not_eligible` (for example
+non-HTML content types, error statuses, or responses the module cannot convert).
+Large or chunked responses are a separate case: they may enter
+`markdown_streaming` and transition through bounded lowercase `event` values
+such as `engine_streaming` or `streaming_convert`. Never `STREAMING_*` outcomes.
+The terminal outcome set stays `converted`, `failed_open`, `failed_closed`,
+`aborted`, and `skipped`. However, relying on eligibility checks alone adds
+noise to your decision logs and metrics.
+
+Explicit exclusions keep your rollout scope clean and your observation data
+meaningful. The safety net catches accidental scope mistakes. It does not
+replace explicit scope control.
 
 ---
 
@@ -1394,7 +1411,7 @@ When a trigger fires:
 
 This section is the streaming-specific supplement folded in from the former
 Streaming Rollout Cookbook. It assumes the general stages and observation
-guidance above, and it adds the verification-request, go/no-go, and emergency
+guidance above. It adds the verification-request, go/no-go, and emergency
 rollback signals specific to the 0.9.2 frozen streaming surface
 (`markdown_streaming off|auto|force`, bounded streaming buffer, and the
 streaming counters).
@@ -1500,22 +1517,22 @@ Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 increases by exactly one between the two snapshots for that single request.
 **This assertion is valid only when the instance has no concurrent traffic
 during the measurement window** — no other conversion requests (including
-scheduled crawlers, health probes, or other tenants on a shared instance).
-With concurrent traffic, the cumulative counter cannot attribute deliveries
-to this request. Use request-correlated evidence instead: issue the probe on a
-**unique path** — embed the random token as a path segment (for example
-`/probe/<uuid>/`) so the decision-log entry's URI field (which records the
-parsed request path and never the query string) identifies exactly this
-request. A generated request header only helps if a decision-log field
-records it, which the schema does not do today. A query parameter is equally
-unusable because the decision log never prints query args. The unique path
-segment is the correlation key since unrelated requests never share it.
-Confirm the probe-path decision-log entry for the delivered engine. Note
-that `streaming_events_total` has no URI/path label, so it cannot scope
-to a probe path. For byte accounting compare deltas of
-`nginx_markdown_output_bytes_total`. Never use a delivery count as a byte
-measurement. A downstream `NGX_AGAIN` is a suspension, not a successful
-delivery.
+scheduled crawlers, health probes, or other tenants on a shared instance). With
+concurrent traffic, the cumulative counter cannot attribute deliveries to this
+request. Use request-correlated evidence instead: issue the probe on a **unique
+path** — embed the random token as a path segment (for example `/probe/<uuid>/`)
+so the decision-log entry's URI field (which records the parsed request path and
+never the query string) identifies exactly this request. A generated request
+header only helps if a decision-log field records it, which the schema does not
+do today. A query parameter is equally unusable because the decision log never
+prints query args. The unique path segment is the correlation key since
+unrelated requests never share it.
+
+Confirm the probe-path decision-log entry for the delivered engine. Note that
+`streaming_events_total` has no URI/path label. It cannot scope to a probe path.
+For byte accounting compare deltas of `nginx_markdown_output_bytes_total`. Never
+use a delivery count as a byte measurement. A downstream `NGX_AGAIN` is a
+suspension, not a successful delivery.
 
 ### Streaming go/no-go signals
 
@@ -1552,21 +1569,22 @@ location /docs {
 }
 ```
 
-Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload
-to drain. The diagnostics in-flight field returns to zero when the request
-population is quiescent, but it is **supplemental evidence only, not proof**:
-it shows that no request is currently mid-conversion, while new requests
-admitted after the reload keep it at or above one while they convert. Treat
-in-flight values and conversion-counter deltas as supporting signals. The
-decisive signal is the diagnostics/error log showing the pre-reload requests
-reaching terminal. Record a baseline immediately before the reload, then
-compare **deltas after quiescence**, or wait until the logs show the
-pre-reload requests reaching terminal. Do not poll the cumulative
-`nginx_markdown_requests_total` counter, which only advances and cannot show
-drain. Only then issue controlled requests for the rolled-back scope and
-compare the before/after deltas. Verify that streaming attempts stop and
-full-buffer attempts remain healthy. Preserve the diagnostics JSON,
-Prometheus snapshot, error-log excerpts, and the exact configuration used
+Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload to
+drain. The diagnostics in-flight field returns to zero when the request
+population is quiescent. It is **supplemental evidence only, not proof**: it
+shows that no request is currently mid-conversion, while new requests admitted
+after the reload keep it at or above one while they convert. Treat in-flight
+values and conversion-counter deltas as supporting signals. The decisive signal
+is the diagnostics/error log showing the pre-reload requests reaching terminal.
+Record a baseline immediately before the reload, then compare **deltas after
+quiescence**, or wait until the logs show the pre-reload requests reaching
+terminal.
+
+Do not poll the cumulative `nginx_markdown_requests_total` counter, which only
+advances and cannot show drain. Only then issue controlled requests for the
+rolled-back scope and compare the before/after deltas. Verify that streaming
+attempts stop and full-buffer attempts remain healthy. Preserve the diagnostics
+JSON, Prometheus snapshot, error-log excerpts, and the exact configuration used
 for the incident.
 
 ## Document Updates

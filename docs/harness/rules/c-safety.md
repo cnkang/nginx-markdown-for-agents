@@ -27,15 +27,14 @@ Required:
 - For decoder/API structs that use narrower counters (for example zlib
   `avail_in/avail_out`), validate bounds before assignment and fail safely
   rather than truncating.
-- Read-only data paths (parameters and local
-  pointers) require const-correctness. When writing or modifying a function, qualify pointer parameters
-  as `const` when the function does not modify the pointed-to data — this
-  applies to struct pointers, array pointers, and string pointers alike.
-  Do not drop `const` qualifiers via cast unless the callee contract
-  explicitly requires mutable memory and the data is truly mutable.
-  When changing a parameter from non-const to const (or vice versa), update
-  all call sites, forward declarations, and header prototypes in the same
-  change set.
+-  Read-only data paths (parameters and local pointers) require
+  const-correctness. When writing or modifying a function, qualify pointer
+  parameters as `const` when the function does not modify the pointed-to data.
+  This applies to struct pointers, array pointers, and string pointers alike. Do
+  not drop `const` qualifiers through cast unless the callee contract explicitly
+  requires mutable memory and the data is truly mutable. When changing a
+  parameter from non-const to const (or vice versa), update all call sites,
+  forward declarations, and header prototypes in the same change set.
 - **NGINX callback signature exception**: do not add `const` to parameters
   whose type NGINX framework callback signatures dictate.  Key
   examples:
@@ -122,8 +121,8 @@ Required:
   members carry stack garbage that can bypass production NULL guards.  A
   `cf.ctx` wild-pointer from a partially-initialized `ngx_conf_t` caused a
   SIGSEGV under GCC -O0 that clang and -O2 masked by chance.
-- This applies to tests and production code alike; tests must exercise the
-  same initialization discipline as the code they validate.
+-  This applies to tests and production code alike. Tests must exercise the same
+  initialization discipline as the code they validate.
 - New config-holder structs must register in
   `detect_uninitialized_stack_struct.sh` `WHOLE_INIT_TYPES`.
 - Verification: `bash tools/harness/detect_uninitialized_stack_struct.sh`

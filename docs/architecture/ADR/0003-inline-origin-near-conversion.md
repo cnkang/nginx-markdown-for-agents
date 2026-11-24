@@ -6,7 +6,10 @@ Accepted
 
 ## Context
 
-The module converts HTML to Markdown inside the NGINX request path, at the reverse-proxy layer closest to the origin application. This is a deliberate positioning choice. Alternative approaches exist — most notably, converting at the CDN or edge layer, as Cloudflare's Markdown for Agents demonstrates.
+The module converts HTML to Markdown inside the NGINX request path, at the
+reverse-proxy layer closest to the origin application. This is a deliberate
+positioning choice. Alternative approaches exist. Most notably, converting at
+the CDN or edge layer, as Cloudflare's Markdown for Agents demonstrates.
 
 This ADR documents why the project chose inline origin-near conversion and what tradeoffs that creates.
 
@@ -32,11 +35,24 @@ The key properties of this positioning:
 
 4. **Simpler cache semantics**: The CDN caches the converted Markdown variant like any other response. This works when conversion happens at the origin. The origin controls `Vary`, `ETag`, and `Cache-Control` directly. The CDN must honor representation variants declared by `Vary: Accept` when matching cached responses, so that clients receive the correct representation.
 
-5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting. When targeting variables (such as a bot-detection map) change the representation served to different clients, the operator must preserve cache separation: when the targeting input is a request header field, add that **request header field name** to `Vary` (for example `Vary: Accept, User-Agent`); only for non-header map inputs, include a normalized targeting-variable value in the cache key instead, so caches do not serve the Markdown variant to clients that should receive HTML (or the reverse). `Vary` may list only request header field names; for non-header map inputs, the normalized targeting-variable value must go in the cache key.
+5.  **Variable-driven flexibility**: Because the module runs inside NGINX,
+   operators can use `map` directives and variables to control conversion per
+   request. This includes User-Agent-based bot targeting. When targeting
+   variables (such as a bot-detection map) change the representation served to
+   different clients, the operator must preserve cache separation: when the
+   targeting input is a request header field, add that **request header field
+   name** to `Vary` (for example `Vary: Accept, User-Agent`). Only for
+   non-header map inputs, include a normalized targeting-variable value in the
+   cache key instead, so caches do not serve the Markdown variant to clients
+   that should receive HTML (or the reverse). `Vary` may list only request
+   header field names. For non-header map inputs, the normalized
+   targeting-variable value must go in the cache key.
 
 ### Negative Consequences
 
-1. **Requires infrastructure access**: The operator must be able to install and configure an NGINX module. This is a higher barrier than enabling a feature toggle on a CDN dashboard.
+1.  **Requires infrastructure access**: The operator must can install and
+   configure an NGINX module. This is a higher barrier than enabling a feature
+   toggle on a CDN dashboard.
 
 2. **Conversion cost on the origin path**: Conversion consumes CPU and memory on the origin or reverse-proxy server. It does not spread across distributed edge nodes. For high-traffic sites, this concentrates the conversion workload. The origin absorbs the cost.
 

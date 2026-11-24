@@ -24,21 +24,22 @@ Maintain `docs/harness/public-surface-inventory.json` as the repository-owned
 declaration of the compatibility surfaces that are currently tracked. The
 fail-closed `tools/harness/detect_public_surface_drift.py` extractor reads the
 live C and Rust source metadata, checks the generated FFI header ABI, and
-compares metadata as well as names for directives, OTel controls,
-metrics, reason codes, and FFI exports.
+compares metadata and names for directives, OTel controls, metrics, reason
+codes, and FFI exports.
 
 This is a **source metadata and ABI drift gate**, not a runtime behavior
-contract. The extractor reads directive defaults, syntax, status, and
-migration targets from the source command table, handler signatures, and
-inline metadata. The dynamic-configuration parser and apply paths are gone:
-0.9.2 removed the dynconf subsystem and its inventory group, so the gate no
-longer reads dynconf type/allowed/default/inheritance from parser tables and
-field declarations. It compares metric bounded cardinality with
-the label value sources declared in the inventory. The gate does not execute
-directive create/merge functions or runtime metric
-rendering. The existing unit, integration, and E2E test suites verify runtime
-behavior. A source comment or detector constant change alone can satisfy this
-gate. It cannot by itself prove runtime behavior stays unchanged.
+contract. The extractor reads directive defaults, syntax, status, and migration
+targets from the source command table, handler signatures, and inline metadata.
+The dynamic-configuration parser and apply paths are gone: 0.9.2 removed the
+dynconf subsystem and its inventory group. The gate no longer reads dynconf
+type/allowed/default/inheritance from parser tables and field declarations. It
+compares metric bounded cardinality with the label value sources declared in the
+inventory. The gate does not execute directive create/merge functions or runtime
+metric rendering.
+
+The existing unit, integration, and E2E test suites verify runtime behavior. A
+source comment or detector constant change alone can satisfy this gate. It
+cannot by itself prove runtime behavior stays unchanged.
 
 The inventory, implementation, tests, and the relevant operator documentation
 must update in the same change set. The project exposes the check through

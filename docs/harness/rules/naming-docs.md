@@ -26,8 +26,8 @@ Required:
   For C code use `/* */` block comments per NGINX style.  For Rust use `///`
   doc comments.  For Python use docstrings.  For shell functions use `#`
   comment blocks.
-- Complex or non-obvious logic must have inline comments explaining the
-  reasoning — not restating what the code does, but why it does it and what
+-  Complex or non-obvious logic must have inline comments explaining the
+  reasoning. Not restating what the code does, but why it does it and what
   invariants it relies on.
 - When a test reimplements production logic (because the production function
   cannot link), the test must document the divergence risk and the
@@ -35,6 +35,6 @@ Required:
 - Struct and enum type definitions must have a comment describing the purpose
   of the type and the meaning of each field/variant, especially for types
   that cross language or module boundaries (FFI structs, shared config types).
-- Shell scripts must document each function with a comment block stating
-  purpose, arguments, output, and exit behaviour. The script must extract
+-  Shell scripts must document each function with a comment block stating
+  purpose, arguments, output, and exit behavior. The script must extract
   repeated string constants into `readonly` variables with descriptive names.

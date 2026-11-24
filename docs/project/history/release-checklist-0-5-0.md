@@ -15,8 +15,9 @@ or review action.
 - [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`
   - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Streaming configuration guide is complete — Verify: `make docs-check` plus a signed accuracy review that checks defaults, enablement, shadow mode, rollback, and failure-mode guidance
-- [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: `make docs-check` plus a signed accuracy review. The review checks
-  enablement, staged rollout, rollback, and failure-mode guidance.
+-  [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual
+  expansion). Verify: `make docs-check` plus a signed accuracy review. The
+  review checks enablement, staged rollout, rollback, and failure-mode guidance.
 - [ ] Compatibility matrix documentation is complete — Verify: `docs/project/history/compatibility-matrix-0-5-0.md` exists with all capabilities classified
 - [ ] 0.5.0 non-goals are explicitly listed — Verify: `docs/project/release-gates-0-5-0.md` contains the non-goals section
 - [ ] CHANGELOG.md updated with 0.5.0 entry — Verify: `grep -En '^## \\[?0\.5\.0\\]?([[:space:]]|$)' CHANGELOG.md` returns at least one release heading
@@ -45,9 +46,12 @@ or review action.
 
 ## Operations Gates
 
-- [ ] Operator can enable streaming path via documentation — Verify: config guide + operational verification
-- [ ] Operator can roll back from streaming to full-buffer via documentation — Verify: rollback docs + operational verification
-- [ ] Operator can observe streaming path behavior via metrics and logs — Verify: metrics endpoint + log review
+-  [ ] Operator can enable streaming path through documentation — Verify: config
+  guide + operational verification
+-  [ ] Operator can roll back from streaming to full-buffer through
+  documentation — Verify: rollback docs + operational verification
+-  [ ] Operator can observe streaming path behavior through metrics and logs —
+  Verify: metrics endpoint + log review
 - [ ] Operator can shadow-verify streaming output — Verify: shadow mode docs + operational verification
 
 ## Streaming Evidence Gates

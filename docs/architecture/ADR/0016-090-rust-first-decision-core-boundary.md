@@ -6,12 +6,13 @@ Accepted (0.9.0 contract freeze)
 
 ## Context
 
-[ADR-0010](0010-v070-rust-first-boundary-evolution.md) established the Rust-first
-strategy: new pure logic lands in Rust, C retains NGINX-coupled responsibilities.
-0.9.0 completes the migration of the remaining **pure decision logic** that still
-lives in C — Accept negotiation glue, content-type/method/status eligibility,
-base-URL / forwarded-header decision, conditional-request decision, streaming
-eligibility, reason selection, and error classification.
+[ADR-0010](0010-v070-rust-first-boundary-evolution.md) established the
+Rust-first strategy: new pure logic lands in Rust, C retains NGINX-coupled
+responsibilities. 0.9.0 completes the migration of the remaining **pure decision
+logic** that still lives in C. Accept negotiation glue,
+content-type/method/status eligibility, base-URL / forwarded-header decision,
+conditional-request decision, streaming eligibility, reason selection, and error
+classification.
 
 The risk is over-correction: a single giant
 `markdown_decide_request(ngx_http_request_t *)` FFI that swallows all request
@@ -38,52 +39,50 @@ snapshots), never on `ngx_http_request_t`:
 
 Any aggregation layer MUST be a thin wrapper over these small APIs, not a new
 request-swallowing FFI entry point. New `FFIDecisionResult`-style structs stay
-permitted but must be `repr(C)`, additive-only, and initialized via helper
+permitted but must be `repr(C)`, additive-only, and initialized through helper
 constructors (Rule 15).
 
 ### C side after migration (NGINX glue only)
 
 C retains: module/command registration, config parse+merge, filter hooks, pool
-allocation, chain forwarding, header-list mutation (via HeaderPlan, ADR-0017),
-SHM/slab metrics, dynconf snapshot, diagnostics subrequest, request
+allocation, chain forwarding, header-list mutation (through HeaderPlan,
+ADR-0017), SHM/slab metrics, dynconf snapshot, diagnostics subrequest, request
 finalization. Migrated C pure-logic files become **thin wrappers** that marshal
-inputs, call the small Rust API, and apply the result — with **no business
+inputs, call the small Rust API, and apply the result. With **no business
 branching**. New C pure business branches are forbidden in 0.9.0+ without an
 ADR-justified exception.
 
 ### Trusted proxies — http-only CIDR trust
 
 Source IP for the trusted-proxy CIDR evaluation comes from the original
-transport peer: the NGINX `realip_remote_addr` variable, read through the
-NGINX variable API, when the NGINX `realip` module has preserved it. Otherwise
-the module uses `r->connection->addr_text`. `realip` is not a
-generic field of `ngx_connection_t`. The module must not dereference a
-private or non-existent `r->connection->realip` member.  When the
-operator enables the NGINX `realip` module (or PROXY protocol), NGINX
-rewrites `r->connection->addr_text` to the resolved client address
-(X-Forwarded-For-derived or PROXY header address) before the request
-reaches the content phase, while the original connecting peer remains
-available through the `realip_remote_addr` variable.  Matching the trusted
-CIDR against the rewritten
-`addr_text` would classify the request by the spoofable client address
-instead of the actual proxy, so the module uses the **original transport
-peer** (the value read from `realip_remote_addr`, falling back to
-`addr_text` when realip did not run). `realip_remote_addr` names the public
-NGINX realip contract. The C field is the transport-peer value passed across
-the FFI boundary. `markdown_trusted_proxies`
-is **http context only**, CIDR-based (IPv4 +
-IPv6, parsed at config time). An immediate peer that is **outside**
-`markdown_trusted_proxies` is the client: the module ignores any
-`Forwarded` or `X-Forwarded-*` headers it carries and uses the peer
-address directly, before any right-to-left traversal. Otherwise the
+transport peer: the NGINX `realip_remote_addr` variable, read through the NGINX
+variable API, when the NGINX `realip` module has preserved it. Otherwise the
+module uses `r->connection->addr_text`. `realip` is not a generic field of
+`ngx_connection_t`. The module must not dereference a private or non-existent
+`r->connection->realip` member. When the operator enables the NGINX `realip`
+module (or PROXY protocol), NGINX rewrites `r->connection->addr_text` to the
+resolved client address (X-Forwarded-For-derived or PROXY header address) before
+the request reaches the content phase, while the original connecting peer
+remains available through the `realip_remote_addr` variable. Matching the
+trusted CIDR against the rewritten `addr_text` would classify the request by the
+spoofable client address instead of the actual proxy.
+
+The module uses the **original transport peer** (the value read from
+`realip_remote_addr`, falling back to `addr_text` when realip did not run).
+`realip_remote_addr` names the public NGINX realip contract. The C field is the
+transport-peer value passed across the FFI boundary. `markdown_trusted_proxies`
+is **http context only**, CIDR-based (IPv4 + IPv6, parsed at config time). An
+immediate peer that is **outside** `markdown_trusted_proxies` is the client: the
+module ignores any `Forwarded` or `X-Forwarded-*` headers it carries and uses
+the peer address directly, before any right-to-left traversal. Otherwise the
 module begins with the connection peer, walks aligned `Forwarded` or
-`X-Forwarded-*` hops from right to left, strips trusted hops, and
-selects the first untrusted hop as the client-facing value. `Forwarded`
-takes precedence over `X-Forwarded-*`. `proto` accepts only `http` or
-`https`. An unavailable or non-parseable source address never matches a
-trusted CIDR and fails closed to the untrusted path. Untrusted sources
-produce a reason code and never leak raw header values into logs or
-metrics.
+`X-Forwarded-*` hops from right to left, strips trusted hops, and selects the
+first untrusted hop as the client-facing value.
+
+`Forwarded` takes precedence over `X-Forwarded-*`. `proto` accepts only `http`
+or `https`. An unavailable or non-parseable source address never matches a
+trusted CIDR and fails closed to the untrusted path. Untrusted sources produce a
+reason code and never leak raw header values into logs or metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 

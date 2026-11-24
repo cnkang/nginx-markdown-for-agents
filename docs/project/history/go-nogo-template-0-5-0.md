@@ -28,12 +28,12 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 - Missing or unsigned gate-review evidence → **No-Go** until the review record
   names the candidate and links the evidence artifacts
 - P1 status does not affect the Go/No-Go decision
-- Gate items that cannot pass must have explicit exceptions recorded. A
+-  Gate items that cannot pass must have explicit exceptions recorded. A
   recorded exception does not override a failed P0 sub-spec DoD: that DoD
   remains failed and the decision remains **No-Go** until the team fixes and
-  re-evaluates the DoD. A release-owner authorization may acknowledge a separately
-  documented non-P0 exception, but it cannot convert a failed P0 DoD into a
-  passing result. The authorization must name the gate, candidate, and scope
+  re-evaluates the DoD. A release-owner authorization may acknowledge a
+  separately documented non-P0 exception. It cannot convert a failed P0 DoD into
+  a passing result. The authorization must name the gate, candidate, and scope
   of the non-P0 exception.
 
 ## Decision Record Template

@@ -80,13 +80,13 @@ context: http, server, location
 ### v0.8.0 Compatibility Bridge Removal
 
 The v0.6.0 compatibility bridge that mapped `markdown_streaming_auto_threshold`
-to `markdown_stream_threshold` during configuration merge disappeared in
-v0.8.0. The `ngx_http_markdown_streaming_cfg_t` struct, `conf->streaming`
-field, and the `ngx_http_markdown_bridge_legacy_stream_values` /
+to `markdown_stream_threshold` during configuration merge disappeared in v0.8.0.
+The `ngx_http_markdown_streaming_cfg_t` struct, `conf->streaming` field, and the
+`ngx_http_markdown_bridge_legacy_stream_values` /
 `ngx_http_markdown_merge_streaming_values` functions no longer exist. Runtime
-code reads from `conf->stream.*` exclusively. `markdown_streaming_auto_threshold`
-is no longer a registered directive — `nginx -t` will fail if it appears in
-configuration.
+code reads from `conf->stream.*` exclusively.
+`markdown_streaming_auto_threshold` is no longer a registered directive. `nginx
+-t` will fail if it appears in configuration.
 
 ## Historical Implementation Sketch (not actionable)
 

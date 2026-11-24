@@ -30,22 +30,22 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 ```
 
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
-defined in this document. The tag package workflow satisfies Gate 3 via its
-build, install-layout, checksum, package-signature, and smoke-test chain, but
-the release record must also attach upgrade/rollback evidence that is
-INDEPENDENT of the Gate 3.6 version-switch test: it must come from a separate
-environment, runner, or actor — or carry distinct artifact provenance — and
-the release record must state which of these establishes the independence.
-Reusing the same environment run for both tests without a recorded
-distinction is an incomplete release record.
-Gate 4 passes via chart lint/render validation, promoted cluster smoke, and F5
-assessment evidence. Final Go requires the package-signature and
-upgrade/rollback records in addition to the Gate 4 records. Gate 4 image
-evidence must bind the immutable multi-platform index digest and the matching
-platform manifest digest for every Ready pod. Missing records remain blocking
-even when the workflow itself is green, and the release record must include a
-signed gate-review artifact naming reviewer, date, candidate, scope, and
-evidence references.
+defined in this document. The tag package workflow satisfies Gate 3 through its
+build, install-layout, checksum, package-signature, and smoke-test chain. The
+release record must also attach upgrade/rollback evidence that is INDEPENDENT of
+the Gate 3.6 version-switch test: it must come from a separate environment,
+runner, or actor — or carry distinct artifact provenance — and the release
+record must state which of these establishes the independence. Reusing the same
+environment run for both tests without a recorded distinction is an incomplete
+release record. Gate 4 passes through chart lint/render validation, promoted
+cluster smoke, and F5 assessment evidence. Final Go requires the
+package-signature and upgrade/rollback records also to the Gate 4 records.
+
+Gate 4 image evidence must bind the immutable multi-platform index digest and
+the matching platform manifest digest for every Ready pod. Missing records
+remain blocking even when the workflow itself is green, and the release record
+must include a signed gate-review artifact naming reviewer, date, candidate,
+scope, and evidence references.
 
 ---
 
@@ -174,11 +174,11 @@ evidence references.
 
 ## Partial Automated Validation
 
-The commands below provide partial automated validation for Gates 1, 2, 5,
-and 6. They omit Gate 3's package-build, signature, checksum, install, and
-upgrade/rollback checks, as well as Gate 4's promoted-cluster smoke and F5
-evidence checks. Those checks require the separate procedures and evidence
-validators documented above.
+The commands below provide partial automated validation for Gates 1, 2, 5, and
+6. They omit Gate 3's package-build, signature, checksum, install, and
+upgrade/rollback checks, and Gate 4's promoted-cluster smoke and F5 evidence
+checks. Those checks require the separate procedures and evidence validators
+documented above.
 
 ```bash
 # Gate 1

@@ -84,10 +84,17 @@ The converter classifies elements into three categories using `SanitizeAction`:
 This policy favors page descriptions over form state. The module must not expose user-entered, restored, or prefilled values to AI-facing Markdown. It may expose a visible caption from a button or a submit/reset control.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
-- `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.
+-  `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the
+  `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the
+  `title` attribute as the link label when available. Fallback child text
+  between the tags stays in the output. It suppresses dangerous URL schemes
+  (`javascript:`, `data:`, and so on). Only safe URLs appear in the output. The
+  module blocks unsafe schemes entirely.
 
 **Media Elements — URL Extracted, Fallback Preserved** (handled in traversal):
-- `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link (with `title` as label). Video `poster` thumbnails become Markdown images. Fallback child text stays via normal child traversal.
+-  `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link
+  (with `title` as label). Video `poster` thumbnails become Markdown images.
+  Fallback child text stays through normal child traversal.
 - `<source>` - The module extracts the `src` URL as a Markdown link with `type` as label (for example `[video/mp4](url)`).
 - `<track>` - The module extracts the `src` URL as a Markdown link with `label` as link text (for example `[English](subs.vtt)`).
 - `<area>` - The module extracts the `href` as a Markdown link with `alt` or `title` as link text.
@@ -112,7 +119,9 @@ pub fn check_element(&self, tag_name: &str) -> SanitizeAction {
 **Location**: `src/security.rs` - `SecurityValidator::is_event_handler()`
 
 **Event Handlers Removed**:
-The module removes all attributes starting with `on` (with length > 2) via prefix matching, following the OWASP/DOMPurify convention. This covers all current and future event handlers, including:
+The module removes all attributes starting with `on` (with length > 2) through
+prefix matching, following the OWASP/DOMPurify convention. This covers all
+current and future event handlers, including:
 - `onclick`, `ondblclick`, `onmousedown`, `onmouseup`
 - `onmouseover`, `onmousemove`, `onmouseout`
 - `onkeydown`, `onkeypress`, `onkeyup`
@@ -323,11 +332,11 @@ The repository also includes `.github/workflows/nightly-fuzz.yml`, which runs th
 - Bypass of one layer does not compromise security
 
 ### 4. Secure Defaults
-- Conservative resource limits: `decompressed_size` 10MB (cumulative
+-  Conservative resource limits: `decompressed_size` 10MB (cumulative
   decompressed-output cap), `conversion_memory` 64MB (input admission +
-  generated-output budget), `conversion_timeout` 30s, `parser_timeout`
-  10s, `parser_budget` 32MB, `streaming_buffer` 2MB — with cooperative
-  parser checkpoints. An in-progress parse may overshoot its configured
+  generated-output budget), `conversion_timeout` 30s, `parser_timeout` 10s,
+  `parser_budget` 32MB, `streaming_buffer` 2MB. With cooperative parser
+  checkpoints. An in-progress parse may overshoot its configured
   `parser_timeout`
 - Fail-open returns the original HTML after a conversion failure.
   resource limits and bounded buffers provide resource-exhaustion

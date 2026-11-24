@@ -9,8 +9,8 @@ cheap blockers first, focused semantic checks second, umbrella checks third.
 
 This checklist covers verification families touched by the stabilization
 workstreams (semantic fidelity, protocol correctness, auth/cache safety,
-streaming parity, operator diagnostics, and this release gate sync) as
-mapped in `docs/harness/routing-manifest.json`.
+streaming parity, operator diagnostics. This release gate sync) as mapped in
+`docs/harness/routing-manifest.json`.
 
 ## Phase 1: Cheap Blockers
 

@@ -249,7 +249,10 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 
 ## Spec Template Convention
 
-When creating a new spec that touches production code, include a coverage verification checkpoint in the tasks document. The spec SHALL include it. This applies to C and Rust paths. This checkpoint is mandatory, not optional. Convention enforces this in harness documentation, not tooling.
+When creating a new spec that touches production code, include a coverage
+verification checkpoint in the tasks document. The spec must include it. This
+applies to C and Rust paths. This checkpoint is mandatory, not optional.
+Convention enforces this in harness documentation, not tooling.
 
 ## Naming and Documentation Standards
 

@@ -30,12 +30,14 @@ The internal C path-selection enum is not used for this family.
 The table above is the production label inventory. Lifecycle events use the
 `transition`/`reason` labels. The terminal request family uses the
 `outcome`/`stage`/`reason` labels. The `engine` label is the sole intentional
-label on the conversion-attempt and conversion-delivery families. Output
-bytes are intentionally unlabelled to keep series cardinality bounded. The
-per-worker in-flight counter is diagnostics-only: the `markdown_diagnostics`
-endpoint exposes it, and it is not a Prometheus family in the
-metrics catalog. Rust helper-event names and enums are implementation
-details and do not expand this Prometheus label contract.
+label on the conversion-attempt and conversion-delivery families. Output bytes
+are intentionally unlabelled to keep series cardinality bounded. The per-worker
+in-flight counter is diagnostics-only: the `markdown_diagnostics` endpoint
+exposes it.
+
+It is not a Prometheus family in the metrics catalog. Rust helper-event names
+and enums are implementation details and do not expand this Prometheus label
+contract.
 
 The `nginx_markdown_streaming_events_total` counter uses `transition` and
 `reason` labels. The six rows below are the label-value combinations emitted by
@@ -76,10 +78,11 @@ The counters follow these conservation rules:
 
 The diagnostics handler returns the strict Schema v3 response documented in
 [Observability Contract v3](../architecture/observability-schema-v3.md). It has
-no streaming-only top-level section. The frozen families provide runtime visibility via
-worker-local `runtime` counters, bounded `recent_decisions` entries, and the
-required `runtime.module_metrics` evidence counters. Those counters are read
-directly by the benchmark harness. They are not inferred from engine labels.
+no streaming-only top-level section. The frozen families provide runtime
+visibility through worker-local `runtime` counters, bounded `recent_decisions`
+entries, and the required `runtime.module_metrics` evidence counters. Those
+counters are read directly by the benchmark harness. They are not inferred from
+engine labels.
 
 The endpoint accepts only GET and HEAD. HEAD computes the complete response length but
 sends no body. Other methods from authorized peers return 405. Native NGINX allow/deny/auth

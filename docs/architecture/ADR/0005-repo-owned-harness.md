@@ -7,7 +7,7 @@ Accepted
 ## Context
 
 The project already had strong runtime documentation and a growing body of
-agent-facing rules in `AGENTS.md`, but the execution workflow around spec
+agent-facing rules in `AGENTS.md`. The execution workflow around spec
 resolution, risk routing, validation, and maintenance was still fragmented.
 
 Important behavior lived in several places:
@@ -25,8 +25,8 @@ This caused three structural problems:
 3. validation behavior was partly implicit instead of executable
 
 At the same time, the project needed to remain open-source friendly. Private
-local assets can be useful for local work, but the repository must not require
-them in order to validate or understand the public contract.
+local assets can be useful for local work. The repository must not require them
+to validate or understand the public contract.
 
 ## Decision
 

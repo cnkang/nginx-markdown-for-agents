@@ -48,7 +48,7 @@ Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, and so on.
 
 ### Nightly Full (`nightly-perf.yml`)
 
-Runs on a daily schedule (03:00 UTC) and via `workflow_dispatch`. Executes
+Runs on a daily schedule (03:00 UTC) and through `workflow_dispatch`. Executes
 all sample tiers 3 times each, computes the median, and runs the threshold
 engine. Same artifact naming convention as PR Smoke.
 
@@ -116,10 +116,10 @@ comparison still runs through `threshold_engine.py` directly.
 `perf/baselines/<platform>.json` stores the baselines. You must generate
 them on the target platform:
 
-1. Run `tools/perf/run_perf_baseline.sh --update-baseline` on the target
-   CI runner (or locally for local baselines), or trigger `nightly-perf`
-   via `workflow_dispatch` with `bootstrap_baseline=true` and download the
-   uploaded `perf-baseline-<platform>.json` artifact.
+1.  Run `tools/perf/run_perf_baseline.sh --update-baseline` on the target CI
+   runner (or locally for local baselines), or trigger `nightly-perf` through
+   `workflow_dispatch` with `bootstrap_baseline=true` and download the uploaded
+   `perf-baseline-<platform>.json` artifact.
 2. Submit the generated baseline file via PR.
 3. When no baseline exists, the engine skips comparison (exit 0).
 
@@ -170,19 +170,19 @@ consistency only when supplied.
 The canonical workflow retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
 path. It validates that every scenario's `.headers`, `.body`, and `.json` files
-exist and that `.headers` and `.json` are non-empty. A zero-byte `.body`
-remains valid for bodyless responses (for example 304 or HEAD probes), and
-the gate checks its SHA-256 against the standard empty-input digest. The gate requires a
-passing probe with `curl_exit_code == 0`, verifies each body SHA-256,
-validates the complete response-correctness schema, parses the final
-HTTP response block from each `.headers` file, and requires its status,
-normalized headers, Markdown content type, and empty content encoding to match
-the probe JSON. It then requires exact finalized/probe
-`response_correctness` object equality and enforces strict boolean/integer
-tail and curl fields before
-running the performance evidence and release gates. The canonical upload
-happens only after those checks pass and contains the finalized JSON, raw
-JSON, and this probe directory. Canonical artifacts stay retained for 30 days.
+exist and that `.headers` and `.json` are non-empty. A zero-byte `.body` remains
+valid for bodyless responses (for example 304 or HEAD probes), and the gate
+checks its SHA-256 against the standard empty-input digest. The gate requires a
+passing probe with `curl_exit_code == 0`, verifies each body SHA-256, validates
+the complete response-correctness schema, parses the final HTTP response block
+from each `.headers` file, and requires its status, normalized headers, Markdown
+content type, and empty content encoding to match the probe JSON. It then
+requires exact finalized/probe `response_correctness` object equality and
+enforces strict boolean/integer tail and curl fields before running the
+performance evidence and release gates. The canonical upload happens only after
+those checks pass and contains the finalized JSON, raw JSON.
+
+This probe directory. Canonical artifacts stay retained for 30 days.
 Failure-only debug artifacts use the shorter diagnostic retention period.
 
 The former `historical_audit_exception` stays only for historical

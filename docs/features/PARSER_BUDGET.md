@@ -177,15 +177,14 @@ Instead:
    checks the nonzero `parser_timeout` from `conversion_start` first. This
    includes the parser working-set estimate and any other pre-parse delay. It
    then checks the nonzero `conversion_timeout`, also from `conversion_start`.
-2. **Post-parse checkpoint**: Immediately after parsing completes, the
-   converter checks the nonzero `parser_timeout` from `parse_start` first.
-   The converter captures `parse_start` immediately before the pre-parse
-   checks, so the post-parse measurement includes the pre-parse checks
-   themselves plus the parse call. It then checks `conversion_timeout`
-   from `conversion_start`. These two parser anchors are intentional: the
-   pre-parse check covers work before parsing, while the post-parse check
-   measures the parse call plus the pre-parse checks that ran after the
-   converter captured `parse_start`.
+2.  **Post-parse checkpoint**: Immediately after parsing completes, the
+   converter checks the nonzero `parser_timeout` from `parse_start` first. The
+   converter captures `parse_start` immediately before the pre-parse checks. The
+   post-parse measurement includes the pre-parse checks themselves plus the
+   parse call. It then checks `conversion_timeout` from `conversion_start`.
+   These two parser anchors are intentional: the pre-parse check covers work
+   before parsing, while the post-parse check measures the parse call plus the
+   pre-parse checks that ran after the converter captured `parse_start`.
 3. **During DOM traversal**: The converter gives `ConversionContext` the
    remaining overall time as `traversal_budget`. Every 100 DOM nodes,
    `increment_and_check()` checks that overall deadline. `parser_timeout` is
@@ -196,15 +195,15 @@ Instead:
 
 At both parser-boundary checkpoints, the parser check runs before the overall
 check. If elapsed time exceeds both deadlines at the same checkpoint, the
-converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
-call-order precedence, not a minimum or an "earlier of" calculation. When
-operators leave `conversion_timeout` unset, the NGINX merge fills the
-30-second default, so the overall deadline stays active. The NGINX merge
-also fills `parser_timeout` from its 10-second default
-(NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT), so parser checkpoints
-are ACTIVE whenever the merged value is nonzero — whether it came from the
-default or from an explicit `parser_timeout`. An explicit nonzero
-`parser_timeout` overrides the default. (An explicit
+converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is call-order
+precedence, not a minimum or an "earlier of" calculation. When operators leave
+`conversion_timeout` unset, the NGINX merge fills the 30-second default. The
+overall deadline stays active. The NGINX merge also fills `parser_timeout` from
+its 10-second default (NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT), so
+parser checkpoints are ACTIVE whenever the merged value is nonzero.
+
+Whether it came from the default or from an explicit `parser_timeout`. An
+explicit nonzero `parser_timeout` overrides the default. (An explicit
 `conversion_timeout=0` fails config validation. The handler rejects zero.
 Operators cannot disable the deadline through configuration.)
 
@@ -219,11 +218,10 @@ responsiveness (worst-case detection latency of ~1-10 ms for typical HTML).
 
 #### Worst-Case Timeout Overshoot
 
-Since the full-buffer `parse_document().one()` call offers no interruption,
-the actual timeout overshoot depends on input size. With the default
-`parser_budget` of 32 MiB, the module rejects inputs above roughly 4.8 MB
-before parsing, so the 5-10 MB row applies only after an operator raises that
-budget.
+Since the full-buffer `parse_document().one()` call offers no interruption, the
+actual timeout overshoot depends on input size. With the default `parser_budget`
+of 32 MiB, the module rejects inputs above roughly 4.8 MB before parsing. The
+5-10 MB row applies only after an operator raises that budget.
 
 | Input Size | Approximate Parse Time | Overshoot Risk |
 |------------|----------------------|----------------|
@@ -385,9 +383,9 @@ transformation has committed yet. With `markdown_error_policy
 fail_closed`, the module returns the configured error status instead of
 the original content. `status N` follows the configured status policy.
 
-The known-size `conversion_memory` check is an exception: it is an
-eligibility decision, not a failure, so it always forwards the original
-response (prechecked passthrough) regardless of the error policy.
+The known-size `conversion_memory` check is an exception: it is an eligibility
+decision, not a failure. It always forwards the original response (prechecked
+passthrough) regardless of the error policy.
 
 **Post-commit failures** (after response headers are sent):
 
@@ -437,14 +435,15 @@ At the two full-buffer parser checkpoints, the converter checks the parser
 deadline first, then the overall deadline. If only the overall deadline has
 elapsed, the conversion reports `ERROR_TIMEOUT`. If the parser deadline has
 elapsed, it reports `ERROR_PARSE_TIMEOUT`, including when both deadlines have
-expired. The
-pre-parse parser check uses `conversion_start`, and the post-parse parser
-check uses `parse_start`. Subsequent traversal and output checks use only the
-remaining overall deadline. At the FFI boundary, a zero
-`conversion_timeout` would disable only the overall deadline, but NGINX
-config validation rejects an explicit zero and the merge fills the
-30-second default when operators omit the key, so a nonzero
-`parser_timeout` still produces `ERROR_PARSE_TIMEOUT` at a parser checkpoint.
+expired. The pre-parse parser check uses `conversion_start`, and the post-parse
+parser check uses `parse_start`. Subsequent traversal and output checks use only
+the remaining overall deadline. At the FFI boundary, a zero `conversion_timeout`
+would disable only the overall deadline, but NGINX config validation rejects an
+explicit zero and the merge fills the 30-second default when operators omit the
+key.
+
+A nonzero `parser_timeout` still produces `ERROR_PARSE_TIMEOUT` at a parser
+checkpoint.
 
 ---
 

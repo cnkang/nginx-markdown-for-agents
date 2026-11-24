@@ -23,7 +23,25 @@ relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
-- **Pre-commit fail-open rate**: ≤ 5% absolute. Numerator: `precommit_failopen_total`, the count of streaming responses that failed open before commit. Denominator: `streaming_requests_total`, the count of responses that actually attempted streaming (selected the streaming engine via `markdown_streaming auto|force` and passed the pre-attempt hard gates). The counter increments when the streaming engine initializes, before any initialization step can fail, so it records attempts rather than successes. Capability fallbacks (`ERROR_STREAMING_FALLBACK` returning the response to the full-buffer engine) stay out of the numerator: they increment `fallback_total` and `streaming_fallback_precommit_pass` instead, and the gate measures the fail-open share only. Excluded from the denominator: responses that never attempted streaming — routed directly to full-buffer by `markdown_streaming off`, profile, decision-chain `not_eligible`, or a pre-attempt hard gate such as `markdown_cache_validation full` (which blocks streaming before any attempt). Measurement window: per benchmark scenario run. Aggregation: per streaming-attempted response (not per chunk or attempt). The window combines results by summing numerator and denominator across all iterations within a scenario before computing the rate.
+-  **Pre-commit fail-open rate**: ≤ 5% absolute. Numerator:
+  `precommit_failopen_total`, the count of streaming responses that failed open
+  before commit. Denominator: `streaming_requests_total`, the count of responses
+  that actually attempted streaming (selected the streaming engine through
+  `markdown_streaming auto|force` and passed the pre-attempt hard gates). The
+  counter increments when the streaming engine initializes, before any
+  initialization step can fail. It records attempts rather than successes.
+  Capability fallbacks (`ERROR_STREAMING_FALLBACK` returning the response to the
+  full-buffer engine) stay out of the numerator: they increment `fallback_total`
+  and `streaming_fallback_precommit_pass` instead, and the gate measures the
+  fail-open share only.
+
+Excluded from the denominator: responses that never attempted streaming. Routed
+  directly to full-buffer by `markdown_streaming off`, profile, decision-chain
+  `not_eligible`, or a pre-attempt hard gate such as `markdown_cache_validation
+  full` (which blocks streaming before any attempt). Measurement window: per
+  benchmark scenario run. Aggregation: per streaming-attempted response (not per
+  chunk or attempt). The window combines results by summing numerator and
+  denominator across all iterations within a scenario before computing the rate.
 - **Memory slope**: ≤ +20%
 
 ### Tooling

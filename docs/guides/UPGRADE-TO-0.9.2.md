@@ -331,12 +331,12 @@ NGINX, apply the 0.9.2 migration:
 # tree (${NGINX_CONF_DIR}) before the module swap.
 ```
 
-Validate the migrated configuration with the staged 0.9.2 module BEFORE
-stopping NGINX: back up the running module first (see the source-build
-sequence below), then run `nginx -t` against a temporary configuration
-whose `load_module` entry points to the staged `.so` — a plain
-`sudo nginx -t` would still load the ACTIVE (0.9.1) module, so it cannot
-prove the migrated syntax is valid under the 0.9.2 binary:
+Validate the migrated configuration with the staged 0.9.2 module BEFORE stopping
+NGINX: back up the running module first (see the source-build sequence below),
+then run `nginx -t` against a temporary configuration whose `load_module` entry
+points to the staged `.so`. A plain `sudo nginx -t` would still load the ACTIVE
+(0.9.1) module. It cannot prove the migrated syntax is valid under the 0.9.2
+binary:
 
 ```bash
 STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"

@@ -85,7 +85,11 @@ cd components/nginx-module/tests/integration
 NGINX_BIN=/absolute/path/to/nginx ./run_integration_tests.sh
 ```
 
-When you supply `NGINX_BIN`, the delegated native runtime checks reuse it only if it looks like a module-enabled runtime install. For example, `.../sbin/nginx` beside `.../conf/mime.types`. If not, the inline integration tests still use that binary, but the delegated runtime checks self-build their own NGINX runtime. The reused binary must expose reusable runtime assets.
+When you supply `NGINX_BIN`, the delegated native runtime checks reuse it only
+if it looks like a module-enabled runtime install. For example, `.../sbin/nginx`
+beside `.../conf/mime.types`. If not, the inline integration tests still use
+that binary. The delegated runtime checks self-build their own NGINX runtime.
+The reused binary must expose reusable runtime assets.
 
 ## Prerequisites
 

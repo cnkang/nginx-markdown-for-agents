@@ -96,14 +96,14 @@ the original response. `fail_closed` and status policies reject it.
 
 ### Empty body with declared encodings
 
-An empty wire body is transparent **only** when the effective chain contains
-no decoder layers (for example, an identity-only chain). If a non-identity
-layer (`gzip`, `deflate`, `br`) exists in the chain, the decoder runs at end
-of input and classifies the empty body as `TruncatedInput` — a missing encoded
-body is **not** accepted as a valid compressed response. This keeps chain
-decoding aligned with the single-format decompressors
-(`decompress_gzip`/`decompress_deflate`/`decompress_brotli`), which classify
-an empty compressed input as `TruncatedInput` the same way.
+An empty wire body is transparent **only** when the effective chain contains no
+decoder layers (for example, an identity-only chain). If a non-identity layer
+(`gzip`, `deflate`, `br`) exists in the chain, the decoder runs at end of input
+and classifies the empty body as `TruncatedInput`. A missing encoded body is
+**not** accepted as a valid compressed response. This keeps chain decoding
+aligned with the single-format decompressors
+(`decompress_gzip`/`decompress_deflate`/`decompress_brotli`), which classify an
+empty compressed input as `TruncatedInput` the same way.
 
 The configured `markdown_error_policy` then applies:
 
@@ -151,13 +151,13 @@ reason-code registry key:
 | `truncated_input` | `decompression_truncated_input` |
 | `io_error` | `decompression_io_error` |
 
-The module counts them after the decoder
-classifies the error and before it handles fail-open or fail-closed responses.
-This makes event totals independent of whether the original body is ultimately
-delivered. The module records successful streaming decompressions when
-finalization succeeds, so a decoder that spans body chunks counts exactly once.
-The renderer also exposes the frozen request, conversion, streaming, and build
-families described in [`prometheus-metrics.md`](../guides/prometheus-metrics.md).
+The module counts them after the decoder classifies the error and before it
+handles fail-open or fail-closed responses. This makes event totals independent
+of whether the original body is ultimately delivered. The module records
+successful streaming decompressions when finalization succeeds. A decoder that
+spans body chunks counts exactly once. The renderer also exposes the frozen
+request, conversion, streaming, and build families described in
+[`prometheus-metrics.md`](../guides/prometheus-metrics.md).
 
 ## Verification
 

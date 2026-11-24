@@ -464,7 +464,7 @@ make -C components/nginx-module/tests unit
 **Status:** Covered by codec-agnostic tests plus a Brotli-specific streaming E2E scenario (`verify_brotli_streaming_e2e.sh`)
 
 The downstream backpressure mechanism (NGX_AGAIN handling, pending output save,
-resume drain) is **codec-agnostic** — it operates on the outgoing Markdown chain
+resume drain) is **codec-agnostic**. It operates on the outgoing Markdown chain
 after decompression, not on compressed input. Once the decompressor produces
 bytes and the module converts those to Markdown, the downstream delivery path
 stays identical regardless of codec (gzip, deflate, or Brotli).
@@ -489,7 +489,7 @@ re-fed to the decoder. This invariant is codec-independent and verified by:
 - The phase 9 unit tests proving Brotli specifically integrates with the backpressure state machine
 
 **Conclusion:** The native Brotli scenario now provides codec-specific
-slow-reader evidence in addition to the existing gzip proof of the shared
+slow-reader evidence also to the existing gzip proof of the shared
 pending-output/resume mechanism. Multi-chunk unit tests and the streaming
 equivalence property test independently cover decoder chunk boundaries.
 

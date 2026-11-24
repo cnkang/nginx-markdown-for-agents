@@ -133,9 +133,12 @@ The current implementation covers the three core non-content elements and the
 default noise regions. Inline event-handler removal is already complete. The
 list below records the remaining items only as a historical implementation note:
 
-1. **Navigation elements**: The module does not prune `<header>`; it prunes `<nav>`, `<footer>`, and `<aside>` by default
+1.  **Navigation elements**: The module does not prune `<header>`. It prunes
+   `<nav>`, `<footer>`, and `<aside>` by default
 2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
-3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`. This is not a future item.
+3.  **Inline event handlers**: Removal of all `on*` attributes through prefix
+   matching — **complete**, already covered by `security.rs` and
+   `test_inline_script_removal`. This is not a future item.
 
 ## Related: Form Element Content Policy
 

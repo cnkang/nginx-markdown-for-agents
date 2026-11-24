@@ -14,10 +14,10 @@ responsibilities: seven `markdown_stream_*` knobs, two error directives
 (`markdown_conditional_requests` + `markdown_etag`). This sprawl is not a stable
 1.0 contract.
 
-0.9.0 collapses these into a small, auditable Config V2 grammar. Because 0.9.0 is
-explicitly breaking, **no alias compatibility** exists: removed directives
+0.9.0 collapses these into a small, auditable Config V2 grammar. Because 0.9.0
+is explicitly breaking, **no alias compatibility** exists: removed directives
 become reject-only stubs that fail `nginx -t` with a migration hint. NGINX's
-unknown-directive handling cannot emit a hint, so the stub parser entries must
+unknown-directive handling cannot emit a hint. The stub parser entries must
 remain to produce actionable errors.
 
 ## Decision
@@ -37,15 +37,15 @@ New consolidating directives (additive-only after 1.0):
 | `markdown_profile` | (new) | `strict_cache\|balanced\|streaming_first` |
 
 Retained EXISTING stable directives keep their names and semantics, notably:
-`markdown_filter on|off` (the module enable directive — there is **no**
-`markdown on|off`), `markdown_streaming` (the sole processing selector),
+`markdown_filter on|off` (the module enable directive. There is **no** `markdown
+on|off`), `markdown_streaming` (the sole processing selector),
 `markdown_content_types`, `markdown_stream_types`, and the
 metrics/diagnostics/otel/parser-budget families.
 
 The 0.9.1 contract treated `markdown_streaming_engine` as reject-only. Version
-0.9.2 removed it, so it is not a stable 1.0 configuration directive. The
-reject-only parser entry described below applies only to directives retained
-by the 0.9.0 migration contract.
+0.9.2 removed it. It is not a stable 1.0 configuration directive. The
+reject-only parser entry described below applies only to directives retained by
+the 0.9.0 migration contract.
 
 ### Reject-only legacy stubs (no aliases)
 

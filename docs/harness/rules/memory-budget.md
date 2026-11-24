@@ -13,8 +13,8 @@ Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.
 
 Required:
 - Enforce all configured budgets (including total working-set budget), not only per-buffer budgets.
-- Copy final data back to pool-owned memory before freeing any auxiliary heap
-  expansion buffer; every exit must free the buffer.
+-  Copy final data back to pool-owned memory before freeing any auxiliary heap
+  expansion buffer. Every exit must free the buffer.
 - Any collector strings/buffers (for example link text, sniff buffers) must respect configured limits.
 - Track peak memory from real resident state, not only counters.
 - Do not hardcode stage limits in downstream components when a configured
@@ -40,36 +40,34 @@ Required:
   so repeated buffer expansions on large responses would grow the pool
   indefinitely.  `ngx_alloc/ngx_free` lets superseded buffers free
   immediately.
-- The module registers a pool cleanup handler (`ngx_pool_cleanup_add`) at
-  `buffer_init` time to ensure the current backing store frees when the
+-  The module registers a pool cleanup handler (`ngx_pool_cleanup_add`) at
+  `buffer_init` time to make sure the current backing store frees when the
   request pool dies. The cleanup handler owns the current `data` pointer. A
-  resize frees only the superseded pointer before storing the replacement, so
-  the cleanup handler sees one current owner and never frees an old pointer a
-  second time. Any future explicit whole-buffer release must clear or disarm
-  the cleanup handler before releasing the current pointer.
+  resize frees only the superseded pointer before storing the replacement. The
+  cleanup handler sees one current owner and never frees an old pointer a second
+  time. Any future explicit whole-buffer release must clear or disarm the
+  cleanup handler before releasing the current pointer.
 - When code outside `buffer.c` needs to replace `ctx->buffer.data`
   (for example decompression output exceeds capacity), it MUST use `ngx_alloc`
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`
   or `ngx_pfree`.
-- **Generalized pool-vs-heap rule**: Any buffer that is independently
+-  **Generalized pool-vs-heap rule**: Any buffer that is independently
   allocated, resized, or freed during request processing — not only
-  `ctx->buffer.data` but also streaming decompression workspaces (for
-  example zlib `finish()` output buffers, `apply_limits` temporary
-  buffers, buffer-expansion scratch space) — MUST use `ngx_alloc` /
-  `ngx_free`.  Pool-allocating such a buffer and later calling
-  `ngx_free` on it counts as undefined behavior: `ngx_free` calls the system
-  `free()`, which expects a heap pointer from `malloc`/`ngx_alloc`, not
-  a pool-internal pointer from `ngx_palloc`/`ngx_pcalloc`.  Conversely,
-  a buffer allocated with `ngx_alloc` must never free via
-  `ngx_pfree` — use `ngx_free` exclusively.
-- **Fixed-size pool buffers**: a buffer allocated once from the request
-  pool with `ngx_pnalloc`/`ngx_pcalloc` and never resized or
-  independently freed remains valid until pool teardown — it needs no
-  independent free at all. Only the rare eligible large-pool allocations
-  (allocations made from the large-block list,
-  which NGINX can return early) may use `ngx_pfree`; call it only on such pointers, and
-  handle its return value (`NGX_DECLINED` means the block was not
-  released because it is not a large-pool allocation). Never use
+  `ctx->buffer.data` but also streaming decompression workspaces (for example
+  zlib `finish()` output buffers, `apply_limits` temporary buffers,
+  buffer-expansion scratch space) — MUST use `ngx_alloc` / `ngx_free`.
+  Pool-allocating such a buffer and later calling `ngx_free` on it counts as
+  undefined behavior: `ngx_free` calls the system `free()`, which expects a heap
+  pointer from `malloc`/`ngx_alloc`, not a pool-internal pointer from
+  `ngx_palloc`/`ngx_pcalloc`. Conversely, a buffer allocated with `ngx_alloc`
+  must never free through `ngx_pfree` — use `ngx_free` exclusively.
+-  **Fixed-size pool buffers**: a buffer allocated once from the request pool
+  with `ngx_pnalloc`/`ngx_pcalloc` and never resized or independently freed
+  remains valid until pool teardown. It needs no independent free at all. Only
+  the rare eligible large-pool allocations (allocations made from the
+  large-block list, which NGINX can return early) may use `ngx_pfree`. Call it
+  only on such pointers, and handle its return value (`NGX_DECLINED` means the
+  block was not released because it is not a large-pool allocation). Never use
   `ngx_pfree` as a substitute for `ngx_free` on heap pointers.
 - **Decompression finish workspace**: The zlib `finish()` path may
   need to grow its output buffer when compressed data expands beyond
@@ -82,13 +80,12 @@ Required:
   `ngx_pfree` to avoid mixing allocation lifetimes. Historical issue:
   commit `1956124f` switched decompression from heap to pool-backed
   to prevent pool expansion side effects.
-- **Free-on-all-exits discipline**: Every `ngx_alloc`-backed buffer
-  introduced in a streaming or decompression path must have a matching
-  `ngx_free` on every exit path — success, error, overflow, and
-  panic/abort.  Use `goto` cleanup labels or NGINX pool cleanup handlers
-  to ensure no exit skips the free.  When adding a new exit path to an
-  existing function that already holds an `ngx_alloc`-backed buffer,
-  audit all exits in the same changeset.
+-  **Free-on-all-exits discipline**: Every `ngx_alloc`-backed buffer introduced
+  in a streaming or decompression path must have a matching `ngx_free` on every
+  exit path. Success, error, overflow, and panic/abort. Use `goto` cleanup
+  labels or NGINX pool cleanup handlers to make sure no exit skips the free.
+  When adding a new exit path to an existing function that already holds an
+  `ngx_alloc`-backed buffer, audit all exits in the same changeset.
 
 Verification:
 - `grep -n 'ngx_p.*alloc.*buffer\\\\.data\\|ngx_pfree.*buffer'

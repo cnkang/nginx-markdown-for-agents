@@ -6,12 +6,13 @@ Accepted (0.9.0 contract freeze — initial contract phase)
 
 ## Context
 
-`ngx_http_markdown_header_plan.c` already exists with SET/DELETE/MODIFY/DELETE-ALL
-operations and rollback support. However, several response-header mutations still
-happen **outside** HeaderPlan (in-place on `r->headers_out`), and the existing
-apply path interleaves allocation with mutation. Because NGINX pool allocation
-**cannot roll back**, an allocation failure mid-apply can leave headers
-partially mutated — a correctness and fail-open hazard (AGENTS.md Rule 39).
+`ngx_http_markdown_header_plan.c` already exists with
+SET/DELETE/MODIFY/DELETE-ALL operations and rollback support. However, several
+response-header mutations still happen **outside** HeaderPlan (in-place on
+`r->headers_out`), and the existing apply path interleaves allocation with
+mutation. Because NGINX pool allocation **cannot roll back**, an allocation
+failure mid-apply can leave headers partially mutated. A correctness and
+fail-open hazard (AGENTS.md Rule 39).
 
 The local 0.9.0 working inventory records exceptions from the current
 scattered-mutation map and the documented full-response-synthesis contract.
@@ -49,14 +50,13 @@ succeeds.**
   apply (Rule 39).
 
 ETag, `Vary: Accept`, token, and authentication-header operations are **not**
-handled in the HeaderPlan commit. They are C-side post-plan operations (see
-the atomic scope boundary below). This keeps them consistent with the
-rationale: ETag set/clear and Vary add execute in C after the plan commits.
-The HeaderPlan atomicity invariant therefore applies **only to the core
-wire-critical fields Content-Type, Content-Encoding, and Content-Length**.
-Status and `last_modified_time`, along with ETag, Vary, token, and
-authentication-header operations, are explicitly exempt via the atomic-scope
-exception below.
+handled in the HeaderPlan commit. They are C-side post-plan operations (see the
+atomic scope boundary below). This keeps them consistent with the rationale:
+ETag set/clear and Vary add execute in C after the plan commits. The HeaderPlan
+atomicity invariant therefore applies **only to the core wire-critical fields
+Content-Type, Content-Encoding, and Content-Length**. Status and
+`last_modified_time`, along with ETag, Vary, token, and authentication-header
+operations, are explicitly exempt through the atomic-scope exception below.
 
 HeaderPlan is the sole authority for invalidating an upstream
 `Content-Length`: it removes the stale list entries and clears the scalar
@@ -68,12 +68,11 @@ omits it when the new representation length is not known.
 
 ### Streaming vs full-buffer header matrix
 
-- **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
+-  **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
   (headers commit before the transformed body is known), `If-None-Match` not
-  supported, and the converted representation clears the source
-  `Last-Modified` (`last_modified_time = -1`), so `If-Modified-Since` never
-  validates a converted response — source IMS applies to pass-through
-  responses only.
+  supported, and the converted representation clears the source `Last-Modified`
+  (`last_modified_time = -1`), so `If-Modified-Since` never validates a
+  converted response. Source IMS applies to pass-through responses only.
 - **Full-buffer**: when `markdown_cache_validation full` and a transformed
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
@@ -137,12 +136,12 @@ directly affect wire-level correctness:
 
 The following **post-plan operations** execute after the plan commits
 successfully. They are **pre-send best-effort with hard abort**: a failure in
-any of them returns `NGX_ERROR` before the module calls `ngx_http_send_header()`, so
-no partially-mutated headers reach the wire. However, they fall outside
-the plan's rollback guarantee — a failure here leaves the already-committed
-core mutations in place (which is safe: Content-Type/Content-Encoding/old
-Content-Length are already correct, and the request will error out before
-headers are sent).
+any of them returns `NGX_ERROR` before the module calls
+`ngx_http_send_header()`, so no partially-mutated headers reach the wire.
+However, they fall outside the plan's rollback guarantee. A failure here leaves
+the already-committed core mutations in place (which is safe:
+Content-Type/Content-Encoding/old Content-Length are already correct, and the
+request will error out before headers are sent).
 
 | Post-plan operation | Failure handling |
 |---------------------|------------------|
