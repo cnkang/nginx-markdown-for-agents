@@ -672,9 +672,26 @@ def _sorted_enum(values: List[Any]) -> List[Any]:
     return sorted(values, key=lambda value: (value is None, str(value)))
 
 
+def _schema_types(schema: Dict[str, Any]) -> set:
+    """Return the declared JSON types of a resolved schema as a set.
+
+    A type list such as ``["array", "null"]`` still describes an array, so
+    the projection must not skip its structure.
+    """
+    declared = schema.get("type")
+    if isinstance(declared, list):
+        return {item for item in declared if isinstance(item, str)}
+    return {declared} if isinstance(declared, str) else set()
+
+
 def _is_object_schema(schema: Dict[str, Any]) -> bool:
     """Return True when a resolved schema describes an object."""
-    return schema.get("type") == "object" or "properties" in schema
+    return "object" in _schema_types(schema) or "properties" in schema
+
+
+def _is_array_schema(schema: Dict[str, Any]) -> bool:
+    """Return True when a resolved schema describes an array."""
+    return "array" in _schema_types(schema)
 
 
 def _schema_nested(
@@ -688,7 +705,7 @@ def _schema_nested(
         nested["additional_properties"] = _schema_additional_properties(schema)
         nested["required_children"] = sorted(schema.get("required") or [])
         nested["properties"] = _schema_properties(schema, defs, depth + 1)
-    if schema.get("type") == "array":
+    if _is_array_schema(schema):
         nested.update(_schema_items(schema, defs, depth + 1))
     return nested
 
@@ -727,7 +744,7 @@ def _schema_items(
     item = _resolve_ref(item_schema, defs)
     if not item:
         raise ContractError("array field declares no item schema")
-    if item.get("type") == "array":
+    if _is_array_schema(item):
         raise ContractError(
             "nested array items are unsupported by the diagnostics projection"
         )
@@ -737,6 +754,8 @@ def _schema_items(
         "items_additional_properties": _schema_additional_properties(item),
         "items_properties": _schema_properties(item, defs, depth),
     }
+    if "enum" in item:
+        projected["items_enum"] = _sorted_enum(item["enum"])
     constraints = _schema_constraints(item)
     if constraints:
         projected["items_constraints"] = constraints
