@@ -109,7 +109,9 @@ def _overlay_entry(source: Path, target: Path) -> None:
         return
     if source.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.is_dir():
+        # copy2 follows a destination symlink and would overwrite its target,
+        # so the link itself is removed before the regular file is copied.
+        if target.is_symlink() or target.is_dir():
             _remove_overlay_target(target)
         shutil.copy2(source, target)
         return

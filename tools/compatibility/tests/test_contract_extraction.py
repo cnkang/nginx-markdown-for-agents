@@ -1101,3 +1101,28 @@ def test_worktree_reader_rejects_symlinked_contract_inputs(tmp_path):
     for path in ("link.txt", "linked/child.txt"):
         with pytest.raises(ContractError, match="not a regular file"):
             reader.read_bytes(path)
+
+
+def test_fixture_overlay_replaces_a_destination_symlink(tmp_path):
+    """Copying a regular file replaces the link without writing its target."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    repo.mkdir()
+    worktree.mkdir()
+    subprocess.run(
+        ["git", "init", str(repo)],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    (repo / "link.txt").write_text("overlay", encoding="utf-8")
+    (worktree / "target.txt").write_text("original", encoding="utf-8")
+    os.symlink("target.txt", worktree / "link.txt")
+
+    _overlay(repo, worktree)
+
+    assert not (worktree / "link.txt").is_symlink()
+    assert (worktree / "link.txt").read_text(encoding="utf-8") == "overlay"
+    assert (worktree / "target.txt").read_text(encoding="utf-8") == "original"
