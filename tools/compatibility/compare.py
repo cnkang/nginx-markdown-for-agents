@@ -722,10 +722,73 @@ def _compare_field_required_children(
         )
 
 
+def _compare_child_enum(
+    result: Comparison, name: str, child: str, old: Dict[str, Any], new: Dict[str, Any]
+) -> None:
+    """Compare the allowed values of one child field of a diagnostics object."""
+    old_enum = set(old.get("enum") or [])
+    new_enum = set(new.get("enum") or [])
+    if old.get("enum") is not None and new.get("enum") is None:
+        result.add(
+            "diagnostics",
+            ADDITIVE,
+            "child-enum-removed:{}:{}".format(name, child),
+            "diagnostics field {} no longer restricts {}".format(name, child),
+            _sort_mixed_values(old_enum),
+            None,
+        )
+    elif new.get("enum") is not None and old.get("enum") is None:
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "child-enum-added:{}:{}".format(name, child),
+            "diagnostics field {} of {} gained a closed value set".format(name, child),
+            None,
+            _sort_mixed_values(new_enum),
+        )
+    elif old_enum - new_enum:
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "child-enum-narrowed:{}:{}".format(name, child),
+            "diagnostics field {} of {} lost an allowed value".format(name, child),
+            _sort_mixed_values(old_enum - new_enum),
+            None,
+        )
+    elif new_enum - old_enum:
+        result.add(
+            "diagnostics",
+            ADDITIVE,
+            "child-enum-widened:{}:{}".format(name, child),
+            "diagnostics field {} of {} gained an allowed value".format(name, child),
+            None,
+            _sort_mixed_values(new_enum - old_enum),
+        )
+
+
+def _compare_retained_child(
+    result: Comparison, name: str, child: str, old: Dict[str, Any], new: Dict[str, Any]
+) -> None:
+    """Compare one child field that both object projections declare."""
+    if old["type"] != new["type"]:
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "child-type-changed:{}:{}".format(name, child),
+            "diagnostics object {} changed the type of field {}".format(name, child),
+            old["type"],
+            new["type"],
+        )
+    _compare_child_enum(result, name, child, old, new)
+    path = "{}.{}".format(name, child)
+    _compare_schema_constraints(result, path, old, new, "constraints")
+    _compare_nested_structure(result, path, old, new)
+
+
 def _compare_properties(
     result: Comparison, name: str, old: List[Dict[str, Any]], new: List[Dict[str, Any]]
 ) -> None:
-    """Compare a projected child field set, including shared field types."""
+    """Compare a projected child field set, including nested child structure."""
     old_children = _by_name(old)
     new_children = _by_name(new)
     for child in sorted(set(old_children) - set(new_children)):
@@ -747,63 +810,8 @@ def _compare_properties(
             new_children[child]["type"],
         )
     for child in sorted(set(old_children) & set(new_children)):
-        if old_children[child]["type"] != new_children[child]["type"]:
-            result.add(
-                "diagnostics",
-                BREAKING,
-                "child-type-changed:{}:{}".format(name, child),
-                "diagnostics object {} changed the type of field {}".format(name, child),
-                old_children[child]["type"],
-                new_children[child]["type"],
-            )
-        old_enum = set(old_children[child].get("enum") or [])
-        new_enum = set(new_children[child].get("enum") or [])
-        if old_children[child].get("enum") is not None and (
-            new_children[child].get("enum") is None
-        ):
-            result.add(
-                "diagnostics",
-                ADDITIVE,
-                "child-enum-removed:{}:{}".format(name, child),
-                "diagnostics field {} no longer restricts {}".format(name, child),
-                _sort_mixed_values(old_enum),
-                None,
-            )
-        elif new_children[child].get("enum") is not None and (
-            old_children[child].get("enum") is None
-        ):
-            result.add(
-                "diagnostics",
-                BREAKING,
-                "child-enum-added:{}:{}".format(name, child),
-                "diagnostics field {} of {} gained a closed value set".format(name, child),
-                None,
-                _sort_mixed_values(new_enum),
-            )
-        elif old_enum - new_enum:
-            result.add(
-                "diagnostics",
-                BREAKING,
-                "child-enum-narrowed:{}:{}".format(name, child),
-                "diagnostics field {} of {} lost an allowed value".format(name, child),
-                _sort_mixed_values(old_enum - new_enum),
-                None,
-            )
-        elif new_enum - old_enum:
-            result.add(
-                "diagnostics",
-                ADDITIVE,
-                "child-enum-widened:{}:{}".format(name, child),
-                "diagnostics field {} of {} gained an allowed value".format(name, child),
-                None,
-                _sort_mixed_values(new_enum - old_enum),
-            )
-        _compare_schema_constraints(
-            result,
-            "{}.{}".format(name, child),
-            old_children[child],
-            new_children[child],
-            "constraints",
+        _compare_retained_child(
+            result, name, child, old_children[child], new_children[child]
         )
 
 
@@ -865,14 +873,14 @@ def _compare_field_items(
     )
 
 
-def _compare_diagnostics_field(
+def _compare_nested_structure(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
-    """Compare one diagnostics schema property."""
-    _compare_field_type(result, name, old, new)
-    _compare_field_nullability(result, name, old, new)
-    _compare_field_enum(result, name, old, new)
-    _compare_schema_constraints(result, name, old, new, "constraints")
+    """Compare the array-item and object structure below one projected field.
+
+    Top-level fields and nested children share this projection, so a type
+    change at any depth reaches a finding instead of only a digest change.
+    """
     if "items_type" in old or "items_type" in new:
         _compare_field_items(result, name, old, new)
     if "required_children" not in old and "required_children" not in new:
@@ -881,6 +889,17 @@ def _compare_diagnostics_field(
     _compare_field_required_children(result, name, old, new)
     if old.get("properties") is not None and new.get("properties") is not None:
         _compare_properties(result, name, old["properties"], new["properties"])
+
+
+def _compare_diagnostics_field(
+    result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
+) -> None:
+    """Compare one diagnostics schema property."""
+    _compare_field_type(result, name, old, new)
+    _compare_field_nullability(result, name, old, new)
+    _compare_field_enum(result, name, old, new)
+    _compare_schema_constraints(result, name, old, new, "constraints")
+    _compare_nested_structure(result, name, old, new)
 
 
 def _compare_diagnostics_header(

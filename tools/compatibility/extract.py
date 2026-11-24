@@ -549,6 +549,23 @@ def extract_reasons(reader: SourceReader) -> Dict[str, Any]:
 
 _REF_PREFIX = "#/$defs/"
 _REF_DEPTH_LIMIT = 8
+_SCHEMA_NESTING_LIMIT = 16
+# Keywords that never change which instances validate.  Only these may sit
+# beside a ``$ref``: a validation keyword there applies alongside the target,
+# and its ``additionalProperties`` scope excludes the target's ``properties``,
+# which a flattened projection cannot represent.
+_SCHEMA_ANNOTATION_KEYWORDS = frozenset(
+    {
+        "$comment",
+        "default",
+        "deprecated",
+        "description",
+        "examples",
+        "readOnly",
+        "title",
+        "writeOnly",
+    }
+)
 
 
 _SCHEMA_CONSTRAINT_KEYS = (
@@ -581,6 +598,7 @@ _UNSUPPORTED_SCHEMA_KEYWORDS = (
     "minContains",
     "not",
     "patternProperties",
+    "prefixItems",
     "propertyNames",
     "then",
     "unevaluatedItems",
@@ -628,8 +646,15 @@ def _resolve_ref(schema: Any, defs: Dict[str, Any], depth: int = 0) -> Dict[str,
     target = defs.get(reference[len(_REF_PREFIX):])
     if not isinstance(target, dict):
         raise ContractError("unresolved schema $ref: {!r}".format(reference))
+    siblings = {key: value for key, value in schema.items() if key != "$ref"}
+    validating = sorted(set(siblings) - _SCHEMA_ANNOTATION_KEYWORDS)
+    if validating:
+        raise ContractError(
+            "schema $ref {!r} has validation siblings the projection cannot "
+            "represent: {}".format(reference, ", ".join(validating))
+        )
     resolved = _resolve_ref(target, defs, depth + 1)
-    return {**resolved, **{key: value for key, value in schema.items() if key != "$ref"}}
+    return {**resolved, **siblings}
 
 
 def _schema_additional_properties(schema: Dict[str, Any]) -> Optional[bool]:
@@ -647,19 +672,37 @@ def _sorted_enum(values: List[Any]) -> List[Any]:
     return sorted(values, key=lambda value: (value is None, str(value)))
 
 
+def _is_object_schema(schema: Dict[str, Any]) -> bool:
+    """Return True when a resolved schema describes an object."""
+    return schema.get("type") == "object" or "properties" in schema
+
+
+def _schema_nested(
+    schema: Dict[str, Any], defs: Dict[str, Any], depth: int
+) -> Dict[str, Any]:
+    """Project the object and array structure below one resolved schema."""
+    if depth > _SCHEMA_NESTING_LIMIT:
+        raise ContractError("diagnostics schema nesting is too deep")
+    nested: Dict[str, Any] = {}
+    if _is_object_schema(schema):
+        nested["additional_properties"] = _schema_additional_properties(schema)
+        nested["required_children"] = sorted(schema.get("required") or [])
+        nested["properties"] = _schema_properties(schema, defs, depth + 1)
+    if schema.get("type") == "array":
+        nested.update(_schema_items(schema, defs, depth + 1))
+    return nested
+
+
 def _schema_properties(
-    schema: Dict[str, Any], defs: Dict[str, Any]
+    schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0
 ) -> List[Dict[str, Any]]:
-    """Project the child fields of a resolved object schema."""
+    """Project the child fields of a resolved object schema, recursively."""
     children = []
     properties = schema.get("properties") or {}
     if not isinstance(properties, dict):
         raise ContractError("diagnostics schema properties must be a mapping")
     for child, child_schema in properties.items():
         child_schema = _resolve_ref(child_schema, defs)
-        if child_schema.get("type") == "object" or "properties" in child_schema:
-            _schema_additional_properties(child_schema)
-        _schema_constraints(child_schema)
         field: Dict[str, Any] = {
             "name": child,
             "type": child_schema.get("type"),
@@ -669,11 +712,14 @@ def _schema_properties(
         constraints = _schema_constraints(child_schema)
         if constraints:
             field["constraints"] = constraints
+        field.update(_schema_nested(child_schema, defs, depth))
         children.append(field)
     return sorted(children, key=lambda item: item["name"])
 
 
-def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any]:
+def _schema_items(
+    schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0
+) -> Dict[str, Any]:
     """Project the item schema of an array field, resolving a ``$ref``."""
     item_schema = schema.get("items")
     if item_schema is None:
@@ -681,11 +727,15 @@ def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any
     item = _resolve_ref(item_schema, defs)
     if not item:
         raise ContractError("array field declares no item schema")
+    if item.get("type") == "array":
+        raise ContractError(
+            "nested array items are unsupported by the diagnostics projection"
+        )
     projected = {
         "items_type": item.get("type"),
         "items_required": sorted(item.get("required") or []),
         "items_additional_properties": _schema_additional_properties(item),
-        "items_properties": _schema_properties(item, defs),
+        "items_properties": _schema_properties(item, defs, depth),
     }
     constraints = _schema_constraints(item)
     if constraints:
@@ -711,12 +761,7 @@ def _schema_field(
     constraints = _schema_constraints(schema)
     if constraints:
         field["constraints"] = constraints
-    if schema.get("type") == "object" or "properties" in schema:
-        field["additional_properties"] = _schema_additional_properties(schema)
-        field["required_children"] = sorted(schema.get("required") or [])
-        field["properties"] = _schema_properties(schema, defs)
-    if schema.get("type") == "array":
-        field.update(_schema_items(schema, defs))
+    field.update(_schema_nested(schema, defs, 0))
     return field
 
 

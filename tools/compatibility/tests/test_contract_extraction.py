@@ -1323,3 +1323,124 @@ def test_metrics_label_sets_ignore_histogram_sample_order():
     assert [finding.finding_id for finding in added.findings] == [
         "metrics:emitted-labels-changed:" + family
     ]
+
+
+def test_schema_ref_allows_annotations_but_rejects_validation_siblings():
+    """A sibling constraint cannot overwrite the referenced constraint."""
+    defs = {"name": {"type": "string", "minLength": 1}}
+
+    field = _schema_field(
+        "value", {"$ref": "#/$defs/name", "description": "doc"}, True, defs
+    )
+    assert field["constraints"] == {"minLength": 1}
+
+    with pytest.raises(ContractError, match="validation siblings"):
+        _schema_field("value", {"$ref": "#/$defs/name", "minLength": 0}, True, defs)
+
+
+def test_schema_ref_rejects_sibling_additional_properties_scope():
+    """Referenced properties stay outside a sibling additionalProperties scope."""
+    defs = {
+        "entry": {
+            "type": "object",
+            "properties": {"optional": {"type": "string"}},
+        }
+    }
+
+    with pytest.raises(ContractError, match="additionalProperties"):
+        _schema_field(
+            "entry",
+            {"$ref": "#/$defs/entry", "additionalProperties": False},
+            False,
+            defs,
+        )
+
+
+def test_schema_extractor_rejects_prefix_items():
+    """Positional array constraints cannot pass as a homogeneous item schema."""
+    with pytest.raises(ContractError, match="prefixItems"):
+        _schema_field(
+            "pair",
+            {
+                "type": "array",
+                "prefixItems": [{"type": "string"}],
+                "items": {"type": "integer"},
+            },
+            False,
+            {},
+        )
+
+
+def _nested_configuration(filter_type: str, feature_type: str) -> dict:
+    """Return a diagnostics projection with nested object and array children."""
+    defs = {
+        "effective": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["filter"],
+            "properties": {"filter": {"type": filter_type, "enum": ["on", "off"]}},
+        }
+    }
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["effective"],
+        "properties": {
+            "effective": {"$ref": "#/$defs/effective", "description": "doc"},
+            "features": {
+                "type": "array",
+                "items": {"type": feature_type, "minLength": 1},
+            },
+        },
+    }
+    return _schema_field("configuration", schema, True, defs)
+
+
+def test_schema_projection_records_nested_children():
+    """Nested object properties and array items enter the contract."""
+    children = {
+        child["name"]: child
+        for child in _nested_configuration("string", "string")["properties"]
+    }
+
+    assert children["effective"]["required_children"] == ["filter"]
+    assert children["effective"]["additional_properties"] is False
+    assert children["effective"]["properties"] == [
+        {"name": "filter", "type": "string", "enum": ["off", "on"]}
+    ]
+    assert children["features"]["items_type"] == "string"
+    assert children["features"]["items_constraints"] == {"minLength": 1}
+
+    with pytest.raises(ContractError, match="nested array"):
+        _schema_field(
+            "matrix",
+            {"type": "array", "items": {"type": "array", "items": {}}},
+            False,
+            {},
+        )
+
+
+def test_compare_reports_nested_child_type_changes():
+    """A type change below a nested object or array child is BREAKING."""
+    def surface(field):
+        return {
+            "schema_version": 3,
+            "type": "object",
+            "additional_properties": False,
+            "required": ["configuration"],
+            "fields": [field],
+        }
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(
+        result,
+        surface(_nested_configuration("string", "string")),
+        surface(_nested_configuration("integer", "integer")),
+    )
+    verdicts = {finding.finding_id: finding.verdict for finding in result.findings}
+
+    assert (
+        verdicts["diagnostics:child-type-changed:configuration.effective:filter"]
+        == BREAKING
+    )
+    assert verdicts["diagnostics:items-type-changed:configuration.features"] == BREAKING
