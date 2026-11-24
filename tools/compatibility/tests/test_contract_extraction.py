@@ -1649,3 +1649,14 @@ def test_schema_paths_distinguish_dotted_names_from_nesting():
     )
     assert by_id[nested].verdict == OK
     assert [finding.finding_id for finding in result.blocking()] == [flat]
+
+
+def test_schema_one_of_rejects_unresolved_references():
+    """A oneOf branch cannot record a raw reference instead of its target."""
+    defs = {"sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}
+    for alternatives in (
+        [{"$ref": "#/$defs/sha"}, {"const": "development"}],
+        [{"type": "object", "properties": {"value": {"$ref": "#/$defs/sha"}}}],
+    ):
+        with pytest.raises(ContractError, match=r"\$ref"):
+            _schema_field("source_sha", {"oneOf": alternatives}, True, defs)

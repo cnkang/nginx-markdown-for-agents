@@ -606,6 +606,15 @@ _UNSUPPORTED_SCHEMA_KEYWORDS = (
 )
 
 
+def _contains_ref(value: Any) -> bool:
+    """Return True when a schema fragment contains a ``$ref`` anywhere."""
+    if isinstance(value, dict):
+        return "$ref" in value or any(_contains_ref(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_ref(item) for item in value)
+    return False
+
+
 def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
     """Project supported JSON Schema value constraints."""
     unsupported = sorted(key for key in _UNSUPPORTED_SCHEMA_KEYWORDS if key in schema)
@@ -623,6 +632,13 @@ def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(alternative, dict):
                 raise ContractError(
                     "boolean or non-object JSON schemas are unsupported"
+                )
+            if _contains_ref(alternative):
+                # The oneOf list is recorded verbatim, so a reference would
+                # pin the pointer text and miss every change to its target.
+                raise ContractError(
+                    "diagnostics oneOf alternatives must inline their schema "
+                    "instead of using $ref"
                 )
             _schema_constraints(alternative)
     return {
