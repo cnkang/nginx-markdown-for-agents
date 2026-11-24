@@ -142,7 +142,15 @@ def isolated_worktree(tmp_path: Path):
     finally:
         # Only remove this worktree.  A repository-wide prune would race a
         # sibling worker that is still using its own checkout.
-        _run(["git", "worktree", "remove", "--force", str(worktree)], REPO_ROOT)
+        removed = _run(
+            ["git", "worktree", "remove", "--force", str(worktree)], REPO_ROOT
+        )
+        if removed.returncode != 0:
+            raise RuntimeError(
+                "cannot remove the isolated worktree {}: {}".format(
+                    worktree, removed.stderr
+                )
+            )
 
 
 def run_compat_check(worktree: Path, *extra: str) -> subprocess.CompletedProcess:
