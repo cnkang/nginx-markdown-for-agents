@@ -1708,11 +1708,12 @@ contents:
     assert "/usr/lib/nginx/modules/ghost.so" in contract["rpm_install_paths"]
 
     for content_type in ("tree", "config|tree", "unknown"):
+        contents = (
+            "name: sample\ncontents:\n  - dst: /usr/lib/nginx/modules\n"
+            "    type: {}\n".format(json.dumps(content_type))
+        )
         with pytest.raises(ContractError, match="unsupported type"):
-            _nfpm_contract(
-                "name: sample\ncontents:\n  - dst: /usr/lib/nginx/modules\n"
-                "    type: {}\n".format(json.dumps(content_type))
-            )
+            _nfpm_contract(contents)
 
 
 def test_nfpm_load_snippets_are_recorded_per_package_format():
