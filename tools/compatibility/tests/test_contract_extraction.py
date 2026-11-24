@@ -732,6 +732,27 @@ def test_diagnostics_root_enum_fails_closed():
         extract_module.extract_diagnostics(reader)
 
 
+def test_diagnostics_root_ref_fails_closed():
+    """A root-level $ref has no projection, so extraction rejects it."""
+    from tools.compatibility import extract as extract_module
+
+    class SchemaReader(SourceReader):
+        def __init__(self):
+            super().__init__(str(REPO), resolve_worktree(str(REPO)))
+
+        def read_text(self, path):
+            return json.dumps(
+                {
+                    "$ref": "#/$defs/root",
+                    "$defs": {"root": {"type": "object", "properties": {}}},
+                }
+            )
+
+    reader = SchemaReader()
+    with pytest.raises(ContractError, match=r"root-level \$ref"):
+        extract_module.extract_diagnostics(reader)
+
+
 def test_boolean_diagnostics_schema_fails_closed():
     """A boolean subschema cannot disappear as an empty object contract."""
     with pytest.raises(ContractError, match="boolean"):
