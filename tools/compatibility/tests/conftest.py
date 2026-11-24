@@ -105,7 +105,8 @@ def _overlay_entry(source: Path, target: Path) -> None:
     if source.is_dir():
         if target.is_symlink() or (target.exists() and not target.is_dir()):
             _remove_overlay_target(target)
-        shutil.copytree(source, target, dirs_exist_ok=True)
+        # A nested symlink stays a link instead of copying its target.
+        shutil.copytree(source, target, symlinks=True, dirs_exist_ok=True)
         return
     if source.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
