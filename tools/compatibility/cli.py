@@ -55,10 +55,14 @@ from tools.lib.path_validation import (  # noqa: E402
     validate_write_path_within_root,
 )
 
-DEFAULT_INDEX = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "contracts", "INDEX.json"
-)
 INDEX_FILE = "INDEX.json"
+DEFAULT_INDEX = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "contracts", INDEX_FILE
+)
+DEFAULT_INDEX_RELATIVE = os.path.join("tools", "compatibility", "contracts", INDEX_FILE)
+# The checked-in index must audit this directed release pair.  Without it, a
+# self-comparison or a reversed pair would report DOCUMENTED with no evidence.
+DEFAULT_HISTORICAL_PAIR = ("v0.9.2", "v0.9.4")
 WORKTREE_TOKEN = "WORKTREE"
 
 
@@ -129,7 +133,39 @@ def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
         raise ContractError("anchor index declares a duplicate tag")
     if index.get("baseline") not in tags:
         raise ContractError("anchor index baseline is not one of its anchors")
+    if _is_default_index(index_path, repo_root):
+        _require_default_historical_pair(index)
     return index
+
+
+def _is_default_index(index_path: str, repo_root: str) -> bool:
+    """Return True when ``index_path`` names the checked-in anchor index."""
+    candidates = {
+        os.path.realpath(DEFAULT_INDEX),
+        os.path.realpath(os.path.join(repo_root, DEFAULT_INDEX_RELATIVE)),
+    }
+    return os.path.realpath(index_path) in candidates
+
+
+def _require_default_historical_pair(index: Dict[str, Any]) -> None:
+    """Require the checked-in index to audit the expected directed pair.
+
+    A custom index keeps its own comparison records without this restriction.
+    """
+    comparisons = index.get("comparisons")
+    if not isinstance(comparisons, list):
+        raise ContractError("anchor index comparisons must be a list")
+    pairs = {
+        (record.get("from"), record.get("to"))
+        for record in comparisons
+        if isinstance(record, dict)
+    }
+    if DEFAULT_HISTORICAL_PAIR not in pairs:
+        raise ContractError(
+            "the default anchor index must compare {} -> {}".format(
+                *DEFAULT_HISTORICAL_PAIR
+            )
+        )
 
 
 def _anchor_by_tag(index: Dict[str, Any], tag: str) -> Dict[str, Any]:

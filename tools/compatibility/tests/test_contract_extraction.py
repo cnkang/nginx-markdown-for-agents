@@ -39,6 +39,7 @@ from tools.compatibility.extract import (
 )
 from tools.compatibility.model import (
     ContractError,
+    INDEX_SCHEMA,
     MANIFEST_SCHEMA,
     SURFACES,
     contract_digest,
@@ -1126,3 +1127,36 @@ def test_fixture_overlay_replaces_a_destination_symlink(tmp_path):
     assert not (worktree / "link.txt").is_symlink()
     assert (worktree / "link.txt").read_text(encoding="utf-8") == "overlay"
     assert (worktree / "target.txt").read_text(encoding="utf-8") == "original"
+
+
+def _index_with_pair(source: str, target: str) -> dict:
+    """Return a minimal valid anchor index with one comparison record."""
+    return {
+        "index_schema": INDEX_SCHEMA,
+        "baseline": "v0.9.4",
+        "anchors": [{"tag": "v0.9.2"}, {"tag": "v0.9.4"}],
+        "comparisons": [{"from": source, "to": target}],
+    }
+
+
+def test_default_index_requires_the_directed_historical_pair(tmp_path, monkeypatch):
+    """The checked-in index cannot replace its audit with a vacuous pair."""
+    from tools.compatibility import cli
+
+    for source, target in (("v0.9.4", "v0.9.4"), ("v0.9.4", "v0.9.2")):
+        monkeypatch.setattr(
+            cli, "_read_json", lambda *_, pair=(source, target): _index_with_pair(*pair)
+        )
+        with pytest.raises(ContractError, match="v0.9.2 -> v0.9.4"):
+            cli.load_index(str(INDEX), str(REPO))
+
+    monkeypatch.setattr(
+        cli, "_read_json", lambda *_: _index_with_pair("v0.9.2", "v0.9.4")
+    )
+    assert cli.load_index(str(INDEX), str(REPO))["baseline"] == "v0.9.4"
+
+    monkeypatch.setattr(
+        cli, "_read_json", lambda *_: _index_with_pair("v0.9.4", "v0.9.4")
+    )
+    custom = cli.load_index(str(tmp_path / "custom.json"), str(REPO))
+    assert custom["comparisons"] == [{"from": "v0.9.4", "to": "v0.9.4"}]
