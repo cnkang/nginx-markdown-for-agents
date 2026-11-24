@@ -250,7 +250,7 @@ All `unsafe` blocks in the codebase are:
 The listed suite contains 10 XSS/Markdown-injection, 6 unsafe-URL filtering, 7 XXE, 3
 URL-sanitization, and 5 defense-in-depth tests (31 tests total).
 
-**Location**: `tests/security_tests.rs`
+**Location**: `components/rust-converter/tests/security_tests.rs`
 
 **Test Categories**:
 

@@ -254,7 +254,8 @@ Tests cover the timeout mechanism with:
 
 ### Integration Tests
 
-See `tests/timeout_test.rs` for comprehensive timeout tests.
+See `components/rust-converter/tests/timeout_test.rs` for comprehensive
+timeout tests.
 
 ## Future Enhancements (v2+)
 
