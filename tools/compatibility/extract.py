@@ -874,6 +874,10 @@ def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
         "enum" not in schema,
         "the diagnostics projection does not represent a root-level enum",
     )
+    require(
+        "$ref" not in schema,
+        "the diagnostics projection does not resolve a root-level $ref",
+    )
     defs = schema.get("$defs") or {}
     required = schema.get("required") or []
     properties = schema.get("properties") or {}
