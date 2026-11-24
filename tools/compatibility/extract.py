@@ -369,17 +369,83 @@ def _join_c_string_literals(text: str) -> str:
     return re.sub(r'"\s*"', "", text)
 
 
+_C_ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _unescape_c_string(text: str) -> str:
+    """Decode the C escapes a rendered label body can contain."""
+    decoded: List[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text):
+            decoded.append(_C_ESCAPES.get(text[index + 1], text[index + 1]))
+            index += 2
+            continue
+        decoded.append(char)
+        index += 1
+    return "".join(decoded)
+
+
+def _split_label_body(body: str) -> List[str]:
+    """Split a label body on commas that sit outside a quoted value."""
+    parts: List[str] = []
+    start = 0
+    quoted = False
+    escaped = False
+    for index, char in enumerate(body):
+        if escaped:
+            escaped = False
+        elif char == "\\" and quoted:
+            escaped = True
+        elif char == '"':
+            quoted = not quoted
+        elif char == "," and not quoted:
+            parts.append(body[start:index])
+            start = index + 1
+    parts.append(body[start:])
+    return parts
+
+
+def _has_unescaped_quote(value: str) -> bool:
+    """Return True when a quoted value carries a bare inner quote."""
+    escaped = False
+    for char in value[1:-1]:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            return True
+    return False
+
+
 def _parse_label_pairs(body: str) -> List[tuple]:
-    """Parse ``name=\\"value\\"`` pairs from one emitted series body."""
+    """Parse ``name=\\"value\\"`` pairs from one emitted series body.
+
+    The renderer source spells every quote as ``\\"``, so the body is decoded
+    first and then split on commas that sit outside a quoted value.  A
+    fragment that is not a complete ``name="value"`` pair fails the parse
+    instead of dropping a label the contract would then miss.
+    """
+    if not body.strip():
+        return []
     pairs: List[tuple] = []
-    for part in body.split(","):
-        name, separator, rest = part.partition('=\\"')
-        if not separator or not rest.endswith('\\"'):
-            continue
+    for part in _split_label_body(_unescape_c_string(body)):
+        name, separator, value = part.partition("=")
         name = name.strip()
-        if not name or not name.replace("_", "").isalnum():
-            continue
-        pairs.append((name, rest[: -len('\\"')]))
+        value = value.strip()
+        require(
+            bool(separator)
+            and bool(name)
+            and name.replace("_", "").isalnum()
+            and len(value) >= 2
+            and value.startswith('"')
+            and value.endswith('"')
+            and not _has_unescaped_quote(value),
+            f"malformed metrics label fragment: {part!r}",
+        )
+        pairs.append((name, value[1:-1]))
     pairs.sort()
     return pairs
 
@@ -804,6 +870,10 @@ def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
     """Extract the diagnostics wire schema contract."""
     schema = json.loads(reader.read_text(DIAGNOSTICS_SCHEMA))
     require(isinstance(schema, dict), "diagnostics schema must be a JSON object")
+    require(
+        "enum" not in schema,
+        "the diagnostics projection does not represent a root-level enum",
+    )
     defs = schema.get("$defs") or {}
     required = schema.get("required") or []
     properties = schema.get("properties") or {}
@@ -1088,13 +1158,41 @@ def _nfpm_layout(
     return _layout_entries(entries, packager)
 
 
+_DEB_DEPENDENCY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9+.-]*")
+_DEB_NGINX_CONSTRAINT = re.compile(
+    r"\(\s*(?P<operation>[=<>!]+)\s+"
+    r"(?P<value>\$\{(?P<placeholder>[A-Z_]+)\}|[0-9][0-9A-Za-z.+~:_-]*)"
+    r"\s*\)"
+)
+
+
 def _nfpm_deb_constraints(dependencies: List[str]) -> List[List[str]]:
-    """Extract recognized NGINX constraints from DEB dependency strings."""
+    """Extract recognized NGINX constraints from DEB dependency strings.
+
+    A literal bound such as ``nginx (= 1.30.7)`` is recorded like a
+    placeholder bound, and any other expression on the nginx package fails
+    closed instead of disappearing from the contract.
+    """
     constraints = set()
-    pattern = r"nginx\s+\(([=<>!]+)\s+\$\{([A-Z_]+)\}\)"
     for dependency in dependencies:
-        if match := re.fullmatch(pattern, dependency):
-            constraints.add((match[1], match[2]))
+        text = dependency.strip()
+        name = _DEB_DEPENDENCY_NAME.match(text)
+        if name is None or name.group(0) != "nginx":
+            continue
+        expression = text[name.end():].strip()
+        if not expression:
+            continue
+        match = _DEB_NGINX_CONSTRAINT.fullmatch(expression)
+        if match is None:
+            raise ContractError(
+                "unrecognized NGINX dependency constraint: {!r}".format(dependency)
+            )
+        constraints.add(
+            (
+                match.group("operation"),
+                match.group("placeholder") or match.group("value"),
+            )
+        )
     return [list(item) for item in sorted(constraints)]
 
 
