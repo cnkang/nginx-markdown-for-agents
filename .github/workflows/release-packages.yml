@@ -1533,11 +1533,10 @@ jobs:
 
           ./packaging/scripts/validate-version.sh "${PKG_VERSION}"
 
-          # Map the release identity onto the two package families.  A
-          # prerelease keeps the base version for RPM and moves the prerelease
-          # marker into the version field behind `~`, while Debian uses the same
-          # `~` separator in its upstream version, so that 1.0.0~rc1 sorts below
-          # 1.0.0.  See packaging/scripts/release_version.py.
+          # Map the release identity onto both package families. The mapper
+          # encodes prerelease identifiers after `~` so Debian and RPM preserve
+          # SemVer ordering and still sort prereleases below the final version.
+          # See packaging/scripts/release_version.py.
           DEB_VERSION="$(python3 packaging/scripts/release_version.py \
             --version "${PKG_VERSION}" --nginx-version "${NGINX_VERSION}" --field deb_version)"
           DEB_RELEASE="$(python3 packaging/scripts/release_version.py \

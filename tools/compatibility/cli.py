@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 # Bootstrap the repository root before the tools.* imports so the module also
@@ -110,14 +111,20 @@ def _repo_root(args: argparse.Namespace, contracts_dir: str) -> str:
 def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
     """Load and validate the anchor index."""
     index = _read_json(index_path, repo_root)
+    if not isinstance(index, dict):
+        raise ContractError("anchor index must be a JSON object")
     if index.get("index_schema") != INDEX_SCHEMA:
         raise ContractError(
             "anchor index schema must be {}".format(INDEX_SCHEMA)
         )
-    anchors = index.get("anchors") or []
-    if not anchors:
+    anchors = index.get("anchors")
+    if not isinstance(anchors, list) or not anchors:
         raise ContractError("anchor index declares no anchors")
+    if any(not isinstance(anchor, dict) for anchor in anchors):
+        raise ContractError("anchor index entries must be JSON objects")
     tags = [anchor.get("tag") for anchor in anchors]
+    if any(not isinstance(tag, str) or not tag for tag in tags):
+        raise ContractError("anchor index entries must declare a tag")
     if len(tags) != len(set(tags)):
         raise ContractError("anchor index declares a duplicate tag")
     if index.get("baseline") not in tags:
@@ -160,18 +167,37 @@ def _tag_product_version(tag: str) -> str:
 def _load_manifest(path: str, root: str) -> Dict[str, Any]:
     """Load and lightly validate a frozen manifest inside ``root``."""
     manifest = _read_json(path, root)
+    return _validate_manifest(manifest, path)
+
+
+def _validate_manifest(manifest: Any, path: str) -> Dict[str, Any]:
+    """Validate a decoded manifest without reopening its source file."""
+    if not isinstance(manifest, dict):
+        raise ContractError("{} must be a JSON object".format(path))
     if manifest.get("manifest_schema") != MANIFEST_SCHEMA:
         raise ContractError("{} has an unexpected manifest schema".format(path))
-    missing = [name for name in SURFACES if name not in (manifest.get("surfaces") or {})]
+    surfaces = manifest.get("surfaces")
+    if not isinstance(surfaces, dict):
+        raise ContractError("{} must declare its surfaces as an object".format(path))
+    missing = [name for name in SURFACES if name not in surfaces]
     if missing:
         raise ContractError(
             "{} is missing contract surfaces: {}".format(path, ", ".join(missing))
         )
+    if any(not isinstance(surfaces[name], dict) for name in SURFACES):
+        raise ContractError("{} contains a malformed contract surface".format(path))
+    source = manifest.get("source")
+    if not isinstance(source, dict) or not isinstance(source.get("commit"), str):
+        raise ContractError("{} must record a source commit".format(path))
+    if not isinstance(manifest.get("product_version"), str):
+        raise ContractError("{} must record a product version".format(path))
     return manifest
 
 
-def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) -> Dict[str, Any]:
-    """Prove one anchor still matches its manifest and its release tag."""
+def _verify_anchor_with_manifest(
+    repo_root: str, anchor: Dict[str, Any], contracts_dir: str
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Verify an anchor and return the exact manifest bytes that were checked."""
     tag = anchor["tag"]
     path = _manifest_path(contracts_dir, anchor["manifest"])
     try:
@@ -192,7 +218,10 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
                 anchor["manifest"], actual_file_digest, anchor["manifest_sha256"]
             )
         )
-    manifest = _load_manifest(path, contracts_dir)
+    try:
+        manifest = _validate_manifest(json.loads(payload), path)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ContractError("malformed JSON in {}: {}".format(path, error))
     # Recompute from the surfaces: a stored digest that does not describe the
     # content it sits next to proves nothing.
     recomputed_digest = contract_digest(manifest["surfaces"])
@@ -222,6 +251,16 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
                 anchor["manifest"], manifest["source"]["commit"], anchor["commit"]
             )
         )
+    expected_product_version = _tag_product_version(tag)
+    if manifest["product_version"] != expected_product_version:
+        raise ContractError(
+            "{} records product version {} but tag {} names {}".format(
+                anchor["manifest"],
+                manifest["product_version"],
+                tag,
+                expected_product_version,
+            )
+        )
     # Resolve the tag once.  Verification and extraction must describe the
     # same object even if the tag moves while the gate runs.
     revision = resolve_tag(repo_root, tag)
@@ -232,7 +271,7 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
             )
         )
     expected_tag_object = anchor.get("tag_object")
-    if expected_tag_object is not None and revision.tag_object != expected_tag_object:
+    if revision.tag_object != expected_tag_object:
         raise ContractError(
             "tag {} no longer resolves to the recorded tag object {}".format(
                 tag, expected_tag_object
@@ -252,7 +291,7 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
                 tag, tag, extracted["contract_digest"], recorded_digest
             )
         )
-    return {
+    record = {
         "tag": tag,
         "commit": revision.commit,
         "tag_object": revision.tag_object,
@@ -261,22 +300,24 @@ def verify_anchor(repo_root: str, anchor: Dict[str, Any], contracts_dir: str) ->
         "contract_digest": recorded_digest,
         "surfaces_verified": sorted(SURFACES),
     }
+    return record, manifest
+
+
+def verify_anchor(
+    repo_root: str, anchor: Dict[str, Any], contracts_dir: str
+) -> Dict[str, Any]:
+    """Prove one anchor still matches its manifest and its release tag."""
+    record, _ = _verify_anchor_with_manifest(repo_root, anchor, contracts_dir)
+    return record
 
 
 def _historical_comparison(
-    index: Dict[str, Any],
     record: Dict[str, Any],
-    contracts_dir: str,
+    manifests: Dict[str, Dict[str, Any]],
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Audit one declared tag-to-tag comparison against its documented delta."""
-    baseline_anchor = _anchor_by_tag(index, record["from"])
-    candidate_anchor = _anchor_by_tag(index, record["to"])
-    baseline = _load_manifest(
-        _manifest_path(contracts_dir, baseline_anchor["manifest"]), contracts_dir
-    )
-    candidate = _load_manifest(
-        _manifest_path(contracts_dir, candidate_anchor["manifest"]), contracts_dir
-    )
+    baseline = manifests[record["from"]]
+    candidate = manifests[record["to"]]
     result = compare_contracts(
         baseline, candidate, record["from"], record["to"]
     )
@@ -373,24 +414,29 @@ def _print_findings(report: Dict[str, Any], limit: int = 60) -> None:
 
 def _verify_every_anchor(
     repo_root: str, index: Dict[str, Any], contracts_dir: str
-) -> List[Dict[str, Any]]:
-    """Verify each anchor and print its provenance."""
-    records = [
-        verify_anchor(repo_root, anchor, contracts_dir) for anchor in index["anchors"]
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Verify every anchor and retain the checked manifest contents."""
+    verified = [
+        _verify_anchor_with_manifest(repo_root, anchor, contracts_dir)
+        for anchor in index["anchors"]
     ]
+    records = [record for record, _ in verified]
+    manifests = {
+        record["tag"]: manifest for record, manifest in verified
+    }
     for record in records:
         _print_anchor(record)
-    return records
+    return records, manifests
 
 
 def _audit_historical(
-    index: Dict[str, Any], contracts_dir: str
+    index: Dict[str, Any], manifests: Dict[str, Dict[str, Any]]
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Audit every declared tag-to-tag comparison."""
     reports: List[Dict[str, Any]] = []
     failures: List[str] = []
     for record in index.get("comparisons") or []:
-        report, problems = _historical_comparison(index, record, contracts_dir)
+        report, problems = _historical_comparison(record, manifests)
         reports.append(report)
         _print_comparison(
             report, "historical {}: ".format(record.get("expect", "contract_stable"))
@@ -404,14 +450,11 @@ def _audit_historical(
 def _compare_candidate(
     repo_root: str,
     index: Dict[str, Any],
-    contracts_dir: str,
+    manifests: Dict[str, Dict[str, Any]],
     args: argparse.Namespace,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Compare the candidate and return its report and blocking findings."""
-    baseline_anchor = _anchor_by_tag(index, index["baseline"])
-    baseline = _load_manifest(
-        _manifest_path(contracts_dir, baseline_anchor["manifest"]), contracts_dir
-    )
+    baseline = manifests[index["baseline"]]
     revision = _candidate_revision(repo_root, args.candidate)
     candidate = build_manifest(repo_root, revision, args.product_version or "candidate")
     comparison = compare_contracts(
@@ -457,10 +500,10 @@ def check_command(args: argparse.Namespace) -> int:
             raise ContractError(str(error))
     index = load_index(index_path, repo_root)
     _print_header(index_path)
-    anchors = _verify_every_anchor(repo_root, index, contracts_dir)
-    historical, failures = _audit_historical(index, contracts_dir)
+    anchors, manifests = _verify_every_anchor(repo_root, index, contracts_dir)
+    historical, failures = _audit_historical(index, manifests)
     candidate_report, blocking = _compare_candidate(
-        repo_root, index, contracts_dir, args
+        repo_root, index, manifests, args
     )
     if blocking:
         print()
@@ -475,7 +518,7 @@ def check_command(args: argparse.Namespace) -> int:
                 "anchors": anchors,
                 "historical": historical,
                 "candidate": candidate_report,
-                "verdict": candidate_report["verdict"],
+                "verdict": "FAIL" if failures else candidate_report["verdict"],
                 "failures": failures,
             },
         )
@@ -550,8 +593,7 @@ def freeze_command(args: argparse.Namespace) -> int:
         target, contracts_dir, purpose="anchor manifest"
     )
     payload = dump_manifest(manifest)
-    with open(target, "w", encoding="utf-8") as handle:
-        handle.write(payload)
+    _atomic_write_text(target, payload)
     record = {
         "tag": args.tag,
         "role": args.role,
@@ -565,6 +607,35 @@ def freeze_command(args: argparse.Namespace) -> int:
     print("add this anchor to {}:".format(INDEX_FILE))
     print(json.dumps(record, indent=2, sort_keys=True))
     return 0
+
+
+def _atomic_write_text(path: str, payload: str) -> None:
+    """Replace a text file atomically, preserving it if writing fails."""
+    directory = os.path.dirname(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=directory,
+            prefix=".{}-".format(os.path.basename(path)),
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = handle.name
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    except OSError as error:
+        raise ContractError("cannot atomically write {}: {}".format(path, error))
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:

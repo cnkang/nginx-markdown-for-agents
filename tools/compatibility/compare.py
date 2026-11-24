@@ -140,6 +140,11 @@ def _by_name(entries: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {entry["name"]: entry for entry in entries}
 
 
+def _sort_mixed_values(values: Iterable[Any]) -> List[Any]:
+    """Sort JSON enum values without comparing unlike Python types."""
+    return sorted(values, key=lambda value: (value is not None, str(value)))
+
+
 def _compare_directive(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
@@ -246,6 +251,18 @@ def compare_directives(
         )
     for name in sorted(set(old_map) & set(new_map)):
         _compare_directive(result, name, old_map[name], new_map[name])
+    old_sources = baseline.get("runtime_default_sources") or {}
+    new_sources = candidate.get("runtime_default_sources") or {}
+    for path in sorted(set(old_sources) | set(new_sources)):
+        if old_sources.get(path) != new_sources.get(path):
+            result.add(
+                "directives",
+                REVIEW_REQUIRED,
+                "runtime-default-source-changed:{}".format(path),
+                "directive runtime default source changed; verify documented defaults",
+                old_sources.get(path),
+                new_sources.get(path),
+            )
     if candidate["reject_only_count"] > baseline["reject_only_count"]:
         result.add(
             "directives",
@@ -558,6 +575,23 @@ def _compare_field_type(
         )
 
 
+def _compare_schema_constraints(
+    result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any], key: str
+) -> None:
+    """Require review when a projected JSON Schema constraint changes."""
+    old_constraints = old.get(key) or {}
+    new_constraints = new.get(key) or {}
+    if old_constraints != new_constraints:
+        result.add(
+            "diagnostics",
+            REVIEW_REQUIRED,
+            "schema-constraints-changed:{}".format(name),
+            "diagnostics schema constraints changed for {}".format(name),
+            old_constraints,
+            new_constraints,
+        )
+
+
 def _compare_field_nullability(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
@@ -600,7 +634,7 @@ def _compare_field_enum(
             "enum-added:{}".format(name),
             "diagnostics field {} gained a closed value set".format(name),
             None,
-            sorted(new.get("enum") or []),
+            _sort_mixed_values(new.get("enum") or []),
         )
         return
     if old_declares and not new_declares:
@@ -609,7 +643,7 @@ def _compare_field_enum(
             ADDITIVE,
             "enum-removed:{}".format(name),
             "diagnostics field {} no longer restricts its values".format(name),
-            sorted(old.get("enum") or []),
+            _sort_mixed_values(old.get("enum") or []),
             None,
         )
         return
@@ -621,7 +655,7 @@ def _compare_field_enum(
             BREAKING,
             "enum-narrowed:{}".format(name),
             "diagnostics field {} lost an allowed value".format(name),
-            sorted(old_enum - new_enum),
+            _sort_mixed_values(old_enum - new_enum),
             None,
         )
     if new_enum - old_enum:
@@ -631,24 +665,25 @@ def _compare_field_enum(
             "enum-widened:{}".format(name),
             "diagnostics field {} gained an allowed value".format(name),
             None,
-            sorted(new_enum - old_enum),
+            _sort_mixed_values(new_enum - old_enum),
         )
 
 
 def _compare_field_closed_object(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
-    """Reject an object field that stopped refusing unknown properties."""
-    if old.get("additional_properties") is False and (
-        new.get("additional_properties") is not False
-    ):
+    """Compare changes to whether an object accepts unknown properties."""
+    old_value = old.get("additional_properties")
+    new_value = new.get("additional_properties")
+    if old_value != new_value and (old_value is False or new_value is False):
+        direction = "weakened" if new_value is not False else "restricted"
         result.add(
             "diagnostics",
             BREAKING,
-            "additional-properties-weakened:{}".format(name),
-            "diagnostics object {} stopped rejecting unknown properties".format(name),
-            old.get("additional_properties"),
-            new.get("additional_properties"),
+            "additional-properties-{}:{}".format(direction, name),
+            "diagnostics object {} changed its unknown-property contract".format(name),
+            old_value,
+            new_value,
         )
 
 
@@ -724,7 +759,7 @@ def _compare_properties(
                 ADDITIVE,
                 "child-enum-removed:{}:{}".format(name, child),
                 "diagnostics field {} no longer restricts {}".format(name, child),
-                sorted(old_enum),
+                _sort_mixed_values(old_enum),
                 None,
             )
         elif new_children[child].get("enum") is not None and (
@@ -736,7 +771,7 @@ def _compare_properties(
                 "child-enum-added:{}:{}".format(name, child),
                 "diagnostics field {} of {} gained a closed value set".format(name, child),
                 None,
-                sorted(new_enum),
+                _sort_mixed_values(new_enum),
             )
         elif old_enum - new_enum:
             result.add(
@@ -744,7 +779,7 @@ def _compare_properties(
                 BREAKING,
                 "child-enum-narrowed:{}:{}".format(name, child),
                 "diagnostics field {} of {} lost an allowed value".format(name, child),
-                sorted(old_enum - new_enum),
+                _sort_mixed_values(old_enum - new_enum),
                 None,
             )
         elif new_enum - old_enum:
@@ -754,8 +789,15 @@ def _compare_properties(
                 "child-enum-widened:{}:{}".format(name, child),
                 "diagnostics field {} of {} gained an allowed value".format(name, child),
                 None,
-                sorted(new_enum - old_enum),
+                _sort_mixed_values(new_enum - old_enum),
             )
+        _compare_schema_constraints(
+            result,
+            "{}.{}".format(name, child),
+            old_children[child],
+            new_children[child],
+            "constraints",
+        )
 
 
 def _compare_field_items(
@@ -791,18 +833,23 @@ def _compare_field_items(
             None,
             sorted(new_required - old_required),
         )
-    if (
-        old.get("items_additional_properties") is False
-        and new.get("items_additional_properties") is not False
+    old_additional = old.get("items_additional_properties")
+    new_additional = new.get("items_additional_properties")
+    if old_additional != new_additional and (
+        old_additional is False or new_additional is False
     ):
+        direction = "weakened" if new_additional is not False else "restricted"
         result.add(
             "diagnostics",
             BREAKING,
-            "items-additional-properties-weakened:{}".format(name),
-            "diagnostics array items for {} stopped rejecting unknown fields".format(name),
-            old.get("items_additional_properties"),
-            new.get("items_additional_properties"),
+            "items-additional-properties-{}:{}".format(direction, name),
+            "diagnostics array items for {} changed its unknown-property contract".format(name),
+            old_additional,
+            new_additional,
         )
+    _compare_schema_constraints(
+        result, name + "[]", old, new, "items_constraints"
+    )
     _compare_properties(
         result,
         name + "[]",
@@ -818,6 +865,7 @@ def _compare_diagnostics_field(
     _compare_field_type(result, name, old, new)
     _compare_field_nullability(result, name, old, new)
     _compare_field_enum(result, name, old, new)
+    _compare_schema_constraints(result, name, old, new, "constraints")
     if "items_type" in old or "items_type" in new:
         _compare_field_items(result, name, old, new)
     if "required_children" not in old and "required_children" not in new:
@@ -831,7 +879,19 @@ def _compare_diagnostics_field(
 def _compare_diagnostics_header(
     result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
 ) -> None:
-    """Compare the schema version, the method set, and the read-only flag."""
+    """Compare the root schema and endpoint-level declarations."""
+    if baseline.get("type") != candidate.get("type"):
+        result.add(
+            "diagnostics",
+            BREAKING,
+            "root-type-changed",
+            "the diagnostics root schema changed type",
+            baseline.get("type"),
+            candidate.get("type"),
+        )
+    _compare_schema_constraints(
+        result, "root", baseline, candidate, "constraints"
+    )
     old_version = baseline.get("schema_version")
     new_version = candidate.get("schema_version")
     if old_version != new_version:
@@ -904,17 +964,19 @@ def _compare_diagnostics_top_level(
             None,
             name,
         )
-    if (
-        candidate["additional_properties"] is not False
-        and baseline["additional_properties"] is False
+    old_additional = baseline["additional_properties"]
+    new_additional = candidate["additional_properties"]
+    if old_additional != new_additional and (
+        old_additional is False or new_additional is False
     ):
+        direction = "weakened" if new_additional is not False else "restricted"
         result.add(
             "diagnostics",
             BREAKING,
-            "root-additional-properties-weakened",
-            "the diagnostics root stopped rejecting unknown properties",
-            baseline["additional_properties"],
-            candidate["additional_properties"],
+            "root-additional-properties-{}".format(direction),
+            "the diagnostics root changed its unknown-property contract",
+            old_additional,
+            new_additional,
         )
 
 
@@ -965,51 +1027,82 @@ def _compare_unlabelled_samples(
         )
 
 
-def compare_http(
-    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+def _http_binding_digests(
+    behaviour: Dict[str, Any], digests: Dict[str, str]
+) -> Dict[str, Optional[str]]:
+    """Return test paths bound to one behaviour and their digests."""
+    return {path: digests.get(path) for path in behaviour["tests"]}
+
+
+def _compare_removed_http_behaviours(
+    result: Comparison,
+    old: Dict[str, Any],
+    new: Dict[str, Any],
+    digests: Dict[str, str],
 ) -> None:
-    """Compare the behavioural HTTP contract binding."""
-    old_behaviours = baseline["behaviours"]
-    new_behaviours = candidate["behaviours"]
-    for name in sorted(set(old_behaviours) - set(new_behaviours)):
+    """Report behaviours that lost their contract-test binding."""
+    for name in sorted(set(old) - set(new)):
         result.add(
             "http",
             BREAKING,
             "behaviour-removed:{}".format(name),
             "HTTP behaviour {} is no longer bound to a contract test".format(name),
-            old_behaviours[name]["tests"],
+            _http_binding_digests(old[name], digests),
             None,
         )
-    for name in sorted(set(new_behaviours) - set(old_behaviours)):
+
+
+def _compare_added_http_behaviours(
+    result: Comparison,
+    old: Dict[str, Any],
+    new: Dict[str, Any],
+    digests: Dict[str, str],
+) -> None:
+    """Require review when a behaviour is newly bound to tests."""
+    for name in sorted(set(new) - set(old)):
         result.add(
             "http",
             REVIEW_REQUIRED,
             "behaviour-added:{}".format(name),
             "HTTP behaviour {} was added to the contract".format(name),
             None,
-            new_behaviours[name]["tests"],
+            _http_binding_digests(new[name], digests),
         )
-    for name in sorted(set(old_behaviours) & set(new_behaviours)):
-        if old_behaviours[name]["tests"] != new_behaviours[name]["tests"]:
+
+
+def _compare_retained_http_behaviours(
+    result: Comparison,
+    old: Dict[str, Any],
+    new: Dict[str, Any],
+    old_digests: Dict[str, str],
+    new_digests: Dict[str, str],
+) -> None:
+    """Compare test bindings and executors for retained behaviours."""
+    for name in sorted(set(old) & set(new)):
+        if old[name]["tests"] != new[name]["tests"]:
             result.add(
                 "http",
                 REVIEW_REQUIRED,
                 "binding-changed:{}".format(name),
                 "the test binding for HTTP behaviour {} changed".format(name),
-                old_behaviours[name]["tests"],
-                new_behaviours[name]["tests"],
+                _http_binding_digests(old[name], old_digests),
+                _http_binding_digests(new[name], new_digests),
             )
-        if old_behaviours[name]["executed_by"] != new_behaviours[name]["executed_by"]:
+        if old[name]["executed_by"] != new[name]["executed_by"]:
             result.add(
                 "http",
                 REVIEW_REQUIRED,
                 "executor-changed:{}".format(name),
                 "the executing target for HTTP behaviour {} changed".format(name),
-                old_behaviours[name]["executed_by"],
-                new_behaviours[name]["executed_by"],
+                old[name]["executed_by"],
+                new[name]["executed_by"],
             )
-    old_digests = baseline["test_file_digests"]
-    new_digests = candidate["test_file_digests"]
+
+
+def _compare_http_test_digests(
+    result: Comparison, old_digests: Dict[str, str], new_digests: Dict[str, str]
+) -> None:
+    """Require review when a bound HTTP contract test changes."""
     for path in sorted(set(old_digests) & set(new_digests)):
         if old_digests[path] != new_digests[path]:
             result.add(
@@ -1024,6 +1117,20 @@ def compare_http(
             )
 
 
+def compare_http(
+    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+) -> None:
+    """Compare the behavioural HTTP contract binding."""
+    old = baseline["behaviours"]
+    new = candidate["behaviours"]
+    old_digests = baseline["test_file_digests"]
+    new_digests = candidate["test_file_digests"]
+    _compare_removed_http_behaviours(result, old, new, old_digests)
+    _compare_added_http_behaviours(result, old, new, new_digests)
+    _compare_retained_http_behaviours(result, old, new, old_digests, new_digests)
+    _compare_http_test_digests(result, old_digests, new_digests)
+
+
 SUPPORT_TIER_RANK = {"experimental": 0, "best-effort": 1, "supported": 2}
 
 
@@ -1036,23 +1143,32 @@ def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """
     groups: Dict[str, Dict[str, Any]] = {}
     for row in contract["support"]["targets"]:
-        key = "{}/{}/{}/{}".format(
-            row["nginx_minor"], row["os"], row["libc"], row["arch"]
+        key = "{}/{}/{}/{}/{}".format(
+            row["nginx_minor"],
+            row["artifact_type"],
+            row["os"],
+            row["libc"],
+            row["arch"],
         )
         bucket = groups.setdefault(
             key,
             {
                 "nginx_minor": row["nginx_minor"],
+                "artifact_type": row["artifact_type"],
                 "os": row["os"],
                 "libc": row["libc"],
                 "arch": row["arch"],
                 "tiers": set(),
                 "blocking": False,
+                "supported_blocking": False,
                 "patches": [],
             },
         )
         bucket["tiers"].add(row["support_tier"])
         bucket["blocking"] = bucket["blocking"] or row["release_blocking"]
+        bucket["supported_blocking"] = bucket["supported_blocking"] or (
+            row["support_tier"] == "supported" and row["release_blocking"]
+        )
         bucket["patches"].append(row["nginx_version"])
     for bucket in groups.values():
         bucket["patches"].sort()
@@ -1063,9 +1179,13 @@ def _support_groups(contract: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _support_row_key(row: Dict[str, Any]) -> str:
-    """Identify one matrix row by its exact target and patch version."""
-    return "{}|{}/{}/{}".format(
-        row["nginx_version"], row["os"], row["libc"], row["arch"]
+    """Identify one matrix row by artifact, target, and patch version."""
+    return "{}|{}|{}/{}/{}".format(
+        row["nginx_version"],
+        row["artifact_type"],
+        row["os"],
+        row["libc"],
+        row["arch"],
     )
 
 
@@ -1134,6 +1254,15 @@ def _compare_support_target(
             ),
             old["patches"],
             new["patches"],
+        )
+    if old["supported_blocking"] and not new["supported_blocking"]:
+        result.add(
+            "packaging",
+            BREAKING,
+            "support-blocking-coverage-dropped:{}".format(key),
+            "{} no longer has a supported release-blocking matrix row".format(key),
+            old["supported_blocking"],
+            new["supported_blocking"],
         )
 
 
@@ -1349,8 +1478,14 @@ def apply_approvals(
     A bare gate run passes no approvals at all, so this path cannot be reached
     by accident.
     """
+    if not isinstance(approvals, dict):
+        raise ValueError("approval file must be a JSON object")
     notices: List[str] = []
-    entries = approvals.get("exceptions") or []
+    entries = approvals.get("exceptions", [])
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, dict) for entry in entries
+    ):
+        raise ValueError("approval exceptions must be a list of JSON objects")
     require_shape = approvals.get("schema") == 1
     if not require_shape:
         raise ValueError("approval file must declare \"schema\": 1")

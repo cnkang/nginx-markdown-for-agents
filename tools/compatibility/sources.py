@@ -110,11 +110,13 @@ _GIT_LOCATION_VARS = (
 
 def _git_environment() -> dict:
     """Return the process environment without inherited repository locations."""
-    return {
+    environment = {
         key: value
         for key, value in os.environ.items()
         if key not in _GIT_LOCATION_VARS
     }
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    return environment
 
 
 def _git(repo_root: str, *args: str) -> str:
@@ -170,6 +172,7 @@ def repo_root_for(path: str) -> str:
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
+            env=_git_environment(),
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise ContractError("cannot locate a git repository: {}".format(error))
@@ -232,16 +235,14 @@ class SourceReader:
         self.revision = revision
         self._cache: Dict[str, bytes] = {}
 
-    def read_bytes(self, path: str) -> bytes:
-        """Return the file bytes at the recorded revision, failing closed."""
-        if path in self._cache:
-            return self._cache[path]
-        if self.revision.kind == "worktree":
-            absolute = os.path.join(self.repo_root, path)
-            if not os.path.isfile(absolute):
-                raise ContractError(
-                    "contract input {} is missing from the working tree".format(path)
-                )
+    def _read_worktree_file(self, path: str) -> bytes:
+        """Read one regular file from the selected working tree."""
+        absolute = os.path.join(self.repo_root, path)
+        if not os.path.isfile(absolute):
+            raise ContractError(
+                "contract input {} is missing from the working tree".format(path)
+            )
+        try:
             resolved = validate_read_path(absolute, purpose="contract input")
             repository_root = os.path.realpath(self.repo_root)
             if (
@@ -251,41 +252,100 @@ class SourceReader:
                 raise ContractError(
                     "contract input {} escapes the repository".format(path)
                 )
-            try:
-                with open(resolved, "rb") as handle:
-                    payload = handle.read()
-            except OSError as error:
-                raise ContractError(
-                    "cannot read {} from the working tree: {}".format(path, error)
+            with open(resolved, "rb") as handle:
+                return handle.read()
+        except OSError as error:
+            raise ContractError(
+                "cannot read {} from the working tree: {}".format(path, error)
+            )
+
+    def _committed_blob_oid(self, path: str) -> str:
+        """Resolve one exact regular file at the recorded commit."""
+        try:
+            metadata = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    self.repo_root,
+                    "ls-tree",
+                    "-z",
+                    "--full-tree",
+                    self.revision.commit,
+                    "--",
+                    path,
+                ],
+                capture_output=True,
+                timeout=GIT_TIMEOUT_SECONDS,
+                check=False,
+                env=_git_environment(),
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ContractError(
+                "cannot read {} at {}: {}".format(path, self.revision.label, error)
+            )
+        if metadata.returncode != 0:
+            raise ContractError(
+                "contract input {} is missing at {}: {}".format(
+                    path,
+                    self.revision.label,
+                    (metadata.stderr or b"").decode("utf-8", "replace").strip(),
                 )
+            )
+        entries = [entry for entry in metadata.stdout.split(b"\0") if entry]
+        if len(entries) != 1 or b"\t" not in entries[0]:
+            raise ContractError(
+                "contract input {} is not one committed file at {}".format(
+                    path, self.revision.label
+                )
+            )
+        header, entry_path = entries[0].split(b"\t", 1)
+        fields = header.split()
+        if (
+            len(fields) != 3
+            or fields[0] not in (b"100644", b"100755")
+            or fields[1] != b"blob"
+            or entry_path != os.fsencode(path)
+        ):
+            raise ContractError(
+                "contract input {} is not a regular committed file at {}".format(
+                    path, self.revision.label
+                )
+            )
+        return fields[2].decode("ascii")
+
+    def _read_committed_file(self, path: str) -> bytes:
+        """Read one blob from the recorded commit."""
+        blob_oid = self._committed_blob_oid(path)
+        try:
+            completed = subprocess.run(
+                ["git", "-C", self.repo_root, "cat-file", "blob", blob_oid],
+                capture_output=True,
+                timeout=GIT_TIMEOUT_SECONDS,
+                check=False,
+                env=_git_environment(),
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ContractError(
+                "cannot read {} at {}: {}".format(path, self.revision.label, error)
+            )
+        if completed.returncode != 0:
+            raise ContractError(
+                "cannot read {} at {}: {}".format(
+                    path,
+                    self.revision.label,
+                    (completed.stderr or b"").decode("utf-8", "replace").strip(),
+                )
+            )
+        return completed.stdout
+
+    def read_bytes(self, path: str) -> bytes:
+        """Return the file bytes at the recorded revision, failing closed."""
+        if path in self._cache:
+            return self._cache[path]
+        if self.revision.kind == "worktree":
+            payload = self._read_worktree_file(path)
         else:
-            try:
-                completed = subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        self.repo_root,
-                        "show",
-                        "{}:{}".format(self.revision.commit, path),
-                    ],
-                    capture_output=True,
-                    timeout=GIT_TIMEOUT_SECONDS,
-                    check=False,
-                    env=_git_environment(),
-                )
-            except (OSError, subprocess.SubprocessError) as error:
-                raise ContractError(
-                    "cannot read {} at {}: {}".format(path, self.revision.label, error)
-                )
-            if completed.returncode != 0:
-                raise ContractError(
-                    "contract input {} is missing at {}: {}".format(
-                        path,
-                        self.revision.label,
-                        (completed.stderr or b"").decode("utf-8", "replace").strip(),
-                    )
-                )
-            payload = completed.stdout
+            payload = self._read_committed_file(path)
         self._cache[path] = payload
         return payload
 

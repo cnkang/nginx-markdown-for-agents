@@ -4,13 +4,13 @@
 The public release identity is SemVer (``1.0.0-rc.1``), but neither package
 family can use that string verbatim:
 
-* Debian orders a prerelease **below** the final release only through the
-  ``~`` separator, so ``1.0.0-rc.1`` becomes upstream version ``1.0.0~rc1``.
-  Written as ``1.0.0-rc1`` it would sort *above* ``1.0.0``.
+* Debian orders a prerelease **below** the final release through the ``~``
+  separator. The prerelease identifiers are encoded after it to preserve
+  SemVer ordering in both package managers.
 * RPM uses the same ``~`` marker in the ``Version`` field, because
   ``rpmvercmp`` treats a numeric leading segment as newer than a letter
   segment, so a ``Release``-first marker such as ``0.rc1`` sorts *above* the
-  existing ``nginx<ver>.1`` release.  ``Version: 1.0.0~rc1`` with the
+  existing ``nginx<ver>.1`` release. An encoded prerelease after ``~`` with the
   unchanged release sorts correctly and keeps every stable package's metadata
   identical to what earlier releases published.
 
@@ -18,13 +18,10 @@ The mapping is deliberately a pure function of the version string and the
 target NGINX version, so the release workflow, the local packaging target, and
 the ordering tests all derive the same answer.
 
-One limit is worth stating.  Both package comparators rank a digit run
-numerically, while SemVer compares an alphanumeric identifier lexically.  A
-prerelease spelled with numeric identifiers (`alpha.2`, `alpha.10`) therefore
-gets SemVer precedence in both families, and the ordering test proves it.  A
-mixed identifier written as one token (`alpha10` against `alpha2`) keeps the
-package-manager order instead.  Use the dotted form for a release where that
-distinction matters.
+Every prerelease identifier is encoded to letters. Numeric identifiers carry
+an order-preserving length prefix, and each identifier uses an explicit
+SemVer type marker and terminator. This prevents Debian and RPM from treating
+digits embedded in an alphanumeric identifier as numeric runs.
 
 Usage:
     release_version.py --version 1.0.0-rc.1 --nginx-version 1.28.3
@@ -85,23 +82,38 @@ def _split_semver(version: str) -> Dict[str, Any]:
     }
 
 
-def _debian_prerelease(prerelease: str) -> str:
-    """Return the Debian upstream suffix, preserving identifier boundaries.
+_CHARACTER_ALPHABET_SIZE = 25
 
-    Debian upstream versions may contain letters, digits, dots, plus signs,
-    tildes, and hyphens, so the SemVer text survives unchanged.  Collapsing the
-    separators would map ``rc.1`` and ``rc1`` onto the same package version.
-    """
-    return prerelease
+
+def _encode_prerelease_character(character: str) -> str:
+    """Encode one SemVer character as two order-preserving lowercase letters."""
+    value = ord(character) - ord("-")
+    high, low = divmod(value, _CHARACTER_ALPHABET_SIZE)
+    return chr(ord("b") + high) + chr(ord("b") + low)
+
+
+def _encode_prerelease(prerelease: str) -> str:
+    """Encode prerelease identifiers with SemVer ordering in both package tools."""
+    encoded = []
+    for identifier in prerelease.split("."):
+        characters = "".join(
+            _encode_prerelease_character(character) for character in identifier
+        )
+        if re.fullmatch(r"[0-9]+", identifier):
+            encoded.append("a" + "b" * len(identifier) + "a" + characters + "a")
+        else:
+            encoded.append(f"b{characters}a")
+    return "".join(encoded)
+
+
+def _debian_prerelease(prerelease: str) -> str:
+    """Return an order-preserving Debian upstream prerelease suffix."""
+    return _encode_prerelease(prerelease)
 
 
 def _rpm_prerelease(prerelease: str) -> str:
-    """Return the RPM version suffix, which may not contain a hyphen.
-
-    A SemVer identifier allows only letters, digits, and hyphens, so replacing
-    a hyphen with an underscore cannot collide with a valid identifier.
-    """
-    return prerelease.replace("-", "_")
+    """Return an order-preserving RPM prerelease suffix."""
+    return _encode_prerelease(prerelease)
 
 
 def packaging_versions(version: str, nginx_version: Optional[str] = None) -> Dict[str, Any]:
