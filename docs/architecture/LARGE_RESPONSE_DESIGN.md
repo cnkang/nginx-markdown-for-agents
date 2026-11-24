@@ -9,7 +9,7 @@ Since v0.8.0, the module supports **two conversion engines**:
 - **Full-buffer engine**: the default path, and the fallback for responses that
   stay eligible for conversion but cannot stream. It buffers the complete
   eligible response body before conversion through FFI. This remains the simplest and most tested path.
--  **Streaming engine** (enabled through `markdown_streaming`): processes HTML
+- **Streaming engine** (enabled through `markdown_streaming`): processes HTML
   incrementally through a bounded-memory pipeline. The pipeline runs charset
   detection, tokenization, sanitization, a state machine, and emission, with
   per-request memory limits and backpressure.
@@ -29,7 +29,7 @@ For background on the existing request lifecycle and buffering model, see:
 
 ## Design Principles
 
--  **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
+- **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
   conversion. `auto` prefers streaming for every response that clears the hard
   eligibility gates. It falls back to bounded full-buffer only when a response
   stays eligible for conversion but cannot stream. A response that is not

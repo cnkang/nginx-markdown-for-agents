@@ -123,7 +123,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - Preserves backpressure semantics (NGX_AGAIN handling) while decompression
   state is in-flight.
 
--  Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
+- Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
   framing as a fallback for servers that emit raw deflate. The paths decide
   differently. The **full-buffer path** tries RFC 1950 first. If RFC 1950
   decoding fails with a format error, this path replays the same input in raw
@@ -155,7 +155,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - **Gzip/deflate upstreams, streaming desired**: Use `markdown_streaming force`,
   keep `markdown_auto_decompress on`, and avoid
   `markdown_cache_validation full`.
--  **Brotli upstreams, streaming desired**: Same as gzip/deflate. Use
+- **Brotli upstreams, streaming desired**: Same as gzip/deflate. Use
   `markdown_streaming force` with `markdown_auto_decompress on`. Brotli
   streaming is active in official release artifacts. Official Linux modules
   bundle the fixed decoder. Custom builds must have a patched `libbrotlidec`

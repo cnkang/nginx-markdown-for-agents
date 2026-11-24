@@ -15,7 +15,7 @@ or review action.
 - [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`
   - A signed review record is mandatory for this item. The record must name the reviewer, the review date, the reviewed scope, and the evidence artifact.
 - [ ] Streaming configuration guide is complete — Verify: `make docs-check` plus a signed accuracy review that checks defaults, enablement, shadow mode, rollback, and failure-mode guidance
--  [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual
+- [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual
   expansion). Verify: `make docs-check` plus a signed accuracy review. The
   review checks enablement, staged rollout, rollback, and failure-mode guidance.
 - [ ] Compatibility matrix documentation is complete — Verify: `docs/project/history/compatibility-matrix-0-5-0.md` exists with all capabilities classified
@@ -46,11 +46,11 @@ or review action.
 
 ## Operations Gates
 
--  [ ] Operator can enable streaming path through documentation — Verify: config
+- [ ] Operator can enable streaming path through documentation — Verify: config
   guide + operational verification
--  [ ] Operator can roll back from streaming to full-buffer through
+- [ ] Operator can roll back from streaming to full-buffer through
   documentation — Verify: rollback docs + operational verification
--  [ ] Operator can observe streaming path behavior through metrics and logs —
+- [ ] Operator can observe streaming path behavior through metrics and logs —
   Verify: metrics endpoint + log review
 - [ ] Operator can shadow-verify streaming output — Verify: shadow mode docs + operational verification
 

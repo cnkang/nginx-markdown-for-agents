@@ -140,7 +140,7 @@ Verification:
 - `python3 tools/harness/detect_baseline_hand_edit.py --changed <paths>`
   — changed-file mode for pre-commit use: flags finalized baselines that
   changed without their raw inputs.
--  The same full audit resolves the durable measurement ref through
+- The same full audit resolves the durable measurement ref through
   `repo_commit_anchored(sha, stem)`. It tries the canonical
   `refs/tags/perf-baseline/<stem>` fast path first, then any ref that reaches
   the commit. If a shallow or tagless checkout prevents a decision, the
@@ -162,7 +162,7 @@ Verification:
   and each scenario's evidence objects at their respective levels.
 - `make perf-evidence-check` — non-blocking report-only mode, validates the
   same invariant for PR visibility.
--  **Evidence-pack regeneration check (both gates above):** The gate must
+- **Evidence-pack regeneration check (both gates above):** The gate must
   regenerate the evidence pack twice from its retained inputs (raw report and
   raw probe artifacts). It must compare the regenerated pack and its digest
   with the original values. `finalize_module_baseline.py` is the single
@@ -245,7 +245,7 @@ sort) in the same way.
 - **`tools/perf/evidence_gate.py`**: Blocking evidence gate implementation
 
 ## History
--  **2026-08-22**: Added Rule 61 clause 10, the durable measurement ref. Two
+- **2026-08-22**: Added Rule 61 clause 10, the durable measurement ref. Two
   measurement commits behind the checked-in 0.9.1 and 0.9.2 baselines had fallen
   out of every branch and tag during the 2026-08-20/21 evidence churn. The
   blocking provenance gate failed on any clean checkout, full clone included.

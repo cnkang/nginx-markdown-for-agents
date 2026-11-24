@@ -17,7 +17,7 @@ Required:
 - Flush charset decoders at EOF (`last=true`) so trailing buffered bytes get emitted or reported.
 - Do not rely on blanket lossy conversion before handling chunk-tail semantics.
 - When post-commit wrappers re-map errors, preserve original error classification/code for downstream handling and metrics.
--  html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
+- html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
   `feed()` call, not just the first. A BOM's lead byte (0xEF) can go into
   `utf8_tail` when `split_utf8_tail` splits it. If that happens, the converter
   reassembles the BOM at the start of the next `feed()`. html5ever strips
@@ -35,7 +35,7 @@ Required:
 Historical issues: e76c1584, 13189d71, b9e5fe4d.
 
 Required:
--  Supported streaming content codings must match production routing and test
+- Supported streaming content codings must match production routing and test
   payload formats. In the frozen 0.9.2 contract, gzip and deflate are
   streaming-eligible under the configured decompression/cache gates. Brotli
   additionally requires a successful `libbrotlidec` probe under
@@ -123,7 +123,7 @@ Verification:
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
 - `make test-rust` — streaming decompression tests cover zlib-wrapped and raw
   RFC 1951 deflate in both decoders, plus truncated-stream rejection.
--  `make test-nginx-unit` — C unit tests cover the no-progress guard through
+- `make test-nginx-unit` — C unit tests cover the no-progress guard through
   `TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS` and gzip member lifecycle.
 - `make verify-chunked-native-e2e-smoke` — native gzip streaming exercises
   production routing, backpressure/resume, exact output equivalence, and

@@ -46,7 +46,7 @@ Capabilities classified as `streaming-supported` work correctly under the stream
 path with no fallback required. Some carry a *(conditional)* qualifier, meaning they
 depend on a satisfied prerequisite:
 
--  **Header-filter prerequisites** (rows 12, 14): These capabilities complete
+- **Header-filter prerequisites** (rows 12, 14): These capabilities complete
   their work in the NGINX header filter phase, which runs before the body filter
   chain. The streaming engine only operates in the body filter chain. There is
   no conflict. The condition is architectural and always holds in normal
@@ -58,7 +58,7 @@ depend on a satisfied prerequisite:
 
 ### `full-buffer-only` — Why These Capabilities Cannot Stream
 
--  **Response-header ETag** (row 10): The ETag is a hash of the complete
+- **Response-header ETag** (row 10): The ETag is a hash of the complete
   Markdown output. In streaming mode, response headers (including `Content-Type`
   and `Vary`) are sent at the Commit Boundary. The moment the first Markdown
   chunk is ready. At that point the module has not computed the ETag yet.

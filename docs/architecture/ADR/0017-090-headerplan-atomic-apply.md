@@ -68,7 +68,7 @@ omits it when the new representation length is not known.
 
 ### Streaming vs full-buffer header matrix
 
--  **Streaming**: deletes/omits `Content-Length` and generates **no** ordinary
+- **Streaming**: deletes/omits `Content-Length` and generates **no** ordinary
   ETag because headers commit before the transformed body is known. Streaming
   does not support `If-None-Match`. The converted representation clears the
   source `Last-Modified` (`last_modified_time = -1`). Thus `If-Modified-Since`

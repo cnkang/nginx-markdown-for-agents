@@ -149,7 +149,7 @@ Required:
   justification in the detector.
 
 Verification:
--  `python3 tools/harness/detect_scratch_files.py` — full tracked-tree audit.
+- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree audit.
   Blocking harness gate.
 - `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
   mode wired into `.pre-commit-config.yaml`.
@@ -169,7 +169,7 @@ must fail the scan instead of producing an empty result.
 - Parses workflow jobs and steps, while allowing reusable-workflow jobs without
   shell steps.
 - Rejects missing scan roots, malformed workflow shapes, and unreadable files.
--  Runs from `harness-quick-checks`, `harness-security-checks`, and
+- Runs from `harness-quick-checks`, `harness-security-checks`, and
   `test-harness`. The mapping records these entrypoints in
   `docs/harness/routing-manifest.json`.
 

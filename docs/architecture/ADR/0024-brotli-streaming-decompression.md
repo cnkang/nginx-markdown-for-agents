@@ -87,7 +87,7 @@ reclaims the request pool.
 Reservation failures fall into three cases based on decoder input consumption, tracked independently from HTTP/output commit:
 
 - **Before input consumption (pre-commit)**: The decoder has not yet processed any compressed chunk. The allocator reports an allocation failure and the module follows the existing pre-commit replay strategy (same as other decompression failures before output commitment).
--  **After input consumption but before response commit (intermediate state)**:
+- **After input consumption but before response commit (intermediate state)**:
   The decoder has consumed one or more compressed chunks, but the module has not
   yet committed the HTTP response headers (`ngx_http_send_header()` not called).
   The workspace expansion failure triggers the configured pre-commit error
@@ -253,7 +253,7 @@ implementation adds no runtime configuration key or default:
 
 - Adds a build-time and runtime dependency on `libbrotlidec` for
   Brotli-enabled builds (official release artifacts)
--  Brotli decoder internal allocations (ring buffers, context maps) use a
+- Brotli decoder internal allocations (ring buffers, context maps) use a
   separate fixed 32 MiB per-worker workspace budget rather than the decoded
   output budget. Standard RFC 7932 streams use WBITS 10–24. The module does not
   set `BROTLI_DECODER_PARAM_LARGE_WINDOW`. The decoder rejects the RFC 9841

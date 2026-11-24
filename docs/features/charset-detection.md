@@ -11,7 +11,7 @@ decoding instead of causing rejection.
 
 ## Requirements
 
--  **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset
+- **FR-05.1**: WHEN the Upstream_Response Content-Type includes a charset
   parameter, THE Module must record that charset for diagnostics and policy. The
   module transcodes the source bytes to UTF-8 through `encoding_rs` before
   passing them to the parser.

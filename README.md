@@ -186,7 +186,7 @@ without a change. The release does not add, remove, or rename a directive.
   AlmaLinux 9 package targets move from supported to best-effort. These rows
   no longer block releases. NGINX 1.30.4 remains supported and release-blocking
   for performance baselines.
--  The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX on
+- The project supports Ubuntu 24.04 LTS and Ubuntu 26.04 LTS native NGINX on
   amd64 and arm64 through the `nginx-module-markdown-for-agents-ubuntu` package.
   That package depends on the Ubuntu ABI. An ABI-changing security update cannot
   leave the module loaded against an incompatible binary.

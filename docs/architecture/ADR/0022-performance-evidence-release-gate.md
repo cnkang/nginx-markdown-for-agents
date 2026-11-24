@@ -23,7 +23,7 @@ relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
--  **Pre-commit fail-open rate**: ≤ 5% absolute. Numerator:
+- **Pre-commit fail-open rate**: ≤ 5% absolute. Numerator:
   `precommit_failopen_total`, the count of streaming responses that failed open
   before commit. Denominator: `streaming_requests_total`, the count of responses
   that actually attempted streaming (selected the streaming engine through

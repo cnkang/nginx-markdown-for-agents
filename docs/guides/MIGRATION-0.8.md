@@ -83,7 +83,7 @@ scrape the metrics endpoint or parse structured logs, you will see new series:
 - `nginx_markdown_streaming_failure_total{phase=...,action=...}` — post-commit failures
 - `nginx_markdown_streaming_candidate_total` — candidates evaluated
 - `nginx_markdown_true_streaming_selected_total` — final streaming selections
--  `nginx_markdown_streaming_output_bytes_total` — Markdown bytes emitted
+- `nginx_markdown_streaming_output_bytes_total` — Markdown bytes emitted
   through streaming
 - `nginx_markdown_excluded_content_type_total` — requests excluded by content type
 

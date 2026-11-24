@@ -31,7 +31,7 @@ alone.
 
 ## Decision
 
--  The provenance anchor is the **commit identity**, and the release workflow
+- The provenance anchor is the **commit identity**, and the release workflow
   derives the source artifact from it. During a tag release the workflow builds
   a canonical source bundle with `git archive --format=tar` from the released
   commit, piped through `gzip -n`. The commit fixes every entry's timestamp and
@@ -42,7 +42,7 @@ alone.
   to SHA-256 to manifest to signed checksums.
 - The validator **requires** `source.sha256` for tag releases, and the release
   step fails before publication when the bundle step produced no digest. A manifest without a digest can no longer reach a release.
--  The registry under `packaging/` becomes an **audit record**. When an entry
+- The registry under `packaging/` becomes an **audit record**. When an entry
   exists, the release step compares it with the digest computed for the release
   and fails on disagreement, so the two records cannot drift apart silently. Its
   absence no longer blocks a release. This comparison replaces the previous

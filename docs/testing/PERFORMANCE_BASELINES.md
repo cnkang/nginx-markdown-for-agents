@@ -210,7 +210,7 @@ Source output from `./test_conditional_requests_real --bench-conditional`:
 
 ### Interpretation
 
--  `full_support` is significantly more expensive than `if_modified_since_only`.
+- `full_support` is significantly more expensive than `if_modified_since_only`.
   `full` performs conversion to generate/compare ETag. The gap follows. The
   extra conversion work explains it. The benchmark measures this difference.
 - The matching path is slower than the non-matching path in this microbench due to the extra 304 response setup path in the harness.
@@ -380,7 +380,7 @@ evidence rather than a native production-capacity claim.
 - `ttfb_p50_ms` — time to first decompressed byte (streaming path advantage)
 - `latency_p50_ms` / `latency_p95_ms` — total request latency
 - `streaming_requests_total` — request count routed through streaming
--  `decompression_streaming_total` — decompressions completed through streaming
+- `decompression_streaming_total` — decompressions completed through streaming
 - `precommit_failopen_total` — pre-commit fail-open count (must be zero in canonical baseline)
 - `peak_rss_bytes` / `baseline_rss_bytes` — memory regression evidence
 

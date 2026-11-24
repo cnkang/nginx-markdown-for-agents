@@ -21,7 +21,7 @@ Required:
   Fixtures must clean their own children when an assertion fails.
   Test assertions must verify production cleanup before fixture cleanup.
   Failure and interrupted-run tests must prove that host state stays unchanged.
--  **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the 0.9.2
+- **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the 0.9.2
   window needed ~10 commits to fix the detectors themselves (`076bfdc1`
   reusable-workflow boundary state, `658cb4d3` future annotations, `9fd3deba`
   regex complexity, `eaadc7fb`, `493732fe`). These fixes show that detector bugs
@@ -37,7 +37,7 @@ Required:
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
   example many small chunks plus skewed large chunks), not only a single
   two-chunk split.
--  Keep unit/property/fuzz/integration coverage coherent. Do not rely on a
+- Keep unit/property/fuzz/integration coverage coherent. Do not rely on a
   single test layer.
 - Parameterized tests must actually consume per-case inputs to drive the code
   path under test (no loops that ignore the case value and only mutate counters).
@@ -62,7 +62,7 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
--  Known-difference registries must carry structured drift classification
+- Known-difference registries must carry structured drift classification
   metadata (for example `drift_type` and `severity`) also to binary
   accept/reject flags. Parsers must degrade safely for missing/unknown values
   and tests must cover classification parsing defaults.
@@ -123,7 +123,7 @@ Required:
 - If a task requires generated artifacts (for example large fixtures or JSON
   evidence packs), generate them once and verify both existence and required
   shape (schema/required fields), not just file creation.
--  For bounded-memory/perf evidence tests, make sure fixture construction does
+- For bounded-memory/perf evidence tests, make sure fixture construction does
   not trivially force output-size-linear memory growth, inputs used to validate
   working-set bounds should separate input volume from emitted Markdown volume.
 - For bounded-memory/perf evidence fixtures, use parser-visible/pipeline-visible
@@ -143,12 +143,12 @@ Required:
 ### 22. Rust test infrastructure and feature-gated code hygiene
 
 Required:
--  Do not add helper functions that are not consumed in the same change set.
+- Do not add helper functions that are not consumed in the same change set.
   Speculative "this might be useful later" functions produce dead_code warnings
   that dilute real regression signals. If you add a helper, make sure at least
   one call site uses it before merging. Shared test-support modules are the only
   exception (see next rule).
--  Shared test utility modules included through `#[path = "..."]` in multiple
+- Shared test utility modules included through `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level. Each binary uses only a subset of the shared API, and the remaining
   functions produce noisy warnings.
@@ -184,7 +184,7 @@ Required:
 - Avoid `1 * N` identity multiplications in size-constant arrays, use `N`
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
--  **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`
+- **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`
   in patterns that match on a reference type (`&T`, `&Option<T>`, `&mut T`).
   Rust 2024 edition treats this as a hard error because the reference already
   implies borrowing. Use `ref` only when matching on an owned value where you
@@ -206,7 +206,7 @@ Required:
   line coverage bar.
 - Critical paths (auth, error handling, FFI boundary, conditional requests)
   require 90% line coverage for new code.
--  Before declaring a task complete when the change touches production source
+- Before declaring a task complete when the change touches production source
   files, run `make coverage-c` (C module) or `make coverage-rust` (Rust
   converter) and verify aggregate coverage does not regress below 80%. The
   advisory per-file thresholds logged by `collect_nginx_coverage.sh` are

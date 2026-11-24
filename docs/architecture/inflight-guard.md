@@ -74,7 +74,7 @@ markdown_limits max_inflight=64;
 - **Default**: 64
 - **Scope**: `http` only — the module rejects `max_inflight` in `server` and
   `location` contexts
--  **Value 0**: Rejected at config time — `max_inflight` must be an integer from
+- **Value 0**: Rejected at config time — `max_inflight` must be an integer from
   1 to 65535 (there is no "unlimited" value. See Overload Behavior)
 
 The default value of 64 is a conservative guardrail, not a capacity or

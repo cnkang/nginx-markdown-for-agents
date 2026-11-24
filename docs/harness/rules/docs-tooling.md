@@ -26,7 +26,7 @@ Required:
   full series name with labels (for example
   `nginx_markdown_streaming_events_total{transition="fallback"}`). Do not
   invent flat metric names that do not exist in the production output.
--  When docs reference derived rates (for example `decompression_failure_rate`),
+- When docs reference derived rates (for example `decompression_failure_rate`),
   include the computation formula using real metric names so operators can
   reproduce the calculation (for example
   `sum(rate(nginx_markdown_decompression_events_total{outcome="failure"}[5m])) /
@@ -69,7 +69,7 @@ Required:
   `Cargo.lock` (not the semver range in Cargo.toml).
 - Add new dependencies with the correct license type, copyright notice, and
   license text. Delete entries for removed dependencies.
--  Keep every sub-workspace Cargo.lock aligned with the baseline converter lock
+- Keep every sub-workspace Cargo.lock aligned with the baseline converter lock
   (`components/rust-converter/Cargo.lock`): each shared package must resolve a
   baseline version, except the versions documented in
   `CROSS_LOCK_ALLOWED_DIVERGENCES`. Rebuild with a targeted `cargo update -p
@@ -77,16 +77,16 @@ Required:
   rewrite the documented divergences. A targeted update can also move a shared
   transitive dependency past a later planned entry. The sync tool rechecks each
   package against the lock before it runs that package's cargo command.
--  Verify all dependency surfaces with one command: `python3
+- Verify all dependency surfaces with one command: `python3
   tools/ci/sync_dependency_surfaces.py --check`. The check mode writes nothing
   and runs no cargo. It is safe offline. Apply the sync by running the same
   script without `--check`.
--  Verify with the structured checker: `python3
+- Verify with the structured checker: `python3
   tools/ci/check_third_party_notices.py`. It resolves each Cargo.lock package by
   name and version and matches that version to its corresponding
   `THIRD-PARTY-NOTICES` entry. Do not compare unrelated file-order or
   line-number output with `diff`.
--  Dependabot pull requests receive the sync commit automatically from
+- Dependabot pull requests receive the sync commit automatically from
   `.github/workflows/dependabot-sync.yml`, which runs the sync tool and pushes
   only when the coverage checker passes. The workflow needs the
   `DEPENDENCY_SYNC_TOKEN` secret (fine-grained PAT, contents: write on this
@@ -113,7 +113,7 @@ Required:
   `make docs-style-check-regression` (or
   `python3 tools/docs/check_writing_style.py --changed --base REF`). The target
   requires a valid base, and invalid references fail closed.
--  The repository-wide warning budget must not grow: `make
+- The repository-wide warning budget must not grow: `make
   docs-style-check-baseline` (or `python3 tools/docs/check_writing_style.py
   --baseline`) fails when the total exceeds the retained budget in
   `DEFAULT_BASELINE` (`tools/docs/check_writing_style.py`). The maintained docs
@@ -131,7 +131,7 @@ Required:
   `make docs-style-check-regression` for changed files. The advisory scan is
   `make docs-style-check`. The repository-wide budget runs through full
   harness or release validation with `make docs-style-check-baseline`.
--  **Write-time enforcement (2026-08-21)**: the 0.9.2 window needed two post-hoc
+- **Write-time enforcement (2026-08-21)**: the 0.9.2 window needed two post-hoc
   cleanup commits (`3ffc2c0b`, `6b61e3f8`) because regressions surfaced at
   review time, not write time. A pre-commit hook (`docs-style-changed` in
   `.pre-commit-config.yaml`) now runs the changed-file gate before commit.

@@ -105,7 +105,7 @@ python3 tools/docs/check_writing_style.py [--strict|--changed --base REF|--basel
 
 - Default: reports warnings, exits 0 — safe for CI and local use.
 - `--strict`: exits 1 when warnings exist (opt-in gate).
--  `--changed --base REF`: exits 1 when a changed file (working tree + staged
+- `--changed --base REF`: exits 1 when a changed file (working tree + staged
   since the explicitly supplied valid commit `REF`) introduces any warning.
   Changed mode requires a base, and invalid or unknown options fail closed. This
   is the per-changeset gate (harness Rule 63): new or edited prose must not add
