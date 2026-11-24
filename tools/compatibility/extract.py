@@ -700,14 +700,21 @@ def _schema_types(schema: Dict[str, Any]) -> set:
     return {declared} if isinstance(declared, str) else set()
 
 
+# A structure keyword constrains matching instances even when ``type`` is
+# omitted, so its presence alone selects the object or array projection.
+_OBJECT_SCHEMA_KEYWORDS = ("properties", "required", "additionalProperties")
+
+
 def _is_object_schema(schema: Dict[str, Any]) -> bool:
-    """Return True when a resolved schema describes an object."""
-    return "object" in _schema_types(schema) or "properties" in schema
+    """Return True when a resolved schema constrains object instances."""
+    return "object" in _schema_types(schema) or any(
+        keyword in schema for keyword in _OBJECT_SCHEMA_KEYWORDS
+    )
 
 
 def _is_array_schema(schema: Dict[str, Any]) -> bool:
-    """Return True when a resolved schema describes an array."""
-    return "array" in _schema_types(schema)
+    """Return True when a resolved schema constrains array instances."""
+    return "array" in _schema_types(schema) or "items" in schema
 
 
 def _schema_nested(

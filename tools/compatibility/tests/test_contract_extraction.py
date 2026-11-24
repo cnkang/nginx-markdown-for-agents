@@ -1660,3 +1660,25 @@ def test_schema_one_of_rejects_unresolved_references():
     ):
         with pytest.raises(ContractError, match=r"\$ref"):
             _schema_field("source_sha", {"oneOf": alternatives}, True, defs)
+
+
+def test_schema_structure_keywords_apply_without_a_type():
+    """items, required, and additionalProperties project with type omitted."""
+    values = _schema_field("values", {"items": {"type": "integer"}}, False, {})
+    assert values["items_type"] == "integer"
+
+    entry = _schema_field(
+        "entry", {"required": ["id"], "additionalProperties": False}, False, {}
+    )
+    assert entry["required_children"] == ["id"]
+    assert entry["additional_properties"] is False
+
+    assert _diagnostics_verdicts(
+        _diagnostics_surface(values),
+        _diagnostics_surface(
+            _schema_field("values", {"items": {"type": "string"}}, False, {})
+        ),
+    ) == {"diagnostics:items-type-changed:values": BREAKING}
+
+    with pytest.raises(ContractError, match="nested array"):
+        _schema_field("matrix", {"items": {"items": {}}}, False, {})
