@@ -81,13 +81,13 @@ check_expected() {
 check_expected "0.9.4 DEB version" "0.9.4" "$(matrix_field 0.9.4 deb_version)"
 check_expected "0.9.4 RPM release" "nginx${NGINX_VERSION}.1" \
     "$(matrix_field 0.9.4 rpm_release)"
-check_expected "1.0.0-rc.1 DEB version" "1.0.0~rc.1" \
+check_expected "1.0.0-rc.1 DEB version" "1.0.0~bdudfaababfa" \
     "$(matrix_field 1.0.0-rc.1 deb_version)"
-check_expected "1.0.0-rc.1 RPM version" "1.0.0~rc.1" \
+check_expected "1.0.0-rc.1 RPM version" "1.0.0~bdudfaababfa" \
     "$(matrix_field 1.0.0-rc.1 rpm_version)"
 check_expected "1.0.0-rc.1 RPM release" "nginx${NGINX_VERSION}.1" \
     "$(matrix_field 1.0.0-rc.1 rpm_release)"
-check_expected "1.0.0-rc.2 DEB version" "1.0.0~rc.2" \
+check_expected "1.0.0-rc.2 DEB version" "1.0.0~bdudfaababga" \
     "$(matrix_field 1.0.0-rc.2 deb_version)"
 check_expected "1.0.0 DEB version" "1.0.0" "$(matrix_field 1.0.0 deb_version)"
 check_expected "1.0.0 RPM release" "nginx${NGINX_VERSION}.1" \
@@ -115,6 +115,10 @@ DEB_094="0.9.4-nginx${NGINX_VERSION}"
 DEB_RC1="$(matrix_field 1.0.0-rc.1 deb_version)-nginx${NGINX_VERSION}"
 DEB_RC2="$(matrix_field 1.0.0-rc.2 deb_version)-nginx${NGINX_VERSION}"
 DEB_GA="1.0.0-nginx${NGINX_VERSION}"
+DEB_ALPHA10="$(matrix_field 1.0.0-alpha10 deb_version)-nginx${NGINX_VERSION}"
+DEB_ALPHA2="$(matrix_field 1.0.0-alpha2 deb_version)-nginx${NGINX_VERSION}"
+DEB_ALPHA_DOT2="$(matrix_field 1.0.0-alpha.2 deb_version)-nginx${NGINX_VERSION}"
+DEB_ALPHA_DOT10="$(matrix_field 1.0.0-alpha.10 deb_version)-nginx${NGINX_VERSION}"
 
 ##############################################################################
 # 2. Debian ordering with dpkg
@@ -129,21 +133,14 @@ if command -v dpkg >/dev/null 2>&1; then
             fail "$1 ($2 is not lower than $3)"
         fi
     }
-    check_dpkg_lt "dpkg: 0.9.4 < 1.0.0~rc.1" "${DEB_094}" "${DEB_RC1}"
-    check_dpkg_lt "dpkg: 1.0.0~rc.1 < 1.0.0~rc.2" "${DEB_RC1}" "${DEB_RC2}"
-    check_dpkg_lt "dpkg: 1.0.0~rc.2 < 1.0.0" "${DEB_RC2}" "${DEB_GA}"
+    check_dpkg_lt "dpkg: 0.9.4 < rc.1" "${DEB_094}" "${DEB_RC1}"
+    check_dpkg_lt "dpkg: rc.1 < rc.2" "${DEB_RC1}" "${DEB_RC2}"
+    check_dpkg_lt "dpkg: rc.2 < 1.0.0" "${DEB_RC2}" "${DEB_GA}"
     check_dpkg_lt "dpkg: 1.0.0~alpha.2 < 1.0.0~alpha.10" \
-        "1.0.0~alpha.2-nginx${NGINX_VERSION}" "1.0.0~alpha.10-nginx${NGINX_VERSION}"
-    # Known limit: a mixed identifier such as `alpha10` compares digit runs
-    # numerically in dpkg, while SemVer compares it lexically (`alpha10` <
-    # `alpha2`).  The check pins the package-manager behavior so the limit is
-    # explicit; spell numeric sequences with a dot to get SemVer precedence.
-    if dpkg --compare-versions "1.0.0~alpha10-nginx${NGINX_VERSION}" gt \
-        "1.0.0~alpha2-nginx${NGINX_VERSION}"; then
-        pass "dpkg: mixed identifier alpha10 sorts after alpha2 (documented SemVer limit)"
-    else
-        fail "dpkg: expected the documented mixed-identifier ordering"
-    fi
+        "${DEB_ALPHA_DOT2}" "${DEB_ALPHA_DOT10}"
+    check_dpkg_lt "dpkg: SemVer alpha10 < alpha2" "${DEB_ALPHA10}" "${DEB_ALPHA2}"
+    check_dpkg_lt "dpkg: SemVer alpha.2 < alpha.10" \
+        "${DEB_ALPHA_DOT2}" "${DEB_ALPHA_DOT10}"
     # The trap this mapping exists for: the plain hyphen form sorts ABOVE the
     # final release, so a naive mapping would make RC the newest version.
     if dpkg --compare-versions "1.0.0-rc1-nginx${NGINX_VERSION}" gt "${DEB_GA}"; then
@@ -218,11 +215,18 @@ RPM_094="0.9.4-nginx${NGINX_VERSION}.1"
 RPM_RC1="$(matrix_field 1.0.0-rc.1 rpm_version)-$(matrix_field 1.0.0-rc.1 rpm_release)"
 RPM_RC2="$(matrix_field 1.0.0-rc.2 rpm_version)-$(matrix_field 1.0.0-rc.2 rpm_release)"
 RPM_GA="1.0.0-nginx${NGINX_VERSION}.1"
+RPM_ALPHA10="$(matrix_field 1.0.0-alpha10 rpm_version)-$(matrix_field 1.0.0-alpha10 rpm_release)"
+RPM_ALPHA2="$(matrix_field 1.0.0-alpha2 rpm_version)-$(matrix_field 1.0.0-alpha2 rpm_release)"
+RPM_ALPHA_DOT2="$(matrix_field 1.0.0-alpha.2 rpm_version)-$(matrix_field 1.0.0-alpha.2 rpm_release)"
+RPM_ALPHA_DOT10="$(matrix_field 1.0.0-alpha.10 rpm_version)-$(matrix_field 1.0.0-alpha.10 rpm_release)"
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     rpm_smoke="$(
         docker run --rm -e "RPM_094=${RPM_094}" -e "RPM_RC1=${RPM_RC1}" \
             -e "RPM_RC2=${RPM_RC2}" -e "RPM_GA=${RPM_GA}" \
+            -e "RPM_ALPHA10=${RPM_ALPHA10}" -e "RPM_ALPHA2=${RPM_ALPHA2}" \
+            -e "RPM_ALPHA_DOT2=${RPM_ALPHA_DOT2}" \
+            -e "RPM_ALPHA_DOT10=${RPM_ALPHA_DOT10}" \
             -e "NGINX_VERSION=${NGINX_VERSION}" rockylinux:9 bash -c '
 set -euo pipefail
 cmp() {
@@ -231,8 +235,8 @@ cmp() {
 rc1_vs_094="$(cmp "$RPM_RC1" "$RPM_094")"
 rc1_vs_rc2="$(cmp "$RPM_RC1" "$RPM_RC2")"
 rc2_vs_ga="$(cmp "$RPM_RC2" "$RPM_GA")"
-alpha_numeric="$(cmp "1.0.0~alpha.2-nginx${NGINX_VERSION}.1" "1.0.0~alpha.10-nginx${NGINX_VERSION}.1")"
-alpha_mixed="$(cmp "1.0.0~alpha10-nginx${NGINX_VERSION}.1" "1.0.0~alpha2-nginx${NGINX_VERSION}.1")"
+alpha_numeric="$(cmp "$RPM_ALPHA_DOT2" "$RPM_ALPHA_DOT10")"
+alpha_mixed="$(cmp "$RPM_ALPHA10" "$RPM_ALPHA2")"
 # A Release-first prerelease marker such as 0.rc1 would sort above the
 # nginx<ver>.1 release, because rpmvercmp ranks a numeric segment above a
 # letter segment.  Assert the naive shape really is wrong so the mapping
@@ -240,8 +244,8 @@ alpha_mixed="$(cmp "1.0.0~alpha10-nginx${NGINX_VERSION}.1" "1.0.0~alpha2-nginx${
 naive="$(cmp "$(printf "%s-0.rc1.nginx%s" "1.0.0" "$NGINX_VERSION")" "$RPM_GA")"
 echo "RC1_VS_094=$rc1_vs_094 RC1_VS_RC2=$rc1_vs_rc2 RC2_VS_GA=$rc2_vs_ga NAIVE=$naive ALPHA_NUMERIC=$alpha_numeric ALPHA_MIXED=$alpha_mixed"
 ' 2>&1)"
-    if [[ "${rpm_smoke}" == *"RC1_VS_094=1 RC1_VS_RC2=-1 RC2_VS_GA=-1 NAIVE=1 ALPHA_NUMERIC=-1 ALPHA_MIXED=1"* ]]; then
-        pass "rpmvercmp: 0.9.4 < rc.1 < rc.2 < 1.0.0, alpha.2 < alpha.10, mixed identifier pinned"
+    if [[ "${rpm_smoke}" == *"RC1_VS_094=1 RC1_VS_RC2=-1 RC2_VS_GA=-1 NAIVE=1 ALPHA_NUMERIC=-1 ALPHA_MIXED=-1"* ]]; then
+        pass "rpmvercmp: release, numeric, and mixed SemVer prerelease ordering"
     else
         fail "rpmvercmp ordering failed: ${rpm_smoke}"
     fi

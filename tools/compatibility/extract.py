@@ -14,11 +14,17 @@ import re
 import tomllib
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
+
 from .model import ContractError, digest_of, require, sorted_by
 from .sources import SourceReader
 
 DIRECTIVES_IMPL = "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
 DIRECTIVE_NAMES = "components/nginx-module/src/ngx_http_markdown_directive_names.h"
+CONFIG_MERGE_SOURCES = (
+    "components/nginx-module/src/ngx_http_markdown_config_merge_impl.h",
+    "components/nginx-module/src/ngx_http_markdown_filter_module.h",
+)
 METRICS_REGISTRY = "schemas/metrics-v1.registry.json"
 METRICS_RENDERER = "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
 # Both HTTP contract groups below run through the C unit suite.
@@ -326,6 +332,10 @@ def extract_directives(reader: SourceReader) -> Dict[str, Any]:
         "count": len(entries),
         "entries": sorted_by(entries, "name"),
         "declared_names": sorted(declared),
+        "runtime_default_sources": {
+            path: digest_of(reader.read_text(path))
+            for path in CONFIG_MERGE_SOURCES
+        },
         "reject_only_count": sum(
             1 for entry in entries if entry["handler"].endswith("removed_directive")
         ),
@@ -371,6 +381,7 @@ def _parse_label_pairs(body: str) -> List[tuple]:
         if not name or not name.replace("_", "").isalnum():
             continue
         pairs.append((name, rest[: -len('\\"')]))
+    pairs.sort()
     return pairs
 
 
@@ -383,21 +394,41 @@ def _type_families(joined: str) -> Dict[str, str]:
     return families
 
 
+def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
+    """Map emitted sample names to their declared family and component."""
+    samples = {name: (name, None) for name in families}
+    for name, metric_type in families.items():
+        if metric_type != "histogram":
+            continue
+        for component in ("bucket", "sum", "count"):
+            sample = name + "_" + component
+            if sample in samples:
+                raise ContractError(
+                    "ambiguous histogram sample family: {}".format(sample)
+                )
+            samples[sample] = (name, component)
+    return samples
+
+
 def _collect_series(
     joined: str, families: Dict[str, str]
 ) -> Tuple[Dict[str, set], Dict[str, List[List[str]]]]:
     """Collect emitted series and label sets per family."""
     raw_series: Dict[str, set] = {name: set() for name in families}
     labels: Dict[str, List[List[str]]] = {name: [] for name in families}
+    sample_families = _sample_family_map(families)
     for match in re.finditer(r"(nginx_markdown_[a-z0-9_]+)\{([^{}]*)\}", joined):
-        family = match.group(1)
-        if family not in families:
+        resolved = sample_families.get(match.group(1))
+        if resolved is None:
             continue
+        family, component = resolved
         pairs = _parse_label_pairs(match.group(2))
         if not pairs:
             continue
         label_names = sorted(name for name, _ in pairs)
-        raw_series[family].add("|".join(name + "=" + value for name, value in pairs))
+        raw_series[family].add(
+            (component, tuple(name + "=" + value for name, value in pairs))
+        )
         if label_names not in labels[family]:
             labels[family].append(label_names)
     return raw_series, labels
@@ -406,12 +437,19 @@ def _collect_series(
 def _unlabelled_samples(joined: str, families: Dict[str, str]) -> List[str]:
     """Return the families the renderer emits without any label block."""
     present = set()
+    sample_families = _sample_family_map(families)
     for chunk in joined.split("\\n"):
         text = chunk.lstrip('" \t')
-        for name in families:
-            if text.startswith(name + " "):
-                present.add(name)
-                break
+        sample, separator, _value = text.partition(" ")
+        if not separator:
+            continue
+        resolved = sample_families.get(sample)
+        if resolved is None:
+            continue
+        family, component = resolved
+        present.add(
+            family if component is None else "{}:{}".format(family, component)
+        )
     return sorted(present)
 
 
@@ -421,7 +459,13 @@ def _emitted_series(renderer: str) -> Dict[str, Any]:
     families = _type_families(joined)
     raw_series, labels = _collect_series(joined, families)
     series = {
-        name: [item.split("|") for item in sorted(raw_series[name])]
+        name: [
+            (["@component={}".format(component)] if component else [])
+            + list(label_values)
+            for component, label_values in sorted(
+                raw_series[name], key=lambda item: (item[0] or "", item[1])
+            )
+        ]
         for name in sorted(raw_series)
     }
     return {
@@ -492,8 +536,73 @@ _REF_PREFIX = "#/$defs/"
 _REF_DEPTH_LIMIT = 8
 
 
-def _resolve_ref(schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
+_SCHEMA_CONSTRAINT_KEYS = (
+    "const",
+    "exclusiveMaximum",
+    "exclusiveMinimum",
+    "format",
+    "maxItems",
+    "maxLength",
+    "maxProperties",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minProperties",
+    "minimum",
+    "multipleOf",
+    "oneOf",
+    "pattern",
+    "uniqueItems",
+)
+_UNSUPPORTED_SCHEMA_KEYWORDS = (
+    "allOf",
+    "anyOf",
+    "contains",
+    "dependentRequired",
+    "dependentSchemas",
+    "else",
+    "if",
+    "maxContains",
+    "minContains",
+    "not",
+    "patternProperties",
+    "propertyNames",
+    "then",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+)
+
+
+def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Project supported JSON Schema value constraints."""
+    unsupported = sorted(key for key in _UNSUPPORTED_SCHEMA_KEYWORDS if key in schema)
+    if unsupported:
+        raise ContractError(
+            "unsupported diagnostics schema keywords: {}".format(
+                ", ".join(unsupported)
+            )
+        )
+    alternatives = schema.get("oneOf")
+    if alternatives is not None:
+        if not isinstance(alternatives, list) or not alternatives:
+            raise ContractError("diagnostics oneOf must be a non-empty schema list")
+        for alternative in alternatives:
+            if not isinstance(alternative, dict):
+                raise ContractError(
+                    "boolean or non-object JSON schemas are unsupported"
+                )
+            _schema_constraints(alternative)
+    return {
+        key: schema[key]
+        for key in _SCHEMA_CONSTRAINT_KEYS
+        if key in schema
+    }
+
+
+def _resolve_ref(schema: Any, defs: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
     """Resolve a local ``$ref`` chain, failing closed when it cannot."""
+    if not isinstance(schema, dict):
+        raise ContractError("boolean or non-object JSON schemas are unsupported")
     reference = schema.get("$ref")
     if reference is None:
         return schema
@@ -504,7 +613,18 @@ def _resolve_ref(schema: Dict[str, Any], defs: Dict[str, Any], depth: int = 0) -
     target = defs.get(reference[len(_REF_PREFIX):])
     if not isinstance(target, dict):
         raise ContractError("unresolved schema $ref: {!r}".format(reference))
-    return _resolve_ref(target, defs, depth + 1)
+    resolved = _resolve_ref(target, defs, depth + 1)
+    return {**resolved, **{key: value for key, value in schema.items() if key != "$ref"}}
+
+
+def _schema_additional_properties(schema: Dict[str, Any]) -> Optional[bool]:
+    """Return a boolean additionalProperties contract or fail closed."""
+    value = schema.get("additionalProperties")
+    if value is not None and not isinstance(value, bool):
+        raise ContractError(
+            "schema-valued additionalProperties is unsupported"
+        )
+    return value
 
 
 def _sorted_enum(values: List[Any]) -> List[Any]:
@@ -512,37 +632,57 @@ def _sorted_enum(values: List[Any]) -> List[Any]:
     return sorted(values, key=lambda value: (value is None, str(value)))
 
 
-def _schema_properties(schema: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _schema_properties(
+    schema: Dict[str, Any], defs: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """Project the child fields of a resolved object schema."""
     children = []
-    for child, child_schema in (schema.get("properties") or {}).items():
+    properties = schema.get("properties") or {}
+    if not isinstance(properties, dict):
+        raise ContractError("diagnostics schema properties must be a mapping")
+    for child, child_schema in properties.items():
+        child_schema = _resolve_ref(child_schema, defs)
+        if child_schema.get("type") == "object" or "properties" in child_schema:
+            _schema_additional_properties(child_schema)
+        _schema_constraints(child_schema)
         field: Dict[str, Any] = {
             "name": child,
             "type": child_schema.get("type"),
         }
         if "enum" in child_schema:
             field["enum"] = _sorted_enum(child_schema["enum"])
+        constraints = _schema_constraints(child_schema)
+        if constraints:
+            field["constraints"] = constraints
         children.append(field)
     return sorted(children, key=lambda item: item["name"])
 
 
 def _schema_items(schema: Dict[str, Any], defs: Dict[str, Any]) -> Dict[str, Any]:
     """Project the item schema of an array field, resolving a ``$ref``."""
-    item = _resolve_ref(schema.get("items") or {}, defs)
+    item_schema = schema.get("items")
+    if item_schema is None:
+        raise ContractError("array field declares no item schema")
+    item = _resolve_ref(item_schema, defs)
     if not item:
         raise ContractError("array field declares no item schema")
-    return {
+    projected = {
         "items_type": item.get("type"),
         "items_required": sorted(item.get("required") or []),
-        "items_additional_properties": item.get("additionalProperties"),
-        "items_properties": _schema_properties(item),
+        "items_additional_properties": _schema_additional_properties(item),
+        "items_properties": _schema_properties(item, defs),
     }
+    constraints = _schema_constraints(item)
+    if constraints:
+        projected["items_constraints"] = constraints
+    return projected
 
 
 def _schema_field(
     name: str, schema: Dict[str, Any], required: bool, defs: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Normalize one diagnostics schema property."""
+    schema = _resolve_ref(schema, defs)
     field: Dict[str, Any] = {
         "name": name,
         "required": required,
@@ -553,10 +693,13 @@ def _schema_field(
     }
     if "enum" in schema:
         field["enum"] = _sorted_enum(schema["enum"])
+    constraints = _schema_constraints(schema)
+    if constraints:
+        field["constraints"] = constraints
     if schema.get("type") == "object" or "properties" in schema:
-        field["additional_properties"] = schema.get("additionalProperties")
+        field["additional_properties"] = _schema_additional_properties(schema)
         field["required_children"] = sorted(schema.get("required") or [])
-        field["properties"] = _schema_properties(schema)
+        field["properties"] = _schema_properties(schema, defs)
     if schema.get("type") == "array":
         field.update(_schema_items(schema, defs))
     return field
@@ -565,9 +708,20 @@ def _schema_field(
 def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
     """Extract the diagnostics wire schema contract."""
     schema = json.loads(reader.read_text(DIAGNOSTICS_SCHEMA))
+    require(isinstance(schema, dict), "diagnostics schema must be a JSON object")
     defs = schema.get("$defs") or {}
     required = schema.get("required") or []
     properties = schema.get("properties") or {}
+    require(isinstance(defs, dict), "diagnostics schema definitions must be a mapping")
+    require(isinstance(required, list), "diagnostics schema required must be a list")
+    require(
+        isinstance(properties, dict),
+        "diagnostics schema properties must be a mapping",
+    )
+    require(
+        all(isinstance(name, str) for name in required),
+        "diagnostics schema required entries must be strings",
+    )
     require(len(properties) > 0, "diagnostics schema declares no properties")
     fields = [
         _schema_field(name, properties[name], name in required, defs)
@@ -577,7 +731,8 @@ def extract_diagnostics(reader: SourceReader) -> Dict[str, Any]:
     return {
         "schema_version": version_field.get("const"),
         "type": schema.get("type"),
-        "additional_properties": schema.get("additionalProperties"),
+        "additional_properties": _schema_additional_properties(schema),
+        "constraints": _schema_constraints(schema),
         "required": sorted(required),
         "fields": fields,
         "methods": ["GET", "HEAD"],
@@ -639,6 +794,7 @@ def _matrix_target(entry: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "nginx_minor": "{}.{}".format(parts[0], parts[1]),
         "nginx_version": version,
+        "artifact_type": entry["artifact_type"],
         "os": entry["os"],
         "libc": entry["libc"],
         "arch": entry["arch"],
@@ -654,6 +810,20 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     the same minor that disagree cannot collapse into one value.  The
     comparator groups by minor version when it evaluates coverage.
     """
+    identities = [
+        (
+            row["nginx_version"],
+            row["artifact_type"],
+            row["os"],
+            row["libc"],
+            row["arch"],
+        )
+        for row in rows
+    ]
+    require(
+        len(identities) == len(set(identities)),
+        "release matrix declares duplicate support rows",
+    )
     return {
         "counts": {
             "total": len(rows),
@@ -670,6 +840,7 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             rows,
             key=lambda item: (
                 item["nginx_version"],
+                item["artifact_type"],
                 item["os"],
                 item["libc"],
                 item["arch"],
@@ -678,51 +849,25 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _contents_block_ended(raw: str, stripped: str) -> bool:
-    """Whether a line closes the ``contents`` block."""
-    return bool(stripped) and not raw.startswith(" ") and not stripped.startswith("-")
-
-
-def _contents_field(line: str) -> Tuple[str, str]:
-    """Classify one mapping line inside a ``contents`` entry."""
-    if line.startswith("dst:"):
-        return ("dst", line[len("dst:"):].strip().strip('"'))
-    if line.startswith("packager:"):
-        return ("packager", line[len("packager:"):].strip().strip('"'))
-    return ("", "")
-
-
-def _contents_entry_line(stripped: str) -> Tuple[str, str]:
-    """Classify one line inside the ``contents`` block.
-
-    A list item may start with any key, and the remaining keys of that item may
-    appear in any order, so the first key of an item is read from the same line
-    the item starts on.
-    """
-    if stripped.startswith("- "):
-        return _contents_field(stripped[2:].strip())
-    return _contents_field(stripped)
-
-
-def _nfpm_contents(text: str) -> List[Dict[str, str]]:
-    """Parse the nFPM ``contents`` list with each entry's packager scope."""
-    entries: List[Dict[str, str]] = []
-    started = False
-    for raw in text.splitlines():
-        stripped = raw.strip()
-        if stripped == "contents:":
-            started = True
-            continue
-        if not started:
-            continue
-        if _contents_block_ended(raw, stripped):
-            break
-        if stripped.startswith("- "):
-            entries.append({"dst": "", "packager": ""})
-        kind, value = _contents_entry_line(stripped)
-        if kind and entries:
-            entries[-1][kind] = value
-    return [entry for entry in entries if entry["dst"]]
+def _nfpm_contents(document: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Project effective nFPM contents entries and packager scopes."""
+    contents = document.get("contents")
+    require(isinstance(contents, list), "nFPM contents must be a YAML list")
+    entries = []
+    for item in contents:
+        require(isinstance(item, dict), "nFPM contents entries must be mappings")
+        destination = item.get("dst")
+        packager = item.get("packager", "")
+        require(
+            isinstance(destination, str) and bool(destination),
+            "nFPM contents entry has no destination",
+        )
+        require(
+            isinstance(packager, str) and packager in ("", "deb", "rpm"),
+            "nFPM contents entry has an unsupported packager",
+        )
+        entries.append({"dst": destination, "packager": packager})
+    return entries
 
 
 def _layout_paths(entries: List[Dict[str, str]], packager: str) -> List[str]:
@@ -734,26 +879,79 @@ def _layout_paths(entries: List[Dict[str, str]], packager: str) -> List[str]:
     )
 
 
+def _load_nfpm_document(text: str) -> Dict[str, Any]:
+    """Parse and validate the nFPM YAML root mapping."""
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        raise ContractError("malformed nFPM YAML: {}".format(error))
+    require(isinstance(document, dict), "nFPM config must be a YAML mapping")
+    return document
+
+
+def _nfpm_package_name(document: Dict[str, Any]) -> str:
+    """Return the validated package name from one nFPM document."""
+    package_name = document.get("name")
+    require(
+        isinstance(package_name, str)
+        and re.fullmatch(r"[A-Za-z0-9._-]+", package_name) is not None,
+        "nFPM config declares no valid package name",
+    )
+    return package_name
+
+
+def _nfpm_dependencies(overrides: Dict[str, Any], packager: str) -> List[str]:
+    """Return one validated package family's dependency list."""
+    package_override = overrides.get(packager) or {}
+    require(
+        isinstance(package_override, dict),
+        "nFPM {} override must be a YAML mapping".format(packager),
+    )
+    dependencies = package_override.get("depends") or []
+    require(
+        isinstance(dependencies, list)
+        and all(isinstance(item, str) for item in dependencies),
+        "nFPM {} dependencies must be a string list".format(packager),
+    )
+    return dependencies
+
+
+def _nfpm_deb_constraints(dependencies: List[str]) -> List[List[str]]:
+    """Extract recognized NGINX constraints from DEB dependency strings."""
+    constraints = set()
+    pattern = r"nginx\s+\(([=<>!]+)\s+\$\{([A-Z_]+)\}\)"
+    for dependency in dependencies:
+        match = re.fullmatch(pattern, dependency)
+        if match:
+            constraints.add((match.group(1), match.group(2)))
+    return [list(item) for item in sorted(constraints)]
+
+
+def _nfpm_rpm_constraints(dependencies: List[str]) -> List[str]:
+    """Extract recognized NGINX constraints from RPM dependency strings."""
+    constraints = set()
+    pattern = r"nginx(-r\$\{NGINX_VERSION\}|\s*>=\s*\$\{NGINX_VERSION\})"
+    for dependency in dependencies:
+        match = re.fullmatch(pattern, dependency)
+        if match:
+            constraints.add(match.group(1).replace(" ", ""))
+    return sorted(constraints)
+
+
 def _nfpm_contract(text: str) -> Dict[str, Any]:
     """Extract the package name, install layout, and dependency shape."""
-    name_match = re.search(r'^name:\s*"?([A-Za-z0-9._-]+)"?\s*$', text, re.MULTILINE)
-    if name_match is None:
-        raise ContractError("nFPM config declares no package name")
-    entries = _nfpm_contents(text)
+    document = _load_nfpm_document(text)
+    package_name = _nfpm_package_name(document)
+    entries = _nfpm_contents(document)
     require(len(entries) > 0, "nFPM config declares no contents entries")
     deb_paths = _layout_paths(entries, "deb")
     rpm_paths = _layout_paths(entries, "rpm")
-    deb_depends = sorted(set(re.findall(r'"nginx \(([=<>!]+) \$\{([A-Z_]+)\}\)"', text)))
-    rpm_depends = sorted(
-        {
-            item.replace(" ", "")
-            for item in re.findall(
-                r'"nginx(-r\$\{NGINX_VERSION\}|\s*>=\s*\$\{NGINX_VERSION\})"', text
-            )
-        }
-    )
+    overrides = document.get("overrides") or {}
+    require(isinstance(overrides, dict), "nFPM overrides must be a YAML mapping")
+    deb_dependencies = _nfpm_dependencies(overrides, "deb")
+    rpm_dependencies = _nfpm_dependencies(overrides, "rpm")
     return {
-        "package_name": name_match.group(1),
+        "package_name": package_name,
         "deb_install_paths": deb_paths,
         "rpm_install_paths": rpm_paths,
         "deb_module_path": [path for path in deb_paths if path.endswith(".so")],
@@ -761,8 +959,8 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
         "load_snippet_paths": sorted(
             path for path in set(deb_paths) | set(rpm_paths) if path.endswith(".conf")
         ),
-        "deb_nginx_constraints": [list(item) for item in deb_depends],
-        "rpm_nginx_constraints": rpm_depends,
+        "deb_nginx_constraints": _nfpm_deb_constraints(deb_dependencies),
+        "rpm_nginx_constraints": _nfpm_rpm_constraints(rpm_dependencies),
     }
 
 
@@ -784,8 +982,7 @@ def extract_http(reader: SourceReader) -> Dict[str, Any]:
     for behaviour in sorted(HTTP_CONTRACT_TESTS):
         paths = []
         for path in HTTP_CONTRACT_TESTS[behaviour]:
-            payload = reader.read_bytes(path)
-            files[path] = digest_of(payload.decode("utf-8", "replace"))
+            files[path] = digest_of(reader.read_text(path))
             paths.append(path)
         behaviours[behaviour] = {
             "tests": sorted(paths),

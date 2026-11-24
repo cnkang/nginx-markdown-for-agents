@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:e7c4ed090c9cbb951c7df84dd6473eb1e5d118606b10aa8e434ba5f7994ae3ab",
+  "contract_digest": "sha256:5e92f3f11f071780bcb05f9b898e1b18c305633975dc50f7fd0fb899ea56b34c",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -13,17 +13,18 @@
     "tag_object": "4eac4c115fd2159a455d1eed8de00a740390f222"
   },
   "surface_digests": {
-    "diagnostics": "sha256:d151269a5be2489d2de21777a254c4aeea3e4f25d7ebe0e5eee5d143c3fe01f3",
-    "directives": "sha256:77b50891a6616b653326dfc25a899d31350a66b0009f2a84768cd73a40a708da",
+    "diagnostics": "sha256:232a84f970ba7ec73adf84af9fe36ebcdfdb386c640a7d740e5f3ed531fca7a4",
+    "directives": "sha256:832d3a866ed95b722ddc62b78bd5e8b5c59b6135e7b950c52447b298fae3389f",
     "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
     "http": "sha256:3b4a505b6d43bedde37adb7286f23140175341d182cd6b7cff5f21233eb0ca3f",
-    "metrics": "sha256:ca9bf5b79398c7060c40ea79fb9406a7386535d5542cf888e95905061b4bca52",
-    "packaging": "sha256:9c09dcec9b6a8ab6e8ccf1f8cc431084f4edd45471b176ca437ce340751df869",
+    "metrics": "sha256:74863ddaf8d310349b33b4609aa13c03ffcfbf57f585fbce9609223685bcda25",
+    "packaging": "sha256:df3a8ead973a673227312457011bda73e928f31ca9220b2a7b0d2cdd8e26537f",
     "reasons": "sha256:5122f7145d533c310888f1edda0196065cbdf8395f59a0f1359327005392c0e3"
   },
   "surfaces": {
     "diagnostics": {
       "additional_properties": false,
+      "constraints": {},
       "fields": [
         {
           "additional_properties": false,
@@ -39,22 +40,62 @@
               "type": "string"
             },
             {
+              "constraints": {
+                "oneOf": [
+                  {
+                    "pattern": "^sha256:[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  {
+                    "const": "development"
+                  }
+                ]
+              },
               "name": "feature_manifest_digest",
               "type": null
             },
             {
+              "constraints": {
+                "maxItems": 20,
+                "minItems": 0
+              },
               "name": "features",
               "type": "array"
             },
             {
+              "constraints": {
+                "minLength": 1
+              },
               "name": "nginx_version",
               "type": "string"
             },
             {
+              "constraints": {
+                "oneOf": [
+                  {
+                    "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+                    "type": "string"
+                  },
+                  {
+                    "const": "development"
+                  }
+                ]
+              },
               "name": "rust_version",
               "type": null
             },
             {
+              "constraints": {
+                "oneOf": [
+                  {
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "const": "development"
+                  }
+                ]
+              },
               "name": "source_sha",
               "type": null
             }
@@ -77,13 +118,16 @@
           "properties": [
             {
               "name": "effective",
-              "type": null
+              "type": "object"
             },
             {
               "name": "effective_sources",
-              "type": null
+              "type": "object"
             },
             {
+              "constraints": {
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
               "name": "static_digest",
               "type": "string"
             }
@@ -106,15 +150,25 @@
           "type": "object"
         },
         {
+          "constraints": {
+            "minLength": 1
+          },
           "name": "product_version",
           "nullable": false,
           "required": true,
           "type": "string"
         },
         {
+          "constraints": {
+            "maxItems": 100,
+            "minItems": 0
+          },
           "items_additional_properties": false,
           "items_properties": [
             {
+              "constraints": {
+                "minimum": 0
+              },
               "name": "duration_ms",
               "type": "number"
             },
@@ -148,6 +202,9 @@
               "type": "string"
             },
             {
+              "constraints": {
+                "pattern": "^[a-z][a-z0-9_]*$"
+              },
               "name": "reason",
               "type": "string"
             },
@@ -165,6 +222,9 @@
               "type": "string"
             },
             {
+              "constraints": {
+                "format": "date-time"
+              },
               "name": "timestamp",
               "type": "string"
             }
@@ -198,6 +258,9 @@
               "type": "string"
             },
             {
+              "constraints": {
+                "minimum": 0
+              },
               "name": "inflight",
               "type": "integer"
             },
@@ -206,6 +269,9 @@
               "type": "object"
             },
             {
+              "constraints": {
+                "minimum": 0
+              },
               "name": "pending_output",
               "type": "integer"
             }
@@ -220,6 +286,9 @@
           "type": "object"
         },
         {
+          "constraints": {
+            "const": 3
+          },
           "name": "schema_version",
           "nullable": false,
           "required": true,
@@ -231,10 +300,16 @@
           "nullable": false,
           "properties": [
             {
+              "constraints": {
+                "minimum": 1
+              },
               "name": "pid",
               "type": "integer"
             },
             {
+              "constraints": {
+                "const": "worker-local"
+              },
               "name": "scope",
               "type": "string"
             }
@@ -670,7 +745,11 @@
           "syntax": "<CIDR>... | off"
         }
       ],
-      "reject_only_count": 0
+      "reject_only_count": 0,
+      "runtime_default_sources": {
+        "components/nginx-module/src/ngx_http_markdown_config_merge_impl.h": "sha256:fec97575270afc759ecf5a4fe11aa5263923a8ccf3fa6cbf37dbf03e16270216",
+        "components/nginx-module/src/ngx_http_markdown_filter_module.h": "sha256:9f37f6d89d9682527de9c2af0afbea6ae6b76106346cbc118917c37b93fe2605"
+      }
     },
     "ffi": {
       "abi_version": 3,
@@ -977,7 +1056,15 @@
               "engine"
             ]
           ],
-          "nginx_markdown_conversion_duration_seconds": [],
+          "nginx_markdown_conversion_duration_seconds": [
+            [
+              "engine",
+              "le"
+            ],
+            [
+              "engine"
+            ]
+          ],
           "nginx_markdown_conversion_peak_memory_bytes": [],
           "nginx_markdown_decompression_events_total": [
             [
@@ -1005,9 +1092,9 @@
         "series": {
           "nginx_markdown_build_info": [
             [
-              "version=%s",
+              "features=%s",
               "nginx_version=%s",
-              "features=%s"
+              "version=%s"
             ]
           ],
           "nginx_markdown_conversion_attempts_total": [
@@ -1026,7 +1113,26 @@
               "engine=streaming"
             ]
           ],
-          "nginx_markdown_conversion_duration_seconds": [],
+          "nginx_markdown_conversion_duration_seconds": [
+            [
+              "@component=bucket",
+              "engine=%s",
+              "le=%s"
+            ],
+            [
+              "@component=bucket",
+              "engine=%s",
+              "le=+Inf"
+            ],
+            [
+              "@component=count",
+              "engine=%s"
+            ],
+            [
+              "@component=sum",
+              "engine=%s"
+            ]
+          ],
           "nginx_markdown_conversion_peak_memory_bytes": [],
           "nginx_markdown_decompression_events_total": [
             [
@@ -1110,79 +1216,79 @@
           "nginx_markdown_requests_total": [
             [
               "outcome=aborted",
-              "stage=delivery",
-              "reason=streaming_mid_flight_error"
+              "reason=streaming_mid_flight_error",
+              "stage=delivery"
             ],
             [
               "outcome=converted",
-              "stage=conversion",
-              "reason=converted"
+              "reason=converted",
+              "stage=conversion"
             ],
             [
               "outcome=failed_closed",
-              "stage=delivery",
-              "reason=failed_closed"
+              "reason=failed_closed",
+              "stage=delivery"
             ],
             [
               "outcome=failed_open",
-              "stage=delivery",
-              "reason=failed_open"
+              "reason=failed_open",
+              "stage=delivery"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=bypass_no_transform"
+              "reason=bypass_no_transform",
+              "stage=eligibility"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=disabled"
+              "reason=disabled",
+              "stage=eligibility"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=not_eligible"
+              "reason=not_eligible",
+              "stage=eligibility"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=skipped_accept"
+              "reason=skipped_accept",
+              "stage=eligibility"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=skipped_conditional"
+              "reason=skipped_conditional",
+              "stage=eligibility"
             ],
             [
               "outcome=skipped",
-              "stage=eligibility",
-              "reason=skipped_no_accept"
+              "reason=skipped_no_accept",
+              "stage=eligibility"
             ]
           ],
           "nginx_markdown_streaming_events_total": [
             [
-              "transition=abort_start",
-              "reason=streaming_mid_flight_error"
+              "reason=converted",
+              "transition=commit"
             ],
             [
-              "transition=commit",
-              "reason=converted"
+              "reason=converted",
+              "transition=resume_success"
             ],
             [
-              "transition=fallback",
-              "reason=precommit_html_error"
+              "reason=converted",
+              "transition=safe_finish_start"
             ],
             [
-              "transition=resume_failure",
-              "reason=streaming_mid_flight_error"
+              "reason=precommit_html_error",
+              "transition=fallback"
             ],
             [
-              "transition=resume_success",
-              "reason=converted"
+              "reason=streaming_mid_flight_error",
+              "transition=abort_start"
             ],
             [
-              "transition=safe_finish_start",
-              "reason=converted"
+              "reason=streaming_mid_flight_error",
+              "transition=resume_failure"
             ]
           ]
         },
@@ -1459,24 +1565,7 @@
         "targets": [
           {
             "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "almalinux9",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "almalinux9",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
+            "artifact_type": "deb-package",
             "libc": "glibc",
             "nginx_minor": "1.24",
             "nginx_version": "1.24.0",
@@ -1486,6 +1575,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "deb-package",
             "libc": "glibc",
             "nginx_minor": "1.24",
             "nginx_version": "1.24.0",
@@ -1495,42 +1585,7 @@
           },
           {
             "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
-            "libc": "musl",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "musl",
-            "nginx_minor": "1.24",
-            "nginx_version": "1.24.0",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
+            "artifact_type": "deb-package",
             "libc": "glibc",
             "nginx_minor": "1.24",
             "nginx_version": "1.24.0",
@@ -1540,6 +1595,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "deb-package",
             "libc": "glibc",
             "nginx_minor": "1.24",
             "nginx_version": "1.24.0",
@@ -1549,24 +1605,87 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
-            "nginx_minor": "1.26",
-            "nginx_version": "1.26.3",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "dynamic-module",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "dynamic-module",
+            "libc": "musl",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "dynamic-module",
+            "libc": "musl",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "rpm-package",
+            "libc": "glibc",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "almalinux9",
             "release_blocking": true,
             "support_tier": "supported"
           },
           {
             "arch": "arm64",
+            "artifact_type": "rpm-package",
             "libc": "glibc",
-            "nginx_minor": "1.26",
-            "nginx_version": "1.26.3",
+            "nginx_minor": "1.24",
+            "nginx_version": "1.24.0",
             "os": "almalinux9",
             "release_blocking": true,
             "support_tier": "supported"
           },
           {
             "arch": "amd64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "docker-image",
             "libc": "musl",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1576,6 +1695,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "docker-image",
             "libc": "musl",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1584,25 +1704,8 @@
             "support_tier": "supported"
           },
           {
-            "arch": "any",
-            "libc": "n/a",
-            "nginx_minor": "1.26",
-            "nginx_version": "1.26.3",
-            "os": "any",
-            "release_blocking": false,
-            "support_tier": "best-effort"
-          },
-          {
             "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.26",
-            "nginx_version": "1.26.3",
-            "os": "debian12",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
+            "artifact_type": "docker-image",
             "libc": "glibc",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1612,15 +1715,7 @@
           },
           {
             "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.26",
-            "nginx_version": "1.26.3",
-            "os": "debian12",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
+            "artifact_type": "docker-image",
             "libc": "glibc",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1630,6 +1725,7 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1639,6 +1735,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1648,6 +1745,7 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1657,6 +1755,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1666,6 +1765,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "homebrew-formula",
             "libc": "darwin",
             "nginx_minor": "1.26",
             "nginx_version": "1.26.3",
@@ -1675,6 +1775,117 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "rpm-package",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "almalinux9",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "rpm-package",
+            "libc": "glibc",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "almalinux9",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "any",
+            "artifact_type": "source",
+            "libc": "n/a",
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "os": "any",
+            "release_blocking": false,
+            "support_tier": "best-effort"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "debian12",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "ubuntu-26.04",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "deb-package",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "ubuntu-26.04",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "dynamic-module",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "dynamic-module",
+            "libc": "glibc",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "dynamic-module",
+            "libc": "musl",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "arm64",
+            "artifact_type": "dynamic-module",
+            "libc": "musl",
+            "nginx_minor": "1.28",
+            "nginx_version": "1.28.3",
+            "os": "linux",
+            "release_blocking": true,
+            "support_tier": "supported"
+          },
+          {
+            "arch": "amd64",
+            "artifact_type": "rpm-package",
             "libc": "glibc",
             "nginx_minor": "1.28",
             "nginx_version": "1.28.3",
@@ -1684,6 +1895,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "rpm-package",
             "libc": "glibc",
             "nginx_minor": "1.28",
             "nginx_version": "1.28.3",
@@ -1693,6 +1905,7 @@
           },
           {
             "arch": "any",
+            "artifact_type": "source",
             "libc": "n/a",
             "nginx_minor": "1.28",
             "nginx_version": "1.28.3",
@@ -1702,78 +1915,7 @@
           },
           {
             "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "debian12",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "debian12",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
-            "libc": "musl",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "musl",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "linux",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "ubuntu-26.04",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "arm64",
-            "libc": "glibc",
-            "nginx_minor": "1.28",
-            "nginx_version": "1.28.3",
-            "os": "ubuntu-26.04",
-            "release_blocking": true,
-            "support_tier": "supported"
-          },
-          {
-            "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.30",
             "nginx_version": "1.30.7",
@@ -1783,6 +1925,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.30",
             "nginx_version": "1.30.7",
@@ -1792,6 +1935,7 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.30",
             "nginx_version": "1.30.7",
@@ -1801,6 +1945,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.30",
             "nginx_version": "1.30.7",
@@ -1810,6 +1955,7 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.31",
             "nginx_version": "1.31.9",
@@ -1819,6 +1965,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "glibc",
             "nginx_minor": "1.31",
             "nginx_version": "1.31.9",
@@ -1828,6 +1975,7 @@
           },
           {
             "arch": "amd64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.31",
             "nginx_version": "1.31.9",
@@ -1837,6 +1985,7 @@
           },
           {
             "arch": "arm64",
+            "artifact_type": "dynamic-module",
             "libc": "musl",
             "nginx_minor": "1.31",
             "nginx_version": "1.31.9",

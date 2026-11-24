@@ -23,14 +23,38 @@ from tools.compatibility.compare import (
     UNVERIFIED,
     Comparison,
     apply_approvals,
+    _compare_emitted,
+    compare_directives,
+    compare_http,
+    compare_packaging,
     compare_contracts,
+    compare_diagnostics,
 )
-from tools.compatibility.extract import extract_surfaces
-from tools.compatibility.model import SURFACES, contract_digest, surface_digests
-from tools.compatibility.tests.conftest import sanitized_environment
+from tools.compatibility.extract import (
+    _collect_series,
+    _nfpm_contract,
+    _schema_field,
+    _unlabelled_samples,
+    extract_surfaces,
+)
+from tools.compatibility.model import (
+    ContractError,
+    MANIFEST_SCHEMA,
+    SURFACES,
+    contract_digest,
+    digest_of_bytes,
+    dump_manifest,
+    surface_digests,
+)
+from tools.compatibility.tests.conftest import (
+    _changed_paths,
+    _overlay,
+    sanitized_environment,
+)
 from tools.lib.path_validation import validate_read_path
 from tools.compatibility.sources import (
     SourceReader,
+    resolve_commit,
     repo_root_for,
     resolve_tag,
     resolve_worktree,
@@ -137,11 +161,29 @@ def test_anchor_manifests_reproduce_from_their_tags(index_document):
 
 
 def test_frozen_contract_surfaces_are_stable_between_anchors(index_document):
-    """The five frozen surfaces did not move between the two anchors."""
-    baseline = _anchor_manifest(index_document, "v0.9.2")["surface_digests"]
-    candidate = _anchor_manifest(index_document, "v0.9.4")["surface_digests"]
-    for surface in ("directives", "metrics", "reasons", "diagnostics", "ffi"):
-        assert baseline[surface] == candidate[surface], surface
+    """Only the runtime-default evidence changed between the two anchors."""
+    baseline_manifest = _anchor_manifest(index_document, "v0.9.2")
+    candidate_manifest = _anchor_manifest(index_document, "v0.9.4")
+    baseline = baseline_manifest["surfaces"]["directives"]
+    candidate = candidate_manifest["surfaces"]["directives"]
+    for key in ("count", "declared_names", "entries", "reject_only_count"):
+        assert baseline[key] == candidate[key], key
+    assert set(baseline["runtime_default_sources"]) == set(
+        candidate["runtime_default_sources"]
+    )
+    changed_sources = {
+        path
+        for path in baseline["runtime_default_sources"]
+        if baseline["runtime_default_sources"][path]
+        != candidate["runtime_default_sources"][path]
+    }
+    assert changed_sources == {
+        "components/nginx-module/src/ngx_http_markdown_filter_module.h"
+    }
+    baseline_digests = baseline_manifest["surface_digests"]
+    candidate_digests = candidate_manifest["surface_digests"]
+    for surface in ("metrics", "reasons", "diagnostics", "ffi"):
+        assert baseline_digests[surface] == candidate_digests[surface], surface
 
 
 def test_candidate_matches_the_current_baseline(index_document, worktree_surfaces):
@@ -343,6 +385,125 @@ def test_inherited_git_location_cannot_select_another_repository(tmp_path, monke
 
     monkeypatch.setenv("GIT_DIR", str(inherited / ".git"))
     assert resolve_worktree(str(selected)).commit == selected_head
+    assert repo_root_for(str(selected / "marker.txt")) == str(selected)
+
+
+def test_git_environment_disables_replacement_refs(monkeypatch):
+    """Compatibility evidence cannot be redirected through replace refs."""
+    from tools.compatibility.sources import _git_environment
+
+    monkeypatch.setenv("GIT_NO_REPLACE_OBJECTS", "0")
+
+    assert _git_environment()["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_source_reader_rejects_a_committed_directory(tmp_path):
+    """A directory tree cannot masquerade as the contents of a contract file."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "directory").mkdir()
+    (repo / "directory" / "child.txt").write_text("child", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", str(repo)],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "directory"],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    reader = SourceReader(str(repo), resolve_commit(str(repo), "HEAD"))
+
+    with pytest.raises(ContractError, match="committed file"):
+        reader.read_bytes("directory")
+
+
+def test_changed_untracked_directory_is_overlaid_file_by_file(tmp_path):
+    """The fixture overlay sees individual files inside new directories."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    repo.mkdir()
+    worktree.mkdir()
+    subprocess.run(
+        ["git", "init", str(repo)],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    nested = repo / "new" / "nested.txt"
+    nested.parent.mkdir()
+    nested.write_text("new", encoding="utf-8")
+
+    assert "new/nested.txt" in _changed_paths(repo)
+    _overlay(repo, worktree)
+    assert (worktree / "new" / "nested.txt").read_text(encoding="utf-8") == "new"
+
+
+def test_fixture_overlay_preserves_symlinks(tmp_path):
+    """A changed symlink stays a symlink in an isolated fixture."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    repo.mkdir()
+    worktree.mkdir()
+    subprocess.run(
+        ["git", "init", str(repo)],
+        check=True,
+        capture_output=True,
+        env=sanitized_environment(),
+    )
+    (repo / "target.txt").write_text("target", encoding="utf-8")
+    os.symlink("target.txt", repo / "link.txt")
+
+    _overlay(repo, worktree)
+
+    assert (worktree / "link.txt").is_symlink()
+    assert os.readlink(worktree / "link.txt") == "target.txt"
+
+
+def test_extract_http_rejects_invalid_utf8(monkeypatch):
+    """HTTP evidence digests require valid UTF-8 source files."""
+    from tools.compatibility import extract as extract_module
+
+    class InvalidByteReader(SourceReader):
+        def read_bytes(self, path):
+            return b"\xff"
+
+    monkeypatch.setattr(
+        extract_module, "HTTP_CONTRACT_TESTS", {"invalid": ("fixture.c",)}
+    )
+    monkeypatch.setattr(
+        extract_module, "HTTP_EXECUTION_TARGETS", {"invalid": "unit"}
+    )
+    reader = InvalidByteReader(str(REPO), resolve_worktree(str(REPO)))
+
+    with pytest.raises(ContractError, match="valid UTF-8"):
+        extract_module.extract_http(reader)
 
 
 def test_compare_reports_an_array_item_field_type_change():
@@ -375,3 +536,514 @@ def test_compare_reports_an_array_item_field_type_change():
         verdicts["diagnostics:child-type-changed:recent_decisions[]:duration_ms"]
         == BREAKING
     )
+
+
+def test_diagnostics_constraints_and_mixed_enum_values_are_compared():
+    """Array constraints trigger review and enum sorting accepts null values."""
+    baseline = {
+        "schema_version": 3,
+        "type": "object",
+        "additional_properties": False,
+        "required": [],
+        "fields": [
+            {
+                "name": "state",
+                "type": "string",
+                "nullable": False,
+                "enum": [None, "active"],
+            },
+            {
+                "name": "values",
+                "type": "array",
+                "nullable": False,
+                "items_type": "integer",
+                "items_constraints": {"minimum": 1},
+            },
+        ],
+    }
+    candidate = json.loads(json.dumps(baseline))
+    candidate["fields"][0]["enum"] = [None]
+    candidate["fields"][1]["items_constraints"]["minimum"] = 2
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(result, baseline, candidate)
+    verdicts = {finding.finding_id: finding.verdict for finding in result.findings}
+    assert verdicts["diagnostics:enum-narrowed:state"] == BREAKING
+    assert (
+        verdicts["diagnostics:schema-constraints-changed:values[]"]
+        == REVIEW_REQUIRED
+    )
+
+
+def test_diagnostics_open_extension_cannot_become_closed():
+    """Closing an open extension object is a breaking restriction."""
+    baseline = {
+        "schema_version": 3,
+        "type": "object",
+        "additional_properties": False,
+        "required": [],
+        "fields": [
+            {
+                "name": "extensions",
+                "type": "object",
+                "nullable": False,
+                "additional_properties": True,
+                "required_children": [],
+                "properties": [],
+            }
+        ],
+    }
+    candidate = json.loads(json.dumps(baseline))
+    candidate["fields"][0]["additional_properties"] = False
+    result = Comparison(baseline_label="a", candidate_label="b")
+
+    compare_diagnostics(result, baseline, candidate)
+
+    assert {
+        finding.finding_id: finding.verdict for finding in result.findings
+    }["diagnostics:additional-properties-restricted:extensions"] == BREAKING
+
+
+def test_diagnostics_root_type_change_is_breaking():
+    """The comparator checks the schema root type as part of the wire contract."""
+    baseline = {
+        "schema_version": 3,
+        "type": "object",
+        "additional_properties": False,
+        "required": [],
+        "fields": [],
+    }
+    candidate = dict(baseline, type="array")
+    result = Comparison(baseline_label="a", candidate_label="b")
+
+    compare_diagnostics(result, baseline, candidate)
+
+    assert {
+        finding.finding_id: finding.verdict for finding in result.findings
+    }["diagnostics:root-type-changed"] == BREAKING
+
+
+def test_boolean_diagnostics_schema_fails_closed():
+    """A boolean subschema cannot disappear as an empty object contract."""
+    with pytest.raises(ContractError, match="boolean"):
+        _schema_field("value", True, False, {})
+
+    with pytest.raises(ContractError, match="boolean"):
+        _schema_field("values", {"type": "array", "items": False}, False, {})
+
+
+def test_schema_extractor_records_array_item_constraints():
+    """The projected diagnostics contract retains item-level minimums."""
+    field = _schema_field(
+        "values",
+        {"type": "array", "items": {"type": "integer", "minimum": 1}},
+        False,
+        {},
+    )
+
+    assert field["items_constraints"] == {"minimum": 1}
+
+
+def test_schema_extractor_preserves_one_of_alternatives():
+    """A constrained oneOf union remains part of the diagnostics contract."""
+    field = _schema_field(
+        "source_sha",
+        {
+            "oneOf": [
+                {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                {"const": "development"},
+            ]
+        },
+        True,
+        {},
+    )
+
+    assert field["constraints"]["oneOf"] == [
+        {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        {"const": "development"},
+    ]
+
+
+def test_metrics_histogram_samples_and_label_order_are_preserved():
+    """Histogram components are identified and label order is canonical."""
+    family = "nginx_markdown_latency"
+    emitted = (
+        family
+        + r'_bucket{le=\"1\",region=\"west\"} 2\n'
+        + family
+        + r'_bucket{region=\"west\",le=\"1\"} 2'
+    )
+    series, labels = _collect_series(emitted, {family: "histogram"})
+
+    assert series[family] == {
+        ("bucket", ("le=1", "region=west")),
+    }
+    assert labels[family] == [["le", "region"]]
+    assert _unlabelled_samples(
+        family + r"_sum 2\n" + family + "_count 2",
+        {family: "histogram"},
+    ) == [family + ":count", family + ":sum"]
+
+
+def test_metrics_comparator_detects_removed_histogram_component():
+    """A histogram bucket, sum, or count component is part of its contract."""
+    family = "nginx_markdown_latency"
+    baseline = {
+        "emitted": {
+            "families": {family: "histogram"},
+            "label_sets": {family: [["le"], ["method"]]},
+            "series": {
+                family: [
+                    ["@component=bucket", "le=1"],
+                    ["@component=count", "method=GET"],
+                    ["@component=sum", "method=GET"],
+                ]
+            },
+        }
+    }
+    candidate = json.loads(json.dumps(baseline))
+    candidate["emitted"]["series"][family].remove(
+        ["@component=count", "method=GET"]
+    )
+    result = Comparison(baseline_label="a", candidate_label="b")
+
+    _compare_emitted(result, baseline, candidate)
+
+    assert any(
+        finding.verdict == BREAKING
+        and "emitted-series-removed" in finding.finding_id
+        and "@component=count" in finding.finding_id
+        for finding in result.findings
+    )
+
+
+def test_nfpm_extraction_reads_only_effective_yaml_values():
+    """Commented-out package dependencies do not enter the contract."""
+    contract = _nfpm_contract(
+        '''
+name: sample
+# overrides:
+#   deb:
+#     depends:
+#       - "nginx (<< ${NGINX_VERSION_CEIL})"
+overrides:
+  deb:
+    depends:
+      - "nginx (>= ${NGINX_VERSION})"
+  rpm:
+    depends:
+      - "nginx-r${NGINX_VERSION}"
+      - "nginx >= ${NGINX_VERSION}"
+contents:
+  - src: module.so
+    packager: deb
+    dst: /usr/lib/nginx/module.so
+  - dst: /usr/share/doc/sample/README.md
+    packager: rpm
+'''
+    )
+
+    assert contract["deb_nginx_constraints"] == [[">=", "NGINX_VERSION"]]
+    assert contract["rpm_nginx_constraints"] == [
+        "-r${NGINX_VERSION}",
+        ">=${NGINX_VERSION}",
+    ]
+    assert contract["deb_install_paths"] == ["/usr/lib/nginx/module.so"]
+    assert contract["rpm_install_paths"] == ["/usr/share/doc/sample/README.md"]
+
+
+def test_support_rows_keep_artifact_identity_and_detect_each_demotion():
+    """Distinct artifacts at one target retain their own tier changes."""
+    def package_contract(targets):
+        return {
+            "package_name": "sample",
+            "deb_module_path": [],
+            "rpm_module_path": [],
+            "load_snippet_paths": [],
+            "deb_nginx_constraints": [],
+            "rpm_nginx_constraints": [],
+            "deb_install_paths": [],
+            "rpm_install_paths": [],
+            "support": {"targets": targets},
+        }
+
+    rows = [
+        {
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "artifact_type": "deb-package",
+            "os": "debian12",
+            "libc": "glibc",
+            "arch": "amd64",
+            "support_tier": "supported",
+            "release_blocking": True,
+        },
+        {
+            "nginx_minor": "1.26",
+            "nginx_version": "1.26.3",
+            "artifact_type": "docker-image",
+            "os": "debian12",
+            "libc": "glibc",
+            "arch": "amd64",
+            "support_tier": "best-effort",
+            "release_blocking": True,
+        },
+    ]
+    candidate_rows = json.loads(json.dumps(rows))
+    candidate_rows[0]["support_tier"] = "best-effort"
+    candidate_rows[1]["support_tier"] = "supported"
+    result = Comparison(baseline_label="a", candidate_label="b")
+
+    compare_packaging(
+        result, package_contract(rows), package_contract(candidate_rows)
+    )
+    changed = {
+        finding.finding_id: finding.verdict
+        for finding in result.findings
+        if "row-tier-changed" in finding.finding_id
+    }
+    assert changed == {
+        "packaging:row-tier-changed:1.26.3|deb-package|debian12/glibc/amd64":
+            BREAKING,
+        "packaging:row-tier-changed:1.26.3|docker-image|debian12/glibc/amd64":
+            ADDITIVE,
+    }
+
+
+def test_support_patch_replacement_cannot_drop_supported_blocking_coverage():
+    """A supported sibling artifact cannot mask a patch coverage drop."""
+    def target(version, blocking, artifact_type):
+        return {
+            "nginx_minor": "1.30",
+            "nginx_version": version,
+            "artifact_type": artifact_type,
+            "os": "linux",
+            "libc": "glibc",
+            "arch": "amd64",
+            "support_tier": "supported",
+            "release_blocking": blocking,
+        }
+
+    def package_contract(targets):
+        return {
+            "package_name": "sample",
+            "deb_module_path": [],
+            "rpm_module_path": [],
+            "load_snippet_paths": [],
+            "deb_nginx_constraints": [],
+            "rpm_nginx_constraints": [],
+            "deb_install_paths": [],
+            "rpm_install_paths": [],
+            "support": {"targets": targets},
+        }
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_packaging(
+        result,
+        package_contract(
+            [
+                target("1.30.8", True, "dynamic-module"),
+                target("1.30.8", True, "docker-image"),
+            ]
+        ),
+        package_contract(
+            [
+                target("1.30.9", False, "dynamic-module"),
+                target("1.30.8", True, "docker-image"),
+            ]
+        ),
+    )
+
+    findings = {
+        finding.finding_id: finding.verdict for finding in result.findings
+    }
+    assert findings[
+        "packaging:support-blocking-coverage-dropped:1.30/dynamic-module/linux/glibc/amd64"
+    ] == BREAKING
+
+
+def test_directive_runtime_default_source_change_requires_review():
+    """A change to the runtime merge code cannot hide behind unchanged comments."""
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_directives(
+        result,
+        {
+            "entries": [],
+            "reject_only_count": 0,
+            "runtime_default_sources": {"merge.h": "old"},
+        },
+        {
+            "entries": [],
+            "reject_only_count": 0,
+            "runtime_default_sources": {"merge.h": "new"},
+        },
+    )
+
+    assert result.findings[0].verdict == REVIEW_REQUIRED
+    assert result.findings[0].finding_id == (
+        "directives:runtime-default-source-changed:merge.h"
+    )
+
+
+def test_http_rebinding_fingerprint_includes_test_digests():
+    """A binding finding carries both path-to-digest maps as its evidence."""
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_http(
+        result,
+        {
+            "behaviours": {"status": {"tests": ["old.c"], "executed_by": "unit"}},
+            "test_file_digests": {"old.c": "sha256:old"},
+        },
+        {
+            "behaviours": {"status": {"tests": ["new.c"], "executed_by": "unit"}},
+            "test_file_digests": {"new.c": "sha256:new"},
+        },
+    )
+
+    finding = next(item for item in result.findings if "binding-changed" in item.finding_id)
+    assert finding.baseline == {"old.c": "sha256:old"}
+    assert finding.candidate == {"new.c": "sha256:new"}
+
+
+def test_approvals_reject_non_object_exception_entries():
+    """Malformed exceptions fail with a validation error instead of crashing."""
+    result = Comparison(baseline_label="a", candidate_label="b")
+
+    with pytest.raises(ValueError, match="list of JSON objects"):
+        apply_approvals(
+            result,
+            {"schema": 1, "exceptions": [None]},
+            "approvals.json",
+        )
+
+
+def test_cli_load_index_rejects_non_object_json(monkeypatch):
+    """A JSON array at the index path produces a contract error."""
+    from tools.compatibility import cli
+
+    monkeypatch.setattr(cli, "_read_json", lambda *_: [])
+
+    with pytest.raises(ContractError, match="JSON object"):
+        cli.load_index("unused.json", str(REPO))
+
+
+def test_freeze_atomic_write_preserves_existing_manifest(tmp_path, monkeypatch):
+    """A failed atomic replace cannot truncate the current manifest."""
+    from tools.compatibility import cli
+
+    target = tmp_path / "manifest.json"
+    target.write_text("original", encoding="utf-8")
+
+    def fail_replace(source, destination):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(cli.os, "replace", fail_replace)
+    with pytest.raises(ContractError, match="atomically write"):
+        cli._atomic_write_text(str(target), "replacement")
+
+    assert target.read_text(encoding="utf-8") == "original"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_cli_report_verdict_includes_historical_failures(tmp_path, monkeypatch):
+    """The top-level JSON verdict reflects failures outside the candidate."""
+    from argparse import Namespace
+
+    from tools.compatibility import cli
+
+    report_path = tmp_path / "report.json"
+    monkeypatch.setattr(cli, "load_index", lambda *_: {"baseline": "v0.9.4"})
+    monkeypatch.setattr(cli, "_print_header", lambda *_: None)
+    monkeypatch.setattr(
+        cli, "_verify_every_anchor", lambda *_: ([], {"v0.9.4": {}})
+    )
+    monkeypatch.setattr(
+        cli,
+        "_audit_historical",
+        lambda *_: ([{"status": "UNDOCUMENTED"}], ["historical failure"]),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_compare_candidate",
+        lambda *_: ({"verdict": "OK", "findings": []}, []),
+    )
+    args = Namespace(
+        index=str(tmp_path / "INDEX.json"),
+        repo_root=str(tmp_path),
+        json_report=str(report_path),
+        candidate="WORKTREE",
+        product_version=None,
+        approvals=None,
+    )
+
+    assert cli.check_command(args) == 1
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["candidate"]["verdict"] == "OK"
+    assert report["verdict"] == "FAIL"
+    assert report["failures"] == ["historical failure"]
+
+
+def _write_anchor_fixture(tmp_path, product_version, tag_object):
+    from tools.compatibility.cli import _manifest_path
+
+    contracts = tmp_path / "contracts"
+    contracts.mkdir()
+    surfaces = {name: {} for name in SURFACES}
+    manifest = {
+        "manifest_schema": MANIFEST_SCHEMA,
+        "product_version": product_version,
+        "source": {"commit": "fixture-commit", "tag_object": tag_object},
+        "surfaces": surfaces,
+        "surface_digests": surface_digests(surfaces),
+        "contract_digest": contract_digest(surfaces),
+    }
+    payload = dump_manifest(manifest)
+    manifest_path = Path(_manifest_path(str(contracts), "manifest.json"))
+    manifest_path.write_text(payload, encoding="utf-8")
+    anchor = {
+        "tag": "v0.9.4",
+        "commit": "fixture-commit",
+        "tag_object": tag_object,
+        "manifest": "manifest.json",
+        "manifest_sha256": digest_of_bytes(payload.encode("utf-8")),
+        "contract_digest": manifest["contract_digest"],
+    }
+    return contracts, anchor
+
+
+def test_anchor_manifest_product_version_must_match_tag(tmp_path):
+    """A valid digest cannot bind the wrong release identity to a tag."""
+    from tools.compatibility.cli import verify_anchor
+
+    contracts, anchor = _write_anchor_fixture(tmp_path, "0.9.3", "tag-object")
+
+    with pytest.raises(ContractError, match="product version"):
+        verify_anchor(str(tmp_path), anchor, str(contracts))
+
+
+def test_anchor_verification_checks_lightweight_to_annotated_tag_change(
+    tmp_path, monkeypatch
+):
+    """An anchor without a recorded tag object rejects a newly annotated tag."""
+    from types import SimpleNamespace
+
+    from tools.compatibility import cli
+
+    contracts, anchor = _write_anchor_fixture(tmp_path, "0.9.4", None)
+    monkeypatch.setattr(
+        cli,
+        "resolve_tag",
+        lambda *_: SimpleNamespace(
+            commit="fixture-commit",
+            tag_object="new-tag-object",
+            label="v0.9.4",
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "build_manifest",
+        lambda *_: {"contract_digest": anchor["contract_digest"]},
+    )
+
+    with pytest.raises(ContractError, match="tag object"):
+        cli.verify_anchor(str(tmp_path), anchor, str(contracts))

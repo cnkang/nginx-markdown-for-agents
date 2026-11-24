@@ -43,6 +43,7 @@ def sanitized_environment(extra=None) -> dict:
     env.pop("VIRTUAL_ENV", None)
     if extra:
         env.update(extra)
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
     return env
 
 
@@ -60,7 +61,10 @@ def _run(args: List[str], cwd: Path, env=None) -> subprocess.CompletedProcess:
 
 def _changed_paths(repo: Path) -> List[str]:
     """Return worktree-relative paths that differ from HEAD."""
-    completed = _run(["git", "status", "--porcelain=v1", "-z"], repo)
+    completed = _run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "-z"],
+        repo,
+    )
     if completed.returncode != 0:
         raise RuntimeError("git status failed: {}".format(completed.stderr))
     fields = completed.stdout.split("\0")
@@ -83,18 +87,39 @@ def _changed_paths(repo: Path) -> List[str]:
     return paths
 
 
+def _remove_overlay_target(target: Path) -> None:
+    """Remove one conflicting path inside the isolated fixture worktree."""
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
+    elif target.exists() or target.is_symlink():
+        target.unlink()
+
+
+def _overlay_entry(source: Path, target: Path) -> None:
+    """Copy one changed file, directory, or symlink into the fixture tree."""
+    if source.is_symlink():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _remove_overlay_target(target)
+        os.symlink(os.readlink(source), target)
+        return
+    if source.is_dir():
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            _remove_overlay_target(target)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        return
+    if source.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_dir():
+            _remove_overlay_target(target)
+        shutil.copy2(source, target)
+        return
+    _remove_overlay_target(target)
+
+
 def _overlay(repo: Path, worktree: Path) -> None:
     """Copy uncommitted working-tree content onto the detached worktree."""
     for relative in _changed_paths(repo):
-        source = repo / relative
-        target = worktree / relative
-        if source.is_dir():
-            shutil.copytree(source, target, dirs_exist_ok=True)
-        elif source.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-        elif target.exists():
-            target.unlink()
+        _overlay_entry(repo / relative, worktree / relative)
 
 
 @pytest.fixture

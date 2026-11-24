@@ -6,7 +6,8 @@
 # Environment variables (injected by workflow matrix):
 #   PKG_VERSION          - Package version for this packager.  Both families
 #                          receive the mapped version, which carries a
-#                          prerelease behind `~` (for example 1.0.0~rc1).
+#                          prerelease behind `~` with a letter-only SemVer
+#                          ordering suffix. Use release_version.py to map it.
 #   NFPM_RELEASE         - Package release.  Debian: nginx<ver>.  RPM:
 #                          nginx<ver>.1.  The prerelease never moves into the
 #                          RPM release, because rpmvercmp ranks a numeric
