@@ -760,7 +760,8 @@ def test_support_rows_keep_artifact_identity_and_detect_each_demotion():
             "package_name": "sample",
             "deb_module_path": [],
             "rpm_module_path": [],
-            "load_snippet_paths": [],
+            "deb_load_snippet_paths": [],
+            "rpm_load_snippet_paths": [],
             "deb_nginx_constraints": [],
             "rpm_nginx_constraints": [],
             "deb_install_paths": [],
@@ -830,7 +831,8 @@ def test_support_patch_replacement_cannot_drop_supported_blocking_coverage():
             "package_name": "sample",
             "deb_module_path": [],
             "rpm_module_path": [],
-            "load_snippet_paths": [],
+            "deb_load_snippet_paths": [],
+            "rpm_load_snippet_paths": [],
             "deb_nginx_constraints": [],
             "rpm_nginx_constraints": [],
             "deb_install_paths": [],
@@ -1682,3 +1684,56 @@ def test_schema_structure_keywords_apply_without_a_type():
 
     with pytest.raises(ContractError, match="nested array"):
         _schema_field("matrix", {"items": {"items": {}}}, False, {})
+
+
+def test_nfpm_ghost_and_symlink_entries_are_not_shipped_modules():
+    """Only file entries ship a module, and only RPM records a ghost."""
+    contract = _nfpm_contract(
+        """
+name: sample
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+  - dst: /usr/lib/nginx/modules/ghost.so
+    type: ghost
+  - src: /usr/lib/nginx/modules/module.so
+    dst: /usr/lib/nginx/modules/link.so
+    type: symlink
+"""
+    )
+
+    assert contract["deb_module_path"] == ["/usr/lib/nginx/modules/module.so"]
+    assert contract["rpm_module_path"] == ["/usr/lib/nginx/modules/module.so"]
+    assert "/usr/lib/nginx/modules/ghost.so" not in contract["deb_install_paths"]
+    assert "/usr/lib/nginx/modules/ghost.so" in contract["rpm_install_paths"]
+
+    for content_type in ("tree", "config|tree", "unknown"):
+        with pytest.raises(ContractError, match="unsupported type"):
+            _nfpm_contract(
+                "name: sample\ncontents:\n  - dst: /usr/lib/nginx/modules\n"
+                "    type: {}\n".format(json.dumps(content_type))
+            )
+
+
+def test_nfpm_load_snippets_are_recorded_per_package_format():
+    """Snippet evidence comes from each format's own file entries."""
+    contract = _nfpm_contract(
+        """
+name: sample
+contents:
+  - dst: /usr/share/nginx/modules-available/mod.conf
+    type: config|noreplace
+    packager: deb
+  - dst: /usr/share/nginx/modules/mod.conf
+    type: config|noreplace
+    packager: rpm
+  - dst: /usr/share/nginx/modules/legacy.conf
+    type: dir
+    packager: rpm
+"""
+    )
+
+    assert contract["deb_load_snippet_paths"] == [
+        "/usr/share/nginx/modules-available/mod.conf"
+    ]
+    assert contract["rpm_load_snippet_paths"] == ["/usr/share/nginx/modules/mod.conf"]
+    assert "load_snippet_paths" not in contract

@@ -1,5 +1,5 @@
 {
-  "contract_digest": "sha256:961fd29683098f4de2fc25f7e7594cdf6688c890d69211f7176908a651ebd2ee",
+  "contract_digest": "sha256:2aaa25b0af8e3cf2e69be12c0a0851ffa9ebe2b3c4a0a3c0b6306ac6b62ab55a",
   "extractor": {
     "name": "compatibility-contract",
     "version": "1"
@@ -18,7 +18,7 @@
     "ffi": "sha256:2ce07d2745b5321666a7e798586d29d1876c6d9b9303525cac6bd459b11eee10",
     "http": "sha256:3b4a505b6d43bedde37adb7286f23140175341d182cd6b7cff5f21233eb0ca3f",
     "metrics": "sha256:36a0594eacb9e9a4e459e899229d3c91e6931d8198867d3fe6c13e76eadbc8e4",
-    "packaging": "sha256:df3a8ead973a673227312457011bda73e928f31ca9220b2a7b0d2cdd8e26537f",
+    "packaging": "sha256:e659e1b0b48ae31d8308edc77db6c79e8c351317649786b6831050b0011b939f",
     "reasons": "sha256:5122f7145d533c310888f1edda0196065cbdf8395f59a0f1359327005392c0e3"
   },
   "surfaces": {
@@ -1679,6 +1679,9 @@
         "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
         "/usr/share/nginx/modules-available/mod-markdown.conf"
       ],
+      "deb_load_snippet_paths": [
+        "/usr/share/nginx/modules-available/mod-markdown.conf"
+      ],
       "deb_module_path": [
         "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so"
       ],
@@ -1692,10 +1695,6 @@
           "NGINX_VERSION"
         ]
       ],
-      "load_snippet_paths": [
-        "/usr/share/nginx/modules-available/mod-markdown.conf",
-        "/usr/share/nginx/modules/mod-markdown.conf"
-      ],
       "matrix_schema_version": "1.1",
       "package_name": "nginx-module-markdown-for-agents",
       "rpm_install_paths": [
@@ -1706,6 +1705,9 @@
         "/usr/share/doc/nginx-markdown-for-agents/PACKAGE_INSTALLATION.md",
         "/usr/share/doc/nginx-markdown-for-agents/README.md",
         "/usr/share/licenses/nginx-markdown-for-agents/LICENSE",
+        "/usr/share/nginx/modules/mod-markdown.conf"
+      ],
+      "rpm_load_snippet_paths": [
         "/usr/share/nginx/modules/mod-markdown.conf"
       ],
       "rpm_module_path": [
