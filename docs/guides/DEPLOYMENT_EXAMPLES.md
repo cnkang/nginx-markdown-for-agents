@@ -217,10 +217,10 @@ http {
 
 If you are using a reverse proxy upstream instead of PHP-FPM, the default
 `markdown_auto_decompress on` keeps compressed upstream responses eligible for
-conversion. `proxy_set_header Accept-Encoding "";` offers an optional
-first-step simplification. It asks the upstream for an uncompressed response,
-but it does not substitute for the module's decompression policy when
-compression remains enabled end to end.
+conversion. `proxy_set_header Accept-Encoding "";` offers an optional first-step
+simplification. It asks the upstream for an uncompressed response. It does not
+substitute for the module's decompression policy when compression remains
+enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 

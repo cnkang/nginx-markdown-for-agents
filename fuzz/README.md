@@ -128,11 +128,10 @@ The minimized input is written to `components/rust-converter/fuzz/artifacts/<tar
 
 ### Security classification
 
-Any sanitizer finding (ASan, UBSan, MSan) counts as a
-**security defect** and must follow the project's security vulnerability
-reporting process. Do NOT commit crash artifacts that trigger sanitizer reports
-to public branches. Report via the project's private security channel or GitHub
-Security Advisory.
+Any sanitizer finding (ASan, UBSan, MSan) counts as a **security defect** and
+must follow the project's security vulnerability reporting process. Do NOT
+commit crash artifacts that trigger sanitizer reports to public branches. Report
+through the project's private security channel or GitHub Security Advisory.
 
 ---
 

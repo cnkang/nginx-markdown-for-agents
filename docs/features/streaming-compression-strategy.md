@@ -17,10 +17,10 @@ The `auto` route follows the `markdown_streaming` policy and the hard
 compatibility gates. It applies no size heuristic, and there is no
 operator-facing threshold directive.
 
-Brotli streaming requires `NGX_HTTP_BROTLI` at compile time (enabled by
-default in official release artifacts via `NGX_MARKDOWN_BROTLI_STREAMING=on`).
-When `NGX_HTTP_BROTLI` is not defined, Brotli falls back to bounded full-buffer
-decompression via the Rust FFI path.
+Brotli streaming requires `NGX_HTTP_BROTLI` at compile time (enabled by default
+in official release artifacts through `NGX_MARKDOWN_BROTLI_STREAMING=on`). When
+`NGX_HTTP_BROTLI` is not defined, Brotli falls back to bounded full-buffer
+decompression through the Rust FFI path.
 
 | Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
@@ -125,16 +125,15 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - Preserves backpressure semantics (NGX_AGAIN handling) while decompression
   state is in-flight.
 
-- Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
+-  Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
   framing as a fallback for servers that emit raw deflate. The paths decide
   differently: the **full-buffer path** tries RFC 1950 first and, when RFC 1950
   decoding fails with a format error, replays the same input in raw RFC 1951
   mode from the start, discarding any output the wrapped attempt produced. The
-  **streaming path** defers decoder
-  initialization until the first two bytes arrive, sniffs the zlib header,
-  and initializes as zlib-wrapped or raw accordingly. It cannot replay
-  consumed chunks, so a stream misclassified by the sniff fails closed with
-  a format error instead of retrying.
+  **streaming path** defers decoder initialization until the first two bytes
+  arrive, sniffs the zlib header, and initializes as zlib-wrapped or raw
+  accordingly. It cannot replay consumed chunks. A stream misclassified by the
+  sniff fails closed with a format error instead of retrying.
 - Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
   truncation, backpressure, and terminal-once validation.
 - Brotli uses the official `BrotliDecoderDecompressStream` C API with
@@ -157,11 +156,11 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - **Gzip/deflate upstreams, streaming desired**: Use `markdown_streaming force`,
   keep `markdown_auto_decompress on`, and avoid
   `markdown_cache_validation full`.
-- **Brotli upstreams, streaming desired**: Same as gzip/deflate — use
-  `markdown_streaming force` with `markdown_auto_decompress on`. Brotli streaming is
-  active in official release artifacts. Official Linux modules bundle the fixed
-  decoder. Custom builds must have a patched `libbrotlidec` available (see Build
-  Compatibility below).
+-  **Brotli upstreams, streaming desired**: Same as gzip/deflate. Use
+  `markdown_streaming force` with `markdown_auto_decompress on`. Brotli
+  streaming is active in official release artifacts. Official Linux modules
+  bundle the fixed decoder. Custom builds must have a patched `libbrotlidec`
+  available (see Build Compatibility below).
 - **Brotli upstreams, Brotli-disabled build**: The module routes responses to bounded
   full-buffer decompression via the Rust FFI path. No streaming TTFB benefit.
 - **Budget tuning**: Set `markdown_limits decompressed_size=<size>` and
@@ -170,13 +169,12 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 
 ## Build Compatibility
 
-Brotli streaming requires `libbrotlidec` at build time. Official Linux
-modules and the Homebrew formula statically link Brotli 1.2.1 and need no
-Brotli library at runtime. A custom build links the host `libbrotlidec` at
-build time and runtime, so it must provide a release with the
-CVE-2026-111497 fix. The fixed releases are 1.0.10, 1.1.1, and 1.2.1 and
-later. The `NGX_MARKDOWN_BROTLI_STREAMING` environment variable controls
-detection:
+Brotli streaming requires `libbrotlidec` at build time. Official Linux modules
+and the Homebrew formula statically link Brotli 1.2.1 and need no Brotli library
+at runtime. A custom build links the host `libbrotlidec` at build time and
+runtime. It must provide a release with the CVE-2026-111497 fix. The fixed
+releases are 1.0.10, 1.1.1, and 1.2.1 and later. The
+`NGX_MARKDOWN_BROTLI_STREAMING` environment variable controls detection:
 
 - `on` (default in release artifacts): probe and link. Fail if missing.
 - `auto`: probe silently. Enable if available, fall back to full-buffer if not.

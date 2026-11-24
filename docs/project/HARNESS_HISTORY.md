@@ -11,7 +11,7 @@ day-to-day execution contract. For execution rules, see
 ## Why the Harness Exists
 
 The repository already had strong runtime documentation and a large set of
-historical engineering rules in `AGENTS.md`, but the practical workflow for AI
+historical engineering rules in `AGENTS.md`. The practical workflow for AI
 assistance was still fragmented across:
 
 - public tracked docs
@@ -20,9 +20,9 @@ assistance was still fragmented across:
 - review habits
 - ad hoc execution memory inside individual sessions
 
-That setup worked for one local environment, but it was not a stable open-source
-contract. The project introduced the harness to turn those scattered habits into a
-tracked, reviewable, and executable repository asset.
+That setup worked for one local environment. It was not a stable open-source
+contract. The project introduced the harness to turn those scattered habits into
+a tracked, reviewable, and executable repository asset.
 
 ## Problems the Harness Prevents
 
@@ -51,7 +51,7 @@ the final definition of success.
 ### 4. Local-only tooling becoming the real contract
 
 The project still supports richer local workflows, especially through optional
-local adapter inputs, but those local files must remain adapters. Public repository
+local adapter inputs. Those local files must remain adapters. Public repository
 truth lives in tracked docs, checkers, and Make/CI entrypoints.
 
 ### 5. Repeating the same classes of fixes
@@ -96,9 +96,9 @@ why they exist in the first place.
 The repository keeps the durable outcomes, not every intermediate conversation.
 
 Interactive review logs, branching A/B/C plan alternatives, raw review JSONL,
-and timeline telemetry remain planning history rather than public contract.
-They are useful during design and maintenance, but they would add noise and
-duplicate transient reasoning if copied into the tracked docs.
+and timeline telemetry remain planning history rather than public contract. They
+are useful during design and maintenance. They would add noise and duplicate
+transient reasoning if copied into the tracked docs.
 
 ## Document Updates
 

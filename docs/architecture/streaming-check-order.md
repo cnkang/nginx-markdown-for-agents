@@ -227,8 +227,8 @@ Verified in `components/nginx-module/src/ngx_http_markdown_eligibility.c` (lines
 
 1. **Case-insensitive matching** — uses `ngx_strncasecmp()` (length-bounded,
    case-insensitive NGINX helper) for all comparisons.
-2. **Content-Type parameter stripping** — strips everything after first `;`
-   via `ngx_strlchr()`, plus trims trailing whitespace before the semicolon.
+2.  **Content-Type parameter stripping** — strips everything after first `;`
+   through `ngx_strlchr()`, plus trims trailing whitespace before the semicolon.
 3. **All three hard-coded types** — `text/event-stream` (17 chars),
    `application/x-ndjson` (20 chars), `application/stream+json` (23 chars)
    checked with exact-length plus case-insensitive prefix match.

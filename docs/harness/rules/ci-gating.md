@@ -22,21 +22,21 @@ Required:
 - Update workflow path filters whenever checks depend on new file paths.
 - Baseline/bootstrap modes must not upload/compare artifacts incorrectly.
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
-- **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow
-  run block must define each `$VAR` it references in scope — the same
-  step's `env:`, the job's `env:`, the workflow's `env:`, an earlier
-  `GITHUB_ENV` export in the same job, or a shell assignment inside the
-  run block itself.  Shell assignments and `GITHUB_ENV` exports must
-  appear BEFORE the variable's first reference within the same run block.
-  The detector rejects a use-before-assignment case such as reading
-  `MATRIX_ARCH` above the line that assigns it.  A step-local `env:` entry is invisible
-  to later steps; `MATRIX_ARCH` was read as empty by the glibc tarball step and
-  always took the unsupported-architecture branch.  Empty collections
-  that drive matrix expansion must fail the prepare step explicitly
-  (`deb19efd`) rather than silently producing zero jobs.
-  Verification: `PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py`
-  — blocking harness gate, also wired as a pre-commit hook for workflow
-  changes.
+-  **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow run
+  block must define each `$VAR` it references in scope — the same step's `env:`,
+  the job's `env:`, the workflow's `env:`, an earlier `GITHUB_ENV` export in the
+  same job, or a shell assignment inside the run block itself. Shell assignments
+  and `GITHUB_ENV` exports must appear BEFORE the variable's first reference
+  within the same run block. The detector rejects a use-before-assignment case
+  such as reading `MATRIX_ARCH` above the line that assigns it. A step-local
+  `env:` entry is invisible to later steps. `MATRIX_ARCH` was read as empty by
+  the glibc tarball step and always took the unsupported-architecture branch.
+  Empty collections that drive matrix expansion must fail the prepare step
+  explicitly (`deb19efd`) rather than silently producing zero jobs.
+
+Verification: `PYTHONPATH=. python3
+  tools/harness/detect_workflow_env_liveness.py` — blocking harness gate, also
+  wired as a pre-commit hook for workflow changes.
 - **Supply chain hardening (GitHub Actions)**:
   - All third-party GitHub Actions must pin to immutable commit SHA
     references, not mutable version tags (`v4`, `v1`, and so on).  Include a
@@ -303,6 +303,6 @@ Verification:
   `make test-c-unit-gcc`.  Clean container artifacts afterwards
   (`make clean` in `components/nginx-module/tests`), because Linux ELF
   binaries cannot execute on macOS.
-- This gate is additive to the local clang run (`make test-nginx-unit`) and
-  does not replace it; both must pass before push when the change touches C.
+-  This gate is additive to the local clang run (`make test-nginx-unit`) and
+  does not replace it. Both must pass before push when the change touches C.
 - Verification: `make test-c-unit-gcc` exits 0 (requires Docker).

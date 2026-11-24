@@ -111,12 +111,12 @@ When the detector finds a version inconsistency:
    # tools/corpus/test-corpus-conversion/Cargo.toml
    nginx-markdown-converter = { version = "<current-version>", path = "..." }
    ```
-4. **Update current packaging artifacts and documentation examples**: update
+4.  **Update current packaging artifacts and documentation examples**: update
    detector-owned fields in `packaging/nfpm/nfpm.yaml`,
    `packaging/rpm/SPECS/nginx-module-markdown.spec`, release workflow artifact
    names, and INSTALLATION.md or other current guides together. The Homebrew
    formula's `url` and `sha256` remain the previous-release inputs until
-   `homebrew-tap-publish.yml` rewrites them; update only its detector-owned
+   `homebrew-tap-publish.yml` rewrites them. Update only its detector-owned
    metadata in this repository. Replace outdated current-version references
    without changing historical migration entries.
 5. **Update the Rust baseline atomically**: Change `rust-toolchain.toml`, all

@@ -175,10 +175,9 @@ The project checks the public key in at
 fingerprint is `15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
 `7A3743687FEEE0313128355038724643EA12C02A`). Operators must verify the
 fingerprint with `gpg --show-keys` after import and confirm it matches this
-published value before trusting release signatures. A key ID, keyserver
-lookup, or a key file downloaded from the same release is only a transport
-mechanism and cannot establish identity by itself — the fingerprint is the
-trust anchor.
+published value before trusting release signatures. A key ID, keyserver lookup,
+or a key file downloaded from the same release is only a transport mechanism and
+cannot establish identity by itself. The fingerprint is the trust anchor.
 
 ---
 
@@ -221,25 +220,24 @@ export in `GPG_PRIVATE_KEY`:
 - Export the new signing subkey (`gpg --armor --export-secret-subkeys '<NEW_SIGNING_SUBKEY_FINGERPRINT>!' > private-signing-subkey.asc`, see Section 5 for the full command) and update the `GPG_PRIVATE_KEY` secret with that export
 - Update `GPG_PASSPHRASE` secret with new passphrase
 - Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
-- **Publish the new public key**: **append** the new key's armored
-  public export to `packaging/nginx-markdown-for-agents-release.asc`
-  (do not replace existing keys — prior public keys must remain so
-  historical signatures stay verifiable), and update the published
-  fingerprint in Section 3 ("Verify Key Fingerprint", the trust-anchor
-  paragraph that lists the signing-subkey fingerprint) so the active
-  fingerprint is unambiguous. Document both the active fingerprint and
-  the historical fingerprints. Verify before signing packages with the
-  new subkey: `gpg --show-keys packaging/nginx-markdown-for-agents-release.asc`
-  must list the new signing subkey fingerprint alongside the retained
-  historical keys
+-  **Publish the new public key**: **append** the new key's armored public
+  export to `packaging/nginx-markdown-for-agents-release.asc` (do not replace
+  existing keys. Prior public keys must remain so historical signatures stay
+  verifiable), and update the published fingerprint in Section 3 ("Verify Key
+  Fingerprint", the trust-anchor paragraph that lists the signing-subkey
+  fingerprint) so the active fingerprint is unambiguous. Document both the
+  active fingerprint and the historical fingerprints. Verify before signing
+  packages with the new subkey: `gpg --show-keys
+  packaging/nginx-markdown-for-agents-release.asc` must list the new signing
+  subkey fingerprint alongside the retained historical keys
 
 #### Step 4: Update Repository Metadata Signatures
 
 This step applies **only when a self-hosted APT/YUM repository serves the
-packages**: refresh the repository metadata signatures with the new
-key so clients that verify repository metadata accept the rotated key. The
-GitHub Release DEB/RPM channel carries no repository metadata — its rotation
-stays unconditional and stops at the package signatures from Step 3.
+packages**: refresh the repository metadata signatures with the new key so
+clients that verify repository metadata accept the rotated key. The GitHub
+Release DEB/RPM channel carries no repository metadata. Its rotation stays
+unconditional and stops at the package signatures from Step 3.
 
 Re-sign repository metadata with the new key:
 
@@ -355,7 +353,7 @@ Release DEB/RPM channel (see the Overview).
 ### Verifying CI Signing
 
 After a release build, verify signatures locally. Every recipe below uses
-`gnupg` and the distribution's own tools, so a user can repeat them without
+`gnupg` and the distribution's own tools. A user can repeat them without
 installing the pipeline's signing tools:
 
 ```bash
@@ -468,10 +466,10 @@ echo "OK: SHA256SUMS signature is from ${expected_signing_fpr}"
 sha256sum --check SHA256SUMS
 ```
 
-`debsigs` cannot verify its own output (`debsigs --verify` reports
-"Verify not yet implemented"), so the `gpg --verify` recipe above is the way to
-check the signature it writes. An artifact signed by the older `dpkg-sig` tool
-names its member `_gpgbuilder` instead of `_gpgorigin`.
+`debsigs` cannot verify its own output (`debsigs --verify` reports "Verify not
+yet implemented"). The `gpg --verify` recipe above is the way to check the
+signature it writes. An artifact signed by the older `dpkg-sig` tool names its
+member `_gpgbuilder` instead of `_gpgorigin`.
 
 ---
 

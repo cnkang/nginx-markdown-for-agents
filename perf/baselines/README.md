@@ -15,12 +15,11 @@ input sizes. The evidence gate reports `MISSING_EVIDENCE` rather than a
 regression verdict when these fields differ. Report-only mode retains exit zero
 for visibility. Blocking release mode fails until comparable evidence exists.
 
-The blocking 0.9.2 release gate also binds both
-`module_benchmark.git_commit` and
-`baseline_policy.source_git_commit` to the current full 40-character
-`git HEAD`. A stale baseline is release evidence failure, not a candidate
-for silent reuse or metadata-only normalization; run the module-enabled
-canonical benchmark again at the frozen candidate commit.
+The blocking 0.9.2 release gate also binds both `module_benchmark.git_commit`
+and `baseline_policy.source_git_commit` to the current full 40-character `git
+HEAD`. A stale baseline is release evidence failure, not a candidate for silent
+reuse or metadata-only normalization. Run the module-enabled canonical benchmark
+again at the frozen candidate commit.
 
 ## Evidence Truth and Conservative Normalization
 
@@ -42,27 +41,28 @@ may adjust latency and throughput only. Path, fallback, output, memory,
 `input_bytes`, and environment evidence must remain verbatim.
 
 Retain the raw workflow artifact and record its run, source Git commit,
-adjustment rule, person or reason, and adjustment date in `baseline_policy`.
-The checked-in 0.9.1 snapshot is a verbatim eight-scenario run from commit
-`0847c287c1b744a3f80b7b7fe6ccf3e897223377`, measured by canonical workflow
-run `32398065263/attempts/1`. Its raw artifact has SHA-256
-`006bb70b6029a639068c50b532d1c8119c8e54b96775ff8c73e62223ba8cadc4`.
-The checked-in 0.9.2 snapshot is a verbatim run from commit
-`712c5300228373677c367e6c0d83ac9d729ff63b`, measured by canonical workflow
-run `32394531042/attempts/1`; its raw artifact has SHA-256
-`52ed157609da6fc6ecd9e3b2b64a3f1e524c2227c27b44ea62e0c4f3237e63b2`.
-Both runs use the NGINX 1.30.4 environment. The validator requires each
-source commit, run attempt, timestamp, retained raw artifact, and digest to
-remain mutually consistent.
+adjustment rule, person or reason, and adjustment date in `baseline_policy`. The
+checked-in 0.9.1 snapshot is a verbatim eight-scenario run from commit
+`0847c287c1b744a3f80b7b7fe6ccf3e897223377`, measured by canonical workflow run
+`32398065263/attempts/1`. Its raw artifact has SHA-256
+`006bb70b6029a639068c50b532d1c8119c8e54b96775ff8c73e62223ba8cadc4`. The
+checked-in 0.9.2 snapshot is a verbatim run from commit
+`712c5300228373677c367e6c0d83ac9d729ff63b`, measured by canonical workflow run
+`32394531042/attempts/1`. Its raw artifact has SHA-256
+`52ed157609da6fc6ecd9e3b2b64a3f1e524c2227c27b44ea62e0c4f3237e63b2`. Both runs
+use the NGINX 1.30.4 environment.
 
-The 0.9.2 release path regenerates the checked-out 0.9.2 snapshot in the
-release container at the candidate SHA before running the blocking gate. This
-is necessary because a Git commit cannot contain a baseline whose provenance
-hash is the hash of that same commit. The checked-in copy remains auditable
-context; the candidate-bound workflow artifact is the release comparison
-evidence. In short, `module-baseline-091` measures the predecessor comparison
-series captured at commit `0847c287c1b744a3f80b7b7fe6ccf3e897223377`, while the
-release path regenerates the 092 baseline at the candidate SHA.
+The validator requires each source commit, run attempt, timestamp, retained raw
+artifact, and digest to remain mutually consistent.
+
+The 0.9.2 release path regenerates the checked-out 0.9.2 snapshot in the release
+container at the candidate SHA before running the blocking gate. This is
+necessary because a Git commit cannot contain a baseline whose provenance hash
+is the hash of that same commit. The checked-in copy remains auditable context.
+The candidate-bound workflow artifact is the release comparison evidence. In
+short, `module-baseline-091` measures the predecessor comparison series captured
+at commit `0847c287c1b744a3f80b7b7fe6ccf3e897223377`, while the release path
+regenerates the 092 baseline at the candidate SHA.
 
 Provenance layers by object: `baseline_policy` carries policy provenance,
 top-level `module_benchmark` carries `platform`, `load_generator`,
@@ -130,19 +130,18 @@ does not use `historical_audit_exception`.
 
 ## Measurement Commit Durability
 
-Every finalized baseline records the commit its benchmark ran against, and
-that commit always predates the commit that records it. A Git commit cannot
-contain a baseline whose provenance hash is the hash of that same commit, so
-a checked-in baseline always points backwards in history. The binding stays
-verifiable only while some ref still reaches that older commit.
+Every finalized baseline records the commit its benchmark ran against, and that
+commit always predates the commit that records it. A Git commit cannot contain a
+baseline whose provenance hash is the hash of that same commit. A checked-in
+baseline always points backwards in history. The binding stays verifiable only
+while some ref still reaches that older commit.
 
-A history rewrite breaks that reachability. During the 2026-08-20/21
-evidence churn, rebase and force-push moved the measurement commits behind
-`module-baseline-091.json` and `module-baseline-092.json` out of every
-branch and tag. The objects survived on the server and stayed fetchable by
-explicit SHA, but no ref reached them. A clean clone could not obtain them,
-so the provenance gate failed on every clone topology, not only on shallow
-checkouts.
+A history rewrite breaks that reachability. During the 2026-08-20/21 evidence
+churn, rebase and force-push moved the measurement commits behind
+`module-baseline-091.json` and `module-baseline-092.json` out of every branch
+and tag. The objects survived on the server and stayed fetchable by explicit
+SHA, but no ref reached them. A clean clone could not obtain them. The
+provenance gate failed on every clone topology, not only on shallow checkouts.
 
 Running the benchmark again does not remove this failure mode. It only
 swaps in another anchor that happens to be reachable at that moment, and the
@@ -161,17 +160,16 @@ the mechanism that removes the failure class.
 - **Immutability**: a pushed `perf-baseline/*` ref is immutable. Never move
   it and never delete it. Correct a tag message only while the tag stays
   local and unpushed.
-- **Creation trigger**: create a ref when the finalizer produces a new
-  canonical baseline and no existing immutable or protected ref already
-  anchors its measurement commit. A mutable branch, including `main`, does
-  not count as a durable anchor; a commit reached only through such a branch
-  still receives the dedicated `perf-baseline/*` ref.
-- **Message contents**: the message must record the baseline stem,
-  `source_run`, and `source_artifact_sha256`, so the ref audits itself
-  without opening the baseline file. The two live tags carry a superset of
-  that minimum. They add `baseline_file`, `source_git_commit`,
-  `source_artifact`, and an explicit statement that the ref turns immutable
-  once pushed.
+-  **Creation trigger**: create a ref when the finalizer produces a new
+  canonical baseline and no existing immutable or protected ref already anchors
+  its measurement commit. A mutable branch, including `main`, does not count as
+  a durable anchor. A commit reached only through such a branch still receives
+  the dedicated `perf-baseline/*` ref.
+-  **Message contents**: the message must record the baseline stem,
+  `source_run`, and `source_artifact_sha256`. The ref audits itself without
+  opening the baseline file. The two live tags carry a superset of that minimum.
+  They add `baseline_file`, `source_git_commit`, `source_artifact`, and an
+  explicit statement that the ref turns immutable once pushed.
 
 ### Current anchors
 
@@ -181,11 +179,11 @@ the mechanism that removes the failure class.
 | `module-baseline-092` | `712c5300228373677c367e6c0d83ac9d729ff63b` | `refs/tags/perf-baseline/module-baseline-092` |
 | `module-baseline-brotli-091` | `9734d12e4d1c4fb6e6e25852badf0ee614b170c8` | `refs/heads/main` and `refs/tags/v0.9.1` |
 
-`module-baseline-brotli-091` is the live example of the creation trigger.
-Its measurement commit already sits in `main` and in the `v0.9.1` release
-tag, so the policy forbids a dedicated `perf-baseline/*` ref for it. The
-anchoring requirement still holds for it: an archival `verbatim_import`
-pack receives no exemption.
+`module-baseline-brotli-091` is the live example of the creation trigger. Its
+measurement commit already sits in `main` and in the `v0.9.1` release tag. The
+policy forbids a dedicated `perf-baseline/*` ref for it. The anchoring
+requirement still holds for it: an archival `verbatim_import` pack receives no
+exemption.
 
 ### How the anchor check resolves a commit
 
@@ -195,16 +193,16 @@ pack receives no exemption.
 1. **Canonical fast path**: `refs/tags/perf-baseline/<stem>` resolves to
    exactly `sha`. This runs in constant time and proves the per-baseline
    binding.
-2. **Fallback**: `git for-each-ref --contains <sha>` finds a ref whose
-   history contains the object. This proves reachability from some ref, and
-   nothing more. It cannot prove the per-baseline binding, because
-   `712c5300...` is an ancestor of `0847c287...`, so a `--contains` query
-   for the 0.9.2 commit also matches the 0.9.1 tag. The detector therefore
-   never reports the matched refname as the anchor of that stem.
-3. **Indeterminate**: a shallow checkout, or a checkout that carries no
-   tags, cannot decide reachability. The detector prints an explicit SKIP
-   and still records a finding, so it fails closed instead of accepting an
-   anchor that a full clone would reject.
+2.  **Fallback**: `git for-each-ref --contains <sha>` finds a ref whose history
+   contains the object. This proves reachability from some ref, and nothing
+   more. It cannot prove the per-baseline binding, because `712c5300...` is an
+   ancestor of `0847c287...`. A `--contains` query for the 0.9.2 commit also
+   matches the 0.9.1 tag. The detector therefore never reports the matched
+   refname as the anchor of that stem.
+3.  **Indeterminate**: a shallow checkout, or a checkout that carries no tags,
+   cannot decide reachability. The detector prints an explicit SKIP and still
+   records a finding. It fails closed instead of accepting an anchor that a full
+   clone would reject.
 4. **Unanchored**: the object exists but no ref reaches it. The finding
    names the ref to create, `perf-baseline/<stem>`, and points back to this
    section.
@@ -242,20 +240,19 @@ with the other seven scenarios. The older
 `module-baseline-brotli-091.json` remains as a truthful NGINX 1.30.4 archival
 artifact and is never mixed into current comparisons.
 
-Regeneration path: run the `nightly-perf.yml` workflow with
-`workflow_dispatch` and `bootstrap_module_baseline=true` (do not also set
-`bootstrap_baseline=true`). The job builds the canonical NGINX version
-natively on `ubuntu-24.04` (x86_64) with Brotli support (`libbrotli-dev`
-plus the pinned Python `Brotli==1.2.1`), produces all eight scenarios in one
-consistent environment, finalizes the baseline from the retained raw report
-(computing the raw SHA-256 and taking the measurement timestamp from
+Regeneration path: run the `nightly-perf.yml` workflow with `workflow_dispatch`
+and `bootstrap_module_baseline=true` (do not also set
+`bootstrap_baseline=true`). The job builds the canonical NGINX version natively
+on `ubuntu-24.04` (x86_64) with Brotli support (`libbrotli-dev` plus the pinned
+Python `Brotli==1.2.1`), produces all eight scenarios in one consistent
+environment, finalizes the baseline from the retained raw report (computing the
+raw SHA-256 and taking the measurement timestamp from
 `module_benchmark.timestamp`), validates the result against the evidence
-integrity contract (including raw-digest and content-binding verification),
-and uploads both the finalized and raw files as retained artifacts. The
-release-package workflow repeats the generation in its candidate runtime
-before the blocking comparison; verify
-`baseline_policy.source_artifact_sha256`, the raw-artifact digest, after
-either materialization.
+integrity contract (including raw-digest and content-binding verification), and
+uploads both the finalized and raw files as retained artifacts. The
+release-package workflow repeats the generation in its candidate runtime before
+the blocking comparison. Verify `baseline_policy.source_artifact_sha256`, the
+raw-artifact digest, after either materialization.
 
 ## Baseline Files
 
@@ -279,10 +276,10 @@ Each platform has a dedicated baseline file:
   NGINX 1.30.4 (archival only, excluded from cross-environment comparisons)
 - `module-baseline-brotli-091-raw.json` - retained raw report for the Brotli
   run (provenance artifact referenced by `module-baseline-brotli-091.json`)
-- `module-baseline-092.json` - Linux x86_64 module-level 0.9.2 evidence
-  baseline. The checked-in copy is an auditable snapshot; the nightly and
-  release workflows generate a candidate-bound copy at the exact checkout
-  before running the blocking 0.9.2 gate.
+-  `module-baseline-092.json` - Linux x86_64 module-level 0.9.2 evidence
+  baseline. The checked-in copy is an auditable snapshot. The nightly and
+  release workflows generate a candidate-bound copy at the exact checkout before
+  running the blocking 0.9.2 gate.
 - `module-baseline-092-raw.json` - retained raw report for the 0.9.2
   baseline (provenance artifact referenced by `module-baseline-092.json`,
   regenerated by the local gate container or the nightly workflow)
@@ -294,12 +291,11 @@ Each platform has a dedicated baseline file:
 
 Each of the `streaming-first` and `large-body` response payloads is identical in
 every probe set, although the two payloads differ from each other. Only the
-top-level copies exist as regular files
-(`streaming-first.body`, `large-body.body`); each per-set copy is a symlink to
-them. That keeps about 9 MB of duplicate evidence out of the repository while
-every reader still sees the same bytes, and
-`tools/perf/tests/test_baseline_body_dedup.py` keeps the copies identical and
-the links inside this directory.
+top-level copies exist as regular files (`streaming-first.body`,
+`large-body.body`). Each per-set copy is a symlink to them. That keeps about 9
+MB of duplicate evidence out of the repository while every reader still sees the
+same bytes, and `tools/perf/tests/test_baseline_body_dedup.py` keeps the copies
+identical and the links inside this directory.
 
 ## Why the Compressed Variant Bodies Are Identical
 
@@ -309,7 +305,7 @@ its compression through the request the benchmark sends (`?gzip=1`,
 `?deflate=1`, `?brotli=1`) rather than through client negotiation. The recorded
 digest is therefore the same for `streaming-first`, `gzip-streaming-first`,
 `deflate-streaming-first`, and `brotli-streaming-first`, which is why they share
-one stored payload; the variant name describes the query-selected upstream
+one stored payload. The variant name describes the query-selected upstream
 compression of that scenario, not the bytes on disk.
 
 ## Which Layer Selects a Compression

@@ -17,16 +17,16 @@ Required:
 - Flush charset decoders at EOF (`last=true`) so trailing buffered bytes get emitted or reported.
 - Do not rely on blanket lossy conversion before handling chunk-tail semantics.
 - When post-commit wrappers re-map errors, preserve original error classification/code for downstream handling and metrics.
-- html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
-  `feed()` call, not just the first.  When a BOM's lead byte (0xEF) is split
-  into `utf8_tail` by `split_utf8_tail` and reassembled at the start of the
-  next `feed()`, html5ever strips it — diverging from single-chunk conversion
-  where the same BOM is mid-stream and preserved.  The streaming tokenizer
-  must set `discard_bom: false` and strip the stream-start BOM once in the
-  converter (after `utf8_tail` reassembly, so a split BOM reads as a
-  complete 3-byte unit).  The `bom_stripped` flag must not be set prematurely
-  when the effective bytes start with 0xEF but are shorter than 3 bytes —
-  defer until the next chunk reassembles the full sequence.
+-  html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
+  `feed()` call, not just the first. When a BOM's lead byte (0xEF) is split into
+  `utf8_tail` by `split_utf8_tail` and reassembled at the start of the next
+  `feed()`, html5ever strips it — diverging from single-chunk conversion where
+  the same BOM is mid-stream and preserved. The streaming tokenizer must set
+  `discard_bom: false` and strip the stream-start BOM once in the converter
+  (after `utf8_tail` reassembly. A split BOM reads as a complete 3-byte unit).
+  The `bom_stripped` flag must not be set prematurely when the effective bytes
+  start with 0xEF but are shorter than 3 bytes — defer until the next chunk
+  reassembles the full sequence.
 
 ---
 
@@ -34,20 +34,20 @@ Required:
 Historical issues: e76c1584, 13189d71, b9e5fe4d.
 
 Required:
-- Supported streaming content codings must match production routing and test
-  payload formats.  In the frozen 0.9.2 contract, gzip and deflate are
-  streaming-eligible under
-  the configured decompression/cache gates.  Brotli additionally requires a
-  successful `libbrotlidec` probe under
-  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`.  `off` disables the streaming
-  integration.  An `on`-mode probe failure for either the Brotli header or
-  `libbrotlidec` is a configuration error; it must not silently fall back to
-  buffered decompression.  In `auto`, a failed probe leaves the build on the
-  bounded full-buffer path instead of defining `NGX_HTTP_BROTLI`.  Brotli
-  streaming reuses the same codec/member
-  lifecycle invariants as gzip/deflate: the module must reject tail data,
-  detect and reject truncated final streams, guard no-progress,
-  and keep decompression accounting response-wide.
+-  Supported streaming content codings must match production routing and test
+  payload formats. In the frozen 0.9.2 contract, gzip and deflate are
+  streaming-eligible under the configured decompression/cache gates. Brotli
+  additionally requires a successful `libbrotlidec` probe under
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`. `off` disables the streaming
+  integration. An `on`-mode probe failure for either the Brotli header or
+  `libbrotlidec` is a configuration error. It must not silently fall back to
+  buffered decompression.
+
+In `auto`, a failed probe leaves the build on the bounded full-buffer path
+  instead of defining `NGX_HTTP_BROTLI`. Brotli streaming reuses the same
+  codec/member lifecycle invariants as gzip/deflate: the module must reject tail
+  data, detect and reject truncated final streams, guard no-progress, and keep
+  decompression accounting response-wide.
 - Codec-specific lifecycle state must survive arbitrary NGINX input chunk
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
   must not imply that compressed source input got consumed or may advance.
@@ -124,7 +124,7 @@ Verification:
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
 - `make test-rust` — streaming decompression tests cover zlib-wrapped and raw
   RFC 1951 deflate in both decoders, plus truncated-stream rejection.
-- `make test-nginx-unit` — C unit tests cover the no-progress guard via
+-  `make test-nginx-unit` — C unit tests cover the no-progress guard through
   `TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS` and gzip member lifecycle.
 - `make verify-chunked-native-e2e-smoke` — native gzip streaming exercises
   production routing, backpressure/resume, exact output equivalence, and

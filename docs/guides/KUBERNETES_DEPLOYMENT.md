@@ -86,20 +86,25 @@ curl -fsS -D /tmp/markdown-smoke-headers.txt -H 'Accept: text/markdown' \
 grep -i '^content-type: text/markdown' /tmp/markdown-smoke-headers.txt
 ```
 
-The first two commands must show an active, semicolon-terminated
-`load_module` directive and an active `markdown_filter on` directive. A
-comment mentioning the module filename must not satisfy them. `nginx -t`
-validates syntax only, so the directive greps are the load evidence. The
-request must return Markdown rather than the upstream HTML, and the final
-`grep` asserts that the response `Content-Type` header is `text/markdown`,
-failing when the header is missing or names another type. For a negative
-control, temporarily remove the active `load_module` line and repeat
-`nginx -t`. The module-specific configuration must then fail. The smoke test
-must report that failure rather than treating it as successful.
+The first two commands must show an active, semicolon-terminated `load_module`
+directive and an active `markdown_filter on` directive. A comment mentioning the
+module filename must not satisfy them. `nginx -t` validates syntax only. The
+directive greps are the load evidence. The request must return Markdown rather
+than the upstream HTML, and the final `grep` asserts that the response
+`Content-Type` header is `text/markdown`, failing when the header is missing or
+names another type. For a negative control, temporarily remove the active
+`load_module` line and repeat `nginx -t`.
+
+The module-specific configuration must then fail. The smoke test must report
+that failure rather than treating it as successful.
 
 ### Disable
 
-Remove `markdown_filter on` from ConfigMap. This disables only Markdown conversion — the module remains loaded in NGINX and metrics or diagnostics handlers may still run. For full module deactivation, explicitly remove the `load_module` directive from the ConfigMap snippet and rebuild the custom image or revert to the upstream Ingress Controller image.
+Remove `markdown_filter on` from ConfigMap. This disables only Markdown
+conversion. The module remains loaded in NGINX and metrics or diagnostics
+handlers may still run. For full module deactivation, explicitly remove the
+`load_module` directive from the ConfigMap snippet and rebuild the custom image
+or revert to the upstream Ingress Controller image.
 
 ### Rollback
 
@@ -156,13 +161,12 @@ docker build -f examples/kubernetes/Dockerfile.ingress \
 
 #### Custom NGINX Version
 
-Override the NGINX version **and** the base image together. The module must
-use a build compiled against the exact NGINX build shipped in the base
-image, or the load fails with an ABI mismatch. The F5 Ingress Controller
-image pins its own NGINX build, so a custom NGINX version requires the
-plain NGINX base image (see the plain-NGINX example below). The
-`NGINX_INGRESS_IMAGE` argument then selects the matching `nginx:<version>`
-image instead of the Ingress Controller image.
+Override the NGINX version **and** the base image together. The module must use
+a build compiled against the exact NGINX build shipped in the base image, or the
+load fails with an ABI mismatch. The F5 Ingress Controller image pins its own
+NGINX build. A custom NGINX version requires the plain NGINX base image (see the
+plain-NGINX example below). The `NGINX_INGRESS_IMAGE` argument then selects the
+matching `nginx:<version>` image instead of the Ingress Controller image.
 
 #### Custom Ingress Controller Image
 

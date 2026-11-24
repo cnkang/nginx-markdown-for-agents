@@ -2,7 +2,9 @@
 
 ## Status Snapshot
 
-This project is a production-oriented NGINX filter module backed by a Rust HTML-to-Markdown converter (via FFI). It performs HTTP content negotiation and returns Markdown when clients request `Accept: text/markdown`.
+This project is a production-oriented NGINX filter module backed by a Rust
+HTML-to-Markdown converter (through FFI). It performs HTTP content negotiation
+and returns Markdown when clients request `Accept: text/markdown`.
 
 The repository also includes a repo-owned harness for spec resolution, agent
 routing, risk overlays, and harness-specific validation. Public docs and tools
@@ -10,20 +12,24 @@ track that harness rather than private local steering files.
 
 ## Current Assessment
 
-As of **2026-11-22**, v0.9.4 is the current release. The project includes bounded
-full-buffer conversion by default (`markdown_streaming off`) with explicit streaming opt-in.
-It provides Rust-first architecture modules for Accept negotiation, conditional requests,
-decision logic, and header plan application. The project enforces a unified decompression
-budget via `markdown_limits` (conversion_memory, parser_budget, decompressed_size,
-conversion_timeout, parser_timeout). The project also ships a read-only runtime diagnostics
-endpoint and static configuration with validated reload/restore procedures. The delivery
-surface includes a DEB/RPM packaging pipeline, Kubernetes deployment examples, and FFI ABI
-layout verification. CI adds supply-chain hardening, supplemental static security checks,
-and report-oriented supply-chain visibility. A repo-owned harness governs agent workflows. The project has
-implemented and tested the core feature set. The codebase includes unit, integration, E2E,
-fuzz-oriented validation entrypoints, and harness-specific validation
-entrypoints, along with documentation covering installation, configuration,
-operations, architecture, and contributor-facing harness maintenance.
+As of **2026-11-22**, v0.9.4 is the current release. The project includes
+bounded full-buffer conversion by default (`markdown_streaming off`) with
+explicit streaming opt-in. It provides Rust-first architecture modules for
+Accept negotiation, conditional requests, decision logic, and header plan
+application. The project enforces a unified decompression budget through
+`markdown_limits` (conversion_memory, parser_budget, decompressed_size,
+conversion_timeout, parser_timeout). The project also ships a read-only runtime
+diagnostics endpoint and static configuration with validated reload/restore
+procedures. The delivery surface includes a DEB/RPM packaging pipeline,
+Kubernetes deployment examples, and FFI ABI layout verification.
+
+CI adds supply-chain hardening, supplemental static security checks, and
+report-oriented supply-chain visibility. A repo-owned harness governs agent
+workflows. The project has implemented and tested the core feature set. The
+codebase includes unit, integration, E2E, fuzz-oriented validation entrypoints,
+and harness-specific validation entrypoints, along with documentation covering
+installation, configuration, operations, architecture, and contributor-facing
+harness maintenance.
 
 ### Current Release Line 0.9.3
 
@@ -245,17 +251,17 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ### Current Release Line (0.9.x)
 
-The 0.9.x release line is the current maintained line. The current release
-is 0.9.4, dated 2026-11-22. It is a compatibility maintenance release,
-so it keeps the 0.9.2 contracts. 0.9.3 was the previous release (2026-11-02).
-The project released v0.9.2 on 2026-10-08.
+The 0.9.x release line is the current maintained line. The current release is
+0.9.4, dated 2026-11-22. It is a compatibility maintenance release. It keeps the
+0.9.2 contracts. 0.9.3 was the previous release (2026-11-02). The project
+released v0.9.2 on 2026-10-08.
+
 0.9.2 is a breaking surface-freeze release that consolidates the configuration
-surface
-to the 20-directive active contract (removing profile presets, dynconf, custom
-selectors, and per-path metrics), freezes the observability surface (ten v1
-metric families, reason registry, diagnostics JSON v3), advances the bundled
-FFI boundary to ABI 3, and ships the musl dynamic-module build, on top of
-the 0.9.1 streaming-decompression and zero-copy foundation.
+surface to the 20-directive active contract (removing profile presets, dynconf,
+custom selectors, and per-path metrics), freezes the observability surface (ten
+v1 metric families, reason registry, diagnostics JSON v3), advances the bundled
+FFI boundary to ABI 3, and ships the musl dynamic-module build, on top of the
+0.9.1 streaming-decompression and zero-copy foundation.
 
 #### 0.9.1 (previous release)
 

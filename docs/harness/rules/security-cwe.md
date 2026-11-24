@@ -27,11 +27,11 @@ different threat models and MUST NOT merge or import from each other:
   `/opt/homebrew/bin` (developer tools), excludes `/sbin` (not needed for
   non-root repo operations). Validated by the `validate_executable()` helper.
 
-- Packaging trusted PATH (maintainer scripts): serves production hosts
-  running as root during package install/remove. Uses the strict POSIX subset
-  `/usr/sbin:/usr/bin:/sbin:/bin` — includes `/sbin` for system administration
-  commands (for example, `nginx` on some distros), excludes developer-only paths.
-  Enforced by unconditional `PATH=...` assignment at script top.
+-  Packaging trusted PATH (maintainer scripts): serves production hosts running
+  as root during package install/remove. Uses the strict POSIX subset
+  `/usr/sbin:/usr/bin:/sbin:/bin`. Includes `/sbin` for system administration
+  commands (for example, `nginx` on some distros), excludes developer-only
+  paths. Enforced by unconditional `PATH=...` assignment at script top.
 
 Rationale: a dev/CI tool that includes `/sbin` in its PATH resolution risks
 resolving system administration binaries in contexts where they are
@@ -56,19 +56,19 @@ Required:
 - Every narrowing conversion (for example `size_t → uInt`, `ngx_uint_t → uint8_t`,
   `ngx_uint_t → uint32_t`) requires an explicit upper-bound check before the cast,
   against the destination type's maximum value, with an error/clamp path.
-- Size-value parsing via `ngx_parse_size()` must go through
+-  Size-value parsing through `ngx_parse_size()` must go through
   `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
-  parse→validate→safe-cast helper).  Direct calls to `ngx_parse_size()` with
+  parse→validate→safe-cast helper). Direct calls to `ngx_parse_size()` with
   immediate `(size_t)` cast are forbidden in new code.
-- In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
-  explicit non-negative check first (for example `if value < 0 { return Err(...) }`
-  or `value.try_into()`), followed by the appropriate upper-bound check or
-  clamp against the destination type's maximum.  `#[cfg(target_pointer_width = "64")]`
-  architecture guards alone do NOT satisfy signed-input validation: a guard
-  only narrows the target range for `usize` width, it cannot reject a
-  negative `i64`/`isize` value.  Keep the existing 32-bit target handling
-  for `usize` (runtime bounds check or explicit 64-bit-only guard) in
-  addition to the non-negative check.
+-  In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
+  explicit non-negative check first (for example `if value < 0 { return Err(...)
+  }` or `value.try_into()`), followed by the appropriate upper-bound check or
+  clamp against the destination type's maximum. `#[cfg(target_pointer_width =
+  "64")]` architecture guards alone do NOT satisfy signed-input validation: a
+  guard only narrows the target range for `usize` width, it cannot reject a
+  negative `i64`/`isize` value. Keep the existing 32-bit target handling for
+  `usize` (runtime bounds check or explicit 64-bit-only guard) also to the
+  non-negative check.
 - Addition of two `size_t` values that will feed memory allocation or
   buffer sizing must include an overflow guard:
   `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
@@ -76,11 +76,11 @@ Required:
   `(size_t)(last - pos)`) is forbidden unless:
   a. A bounds check on the pointers (for example `if (pos <= last)`) precedes the
      cast, or
-  b. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
-  A comparison context alone does NOT excuse the cast: comparison operators
-  evaluate the subtracted value, so an underflowed (wrapped) difference can
-  still steer control flow wrong before any explicit bounds check runs.
-  The `detect_cwe190_casts.sh` Pattern (d) flags all other cases.
+b. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
+A comparison context alone does NOT excuse the cast: comparison operators
+evaluate the subtracted value. An underflowed (wrapped) difference can still
+steer control flow wrong before any explicit bounds check runs. The
+`detect_cwe190_casts.sh` Pattern (d) flags all other cases.
 
 Verification:
 - `tools/harness/detect_cwe190_casts.sh components/nginx-module/src/`
@@ -119,23 +119,23 @@ Required:
   is inside the repository and executable is insufficient because an in-tree
   symlink can target an arbitrary external command. The executable passed to
   `subprocess` must come from the fixed allowlist, not from the raw CLI value.
-- **ValueError propagation from validate_read_path**: When wrapping
+-  **ValueError propagation from validate_read_path**: When wrapping
   `validate_read_path()` in a try/except block, do NOT catch `ValueError`.
   `validate_read_path()` raises `ValueError` when the path validator catches a
   traversal attempt (for example `..` components). Catching `ValueError`
   silently swallows the traversal rejection, allowing an attacker-controlled
-  path to proceed to `open()`.
-  The permitted fallback tuple is `(FileNotFoundError,)` — this covers only
-  the "directory does not exist" case. `ImportError` for a missing
-  `path_validation` module must **not** be in the tuple: a missing validation
-  module is a broken installation, not a fallback condition, so a missing
-  module must fail closed instead of degrading to unvalidated paths.
-  When refactoring a `try/except` around `validate_read_path`, audit the
-  caught exception types to ensure `ValueError` and `ImportError` are not in
-  the tuple.  `ImportError` must remain **fatal** during startup: a missing
-  `path_validation` module is a broken installation, not a fallback
-  condition, so the detector must not swallow it into a permissive fallback
-  path.
+  path to proceed to `open()`. The permitted fallback tuple is
+  `(FileNotFoundError,)`. This covers only the "directory does not exist" case.
+  `ImportError` for a missing `path_validation` module must **not** be in the
+  tuple: a missing validation module is a broken installation, not a fallback
+  condition, so a missing module must fail closed instead of degrading to
+  unvalidated paths.
+
+When refactoring a `try/except` around `validate_read_path`, audit the caught
+  exception types to make sure `ValueError` and `ImportError` are not in the
+  tuple. `ImportError` must remain **fatal** during startup: a missing
+  `path_validation` module is a broken installation, not a fallback condition.
+  The detector must not swallow it into a permissive fallback path.
 - For single-artifact CLI tools, prefer emitting the artifact to stdout and
   letting the trusted caller redirect it. Do not accept a caller-controlled
   output path when the Python process does not need filesystem ownership of
@@ -173,10 +173,9 @@ Required:
 - Handlers that never reject methods are exempt.
 
 Verification:
-- `python3 tools/harness/detect_access_before_method.py` — advisory
-  local gate; `--strict` promotes findings to violations (blocking
-  harness-tooling CI check via `make harness-security-checks` for
-  selected `harness_tooling` paths).
+-  `python3 tools/harness/detect_access_before_method.py` — advisory local gate.
+  `--strict` promotes findings to violations (blocking harness-tooling CI check
+  through `make harness-security-checks` for selected `harness_tooling` paths).
 - `PYTHONPATH=tools python3 -m pytest
   tools/harness/tests/test_detect_access_before_method.py -q --tb=short`
   — detector regression tests (clean ordering, bad ordering, exempt

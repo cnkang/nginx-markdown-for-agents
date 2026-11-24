@@ -75,11 +75,12 @@ the structure above and rejects cross-key violations before mutation:
 - `streaming_buffer <= conversion_memory`
 
 Zero handling: `conversion_timeout=0` is **rejected by the config handler**
-(must be a positive duration). When omitted, `conversion_timeout` defaults to 30s
-via configuration merge. A nonzero `parser_timeout` (default 10s) limits only the parser
-phase. When both keys are explicitly configured, `nginx -t` fails if
-`parser_timeout` exceeds `conversion_timeout`. When only one side is explicit, the merge step
-clamps the parser value down to the effective conversion bound.
+(must be a positive duration). When omitted, `conversion_timeout` defaults to
+30s through configuration merge. A nonzero `parser_timeout` (default 10s) limits
+only the parser phase. When both keys are explicitly configured, `nginx -t`
+fails if `parser_timeout` exceeds `conversion_timeout`. When only one side is
+explicit, the merge step clamps the parser value down to the effective
+conversion bound.
 
 `streaming_buffer` bounds the Rust streaming working set and each of the two
 pre-commit replay buffers separately. It is not a single shared total, and peak

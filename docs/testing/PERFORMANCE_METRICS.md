@@ -68,10 +68,11 @@ All sample content is deterministic and version-controlled. The tier name `large
 
 ## Baseline Update Flow
 
-Baselines are platform-specific JSON files stored in `perf/baselines/<platform>.json`.
-They contain only core metrics (`p50_ms`, `p95_ms`, `p99_ms`, `peak_memory_bytes`,
-`req_per_s`, `input_mb_per_s`) — the files exclude runtime metadata like
-`stage_breakdown`, `iterations`, and `warmup`.
+Baselines are platform-specific JSON files stored in
+`perf/baselines/<platform>.json`. They contain only core metrics (`p50_ms`,
+`p95_ms`, `p99_ms`, `peak_memory_bytes`, `req_per_s`, `input_mb_per_s`). The
+files exclude runtime metadata like `stage_breakdown`, `iterations`, and
+`warmup`.
 
 ### Generating or Updating a Baseline
 
@@ -100,9 +101,9 @@ When no baseline exists for a platform:
 4. The script prints a warning to stderr: `No baseline found for platform <platform>, skipping comparison`
 
 To bootstrap, a maintainer runs `--update-baseline` on the target CI runner, or
-triggers `nightly-perf` via `workflow_dispatch` with `bootstrap_baseline=true`,
-downloads the uploaded `perf-baseline-<platform>.json` artifact, and then submits
-the result as a PR.
+triggers `nightly-perf` through `workflow_dispatch` with
+`bootstrap_baseline=true`, downloads the uploaded
+`perf-baseline-<platform>.json` artifact, and then submits the result as a PR.
 
 ### Rules
 

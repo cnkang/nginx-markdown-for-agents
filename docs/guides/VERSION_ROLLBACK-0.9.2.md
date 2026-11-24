@@ -7,13 +7,14 @@ or narrowly scopes conversion **without replacing the binary**, see
 
 ## Overview
 
-This guide covers rolling back the 0.9.2 release to a prior
-release. 0.9.2 is a breaking release (see
-[0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
-on-disk data migration. Rolling back the module binary restores the 0.9.1
-directive surface only after the configuration is also restored. The 0.9.2
-20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary.
-The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
+This guide covers rolling back the 0.9.2 release to a prior release. 0.9.2 is a
+breaking release (see [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)).
+It has no on-disk data migration. Rolling back the module binary restores the
+0.9.1 directive surface only after the configuration is also restored. The 0.9.2
+20-directive configuration and ABI 3 are not compatible with a 0.9.1 binary. The
+project published v0.9.2 on 2026-10-08.
+
+Use its release-tag artifacts.
 
 | Target | Section |
 |--------|---------|
@@ -136,24 +137,23 @@ The project published v0.9.2 on 2026-10-08. Use its release-tag artifacts.
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```
 
-   Or download the 0.9.1 binary from the GitHub release archive. Verify the
-   `SHA256SUMS` and `SHA256SUMS.asc` files, confirming the signing key's
-   fingerprint through an independent trusted source, before copying or
-   installing the binary. Follow the standard verification block in
-   `docs/guides/PACKAGE_INSTALLATION.md` (isolated `GNUPGHOME`, fingerprint
-   check against `docs/guides/GPG_KEY_MANAGEMENT.md` §3, `VALIDSIG`
-   extraction from the Good-signature status line) — the one-sentence
-   summary here is not a substitute for that procedure.
+Or download the 0.9.1 binary from the GitHub release archive. Verify the
+`SHA256SUMS` and `SHA256SUMS.asc` files, confirming the signing key's
+fingerprint through an independent trusted source, before copying or installing
+the binary. Follow the standard verification block in
+`docs/guides/PACKAGE_INSTALLATION.md` (isolated `GNUPGHOME`, fingerprint check
+against `docs/guides/GPG_KEY_MANAGEMENT.md` §3, `VALIDSIG` extraction from the
+Good-signature status line). The one-sentence summary here is not a substitute
+for that procedure.
 
 3. **Restore the matching 0.9.1 configuration:**
 
-   Restore the complete versioned 0.9.1 configuration tree from the same
-   backup or release-controlled configuration bundle — `nginx.conf`, every
-   file under `conf.d/`, and every module-enablement file under
-   `modules-enabled/` (or the equivalent include directories for your
-   distribution). Do not validate a 0.9.2 configuration with the 0.9.1
-   binary. The 20-directive surface and static configuration defaults are
-   not compatible.
+Restore the complete versioned 0.9.1 configuration tree from the same backup or
+release-controlled configuration bundle. `nginx.conf`, every file under
+`conf.d/`, and every module-enablement file under `modules-enabled/` (or the
+equivalent include directories for your distribution). Do not validate a 0.9.2
+configuration with the 0.9.1 binary. The 20-directive surface and static
+configuration defaults are not compatible.
 
 4. **Validate configuration:**
 

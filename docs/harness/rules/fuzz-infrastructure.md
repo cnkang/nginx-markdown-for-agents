@@ -54,9 +54,9 @@ new behavior.
 **Description:**
 
 When adding new parser, header parsing, negotiation, or streaming logic,
-developers must ensure the corresponding fuzz target covers the new logic, or
-create a new fuzz target. This ensures all code paths handling untrusted input
-have continuous fuzzing coverage.
+developers must make sure the corresponding fuzz target covers the new logic, or
+create a new fuzz target. This makes sure all code paths handling untrusted
+input have continuous fuzzing coverage.
 
 **Applicable scenarios:**
 - Adding support for new HTML tags or attributes
@@ -84,7 +84,7 @@ have continuous fuzzing coverage.
 
 All fuzz targets must satisfy deterministic execution and side-effect
 constraints: the same input must produce the same behavior. This is a
-prerequisite for the fuzzing engine to work correctly — non-deterministic
+prerequisite for the fuzzing engine to work correctly. Non-deterministic
 behavior causes coverage guidance to fail and crashes to become unreproducible.
 
 **Prohibited operations:**
@@ -197,9 +197,9 @@ causes:
 **Description:**
 
 Fuzz CI workflows must not run for unrelated documentation-only changes (unless
-explicitly requested). The harness implements this via GitHub Actions path filters
-(`paths` trigger conditions), ensuring PR fuzzing is only triggered when the
-following paths change:
+explicitly requested). The harness implements this through GitHub Actions path
+filters (`paths` trigger conditions), ensuring PR fuzzing is only triggered when
+the following paths change:
 
 - `components/rust-converter/**`
 - `fuzz/**`
@@ -253,16 +253,16 @@ includes:
    also exist (FUZZ-005).
 6. **Documentation completeness**: `fuzz/README.md` exists.
 7. **Gitignore configuration**: `.gitignore` excludes generated corpus paths.
-8. **Container privilege**: the ClusterFuzzLite Dockerfile ends with a
-   non-root user while keeping the Rust toolchain readable and the
-   source/build/output paths writable for the action's mounted directories.
-   The `/rustc` standard-library source staging directory and fixed
+8.  **Container privilege**: the ClusterFuzzLite Dockerfile ends with a non-root
+   user while keeping the Rust toolchain readable and the source/build/output
+   paths writable for the action's mounted directories. The `/rustc`
+   standard-library source staging directory and fixed
    `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz compile
-   wrapper must be pre-created and owned by that user. Do
-   not make the whole `/usr/lib` directory writable. Every workflow invoking
-   `build_fuzzers` must also pre-create `build-out` before the container action
-   runs, so the action's root process cannot make the bind-mounted output
-   directory unwritable to the final non-root project image.
+   wrapper must be pre-created and owned by that user. Do not make the whole
+   `/usr/lib` directory writable. Every workflow invoking `build_fuzzers` must
+   also pre-create `build-out` before the container action runs. The action's
+   root process cannot make the bind-mounted output directory unwritable to the
+   final non-root project image.
 
 **Verification command:**
 ```bash

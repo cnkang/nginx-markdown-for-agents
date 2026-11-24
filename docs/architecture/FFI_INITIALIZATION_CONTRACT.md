@@ -12,8 +12,8 @@
 
 Every `#[repr(C)]` FFI result struct uses its matching production helper when
 one exists. **Semantic initializer first**: the initializer establishes the
-struct's non-zero semantic defaults. Zero-initialization is only a fallback
-for a struct with no semantic defaults and no initializer. This ensures that:
+struct's non-zero semantic defaults. Zero-initialization is only a fallback for
+a struct with no semantic defaults and no initializer. This makes sure that:
 
 1. Every field has a defined value (no uninitialized memory across FFI)
 2. Pointer fields are NULL (safe to call `free` on)

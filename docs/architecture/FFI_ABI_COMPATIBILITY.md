@@ -68,8 +68,8 @@ fingerprints from the checked-in header, the Rust export modules, and the
 layout-check `_Static_assert` set. Run it after any header or export change and
 paste its output into `abi.rs`, then update the values here. The Rust tests in
 `ffi/exports.rs` (`abi_header_hash_matches_constant` and its two siblings) pin
-the constants to the accessor returns, so a drift fails `make test-rust`
-before it can reach a release.
+the constants to the accessor returns. A drift fails `make test-rust` before it
+can reach a release.
 
 The three fingerprint values detect drift even when the numeric ABI version
 stays unchanged:

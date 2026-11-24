@@ -1,10 +1,10 @@
 # Knowledge Base: nginx-markdown-for-agents
 
-This directory is the project's **decision-layer knowledge base** (pilot).
-It does NOT duplicate the guides, architecture docs, or changelogs — those
-remain the living source of truth. This layer answers "what do I need to
-remember / which rule applies here?" with the stable contract facts, mental
-models, and pointers.
+This directory is the project's **decision-layer knowledge base** (pilot). It
+does NOT duplicate the guides, architecture docs, or changelogs. Those remain
+the living source of truth. This layer answers "what do I need to remember /
+which rule applies here?" with the stable contract facts, mental models, and
+pointers.
 
 ## When to Use This Directory
 
@@ -55,10 +55,9 @@ distinct directives with different migration paths.
 The five convergence names (`markdown_dynamic_config`,
 `markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
 `markdown_prune_selectors`, and `markdown_prune_protection_selectors`) are no
-longer registered at all. They fail `nginx -t` with NGINX's standard
-`unknown directive` error, so the replacement for each name comes from
-`MIGRATION-0.9.2.md` rather than from a module message. They are not active
-configuration directives.
+longer registered at all. They fail `nginx -t` with NGINX's standard `unknown
+directive` error. The replacement for each name comes from `MIGRATION-0.9.2.md`
+rather than from a module message. They are not active configuration directives.
 
 ## Contract Loading
 

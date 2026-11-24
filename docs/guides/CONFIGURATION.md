@@ -119,15 +119,16 @@ after streaming headers have been sent.
 
 `streaming_buffer` is a total per-request byte budget shared by the Rust
 streaming converter's working set and the pre-commit original-body replay
-buffer. It is not an upstream chunk-size or flush-size setting. Streaming
-budget and replay-overflow errors follow `markdown_error_policy`. With
-`pass`, the module normally forwards the original response — but only while
-the replay buffer still holds the original body. If a replay overflow makes
-that body unavailable before commit, even `pass` cannot forward it. In that
-exception the decision engine returns the internal default reject status
+buffer. It is not an upstream chunk-size or flush-size setting. Streaming budget
+and replay-overflow errors follow `markdown_error_policy`. With `pass`, the
+module normally forwards the original response. But only while the replay buffer
+still holds the original body. If a replay overflow makes that body unavailable
+before commit, even `pass` cannot forward it.
+
+In that exception the decision engine returns the internal default reject status
 (`mcf->error_status`, 502 unless the configuration overrides it). With
-`fail_closed` or `status <code>`, the module rejects the
-request and returns the configured reject status.
+`fail_closed` or `status <code>`, the module rejects the request and returns the
+configured reject status.
 
 After a streaming response switches to pass-through, queued body copies use
 reusable storage. The module applies `streaming_buffer` to this retained
@@ -324,7 +325,7 @@ longer watched.
 `markdown_dynconf_dry_run` — REMOVED. Validate candidate static configuration
 with `nginx -t` before reloading.
 
-The module no longer registers these five names, so a configuration that still uses
+The module no longer registers these five names. A configuration that still uses
 one fails `nginx -t` with NGINX's standard `unknown directive` error. There is
 no module-specific migration hint.
 

@@ -21,24 +21,23 @@ Required:
   Fixtures must clean their own children when an assertion fails.
   Test assertions must verify production cleanup before fixture cleanup.
   Failure and interrupted-run tests must prove that host state stays unchanged.
-- **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the
-  0.9.2 window needed ~10 commits fixing the detectors themselves
-  (`076bfdc1` reusable-workflow boundary state, `658cb4d3` future
-  annotations, `9fd3deba` regex complexity, `eaadc7fb`, `493732fe`),
-  proving detector bugs recur at boundary shapes.  A fix to any
-  `tools/harness/detect_*` script must add a test fixture that reproduces
-  the exact defect shape (the fixture fails before the fix and passes
-  after it), plus a clean-fixture case proving the detector does not
-  false-positive on the prescribed idiom.  Detector scans over the full
-  repository must stay runtime-bounded; if a detector needs optimization,
-  preserve its detection semantics and note the budget in the rule that
-  owns it.
+-  **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the 0.9.2
+  window needed ~10 commits fixing the detectors themselves (`076bfdc1`
+  reusable-workflow boundary state, `658cb4d3` future annotations, `9fd3deba`
+  regex complexity, `eaadc7fb`, `493732fe`), proving detector bugs recur at
+  boundary shapes. A fix to any `tools/harness/detect_*` script must add a test
+  fixture that reproduces the exact defect shape (the fixture fails before the
+  fix and passes after it), plus a clean-fixture case proving the detector does
+  not false-positive on the prescribed idiom. Detector scans over the full
+  repository must stay runtime-bounded. If a detector needs optimization,
+  preserve its detection semantics and note the budget in the rule that owns it.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
   example many small chunks plus skewed large chunks), not only a single
   two-chunk split.
-- Keep unit/property/fuzz/integration coverage coherent; do not rely on a single test layer.
+-  Keep unit/property/fuzz/integration coverage coherent. Do not rely on a
+  single test layer.
 - Parameterized tests must actually consume per-case inputs to drive the code
   path under test (no loops that ignore the case value and only mutate counters).
 - Prefer exercising shared routing/helpers used by production semantics over
@@ -62,8 +61,8 @@ Required:
   `tests/corpus/**/.meta.json -> streaming_notes.known_diff_ids` synchronized
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
-- Known-difference registries must carry structured drift classification
-  metadata (for example `drift_type` and `severity`) in addition to binary
+-  Known-difference registries must carry structured drift classification
+  metadata (for example `drift_type` and `severity`) also to binary
   accept/reject flags. Parsers must degrade safely for missing/unknown values
   and tests must cover classification parsing defaults.
 - Any new `tests/corpus/**/*.html` fixture must include a same-basename
@@ -123,8 +122,8 @@ Required:
 - If a task requires generated artifacts (for example large fixtures or JSON
   evidence packs), generate them once and verify both existence and required
   shape (schema/required fields), not just file creation.
-- For bounded-memory/perf evidence tests, ensure fixture construction does not
-  trivially force output-size-linear memory growth, inputs used to validate
+-  For bounded-memory/perf evidence tests, make sure fixture construction does
+  not trivially force output-size-linear memory growth, inputs used to validate
   working-set bounds should separate input volume from emitted Markdown volume.
 - For bounded-memory/perf evidence fixtures, use parser-visible/pipeline-visible
   padding (for example regular elements/text), not parser-discarded constructs
@@ -143,12 +142,12 @@ Required:
 ### 22. Rust test infrastructure and feature-gated code hygiene
 
 Required:
-- Do not add helper functions that are not consumed in the same change set.
+-  Do not add helper functions that are not consumed in the same change set.
   Speculative "this might be useful later" functions produce dead_code warnings
-  that dilute real regression signals. If you add a helper, ensure at least one
-  call site uses it before merging. Shared test-support modules are the only
+  that dilute real regression signals. If you add a helper, make sure at least
+  one call site uses it before merging. Shared test-support modules are the only
   exception (see next rule).
-- Shared test utility modules included via `#[path = "..."]` in multiple
+-  Shared test utility modules included through `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level, because each binary only uses a subset of the shared API and the
   remaining functions produce noisy warnings.
@@ -184,15 +183,16 @@ Required:
 - Avoid `1 * N` identity multiplications in size-constant arrays, use `N`
   directly or underscore-separated literals (`1_024`) to satisfy
   `clippy::identity_op`.
-- **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`
+-  **Rust 2024 edition binding modes**: do not use explicit `ref` or `ref mut`
   in patterns that match on a reference type (`&T`, `&Option<T>`, `&mut T`).
   Rust 2024 edition treats this as a hard error because the reference already
-  implies borrowing.  Use `ref` only when matching on an owned value where
-  you need to borrow without moving.  Before writing `if let Some(ref x) = y`,
-  check whether `y` is a reference — if so, drop the `ref`.  This applies to
-  all pattern contexts: `if let`, `match`, `while let`, and function arguments.
-  CI compiles with the project's declared edition, so a local build with an
-  older edition may not catch this.
+  implies borrowing. Use `ref` only when matching on an owned value where you
+  need to borrow without moving. Before writing `if let Some(ref x) = y`, check
+  whether `y` is a reference. If so, drop the `ref`. This applies to all pattern
+  contexts: `if let`, `match`, `while let`, and function arguments.
+
+CI compiles with the project's declared edition. A local build with an older
+  edition may not catch this.
 
 ---
 
@@ -205,12 +205,12 @@ Required:
   line coverage bar.
 - Critical paths (auth, error handling, FFI boundary, conditional requests)
   require 90% line coverage for new code.
-- Before declaring a task complete when the change touches production source
+-  Before declaring a task complete when the change touches production source
   files, run `make coverage-c` (C module) or `make coverage-rust` (Rust
-  converter) and verify aggregate coverage does not regress below 80%.
-  The advisory per-file thresholds logged by `collect_nginx_coverage.sh` are
-  informational warnings only — the binding gate is the 80% aggregate bar
-  (90% for critical paths).
+  converter) and verify aggregate coverage does not regress below 80%. The
+  advisory per-file thresholds logged by `collect_nginx_coverage.sh` are
+  informational warnings only. The binding gate is the 80% aggregate bar (90%
+  for critical paths).
 
 
 ---

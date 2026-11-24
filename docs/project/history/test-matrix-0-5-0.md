@@ -18,11 +18,11 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 
 Each sub-spec fills in the following template to identify complete covered
 tuples. A row is one executable combination across all dimensions. Listing a
-value in isolation does not establish coverage for the cross-product.
-The **Combination ID** must be deterministic and globally unique: derive it
-from every listed dimension value (for example a stable hash of the
-canonical dimension tuple), or specify the complete dimension tuple as the
-canonical key — never reuse the same ID for different tuples.
+value in isolation does not establish coverage for the cross-product. The
+**Combination ID** must be deterministic and globally unique: derive it from
+every listed dimension value (for example a stable hash of the canonical
+dimension tuple), or specify the complete dimension tuple as the canonical key.
+Never reuse the same ID for different tuples.
 
 ```markdown
 ## Test Matrix Coverage — [Sub-Spec Name]
@@ -48,24 +48,24 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 The required coverage set is the complete Cartesian product of the listed
 dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
-conversion engines x 6 conversion paths = 288 tuples.  Six of them — the
-Extra-Large full-buffer convert tuples (TM-037, TM-085, TM-133, TM-181,
-TM-229, TM-277) — hit the size-limit rejection path by design: the module
-rejects inputs at or above the conversion ceiling, so this document excludes
-them from the required set.  A further 24 full-buffer/fallback tuples are
-unreachable: fallback is a streaming-to-full-buffer transition, so a request
-whose initial engine is full-buffer can never take the fallback path.  This
-document excludes those 24 tuples for the same reason it excludes the
-Extra-Large convert rows, leaving 258 required tuples.  The fallback and fail-open
-paths are separate coverage obligations: each carries its own reason code
-and output, so no tuple may cover both at once. A streaming-to-full-buffer
-fallback does not count an already counted full-buffer conversion again.
-Before release,
-aggregate all sub-spec coverage mappings. Ensure every required tuple has at
-least one covering sub-spec. Covering each value independently is not
-sufficient. The following table enumerates the complete required set in
-deterministic lexicographic order. A tuple remains Pending until the release
-process records a covering sub-spec:
+conversion engines x 6 conversion paths = 288 tuples. Six of them — the
+Extra-Large full-buffer convert tuples (TM-037, TM-085, TM-133, TM-181, TM-229,
+TM-277) — hit the size-limit rejection path by design: the module rejects inputs
+at or above the conversion ceiling, so this document excludes them from the
+required set. A further 24 full-buffer/fallback tuples are unreachable: fallback
+is a streaming-to-full-buffer transition. A request whose initial engine is
+full-buffer can never take the fallback path. This document excludes those 24
+tuples for the same reason it excludes the Extra-Large convert rows, leaving 258
+required tuples. The fallback and fail-open paths are separate coverage
+obligations: each carries its own reason code and output, so no tuple may cover
+both at once.
+
+A streaming-to-full-buffer fallback does not count an already counted
+full-buffer conversion again. Before release, aggregate all sub-spec coverage
+mappings. make sure every required tuple has at least one covering sub-spec.
+Covering each value independently is not sufficient. The following table
+enumerates the complete required set in deterministic lexicographic order. A
+tuple remains Pending until the release process records a covering sub-spec:
 
 | Combination ID | Platform | NGINX Version | Response Size Tier | Conversion Engine | Conversion Path | Covering Sub-Spec | Status |
 |---------------|----------|---------------|--------------------|-------------------|-----------------|------------------|--------|

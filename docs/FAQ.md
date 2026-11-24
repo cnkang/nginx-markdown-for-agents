@@ -32,12 +32,12 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: repository builds use the pinned 1.98.1 toolchain; the public
+-  **Rust**: repository builds use the pinned 1.98.1 toolchain. The public
   source-build MSRV is 1.98 (for source builds only)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
-- **Memory**: Minimum 512MB RAM per worker (more for large documents;
-  a practical sizing floor for typical deployments — not a hard upper
-  bound, see `markdown_limits conversion_memory`)
+-  **Memory**: Minimum 512MB RAM per worker (more for large documents. A
+  practical sizing floor for typical deployments — not a hard upper bound, see
+  `markdown_limits conversion_memory`)
 
 Your distribution can ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
 

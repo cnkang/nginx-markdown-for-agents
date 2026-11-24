@@ -19,10 +19,10 @@ compatibility or release scope.
 - Repository metadata targets 0.9.4. Use the v0.9.4 tag, assets, and
   checksums for the current release.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
-- v0.9.3 is a controlled compatibility maintenance exception. It is not a
-  second breaking release, and it does not reopen the v0.9.2 contract. Its
-  scope is the NGINX compatibility surface, Ubuntu LTS support, release
-  engineering, and the documentation that follows from those changes.
+-  v0.9.3 is a controlled compatibility maintenance exception. It is not a
+  second breaking release. It does not reopen the v0.9.2 contract. Its scope is
+  the NGINX compatibility surface, Ubuntu LTS support, release engineering, and
+  the documentation that follows from those changes.
 - The v0.9.4 release continues that compatibility-only scope. The 20 active
   directives, defaults, HTTP representation, metrics, diagnostics, reason
   codes, and FFI ABI version 3 stay unchanged.

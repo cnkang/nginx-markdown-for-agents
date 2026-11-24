@@ -291,7 +291,7 @@ The three v0.9.2 targets each have a matching seed-corpus directory under
 
 The `fuzz_multilayer_decode` target requires at least six input bytes before it
 can derive its layer selectors, payload kind, and payload source. Keep at least
-one tracked seed at or above that minimum; `fuzz/corpus/fuzz_multilayer_decode/`
+one tracked seed at or above that minimum. `fuzz/corpus/fuzz_multilayer_decode/`
 contains `seed-minimum-valid.txt` as the minimal smoke seed and `basic.txt` as
 the compressed-stream seed.
 

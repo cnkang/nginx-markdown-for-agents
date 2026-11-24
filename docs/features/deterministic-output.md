@@ -5,12 +5,11 @@
 **Contract:** within the same module version and build feature set, identical
 effective inputs produce byte-identical response bodies.
 
-**Determinism identity:** the effective input tuple consists of the
-upstream HTML bytes plus every explicit conversion option — base URL,
-content type, markdown flavor, pruning configuration, front matter mode,
-token-estimate mode, and any other explicit conversion option. Two requests
-that agree on every element of this tuple must produce byte-identical
-response bodies.
+**Determinism identity:** the effective input tuple consists of the upstream
+HTML bytes plus every explicit conversion option. Base URL, content type,
+markdown flavor, pruning configuration, front matter mode, token-estimate mode,
+and any other explicit conversion option. Two requests that agree on every
+element of this tuple must produce byte-identical response bodies.
 
 **Only headers that participate in the effective input tuple are part of the
 determinism identity.** `Accept` is an explicit Markdown-negotiation input and
@@ -30,7 +29,10 @@ processes and requires byte-identical output (`perf/reports/corpus-determinism-r
 
 ## Overview
 
-The NGINX Markdown Converter implements comprehensive output normalization to ensure **deterministic Markdown generation**. This means that converting identical HTML input multiple times will always produce byte-for-byte identical Markdown output.
+The NGINX Markdown Converter implements comprehensive output normalization to
+make sure **deterministic Markdown generation**. This means that converting
+identical HTML input multiple times will always produce byte-for-byte identical
+Markdown output.
 
 Deterministic output is **critical** for:
 - **Stable ETags**: Consistent output enables reliable ETag generation for HTTP caching

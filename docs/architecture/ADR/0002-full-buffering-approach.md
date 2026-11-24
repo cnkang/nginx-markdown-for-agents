@@ -2,11 +2,10 @@
 
 ## Status
 
-Accepted. The ADR records a historical baseline that ADR-0004,
-ADR-0011, and ADR-0013 later partially superseded or extended. The
-full-buffer engine itself remains part of the active dual-engine
-architecture, and this ADR records why v1 originally chose full
-buffering.
+Accepted. The ADR records a historical baseline that ADR-0004, ADR-0011, and
+ADR-0013 later partially superseded or extended. The full-buffer engine itself
+remains part of the active dual-engine architecture. This ADR records why v1
+originally chose full buffering.
 
 ## Context
 

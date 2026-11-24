@@ -29,32 +29,32 @@ and full-buffer backpressure NGX_AGAIN resume tail duplication fix.
 ## 1. True Streaming Definition
 
 In 0.8.0, "true streaming conversion" means: the module, upon receiving an
-upstream response buffer chain in the NGINX response body filter, is able to
-parse HTML incrementally, maintain conversion state, and produce Markdown
-output **without buffering the entire upstream response body**.
+upstream response buffer chain in the NGINX response body filter, can parse HTML
+incrementally, maintain conversion state, and produce Markdown output **without
+buffering the entire upstream response body**.
 
 True streaming MUST satisfy ALL of the following conditions simultaneously.
 
 ### 1.1 Incremental Input Processing
 
-The module processes response body in the order buffers/chunks arrive via the
-NGINX body filter chain. HTML tags, text nodes, attributes, entities, tables,
-lists, and other structures MAY span chunk boundaries. The converter MUST
-maintain the necessary state and correctly merge content across boundaries.
+The module processes response body in the order buffers/chunks arrive through
+the NGINX body filter chain. HTML tags, text nodes, attributes, entities,
+tables, lists, and other structures MAY span chunk boundaries. The converter
+MUST maintain the necessary state and correctly merge content across boundaries.
 
 ### 1.2 Incremental Output Emission
 
 Once the converter has sufficient context and confirms the response remains
 safely convertible, it MAY send Markdown output downstream. Output is NOT
-required to correspond one-to-one with input chunks, but the module MUST NOT
-wait until the entire HTML response arrives before producing any output.
+required to correspond one-to-one with input chunks. The module MUST NOT wait
+until the entire HTML response arrives before producing any output.
 
 ### 1.3 Explainable Memory Bound
 
-The peak memory of the true streaming path MUST NOT scale linearly with the
-full HTML body size. The implementation MAY retain parser state, a look-behind
-window, a pending output buffer, and a pre-commit raw replay buffer — but it
-MUST NOT hold the complete response body as a default working set.
+The peak memory of the true streaming path MUST NOT scale linearly with the full
+HTML body size. The implementation MAY retain parser state, a look-behind
+window, a pending output buffer, and a pre-commit raw replay buffer. But it MUST
+NOT hold the complete response body as a default working set.
 
 ### 1.4 Representation Non-Reversibility
 
@@ -93,10 +93,10 @@ True streaming does NOT cover:
   or any response without a well-defined end boundary or with continuously
   mutating semantics.
 - **Non-HTML content**: JSON APIs, file downloads, images, CSS, JavaScript.
-- **Features requiring full-document correctness** unless that feature already
-  has an incremental implementation — for example strict Markdown-variant ETag
-  comparison, full-text-scan front matter, and normalization modes requiring
-  the complete document.
+-  **Features requiring full-document correctness** unless that feature already
+  has an incremental implementation. For example strict Markdown-variant ETag
+  comparison, full-text-scan front matter, and normalization modes requiring the
+  complete document.
 - **Compressed responses** MUST pass through the controlled
   decompression budget before entering the streaming HTML converter. The module
   MUST NOT feed gzip, br, and deflate payloads directly to the streaming parser.
@@ -269,7 +269,7 @@ conversion:
 - `application/x-ndjson`
 - `application/stream+json`
 
-Users MAY add exclusions via `markdown_stream_excluded_types`. The effective
+Users MAY add exclusions through `markdown_stream_excluded_types`. The effective
 excluded type set is the union of built-in hard exclusions and user-configured
 exclusions. User configuration MUST NOT replace or remove built-in hard
 exclusions. These types have inherent continuous-stream semantics incompatible
@@ -369,27 +369,26 @@ the parser allowance.
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- a section 2.2 pre-selection guard routes an otherwise eligible response to
+-  a section 2.2 pre-selection guard routes an otherwise eligible response to
   the bounded full-buffer engine (for example a policy other than `auto`/
   `force`). The guard selects the engine: a response that fails it runs on the
   bounded full-buffer engine and is not a streaming candidate. A
   `markdown_stream_excluded_types` match does not reach this guard: it fails
-  eligibility and the module forwards the response unchanged. A response that
-  is not eligible for conversion is never converted, so it is not a fallback
-  case either.
+  eligibility and the module forwards the response unchanged. A response that is
+  not eligible for conversion is never converted. It is not a fallback case
+  either.
 
 If the response would exceed the full-buffer **input-size** limit
-(`markdown_limits conversion_memory=`) **and the size is
-known at header time** (Content-Length present), the eligibility gate
-rejects it **before any conversion attempt**: the module records the
-request as `not_eligible` (reason `not_eligible`) and does **not**
-increment `nginx_markdown_conversion_attempts_total` nor assign
-`engine="full_buffer"`, because conversion never starts. The module
-forwards the original response without evaluating `markdown_error_policy`
-(prechecked passthrough). Generated-output, transient-working-set, and
-`parser_budget` failures are **not** prechecked at header time: they can
-only appear during conversion, so those cases go through
-`markdown_error_policy` like any other conversion failure.
+(`markdown_limits conversion_memory=`) **and the size is known at header time**
+(Content-Length present), the eligibility gate rejects it **before any
+conversion attempt**: the module records the request as `not_eligible` (reason
+`not_eligible`) and does **not** increment
+`nginx_markdown_conversion_attempts_total` nor assign `engine="full_buffer"`,
+because conversion never starts. The module forwards the original response
+without evaluating `markdown_error_policy` (prechecked passthrough).
+Generated-output, transient-working-set, and `parser_budget` failures are
+**not** prechecked at header time: they can only appear during conversion. Those
+cases go through `markdown_error_policy` like any other conversion failure.
 
 When the size is **not known at header time** (chunked or no
 Content-Length), the request enters the buffering pipeline and the body

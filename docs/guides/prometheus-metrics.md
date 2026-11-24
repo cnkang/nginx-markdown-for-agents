@@ -50,9 +50,9 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
 | `nginx_markdown_build_info` | gauge | `version`, `nginx_version`, `features` | Build identity; value is always `1`. |
 
-The recorder that maintains the `nginx_markdown_conversion_peak_memory_bytes` gauge sits outside the streaming feature block,
-so a build without streaming support reports the working set of its full-buffer
-conversions rather than zero.
+The recorder that maintains the `nginx_markdown_conversion_peak_memory_bytes`
+gauge sits outside the streaming feature block. A build without streaming
+support reports the working set of its full-buffer conversions rather than zero.
 
 The engine values are `full_buffer` and `streaming`. The streaming transition
 allowlist is `commit`, `fallback`, `safe_finish_start`, `abort_start`,
@@ -79,10 +79,10 @@ The frozen event model is:
 3. A successful attempt produces at most one request-level successful delivery.
 4. The diagnostics in-flight counter returns to zero after quiescence.
 
-Therefore, after the system is quiescent (no in-flight requests, so the
-counters have stopped advancing), the conservation equations hold on
-**deltas measured from one shared counter baseline** taken before the
-observation window (for example the previous scrape):
+Therefore, after the system is quiescent (no in-flight requests. The counters
+have stopped advancing), the conservation equations hold on **deltas measured
+from one shared counter baseline** taken before the observation window (for
+example the previous scrape):
 
 ```text
 delta(sum(requests_total)) == requests entering the decision chain during the window
@@ -125,10 +125,10 @@ Keep the endpoint on a management listener or behind an internal access
 policy. Do not expose it directly to the public network.
 
 The metrics endpoint accepts only loopback clients (`allow 127.0.0.1; allow ::1;
-deny all;`), so the `targets: ['127.0.0.1:80']` example works only when
-Prometheus shares NGINX's network namespace (same host or same pod). For remote
-or separately containerized Prometheus, use a local agent, a sidecar, or a
-loopback relay that forwards to the management listener instead of changing the
+deny all;`). The `targets: ['127.0.0.1:80']` example works only when Prometheus
+shares NGINX's network namespace (same host or same pod). For remote or
+separately containerized Prometheus, use a local agent, a sidecar, or a loopback
+relay that forwards to the management listener instead of changing the
 endpoint's loopback restriction.
 
 ## Verify the contract

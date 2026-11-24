@@ -10,14 +10,14 @@
 
 This document defines which test concerns must remain in C and why. It is the
 authoritative explanation for why some tests are not migrated during the 0.6.3
-Rust-first test migration, and it provides a decision guide for future
-contributors deciding where a new test belongs.
+Rust-first test migration. It provides a decision guide for future contributors
+deciding where a new test belongs.
 
 The 0.6.3 migration moves product-level HTTP E2E scenario logic into the Rust
 harness. It does **not** remove or migrate C unit tests that validate NGINX
-module internals, C/NGINX glue, or ABI concerns. Those tests remain in C
-because the concerns they test are inherently C-language concerns — they depend
-on NGINX data structures, NGINX memory pools, NGINX filter chain semantics, or
+module internals, C/NGINX glue, or ABI concerns. Those tests remain in C because
+the concerns they test are inherently C-language concerns. They depend on NGINX
+data structures, NGINX memory pools, NGINX filter chain semantics, or
 compiler/toolchain behavior that cannot be meaningfully expressed in Rust.
 
 ---
@@ -59,9 +59,9 @@ available in C.
 (`ngx_conf_t`, `ngx_command_t`, `ngx_conf_merge_value`, `ngx_conf_set_*_slot`).
 The merge semantics — how `http {}`, `server {}`, and `location {}` blocks
 inherit and override values — are NGINX-internal behavior. Testing them requires
-constructing `ngx_conf_t` and `ngx_http_*_conf_t` structures directly in C.
-The dynconf (dynamic configuration) subsystem also operates on NGINX pool
-memory, so its tests must run at the C level.
+constructing `ngx_conf_t` and `ngx_http_*_conf_t` structures directly in C. The
+dynconf (dynamic configuration) subsystem also operates on NGINX pool memory.
+Its tests must run at the C level.
 
 **Concrete examples:**
 
@@ -200,9 +200,9 @@ E2E harness.
 
 ### Tests That Belong in C
 
-A test belongs in C when it validates **NGINX C module behavior** — that is,
-behavior that uses NGINX C APIs, NGINX data structures, or
-C-language semantics that have no equivalent in the Rust harness.
+A test belongs in C when it validates **NGINX C module behavior**. That is,
+behavior that uses NGINX C APIs, NGINX data structures, or C-language semantics
+that have no equivalent in the Rust harness.
 
 Ask: does the test require any of the following?
 
@@ -241,11 +241,10 @@ If the answer to any of these is yes, the test belongs in C.
 
 ### Tests That May Use the Rust E2E Harness
 
-A test may use the Rust E2E harness when it validates
-**product/runtime behavior** — that is, observable HTTP behavior that
-the test verifies through real HTTP requests and responses against a
-running NGINX instance, without needing to inspect internal C
-structures.
+A test may use the Rust E2E harness when it validates **product/runtime
+behavior**. That is, observable HTTP behavior that the test verifies through
+real HTTP requests and responses against a running NGINX instance, without
+needing to inspect internal C structures.
 
 Ask: can the test state entirely as:
 

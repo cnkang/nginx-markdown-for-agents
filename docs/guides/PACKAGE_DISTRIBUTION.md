@@ -8,7 +8,7 @@ artifacts. Operators installing a published package should use the
 
 This document defines the distribution strategy for the NGINX Markdown Filter
 Module binary packages (DEB and RPM), including artifact naming conventions,
-integrity verification via SHA256SUMS, and GPG signature verification.
+integrity verification through SHA256SUMS, and GPG signature verification.
 
 ## Distribution Channels
 
@@ -215,13 +215,13 @@ approved by the release owner after qualification. The package workflow rejects
 an older commit that is merely an ancestor of `main`, even when that commit
 passed its own checks.
 
-The release-gate job also verifies that the repository's tag ruleset covers
-`v*` release tags with deletion and update protection. Reading a ruleset's
-bypass list requires repository administration scope, which the workflow token
-does not carry, so the check reads it with the `RELEASE_RULESET_TOKEN`
-repository secret: a fine-grained personal access token with
-`Administration: read` on this repository. Without that secret the check fails
-closed and the release cannot proceed.
+The release-gate job also verifies that the repository's tag ruleset covers `v*`
+release tags with deletion and update protection. Reading a ruleset's bypass
+list requires repository administration scope, which the workflow token does not
+carry. The check reads it with the `RELEASE_RULESET_TOKEN` repository secret: a
+fine-grained personal access token with `Administration: read` on this
+repository. Without that secret the check fails closed and the release cannot
+proceed.
 
 Download the manifest from the same GitHub Release page:
 
@@ -234,16 +234,15 @@ curl -fsSL -H "Accept: application/json" -o release-manifest.json \
 ## GPG Signature Verification
 
 For a published GitHub Release, the `release-packages` workflow publishes a
-detached ASCII-armored signature file (`SHA256SUMS.asc`) alongside
-`SHA256SUMS`. Its `integrity-signature` job runs only on a tag push, checks out
-the exact commit resolved by the workflow's prepare job, so the signing script
-and release metadata come from the same immutable source revision, and signs
-the checksum manifest inside the protected `release-signing` environment.
-`release-binaries` never signs anything: it is a manual rebuild tool that
-uploads workflow artifacts only.
-The `release-signing` environment secrets are therefore mandatory for a
-published release. The workflow fails closed rather than publishing an
-unsigned release asset.
+detached ASCII-armored signature file (`SHA256SUMS.asc`) alongside `SHA256SUMS`.
+Its `integrity-signature` job runs only on a tag push, checks out the exact
+commit resolved by the workflow's prepare job. The signing script and release
+metadata come from the same immutable source revision, and signs the checksum
+manifest inside the protected `release-signing` environment. `release-binaries`
+never signs anything: it is a manual rebuild tool that uploads workflow
+artifacts only. The `release-signing` environment secrets are therefore
+mandatory for a published release. The workflow fails closed rather than
+publishing an unsigned release asset.
 
 ### Importing the Project Public Key
 
@@ -273,9 +272,9 @@ gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 ### Verifying the Signature
 
 Download both `SHA256SUMS` and `SHA256SUMS.asc`, then verify against the
-independently authenticated fingerprint — a bare `gpg --verify` exit
-status, or a "Good signature" line under an unauthenticated key, proves
-integrity only, not project authenticity:
+independently authenticated fingerprint. A bare `gpg --verify` exit status, or a
+"Good signature" line under an unauthenticated key, proves integrity only, not
+project authenticity:
 
 ```bash
 : "${TRUSTED_FINGERPRINT:?set TRUSTED_FINGERPRINT to the fingerprint published in docs/guides/GPG_KEY_MANAGEMENT.md}"
