@@ -1134,10 +1134,20 @@ def test_fixture_overlay_replaces_a_destination_symlink(tmp_path):
 
 def _index_with_pair(source: str, target: str) -> dict:
     """Return a minimal valid anchor index with one comparison record."""
+    anchors = [
+        {
+            "tag": tag,
+            "commit": "0" * 40,
+            "manifest": "nginx-markdown-{}.json".format(tag[1:]),
+            "manifest_sha256": "sha256:" + "0" * 64,
+            "contract_digest": "sha256:" + "1" * 64,
+        }
+        for tag in ("v0.9.2", "v0.9.4")
+    ]
     return {
         "index_schema": INDEX_SCHEMA,
         "baseline": "v0.9.4",
-        "anchors": [{"tag": "v0.9.2"}, {"tag": "v0.9.4"}],
+        "anchors": anchors,
         "comparisons": [{"from": source, "to": target}],
     }
 
@@ -1163,6 +1173,109 @@ def test_default_index_requires_the_directed_historical_pair(tmp_path, monkeypat
     )
     custom = cli.load_index(str(tmp_path / "custom.json"), str(REPO))
     assert custom["comparisons"] == [{"from": "v0.9.4", "to": "v0.9.4"}]
+
+
+def test_index_anchor_records_require_identity_fields(tmp_path, monkeypatch, capsys):
+    """An anchor without its manifest identity fails as a contract error."""
+    from tools.compatibility import cli
+
+    custom = str(tmp_path / "custom.json")
+    for field in ("commit", "manifest", "manifest_sha256", "contract_digest"):
+        index = _index_with_pair("v0.9.2", "v0.9.4")
+        del index["anchors"][0][field]
+        monkeypatch.setattr(cli, "_read_json", lambda *_, value=index: value)
+        with pytest.raises(ContractError, match=field):
+            cli.load_index(custom, str(REPO))
+        arguments = ["verify-anchors", "--index", custom, "--repo-root", str(REPO)]
+        assert cli.main(arguments) == 1
+        assert "FAIL: anchor" in capsys.readouterr().err
+
+    index = _index_with_pair("v0.9.2", "v0.9.4")
+    index["anchors"][0]["manifest"] = "nested/other.json"
+    monkeypatch.setattr(cli, "_read_json", lambda *_, value=index: value)
+    with pytest.raises(ContractError, match="single safe path component"):
+        cli.load_index(custom, str(REPO))
+
+
+def test_default_index_requires_the_maintenance_baseline(tmp_path, monkeypatch):
+    """The checked-in index cannot compare against an older anchor."""
+    from tools.compatibility import cli
+
+    index = _index_with_pair("v0.9.2", "v0.9.4")
+    index["baseline"] = "v0.9.2"
+    monkeypatch.setattr(cli, "_read_json", lambda *_: index)
+    with pytest.raises(ContractError, match="v0.9.4"):
+        cli.load_index(str(INDEX), str(REPO))
+
+    custom = cli.load_index(str(tmp_path / "custom.json"), str(REPO))
+    assert custom["baseline"] == "v0.9.2"
+
+
+def test_report_destination_cannot_alias_a_gate_input(tmp_path):
+    """A report that resolves to an input the gate reads is refused."""
+    from tools.compatibility import cli
+
+    contracts = tmp_path / "contracts"
+    contracts.mkdir()
+    index_path = contracts / "INDEX.json"
+    manifest_path = contracts / "manifest.json"
+    approvals = tmp_path / "approvals.json"
+    for path in (index_path, manifest_path, approvals):
+        path.write_text("{}", encoding="utf-8")
+    index = {"anchors": [{"tag": "v0.9.4", "manifest": "manifest.json"}]}
+
+    for target, label in (
+        (str(index_path), "anchor index"),
+        (str(manifest_path), "manifest"),
+        (str(approvals), "approvals"),
+    ):
+        with pytest.raises(ContractError, match=label):
+            cli._reject_report_aliases(
+                target, str(index_path), index, str(contracts), str(approvals)
+            )
+    cli._reject_report_aliases(
+        str(tmp_path / "report.json"), str(index_path), index, str(contracts), ""
+    )
+
+
+def test_report_destination_must_stay_inside_the_repository(tmp_path):
+    """The report path keeps its existing repository-root boundary."""
+    from argparse import Namespace
+
+    from tools.compatibility import cli
+
+    args = Namespace(json_report=str(tmp_path.parent / "outside.json"))
+    with pytest.raises(ContractError, match="escapes root"):
+        cli._report_destination(args, str(tmp_path))
+
+
+def test_check_rejects_an_aliased_report_before_comparing(tmp_path, monkeypatch):
+    """The alias check runs before any anchor verification or comparison."""
+    from argparse import Namespace
+
+    from tools.compatibility import cli
+
+    index_path = tmp_path / "INDEX.json"
+    index_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        cli, "load_index", lambda *_: {"baseline": "v0.9.4", "anchors": []}
+    )
+    monkeypatch.setattr(
+        cli,
+        "_compare_candidate",
+        lambda *_: pytest.fail("compared before the report path was checked"),
+    )
+    args = Namespace(
+        index=str(index_path),
+        repo_root=str(tmp_path),
+        json_report=str(index_path),
+        candidate="WORKTREE",
+        product_version=None,
+        approvals=None,
+    )
+
+    with pytest.raises(ContractError, match="anchor index"):
+        cli.check_command(args)
 
 
 def test_index_comparison_records_must_name_anchor_tags(tmp_path, monkeypatch, capsys):

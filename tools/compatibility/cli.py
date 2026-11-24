@@ -60,9 +60,12 @@ DEFAULT_INDEX = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "contracts", INDEX_FILE
 )
 DEFAULT_INDEX_RELATIVE = os.path.join("tools", "compatibility", "contracts", INDEX_FILE)
-# The checked-in index must audit this directed release pair.  Without it, a
-# self-comparison or a reversed pair would report DOCUMENTED with no evidence.
+# The checked-in index must audit this directed release pair and must compare a
+# candidate against the pair's newer maintenance tag.  Without both, a
+# self-comparison, a reversed pair, or a baseline that drifted to another anchor
+# would report DOCUMENTED with no evidence.
 DEFAULT_HISTORICAL_PAIR = ("v0.9.2", "v0.9.4")
+DEFAULT_MAINTENANCE_BASELINE = DEFAULT_HISTORICAL_PAIR[1]
 WORKTREE_TOKEN = "WORKTREE"
 
 
@@ -79,13 +82,23 @@ _NAME_CHARS = set(
 )
 
 
-def _manifest_path(base: str, name: str) -> str:
-    """Resolve a single-component manifest name inside the contracts directory."""
-    if not name or name in {".", ".."} or set(name) - _NAME_CHARS:
+def _manifest_name(name: Any) -> str:
+    """Return a manifest name proven to be a single safe path component."""
+    if (
+        not isinstance(name, str)
+        or not name
+        or name in {".", ".."}
+        or set(name) - _NAME_CHARS
+    ):
         raise ContractError(
             "manifest name is not a single safe path component: {!r}".format(name)
         )
-    return os.path.join(os.path.realpath(base), name)
+    return name
+
+
+def _manifest_path(base: str, name: str) -> str:
+    """Resolve a single-component manifest name inside the contracts directory."""
+    return os.path.join(os.path.realpath(base), _manifest_name(name))
 
 
 
@@ -112,6 +125,46 @@ def _repo_root(args: argparse.Namespace, contracts_dir: str) -> str:
     return args.repo_root or repo_root_for(contracts_dir)
 
 
+_ANCHOR_REQUIRED_FIELDS = ("commit", "manifest", "manifest_sha256", "contract_digest")
+
+
+def _validate_anchor_fields(anchor: Dict[str, Any]) -> None:
+    """Require the anchor fields verification consumes.
+
+    ``tag_object`` stays optional: a lightweight tag records no tag object,
+    so requiring one would reject a valid anchor.
+    """
+    for field in _ANCHOR_REQUIRED_FIELDS:
+        value = anchor.get(field)
+        if not isinstance(value, str) or not value:
+            raise ContractError(
+                "anchor {!r} must declare a non-empty {} string".format(
+                    anchor.get("tag"), field
+                )
+            )
+    _manifest_name(anchor["manifest"])
+
+
+def _require_default_index_shape(
+    index: Dict[str, Any], pairs: set, is_default: bool
+) -> None:
+    """Require the checked-in index to audit the established release pair."""
+    if not is_default:
+        return
+    if index.get("baseline") != DEFAULT_MAINTENANCE_BASELINE:
+        raise ContractError(
+            "the default anchor index must declare {} as its baseline".format(
+                DEFAULT_MAINTENANCE_BASELINE
+            )
+        )
+    if DEFAULT_HISTORICAL_PAIR not in pairs:
+        raise ContractError(
+            "the default anchor index must compare {} -> {}".format(
+                *DEFAULT_HISTORICAL_PAIR
+            )
+        )
+
+
 def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
     """Load and validate the anchor index."""
     index = _read_json(index_path, repo_root)
@@ -129,18 +182,16 @@ def load_index(index_path: str, repo_root: str) -> Dict[str, Any]:
     tags = [anchor.get("tag") for anchor in anchors]
     if any(not isinstance(tag, str) or not tag for tag in tags):
         raise ContractError("anchor index entries must declare a tag")
+    for anchor in anchors:
+        _validate_anchor_fields(anchor)
     if len(tags) != len(set(tags)):
         raise ContractError("anchor index declares a duplicate tag")
     if index.get("baseline") not in tags:
         raise ContractError("anchor index baseline is not one of its anchors")
     pairs = _comparison_pairs(index, set(tags))
-    is_default = _is_default_index(index_path, repo_root)
-    if is_default and DEFAULT_HISTORICAL_PAIR not in pairs:
-        raise ContractError(
-            "the default anchor index must compare {} -> {}".format(
-                *DEFAULT_HISTORICAL_PAIR
-            )
-        )
+    _require_default_index_shape(
+        index, pairs, _is_default_index(index_path, repo_root)
+    )
     return index
 
 
@@ -533,21 +584,69 @@ def _write_report(path: str, root: str, payload: Dict[str, Any]) -> None:
     print("  report: {}".format(path))
 
 
+def _same_file(first: str, second: str) -> bool:
+    """Return True when two paths name the same file, hard links included."""
+    if os.path.realpath(first) == os.path.realpath(second):
+        return True
+    if not (os.path.exists(first) and os.path.exists(second)):
+        return False
+    return os.path.samefile(first, second)
+
+
+def _reject_report_aliases(
+    report_path: str,
+    index_path: str,
+    index: Dict[str, Any],
+    contracts_dir: str,
+    approvals: Optional[str],
+) -> None:
+    """Refuse a report destination that resolves to a gate input."""
+    protected = [("the anchor index", index_path)]
+    protected.extend(
+        (
+            "the manifest {}".format(anchor["manifest"]),
+            _manifest_path(contracts_dir, anchor["manifest"]),
+        )
+        for anchor in index.get("anchors") or []
+    )
+    if approvals:
+        protected.append(("the approvals file", approvals))
+    for label, path in protected:
+        if _same_file(report_path, path):
+            raise ContractError(
+                "the --json-report destination {} would overwrite {}; "
+                "choose a separate report path".format(report_path, label)
+            )
+
+
+def _report_destination(args: argparse.Namespace, repo_root: str) -> Optional[str]:
+    """Validate the report destination before the comparison runs."""
+    if not args.json_report:
+        return None
+    try:
+        return str(
+            validate_write_path_within_root(
+                args.json_report, repo_root, purpose="report"
+            )
+        )
+    except ValueError as error:
+        raise ContractError(str(error))
+
+
 def check_command(args: argparse.Namespace) -> int:
     """Run the blocking compatibility check."""
     index_path = os.path.abspath(args.index)
     contracts_dir = _contracts_dir(index_path)
     repo_root = _repo_root(args, contracts_dir)
-    if args.json_report:
-        # Fail before the comparison when the report cannot be written, so a
-        # passing verdict never ends with a path error.
-        try:
-            validate_write_path_within_root(
-                args.json_report, repo_root, purpose="report"
-            )
-        except ValueError as error:
-            raise ContractError(str(error))
+    # Fail before the comparison when the report cannot be written, so a
+    # passing verdict never ends with a path error.  The report must also not
+    # resolve to an input the gate reads, which would corrupt it mid-run.
+    report_path = _report_destination(args, repo_root)
     index = load_index(index_path, repo_root)
+    if report_path is not None:
+        _reject_report_aliases(
+            report_path, index_path, index, contracts_dir, args.approvals
+        )
     _print_header(index_path)
     anchors, manifests = _verify_every_anchor(repo_root, index, contracts_dir)
     historical, failures = _audit_historical(index, manifests)
