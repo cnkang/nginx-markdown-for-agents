@@ -88,7 +88,8 @@ grep -i '^content-type: text/markdown' /tmp/markdown-smoke-headers.txt
 The first two commands must show an active, semicolon-terminated `load_module`
 directive and an active `markdown_filter on` directive. A comment mentioning the
 module filename must not satisfy them. `nginx -t` validates syntax only. The
-directive greps are the load evidence. The request must return Markdown rather
+directive greps confirm the configuration on disk. The Markdown request that
+follows is the live load evidence. The request must return Markdown rather
 than the upstream HTML. The final `grep` checks that the response
 `Content-Type` header is `text/markdown`. The check fails if the header is
 missing or names another type. For a negative control, temporarily remove the

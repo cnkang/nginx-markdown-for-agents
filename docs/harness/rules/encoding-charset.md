@@ -96,12 +96,14 @@ In `auto`, a failed probe leaves the build on the bounded full-buffer path
   space, remaining input, and no change in `total_out` indicates an unexpected
   stall. It can indicate a format error or a malformed stream. The no-progress
   guard must return an error immediately. Calling inflate again with the same
-  state would loop indefinitely. `Z_OK` with `avail_out > 0` simply means more
-  data is available — loop again without intervention. Never merge the two
+  state would loop indefinitely. Never merge the two
   branches into a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` without first
   checking `avail_out`. That check distinguishes the recoverable stall from
-  the normal-progress case. See Rule 31 for the semantic-equivalence
-  requirement for duplicate consolidation.
+  the normal-progress case. `Z_OK` with `avail_out > 0` means more output is
+  possible. Loop again without intervention while input remains. When
+  `avail_in` reaches zero, return for the next input chunk instead of calling
+  `inflate()` again with empty input. See Rule 31 for the
+  semantic-equivalence requirement for duplicate consolidation.
 
 Verification:
 - `grep -rn 'windowBits\|Z_RAW\|inflateInit\|inflateReset\|zlib_header' components/nginx-module/src/ components/rust-converter/src/`

@@ -352,8 +352,11 @@ with a 1 MiB chunked response compressed at Brotli quality 6. The retained
 archival run used the exact implementation commit `9734d12e`, NGINX 1.30.4, Rust
 1.97.0, and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`. This record is the
 2026-07-19 historical measurement flagged as archival at the top of this
-document. The 2026-07-31 native Linux (NGINX 1.24.0) record is the canonical
-source of truth for release baseline claims.
+document. The checked-in 0.9.2 baseline snapshot is the canonical source of
+truth for release baseline claims. It is `module-baseline-092.json`, measured
+from commit `712c5300228373677c367e6c0d83ac9d729ff63b` with NGINX 1.30.4 in
+workflow run `32394531042/attempts/1`. The 2026-07-31 native Linux (NGINX
+1.24.0) record stays the latest cross-platform historical measurement.
 
 The archival 1000-request run completed with zero failed or non-2xx requests
 and zero pre-commit fail-open events. It recorded 1030 streaming decompressions

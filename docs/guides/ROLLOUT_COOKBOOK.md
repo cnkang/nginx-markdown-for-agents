@@ -1525,8 +1525,9 @@ crawlers, health probes, and other tenants on a shared instance.
 
 With concurrent traffic, the cumulative counter cannot attribute deliveries to
 this request. Use request-correlated evidence instead. Issue the probe on a
-**unique path**, and embed the random token as a path segment (for example
-`/probe/<uuid>/`). The decision-log entry's URI field records the parsed
+**unique path** inside the Markdown-enabled location, and embed the random token
+as a path segment (for example `/docs/probe/<uuid>/`). Make sure the upstream
+serves an eligible response at that path. The decision-log entry's URI field records the parsed
 request path and never the query string. It identifies exactly this request.
 A generated request header only helps if a decision-log field records it. The
 schema does not do that today. A query parameter is equally unusable because

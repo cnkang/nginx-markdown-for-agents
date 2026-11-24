@@ -105,8 +105,8 @@ the full-buffer **generated-output budget** (`output_budget`). Transient
 scratch allocations (normalizer buffers, table containers, working-set
 reservations) also draw against it. A conversion that would grow the
 generated Markdown or its transient working set past this value aborts
-with a controlled `MemoryLimit` error. This prevents exceeding the
-configured peak. `parser_budget` remains the independent bound for the
+with a controlled `MemoryLimit` error. This keeps the conversion inside the
+configured budget. `parser_budget` remains the independent bound for the
 Rust parser's DOM/working-set allocations.
 
 This is the primary defense for the full-buffer path. `parse_document` has

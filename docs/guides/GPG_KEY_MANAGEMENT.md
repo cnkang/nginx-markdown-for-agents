@@ -179,6 +179,11 @@ published value before trusting release signatures. A key ID, keyserver lookup,
 or a key file downloaded from the same release is only a transport mechanism and
 cannot establish identity by itself. The fingerprint is the trust anchor.
 
+Packages published before a key rotation carry a historical signing-subkey
+fingerprint. Verify those packages against the fingerprint published for
+that release. The rotation record in Section 4 lists the
+historical fingerprints.
+
 ---
 
 ## 4. Key Rotation Process

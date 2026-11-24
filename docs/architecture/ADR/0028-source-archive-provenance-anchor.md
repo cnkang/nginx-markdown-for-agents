@@ -18,8 +18,10 @@ find its own entry there and fail closed when the entry was missing.
 No implementation can satisfy that requirement. The registry file is part of
 the tree, so committing an entry changes the tree. GitHub generates a tag
 archive from the tree at that tag. No one can therefore record an entry
-that describes a tag's own archive before the tag exists. A digest recorded
-afterwards never matches the archive the tag produces. Two independent
+that describes a tag's own archive before the tag exists. A later commit can
+record a digest of the unchanged archive. Rerunning from that tag cannot see
+the later record, because the record stays outside the tagged tree. Two
+independent
 reviews reached this conclusion independently, and the digest requirement in
 the release-manifest validator had to make the digest optional as a consequence.
 

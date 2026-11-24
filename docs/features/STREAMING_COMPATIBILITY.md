@@ -66,7 +66,8 @@ full-buffer path and no ETag on the streaming path. A streaming response
 commits its headers before the converted body exists. The selected path, not
 response size, determines whether strong validation is available.
 `markdown_streaming off`, a hard blocker, or an ineligible response keeps
-strong validation. With `auto` or `force`, a response that actually streams
+the validation behavior that `markdown_cache_validation` configures. Strong
+ETag validation applies only under `full`. With `auto` or `force`, a response that actually streams
 gives up strong validation.
 This is an accepted trade-off of streaming header commitment. A deferred
 header commit is out of scope for 0.9.2.
