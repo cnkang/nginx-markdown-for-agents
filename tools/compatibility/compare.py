@@ -815,6 +815,11 @@ def _compare_properties(
         )
 
 
+def _items_enum_view(field: Dict[str, Any]) -> Dict[str, Any]:
+    """Return an array's item enum in the shape the enum comparison reads."""
+    return {"enum": field["items_enum"]} if "items_enum" in field else {}
+
+
 def _compare_field_items(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
@@ -864,6 +869,9 @@ def _compare_field_items(
         )
     _compare_schema_constraints(
         result, name + "[]", old, new, "items_constraints"
+    )
+    _compare_field_enum(
+        result, name + "[]", _items_enum_view(old), _items_enum_view(new)
     )
     _compare_properties(
         result,

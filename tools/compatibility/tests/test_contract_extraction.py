@@ -1444,3 +1444,78 @@ def test_compare_reports_nested_child_type_changes():
         == BREAKING
     )
     assert verdicts["diagnostics:items-type-changed:configuration.features"] == BREAKING
+
+
+def _array_child(child_schema: dict) -> dict:
+    """Return a diagnostics projection with one nested array child."""
+    return _schema_field(
+        "build",
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [],
+            "properties": {"features": child_schema},
+        },
+        True,
+        {},
+    )
+
+
+def _compare_build(baseline: dict, candidate: dict) -> dict:
+    """Compare two single-field diagnostics projections by finding id."""
+    def surface(field):
+        return {
+            "schema_version": 3,
+            "type": "object",
+            "additional_properties": False,
+            "required": ["build"],
+            "fields": [field],
+        }
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(result, surface(baseline), surface(candidate))
+    return {finding.finding_id: finding.verdict for finding in result.findings}
+
+
+def test_nullable_array_children_keep_their_item_schema():
+    """A type list that includes array still projects and compares its items."""
+    baseline = _array_child({"type": ["array", "null"], "items": {"type": "string"}})
+    candidate = _array_child(
+        {"type": ["array", "null"], "items": {"type": "integer"}}
+    )
+
+    assert baseline["properties"][0]["items_type"] == "string"
+    assert (
+        _compare_build(baseline, candidate)[
+            "diagnostics:items-type-changed:build.features"
+        ]
+        == BREAKING
+    )
+
+
+def test_array_item_enums_are_projected_and_compared():
+    """Item enum changes reach findings, and unrestricted items stay open."""
+    def child(enum=None):
+        items = {"type": "string"}
+        if enum is not None:
+            items["enum"] = enum
+        return _array_child({"type": "array", "items": items})
+
+    unrestricted = child()
+    both = child(["on", "off"])
+
+    assert "items_enum" not in unrestricted["properties"][0]
+    assert both["properties"][0]["items_enum"] == ["off", "on"]
+    assert _compare_build(unrestricted, unrestricted) == {}
+    assert _compare_build(unrestricted, both) == {
+        "diagnostics:enum-added:build.features[]": BREAKING
+    }
+    assert _compare_build(both, unrestricted) == {
+        "diagnostics:enum-removed:build.features[]": ADDITIVE
+    }
+    assert _compare_build(both, child(["on"])) == {
+        "diagnostics:enum-narrowed:build.features[]": BREAKING
+    }
+    assert _compare_build(both, child(["on", "off", "auto"])) == {
+        "diagnostics:enum-widened:build.features[]": ADDITIVE
+    }
