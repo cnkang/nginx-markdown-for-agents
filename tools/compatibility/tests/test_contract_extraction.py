@@ -807,9 +807,40 @@ def test_metrics_label_parser_keeps_quoted_commas_and_rejects_fragments():
 
     with pytest.raises(ContractError, match="label fragment"):
         _collect_series(
-            family + r'{features=\"accept,version=\"1.0\"} 1',
+            family + r'{features=\"accept\",version} 1',
             {family: "gauge"},
         )
+
+
+def test_metrics_label_values_may_contain_quoted_braces():
+    """A brace inside a quoted value stays part of the sample."""
+    family = "nginx_markdown_build_info"
+    emitted = family + r'{features=\"a}b\",version=\"1.0\"} 1' + "\n"
+    series, labels = _collect_series(emitted, {family: "gauge"})
+
+    assert series[family] == {(None, ("features=a}b", "version=1.0"))}
+    assert labels[family] == [["features", "version"]]
+
+    def surface(feature):
+        return {
+            "emitted": {
+                "families": {family: "gauge"},
+                "label_sets": {family: [["features", "version"]]},
+                "series": {family: [[f"features={feature}", "version=1.0"]]},
+            }
+        }
+
+    result = Comparison(baseline_label="a", candidate_label="b")
+    _compare_emitted(result, surface("a}b"), surface("a}c"))
+
+    assert {finding.finding_id for finding in result.findings} == {
+        f"metrics:emitted-series-removed:{family}:features=a}}b,version=1.0",
+        f"metrics:emitted-series-added:{family}:features=a}}c,version=1.0",
+    }
+    with pytest.raises(ContractError, match="declares no labels"):
+        _collect_series(family + "{} 1", {family: "gauge"})
+    with pytest.raises(ContractError, match="not terminated"):
+        _collect_series(family + r'{features=\"a} 1', {family: "gauge"})
 
 
 def test_metrics_histogram_samples_and_label_order_are_preserved():

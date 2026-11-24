@@ -474,6 +474,26 @@ def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
     return samples
 
 
+def _sample_body(joined: str, start: int, name: str) -> str:
+    """Return a sample's label body up to the brace outside its values.
+
+    The renderer source spells a quote as a backslash followed by a quote, so
+    the scan tracks that pair.  A brace inside a quoted value stays part of
+    the sample instead of ending it early.
+    """
+    index = start
+    quoted = False
+    while index < len(joined):
+        if joined.startswith('\\"', index):
+            quoted = not quoted
+            index += 2
+            continue
+        if joined[index] == "}" and not quoted:
+            return joined[start:index]
+        index += 1
+    raise ContractError(f"labelled sample {name} is not terminated")
+
+
 def _collect_series(
     joined: str, families: Dict[str, str]
 ) -> Tuple[Dict[str, set], Dict[str, List[List[str]]]]:
@@ -486,14 +506,18 @@ def _collect_series(
     raw_series: Dict[str, set] = {name: set() for name in families}
     label_sets: Dict[str, set] = {name: set() for name in families}
     sample_families = _sample_family_map(families)
-    for match in re.finditer(r"(nginx_markdown_[a-z0-9_]+)\{([^{}]*)\}", joined):
+    for match in re.finditer(r"(nginx_markdown_[a-z0-9_]+)\{", joined):
         resolved = sample_families.get(match.group(1))
         if resolved is None:
             continue
         family, component = resolved
-        pairs = _parse_label_pairs(match.group(2))
-        if not pairs:
-            continue
+        pairs = _parse_label_pairs(
+            _sample_body(joined, match.end(), match.group(1))
+        )
+        require(
+            bool(pairs),
+            f"labelled sample {match.group(1)} declares no labels",
+        )
         marker = [f"@component={component}"] if component else []
         label_sets[family].add(
             tuple(marker + sorted(name for name, _ in pairs))
