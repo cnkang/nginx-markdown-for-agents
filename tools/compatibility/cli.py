@@ -446,6 +446,15 @@ def check_command(args: argparse.Namespace) -> int:
     index_path = os.path.abspath(args.index)
     contracts_dir = _contracts_dir(index_path)
     repo_root = _repo_root(args, contracts_dir)
+    if args.json_report:
+        # Fail before the comparison when the report cannot be written, so a
+        # passing verdict never ends with a path error.
+        try:
+            validate_write_path_within_root(
+                args.json_report, repo_root, purpose="report"
+            )
+        except ValueError as error:
+            raise ContractError(str(error))
     index = load_index(index_path, repo_root)
     _print_header(index_path)
     anchors = _verify_every_anchor(repo_root, index, contracts_dir)
