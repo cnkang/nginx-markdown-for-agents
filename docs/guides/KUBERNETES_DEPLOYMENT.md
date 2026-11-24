@@ -82,7 +82,7 @@ kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
 kubectl exec -n ingress-nginx <pod> -- nginx -t
 curl -fsS -D /tmp/markdown-smoke-headers.txt -H 'Accept: text/markdown' \
   https://<ingress-host>/docs/example
-grep -i '^content-type: text/markdown' /tmp/markdown-smoke-headers.txt
+grep -iE '^content-type:[[:space:]]*text/markdown([;[:space:]].*)?$' /tmp/markdown-smoke-headers.txt
 ```
 
 The first two commands must show an active, semicolon-terminated `load_module`
@@ -90,17 +90,27 @@ directive and an active `markdown_filter on` directive. A comment mentioning the
 module filename must not satisfy them. `nginx -t` validates syntax only. The
 directive greps confirm the configuration on disk. The Markdown request that
 follows is the live load evidence. The request must reach the pod inspected
-above. Pin it with a port forward: run `kubectl port-forward -n
-ingress-nginx <pod> 18443:443`, then send the example request as
-`curl -fsS --resolve <ingress-host>:18443:127.0.0.1 -H 'Accept:
-text/markdown' https://<ingress-host>:18443/docs/example`.
+above. Pin it with a port forward. Run `kubectl port-forward -n
+ingress-nginx <pod> 18443:443`. Then send the example request as
+`curl -fsS --noproxy '*' --resolve <ingress-host>:18443:127.0.0.1 -D
+/tmp/markdown-smoke-headers.txt -H 'Accept: text/markdown'
+https://<ingress-host>:18443/docs/example`.
+Run the port forward in a separate terminal or in the background. It stays
+in the foreground. Before checking another pod, stop the previous forward
+and confirm the new forward is listening, then send the pinned request
+again.
 The `--resolve` pin keeps the ingress hostname for TLS SNI and server-name
-routing while the port forward selects the pod. An unpinned request can reach
+routing while the port forward selects the pod. The `--noproxy '*'` flag
+bypasses any configured proxy so the request connects directly to the local
+port forward. An unpinned request can reach
 a different pod behind the load-balancing ingress, which produces a false
 pass. During a rolling update, repeat the inspection and the pinned request
 for every controller pod. The request must return Markdown rather than the
-upstream HTML. The final `grep` checks that the response
-`Content-Type` header is `text/markdown`. The check fails if the header is
+upstream HTML. After the pinned request, run the final `grep` again. It
+checks the pinned response headers in
+`/tmp/markdown-smoke-headers.txt`. The pattern anchors the media type, so a
+different subtype fails the match. The `Content-Type` header must be
+`text/markdown`. The check fails if the header is
 missing or names another type. For a negative control, temporarily remove the
 active `load_module` line and repeat `nginx -t`.
 
