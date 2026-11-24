@@ -203,9 +203,8 @@ operators leave `conversion_timeout` unset, the NGINX merge fills the
 30-second default. The overall deadline stays active. The NGINX merge also
 fills `parser_timeout` from its 10-second default
 (NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT). Parser checkpoints are
-ACTIVE whenever the merged value is nonzero.
-
-Whether it came from the default or from an explicit `parser_timeout`. An
+ACTIVE whenever the merged value is nonzero, whether it came from the default
+or from an explicit `parser_timeout`. An
 explicit nonzero `parser_timeout` overrides the default. (An explicit
 `conversion_timeout=0` fails config validation. The handler rejects zero.
 Operators cannot disable the deadline through configuration.)

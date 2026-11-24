@@ -69,7 +69,7 @@ Required:
   "64")]` alone do NOT satisfy signed-input validation. A guard only narrows
   the target range for `usize` width. It cannot reject a negative `i64`/`isize`
   value. Keep the existing 32-bit target handling for
-  `usize` (runtime bounds check or explicit 64-bit-only guard) also to the
+  `usize` (runtime bounds check or explicit 64-bit-only guard) in addition to the
   non-negative check.
 - Addition of two `size_t` values that will feed memory allocation or
   buffer sizing must include an overflow guard:

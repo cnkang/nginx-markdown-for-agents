@@ -489,7 +489,7 @@ re-fed to the decoder. This invariant is codec-independent and verified by:
 - The phase 9 unit tests proving Brotli specifically integrates with the backpressure state machine
 
 **Conclusion:** The native Brotli scenario now provides codec-specific
-slow-reader evidence also to the existing gzip proof of the shared
+slow-reader evidence in addition to the existing gzip proof of the shared
 pending-output/resume mechanism. Multi-chunk unit tests and the streaming
 equivalence property test independently cover decoder chunk boundaries.
 

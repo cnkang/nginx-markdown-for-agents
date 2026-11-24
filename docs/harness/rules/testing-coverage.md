@@ -63,7 +63,7 @@ Required:
   with `tests/streaming/known-differences.toml` IDs to avoid silent metadata
   drift.
 - Known-difference registries must carry structured drift classification
-  metadata (for example `drift_type` and `severity`) also to binary
+  metadata (for example `drift_type` and `severity`) in addition to binary
   accept/reject flags. Parsers must degrade safely for missing/unknown values
   and tests must cover classification parsing defaults.
 - Any new `tests/corpus/**/*.html` fixture must include a same-basename
