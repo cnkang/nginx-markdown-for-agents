@@ -90,9 +90,13 @@ directive and an active `markdown_filter on` directive. A comment mentioning the
 module filename must not satisfy them. `nginx -t` validates syntax only. The
 directive greps confirm the configuration on disk. The Markdown request that
 follows is the live load evidence. The request must reach the pod inspected
-above. When the ingress load-balances across several pods, repeat the
-inspection and the request for each pod separately. The request must return Markdown rather
-than the upstream HTML. The final `grep` checks that the response
+above. Pin it with a port forward: run `kubectl port-forward -n
+ingress-nginx <pod> 18080:80`, then send the example request to
+`http://localhost:18080/docs/example` with `-H 'Host: <ingress-host>'`.
+An unpinned request can reach a different pod behind the load-balancing
+ingress, which produces a false pass. During a rolling update, repeat the
+inspection and the pinned request for every controller pod. The request
+must return Markdown rather than the upstream HTML. The final `grep` checks that the response
 `Content-Type` header is `text/markdown`. The check fails if the header is
 missing or names another type. For a negative control, temporarily remove the
 active `load_module` line and repeat `nginx -t`.
