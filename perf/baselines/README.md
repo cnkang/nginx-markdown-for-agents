@@ -25,7 +25,7 @@ again at the frozen candidate commit.
 
 Module baselines contain two different classes of data:
 
-- Truth evidence must remain verbatim from the canonical run:
+- Truth evidence must remain verbatim from the canonical run. It includes:
   `streaming_path_hits`, `fullbuffer_path_hits`,
   `streaming_requests_total`, `precommit_failopen_total`,
   `decompression_streaming_total`, `decompression_fullbuffer_total`,
@@ -64,9 +64,9 @@ short, `module-baseline-091` measures the predecessor comparison series captured
 at commit `0847c287c1b744a3f80b7b7fe6ccf3e897223377`, while the release path
 regenerates the 092 baseline at the candidate SHA.
 
-Provenance layers by object: `baseline_policy` carries policy provenance,
-top-level `module_benchmark` carries `platform`, `load_generator`,
-`nginx_version`, `git_commit`, and `timestamp`, and each scenario carries its
+Provenance layers by object: `baseline_policy` carries policy provenance.
+Top-level `module_benchmark` carries `platform`, `load_generator`,
+`nginx_version`, `git_commit`, and `timestamp`. Each scenario carries its
 metadata, `load_integrity`, `metrics`, and `response_correctness`. The
 validator checks the optional `baseline_policy.scenario_sources` object for
 environment consistency only when present.
@@ -161,7 +161,7 @@ the mechanism that removes the failure class.
   it and never delete it. Correct a tag message only while the tag stays
   local and unpushed.
 -  **Creation trigger**: create a ref when the finalizer produces a new
-  canonical baseline and no existing immutable or protected ref already anchors
+  canonical baseline and no existing immutable or protected ref anchors
   its measurement commit. A mutable branch, including `main`, does not count as
   a durable anchor. A commit reached only through such a branch still receives
   the dedicated `perf-baseline/*` ref.
@@ -229,10 +229,10 @@ environments. Every scenario in `module-baseline-091.json` and
 (`linux-x86_64`, `ab`, NGINX 1.30.4). When
 the finalizer merges a scenario from a different run,
 `baseline_policy.scenario_sources` must declare structured `platform`,
-`load_generator`, and `nginx_version` fields for it, and the evidence gate
-rejects the baseline unless each of them matches the top-level environment.
-A scenario measured in a diverging environment must instead live in its own
-environment-truthful baseline file and must never enter comparisons against
+`load_generator`, and `nginx_version` fields for it. The evidence gate rejects
+the baseline unless each field matches the top-level environment.
+A scenario measured in a diverging environment must live in its own
+environment-truthful baseline file. It must never enter comparisons against
 reports from the canonical environment.
 
 The active canonical run includes `brotli-streaming-first` under NGINX 1.30.4
@@ -244,11 +244,11 @@ Regeneration path: run the `nightly-perf.yml` workflow with `workflow_dispatch`
 and `bootstrap_module_baseline=true` (do not also set
 `bootstrap_baseline=true`). The job builds the canonical NGINX version natively
 on `ubuntu-24.04` (x86_64) with Brotli support (`libbrotli-dev` plus the pinned
-Python `Brotli==1.2.1`), produces all eight scenarios in one consistent
-environment, finalizes the baseline from the retained raw report (computing the
-raw SHA-256 and taking the measurement timestamp from
-`module_benchmark.timestamp`), validates the result against the evidence
-integrity contract (including raw-digest and content-binding verification), and
+Python `Brotli==1.2.1`). It produces all eight scenarios in one consistent
+environment and finalizes the baseline from the retained raw report. This
+computes the raw SHA-256 and takes the measurement timestamp from
+`module_benchmark.timestamp`. The job validates the result against the evidence
+integrity contract, including raw-digest and content-binding verification. It
 uploads both the finalized and raw files as retained artifacts. The
 release-package workflow repeats the generation in its candidate runtime before
 the blocking comparison. Verify `baseline_policy.source_artifact_sha256`, the
@@ -294,13 +294,13 @@ every probe set, although the two payloads differ from each other. Only the
 top-level copies exist as regular files (`streaming-first.body`,
 `large-body.body`). Each per-set copy is a symlink to them. That keeps about 9
 MB of duplicate evidence out of the repository while every reader still sees the
-same bytes, and `tools/perf/tests/test_baseline_body_dedup.py` keeps the copies
+same bytes. `tools/perf/tests/test_baseline_body_dedup.py` keeps the copies
 identical and the links inside this directory.
 
 ## Why the Compressed Variant Bodies Are Identical
 
-The recorded `.body` files are the decoded markdown response: the headers show
-`Transfer-Encoding: chunked` and no `Content-Encoding`, and the scenario selects
+The recorded `.body` files are the decoded markdown response. The headers show
+`Transfer-Encoding: chunked` and no `Content-Encoding`. The scenario selects
 its compression through the request the benchmark sends (`?gzip=1`,
 `?deflate=1`, `?brotli=1`) rather than through client negotiation. The recorded
 digest is therefore the same for `streaming-first`, `gzip-streaming-first`,

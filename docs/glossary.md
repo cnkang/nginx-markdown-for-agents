@@ -31,6 +31,6 @@ operator documentation, and harness reports.
 
 ## Document Updates
 
-When introducing a new term that appears in code comments and operator-facing
-documentation, add it here in the same change set and update affected docs to
-use the same spelling.
+When you introduce a new term in code comments and operator-facing
+documentation, add it here in the same change set. Then update the affected
+docs to use the same spelling.

@@ -46,7 +46,7 @@ Your distribution can ship an older NGINX, such as 1.22.x or earlier. Upgrade NG
 Not always.
 
 - If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module. You do not need to rebuild NGINX. Check the release assets for your version.
-- Use a custom NGINX build or a runtime without an exact version match? Compile the module against the exact NGINX source tree that produced the running binary, using the same `./configure` options (module paths, feature flags) as that build. A matching-version source tree is not enough: the module ABI depends on the exact source revision and configure options, not just the version string. This applies to custom builds of NGINX 1.24.0 or higher.
+- Use a custom NGINX build or a runtime without an exact version match? Compile the module against the exact NGINX source tree that produced the running binary. Use the same `./configure` options (module paths, feature flags) as that build. A matching-version source tree is not enough: the module ABI depends on the exact source revision and configure options, not just the version string. This applies to custom builds of NGINX 1.24.0 or higher.
 
 You can integrate the module as either:
 - **Dynamic module** (recommended): Load with `load_module`
@@ -242,7 +242,7 @@ budget model.
    ```
    Fallback for cases where upstream forces compression and you cannot or do not want to modify proxy configuration. Handles all three formats. Slightly higher overhead than `gunzip` because it operates inside the module's conversion path.
 
-**When to prefer `gunzip` over built-in decompression**: If you only need gzip support and `gunzip` is already compiled into your NGINX build, prefer `gunzip on` + `markdown_auto_decompress off`. It gives lower per-request overhead. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
+**When to prefer `gunzip` over built-in decompression**: If you only need gzip support, prefer `gunzip on` + `markdown_auto_decompress off`. This applies when `gunzip` is already compiled into your NGINX build. It gives lower per-request overhead. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
 
 For operational guidance, see [Operations Guide](guides/OPERATIONS.md).
 

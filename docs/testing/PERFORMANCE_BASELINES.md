@@ -13,8 +13,8 @@ benchmark.)
 **Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
 1.30.4, archival only)
 **Scope:** The local record covers release-build microbenchmarks for the Rust
-converter FFI path and the C conditional-request handler (`If-None-Match`)
-using the standalone test harness with real Rust FFI. Local real-NGINX HTTP
+converter FFI path and the C conditional-request handler (`If-None-Match`).
+These use the standalone test harness with real Rust FFI. Local real-NGINX HTTP
 measurements on this machine, including the NGINX 1.28.2 tables below, are
 diagnostic only. Only the canonical native Linux record is eligible for
 release baseline claims.
@@ -26,8 +26,8 @@ This file replaces the previous placeholder template with real local baseline da
 ### Canonical Evidence and Threshold Normalization
 
 Canonical module baselines separate measured truth from conservatively
-normalized performance thresholds. You must copy the following fields
-verbatim from the real canonical run: `streaming_path_hits`,
+normalized performance thresholds. You must copy these fields verbatim from
+the real canonical run: `streaming_path_hits`,
 `fullbuffer_path_hits`, `streaming_requests_total`,
 `precommit_failopen_total`, `decompression_streaming_total`,
 `decompression_fullbuffer_total`,
@@ -39,16 +39,16 @@ latency/TTFB may round upward or raise. RPS must not increase, latency/TTFB must
 not decrease, and path, fallback, output, memory, or environment evidence must
 not change. This makes the threshold more conservative without improving or
 fabricating measured evidence. All adjustments must stay within a documented
-bound. A fixed precision or maximum adjustment (for example ±5% of the measured
-value, or rounding to at most one significant digit) recorded in the
-`baseline_policy` metadata. The gate rejects arbitrary downward RPS or upward
+bound. Record a fixed precision or maximum adjustment in the `baseline_policy`
+metadata. For example, use ±5% of the measured value or round to at most one
+significant digit. The gate rejects arbitrary downward RPS or upward
 latency/TTFB changes beyond that bound.
 
 It also fails repeated small adjustments that accumulate past it.
 
-Every canonical baseline must retain the raw workflow artifact and record the
-artifact/run, original Git commit, adjustment rule, person or reason, and date
-in machine-locatable `baseline_policy` metadata. The checked-in 0.9.2 module
+Every canonical baseline must retain the raw workflow artifact. It must record
+the artifact/run, original Git commit, adjustment rule, person or reason, and
+date in machine-locatable `baseline_policy` metadata. The checked-in 0.9.2 module
 baseline is a verbatim run from source commit
 `97672b57d4479febbf6d9a3d947a339236b698f3`, workflow run
 `30604344481/attempts/1`, measured at `2026-07-31T04:36:09Z`, with raw digest
@@ -71,10 +71,12 @@ The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
 output path. The workflow validates `.headers`, `.body`, and `.json` files for
 all eight scenarios. Each scenario must produce a non-empty `.headers` and
-`.json` file. The `.body` file must **exist** for every scenario, but an empty
-body is valid for bodyless responses (for example 304/HEAD). The workflow must
-not require non-zero body content. It verifies each probe's verdict, curl exit
-code, and body SHA-256 (the empty-body digest is the SHA-256 of zero bytes).
+`.json` file. The `.body` file must **exist** for every scenario. An empty body
+is valid for bodyless responses (for example 304/HEAD). The workflow must not
+require non-zero body content.
+
+It verifies each probe's verdict, curl exit code, and body SHA-256 (the
+empty-body digest is the SHA-256 of zero bytes).
 
 It validates the complete response-correctness schema (`http_status`, normalized
 `headers`, content metadata, body metadata, correctness markers, verdict,

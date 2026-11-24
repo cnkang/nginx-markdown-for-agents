@@ -66,18 +66,18 @@ the large tier.
 
 All 33 fixtures in the benchmark corpus (`tests/corpus/`) converted with both
 the baseline (`2af6fef`) and current code using the same converter
-configuration. The comparison checked out the baseline source, built it,
-converted all fixtures, computed blake3 hashes of each Markdown output, then
-repeated with the current source and compared the fixture-to-hash mappings. Each
-revision records its fixture path together with that fixture's output hash. A
-hash landing on a different fixture counts as a diff even when the two hash sets
-are equal.
+configuration. The comparison checked out the baseline source and built it.
+It converted all fixtures and computed blake3 hashes of each Markdown output.
+Then it repeated the steps with the current source and compared the
+fixture-to-hash mappings. Each revision records its fixture path together with
+that fixture's output hash. A hash landing on a different fixture counts as a
+diff even when the two hash sets are equal.
 
 Method: build each revision in an isolated worktree (or restore every relevant
 build input before each build), including the Rust source, `Cargo.toml`,
 `Cargo.lock`, build scripts, feature definitions, and fixtures. Then run `cargo
-build`, convert each fixture through `MarkdownConverter::new().convert()`,
-compute `blake3::hash(output)`, and compare the fixture-to-hash mappings between
+build` and convert each fixture through `MarkdownConverter::new().convert()`.
+Compute `blake3::hash(output)` and compare the fixture-to-hash mappings between
 revisions. The full artifact lives at
 `docs/evidence/10-parser-path-optimization-corpus-diff.tsv` (a checked-in frozen
 evidence file, distinct from the generated `artifacts/` evidence policy
@@ -93,8 +93,8 @@ described in `docs/guides/BUILD_INSTRUCTIONS.md`).
 | **Total** | **33** | **0** | **All identical** |
 
 Separately, the `optimization_regression` test suite (11 tests) verifies
-output properties and determinism on the current code for every fixture, and
-40 property-based tests verify output equivalence across randomly generated
+output properties and determinism on the current code for every fixture.
+Also, 40 property-based tests verify output equivalence across randomly generated
 HTML structures. These tests pass in both default and `prune_noise_regions`
 feature modes.
 
@@ -208,7 +208,7 @@ All other elements return `Traverse` and get normal handling.
 - The `RcDom` tree never mutates. Pruning operates at the traversal layer
   by returning early from `handle_element_internal`.
 -  Call order per element: pruning (`should_prune_with_config`) runs first, then
-  `SecurityValidator::check_element`. For `SkipChildren`: the pruning decision
+  `SecurityValidator::check_element`. For `SkipChildren`, the pruning decision
   returns before the security validator runs. The element node and its children
   are never visited by the validator. For `SkipSubtree`: the element and its
   entire subtree skip. Elements that pass pruning are then checked by the
@@ -261,8 +261,8 @@ path.
 
 The fast path is a qualification gate, not a separate converter. Qualifying
 documents use the same `traverse_node` code path. The converter can eliminate
-unreachable branches during traversal (for example table handling, form control
-handling, embedded content handling are unreachable for fast-path documents).
+unreachable branches during traversal. For example, table handling, form
+control handling, and embedded content handling are unreachable for fast-path documents.
 `SecurityValidator` remains fully active.
 
 If any unsupported node is found during the pre-scan, the entire document falls
@@ -295,9 +295,9 @@ always allowed.
 ### Disqualifying elements (examples)
 
 Tables (`table`, `thead`, `tbody`, `tr`, `td`, `th`), forms (`form`, `input`,
-`select`, `textarea`, `button`), embedded content (`iframe`, `object`,
-`embed`), and media (`video`, `audio`, `source`, `track`, `area`, `map`) all
-disqualify a document from the fast path.
+`select`, `textarea`, `button`), and embedded content (`iframe`, `object`,
+`embed`) disqualify a document from the fast path. Media (`video`, `audio`,
+`source`, `track`, `area`, `map`) also disqualify it.
 
 ### Depth threshold
 
@@ -311,10 +311,10 @@ Depth counts from the document root node (depth 0). A text node inside
 ### Known limitations
 
 - The pre-scan walks the full DOM tree only when no disqualifying node is
-  found. Otherwise, it exits immediately at the first disqualifying node,
-  avoiding unnecessary traversal of the remaining tree. In practice, the
-  scan is lightweight (tag-name comparison, maximum-depth tracking, and
-  should_prune evaluation only).
+  found. Otherwise, it exits immediately at the first disqualifying node.
+  This avoids unnecessary traversal of the remaining tree. In practice, the
+  scan is lightweight. It performs tag-name comparison, maximum-depth tracking,
+  and should_prune evaluation only.
 - The allowed element set is intentionally conservative. Some elements that
   the fast path could handle (for example `<dl>`, `<dt>`, `<dd>`) stay
   excluded to keep the qualification logic simple.
@@ -333,19 +333,18 @@ Depth counts from the document root node (depth 0). A text node inside
 
 ### What it does
 
-When the traversal output exceeds an internal size threshold, this optimization replaces
-the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
+When the traversal output exceeds an internal size threshold, this optimization
+replaces the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
 This removes one O(n) allocation and copy for the normalization result.
 
 The optimization targets the normalization phase (after traversal), not the
 traversal itself. The default initial traversal buffer uses a 1 KB
-pre-allocation, but when the full-buffer FFI caller provides an input size hint
+pre-allocation. When the full-buffer FFI caller provides an input size hint
 exceeding the internal `LARGE_BODY_THRESHOLD`, the buffer pre-allocates
-proportionally to the input HTML size through `estimate_output_capacity`. For
-small documents or callers that do not set the hint, the default 1 KB
-pre-allocation applies. The `RcDom` does not expose the original byte count
-without an additional tree walk. That is why the caller must provide the hint
-externally.
+proportionally to the input HTML size through `estimate_output_capacity`. The
+default 1 KB pre-allocation applies to small documents and callers that do not
+set the hint. The `RcDom` does not expose the original byte count without an
+additional tree walk. Therefore, the caller must provide the hint externally.
 
 ### Buffer estimation for the fused normalizer
 
@@ -379,7 +378,8 @@ appends:
   while preserving leading indentation and content inside backtick spans.
 
 The output produced by `FusedNormalizer` is identical to the output of
-`MarkdownConverter::normalize_output` for the same input. Property-based tests verify this equivalence.
+`MarkdownConverter::normalize_output` for the same input. Property-based tests
+verify this equivalence.
 
 ### Threshold
 
@@ -389,17 +389,17 @@ This threshold gets checked against the traversal output length after
 `traverse_node_with_context` completes. Not against the input HTML size.
 
 The 256 KB value is an implementation constant chosen well below the parser
-and streaming budgets, so ordinary documents keep the two-pass path and only
-large intermediate Markdown output uses the fused normalization. It measures
-intermediate Markdown output size and has no counterpart in streaming
-selection, which applies no size threshold. Documents below this threshold use
-the standard `normalize_output` two-pass approach.
+and streaming budgets. Ordinary documents keep the two-pass path. Only large
+intermediate Markdown output uses the fused normalization. The threshold
+measures intermediate Markdown output size. Streaming selection has no
+counterpart because it applies no size threshold. Documents below this
+threshold use the standard `normalize_output` two-pass approach.
 
 ### Known limitations
 
 -  The fused normalizer processes the traversal output line-by-line after
   traversal completes. It does not interleave with traversal itself. The
-  intermediate `output` string is still fully built before normalization begins.
+  intermediate `output` string is fully built before normalization begins.
   CRLF normalization happens inline in `push_line` (stripping trailing `\r`).
   The code needs no separate `replace("\r\n", "\n")` allocation. The saving is
   one full O(n) allocation and copy compared to the two-pass `normalize_output`
@@ -409,9 +409,9 @@ the standard `normalize_output` two-pass approach.
   when the full-buffer FFI caller provides an input size hint exceeding
   `LARGE_BODY_THRESHOLD`. For small documents or callers that do not set the
   hint, the default 1 KB pre-allocation applies. When the fused normalizer
-  activates (after traversal), it receives the actual traversal output length as
-  its capacity, avoiding the underestimate that would result from applying the
-  0.4 factor to already-converted Markdown text.
+  activates after traversal, it receives the actual traversal output length as
+  its capacity. This avoids the underestimate from applying the 0.4 factor to
+  already-converted Markdown text.
 -  Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
   from the input size hint. The fused normalizer receives the actual traversal
   output length. It does not inherit an input/output compression-ratio estimate.
@@ -434,11 +434,11 @@ the standard `normalize_output` two-pass approach.
 The optimization is security-sensitive. Early pruning skips
 `SecurityValidator::check_element` for allowlisted prunable elements only.
 There is no unapproved bypass. The prunable-element allowlist and its safety
-tests are part of the security contract. Exactly the following elements may
-skip `SecurityValidator::check_element`: `<script>`, `<style>`, `<noscript>`
-(active by default), plus `<nav>`, `<footer>`, `<aside>` (behind the
-`prune_noise_regions` feature flag). All other elements pass through the normal
-validator:
+tests are part of the security contract. Only the following elements may skip
+`SecurityValidator::check_element`: `<script>`, `<style>`, and `<noscript>`
+(active by default). The list also includes `<nav>`, `<footer>`, and `<aside>`
+behind the `prune_noise_regions` feature flag. All other elements pass through
+the normal validator:
 
 - Dangerous element removal (`script`, `style`, `noscript`, and others in
   `DANGEROUS_ELEMENTS`)
@@ -452,9 +452,9 @@ anyway. Pruning `<nav>`, `<footer>`, `<aside>` is a content decision, not a
 security decision. These elements are not in `DANGEROUS_ELEMENTS`.
 
 The `optimization_regression` test suite (11 tests) and 40 property-based
-tests validate the prunable-element allowlist, verifying output
-equivalence and security properties across both default and `prune_noise_regions`
-feature modes. All security tests pass in both modes.
+tests validate the prunable-element allowlist. They verify output equivalence
+and security properties in default and `prune_noise_regions` feature modes.
+All security tests pass in both modes.
 
 No optimization in this spec introduces new `unsafe` code.
 
