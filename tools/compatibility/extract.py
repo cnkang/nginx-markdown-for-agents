@@ -116,9 +116,7 @@ def _expand_macros(text: str, names_text: str) -> str:
         "directive name inventory defines fewer than 20 names",
     )
     return _MACRO_USE_RE.sub(
-        lambda match: 'ngx_string("{}")'.format(
-            definitions.get(match.group(1), match.group(1))
-        ),
+        lambda match: f'ngx_string("{definitions.get(match.group(1), match.group(1))}")',
         text,
     )
 
@@ -169,7 +167,7 @@ def _split_fields(entry: str) -> List[str]:
             fields.append(entry[start:index].strip())
             start = index + 1
     fields.append(entry[start:].strip())
-    require(len(fields) == 6, "malformed ngx_command_t row: {}".format(entry.strip()))
+    require(len(fields) == 6, f"malformed ngx_command_t row: {entry.strip()}")
     return fields
 
 
@@ -181,17 +179,21 @@ def _flag_tokens(flags: str) -> set:
 def _args_contract(flags: str) -> str:
     """Map NGINX command flags to the inventory argument contract."""
     tokens = _flag_tokens(flags)
-    for token, value in (
-        ("NGX_CONF_NOARGS", "no_args"),
-        ("NGX_CONF_TAKE12", "1_or_2"),
-        ("NGX_CONF_1MORE", "1_or_more"),
-        ("NGX_CONF_ANY", "any"),
-        ("NGX_CONF_FLAG", "flag"),
-        ("NGX_CONF_TAKE1", "1"),
-    ):
-        if token in tokens:
-            return value
-    return "unknown"
+    return next(
+        (
+            value
+            for token, value in (
+                ("NGX_CONF_NOARGS", "no_args"),
+                ("NGX_CONF_TAKE12", "1_or_2"),
+                ("NGX_CONF_1MORE", "1_or_more"),
+                ("NGX_CONF_ANY", "any"),
+                ("NGX_CONF_FLAG", "flag"),
+                ("NGX_CONF_TAKE1", "1"),
+            )
+            if token in tokens
+        ),
+        "unknown",
+    )
 
 
 def _context_contract(flags: str) -> List[str]:
@@ -241,11 +243,14 @@ def _strip_syntax_note(syntax: str) -> str:
 
 def _comment_syntax(lines: List[str], name: str) -> str:
     """Return the documented value syntax for a directive."""
-    for line in lines:
-        if not line or line.startswith(name) is False:
-            continue
-        return _strip_syntax_note(line[len(name):].strip())
-    return ""
+    return next(
+        (
+            _strip_syntax_note(line[len(name) :].strip())
+            for line in lines
+            if line and line.startswith(name) is not False
+        ),
+        "",
+    )
 
 
 def _comment_value(lines: List[str], label: str) -> Optional[str]:
@@ -261,8 +266,7 @@ def _comment_value(lines: List[str], label: str) -> Optional[str]:
 def _documented_default(lines: List[str]) -> str:
     """Return the operator-facing default, preferring ``Public default``."""
     for label in ("Public default:", "Default:"):
-        value = _comment_value(lines, label)
-        if value:
+        if value := _comment_value(lines, label):
             return value
     return ""
 
@@ -311,7 +315,7 @@ def extract_directives(reader: SourceReader) -> Dict[str, Any]:
         name = match.group(1)
         require(
             name.startswith("markdown_"),
-            "unexpected directive name outside the markdown_ namespace: {}".format(name),
+            f"unexpected directive name outside the markdown_ namespace: {name}",
         )
         entries.append(_directive_entry(name, fields, _preceding_comment(block, brace)))
     names_seen = [entry["name"] for entry in entries]
@@ -332,23 +336,22 @@ def extract_directives(reader: SourceReader) -> Dict[str, Any]:
             path: digest_of(reader.read_text(path))
             for path in CONFIG_MERGE_SOURCES
         },
-        "reject_only_count": sum(
-            1 for entry in entries if entry["handler"].endswith("removed_directive")
-        ),
+        "reject_only_count": sum(bool(entry["handler"].endswith("removed_directive"))
+                             for entry in entries),
     }
 
 
 def _metric_family(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize one declared metric family."""
     labels = []
-    for label in entry.get("labels") or []:
-        labels.append(
-            {
-                "name": label["name"],
-                "values": sorted(label.get("values") or []),
-                "dynamic": bool(label.get("dynamic", False)),
-            }
-        )
+    labels.extend(
+        {
+            "name": label["name"],
+            "values": sorted(label.get("values") or []),
+            "dynamic": bool(label.get("dynamic", False)),
+        }
+        for label in entry.get("labels") or []
+    )
     family: Dict[str, Any] = {
         "name": entry["name"],
         "type": entry["type"],
@@ -383,9 +386,10 @@ def _parse_label_pairs(body: str) -> List[tuple]:
 
 def _type_families(joined: str) -> Dict[str, str]:
     """Return the family-to-type map the renderer declares."""
-    families: Dict[str, str] = {}
-    for match in re.finditer(r"# TYPE (\S+) (\S+)\\n", joined):
-        families[match.group(1)] = match.group(2)
+    families: Dict[str, str] = {
+        match.group(1): match.group(2)
+        for match in re.finditer(r"# TYPE (\S+) (\S+)\\n", joined)
+    }
     require(len(families) > 0, "metrics renderer declares no # TYPE families")
     return families
 
@@ -397,11 +401,9 @@ def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
         if metric_type != "histogram":
             continue
         for component in ("bucket", "sum", "count"):
-            sample = name + "_" + component
+            sample = f"{name}_{component}"
             if sample in samples:
-                raise ContractError(
-                    "ambiguous histogram sample family: {}".format(sample)
-                )
+                raise ContractError(f"ambiguous histogram sample family: {sample}")
             samples[sample] = (name, component)
     return samples
 
@@ -426,12 +428,12 @@ def _collect_series(
         pairs = _parse_label_pairs(match.group(2))
         if not pairs:
             continue
-        marker = ["@component={}".format(component)] if component else []
+        marker = [f"@component={component}"] if component else []
         label_sets[family].add(
             tuple(marker + sorted(name for name, _ in pairs))
         )
         raw_series[family].add(
-            (component, tuple(name + "=" + value for name, value in pairs))
+            (component, tuple(f"{name}={value}" for name, value in pairs))
         )
     labels = {
         name: [list(label_set) for label_set in sorted(label_sets[name])]
@@ -458,9 +460,7 @@ def _unlabelled_samples(joined: str, families: Dict[str, str]) -> List[str]:
         if resolved is None:
             continue
         family, component = resolved
-        present.add(
-            family if component is None else "{}:{}".format(family, component)
-        )
+        present.add(family if component is None else f"{family}:{component}")
     return sorted(present)
 
 
@@ -471,7 +471,7 @@ def _emitted_series(renderer: str) -> Dict[str, Any]:
     raw_series, labels = _collect_series(joined, families)
     series = {
         name: [
-            (["@component={}".format(component)] if component else [])
+            ([f"@component={component}"] if component else [])
             + list(label_values)
             for component, label_values in sorted(
                 raw_series[name], key=lambda item: (item[0] or "", item[1])
@@ -513,18 +513,18 @@ def extract_reasons(reader: SourceReader) -> Dict[str, Any]:
     reasons = registry.get("reasons") or []
     require(len(reasons) > 0, "reason registry declares no reasons")
     entries = []
-    for reason in reasons:
-        entries.append(
-            {
-                "discriminant": reason["discriminant"],
-                "key": reason["key"],
-                "stage": reason.get("default_stage"),
-                "outcome": reason.get("outcome"),
-                "default_origin": reason.get("default_origin"),
-                "allowed_origins": sorted(reason.get("allowed_origins") or []),
-                "operator_visible": bool(reason.get("operator_visible")),
-            }
-        )
+    entries.extend(
+        {
+            "discriminant": reason["discriminant"],
+            "key": reason["key"],
+            "stage": reason.get("default_stage"),
+            "outcome": reason.get("outcome"),
+            "default_origin": reason.get("default_origin"),
+            "allowed_origins": sorted(reason.get("allowed_origins") or []),
+            "operator_visible": bool(reason.get("operator_visible")),
+        }
+        for reason in reasons
+    )
     ordered = sorted_by(entries, "discriminant")
     discriminants = [entry["discriminant"] for entry in ordered]
     require(
@@ -630,12 +630,11 @@ def _validate_one_of(alternatives: Any) -> None:
 
 def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
     """Project supported JSON Schema value constraints."""
-    unsupported = sorted(key for key in _UNSUPPORTED_SCHEMA_KEYWORDS if key in schema)
-    if unsupported:
+    if unsupported := sorted(
+        key for key in _UNSUPPORTED_SCHEMA_KEYWORDS if key in schema
+    ):
         raise ContractError(
-            "unsupported diagnostics schema keywords: {}".format(
-                ", ".join(unsupported)
-            )
+            f'unsupported diagnostics schema keywords: {", ".join(unsupported)}'
         )
     if schema.get("oneOf") is not None:
         _validate_one_of(schema["oneOf"])
@@ -654,15 +653,14 @@ def _resolve_ref(schema: Any, defs: Dict[str, Any], depth: int = 0) -> Dict[str,
     if reference is None:
         return schema
     if depth > _REF_DEPTH_LIMIT:
-        raise ContractError("schema $ref chain is too deep: {}".format(reference))
+        raise ContractError(f"schema $ref chain is too deep: {reference}")
     if not isinstance(reference, str) or not reference.startswith(_REF_PREFIX):
         raise ContractError("unsupported schema $ref: {!r}".format(reference))
     target = defs.get(reference[len(_REF_PREFIX):])
     if not isinstance(target, dict):
         raise ContractError("unresolved schema $ref: {!r}".format(reference))
     siblings = {key: value for key, value in schema.items() if key != "$ref"}
-    validating = sorted(set(siblings) - _SCHEMA_ANNOTATION_KEYWORDS)
-    if validating:
+    if validating := sorted(set(siblings) - _SCHEMA_ANNOTATION_KEYWORDS):
         raise ContractError(
             "schema $ref {!r} has validation siblings the projection cannot "
             "represent: {}".format(reference, ", ".join(validating))
@@ -727,7 +725,7 @@ def _schema_nested(
         nested["required_children"] = sorted(schema.get("required") or [])
         nested["properties"] = _schema_properties(schema, defs, depth + 1)
     if _is_array_schema(schema):
-        nested.update(_schema_items(schema, defs, depth + 1))
+        nested |= _schema_items(schema, defs, depth + 1)
     return nested
 
 
@@ -747,10 +745,9 @@ def _schema_properties(
         }
         if "enum" in child_schema:
             field["enum"] = _sorted_enum(child_schema["enum"])
-        constraints = _schema_constraints(child_schema)
-        if constraints:
+        if constraints := _schema_constraints(child_schema):
             field["constraints"] = constraints
-        field.update(_schema_nested(child_schema, defs, depth))
+        field |= _schema_nested(child_schema, defs, depth)
         children.append(field)
     return sorted(children, key=lambda item: item["name"])
 
@@ -777,8 +774,7 @@ def _schema_items(
     }
     if "enum" in item:
         projected["items_enum"] = _sorted_enum(item["enum"])
-    constraints = _schema_constraints(item)
-    if constraints:
+    if constraints := _schema_constraints(item):
         projected["items_constraints"] = constraints
     return projected
 
@@ -798,10 +794,9 @@ def _schema_field(
     }
     if "enum" in schema:
         field["enum"] = _sorted_enum(schema["enum"])
-    constraints = _schema_constraints(schema)
-    if constraints:
+    if constraints := _schema_constraints(schema):
         field["constraints"] = constraints
-    field.update(_schema_nested(schema, defs, 0))
+    field |= _schema_nested(schema, defs, 0)
     return field
 
 
@@ -853,7 +848,7 @@ def extract_ffi(reader: SourceReader) -> Dict[str, Any]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped.startswith("*"):
             continue
-        buffer = (buffer + " " + stripped).strip()
+        buffer = f"{buffer} {stripped}".strip()
         if stripped.endswith(";"):
             prototypes.append(re.sub(r"\s+", " ", buffer))
             buffer = ""
@@ -865,7 +860,7 @@ def extract_ffi(reader: SourceReader) -> Dict[str, Any]:
         prefix = prototype[: match.start()].strip()
         symbols.append(
             {
-                "name": match.group(1),
+                "name": match[1],
                 "signature": prototype.rstrip(";").strip(),
                 "return_type": prefix.replace("*", " *").strip(),
             }
@@ -877,7 +872,7 @@ def extract_ffi(reader: SourceReader) -> Dict[str, Any]:
         name for name in names if name.startswith("markdown_abi_")
     )
     return {
-        "abi_version": int(version_match.group(1)),
+        "abi_version": int(version_match[1]),
         "classification": "INTERNAL_ONLY",
         "header": FFI_HEADER,
         "count": len(symbols),
@@ -892,7 +887,7 @@ def _matrix_target(entry: Dict[str, Any]) -> Dict[str, Any]:
     parts = version.split(".")
     require(len(parts) == 3, "release matrix row has a malformed NGINX version")
     return {
-        "nginx_minor": "{}.{}".format(parts[0], parts[1]),
+        "nginx_minor": f"{parts[0]}.{parts[1]}",
         "nginx_version": version,
         "artifact_type": entry["artifact_type"],
         "os": entry["os"],
@@ -927,14 +922,17 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "counts": {
             "total": len(rows),
-            "supported": sum(1 for row in rows if row["support_tier"] == "supported"),
+            "supported": sum(
+                row["support_tier"] == "supported" for row in rows
+            ),
             "best_effort": sum(
-                1 for row in rows if row["support_tier"] == "best-effort"
+                row["support_tier"] == "best-effort" for row in rows
             ),
             "experimental": sum(
-                1 for row in rows if row["support_tier"] == "experimental"
+                row["support_tier"] == "experimental" for row in rows
             ),
-            "release_blocking": sum(1 for row in rows if row["release_blocking"]),
+            "release_blocking": sum(bool(row["release_blocking"])
+                                for row in rows),
         },
         "targets": sorted(
             rows,
@@ -965,7 +963,7 @@ def _nfpm_contents(contents: Any, scope: str) -> List[Dict[str, str]]:
 
     An omitted ``type`` is a regular file, as in nFPM itself.
     """
-    require(isinstance(contents, list), "nFPM {} must be a YAML list".format(scope))
+    require(isinstance(contents, list), f"nFPM {scope} must be a YAML list")
     entries = []
     for item in contents:
         require(isinstance(item, dict), "nFPM contents entries must be mappings")
@@ -1025,7 +1023,7 @@ def _load_nfpm_document(text: str) -> Dict[str, Any]:
     try:
         document = yaml.safe_load(text)
     except yaml.YAMLError as error:
-        raise ContractError("malformed nFPM YAML: {}".format(error))
+        raise ContractError(f"malformed nFPM YAML: {error}") from error
     require(isinstance(document, dict), "nFPM config must be a YAML mapping")
     return document
 
@@ -1046,7 +1044,7 @@ def _nfpm_override(overrides: Dict[str, Any], packager: str) -> Dict[str, Any]:
     package_override = overrides.get(packager) or {}
     require(
         isinstance(package_override, dict),
-        "nFPM {} override must be a YAML mapping".format(packager),
+        f"nFPM {packager} override must be a YAML mapping",
     )
     return package_override
 
@@ -1060,9 +1058,7 @@ def _nfpm_effective(
     values, so an absent or empty override list inherits the root list.
     """
     value = package_override.get(key)
-    if value is None or value == []:
-        return document.get(key)
-    return value
+    return document.get(key) if value is None or value == [] else value
 
 
 def _nfpm_dependencies(
@@ -1073,7 +1069,7 @@ def _nfpm_dependencies(
     require(
         isinstance(dependencies, list)
         and all(isinstance(item, str) for item in dependencies),
-        "nFPM {} dependencies must be a string list".format(packager),
+        f"nFPM {packager} dependencies must be a string list",
     )
     return dependencies
 
@@ -1087,7 +1083,7 @@ def _nfpm_layout(
         require(len(entries) > 0, "nFPM config declares no contents entries")
     else:
         entries = _nfpm_contents(
-            package_override["contents"], "{} override contents".format(packager)
+            package_override["contents"], f"{packager} override contents"
         )
     return _layout_entries(entries, packager)
 
@@ -1097,9 +1093,8 @@ def _nfpm_deb_constraints(dependencies: List[str]) -> List[List[str]]:
     constraints = set()
     pattern = r"nginx\s+\(([=<>!]+)\s+\$\{([A-Z_]+)\}\)"
     for dependency in dependencies:
-        match = re.fullmatch(pattern, dependency)
-        if match:
-            constraints.add((match.group(1), match.group(2)))
+        if match := re.fullmatch(pattern, dependency):
+            constraints.add((match[1], match[2]))
     return [list(item) for item in sorted(constraints)]
 
 
@@ -1108,9 +1103,8 @@ def _nfpm_rpm_constraints(dependencies: List[str]) -> List[str]:
     constraints = set()
     pattern = r"nginx(-r\$\{NGINX_VERSION\}|\s*>=\s*\$\{NGINX_VERSION\})"
     for dependency in dependencies:
-        match = re.fullmatch(pattern, dependency)
-        if match:
-            constraints.add(match.group(1).replace(" ", ""))
+        if match := re.fullmatch(pattern, dependency):
+            constraints.add(match[1].replace(" ", ""))
     return sorted(constraints)
 
 
@@ -1196,7 +1190,7 @@ def extract_surfaces(reader: SourceReader, surfaces: Optional[List[str]] = None)
     """Extract every requested surface from one source revision."""
     names = surfaces or sorted(EXTRACTORS)
     unknown = [name for name in names if name not in EXTRACTORS]
-    require(not unknown, "unknown contract surface: {}".format(", ".join(unknown)))
+    require(not unknown, f'unknown contract surface: {", ".join(unknown)}')
     result = {}
     for name in names:
         try:
@@ -1204,7 +1198,5 @@ def extract_surfaces(reader: SourceReader, surfaces: Optional[List[str]] = None)
         except ContractError:
             raise
         except (KeyError, TypeError, ValueError) as error:
-            raise ContractError(
-                "cannot extract the {} surface: {}".format(name, error)
-            )
+            raise ContractError(f"cannot extract the {name} surface: {error}") from error
     return result
