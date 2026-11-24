@@ -184,6 +184,32 @@ def _enum_difference(
     return _sort_mixed_values(removed), _sort_mixed_values(added)
 
 
+_SCHEMA_SEGMENT_SAFE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+
+def _schema_segment(name: str) -> str:
+    """Percent-encode one property name for a diagnostics schema path.
+
+    Paths join property segments with ``.``, mark array items with ``[]``, and
+    separate a parent from its child with ``:``.  Encoding every other
+    character keeps a property named ``a.b`` distinct from ``a`` -> ``b``,
+    while ordinary names keep their plain spelling.
+    """
+    return "".join(
+        char
+        if char in _SCHEMA_SEGMENT_SAFE
+        else "".join(f"%{byte:02X}" for byte in char.encode("utf-8"))
+        for char in name
+    )
+
+
+def _by_segment(entries: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Index projected schema fields by their encoded path segment."""
+    return {_schema_segment(entry["name"]): entry for entry in entries}
+
+
 def _compare_directive(
     result: Comparison, name: str, old: Dict[str, Any], new: Dict[str, Any]
 ) -> None:
@@ -824,8 +850,8 @@ def _compare_properties(
     result: Comparison, name: str, old: List[Dict[str, Any]], new: List[Dict[str, Any]]
 ) -> None:
     """Compare a projected child field set, including nested child structure."""
-    old_children = _by_name(old)
-    new_children = _by_name(new)
+    old_children = _by_segment(old)
+    new_children = _by_segment(new)
     for child in sorted(set(old_children) - set(new_children)):
         result.add(
             "diagnostics",
@@ -1012,8 +1038,8 @@ def _compare_diagnostics_top_level(
         result.add(
             "diagnostics",
             REVIEW_REQUIRED,
-            f"required-added:{name}",
-            f"diagnostics field {name} became required",
+            f"required-added:{_schema_segment(name)}",
+            f"diagnostics field {_schema_segment(name)} became required",
             None,
             name,
         )
@@ -1026,8 +1052,9 @@ def _compare_diagnostics_top_level(
         result.add(
             "diagnostics",
             verdict,
-            f"top-level-field-added:{name}",
-            f"diagnostics added top-level field {name}; the frozen contract keeps additive state in extensions",
+            f"top-level-field-added:{_schema_segment(name)}",
+            f"diagnostics added top-level field {_schema_segment(name)}; "
+            "the frozen contract keeps additive state in extensions",
             None,
             name,
         )
@@ -1053,8 +1080,8 @@ def compare_diagnostics(
     """Compare the diagnostics wire schema."""
     _compare_diagnostics_header(result, baseline, candidate)
     _compare_diagnostics_top_level(result, baseline, candidate)
-    old_map = _by_name(baseline["fields"])
-    new_map = _by_name(candidate["fields"])
+    old_map = _by_segment(baseline["fields"])
+    new_map = _by_segment(candidate["fields"])
     for name in sorted(set(old_map) - set(new_map)):
         result.add(
             "diagnostics",
