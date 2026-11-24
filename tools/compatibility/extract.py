@@ -7,6 +7,7 @@ promised, and the implementation files record what it did.  The behavioural
 request path, and the manifest records the binding rather than a claim.
 """
 
+
 from __future__ import annotations
 
 import json
@@ -27,8 +28,6 @@ CONFIG_MERGE_SOURCES = (
 )
 METRICS_REGISTRY = "schemas/metrics-v1.registry.json"
 METRICS_RENDERER = "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
-# Both HTTP contract groups below run through the C unit suite.
-UNIT_SUITE_TARGET = "make test-nginx-unit"
 REASON_REGISTRY = "components/rust-converter/reason_registry.toml"
 DIAGNOSTICS_SCHEMA = "schemas/diagnostics.schema.json"
 FFI_HEADER = "components/rust-converter/include/markdown_converter.h"
@@ -70,14 +69,13 @@ HTTP_CONTRACT_TESTS = {
     ),
 }
 
+UNIT_SUITE_TARGET = "make test-nginx-unit"
 # Executor for each HTTP behaviour group.  These targets run in CI, not inside
 # this gate: the gate proves the contract text did not move, the targets prove
 # the behaviour still holds.
 HTTP_EXECUTION_TARGETS = {
-    "accept_negotiation": UNIT_SUITE_TARGET
-    + " / bash tools/e2e/verify_accept_negotiation_e2e.sh",
-    "conditional_304": UNIT_SUITE_TARGET
-    + " / bash tools/e2e/verify_conditional_requests_e2e.sh",
+    "accept_negotiation": f"{UNIT_SUITE_TARGET} / bash tools/e2e/verify_accept_negotiation_e2e.sh",
+    "conditional_304": f"{UNIT_SUITE_TARGET} / bash tools/e2e/verify_conditional_requests_e2e.sh",
     "head_request": UNIT_SUITE_TARGET,
     "header_plan_vary_content_type": UNIT_SUITE_TARGET,
     "pre_post_commit": UNIT_SUITE_TARGET,
@@ -214,10 +212,8 @@ def _preceding_comment(block: str, entry_brace: int) -> str:
 def _comment_lines(comment: str) -> List[str]:
     """Return normalized text lines of a C block comment."""
     body = comment.strip()
-    if body.startswith("/*"):
-        body = body[2:]
-    if body.endswith("*/"):
-        body = body[:-2]
+    body = body.removeprefix("/*")
+    body = body.removesuffix("*/")
     lines = []
     for raw in body.splitlines():
         line = raw.strip()
@@ -615,6 +611,23 @@ def _contains_ref(value: Any) -> bool:
     return False
 
 
+def _validate_one_of(alternatives: Any) -> None:
+    """Require inline, supported ``oneOf`` alternatives."""
+    if not isinstance(alternatives, list) or not alternatives:
+        raise ContractError("diagnostics oneOf must be a non-empty schema list")
+    for alternative in alternatives:
+        if not isinstance(alternative, dict):
+            raise ContractError("boolean or non-object JSON schemas are unsupported")
+        if _contains_ref(alternative):
+            # The oneOf list is recorded verbatim, so a reference would pin
+            # the pointer text and miss every change to its target.
+            raise ContractError(
+                "diagnostics oneOf alternatives must inline their schema "
+                "instead of using $ref"
+            )
+        _schema_constraints(alternative)
+
+
 def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
     """Project supported JSON Schema value constraints."""
     unsupported = sorted(key for key in _UNSUPPORTED_SCHEMA_KEYWORDS if key in schema)
@@ -624,23 +637,8 @@ def _schema_constraints(schema: Dict[str, Any]) -> Dict[str, Any]:
                 ", ".join(unsupported)
             )
         )
-    alternatives = schema.get("oneOf")
-    if alternatives is not None:
-        if not isinstance(alternatives, list) or not alternatives:
-            raise ContractError("diagnostics oneOf must be a non-empty schema list")
-        for alternative in alternatives:
-            if not isinstance(alternative, dict):
-                raise ContractError(
-                    "boolean or non-object JSON schemas are unsupported"
-                )
-            if _contains_ref(alternative):
-                # The oneOf list is recorded verbatim, so a reference would
-                # pin the pointer text and miss every change to its target.
-                raise ContractError(
-                    "diagnostics oneOf alternatives must inline their schema "
-                    "instead of using $ref"
-                )
-            _schema_constraints(alternative)
+    if schema.get("oneOf") is not None:
+        _validate_one_of(schema["oneOf"])
     return {
         key: schema[key]
         for key in _SCHEMA_CONSTRAINT_KEYS
