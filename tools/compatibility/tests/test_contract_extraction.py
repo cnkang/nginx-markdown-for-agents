@@ -698,6 +698,27 @@ def test_diagnostics_root_type_change_is_breaking():
     }["diagnostics:root-type-changed"] == BREAKING
 
 
+def test_diagnostics_root_enum_fails_closed():
+    """A root-level enum has no projection, so extraction rejects it."""
+    from tools.compatibility import extract as extract_module
+
+    class SchemaReader(SourceReader):
+        def __init__(self):
+            super().__init__(str(REPO), resolve_worktree(str(REPO)))
+
+        def read_text(self, path):
+            return json.dumps(
+                {
+                    "type": "object",
+                    "enum": ["only"],
+                    "properties": {"value": {"type": "string"}},
+                }
+            )
+
+    with pytest.raises(ContractError, match="root-level enum"):
+        extract_module.extract_diagnostics(SchemaReader())
+
+
 def test_boolean_diagnostics_schema_fails_closed():
     """A boolean subschema cannot disappear as an empty object contract."""
     with pytest.raises(ContractError, match="boolean"):
@@ -737,6 +758,24 @@ def test_schema_extractor_preserves_one_of_alternatives():
         {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         {"const": "development"},
     ]
+
+
+def test_metrics_label_parser_keeps_quoted_commas_and_rejects_fragments():
+    """A quoted comma is content, and an incomplete pair fails the parse."""
+    family = "nginx_markdown_build_info"
+    emitted = family + r'{features=\"accept,streaming\",version=\"1.0\"} 1' + "\n"
+    series, labels = _collect_series(emitted, {family: "gauge"})
+
+    assert series[family] == {
+        (None, ("features=accept,streaming", "version=1.0")),
+    }
+    assert labels[family] == [["features", "version"]]
+
+    with pytest.raises(ContractError, match="label fragment"):
+        _collect_series(
+            family + r'{features=\"accept,version=\"1.0\"} 1',
+            {family: "gauge"},
+        )
 
 
 def test_metrics_histogram_samples_and_label_order_are_preserved():
@@ -1407,6 +1446,32 @@ def test_http_addition_fingerprint_includes_the_executor():
     }
     assert first.fingerprint == unchanged.fingerprint
     assert first.fingerprint != moved.fingerprint
+
+
+def test_nfpm_deb_constraints_record_literal_bounds_and_fail_closed():
+    """A literal nginx bound is contract, and an unreadable one fails closed."""
+    contract = _nfpm_contract(
+        """
+name: sample
+depends:
+  - "nginx (= 1.30.7)"
+  - "libc6 (>= 2.34)"
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+"""
+    )
+    assert contract["deb_nginx_constraints"] == [["=", "1.30.7"]]
+
+    with pytest.raises(ContractError, match="unrecognized NGINX dependency"):
+        _nfpm_contract(
+            """
+name: sample
+depends:
+  - "nginx (>= 1.24) | nginx-extras"
+contents:
+  - dst: /usr/lib/nginx/modules/module.so
+"""
+        )
 
 
 def test_nfpm_dependencies_follow_the_effective_override():
