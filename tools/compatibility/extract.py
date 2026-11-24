@@ -951,8 +951,15 @@ def _support_contract(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-# nFPM content types whose destination is a directory, not an installed file.
-_NFPM_DIRECTORY_TYPES = ("dir", "tree")
+# nFPM content types.  A file type installs the entry's own bytes at dst.
+# dir creates a directory, symlink installs a link, and ghost names a path
+# that RPM owns without shipping it and other packagers ignore.  A tree type
+# installs files the contents list does not name, so the projection rejects
+# it, as it rejects any type it does not know.
+_NFPM_FILE_TYPES = frozenset(
+    {"", "file", "config", "config|noreplace", "config|missingok", "license", "licence"}
+)
+_NFPM_NON_FILE_TYPES = frozenset({"dir", "symlink", "ghost"})
 
 
 def _nfpm_contents(contents: Any, scope: str) -> List[Dict[str, str]]:
@@ -976,8 +983,11 @@ def _nfpm_contents(contents: Any, scope: str) -> List[Dict[str, str]]:
             "nFPM contents entry has an unsupported packager",
         )
         require(
-            isinstance(content_type, str),
-            "nFPM contents entry has a non-string type",
+            isinstance(content_type, str)
+            and content_type in _NFPM_FILE_TYPES | _NFPM_NON_FILE_TYPES,
+            "nFPM contents entry for {} has an unsupported type: {!r}".format(
+                destination, content_type
+            ),
         )
         entries.append(
             {"dst": destination, "packager": packager, "type": content_type}
@@ -988,20 +998,27 @@ def _nfpm_contents(contents: Any, scope: str) -> List[Dict[str, str]]:
 def _layout_entries(
     entries: List[Dict[str, str]], packager: str
 ) -> List[Dict[str, str]]:
-    """Return the effective contents entries for one package family."""
+    """Return the effective contents entries for one package family.
+
+    Only RPM records ghost entries; every other packager drops them.
+    """
     return sorted(
-        (entry for entry in entries if entry["packager"] in ("", packager)),
+        (
+            entry
+            for entry in entries
+            if entry["packager"] in ("", packager)
+            and (packager == "rpm" or entry["type"] != "ghost")
+        ),
         key=lambda entry: entry["dst"],
     )
 
 
-def _module_paths(entries: List[Dict[str, str]]) -> List[str]:
-    """Return installed module files, excluding directory entries."""
+def _shipped_files(entries: List[Dict[str, str]], suffix: str) -> List[str]:
+    """Return shipped regular files whose destination ends with ``suffix``."""
     return [
         entry["dst"]
         for entry in entries
-        if entry["dst"].endswith(".so")
-        and entry["type"] not in _NFPM_DIRECTORY_TYPES
+        if entry["dst"].endswith(suffix) and entry["type"] in _NFPM_FILE_TYPES
     ]
 
 
@@ -1121,11 +1138,10 @@ def _nfpm_contract(text: str) -> Dict[str, Any]:
         "package_name": package_name,
         "deb_install_paths": deb_paths,
         "rpm_install_paths": rpm_paths,
-        "deb_module_path": _module_paths(deb_entries),
-        "rpm_module_path": _module_paths(rpm_entries),
-        "load_snippet_paths": sorted(
-            path for path in set(deb_paths) | set(rpm_paths) if path.endswith(".conf")
-        ),
+        "deb_module_path": _shipped_files(deb_entries, ".so"),
+        "rpm_module_path": _shipped_files(rpm_entries, ".so"),
+        "deb_load_snippet_paths": _shipped_files(deb_entries, ".conf"),
+        "rpm_load_snippet_paths": _shipped_files(rpm_entries, ".conf"),
         "deb_nginx_constraints": _nfpm_deb_constraints(deb_dependencies),
         "rpm_nginx_constraints": _nfpm_rpm_constraints(rpm_dependencies),
     }

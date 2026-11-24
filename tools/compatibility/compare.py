@@ -1410,7 +1410,12 @@ def compare_packaging(
                 baseline[key],
                 candidate[key],
             )
-    for key in ("load_snippet_paths", "deb_nginx_constraints", "rpm_nginx_constraints"):
+    for key in (
+        "deb_load_snippet_paths",
+        "rpm_load_snippet_paths",
+        "deb_nginx_constraints",
+        "rpm_nginx_constraints",
+    ):
         if baseline[key] != candidate[key]:
             result.add(
                 "packaging",
