@@ -6,12 +6,12 @@ Accepted (implemented in 0.8.0)
 
 ## Context
 
-The project's support information (supported platforms, NGINX versions, Rust
-toolchain versions, package formats, and deployment tiers) is currently
-scattered across multiple documentation files, CI workflow matrices, packaging
-metadata, and release notes. This dispersion creates drift risk: a version
-bump in one surface may not propagate to others, leading to inconsistent
-operator guidance and CI behavior.
+The project's support information covers supported platforms, NGINX versions,
+Rust toolchain versions, package formats, and deployment tiers. It currently
+spans multiple documentation files, CI workflow matrices, packaging metadata,
+and release notes. This dispersion creates drift risk: a version bump in one
+surface may not propagate to others, leading to inconsistent operator guidance
+and CI behavior.
 
 RFC 0008 section 4 proposes a single machine-readable release matrix as the
 canonical source of truth for all support declarations.
@@ -22,10 +22,11 @@ Establish a single machine-readable release matrix per RFC 0008 section 4:
 
 1. The canonical policy matrix is a JSON file at
    `tools/release-matrix.json`. If a `packaging/matrix.yaml` exists for
-   packaging tooling, it is a packaging input only, never an authority:
-   every NGINX version it lists MUST be a subset of the canonical JSON
-   (validated by `python3 tools/docs/validate_packaging_matrix.py`), and
-   the YAML MUST NOT add support declarations absent from the JSON.
+   packaging tooling, that file is a packaging input only, never an authority.
+   Every NGINX version it lists MUST appear in the canonical JSON.
+   The command `python3 tools/docs/validate_packaging_matrix.py` validates
+   this constraint. The YAML MUST NOT add support declarations absent from
+   the JSON.
 2. CI workflows, documentation generators, packaging scripts, and policy
    validators MUST consume `tools/release-matrix.json` as the authoritative
    source for support, platform, artifact, and version declarations.

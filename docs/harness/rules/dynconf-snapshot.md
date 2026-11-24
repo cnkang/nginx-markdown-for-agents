@@ -37,13 +37,14 @@ paths:
 
 Historical record (pre-0.9.2, the module no longer enforces this):
 - Request-path code once read runtime-mutable fields through a per-request
-  snapshot that a reload timer could swap. The main historical hazards were a
-  request-level consistency gap (the code bound a snapshot but never consumed
-  it) and a race where the header filter read the global active snapshot twice.
+  snapshot that a reload timer could swap. One main historical hazard was a
+  request-level consistency gap: the code bound a snapshot but never consumed
+  it. The other main hazard was a race: the header filter read the global
+  active snapshot twice.
 - The historical mitigation captured the global snapshot exactly once at
-  header-filter entry into a function-lifetime variable, derived the effective
-  view from that single capture, and bound both into the request context
-  without a second read of the global snapshot.
+  header-filter entry into a function-lifetime variable. It derived the
+  effective view from that single capture. It bound both into the request
+  context without a second read of the global snapshot.
 - Adding a runtime-mutable field once meant updating the snapshot struct, the
   apply helper, the build-effective-view helper, an accessor, every
   request-path read, and a snapshot-consistency test.
@@ -91,11 +92,11 @@ Required:
   NULL view can appear on early header-filter paths before the module binds the
   view, or after an allocation failure. A NULL `effective_conf` must fall back
   to `conf->` with an explicit comment that states why the view is missing.
-- When a configuration field spans multiple translation units (for example a
-  buffer-limit field that both `filter_module.c` and the streaming impl use),
-  the field declaration and accessor must live in a shared header
-  (`filter_module.h`) rather than a source file. A field with `static` linkage
-  in one `.c` file stays invisible to other translation units. That invisible
+- A configuration field can span multiple translation units. One example is
+  a buffer-limit field that both `filter_module.c` and the streaming impl use.
+  For such fields, the declaration and accessor must live in a shared header
+  (`filter_module.h`), not a source file. A field with `static` linkage in one
+  `.c` file stays invisible to other translation units. That invisible
   field causes either a link error or the silent use of a stale or zero
   default.
 - When a helper uses `NGX_CONF_UNSET_SIZE` as the "use default" sentinel, the

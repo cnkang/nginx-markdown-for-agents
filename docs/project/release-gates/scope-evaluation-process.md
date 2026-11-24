@@ -12,9 +12,9 @@ This document defines the process for evaluating new proposals that arise during
 
 1. **New proposal received.** Someone submits a proposed addition or change for consideration.
 
-2. **Check against the non-goals list first.** If the proposal matches an
-   item on the non-goals list (see below), reject it immediately and record
-   it as a 0.5.x candidate. Do this before checking sub-spec coverage. A
+2. **Check against the non-goals list first.** Reject the proposal immediately
+   if it matches an item on the non-goals list (see below). Record that proposal
+   as a 0.5.x candidate. Do this before checking sub-spec coverage. A
    matching non-goal proposal must never be short-circuited into an existing
    sub-spec.
 

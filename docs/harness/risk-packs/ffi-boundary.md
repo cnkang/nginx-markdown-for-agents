@@ -26,9 +26,9 @@ plumbing, or error-code classification change.
   use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices.
   Vec transfers must pass pointer, length, and original capacity back together
   and reconstruct with `Vec::from_raw_parts`. Do NOT `shrink_to_fit` before
-  transfer. The documented streaming output ABI is the deliberate exception:
-  it transfers a `Box<[u8]>`, whose allocation has the exact invariant
-  `len == capacity`, so `(data, len)` is sufficient for
+  transfer. The documented streaming output ABI is the deliberate exception.
+  It transfers a `Box<[u8]>` with the exact allocation invariant
+  `len == capacity`. Thus `(data, len)` is sufficient for
   `markdown_streaming_output_free`. Do not apply the Vec rule to that exact
   capacity path without bumping the ABI and all consumers.
 - Empty results return NULL instead of zero-length allocations (Rule 53).

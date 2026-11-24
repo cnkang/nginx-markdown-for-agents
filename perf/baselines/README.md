@@ -78,11 +78,11 @@ output path. For the canonical raw report this is
 `tools/perf/validate_module_probe_artifacts.py` verifies that complete
 triplet, its response verdict and digest, and the finalized baseline's
 complete `response_correctness` object before the system uploads the
-canonical artifact. The validator parses the final HTTP response block in each `.headers`
-file and binds its status, normalized headers, Markdown content type, and empty
-content encoding to the probe JSON. The system retains the canonical artifact
-for 30 days. Failure-only debug artifacts remain on the shorter diagnostic
-retention period.
+canonical artifact. The validator parses the final HTTP response block in each
+`.headers` file. It binds the parsed status, normalized headers, Markdown
+content type, and empty content encoding to the probe JSON. The system retains
+the canonical artifact for 30 days. Failure-only debug artifacts remain on the
+shorter diagnostic retention period.
 
 ## Raw Artifact Binding and Digest Verification
 

@@ -30,10 +30,10 @@ relative to a baseline:
   `markdown_streaming auto|force` and passed the pre-attempt hard gates). The
   counter increments when the streaming engine initializes, before any
   initialization step can fail. It records attempts rather than successes.
-  Capability fallbacks (`ERROR_STREAMING_FALLBACK` returning the response to the
-  full-buffer engine) stay out of the numerator: they increment `fallback_total`
-  and `streaming_fallback_precommit_pass` instead, and the gate measures the
-  fail-open share only.
+  Capability fallbacks (`ERROR_STREAMING_FALLBACK` returning the response to
+  the full-buffer engine) stay out of the numerator. They increment
+  `fallback_total` and `streaming_fallback_precommit_pass` instead. The gate
+  measures the fail-open share only.
 
 Excluded from the denominator: responses that never attempted streaming. Routed
   directly to full-buffer by `markdown_streaming off`, profile, decision-chain
@@ -48,8 +48,8 @@ Excluded from the denominator: responses that never attempted streaming. Routed
 - **Benchmark Harness**: `tools/perf/run_module_benchmark.sh` exercises the full NGINX request lifecycle across 8 representative scenarios.
 - **Streaming-path evidence**: The `streaming-first` scenario uses the tracked
   large streaming-safe fixture whose metadata declares no expected fallback.
-  The mock upstream emits bounded 16 KiB HTTP chunks, and the scenario disables
-  proxy buffering over HTTP/1.1 so path hits, TTFB, and zero-copy counters
+  The mock upstream emits bounded 16 KiB HTTP chunks. The scenario disables
+  proxy buffering over HTTP/1.1. Thus path hits, TTFB, and zero-copy counters
   represent incremental processing rather than a single buffered body.
 - **Compressed streaming decompression evidence**: Every artifact must
   include the `gzip-streaming-first` and
@@ -76,10 +76,11 @@ Excluded from the denominator: responses that never attempted streaming. Routed
 - Increases the time required for the final release check.
 
 ### Toolchain Security
-- All external helpers executed by the benchmark harness and the evidence gate
-  (`bash`, `git`, `curl`, `python3`, `ps`, `awk`, `cat`, `cp`, `cut`, `head`, `mkdir`,
-  `mktemp`, `rm`, `sleep`, `tr`, `uname`, `wc`, `date`, and the load generator)
-  pass through a trusted-root resolver that returns approved absolute paths.
+- The benchmark harness and evidence gate resolve all external helpers they
+  run through a trusted-root resolver that returns approved absolute paths.
+  These helpers are `bash`, `git`, `curl`, `python3`, `ps`, `awk`, `cat`, `cp`, `cut`,
+  `head`, `mkdir`, `mktemp`, `rm`, `sleep`, `tr`, `uname`, `wc`, `date`, and the
+  load generator.
   The harness and gate never invoke a bare PATH-shadowable executable, so
   evidence cannot come from a hijacked binary.  The toolchain paths appear in
   the report and evidence pack.

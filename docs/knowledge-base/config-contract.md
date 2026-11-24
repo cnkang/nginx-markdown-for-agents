@@ -114,8 +114,8 @@ CONFIGURATION_STRUCTURE.md documents the effective module defaults.
 ## Removed Surface
 
 Removed directives are invalid in 0.9.2 and must not appear in configuration
-examples. The five names removed by the pre-LTS convergence are no longer
-registered, so `nginx -t` reports NGINX's standard `unknown directive` error and
+examples. The pre-LTS convergence removed the registration for five names.
+As a result, `nginx -t` reports NGINX's standard `unknown directive` error.
 `docs/guides/MIGRATION-0.9.2.md` names the replacement for each. They do not
 contribute to the 20 active directives above. See
 `docs/guides/0.9.2-breaking-changes.md` for the authoritative names and

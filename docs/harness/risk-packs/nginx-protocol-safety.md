@@ -34,10 +34,10 @@ cache-control, conditional request, status, or header semantics change.
 - conditional request modes preserve the intended full-buffer vs streaming path
 - status-specific eligibility, especially `206` and `304`, maps to the intended
   reason code under normal and malformed upstream responses
-- Protocol checks cover HEAD headers with `curl --head` (or an equivalent
-  protocol-correct check), validate GET/body-size behavior with a normal GET,
-  and send a conditional GET with `If-None-Match` or `If-Modified-Since` to
-  assert a `304` response with an empty body
+- Check HEAD headers with `curl --head` (or an equivalent protocol-correct
+  check). Validate GET/body-size behavior with a normal GET. Send a conditional
+  GET with `If-None-Match` or `If-Modified-Since` to assert a `304` response
+  with an empty body.
 - protocol docs use exact config names, reason codes, and retrievable metrics
 - `ngx_str_t` values are NUL-terminated before passing to C APIs that require
   it. Prefer length-bounded NGINX APIs where possible (Rule 30)

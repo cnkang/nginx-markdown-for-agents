@@ -14,18 +14,19 @@ content-type/method/status eligibility, base-URL / forwarded-header decision,
 conditional-request decision, streaming eligibility, reason selection, and error
 classification.
 
-The risk is over-correction: a single giant
+The risk is over-correction. A single giant
 `markdown_decide_request(ngx_http_request_t *)` FFI that swallows all request
-state would couple Rust to NGINX internals, defeat unit testing, and create an
-unstable ABI. 0.9.0 therefore freezes a **small-API** decision boundary.
+state would couple Rust to NGINX internals. It would also defeat unit testing
+and create an unstable ABI. 0.9.0 therefore freezes a **small-API** decision
+boundary.
 
 ## Decision
 
 ### Small decision APIs (no giant aggregate FFI)
 
-The module exposes the decision core as small, independently testable Rust functions
-operating on normalized inputs (byte slices, primitive fields, normalized config
-snapshots), never on `ngx_http_request_t`:
+The module exposes the decision core as small, independently testable Rust
+functions. These functions operate on normalized inputs (byte slices,
+primitive fields, normalized config snapshots), never on `ngx_http_request_t`:
 
 | Decision API | Maps to | 0.9.0 status |
 |--------------|---------|--------------|
@@ -55,28 +56,29 @@ ADR-justified exception.
 ### Trusted proxies — http-only CIDR trust
 
 Source IP for the trusted-proxy CIDR evaluation comes from the original
-transport peer: the NGINX `realip_remote_addr` variable, read through the NGINX
-variable API, when the NGINX `realip` module has preserved it. Otherwise the
-module uses `r->connection->addr_text`. `realip` is not a generic field of
-`ngx_connection_t`. The module must not dereference a private or non-existent
-`r->connection->realip` member. When the operator enables the NGINX `realip`
-module (or PROXY protocol), NGINX rewrites `r->connection->addr_text` to the
-resolved client address (X-Forwarded-For-derived or PROXY header address) before
-the request reaches the content phase, while the original connecting peer
-remains available through the `realip_remote_addr` variable. Matching the
-trusted CIDR against the rewritten `addr_text` would classify the request by the
-spoofable client address instead of the actual proxy.
+transport peer. The module reads the `realip_remote_addr` variable through the
+NGINX variable API when the NGINX `realip` module has preserved the peer.
+Otherwise the module uses `r->connection->addr_text`. `realip` is not a generic
+field of `ngx_connection_t`. The module must not dereference a private or
+non-existent `r->connection->realip` member. When the operator enables the
+NGINX `realip` module (or PROXY protocol), NGINX rewrites
+`r->connection->addr_text` to the resolved client address. It does this before
+the request reaches the content phase. The resolved client address comes from
+X-Forwarded-For or the PROXY header. The original connecting peer remains
+available through the `realip_remote_addr` variable. Matching the trusted CIDR
+against the rewritten `addr_text` would classify the request by the spoofable
+client address instead of the actual proxy.
 
 The module uses the **original transport peer** (the value read from
 `realip_remote_addr`, falling back to `addr_text` when realip did not run).
 `realip_remote_addr` names the public NGINX realip contract. The C field is the
 transport-peer value passed across the FFI boundary. `markdown_trusted_proxies`
-is **http context only**, CIDR-based (IPv4 + IPv6, parsed at config time). An
-immediate peer that is **outside** `markdown_trusted_proxies` is the client: the
-module ignores any `Forwarded` or `X-Forwarded-*` headers it carries and uses
-the peer address directly, before any right-to-left traversal. Otherwise the
-module begins with the connection peer, walks aligned `Forwarded` or
-`X-Forwarded-*` hops from right to left, strips trusted hops, and selects the
+is **http context only**, CIDR-based (IPv4 + IPv6, parsed at config time).
+An immediate peer that is **outside** `markdown_trusted_proxies` is the client.
+The module ignores any `Forwarded` or `X-Forwarded-*` headers it carries and
+uses the peer address directly, before any right-to-left traversal. Otherwise
+the module begins with the connection peer and walks aligned `Forwarded` or
+`X-Forwarded-*` hops from right to left. It strips trusted hops and selects the
 first untrusted hop as the client-facing value.
 
 `Forwarded` takes precedence over `X-Forwarded-*`. `proto` accepts only `http`
@@ -86,10 +88,11 @@ reason code and never leak raw header values into logs or metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 
-Each migration must produce a before/after C function inventory, P0 migration
-status (migrated / thin-wrapper / documented exception), Rust unit coverage,
-and a C integration **parity test** (Rust decision == legacy C decision for
-identical input) retained until the C logic disappears.
+Each migration must produce a before/after C function inventory and P0
+migration status (migrated / thin-wrapper / documented exception). It must
+also produce Rust unit coverage and a C integration **parity test**. The test
+verifies that the Rust decision equals the legacy C decision for identical
+input. Keep the test until the C logic disappears.
 `tools/harness/detect_c_pure_logic.sh` must pass. The migration must keep no
 duplicate C/Rust business logic and no direct `headers_out` mutation outside
 HeaderPlan exceptions (ADR-0017).

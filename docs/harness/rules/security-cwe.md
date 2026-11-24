@@ -61,12 +61,14 @@ Required:
   parse→validate→safe-cast helper). Direct calls to `ngx_parse_size()` with
   immediate `(size_t)` cast are forbidden in new code.
 -  In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
-  explicit non-negative check first (for example `if value < 0 { return Err(...)
-  }` or `value.try_into()`), followed by the appropriate upper-bound check or
-  clamp against the destination type's maximum. `#[cfg(target_pointer_width =
-  "64")]` architecture guards alone do NOT satisfy signed-input validation: a
-  guard only narrows the target range for `usize` width, it cannot reject a
-  negative `i64`/`isize` value. Keep the existing 32-bit target handling for
+  explicit non-negative check first (for example
+  `if value < 0 { return Err(...)
+  }` or `value.try_into()`). Before converting, follow that check with the
+  appropriate upper-bound check or clamp against the destination type's
+  maximum. Architecture guards such as `#[cfg(target_pointer_width =
+  "64")]` alone do NOT satisfy signed-input validation. A guard only narrows
+  the target range for `usize` width. It cannot reject a negative `i64`/`isize`
+  value. Keep the existing 32-bit target handling for
   `usize` (runtime bounds check or explicit 64-bit-only guard) also to the
   non-negative check.
 - Addition of two `size_t` values that will feed memory allocation or
@@ -127,8 +129,8 @@ Required:
   path to proceed to `open()`. The permitted fallback tuple is
   `(FileNotFoundError,)`. This covers only the "directory does not exist" case.
   `ImportError` for a missing `path_validation` module must **not** be in the
-  tuple: a missing validation module is a broken installation, not a fallback
-  condition, so a missing module must fail closed instead of degrading to
+  tuple. A missing validation module is a broken installation, not a fallback
+  condition. If the module is missing, fail closed instead of degrading to
   unvalidated paths.
 
 When refactoring a `try/except` around `validate_read_path`, audit the caught

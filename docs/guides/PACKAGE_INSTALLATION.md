@@ -48,11 +48,11 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 
 The release pipeline builds DEB and RPM packages on glibc-based build images.
 Those packages target glibc-based distributions only. For musl-based
-environments (Alpine Linux, and so on), use the pre-built dynamic-module tarball
-from the musl-build job of the release-packages workflow (it is a loadable
-module artifact, not a static server binary. Pair it with an ABI-compatible
-NGINX executable, see the compatibility matrix in PACKAGE_COMPATIBILITY.md) or
-build from source.
+environments (Alpine Linux, and so on), use the pre-built dynamic-module
+tarball or build from source. The tarball comes from the musl-build job of the
+release-packages workflow. It is a loadable module artifact, not a static
+server binary. Pair it with an ABI-compatible NGINX executable. See the
+compatibility matrix in PACKAGE_COMPATIBILITY.md.
 
 DEB format for nginx.org builds:
 
@@ -186,7 +186,7 @@ The module filename remains `ngx_http_markdown_filter_module.so`.
 `http`, `server`, or `location`, and `conf.d/` is the wrong place for it.
 
 A relative module path in `load_module` resolves against the NGINX **prefix**
-(not against `--modules-path`), so whether the relative form works depends on
+(not against `--modules-path`). Whether the relative form works depends on
 which nginx package you installed. Inspect both values on your host:
 
 ```bash
@@ -206,12 +206,13 @@ directive form below is the one that resolves there:
 | Arch/Omarchy — distribution package | `/usr/lib/nginx/modules` | `/etc/nginx/modules.d/*.conf` | `nginx.conf` includes that directory at the top level. Drop the directive in as a file |
 | Source build / custom prefix | `<prefix>/modules` (or the configured `--modules-path`) | — | Add the directive to the top level of your `nginx.conf` |
 
-Because the project's packages install the module only in the compiled modules
-directory, the shipped snippets use the form that resolves on their family: an
-absolute path for DEB (`/usr/lib/nginx/modules/...`, because distribution
-module packages also copy the `.so` into the prefix directory, which is why
-their own snippets can use the relative form) and the relative form for RPM (nginx.org
-ships `/etc/nginx/modules` as a symlink to `/usr/lib64/nginx/modules`).
+The project's packages install the module only in the compiled modules
+directory. The shipped snippets therefore use a path that resolves on their
+package family. The DEB snippet uses the absolute path
+`/usr/lib/nginx/modules/...`. Distribution module packages also copy the `.so`
+into the prefix directory, so their own snippets can use a relative path. The
+RPM snippet uses a relative path. The nginx.org package ships
+`/etc/nginx/modules` as a symlink to `/usr/lib64/nginx/modules`.
 
 Enable it for the package you installed:
 
@@ -230,17 +231,19 @@ sudo sed -i 's|^#load_module |load_module |' \
 #   and add to the top level of nginx.conf:  include /usr/share/nginx/modules/*.conf;
 ```
 
-This project verified the directory layout and include behavior above against
-real packages instead of assuming them: Debian 12 (nginx 1.22.1 — `include
-/etc/nginx/modules-enabled/*.conf;` at line 5, and `libnginx-mod-http-geoip2`
-installs the `.so` into both `/usr/lib/nginx/modules` and
-`/usr/share/nginx/modules`), Ubuntu 24.04 with the nginx.org repository (nginx
-1.30.4 — no `modules-enabled`, no module include, `/etc/nginx/modules` is a
-symlink to `/usr/lib/nginx/modules`), Rocky Linux 9 with the nginx.org
-repository (nginx 1.30.4 — no module include, and `/etc/nginx/modules` symlinks
-to `/usr/lib64/nginx/modules`), Alpine 3.21 (nginx 1.26.3 — `include
-/etc/nginx/modules/*.conf;` at line 15), the nginx.org Alpine image (nginx
-1.30.4 — no module include), and Arch (`include modules.d/*.conf;` at line 13).
+This project checked real packages instead of assuming the directory layout
+and include behavior above. Debian 12 (nginx 1.22.1) has `include
+/etc/nginx/modules-enabled/*.conf;` at line 5. Its `libnginx-mod-http-geoip2`
+package installs the `.so` into both `/usr/lib/nginx/modules` and
+`/usr/share/nginx/modules`. Ubuntu 24.04 with the nginx.org repository (nginx
+1.30.4) has no `modules-enabled` and no module include. Its
+`/etc/nginx/modules` is a symlink to `/usr/lib/nginx/modules`. Rocky Linux 9
+with the nginx.org repository (nginx 1.30.4) has no module include. Its
+`/etc/nginx/modules` symlinks to `/usr/lib64/nginx/modules`. Alpine 3.21
+(nginx 1.26.3) has `include
+/etc/nginx/modules/*.conf;` at line 15. The nginx.org Alpine image (nginx
+1.30.4) has no module include. Arch has `include modules.d/*.conf;` at line
+13.
 Re-check your own host with the command above: distributions change this between
 releases.
 
@@ -274,15 +277,15 @@ opt-in per location through `markdown_filter on;`.
 Download the new artifact and matching `SHA256SUMS` file from the target
 release. Before installing, repeat the detached-signature verification in the
 DEB or RPM section above with an independently authenticated
-`TRUSTED_FINGERPRINT`, then verify the selected package against that release's
+`TRUSTED_FINGERPRINT`. Then verify the selected package against that release's
 `SHA256SUMS`. Reinstall the package only after both checks pass.
 
 ## Rollback
 
 Download the previous release artifact that matches the installed NGINX
 version and architecture. Repeat the detached-signature verification in the
-DEB or RPM section above with the independently authenticated fingerprint,
-then verify the artifact against that release's `SHA256SUMS` before installing
+DEB or RPM section above with the independently authenticated fingerprint.
+Then verify the artifact against that release's `SHA256SUMS` before installing
 it locally.
 
 ## Troubleshooting

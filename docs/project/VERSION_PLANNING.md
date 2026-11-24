@@ -28,17 +28,18 @@ compatibility or release scope.
   codes, and FFI ABI version 3 stay unchanged.
 
 At the time v0.9.0 shipped, the plan intended it to be the last breaking release
-before v1.0. The project deliberately extended that freeze through v0.9.1 because v1.0
-had not shipped, adoption remained limited, and the final toolchain,
-dependency, configuration, and ABI audit found cleanup worth completing before
-the long-lived compatibility contract begins.
+before v1.0. The project deliberately extended that freeze through v0.9.1
+because v1.0 had not shipped and adoption remained limited. The final toolchain,
+dependency, configuration, and ABI audit gave another reason for the extension.
+It found cleanup worth completing before the long-lived compatibility contract
+begins.
 
 ## v0.9.2 Release Objective
 
 The release delivers harness consolidation, documentation corrections, and
 release-gate hardening on top of the v0.9.1 baseline. It also completes the
-final pre-v1 public-surface reset: the release removes retired directives and
-unused profile/conflict FFI snapshots, and advances the bundled internal ABI to
+final pre-v1 public-surface reset. The release removes retired directives and
+unused profile/conflict FFI snapshots. It advances the bundled internal ABI to
 version 3. These are intentional pre-v1 compatibility changes, not a claim of
 ABI or configuration stability across 0.9.1 and 0.9.2.
 
@@ -109,10 +110,10 @@ as part of the frozen stable contract.
 ### Required v1.0 Work: Cross-Release Compatibility Gate
 
 The current public-surface detector proves that the implementation and its
-inventory agree with each other.  It cannot prove that the contract a previous
-stable release published is still satisfied, because one change can edit both
-the source and its inventory and leave them looking consistent while a contract
-breaks.
+inventory agree with each other. It cannot prove that the project still
+satisfies the contract a previous stable release published. One change can edit
+both the source and its inventory. They can still look consistent while a
+contract breaks.
 
 Before the v1.0 line is frozen, a machine-readable baseline comparison must
 exist that covers at least:
@@ -129,9 +130,9 @@ extension from a break.  Negative fixtures must show that editing source and the
 new inventory together cannot hide a breaking change.  The gate belongs behind a
 generic target, not one whose name cites a specification number.
 
-This is deliberately not part of v0.9.2: the release keeps the detector and its
-current-release shape constants as they are, and a compatibility gate is a v1.0
-deliverable rather than a late pre-release design change.
+The compatibility gate is deliberately not part of v0.9.2. The release keeps
+the detector and its current-release shape constants as they are. The
+compatibility gate is a v1.0 deliverable, not a late pre-release design change.
 
 ## Post-v1.0 Compatibility Policy
 

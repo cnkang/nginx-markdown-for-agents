@@ -49,9 +49,9 @@ Required:
   tracked-file materialization must omit tracked paths that the worktree no
   longer contains and preserve unusual filenames with NUL-safe traversal.
 - Semgrep CE rules must stay high-confidence and repo-specific. Focus them on
-  repository workflow, shell, Python tooling, and C module patterns. This
-  includes direct CLI-derived path I/O before harness validation helpers,
-  obvious subprocess misuse, unsafe libc APIs in the NGINX C module, and
+  repository workflow, shell, Python tooling, and C module patterns. Cover
+  direct CLI-derived path I/O before harness validation helpers and obvious
+  subprocess misuse. Also cover unsafe libc APIs in the NGINX C module and
   exported Rust FFI functions that still contain panic/unwrap/expect paths.
   Dockerfile rustup bootstrap paths that download and execute unverified
   installers should also get covered.
@@ -72,14 +72,13 @@ Required:
   images must pair that user with an unprivileged listener and writable PID and
   temporary paths. ClusterFuzzLite images must keep the toolchain readable and
   the source/build/output directories writable under the actual fuzz action
-  mount contract, including ownership of the `/rustc` source-staging directory
-  and the fixed
-  `/usr/lib/libFuzzingEngine.a` archive installed by the compile wrapper. Grant
-  access to that file only, not the full system library directory. Do not
-  suppress Trivy's missing-user finding when those runtime changes are
-  feasible. ClusterFuzzLite workflows must pre-create the bind-mounted
-  `build-out` directory as the runner user before the root container action
-  initializes its workspace.
+  mount contract. That contract includes ownership of the `/rustc`
+  source-staging directory and the fixed `/usr/lib/libFuzzingEngine.a` archive
+  installed by the compile wrapper. Grant access to that file only, not the
+  full system library directory. Do not suppress Trivy's missing-user finding
+  when those runtime changes are feasible. ClusterFuzzLite workflows must
+  pre-create the bind-mounted `build-out` directory as the runner user before
+  the root container action initializes its workspace.
 - Production examples that enable Basic Auth must serve it on an SSL listener
   or bind the cleartext backend to loopback behind a documented mandatory
   co-located TLS terminator. Authenticated client commands must use HTTPS.

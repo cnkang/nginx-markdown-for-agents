@@ -19,11 +19,12 @@ streaming candidate, regardless of its size.
 
 ## Context
 
-The streaming engine can operate in several modes: always-off (full-buffer
-only), always-on (streaming for all responses), or auto (select streaming or
-full-buffer based on response characteristics). RFC 0008 section 2.1 defines
-the core engine switch and section 2.2 defined the automatic streaming
-threshold for `auto` mode in the 0.8.0 era. Under that historical rule,
+The streaming engine can operate in always-off, always-on, or auto mode.
+Always-off uses full-buffer only. Always-on streams all responses. Auto
+selects streaming or full-buffer based on response characteristics. RFC 0008
+section 2.1 defines the core engine switch and section 2.2 defined the
+automatic streaming threshold for `auto` mode in the 0.8.0 era. Under that
+historical rule,
 responses exceeding a size threshold or using chunked transfer encoding
 targeted the streaming path. Smaller responses stayed on the full-buffer
 path. The active 0.9.2 contract applies no size threshold (see the
@@ -31,8 +32,8 @@ path. The active 0.9.2 contract applies no size threshold (see the
 
 ADR-0007 established streaming-as-default with auto mode in 0.6.0. This ADR
 extends that decision with the 0.8.0 true streaming contract semantics from
-RFC 0008, ensuring that the auto-mode policy remains aligned with the formal
-streaming definition and updated threshold.
+RFC 0008. This makes sure that the auto-mode policy remains aligned with the
+formal streaming definition and updated threshold.
 
 ## Decision
 
@@ -72,15 +73,15 @@ combined with `markdown_cache_validation full` is a configuration error
 rejected at `nginx -t`. Only `ims_only` and `off` cache-validation modes
 are streaming-compatible.
 
-The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
-reflects the goal of reducing regression risk from the new true streaming code
-path: under the 0.8.0-era threshold rule, only responses large enough to
-materially benefit from bounded-memory conversion became streaming candidates
-for the path targeted by the 0.8.0 release. That threshold rule is historical.
-The active 0.9.2 contract applies no size threshold: `markdown_streaming auto`
-makes every response that clears the remaining eligibility gates a streaming
-candidate, independent of response length (see the 2026-09-17 Amendment
-above).
+The threshold increased from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008). The
+increase aimed to reduce regression risk from the new true streaming code
+path. The 0.8.0-era threshold rule applied to the streaming path targeted by
+0.8.0. Under that rule, only responses large enough to materially benefit from
+bounded-memory conversion became streaming candidates. That rule is historical.
+The active 0.9.2 contract applies no size threshold. With
+`markdown_streaming auto`, every response that clears
+the remaining eligibility gates is a streaming candidate, regardless of
+response length. See the 2026-09-17 Amendment above.
 
 ## Consequences
 

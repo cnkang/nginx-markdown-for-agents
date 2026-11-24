@@ -68,9 +68,9 @@ The following breaking changes require configuration and/or tooling updates:
 ---
 
 The release removes several legacy directives and replaces them with Config V2.
-In 0.9.0 and 0.9.1, removed directives stayed as **reject-only stubs**: the
-parser entry still existed, and the only behavior was to fail `nginx -t` with an
-actionable migration hint. The 0.9.2 release deleted those stubs, so removed
+In 0.9.0 and 0.9.1, removed directives stayed as **reject-only stubs** in the
+parser. Those entries could only fail `nginx -t` with an actionable migration
+hint. The 0.9.2 release deleted those stubs, so removed
 directives now fail `nginx -t` with the standard `unknown directive` error.
 There is **no alias compatibility** and **no legacy fallback behavior**. This
 keeps the breaking-release boundary unambiguous.
@@ -669,6 +669,7 @@ layers for removed directives.** This is a deliberate design choice:
 - The breaking boundary is unambiguous: if `nginx -t` passes, your
   configuration is fully 0.9.0 compliant.
 
-If you need to maintain both 0.8.x and 0.9.0 configurations (for example during a
-staged rollout across a fleet), use separate configuration files and deploy
-the matching module binary with each configuration version.
+If you need to maintain both 0.8.x and 0.9.0 configurations, use separate
+configuration files. In that case, deploy the matching module binary with each
+configuration version. A staged rollout across a fleet is one example of when
+you may need to maintain both configurations.

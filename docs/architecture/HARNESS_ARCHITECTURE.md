@@ -13,9 +13,9 @@ Use it when you need to understand:
 
 ## Problem Statement
 
-The repository already had strong runtime architecture docs and a large body of
-historical fixes captured in `AGENTS.md`, but agent workflow behavior was still
-spread across:
+The repository already had strong runtime architecture docs and a large body
+of historical fixes in `AGENTS.md`. But its agent workflow behavior still
+spanned:
 
 - `AGENTS.md`
 - local adapter files

@@ -22,15 +22,16 @@ Required:
   Test assertions must verify production cleanup before fixture cleanup.
   Failure and interrupted-run tests must prove that host state stays unchanged.
 -  **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the 0.9.2
-  window needed ~10 commits fixing the detectors themselves (`076bfdc1`
+  window needed ~10 commits to fix the detectors themselves (`076bfdc1`
   reusable-workflow boundary state, `658cb4d3` future annotations, `9fd3deba`
-  regex complexity, `eaadc7fb`, `493732fe`), proving detector bugs recur at
-  boundary shapes. A fix to any `tools/harness/detect_*` script must add a test
-  fixture that reproduces the exact defect shape (the fixture fails before the
-  fix and passes after it), plus a clean-fixture case proving the detector does
-  not false-positive on the prescribed idiom. Detector scans over the full
-  repository must stay runtime-bounded. If a detector needs optimization,
-  preserve its detection semantics and note the budget in the rule that owns it.
+  regex complexity, `eaadc7fb`, `493732fe`). These fixes show that detector bugs
+  recur at boundary shapes. A fix to any `tools/harness/detect_*` script must
+  add a test fixture that reproduces the exact defect shape. The fixture must
+  fail before the fix and pass after it. The fix must also add a clean-fixture
+  case proving that the detector does not flag the prescribed idiom. Detector
+  scans over the full repository must stay runtime-bounded. If a detector needs
+  optimization, preserve its detection semantics and note the budget in the
+  rule that owns it.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
@@ -88,11 +89,11 @@ Required:
   to any test that claims to verify a side-effect: the test must go through the
   code path that produces the side-effect.
 - Test assertions must align with the production semantics they claim to
-  verify.  If production code only increments a counter on success, the test
-  for the failure path must assert the counter is zero, not manually
-  increment it and assert one.  A test that encodes the opposite of the
-  production behavior will pass today but block correct future changes and
-  confuse reviewers about the intended contract.
+  verify. If production code increments a counter only on success, the
+  failure-path test must assert that the counter is zero. That test must not
+  manually increment the counter and assert that it is one. A test that encodes
+  the opposite of the production behavior will pass today but block correct
+  future changes and confuse reviewers about the intended contract.
 
 ---
 
@@ -149,18 +150,18 @@ Required:
   exception (see next rule).
 -  Shared test utility modules included through `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
-  level, because each binary only uses a subset of the shared API and the
-  remaining functions produce noisy warnings.
+  level. Each binary uses only a subset of the shared API, and the remaining
+  functions produce noisy warnings.
 - Fuzz/test helper wrappers around streaming conversion must preserve
   `ConversionError` detail and variant identity by returning
-  `Result<..., ConversionError>` (or equivalent) and propagating with `?`,
-  avoid `Option` wrappers and `.ok()?` conversions that erase error semantics
+  `Result<..., ConversionError>` (or equivalent) and propagating with `?`.
+  Avoid `Option` wrappers and `.ok()?` conversions that erase error semantics
   needed for parity/regression assertions.
 - Never remove or modify a `#[cfg(feature = "...")]`-gated import without
   scanning the entire file for `#[cfg(feature = "...")]`-gated usages of that
-  import. Feature-gated items may appear far from their import and are invisible
-  under the default feature set, removing the import silently breaks compilation
-  under that feature flag.
+  import. Feature-gated items can appear far from their import and are
+  invisible under the default feature set. Removing the import silently breaks
+  compilation under that feature flag.
 - Doc comments (`///`) must not contain blank lines between comment lines,
   use `///` on every line (including blank doc-comment lines as `///` with no
   trailing text). Blank lines between `///` lines trigger

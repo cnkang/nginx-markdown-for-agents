@@ -9,10 +9,11 @@
 ## Overview
 
 **0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release intended to be the
-last breaking release before v1.0. The freeze was deliberately extended through
-v0.9.1 because v1.0 had not shipped, adoption remained limited, and the final
-toolchain, dependency, configuration, and ABI audit found cleanup worth
-completing before the long-lived contract begins.
+last breaking release before v1.0. The project deliberately extended the
+freeze through v0.9.1 for several reasons. v1.0 had not shipped, and adoption
+remained limited. The final toolchain, dependency, configuration, and ABI
+audit also found cleanup worth completing before the long-lived contract
+begins.
 
 If you are running 0.9.0 in production, you must follow this guide before
 upgrading. There is **no backward-compatible mode**. 0.9.1 rejects old

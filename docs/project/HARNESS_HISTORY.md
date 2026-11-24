@@ -31,8 +31,8 @@ The harness exists to reduce a specific class of repeated engineering failures.
 ### 1. Hidden or drifting workflow rules
 
 Important task-routing and validation behavior should not live only in private
-steering files or in the memory of whichever agent or reviewer happens to be
-running the task.
+steering files. Nor should it live only in the memory of whichever agent or
+reviewer happens to be running the task.
 
 ### 2. Silent misrouting on spec-driven work
 

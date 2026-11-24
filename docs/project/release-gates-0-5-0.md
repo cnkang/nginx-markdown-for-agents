@@ -76,10 +76,10 @@ verifiable gate items:
 - Manual accuracy and completeness review completed: defaults, behavior,
   failure modes, and migration guidance verified against the implementation
   (not just existence checks). The review record must name the reviewer,
-  the review date, the reviewed scope (directives, defaults, failure modes,
-  migration guidance), and the evidence artifact (for example a signed
-  review note under `release-evidence/`) so the release record can prove
-  the check happened.
+  review date, reviewed scope (directives, defaults, failure modes, migration
+  guidance), and evidence artifact. A signed review note under
+  `release-evidence/` is one example of an evidence artifact. The release
+  record needs this information to prove the check happened.
 
 ### Testing Gates
 

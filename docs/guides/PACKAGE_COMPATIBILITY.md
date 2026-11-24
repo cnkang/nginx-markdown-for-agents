@@ -26,9 +26,9 @@ Key points:
 
 The package manager dependency pins the exact upstream NGINX version. The DEB
 metadata uses the closed interval `nginx (>= ${NGINX_VERSION})` plus `nginx (<<
-next-patch)`, so distro revisions of the pinned version stay installable while a
-plain NGINX patch upgrade no longer satisfies the dependency — the package
-manager keeps the module and NGINX versions in lock step. The RPM metadata
+next-patch)`. Distro revisions of the pinned version stay installable. A plain
+NGINX patch upgrade no longer satisfies the dependency. This keeps the module
+and NGINX versions in lock step. The RPM metadata
 additionally requires the `nginx-rX.Y.Z` capability published by the official
 nginx.org NGINX package, alongside an epoch-flexible floor (`nginx >= X.Y.Z`).
 Omitting the epoch is deliberate: RPM's dependency comparison treats an omitted
@@ -112,24 +112,25 @@ contains the exact package and `SHA256SUMS`. Otherwise build from source.
 
 The NGINX version embedded in the artifact name is the version tested by the
 release pipeline. After upgrading NGINX, install the package built for the new
-NGINX version before reloading the module, then run `nginx -t` to validate that
+NGINX version before reloading the module. Then run `nginx -t` to verify that
 the module still loads with the active NGINX binary.
 
 ### Musl dynamic-module release path
 
 The compatibility matrix in this document lists `release-packages.yml` as the
-owner workflow of the musl dynamic-module rows (`release-binaries.yml` remains
-the manual rebuild tool for existing releases). For the 0.9.2 release cycle the
-`musl-build` job of `release-packages.yml` builds the musl tarballs **before**
-publication (tag + `workflow_dispatch` triggers). `release-binaries.yml` never
+owner workflow of the musl dynamic-module rows. The `release-binaries.yml`
+workflow remains the manual rebuild tool for existing releases. For the 0.9.2
+release cycle the `musl-build` job of `release-packages.yml` builds the musl
+tarballs **before** publication (tag + `workflow_dispatch` triggers).
+`release-binaries.yml` never
 runs on release publication. Both workflows consume the same
 `tools/release-matrix.json` rows. The matrix rows are the single source of truth
 for which musl versions and architectures ship.
 
 ### Checksum signature ownership
 
-`release-packages.yml` is the publishing workflow, and it also owns the detached
-`SHA256SUMS.asc` signature: its `integrity-signature` job runs on a tag push
+`release-packages.yml` is the publishing workflow and owns the detached
+`SHA256SUMS.asc` signature. Its `integrity-signature` job runs on a tag push
 inside the protected `release-signing` environment before publication.
 `release-binaries.yml` builds and verifies archives only. It uploads workflow
 artifacts and never signs or publishes release assets. A `SHA256SUMS.asc` on a
@@ -221,11 +222,10 @@ nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    nginx -V 2>&1 | grep -- '--with-compat'
    ```
 
-   While `--with-compat` is not strictly required for nginx.org official
-   builds (since the package compiles against the exact version), its
-   absence on a non-official build is a warning signal, not proof of
-   incompatibility: a custom build may still match the required source and
-   version.
+   Official nginx.org builds do not strictly require `--with-compat` because
+   the package compiles against the exact version. Its absence on a
+   non-official build is a warning signal, not proof of incompatibility. A
+   custom build may still match the required source and version.
 
 4. **Verify NGINX source**:
 

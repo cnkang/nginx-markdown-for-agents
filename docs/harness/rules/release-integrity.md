@@ -20,9 +20,9 @@ Historical issue chain (performance evidence provenance):
 **Principle**: Every piece of performance evidence accepted by the release
 gate must be *attributable to an exact, auditable source*. Evidence whose
 provenance is ambiguous, mixed-environment, or unbound is not release evidence.
-The gate must reject it (fail closed). This invariant collapsed from a
-seven-commit incremental design sequence and must read as one contract so future
-gate work starts from the complete set of fields.
+The gate must reject it (fail closed). This invariant came from a seven-commit
+incremental design sequence. It must read as one contract so future gate work
+starts from the complete set of fields.
 
 **Required evidence provenance fields.** The `baseline_policy` object in each
 finalized baseline (written by `tools/perf/finalize_module_baseline.py` and
@@ -56,7 +56,8 @@ own objects. Do not copy provenance into every scenario record:
 
 1. **Per-codec path evidence.** Each streaming decompression codec (gzip,
    deflate, Brotli) must record a positive `decompression_streaming_total > 0`
-   counter from a real module-enabled NGINX path, not a mock or fallback.
+   counter. The counter must come from a real module-enabled NGINX path, not a
+   mock or fallback.
 2.  **Fallback-rate consistency.** The stored `fallback_rate` in each scenario
    must equal `precommit_failopen_total / streaming_requests_total` (or 0.0 when
    `streaming_requests_total == 0`). The evidence gate cross-checks this through
@@ -68,8 +69,8 @@ own objects. Do not copy provenance into every scenario record:
    regeneration does not overwrite it. The old pack stays preserved with its own
    digest.
 4.  **Fail closed on missing provenance.** The blocking gate (`make
-   release-gates-check-092`) must reject any baseline policy that is missing any
-   required provenance field, rather than skipping it silently. Archival
+   release-gates-check-092`) must reject any baseline policy that lacks a
+   required provenance field. Do not skip that policy silently. Archival
    `verbatim_import` packs are exempt from the fields clause 9 leaves as
    imported (`source_run` and `source_artifact_sha256`). Every other provenance
    field is still required.
@@ -83,10 +84,11 @@ own objects. Do not copy provenance into every scenario record:
    Mixed-environment baselines are split or rejected.
 
 **Evidence binding lifecycle (2026-08-21 extension).** The 0.9.2
-pre-freeze window produced ~15 commits churning candidate-bound evidence
+pre-freeze window produced ~15 commits that churned candidate-bound evidence
 (`36a9ad45`, `0847c287`, `f68109ac`, `2f8fc276`, `3bd22d47`, `f49920c6`,
-`19340b31`, `d7012e42` reverted two minutes later by `cf6aea8e`) plus one
-direct edit of a derived field (`8c899644`).  Provenance fields alone did
+`19340b31`, `d7012e42`). A commit reverted the last listed change two minutes
+later (`cf6aea8e`). The window also produced one direct edit of a derived
+field (`8c899644`). Provenance fields alone did
 not prevent the churn because the *workflow* did not manage the lifecycle:
 
 7.  **Baselines are finalizer output, never hand-edited data.**
@@ -94,9 +96,9 @@ not prevent the churn because the *workflow* did not manage the lifecycle:
    finalized `perf/baselines/module-baseline-*.json` from retained raw inputs.
    Hand-editing a finalized baseline — including derived fields such as
    `fallback_rate` — is forbidden. Regenerate instead.
-8. **Raw inputs move with the finalized pack.**  A change set that touches
-   a finalized baseline must touch its retained inputs
-   (`*-raw.json` and/or `*-raw-probes/`) in the same commit.  A finalized
+8. **Raw inputs move with the finalized pack.** A change set that touches a
+   finalized baseline must touch its retained inputs in the same commit.
+   These inputs are `*-raw.json` and/or `*-raw-probes/`.  A finalized
    JSON that moves alone is the signature of a hand edit.
 9.  **Archival imports keep their schema.** `type: verbatim_import` packs are
    immutable audit records: they require a full 40-hex `source_git_commit` and
@@ -139,15 +141,15 @@ Verification:
   — changed-file mode for pre-commit use: flags finalized baselines that
   changed without their raw inputs.
 -  The same full audit resolves the durable measurement ref through
-  `repo_commit_anchored(sha, stem)`: the canonical
+  `repo_commit_anchored(sha, stem)`. It tries the canonical
   `refs/tags/perf-baseline/<stem>` fast path first, then any ref that reaches
-  the commit, and an explicit SKIP plus a finding when a shallow or tagless
-  checkout cannot decide. A present but unanchored commit fails the gate and the
-  finding names the ref to create. The fallback to non-canonical refs (including
-  the mutable `main` branch) is a best-effort resolution for archival packs that
-  predate the tag namespace. It never substitutes for the durable anchor clause
-  10 requires, and the gate still fails when only a mutable ref reaches the
-  commit. The `harness-tooling` CI job first fetches the anchor refspec
+  the commit. If a shallow or tagless checkout prevents a decision, the
+  audit reports an explicit SKIP and a finding. A present but unanchored
+  commit fails the gate and the finding names the ref to create. The fallback
+  to non-canonical refs (including the mutable `main` branch) is a best-effort
+  resolution for archival packs that predate the tag namespace. It never
+  substitutes for the durable anchor clause 10 requires, and the gate still
+  fails when only a mutable ref reaches the commit. The `harness-tooling` CI job first fetches the anchor refspec
   `+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*`, then proves each
   commit present with `git cat-file -e` before the gate runs. An object-only
   fetch by explicit SHA does not satisfy this contract: it lands the commit as a
@@ -160,16 +162,16 @@ Verification:
   and each scenario's evidence objects at their respective levels.
 - `make perf-evidence-check` — non-blocking report-only mode, validates the
   same invariant for PR visibility.
--  **Evidence-pack regeneration check (both gates above):** the gate must
-  regenerate the evidence pack twice from its retained inputs (raw report, raw
-  probe artifacts) and compare the regenerated pack and its digest with the
-  original values. `finalize_module_baseline.py` is the single regeneration
-  path. `evidence_gate.py` recomputes the raw artifact SHA-256
-  (`_verify_raw_digest`) and requires the finalized report to be byte-identical
-  to the raw report (minus `baseline_policy`), so running the finalizer and the
-  gate on the same retained inputs twice must yield the same pack and the same
-  digest. A mismatch indicates nondeterministic generation or an unbound
-  artifact and fails the gate (fail closed).
+-  **Evidence-pack regeneration check (both gates above):** The gate must
+  regenerate the evidence pack twice from its retained inputs (raw report and
+  raw probe artifacts). It must compare the regenerated pack and its digest
+  with the original values. `finalize_module_baseline.py` is the single
+  regeneration path. `evidence_gate.py` recomputes the raw artifact SHA-256
+  (`_verify_raw_digest`). It requires the finalized report to be byte-identical
+  to the raw report (minus `baseline_policy`). Thus, two runs of the finalizer
+  and gate on the same retained inputs must yield the same pack and digest.
+  A mismatch indicates nondeterministic generation or an unbound artifact and
+  fails the gate (fail closed).
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
   (692 tests), must pass.
 - Inspect `perf/baselines/module-baseline-092.json` `baseline_policy` and
@@ -186,25 +188,27 @@ seven commits collectively established.
 
 ## Rule 62: Release matrix key normalization invariant
 
-Historical issue chain (release-matrix key normalization): `59fbc06e`
-(`entries` key support), `018e3483` (required keys check), `9c74af50`
-(`_validate_manual_entries` keys), `2d7887c0` (loader and diffing keys),
-`25c5d8c6` (fix matrix ghost updates and out-of-sync entries), `19d769a7`
-(SonarCloud/CodeQL review findings).
+Historical issue chain (release-matrix key normalization): `59fbc06e` added
+`entries` key support. `018e3483` covered the required keys check. `9c74af50`
+covered `_validate_manual_entries` keys. `2d7887c0` covered loader and diffing
+keys. `25c5d8c6` fixed matrix ghost updates and out-of-sync entries.
+`19d769a7` addressed SonarCloud/CodeQL review findings.
 
 **Principle**: All release-matrix code paths must resolve an entry through
 *one* normalization function and use *one* canonical key set, not five
 independent ad-hoc key lookups that silently disagree. The matrix loader
 (`tools/release/matrix/update_matrix.py`) evolved through a five-commit
-normalization sequence because key aliases (`nginx` / `nginx_version`,
-`os_type` / `os` / `libc`) stayed independent in each function.
+normalization sequence. The sequence was necessary because key aliases
+(`nginx` / `nginx_version`, `os_type` / `os` / `libc`) stayed independent in
+each function.
 
 **Required:**
 
 1.  **Single alias-resolution path.** Every function that reads a matrix entry
-   dict (`load_matrix`, `_validate_matrix_entry`, `_validate_manual_entries`,
-   `_entry_sort_key`, `compute_matrix`, `diff_matrix`) must resolve aliased keys
-   through the same normalization entry point. The normalization layer
+   dict must resolve aliased keys through the same normalization entry point.
+   These functions are `load_matrix`, `_validate_matrix_entry`,
+   `_validate_manual_entries`, `_entry_sort_key`, `compute_matrix`, and
+   `diff_matrix`. The normalization layer
    interprets an entry written with legacy keys (`nginx`, `os`) the same way as
    one written with canonical keys (`nginx_version`, `os_type`).
 
@@ -214,11 +218,11 @@ normalization sequence because key aliases (`nginx` / `nginx_version`,
    diff ordering never disagree. Disagreement caused the ghost-update
    regressions fixed in `25c5d8c6`.
 
-3. **Canonical key set for required-key validation.** The required-key set
-   (`REQUIRED_MATRIX_ENTRY_KEYS`) used by `_validate_matrix_entry` and the
-   key set used by `_validate_manual_entries` must be identical in their
-   interpretation of aliases, so adding a new required key does not create
-   a second, inconsistent lookup.
+3. **Canonical key set for required-key validation.**
+   The required-key set is `REQUIRED_MATRIX_ENTRY_KEYS` for
+   `_validate_matrix_entry`. The key set that `_validate_manual_entries` uses must
+   interpret aliases the same way. This prevents a second, inconsistent
+   lookup when adding a new required key.
 
 **Verification:**
 - `python3 -m pytest tools/release/matrix/tests/ -v --tb=short` — 114 tests,
@@ -246,9 +250,9 @@ sort) in the same way.
   out of every branch and tag during the 2026-08-20/21 evidence churn. The
   blocking provenance gate failed on any clean checkout, full clone included.
   Clauses 1–9 bound the evidence but never kept the measurement commit
-  reachable. The clause records the anchor namespace, the annotated-tag and
-  immutability requirements, and the rule that a commit an existing ref already
-  reaches must not receive a redundant ref. `detect_baseline_hand_edit.py`
+  reachable. The clause records the anchor namespace and the annotated-tag
+  and immutability requirements. It also states that a commit an existing ref
+  already reaches must not receive a redundant ref. `detect_baseline_hand_edit.py`
   gained `repo_commit_anchored()` and the `harness-tooling` CI job gained a
   provenance preparation step.
 - **2026-07-29**: Corrected Rule 61 provenance field table to match real
@@ -262,4 +266,4 @@ sort) in the same way.
 - **2026-07-29**: Added Rules 61–62 after v0.9.0→HEAD fix-commit recurrence
   analysis identified two incremental-design gaps: the 7-commit performance
   evidence provenance chain and the 5-commit release-matrix key
-  normalization chain, neither of which had a single stated contract.
+  normalization chain. Neither chain had a single stated contract.

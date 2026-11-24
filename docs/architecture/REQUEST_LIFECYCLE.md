@@ -5,10 +5,10 @@ The important invariant is that eligibility, engine selection, streaming
 backpressure, and terminal metrics describe one request. Backpressure may
 suspend that same request multiple times, but every event remains associated
 with it. The module records the terminal outcome exactly once, through
-`nginx_markdown_requests_total`. That counter is distinct from
-`nginx_markdown_conversion_attempts_total`, which counts the point where engine
-selection commits, so one request can contribute an attempt and later a
-terminal outcome in a different category.
+`nginx_markdown_requests_total`. The separate counter
+`nginx_markdown_conversion_attempts_total` counts attempts when engine selection
+commits. Thus one request can contribute an attempt and later a terminal outcome
+in a different category.
 
 ## Lifecycle
 
@@ -52,7 +52,7 @@ configuration lifecycle.
 ## Engine selection
 
 `markdown_streaming off` selects bounded full-buffer conversion. `auto` prefers
-streaming for every response that clears the hard eligibility gates and falls
+streaming for every response that clears the hard eligibility gates. It falls
 back to bounded full-buffer conversion for responses that stay eligible for
 conversion but cannot stream. Responses that fail the conversion gates
 (method, status, content type, or `Accept`) never convert: they pass through or
@@ -60,9 +60,9 @@ follow the configured rejection path. `auto` exposes no threshold directive.
 `force` requests streaming after the same gates pass.
 
 User-configured streaming exclusions (`markdown_stream_excluded_types`)
-select full-buffer or passthrough, as do built-in hard exclusions (full cache
-validation for conditional requests, and streaming decoders absent from the
-build). A known codec whose
+select full-buffer or passthrough. Built-in hard exclusions do the same: full
+cache validation for conditional requests and streaming decoders absent from
+the build. A known codec whose
 streaming decoder is unavailable in the build (for example Brotli without
 `NGX_HTTP_BROTLI`) uses bounded full-buffer decompression. A malformed,
 unknown, or excessively deep `Content-Encoding` chain follows the configured
@@ -96,11 +96,12 @@ member is a failure.
 
 ## Commit and delivery
 
-The module commits headers before the first converted body buffer. A
-pre-commit failure can use the configured fail-open policy and replay the
-original buffered response only when the replay buffer contains every upstream
-byte read so far. In that case the module replays the already-read raw bytes,
-passes through the remaining upstream body directly, and records
+The module commits headers before the first converted body buffer. For a
+pre-commit failure, the module can use the configured fail-open policy to
+replay the original buffered response. It can do so only when the replay
+buffer contains every upstream byte read so far. In that case the module
+replays the already-read raw bytes, passes through the remaining upstream body
+directly, and records
 `nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"}`
 (the `pass` policy). The `fail_closed` policy returns 502 without replaying
 or forwarding any response body. If any upstream

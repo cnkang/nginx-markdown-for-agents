@@ -67,20 +67,20 @@ Required:
   `markdown_streaming force` (or `auto` with no blocking directives). make sure
   the assertions actually verify streaming-specific behavior (for example
   chunked transfer encoding, absence of Content-Length, streaming metrics).
-- The one exception: tests that **intentionally validate the runtime-block
-  mechanism** (that is, verifying that `auto` + `full` correctly falls back
-  to full-buffer) may use the contradictory combination, but must document
-  this intent in a comment and assert streaming-block-specific indicators
-  (for example ETag presence, Content-Length, full-buffer metric delta).
+- Only tests that **intentionally validate the runtime-block mechanism** may
+  use the contradictory combination. These tests verify that `auto` + `full`
+  correctly falls back to full-buffer. They must document this intent in a
+  comment and assert streaming-block-specific indicators (for example ETag
+  presence, Content-Length, full-buffer metric delta).
 - `detect_e2e_streaming_config.py` provides advisory detection of implicit
   `auto` + `markdown_cache_validation full` combinations, and the
   `auto + full` contradiction.  It is block-aware (comment-masked brace
   parsing, direct-depth directive extraction, fail-closed scan errors).
   A deterministic character scanner parses location block headers
   (`_scan_location_headers`, `_parse_location_header`, `_read_location_path`)
-  instead of a regex, supporting quoted regex locations (with spaces),
-  regex quantifiers `{m,n}`, and escaped quotes.  Strict UTF-8 file reading
-  rejects encoding errors (produces ScanError).  Overall config structure
+  instead of a regex. The scanner supports quoted regex locations (with
+  spaces), regex quantifiers `{m,n}`, and escaped quotes. Strict UTF-8 file
+  reading rejects encoding errors (produces ScanError). Overall config structure
   `_validate_config_structure` validates the structure to detect malformed configs
   before location analysis.  Unterminated quoted strings produce a single
   root ScanError and stop further structural analysis of that section so

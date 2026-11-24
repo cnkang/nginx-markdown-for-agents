@@ -213,28 +213,28 @@ Update the HTTPS distribution endpoint to serve the combined key file.
 #### Step 3: Sign New Packages with New Key
 
 Update CI/CD secrets (see Section 5) to use the new key for all new package
-builds. Export only the armored signing subkey of the new key with the exact
-`<fingerprint>!` selector, never the primary secret key, and store that
-export in `GPG_PRIVATE_KEY`:
+builds. Use the exact `<fingerprint>!` selector to export only the armored
+signing subkey of the new key, never the primary secret key. Store that export
+in `GPG_PRIVATE_KEY`:
 
 - Export the new signing subkey (`gpg --armor --export-secret-subkeys '<NEW_SIGNING_SUBKEY_FINGERPRINT>!' > private-signing-subkey.asc`, see Section 5 for the full command) and update the `GPG_PRIVATE_KEY` secret with that export
 - Update `GPG_PASSPHRASE` secret with new passphrase
 - Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
 -  **Publish the new public key**: **append** the new key's armored public
-  export to `packaging/nginx-markdown-for-agents-release.asc` (do not replace
+  export to `packaging/nginx-markdown-for-agents-release.asc`. Do not replace
   existing keys. Prior public keys must remain so historical signatures stay
-  verifiable), and update the published fingerprint in Section 3 ("Verify Key
-  Fingerprint", the trust-anchor paragraph that lists the signing-subkey
-  fingerprint) so the active fingerprint is unambiguous. Document both the
-  active fingerprint and the historical fingerprints. Verify before signing
-  packages with the new subkey: `gpg --show-keys
+  verifiable. In the Section 3 trust-anchor paragraph ("Verify Key
+  Fingerprint"), update the published signing-subkey fingerprint. This makes
+  the active fingerprint unambiguous. Document both the active fingerprint and
+  the historical fingerprints. Verify before signing packages with the new
+  subkey: `gpg --show-keys
   packaging/nginx-markdown-for-agents-release.asc` must list the new signing
   subkey fingerprint alongside the retained historical keys
 
 #### Step 4: Update Repository Metadata Signatures
 
 This step applies **only when a self-hosted APT/YUM repository serves the
-packages**: refresh the repository metadata signatures with the new key so
+packages**. Refresh the repository metadata signatures with the new key so
 clients that verify repository metadata accept the rotated key. The GitHub
 Release DEB/RPM channel carries no repository metadata. Its rotation stays
 unconditional and stops at the package signatures from Step 3.
@@ -343,11 +343,11 @@ The `release-packages.yml` workflow uses these secrets in its
 4. Sign APT repository metadata (`Release.gpg`, `InRelease`)
 5. Sign YUM repository metadata (`repomd.xml.asc`)
 
-Steps 4–5 are **future/planned**: they run only when the workflow's
+Steps 4–5 are **future/planned**. They run only when the workflow's
 repository-metadata signing job executes for the planned self-hosted APT/YUM
-repositories (the current workflow dispatches it after package signing, but
-no public APT/YUM channel exists yet, so repository metadata is not consumed
-in production). They are not active requirements for the current GitHub
+repositories. The current workflow dispatches this job after package signing.
+No public APT/YUM channel exists yet, so production clients do not consume
+repository metadata. They are not active requirements for the current GitHub
 Release DEB/RPM channel (see the Overview).
 
 ### Verifying CI Signing

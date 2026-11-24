@@ -4,9 +4,9 @@
 
 The inflight guard is a per-worker concurrency limiter that prevents any
 single NGINX worker from accumulating unbounded in-flight markdown
-conversions.  When the number of active conversions reaches the configured
-limit, the module handles new eligible requests according to the unified error
-policy (pass-through, return a status code, or fail closed).
+conversions. When active conversions reach the configured limit, the module
+handles new eligible requests according to the unified error policy. It passes
+the request through, returns a status code, or fails closed.
 
 ## Design Decisions
 
@@ -19,9 +19,9 @@ Each NGINX worker process maintains its own counter.  This avoids:
 - Cache-line bouncing between cores
 
 Since NGINX workers are single-threaded event loops, a per-worker counter
-with `ngx_atomic_t` fields is sufficient.  The atomic type serves only to
-allow safe reads from the metrics snapshot path (which runs in the same
-worker but may read during a different event-loop phase).
+with `ngx_atomic_t` fields is sufficient. The atomic type serves only to allow
+safe reads from the metrics snapshot path. That path runs in the same worker
+but may read during a different event-loop phase.
 
 ### Cleanup Handler Pattern
 
@@ -104,9 +104,9 @@ that point.
 
 ## Metrics
 
-The frozen Prometheus surface does **not** export an inflight gauge: the
-worker-local in-flight counter remains an internal guard (and diagnostics
-field) so its semantics stay unambiguous and scrape-independent. The frozen
+The frozen Prometheus surface does **not** export an inflight gauge. The
+worker-local in-flight counter remains an internal guard and diagnostics field.
+This keeps its semantics unambiguous and scrape-independent. The frozen
 surface exposes request outcomes:
 
 | Metric | Type | Description |

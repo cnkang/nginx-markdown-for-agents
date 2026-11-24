@@ -9,8 +9,8 @@ Accepted
 The Config V2 surface exposed both `markdown_streaming off|auto|force` and
 `markdown_streaming_engine off|auto|on`. Production tracing showed that the
 engine field did not select a separate backend with an independent operator
-use case. It only gated the same full-buffer or streaming path already owned
-by the policy, while profiles and the Rust effective-configuration model used
+use case. It only gated the same full-buffer or streaming path that the policy
+already controlled. Profiles and the Rust effective-configuration model used
 the policy as their source of truth.
 
 Keeping both controls would freeze contradictory inheritance, diagnostics,

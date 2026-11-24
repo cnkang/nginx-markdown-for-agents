@@ -85,7 +85,7 @@ The documentation gate also enforces release-state consistency: an
 `Unreleased` changelog entry must not appear as stable in the project
 status or release notes. The tag-only
 `tools/release/gates/validate_release_metadata.py` gate applies the inverse
-contract at publication time: the tagged version must have a concrete,
+contract at publication time. The tagged version must have a concrete,
 matching date and stable status across the changelog, project status, and
 release notes.
 

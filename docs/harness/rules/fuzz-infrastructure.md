@@ -23,10 +23,10 @@ paths:
 
 When a developer modifies parser, sanitizer, or emitter modules under
 `components/rust-converter/src/`, they must assess whether the change affects
-the coverage scope of existing fuzz targets. If the change introduces new
-parsing paths, new input-handling branches, or modifies boundary conditions of
-existing behavior, the corresponding fuzz target should update to cover the
-new behavior.
+the coverage scope of existing fuzz targets. The developer should update the
+corresponding fuzz target to cover new parsing paths and input-handling
+branches. The fuzz target should also cover changes to boundary conditions of
+existing behavior.
 
 **Applicable scenarios:**
 - Modifying HTML parser tag-handling logic
@@ -54,9 +54,9 @@ new behavior.
 **Description:**
 
 When adding new parser, header parsing, negotiation, or streaming logic,
-developers must make sure the corresponding fuzz target covers the new logic, or
-create a new fuzz target. This makes sure all code paths handling untrusted
-input have continuous fuzzing coverage.
+developers must cover the new logic with a fuzz target. Use the corresponding
+fuzz target or create a new one. This makes sure all code paths handling
+untrusted input have continuous fuzzing coverage.
 
 **Applicable scenarios:**
 - Adding support for new HTML tags or attributes
@@ -254,7 +254,7 @@ includes:
 6. **Documentation completeness**: `fuzz/README.md` exists.
 7. **Gitignore configuration**: `.gitignore` excludes generated corpus paths.
 8.  **Container privilege**: the ClusterFuzzLite Dockerfile ends with a non-root
-   user while keeping the Rust toolchain readable and the source/build/output
+   user. It keeps the Rust toolchain readable and the source/build/output
    paths writable for the action's mounted directories. The `/rustc`
    standard-library source staging directory and fixed
    `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz compile

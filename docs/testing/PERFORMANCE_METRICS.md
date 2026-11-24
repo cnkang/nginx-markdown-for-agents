@@ -100,10 +100,11 @@ When no baseline exists for a platform:
 3. PR Smoke and Nightly Full CI jobs pass without blocking
 4. The script prints a warning to stderr: `No baseline found for platform <platform>, skipping comparison`
 
-To bootstrap, a maintainer runs `--update-baseline` on the target CI runner, or
+To bootstrap, a maintainer runs `--update-baseline` on the target CI runner or
 triggers `nightly-perf` through `workflow_dispatch` with
-`bootstrap_baseline=true`, downloads the uploaded
-`perf-baseline-<platform>.json` artifact, and then submits the result as a PR.
+`bootstrap_baseline=true`.
+The maintainer downloads the uploaded `perf-baseline-<platform>.json` artifact
+and then submits the result as a PR.
 
 ### Rules
 

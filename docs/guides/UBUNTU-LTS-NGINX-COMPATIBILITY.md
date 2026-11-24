@@ -458,10 +458,11 @@ verifies official archive signatures by default, as described in its
 | 24.04 | `1.24.0-2ubuntu7.21` | Pending for both architectures | Pending CI evidence |
 | 26.04 | `1.28.3-2ubuntu1.14` | Pending for both architectures | Pending CI evidence |
 
-The release workflow must install each exact revision on both architectures
-and record its ABI provide, linked Brotli package, module load, Markdown
-request, and incompatible-module rejection result. The v0.9.3 ABI values above
-are historical evidence and do not substitute for v0.9.4 records.
+The release workflow must install each exact revision on both architectures.
+It must also record each revision's ABI provide, linked Brotli package, module
+load, Markdown request, and incompatible-module rejection result. The v0.9.3
+ABI values above are historical evidence and do not substitute for v0.9.4
+records.
 
 Limits:
 

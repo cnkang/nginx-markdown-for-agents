@@ -27,9 +27,9 @@ Required:
 - Single-header shortcut functions (for example "find first occurrence of
   header X") must document the first-match-only limitation explicitly in
   their doc comment.
-- **elts NULL guard**: when a chain part can carry `nelts != 0` with a
-  NULL `elts` pointer (partial/boundary list state — a real crash class
-  found in review), guard the dereference:
+- **elts NULL guard**: A chain part can carry `nelts != 0` with a NULL `elts`
+  pointer in partial or boundary list states. Review found a real crash
+  class in those states. Guard the dereference in this case.
   ```c
   headers = part->elts;
   if (headers == NULL && part->nelts != 0) {
@@ -38,14 +38,13 @@ Required:
                             advance part first if the flow must continue */
   }
   ```
-  The guard must return the function's appropriate error or empty value
-  for its declared type, not a bare `return;` (a void function may use
-  `return;`, but a function returning a value must return that value's
-  error/empty form).
-  Standard NGINX iterations bounded by `i < part->nelts` are exempt
-  (NGINX guarantees elts non-NULL whenever nelts > 0 for request-parsed
-  lists); you must add the guard when iterating lists whose construction
-  state is not fully controlled by the request parser.
+  For a function that returns a value, the guard must return the appropriate
+  error or empty value for the declared type, not a bare `return;`. A void
+  function may use `return;`.
+  Standard NGINX iterations bounded by `i < part->nelts` are exempt. For
+  request-parsed lists, NGINX guarantees elts non-NULL whenever nelts > 0.
+  You must add the guard when iterating lists whose construction state the
+  request parser does not fully control.
 - When aggregating flags or values from multiple headers of the same name
   (for example `X-Forwarded-For`), check the aggregated result before
   branching on per-header flags, so a later header cannot override an
@@ -87,37 +86,37 @@ Verification:
 Historical issues: `8b3d1a5`, `a2c6e90`, `327bfe99`, `4b97d0a7`.
 
 Required:
-- `ngx_str_t` values are **not** NUL-terminated.  Before passing an
-  `ngx_str_t`'s `data` pointer to any C API that requires NUL-terminated
-  input (for example `ngx_strcasecmp`, `stat()`, `ngx_file_info()`,
-  `opendir()`, `strstr()`), copy to a stack or pool buffer and append
-  `'\0'`.
+- `ngx_str_t` values are **not** NUL-terminated. Before passing an `ngx_str_t`'s
+  `data` pointer to any C API that requires NUL-terminated input, make a
+  NUL-terminated copy. These APIs include `ngx_strcasecmp`, `stat()`,
+  `ngx_file_info()`, `opendir()`, and `strstr()`. Copy to a stack or pool
+  buffer and append `'\0'`.
 - Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`,
   `ngx_strnstr`) when the length is known, avoiding the copy entirely.
 - When a length-bounded API is not available and a copy becomes needed, use
   `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate. The owning
   pool reclaims the copy. Use `ngx_pfree()` only for a buffer that the pool
-  tracks as a large allocation; do not apply it to
-  ordinary pool allocations or `ngx_alloc()`-backed storage.
+  tracks as a large allocation. Do not apply it to ordinary pool allocations
+  or `ngx_alloc()`-backed storage.
 - Line-oriented parsers that read files or buffers must handle the final
   line that lacks a trailing `\n`.  Treating `\n` as the sole line delimiter
   silently drops the last line if the file does not end with a newline.
 - When comparing `ngx_str_t` values for directive matching, require exact
   length equality first and use `ngx_strncasecmp(..., expected_len)` to
   prevent out-of-bounds reads on short or truncated inputs.
-- **Cross-translation-unit visibility**: When a configuration-derived field
-  (for example `effective_body_buffer_limit`) spans multiple
-  source files, its declaration and accessor function must be in a shared
-  header file (for example `filter_module.h`), not declared `static` in
-  one `.c` file.  A `static` declaration in a source file is invisible to
+- **Cross-translation-unit visibility**: A configuration-derived field such as
+  `effective_body_buffer_limit` can span multiple source files. In that case,
+  its declaration and accessor function must be in a shared header file such
+  as `filter_module.h`. Do not declare them `static` in one `.c` file. A
+  `static` declaration in a source file is invisible to
   other translation units, causing them to use stale defaults or
   `NGX_CONF_UNSET_SIZE` sentinels.  When moving a declaration from a
   source file to a header, update all consumers in the same change set.
 - **Sentinel consistency**: When using `NGX_CONF_UNSET_SIZE` as the
   "unset" sentinel for `size_t` fields, use it consistently throughout
-  the accessor chain.  Do not mix `NGX_CONF_UNSET_SIZE` and literal
-  `(size_t)-1` in different accessors for the same field — they are the
-  same value but mixing forms obscures intent and can mask bugs if
+  the accessor chain. Do not mix `NGX_CONF_UNSET_SIZE` and literal `(size_t)-1`
+  in different accessors for the same field. They are the same value, but
+  mixing the forms obscures intent. It can also mask bugs if
   `NGX_CONF_UNSET_SIZE` changes in a future NGINX version.
 
 Verification:
@@ -133,34 +132,35 @@ Verification:
 Historical issues: `d6a4b2c`, `9f1e3a8`.
 
 Required:
-- After a merge commit or any change that modifies more than 500 lines in a
-  single file, verify: (a) the file compiles, (b) `git diff --check` shows
-  no whitespace conflicts, (c) the function/method count matches the expected
-  value (no functions silently dropped by merge conflict resolution), and
-  (d) no duplicate adjacent blocks exist (identical consecutive code blocks
-  are a common merge residual).
+- Do these checks after a merge commit or any change that modifies more than
+  500 lines in a single file. Verify that the file compiles and that
+  `git diff --check` shows no whitespace conflicts. Verify that the
+  function/method count matches the expected value. This checks that merge
+  conflict resolution did not silently drop functions. Verify that no
+  duplicate adjacent blocks exist. Identical consecutive code blocks are a
+  common merge residual.
 - For any single file change exceeding 30 lines, verify the last function in
   the file still has its closing brace and the file is not truncated.
 - **Organic duplicate code detection**: Duplicate adjacent code blocks are
-  not only a merge residual — they can also accumulate organically when
-  a developer copies a block within the same file (for example config
-  handlers, auth/otel helper functions).  When adding a new code block
-  that is similar to an existing block in the same file, check whether the
-  two blocks can unify into a shared helper.  If a code block of 5+
+  not only a merge residual. They can also accumulate when a developer copies
+  a block within the same file, such as config handlers or auth/otel helper
+  functions. When adding a new block, check for similar code in the same file.
+  If a similar block exists, check whether the two blocks can share a helper.
+  If a code block of 5+
   lines repeats (non-adjacent) within the same file, extract the
-  common logic into a function.  CI tooling (`detect_duplicate_code.py`)
-  should flag both adjacent duplicates (3+ identical consecutive lines
-  immediately repeated) and non-adjacent duplicates (5+ identical
-  consecutive lines appearing elsewhere in the same file).
-- **Semantic-equivalence requirement for duplicate consolidation**: When
-  consolidating two code branches into a shared path (for example merging
-  `if (zrc == Z_OK) { ... }` and `if (zrc == Z_BUF_ERROR) { ... }` into
-  a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` block), verify that
-  the two branches are truly semantically equivalent before merging.
-  Branches that share the same *shape* but differ in error classification,
-  log label, retry semantics, or side effects must not collapse into
-  a single path — the apparent duplication encodes a real semantic
-  distinction.  Before consolidating, document: (a) what the two branches
+  common logic into a function. CI tooling (`detect_duplicate_code.py`)
+  should flag adjacent duplicates: 3+ identical consecutive lines immediately
+  repeated. It should also flag non-adjacent duplicates: 5+ identical
+  consecutive lines appearing elsewhere in the same file.
+- **Semantic-equivalence requirement for duplicate consolidation**: Before
+  consolidating two code branches into a shared path, verify that the
+  branches are truly semantically equivalent. For example, this applies to
+  merging `if (zrc == Z_OK) { ... }` and `if (zrc == Z_BUF_ERROR) { ... }` into
+  a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` block.
+  Branches with the same *shape* can differ in error classification, log
+  label, retry semantics, or side effects. Do not consolidate such branches
+  into a single path. The apparent duplication encodes a real semantic
+  distinction. Before consolidating, document: (a) what the two branches
   share (control flow, resource handling), and (b) how they differ (error
   code, log label, state transition).  If (b) is non-empty, keep the
   branches separate or parameterize the difference rather than collapsing
@@ -206,11 +206,12 @@ Required:
 - When a helper function calls `ngx_http_finalize_request`, its doc comment
   must state "Returns NGX_DONE after finalizing the request, caller must not
   continue processing."
-- Multi-step header/response modification operations (for example header plan
-  apply with ETag set, Vary append, custom header add) must be atomic: if any
-  step fails (allocation failure, header set failure), abort the entire
-  operation and return `NGX_ERROR`.  Do not log the error and continue with
-  partially applied headers — downstream consumers will see inconsistent state.
+- Multi-step header/response modification operations must be atomic. One
+  example is a header plan apply that sets ETag, appends Vary, and adds a
+  custom header. If any step fails (for example, allocation or header set),
+  abort the entire operation and return `NGX_ERROR`. Do not log the error
+  and continue with partially applied headers — downstream consumers will
+  see inconsistent state.
 - Fixed-capacity transaction snapshots must detect capacity overflow before
   the first mutation and return `NGX_ERROR`.  Never silently omit matching
   state from a rollback snapshot, a rollback set that does not cover every
@@ -284,30 +285,30 @@ Verification:
 Historical issues: `aac2f341`, `ccc320c7`, `8b3633c1`, `de6cec38`,
 `516df672`, `0db8042e`, `a47a3e40`, `1fa75117` (2026-08-19/20 cluster).
 
-Principle: when a response's representation changes (HTML to Markdown
-conversion commit, streaming commit metadata removal, 304 Decision G,
-HEAD representation rewrite), the implementation must clear or suppress
-EVERY upstream metadata surface in the same function.  NGINX emission predicates
-read paired state, so clearing one mirror while leaving its twin stale
-either resurrects source-HTML metadata or leaks it through another
-emission path.  The 2026-08 cluster fixed these surfaces one at a time
+Principle: when a response's representation changes, the implementation must
+clear or suppress EVERY upstream metadata surface in the same function. This
+applies to HTML to Markdown conversion commit, streaming commit metadata
+removal, 304 Decision G, and HEAD representation rewrite. NGINX emission
+predicates read paired state. Clearing one mirror while leaving its twin stale
+either resurrects source-HTML metadata or leaks it through another emission
+path. The 2026-08 cluster fixed these surfaces one at a time
 across four paths. This rule collapses them into one contract.
 
 Required:
 - **Trailer suppression**: invalidating the `Trailer` declaration header
-  is not sufficient.  HTTP/2 and HTTP/3 emit `headers_out.trailers`
-  entries without any declaration, so every representation-change path
-  must call the shared `ngx_http_markdown_clear_trailers()` helper in
-  the same function that invalidates the declaration.
+  is not sufficient. HTTP/2 and HTTP/3 emit `headers_out.trailers` entries
+  without any declaration. Thus, every representation-change path must call
+  the shared `ngx_http_markdown_clear_trailers()` helper in the same function
+  that invalidates the declaration.
 - **Mirror-pair completeness**: NGINX core emits `Last-Modified` from
   paired state (`last_modified_time` scalar mirror plus typed pointer)
   and matches Content-Type through the `content_type_lowcase` /
-  `content_type_hash` cache.  A function that strips one half of a pair
-  (`last_modified_time = -1`, `content_type_lowcase = NULL`) must strip
-  the other half in the same function, or explicitly invalidate the
-  corresponding header-list entry via `ngx_http_markdown_invalidate_headers`,
-  or delegate to `ngx_http_markdown_send_304()` which performs the full
-  strip.
+  `content_type_hash` cache. A function that strips one half of a pair
+  (`last_modified_time = -1`, `content_type_lowcase = NULL`) must also handle
+  the other half. It can strip the other half in the same function. It can
+  instead explicitly invalidate the corresponding header-list entry through
+  `ngx_http_markdown_invalidate_headers` or delegate to
+  `ngx_http_markdown_send_304()`, which performs the full strip.
 - **Single shared helpers**: new representation paths must reuse
   `ngx_http_markdown_clear_trailers()`, `ngx_http_markdown_invalidate_headers()`,
   and `ngx_http_markdown_head_representation_headers()` rather than

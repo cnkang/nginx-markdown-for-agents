@@ -29,11 +29,11 @@ a ConfigMap or PersistentVolume, and add `load_module` via the
 `main-snippet` ConfigMap key.
 
 **Image prerequisite.** This flow requires a custom Ingress Controller
-image that already contains the module. A volume mount alone does not
-make the flow supported: the Controller must load a module binary whose
-ABI matches the NGINX inside the image, and managed deployments do not
-allow replacing the Controller image (see Known Limitations). Treat the
-example below as a feasibility sketch, not a supported deployment path.
+image that already contains the module. A volume mount alone does not make the
+flow supported. The Controller must load a module binary whose ABI matches the
+NGINX inside the image. Managed deployments do not allow replacing the
+Controller image (see Known Limitations). Treat the example below as a
+feasibility sketch, not a supported deployment path.
 
 ```yaml
 volumeMounts:
@@ -47,9 +47,8 @@ volumeMounts:
 1. **ABI binding**: The `.so` must compile against the exact NGINX
    version inside the F5 Controller image, using a compatible build
    configuration (matching `configure` arguments). Use `--with-compat`
-   only when the target binary also enables it, otherwise the module
-   binary must be built with the same configure arguments as the
-   Controller's NGINX.
+   only when the target binary also enables it. Otherwise, the module build
+   must use the same configure arguments as the Controller's NGINX.
 2. **No custom image**: F5 does not support replacing the Controller
    image with a custom build in managed deployments.
 3. **Module updates**: Require rebuilding the `.so` when the Controller
@@ -90,10 +89,10 @@ The first two commands must show an active, semicolon-terminated `load_module`
 directive and an active `markdown_filter on` directive. A comment mentioning the
 module filename must not satisfy them. `nginx -t` validates syntax only. The
 directive greps are the load evidence. The request must return Markdown rather
-than the upstream HTML, and the final `grep` asserts that the response
-`Content-Type` header is `text/markdown`, failing when the header is missing or
-names another type. For a negative control, temporarily remove the active
-`load_module` line and repeat `nginx -t`.
+than the upstream HTML. The final `grep` checks that the response
+`Content-Type` header is `text/markdown`. The check fails if the header is
+missing or names another type. For a negative control, temporarily remove the
+active `load_module` line and repeat `nginx -t`.
 
 The module-specific configuration must then fail. The smoke test must report
 that failure rather than treating it as successful.
@@ -103,7 +102,7 @@ that failure rather than treating it as successful.
 Remove `markdown_filter on` from ConfigMap. This disables only Markdown
 conversion. The module remains loaded in NGINX and metrics or diagnostics
 handlers may still run. For full module deactivation, explicitly remove the
-`load_module` directive from the ConfigMap snippet and rebuild the custom image
+`load_module` directive from the ConfigMap snippet. Rebuild the custom image
 or revert to the upstream Ingress Controller image.
 
 ### Rollback
@@ -406,9 +405,9 @@ its in-flight conversions instead of the platform killing it mid-stream:
   active streaming conversions and emit their terminal outcomes.
 
 During a `helm upgrade`, the Deployment controller marks old pods
-`Terminating`, Kubelet delivers the preStop hook, and NGINX drains within the
-grace period, and readiness gates remove traffic from the Service as pods
-become unready. If workloads run conversions longer than 30s, raise
+`Terminating`. Kubelet delivers the preStop hook, and NGINX drains within the
+grace period. Readiness gates remove traffic from the Service as pods become
+unready. If workloads run conversions longer than 30s, raise
 `terminationGracePeriodSeconds` rather than disabling the hook.
 
 When the container entrypoint is not NGINX (custom images that start

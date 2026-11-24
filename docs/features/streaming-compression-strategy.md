@@ -8,10 +8,10 @@ full-buffer decompression.
 
 ## Summary
 
-In 0.9.2, gzip, deflate, and Brotli responses are eligible for streaming
-decompression when `markdown_streaming force` or `auto` selects streaming,
-automatic decompression turns on, cache validation is not `full`, and the
-response carries a single non-identity encoding layer. The module decodes chains
+In 0.9.2, gzip, deflate, and Brotli responses can use streaming decompression
+when `markdown_streaming force` or `auto` selects streaming. Automatic
+decompression must be on, cache validation must not be `full`, and the response
+must carry a single non-identity encoding layer. The module decodes chains
 with more than one non-identity layer on the bounded full-buffer path.
 The `auto` route follows the `markdown_streaming` policy and the hard
 compatibility gates. It applies no size heuristic, and there is no
@@ -47,9 +47,9 @@ eligible response, the following logic applies:
 3. Full cache validation selects the bounded full-buffer path for all codecs.
 4. Brotli without `NGX_HTTP_BROTLI` defined routes to bounded full-buffer
    decompression via the Rust FFI path.
-5. A known codec whose streaming decoder is unavailable in the build (for
-   example Brotli without `NGX_HTTP_BROTLI`) uses bounded full-buffer
-   decompression — it does **not** pass through.
+5. A known codec without a streaming decoder in the build uses bounded
+   full-buffer decompression. Brotli without `NGX_HTTP_BROTLI` is one example.
+   The module does **not** pass through responses with such a codec.
 6. A malformed `Content-Encoding` value, an unknown encoding token, or an
    excessively deep chain follows the configured `markdown_error_policy`:
    `pass` forwards the original response unchanged. `fail_closed` and
@@ -94,11 +94,9 @@ support concatenated members. A complete deflate stream
 must consume every byte of the compressed payload. If zlib reaches
 `Z_STREAM_END` with `avail_in > 0`, the remaining bytes are trailing data and
 the module rejects the response as `FORMAT_ERROR` rather than silently
-truncating it. The same applies to non-empty chunks arriving after the
-deflate stream has already finished: empty chunks remain a safe no-op, but
-any non-empty subsequent input classifies as trailing data and the module
-rejects it. Gzip is exempt from this constraint because it supports
-concatenated members.
+truncating it. After the deflate stream finishes, the module also rejects any
+non-empty chunks as trailing data. Empty chunks remain a safe no-op. Gzip is
+exempt from this constraint because it supports concatenated members.
 
 If decompressed output exceeds the limit, decompression terminates immediately
 and the configured `markdown_error_policy` applies before commit:
@@ -127,13 +125,14 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 
 -  Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
   framing as a fallback for servers that emit raw deflate. The paths decide
-  differently: the **full-buffer path** tries RFC 1950 first and, when RFC 1950
-  decoding fails with a format error, replays the same input in raw RFC 1951
-  mode from the start, discarding any output the wrapped attempt produced. The
-  **streaming path** defers decoder initialization until the first two bytes
-  arrive, sniffs the zlib header, and initializes as zlib-wrapped or raw
-  accordingly. It cannot replay consumed chunks. A stream misclassified by the
-  sniff fails closed with a format error instead of retrying.
+  differently. The **full-buffer path** tries RFC 1950 first. If RFC 1950
+  decoding fails with a format error, this path replays the same input in raw
+  RFC 1951 mode from the start. It discards any output from the wrapped
+  attempt. The **streaming path** defers decoder initialization until the
+  first two bytes arrive, sniffs the zlib header, and initializes as
+  zlib-wrapped or raw accordingly. It cannot replay consumed chunks. A stream
+  misclassified by the sniff fails closed with a format error instead of
+  retrying.
 - Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
   truncation, backpressure, and terminal-once validation.
 - Brotli uses the official `BrotliDecoderDecompressStream` C API with

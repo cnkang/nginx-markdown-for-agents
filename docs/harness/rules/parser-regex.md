@@ -24,9 +24,9 @@ Required:
     containing an unbounded inner quantifier unless every alternation branch
   starts with a strong literal separator (a multi-char literal or a single
   non-alphanumeric char like `-`, `_`, `.`) that the inner unbounded atom
-  cannot consume.  For multi-character separators, only the first character
-  of the separator needs to be unconsumable by the inner unbounded atom,
-  because the outer iteration must start from the separator's first character.
+  cannot consume. For multi-character separators, the outer iteration must
+  start from the first character. Thus, the inner unbounded atom need only
+  reject that first character.
   - Adjacent overlapping `.*` quantifiers: `(.*)(.*)`
   - Backreferences after `.*` or `.*?`: `(.*?)\1`
   - Unbounded repetition inside repeated groups: `(.*,)+`
@@ -42,7 +42,7 @@ Required:
     `(\d+)\s*metric\s+famili`, `x*yx*`, `\s*,`, `(ab)*a(ba)*`.  The
     check covers only partial-match APIs (`re.search`, `re.findall`,
     `re.finditer`, `re.split`, `re.sub`, `re.subn`, and the same compiled
-    methods); `re.match`/`re.fullmatch` are not partial matches and are
+    methods). `re.match`/`re.fullmatch` are not partial matches and are
     exempt, matching Sonar's `RedosMatchTypeHelper`.  Bounded quantifiers
     (`{m,n}`), anchored patterns, and repetitions whose element contains an
     intersecting inner repetition (Sonar reports those as
@@ -52,7 +52,7 @@ Required:
   - Dynamic regex injection: CLI args, env vars, file content as patterns
   - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
-    not trigger this broad advisory check; they still pass through the normal
+    not trigger this broad advisory check. They still pass through the normal
     structural ReDoS checks.
 -  The detector extracts Python regex usage through the standard library `ast`
   module, covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
@@ -74,9 +74,9 @@ Required:
 
 Reassignment of a `re` alias to a non-`re` value invalidates the alias.
   Reassignment of a compiled-pattern variable to a dynamic value upgrades the
-  binding to `COMPILED_DYNAMIC_PATTERN` (not plain `DYNAMIC_VALUE`) so
-  subsequent `compiled.search/match/sub/findall` calls emit a REVIEW referencing
-  the original `compile_line`. This applies to Assign, AnnAssign, and AugAssign.
+  binding to `COMPILED_DYNAMIC_PATTERN` (not plain `DYNAMIC_VALUE`). Subsequent
+  `compiled.search/match/sub/findall` calls then emit a REVIEW referencing the
+  original `compile_line`. This applies to Assign, AnnAssign, and AugAssign.
   An initially dynamic `re.compile()` emits its REVIEW at the compile site only.
   A second compiled-method REVIEW stays reserved for actual reassignment.
   Lexical `del` writes a DELETED tombstone in the current scope instead of
@@ -85,18 +85,18 @@ Reassignment of a `re` alias to a non-`re` value invalidates the alias.
 A function-local `del p` no longer removes a module binding, `global`/`nonlocal`
   are partially modeled (honored for delete routing) and otherwise conservative.
   Function/lambda defaults, decorators, return annotations, and parameter
-  annotations evaluate in the enclosing scope before the function name binds and
-  before the body scope opens, matching Python's real evaluation order. Modules
+  annotations evaluate in the enclosing scope. As in Python, they evaluate
+  before the function name binds and before the body scope opens. Modules
   that import `from __future__ import annotations` use postponed evaluation:
   their annotation AST nodes are inert string constants at runtime. The visitor
   detects the future import **explicitly** from the AST (`visit_ImportFrom`
   matching `__future__` + `annotations`) and skips return/parameter/annotation
   traversal entirely under that flag. It never infers postponed mode from
-  `ast.Constant` node shape, which is ambiguous (a genuine string literal
-  annotation without the future import evaluates eagerly and still requires
-  analysis). Preserving the annotation AST nodes matters for eager mode: the
-  visitor walks their expressions (names, attribute accesses, and any embedded
-  constants) normally.
+  `ast.Constant` node shape because that shape is ambiguous. Without the
+  future import, a genuine string literal annotation evaluates eagerly and
+  still requires analysis. Preserving the annotation AST nodes matters for
+  eager mode: the visitor walks their expressions (names, attribute accesses,
+  and any embedded constants) normally.
 
 Modules without the future import analyze eagerly. Postponed annotation strings
   intentionally produce no REVIEW. Unknown RHS expressions produce DYNAMIC_VALUE
@@ -106,11 +106,11 @@ Modules without the future import analyze eagerly. Postponed annotation strings
   quantifier as a separate atom so that separator detection is not lost when
   the detector merges adjacent literals.  For example, `abc\w+` keeps `abc` as a
   separate literal atom so the detector recognizes `\w+` as having a multi-char
-  literal separator prefix.  Segment analysis treats `re.escape()` as
-  protecting only its own operand, a concatenation like
-  `re.escape(x) + r"(a+)+$"` is still analyzed for the static tail, and any
-  dangerous static segment produces an ERROR regardless of escaped/dynamic
-  neighbors.  The detector represents an escaped-only composition with a literal atom
+  literal separator prefix. Segment analysis treats `re.escape()` as
+  protecting only its own operand. The detector still analyzes the static
+  tail of a concatenation like `re.escape(x) + r"(a+)+$"`. Any dangerous
+  static segment produces an ERROR regardless of escaped/dynamic neighbors.
+  The detector represents an escaped-only composition with a literal atom
   and analyzes its static scaffold, safe scaffolds produce no REVIEW.
 - Pattern source classification: `STATIC_LITERAL`, `STATIC_CONCAT`,
   `STATIC_FORMATTED`, `ESCAPED_DYNAMIC`, `DYNAMIC`, `UNKNOWN`.
@@ -120,30 +120,32 @@ Modules without the future import analyze eagerly. Postponed annotation strings
   to INFO) so unresolvable regex origins require manual attention.
 -  Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
   flags (`grep -P`/`--perl-regexp`, `rg -P`/`--pcre2`, `perl` itself) are
-  separate. `grep -e`/`rg -e` without a PCRE flag use the command's default
-  engine (BRE/ERE for grep, Rust regex NFA for rg) and are NOT analyzed for PCRE
-  catastrophic backtracking. Only `grep -P`, `rg -P`/`--pcre2`, and `perl
+  separate. Without a PCRE flag, `grep -e`/`rg -e` use the command's default
+  engine (BRE/ERE for grep, Rust regex NFA for rg). The detector does NOT
+  analyze these commands for PCRE catastrophic backtracking. Only `grep -P`,
+  `rg -P`/`--pcre2`, and `perl
   -e`/`-E` produce `shell-pcre` findings. Pattern extraction is command-aware:
-  it locates the regex command past pipes and env assignments, skips options,
-  supports `-e`/`--regexp`/`-P` and `--`, and does not pick up patterns from
-  preceding commands in a pipeline. Broken multi-line command recovery matches
-  exact command tokens rather than substrings in prose or arguments. The
-  detector models common engine/output flags such as `grep -E`/`-F`/`-G`/`-c`
-  and `rg -F` as boolean options.
+  it locates the regex command past pipes and env assignments. It skips
+  options and supports `-e`/`--regexp`/`-P` and `--`. It does not pick up
+  patterns from preceding commands in a pipeline. Broken multi-line command
+  recovery matches exact command tokens rather than substrings in prose or
+  arguments. The detector models common engine/output flags as boolean
+  options, such as `grep -E`/`-F`/`-G`/`-c` and `rg -F`.
 
 They do not become spurious pattern candidates. Shell argument parsing
-  classifies options into boolean flags (consume nothing), required-value
-  options (consume next token), optional-value options (do not consume next
-  token), pattern options, pattern-file options, and PCRE flags. After an
-  unknown option, the detector collects additional non-option tokens as pattern
+  classifies options as boolean flags, required-value options, optional-value
+  options, pattern options, pattern-file options, or PCRE flags. Boolean flags
+  consume nothing. Required-value options consume the next token.
+  Optional-value options do not consume the next token. After an unknown
+  option, the detector collects additional non-option tokens as pattern
   candidates so a dangerous pattern cannot be hidden behind an unrecognized
-  option. Multiple `-e` patterns are all extracted. Pattern-file options
-  (`-f`/`--file`, multiple supported) get resolved relative to the shell script
-  directory, validated to stay within the repository root (the detector rejects
-  absolute paths, `..` traversal, and symlink escapes), read as UTF-8, and
-  analyzed per line. Read/encoding failures (OSError, UnicodeDecodeError,
-  IsADirectoryError) produce a ScanError plus a conservative REVIEW instead of
-  crashing.
+  option. Multiple `-e` patterns are all extracted. The detector supports
+  multiple pattern-file options (`-f`/`--file`). It resolves paths relative
+  to the shell script directory and validates that they stay within the
+  repository root. It rejects absolute paths, `..` traversal, and symlink
+  escapes. It reads the files as UTF-8 and analyzes them per line.
+  Read/encoding failures (OSError, UnicodeDecodeError, IsADirectoryError)
+  produce a ScanError plus a conservative REVIEW instead of crashing.
 
 `shlex` parse errors produce ScanError.
 - Rust `regex` crate uses NFA (non-backtracking) — safe by default.

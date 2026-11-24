@@ -35,19 +35,20 @@ Required:
   request count as denominator for a streaming-only failure count will dilute
   the rate during partial rollout and mask real problems.
 - Verification commands in operator docs (curl + grep/jq/python) must specify
-  an explicit `Accept` header matching the output format they parse.  The
+  an explicit `Accept` header matching the output format they parse. The
   default plain-text format uses human-readable labels that differ from JSON
-  keys and Prometheus series names, omitting `Accept` causes false negatives
+  keys and Prometheus series names. Omitting `Accept` causes false negatives
   when grepping for snake_case keys.
 - `tools/harness/detect_doc_sync.py` owns the blocking 0.9.2 public-config
   drift contract. It reads the current worktree directly, including untracked
   files under the owned production/example/E2E/Sonar surfaces. It verifies the
-  active `markdown_streaming` registration, the removal of the former
-  reject-only `markdown_streaming_engine` stub (removed names now fail with
-  NGINX's standard `unknown directive` error), Helm `markdown.streaming.mode`
-  mapping, removal of production `stream.engine`/`STREAM_ENGINE` symbols, the
-  commonmark/gfm-only flavor contract with explicit mdx/org-mode rejection,
-  and the exact off-to-off, auto-to-auto, on-to-force migration table.
+  active `markdown_streaming` registration and the removal of the former
+  reject-only `markdown_streaming_engine` stub. Removed names now fail with
+  NGINX's standard `unknown directive` error. The detector verifies the Helm
+  `markdown.streaming.mode` mapping and the removal of production
+  `stream.engine`/`STREAM_ENGINE` symbols. It also verifies the
+  commonmark/gfm-only flavor contract with explicit mdx/org-mode rejection and
+  the exact off-to-off, auto-to-auto, on-to-force migration table.
 - This detector is blocking in the existing CI docs job through
   `make docs-check` and also runs through `make harness-security-checks`, its
   positive and negative fixtures run through `make test-harness`.
@@ -55,7 +56,7 @@ Required:
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
 Historical issues: at least five manual "sync" commits (`54ed7799`, `0ee43e93`,
 `3f4442f0`, `a4c49847`, `94c5bb84`) repaired the same failure after Dependabot
-bumps: the audit gate ran `check_third_party_notices.py`, which reported a stale
+bumps. The audit gate ran `check_third_party_notices.py`, which reported a stale
 notices version and cross-workspace lock drift. The recurring actor is
 Dependabot itself: it updates only the baseline converter lock. The automation
 (2026-11-16) applies the mechanical remainder.
@@ -94,20 +95,19 @@ Required:
   enforces human changesets at write time.
 
 ### 63. Non-native-reader writing style (STE-inspired) for maintained docs
-Historical issues: writing-pass semantic drift found in the docs/kb-pilot
-review (`cae5450d`): passive-to-active rewrites that inverted meaning
-(budget exceeds, tail data must reject), dropped subjects, and removed
-requirements. The style gate exists to keep maintained docs readable by
+Historical issues: the docs/kb-pilot review (`cae5450d`) found semantic drift
+from the writing pass. Passive-to-active rewrites inverted meaning (budget
+exceeds, tail data must reject), dropped subjects, and removed requirements.
+The style gate exists to keep maintained docs readable by
 translators, NMT engines, and LLMs (see `docs/WRITING_GUIDE.md`).
 
 Required:
 - Maintained Markdown (current reader-facing root docs + `docs/`, excluding
-  `docs/archive/` and gitignored paths) must follow the
-  STE-inspired prose rules in
-  `docs/WRITING_GUIDE.md`: sentences ≤ 25 words (descriptive) /
-  ≤ 20 words (instructions), active voice, no Latin abbreviations
-  (`e.g.`/`i.e.`/`etc.`), no contractions, no multi-word noun chains
-  (≥ 4 capitalized words), no semicolon chains in prose.
+  `docs/archive/` and gitignored paths) must follow the STE-inspired prose
+  rules in `docs/WRITING_GUIDE.md`. Keep sentences ≤ 25 words (descriptive) or
+  ≤ 20 words (instructions). Use active voice. Do not use Latin abbreviations
+  (`e.g.`/`i.e.`/`etc.`), contractions, multi-word noun chains (≥ 4 capitalized
+  words), or semicolon chains in prose.
 - Files changed in the current changeset must introduce **zero** new
   warnings. Set `STYLE_BASE` to the target branch commit and run
   `make docs-style-check-regression` (or
@@ -117,10 +117,10 @@ Required:
   docs-style-check-baseline` (or `python3 tools/docs/check_writing_style.py
   --baseline`) fails when the total exceeds the retained budget in
   `DEFAULT_BASELINE` (`tools/docs/check_writing_style.py`). The maintained docs
-  now pass the audit with zero warnings, so any new warning fails this gate. The
-  checker exempts structural surfaces — rule-checklist items, allowlisted formal
-  titles, reference lines, and explicitly labeled source-citation lines — so the
-  scan targets genuine prose violations only.
+  now pass the audit with zero warnings, so any new warning fails this gate.
+  The checker targets genuine prose violations only. It exempts structural
+  surfaces: rule-checklist items, allowlisted formal titles, reference lines,
+  and explicitly labeled source-citation lines.
 - Preserve meaning when rewriting passive voice to active: keep the
   original subject/object direction (`X is exceeded` → `the conversion
   exceeds X`, never `X exceeds`), keep the agent explicit (`the module

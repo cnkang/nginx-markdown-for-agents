@@ -152,10 +152,10 @@ compilation. Rust cannot express them without a circular dependency.
 (`ngx_shm_zone_t`) and NGINX atomic types (`ngx_atomic_t`). It also uses a C
 struct (`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The frozen
 metrics format selection is Prometheus-only, and the endpoint renders that
-Prometheus text directly from the C structures. Testing metrics correctness —
-counter increments, snapshot isolation, Prometheus rendering, and SHM layout
-compatibility — requires direct access to these C structures and NGINX SHM
-APIs.
+Prometheus text directly from the C structures. Testing metrics correctness
+requires direct access to these C structures and NGINX SHM APIs. These tests
+cover counter increments, snapshot isolation, Prometheus rendering, and SHM
+layout compatibility.
 
 **Concrete examples:**
 

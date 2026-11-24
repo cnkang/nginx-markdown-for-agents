@@ -13,7 +13,7 @@ It focuses on converter behavior and output shape. For NGINX directive syntax an
 - **FR-15.5**: Include resolved absolute URLs for images in front matter
 - **FR-15.6**: Metadata extraction and front-matter emission have distinct
   roles. `include_front_matter` controls emission and promotes metadata
-  extraction internally; `extract_metadata` alone enables metadata/ETag
+  extraction internally. `extract_metadata` alone enables metadata/ETag
   processing without emitting front matter
 - **FR-15.7**: Configurable via `include_front_matter` option
 - **FR-15.8**: When disabled, the module includes no front matter

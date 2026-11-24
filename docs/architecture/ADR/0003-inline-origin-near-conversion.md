@@ -37,15 +37,15 @@ The key properties of this positioning:
 
 5.  **Variable-driven flexibility**: Because the module runs inside NGINX,
    operators can use `map` directives and variables to control conversion per
-   request. This includes User-Agent-based bot targeting. When targeting
-   variables (such as a bot-detection map) change the representation served to
-   different clients, the operator must preserve cache separation: when the
+   request. This includes User-Agent-based bot targeting. The operator must
+   preserve cache separation when targeting variables change the representation
+   served to different clients. A bot-detection map is one example. When the
    targeting input is a request header field, add that **request header field
-   name** to `Vary` (for example `Vary: Accept, User-Agent`). Only for
+   name** to `Vary`. For example: `Vary: Accept, User-Agent`. Only for
    non-header map inputs, include a normalized targeting-variable value in the
-   cache key instead, so caches do not serve the Markdown variant to clients
-   that should receive HTML (or the reverse). `Vary` may list only request
-   header field names. For non-header map inputs, the normalized
+   cache key instead. This prevents caches from serving the Markdown variant
+   to clients that should receive HTML (or the reverse). `Vary` may list only
+   request header field names. For non-header map inputs, the normalized
    targeting-variable value must go in the cache key.
 
 ### Negative Consequences

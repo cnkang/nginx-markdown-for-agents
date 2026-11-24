@@ -233,9 +233,9 @@ mismatches.
 ### 11. Rust converter and C module need a matched upgrade
 
 The Rust converter shared library and the NGINX C module must always deploy
-as a matched pair. Mixing a 0.8.0 Rust library with a 0.7.x C
-module (or vice versa) will result in FFI layout mismatches, incorrect
-`FFIHeaderEntry` processing, and potential memory corruption.
+as a matched pair. Mixing a 0.8.0 Rust library with a 0.7.x C module (or vice
+versa) causes FFI layout mismatches and incorrect `FFIHeaderEntry` processing.
+Mixing those versions can also cause memory corruption.
 
 **Impact**: Package deployment workflows must ensure both components upgrade
 atomically. The RPM/DEB package dependencies enforce this via the
@@ -272,8 +272,9 @@ markdown_stream_threshold 5m;
 
 Size of the pre-commit replay buffer. During the streaming pre-commit phase,
 converted output buffers up to this size. If an error occurs before the
-commit boundary, the buffered content gets discarded and the module replays
-the original HTML to the client (fail-open behavior per `markdown_streaming_on_error`).
+commit boundary, the module discards the buffered content. The module then
+replays the original HTML to the client (fail-open behavior per
+`markdown_streaming_on_error`).
 
 Setting this to `0` disables pre-commit HTML replay — errors immediately
 trigger the configured error policy without fallback.

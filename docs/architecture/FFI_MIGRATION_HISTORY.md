@@ -3,9 +3,9 @@
 ## Purpose and ownership
 
 This document records the **migration history** of the Rust↔C FFI boundary
-between v0.9.1 (ABI v1) and v0.9.2 (final ABI v3, with ABI v2 as an intermediate
-development step): what we removed, why, and what replaced it. It is a
-historical record, not the active contract.
+between v0.9.1 (ABI v1) and v0.9.2 (final ABI v3). ABI v2 was an intermediate
+development step. The document records what we removed, why, and what replaced
+it. It is a historical record, not the active contract.
 
 For the **active** ABI contract (version, 4-tuple handshake, layout,
 ownership, v1 compatibility policy) see
@@ -82,10 +82,10 @@ than a partial literal or caller-side `memset`. The active helpers include:
 - `markdown_decomp_result_init`
 
 Tests may use a single centralized helper that calls the production initializer.
-Adding a field requires an ABI version increment plus updates to the
-initializer, reset/free path, Rust layout test, C layout assertion, and all
-semantic consumers in the same change. The only future exception would be an
-explicitly adopted and validated size-tagged struct protocol.
+Adding a field requires an ABI version increment. The same change must also
+update the initializer, reset/free path, Rust layout test, C layout assertion,
+and all semantic consumers. The only future exception would be an explicitly
+adopted and validated size-tagged struct protocol.
 
 ## Error and panic contract
 

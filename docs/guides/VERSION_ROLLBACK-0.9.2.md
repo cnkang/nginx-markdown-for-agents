@@ -658,18 +658,18 @@ When rolling back from 0.9.2 to 0.9.1:
 | Prometheus metric families | **Differ between the versions.** 0.9.2 exposes exactly the ten frozen v1 families (`nginx_markdown_build_info`, `nginx_markdown_conversion_attempts_total`, `nginx_markdown_conversion_deliveries_total`, `nginx_markdown_conversion_duration_seconds`, `nginx_markdown_decompression_events_total`, `nginx_markdown_input_bytes_total`, `nginx_markdown_output_bytes_total`, `nginx_markdown_requests_total`, `nginx_markdown_streaming_events_total`, `nginx_markdown_conversion_peak_memory_bytes`). The 0.9.1 binary re-emits the legacy surface it shipped with: per-path families (`per_path_conversions_total`, `per_path_overflow_total`, …), shadow metrics, profile/passthrough/decision families, and the debug/perf families removed in 0.9.2 (see `docs/guides/prometheus-metrics.md`). Renamed families include `conversions_total` → `conversion_attempts_total`/`conversion_deliveries_total`, `decompressions_total` → `decompression_events_total`, and `streaming_failure_total` → `streaming_events_total` labels. |
 
 After rollback, validate every dashboard and alert that consumes the
-`/markdown-metrics` endpoint: 0.9.2 family names and label sets do not exist
-under the 0.9.1 binary, and the 0.9.1 legacy families reappear. Queries that
-reference removed or renamed families must update their alert rules, and
-operators must re-test the alerts against the downgraded binary before
-they consider the rollback complete.
+`/markdown-metrics` endpoint. The 0.9.1 binary does not expose 0.9.2 family names
+or label sets. The 0.9.1 legacy families reappear. Operators must update the
+alert rules for queries that reference removed or renamed families. They must
+re-test the alerts against the downgraded binary before they consider the
+rollback complete.
 
 Metric counters are **not reset** on a graceful reload (`nginx -s reload`
 signals a same-version HUP). They continue accumulating from their current
 values under the downgraded module. A full NGINX stop and subsequent start
-(the quit → swap → start procedure used by this rollback guide) resets
-shared-memory counters, so delta calculations must establish a new baseline
-after the rollback restart. A graceful reload preserves them.
+resets shared-memory counters. This guide uses that procedure: quit → swap →
+start. Therefore, delta calculations must establish a new baseline after the
+rollback restart. A graceful reload preserves them.
 
 ---
 

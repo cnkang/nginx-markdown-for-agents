@@ -16,8 +16,8 @@ third-party C consumers a supported product surface.
 ## v0.9.2 bundled boundary
 
 v0.9.1's ABI version **1** is historical. The 0.9.2 breaking surface update
-advances the bundled boundary to ABI version **3** (the pre-LTS convergence
-bumped 2 → 3 when it removed the dynconf subsystem and custom selectors).
+advances the bundled boundary to ABI version **3**. The pre-LTS convergence
+bumped 2 → 3 when it removed the dynconf subsystem and custom selectors.
 The earlier reset:
 
 - removes the unimplemented MDX and Org-mode flavor discriminants,
@@ -82,19 +82,19 @@ stays unchanged:
 NGINX startup comparison is the authoritative value enforcement.
 
 Increment `MARKDOWN_ABI_VERSION` whenever a shared struct changes size or
-layout (including a tail-field append), a field gets removed/reordered or changes
-type, an enum representation changes, an export gets removed/changed, or any
-other change makes a C object built against the previous header unsafe or
-semantically invalid.
+layout, including a tail-field append. The same rule applies to field removal,
+reordering or type changes, enum representation changes, and export removals
+or changes. It also applies to any other change that makes a C object built
+against the previous header unsafe or semantically invalid.
 
 ## Compatibility policy
 
 ### Before v1.0
 
 0.9.2 is the final planned pre-v1 breaking boundary. Any further incompatible
-change must be release-noted, increment `MARKDOWN_ABI_VERSION`, and update all
-Rust definitions, C consumers, headers, layout assertions, tests, and operator
-diagnostics in one change.
+change must have a release note and increment `MARKDOWN_ABI_VERSION`. The same
+change must update all Rust definitions, C consumers, headers, layout
+assertions, tests, and operator diagnostics.
 
 ### v1.0 and later
 

@@ -240,7 +240,10 @@ budget model.
    markdown_auto_decompress on;           # default
    markdown_limits decompressed_size=20m decompression_ratio=100;
    ```
-   Fallback for cases where upstream forces compression and you cannot or do not want to modify proxy configuration. Handles all three formats. Slightly higher overhead than `gunzip` because it operates inside the module's conversion path.
+   This fallback covers forced upstream compression. Use it if you cannot
+   or do not want to modify proxy configuration. Handles all three formats.
+   Slightly higher overhead than `gunzip` because it operates inside the
+   module's conversion path.
 
 **When to prefer `gunzip` over built-in decompression**: If you only need gzip support, prefer `gunzip on` + `markdown_auto_decompress off`. This applies when `gunzip` is already compiled into your NGINX build. It gives lower per-request overhead. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
 

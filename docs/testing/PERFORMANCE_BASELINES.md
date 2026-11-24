@@ -27,12 +27,12 @@ This file replaces the previous placeholder template with real local baseline da
 
 Canonical module baselines separate measured truth from conservatively
 normalized performance thresholds. You must copy these fields verbatim from
-the real canonical run: `streaming_path_hits`,
-`fullbuffer_path_hits`, `streaming_requests_total`,
-`precommit_failopen_total`, `decompression_streaming_total`,
-`decompression_fullbuffer_total`,
-`copied_output_total`, `baseline_rss_bytes`, `peak_rss_bytes`, `input_bytes`,
-scenario status and metadata, platform, load generator, and NGINX version.
+the real canonical run: `streaming_path_hits`, `fullbuffer_path_hits`,
+`streaming_requests_total`, `precommit_failopen_total`,
+`decompression_streaming_total`, `decompression_fullbuffer_total`,
+`copied_output_total`, `baseline_rss_bytes`, `peak_rss_bytes`, and `input_bytes`.
+You must also copy the scenario status and metadata, platform, load generator,
+and NGINX version verbatim from that run.
 
 For long-lived release thresholds, RPS may round downward or lower and
 latency/TTFB may round upward or raise. RPS must not increase, latency/TTFB must
@@ -81,8 +81,8 @@ empty-body digest is the SHA-256 of zero bytes).
 It validates the complete response-correctness schema (`http_status`, normalized
 `headers`, content metadata, body metadata, correctness markers, verdict,
 failure reason, and artifact names). It parses the final HTTP response block
-from each retained `.headers` artifact and requires the parsed status, headers,
-content type, and content encoding to match the probe JSON. The finalized
+from each retained `.headers` artifact. The parsed status, headers, content type,
+and content encoding must match the probe JSON. The finalized
 `response_correctness` object must then match each probe object exactly before
 uploading canonical evidence. The workflow retains canonical artifacts for 30
 days for release audit review.
@@ -303,9 +303,9 @@ Memory peak values in this document come from `tools/perf/memory_observer.sh`. T
 
 ### Linux — `os_reported_peak`
 
-On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` and stores the
+On Linux, the observer reads `VmHWM` from `/proc/<pid>/status`. It stores the
 last successfully read value **before the target process exits or the OS reaps
-it**: once the status file becomes unreadable (process gone), the observer
+it**. Once the status file becomes unreadable (process gone), the observer
 reports that stored sample as `os_reported_peak`. `VmHWM` is the kernel-tracked
 high-water mark for resident set size over the entire process lifetime. The
 entry disappears once the OS reaps the process. The observer reports the last
@@ -314,9 +314,9 @@ polls `VmRSS` during the run as a fallback when `VmHWM` cannot be read at exit
 (the caller has already reaped the process). When the observer uses the
 fallback, the reported value is the last successfully sampled `VmRSS` reading.
 
-The last observed value, not an exact kernel-tracked peak (exactness applies
-only when the final allocation is known to precede that successful read and the
-`VmHWM` read succeeded).
+The observer reports the last observed value, not necessarily the exact
+kernel-tracked peak. The value is exact only if the `VmHWM` read succeeded
+and the final allocation is known to precede that read.
 
 ### macOS — `sampled_peak`
 
@@ -355,14 +355,14 @@ archival run used the exact implementation commit `9734d12e`, NGINX 1.30.4, Rust
 document. The 2026-07-31 native Linux (NGINX 1.24.0) record is the canonical
 source of truth for release baseline claims.
 
-The archival 1000-request run completed with zero failed or non-2xx requests,
-zero pre-commit fail-open events, 1030 streaming decompressions (including
-warm-up and probes), and byte-complete Markdown output. The retained raw report
-at `perf/baselines/module-baseline-brotli-091-raw.json` records the response
-status, normalized headers, body size and SHA-256, heading/tail checks, and curl
-exit status. Docker ran the x86_64 environment under host emulation, so latency
-and throughput are conservative portability evidence rather than a native
-production-capacity claim.
+The archival 1000-request run completed with zero failed or non-2xx requests
+and zero pre-commit fail-open events. It recorded 1030 streaming decompressions
+(including warm-up and probes) and produced byte-complete Markdown output.
+The retained raw report at `perf/baselines/module-baseline-brotli-091-raw.json`
+records the response status, normalized headers, body size and SHA-256,
+heading/tail checks, and curl exit status. Docker ran the x86_64 environment
+under host emulation, so latency and throughput are conservative portability
+evidence rather than a native production-capacity claim.
 
 | Metric | Recorded value |
 |--------|---------------:|
@@ -384,11 +384,11 @@ production-capacity claim.
 - `precommit_failopen_total` — pre-commit fail-open count (must be zero in canonical baseline)
 - `peak_rss_bytes` / `baseline_rss_bytes` — memory regression evidence
 
-The release gate requires this completed scenario, validates its metadata and
-real path counters, rejects missing output or excessive fail-open evidence, and
-evaluates latency and memory against the recorded baseline. A direct Brotli
-full-buffer comparison was not part of this retained run. These data do not
-claim a measured relative speedup.
+The release gate requires this completed scenario and validates its metadata
+and real path counters. It rejects missing output or excessive fail-open
+evidence. It evaluates latency and memory against the recorded baseline.
+A direct Brotli full-buffer comparison was not part of this retained run.
+These data do not claim a measured relative speedup.
 
 ## Next Actions (Data-Driven)
 

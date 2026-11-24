@@ -21,10 +21,10 @@ Required:
   budget field already exists (for example charset sniff bytes, stack bytes,
   output buffer bytes). Thread budget values through constructors and enforce
   them at the runtime write/check site.
-- Budget guard helper APIs and production enforcement must not drift: if
-  helper methods exist for stage checks, production code should call them, if
-  a helper is not part of production enforcement, remove it in the same change
-  set. Avoid parallel inline checks and helper checks that can diverge.
+- Budget guard helper APIs and production enforcement must not drift.
+  If helper methods exist for stage checks, production code should call them.
+  If a helper is not part of production enforcement, remove it in the same
+  change set. Avoid parallel inline checks and helper checks that can diverge.
 - Never apply hidden floor/ceiling behavior that weakens a configured budget
   (for example enforcing a minimum depth that exceeds `state_stack` for small
   budgets) unless explicitly documented in spec and tested as intended behavior.
@@ -52,15 +52,16 @@ Required:
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`
   or `ngx_pfree`.
 -  **Generalized pool-vs-heap rule**: Any buffer that is independently
-  allocated, resized, or freed during request processing — not only
-  `ctx->buffer.data` but also streaming decompression workspaces (for example
-  zlib `finish()` output buffers, `apply_limits` temporary buffers,
-  buffer-expansion scratch space) — MUST use `ngx_alloc` / `ngx_free`.
-  Pool-allocating such a buffer and later calling `ngx_free` on it counts as
-  undefined behavior: `ngx_free` calls the system `free()`, which expects a heap
-  pointer from `malloc`/`ngx_alloc`, not a pool-internal pointer from
-  `ngx_palloc`/`ngx_pcalloc`. Conversely, a buffer allocated with `ngx_alloc`
-  must never free through `ngx_pfree` — use `ngx_free` exclusively.
+  allocated, resized, or freed during request processing MUST use `ngx_alloc`
+  / `ngx_free`. This includes `ctx->buffer.data` and streaming decompression
+  workspaces. Examples of such workspaces include zlib `finish()` output
+  buffers, `apply_limits` temporary buffers, and buffer-expansion scratch
+  space. Pool-allocating such a buffer and later calling `ngx_free` on it
+  counts as undefined behavior. `ngx_free` calls the system `free()`.
+  That function expects a heap pointer from `malloc`/`ngx_alloc`, not a
+  pool-internal pointer from `ngx_palloc`/`ngx_pcalloc`. Conversely, a buffer
+  allocated with `ngx_alloc` must never free through `ngx_pfree` — use
+  `ngx_free` exclusively.
 -  **Fixed-size pool buffers**: a buffer allocated once from the request pool
   with `ngx_pnalloc`/`ngx_pcalloc` and never resized or independently freed
   remains valid until pool teardown. It needs no independent free at all. Only

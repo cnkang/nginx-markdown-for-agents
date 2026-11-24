@@ -44,29 +44,30 @@ compressed response.
 Full-buffer mode computes an ETag from the complete Markdown output and supports
 `If-None-Match` / `If-Modified-Since` for 304 responses. For a converted
 response, only the Markdown ETag drives the 304 decision, and only when
-`markdown_cache_validation` is `full`: the source
-`Last-Modified` value is deliberately not an input, and the conversion clears
-that header. With `ims_only` a converted response never produces a 304 through
-the transformed representation, and `off` disables conditional handling for
-it. Source `Last-Modified` / `If-Modified-Since` validation therefore
-applies to pass-through responses only. Streaming mode commits
-the response headers before the full output is available, so ETag generation
-and `If-None-Match`-based conditional validation are not possible.
+`markdown_cache_validation` is `full`. The conversion deliberately excludes the
+source `Last-Modified` value from the decision and clears that header. With
+`ims_only` a converted response never produces a 304 through the transformed
+representation, and `off` disables conditional handling for it. Source
+`Last-Modified` / `If-Modified-Since` validation therefore applies to
+pass-through responses only. Streaming mode commits the response headers
+before the full output is available, so ETag generation and
+`If-None-Match`-based conditional validation are not possible.
 
 Only ETag validation requires full buffering. With `markdown_cache_validation
-ims_only`, streaming stays compatible with pass-through conditional handling:
-the module forwards the upstream `Last-Modified` for responses it does not
-convert, and NGINX's standard `If-Modified-Since` handling decides those. A
+ims_only`, streaming stays compatible with pass-through conditional handling.
+The module forwards the upstream `Last-Modified` for responses it does not
+convert. NGINX's standard `If-Modified-Since` handling decides those requests. A
 converted streaming response is different: the stream commit clears the upstream
 `Last-Modified`, so no source-IMS 304 can apply to it. The mode therefore never
 forces the full-buffer path. It never produces a 304 for converted content.
 
-**Known constraint (user-confirmed):** the same URL can therefore
-yield an ETag when the full-buffer path serves it and no ETag when the
-streaming path does, because a streaming response commits its headers before
-the converted body exists. The trigger is the selected path, not a response
-size: `markdown_streaming off`, a hard blocker, or an ineligible response keeps
-strong validation, while `auto` or `force` that actually streams gives it up.
+**Known constraint (user-confirmed):** the same URL can yield an ETag on the
+full-buffer path and no ETag on the streaming path. A streaming response
+commits its headers before the converted body exists. The selected path, not
+response size, determines whether strong validation is available.
+`markdown_streaming off`, a hard blocker, or an ineligible response keeps
+strong validation. With `auto` or `force`, a response that actually streams
+gives up strong validation.
 This is an accepted trade-off of streaming header commitment. A deferred
 header commit is out of scope for 0.9.2.
 
@@ -80,7 +81,7 @@ error status and do not pass through the original body. `status N` uses that
 explicit status policy.
 Errors that occur after headers have already been sent (post-commit) cannot
 roll back, and the outcome depends on whether a safe finish is possible.
-When a later gzip member fails, the module can still finish safely: it
+When a later gzip member fails, the module can still finish safely. It
 completes the remaining Markdown, preserving earlier decompressed output and
 appending the Markdown closing bytes. When a safe finish is not possible,
 the module aborts the conversion without replaying output, and the client
@@ -122,10 +123,10 @@ You must write `auto` explicitly to opt in.
 The hard gates apply to every policy: HEAD requests, 304 responses, full
 conditional validation, excluded content types, and front matter
 (`markdown_front_matter on` routes to full-buffer). The streaming memory budget
-is not a selection gate: the module enforces it while streaming runs, and a response
-that exceeds it follows the configured error handling rather than being
-re-routed. No size threshold and no internal candidate boundary takes part in
-path selection.
+is not a selection gate. The module enforces it while streaming runs. If a
+response exceeds it, the module follows the configured error handling rather
+than routing the response to another path. No size threshold and no internal
+candidate boundary takes part in path selection.
 
 ### GFM constructs and the streaming path
 

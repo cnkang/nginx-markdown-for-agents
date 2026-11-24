@@ -79,10 +79,10 @@ The frozen event model is:
 3. A successful attempt produces at most one request-level successful delivery.
 4. The diagnostics in-flight counter returns to zero after quiescence.
 
-Therefore, after the system is quiescent (no in-flight requests. The counters
-have stopped advancing), the conservation equations hold on **deltas measured
-from one shared counter baseline** taken before the observation window (for
-example the previous scrape):
+The system is quiescent when no requests are in flight and the counters have
+stopped advancing. At quiescence, the conservation equations hold on **deltas
+measured from one shared counter baseline**. Use a baseline from before the
+observation window, for example the previous scrape:
 
 ```text
 delta(sum(requests_total)) == requests entering the decision chain during the window
@@ -99,9 +99,9 @@ instance.
 Counters persist across graceful reloads (`nginx -s reload` keeps the
 existing shared-memory counters) **only while the metrics zone size stays
 unchanged**. Changing `markdown_metrics_shm_size` makes NGINX recreate the
-shared-memory zone on the next reload (the old segment unmaps and a new
-one replaces it), which resets all counters to zero and invalidates any
-baseline taken before the change. Treat a `shm_size` change like a full
+shared-memory zone on the next reload. The old segment unmaps and a new one
+replaces it. This resets all counters to zero and invalidates any baseline
+from before the change. Treat a `shm_size` change like a full
 restart: establish a new baseline after the reload. After any full restart,
 establish a new baseline before
 computing deltas so the comparison interval never spans the reset.
@@ -125,11 +125,12 @@ Keep the endpoint on a management listener or behind an internal access
 policy. Do not expose it directly to the public network.
 
 The metrics endpoint accepts only loopback clients (`allow 127.0.0.1; allow ::1;
-deny all;`). The `targets: ['127.0.0.1:80']` example works only when Prometheus
-shares NGINX's network namespace (same host or same pod). For remote or
-separately containerized Prometheus, use a local agent, a sidecar, or a loopback
-relay that forwards to the management listener instead of changing the
-endpoint's loopback restriction.
+deny all;`). The
+`targets: ['127.0.0.1:80']` example works only when Prometheus shares NGINX's
+network namespace (same host or same pod). For remote or separately
+containerized Prometheus, keep the endpoint's loopback restriction. Use a
+local agent, a sidecar, or a loopback relay that forwards to the management
+listener.
 
 ## Verify the contract
 
