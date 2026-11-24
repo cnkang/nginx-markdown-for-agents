@@ -245,7 +245,7 @@ budget model.
    Slightly higher overhead than `gunzip` because it operates inside the
    module's conversion path.
 
-**When to prefer `gunzip` over built-in decompression**: If you only need gzip support, prefer `gunzip on` + `markdown_auto_decompress off`. This applies when `gunzip` is already compiled into your NGINX build. It gives lower per-request overhead. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
+**When to prefer `gunzip` over built-in decompression**: If you only need gzip support, prefer `gunzip on` + `markdown_auto_decompress off`. This applies when `gunzip` is already compiled into your NGINX build. It gives lower per-request overhead. Note that `gunzip` decompresses only for clients that do not advertise `gzip` support. A Markdown client that sends `Accept-Encoding: gzip` still receives the compressed response, and the module passes it through without conversion. Such clients need `markdown_auto_decompress on`. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
 
 For operational guidance, see [Operations Guide](guides/OPERATIONS.md).
 

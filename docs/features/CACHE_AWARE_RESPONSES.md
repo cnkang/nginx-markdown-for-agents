@@ -153,7 +153,7 @@ location /docs/ {
   validate the transformed representation. No Markdown ETag exists for
   revalidation either.
   The module clears the source `Last-Modified` and returns a fresh 200 with a
-  full body.
+  full body for a converted GET response.
 - `full`: Support Markdown-variant `If-None-Match` (ETag). Converted
   responses use their Markdown ETag only. Source `If-Modified-Since` does not
   validate the transformed body.

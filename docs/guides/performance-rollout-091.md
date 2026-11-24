@@ -260,9 +260,11 @@ Streaming decompression requires ALL FOUR conditions to be met:
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
 changes the streaming engine selection. The `balanced` profile uses
 `streaming_policy: auto` (threshold-based), and `strict_cache` forces
-`streaming_policy: off`. Neither change guarantees condition (2) for all
-requests. As a result, the module automatically disables streaming
-decompression for requests that no longer select the streaming path.
+`streaming_policy: off`. Neither `balanced` nor profile removal guarantees
+condition (2) for all requests. Use `strict_cache` when the goal is to
+disable streaming decompression for every request. For the remaining
+profiles, the module automatically disables streaming decompression for
+requests that no longer select the streaming path.
 
 Setting `auto_decompress off` directly breaks condition (1), disabling all
 decompression routing (compressed responses pass through unconverted).

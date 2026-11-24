@@ -149,8 +149,8 @@ Required:
   justification in the detector.
 
 Verification:
-- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree audit.
-  Blocking harness gate.
+- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree
+  audit. It is a blocking harness gate.
 - `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
   mode wired into `.pre-commit-config.yaml`.
 

@@ -181,11 +181,10 @@ headers, Markdown content type, and empty content encoding must match the probe
 JSON. It then requires exact finalized/probe `response_correctness` object
 equality and enforces strict boolean/integer tail and curl fields before
 running the performance evidence and release gates. The canonical upload
-happens only after those checks pass and contains the finalized JSON,
-raw JSON.
-
-This probe directory. Canonical artifacts stay retained for 30 days.
-Failure-only debug artifacts use the shorter diagnostic retention period.
+happens only after those checks pass and contains the finalized JSON, the
+raw JSON, and the probe directory. Canonical artifacts stay retained for 30
+days. Failure-only debug artifacts use the shorter diagnostic retention
+period.
 
 The former `historical_audit_exception` stays only for historical
 validator coverage and is not used by the active release baseline. Future

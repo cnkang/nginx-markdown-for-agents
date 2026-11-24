@@ -109,7 +109,8 @@ run_case || rc=$?
   none are. The gate must cover **all** prohibited regex forms: the PCRE
   character classes `\s`, `\d`, `\w` and the BRE-only grouping syntax
   `\(...\)`. Check **any** line that feeds a regex-capable command or a regex
-  variable assignment, not only literal `grep`/`sed`/`awk` lines. Check
+  variable assignment, not only literal `grep`/`sed`/`awk`/`expr` lines. The
+  POSIX `expr` regular-expression operand is regex-capable. Check
   **arbitrary variable assignments** whose value later feeds a regex-capable
   command (for example `needle=...` assigned before `grep -E "$needle"`).
   Do not restrict this check to variables named `pattern=` or `regex=`.

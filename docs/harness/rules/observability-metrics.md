@@ -133,7 +133,10 @@ Required:
   consumer must accept **both** names with a fallback chain. For example, a
   Rust benchmark binary can emit `html_bytes` while a Python evidence
   generator reads `input_bytes`. An example fallback chain is
-  `tier_data.get("html_bytes") or tier_data.get("input_bytes")`.
+  `tier_data.get("html_bytes", tier_data.get("input_bytes"))`.
+  The chain keeps an authoritative `html_bytes` value of zero. A truthiness
+  test with `or` would discard that zero and fall through to
+  `input_bytes`.
   This is the consumer's responsibility. The producer's key name is the source
   of truth.
 - **When the harness uses combined reports** (for example `--engine both` produces a

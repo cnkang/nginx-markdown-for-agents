@@ -58,7 +58,9 @@ module configuration. The supported default path uses the markdown filter's own
 bounded decompressor before conversion. It does not depend on the optional
 `gunzip` filter. When operators configure an external decompressor, they must
 verify its effective position for that NGINX build and set
-`markdown_auto_decompress off`.
+`markdown_auto_decompress off`. An external `gunzip` filter also decompresses
+only for clients that do not advertise `gzip`. Gzip-capable Markdown clients
+still receive compressed input, which stays unconverted.
 
 The standard decompression/compression registration order is `gzip` before
 `gunzip`. Because each filter prepends itself, `gunzip` runs before `gzip` at
