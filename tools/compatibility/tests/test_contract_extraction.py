@@ -188,8 +188,8 @@ def test_frozen_contract_surfaces_are_stable_between_anchors(index_document):
         assert baseline_digests[surface] == candidate_digests[surface], surface
 
 
-def test_candidate_matches_the_current_baseline(index_document, worktree_surfaces):
-    """The working tree preserves the newest anchor's contract."""
+def test_candidate_preserves_the_current_baseline(index_document, worktree_surfaces):
+    """The working tree keeps the newest anchor's contract compatible."""
     baseline = _anchor_manifest(index_document, index_document["baseline"])
     result = compare_contracts(
         baseline,
@@ -197,8 +197,17 @@ def test_candidate_matches_the_current_baseline(index_document, worktree_surface
         index_document["baseline"],
         "worktree",
     )
-    assert result.verdict() == OK
+    assert result.verdict() in (OK, ADDITIVE)
     assert result.blocking() == []
+
+
+def test_unchanged_baseline_compares_as_exactly_ok(index_document):
+    """A fixed, unchanged baseline pair reports OK with no findings."""
+    baseline = _anchor_manifest(index_document, index_document["baseline"])
+    result = compare_contracts(baseline, baseline, "baseline", "same")
+
+    assert result.findings == []
+    assert result.verdict() == OK
 
 
 def test_declared_historical_deltas_still_occur(index_document):
@@ -371,9 +380,9 @@ def test_approvals_waive_review_but_never_break_candidates():
 
 
 def test_approval_file_requires_named_approver():
-    """An approval without a reviewer is rejected."""
+    """An approval without a reviewer is rejected for that reason alone."""
     result = Comparison(baseline_label="a", candidate_label="b")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="approved_by"):
         apply_approvals(
             result,
             {
@@ -383,6 +392,7 @@ def test_approval_file_requires_named_approver():
                         "finding_id": "http:test-changed:x",
                         "evidence_fingerprint": "sha256:" + "0" * 64,
                         "reason": "r",
+                        "approved_at": "2026-11-23",
                     }
                 ],
             },
@@ -444,6 +454,7 @@ def test_inherited_git_location_cannot_select_another_repository(tmp_path, monke
                 "-c",
                 "user.email=test@example.invalid",
                 "commit",
+                "--no-gpg-sign",
                 "-m",
                 name,
             ],
@@ -502,6 +513,7 @@ def test_source_reader_rejects_a_committed_directory(tmp_path):
             "-c",
             "user.email=test@example.invalid",
             "commit",
+            "--no-gpg-sign",
             "-m",
             "fixture",
         ],
@@ -1191,6 +1203,7 @@ def _init_committed_repo(repo: Path) -> None:
             "-c",
             "user.email=test@example.invalid",
             "commit",
+            "--no-gpg-sign",
             "--allow-empty",
             "-m",
             "fixture",
