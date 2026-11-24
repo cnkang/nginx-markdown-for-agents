@@ -331,8 +331,8 @@ make harness-check
 ```
 
 After a successful release preflight, a tag for the same full commit SHA can
-reuse the fuzz and short-soak qualifications after validating their source run,
-artifact, attestation, and records. Package builds, compatibility evidence, RC
+reuse the fuzz and short-soak qualifications. The gate first validates the
+source run, artifact, attestation, and records. Package builds, compatibility evidence, RC
 and performance gates still run. Missing or mismatched evidence falls back to
 the long checks. See the [qualification reuse guide](docs/guides/RELEASE-QUALIFICATION-REUSE.md).
 

@@ -676,9 +676,9 @@ http {
 
 Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want a narrowly selected set of wildcard Accept values (for
-example `text/*`) to trigger conversion, keep the map and set
-`markdown_accept force` in that scope:
+You can later select a narrow set of wildcard Accept values, for example
+`text/*`, to trigger conversion. Keep the map and set `markdown_accept force`
+in that scope:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -1411,17 +1411,17 @@ When a trigger fires:
 
 This section is the streaming-specific supplement folded in from the former
 Streaming Rollout Cookbook. It assumes the general stages and observation
-guidance above. It adds the verification-request, go/no-go, and emergency
-rollback signals specific to the 0.9.2 frozen streaming surface
-(`markdown_streaming off|auto|force`, bounded streaming buffer, and the
-streaming counters).
+guidance above. It adds three signal groups for the 0.9.2 frozen streaming
+surface: verification-request, go/no-go, and emergency rollback. The surface
+covers `markdown_streaming off|auto|force`, the bounded streaming buffer, and
+the streaming counters.
 
 ### Streaming baseline
 
 Keep `markdown_error_policy pass` during the initial streaming rollout so
 conversion errors that occur before headers commit can preserve the upstream
 response. After NGINX commits headers or converted bytes, the original HTML
-is no longer replayable, and a later failure follows the safe-finish/abort
+is no longer replayable. A later failure follows the safe-finish/abort
 contract and may leave the client with a truncated Markdown response. Use
 `markdown_streaming force` only for paths whose response size, cache
 requirements, and compressed encodings have completed testing.
@@ -1474,10 +1474,13 @@ curl -fsS -H 'Accept: application/json' \
 4. Enable one low-traffic production path.
 5. Expand only after the counters and logs remain stable.
 
-For each stage, record `nginx_markdown_requests_total` by `outcome`, `stage`,
-and `reason`, conversion attempts and deliveries by `engine`, streaming
-transitions by `transition`, decompression events by `encoding`, `outcome`,
-and `reason`, plus the diagnostics `configuration.effective` object.
+For each stage, record these signals:
+
+- `nginx_markdown_requests_total` by `outcome`, `stage`, and `reason`
+- conversion attempts and deliveries by `engine`
+- streaming transitions by `transition`
+- decompression events by `encoding`, `outcome`, and `reason`
+- the diagnostics `configuration.effective` object
 
 ### Streaming verification requests
 
@@ -1494,10 +1497,11 @@ The expected converted response has `Content-Type: text/markdown` and valid
 Markdown output.
 
 Measure one known streaming-eligible request per before/after snapshot pair.
-The diagnostics/decision log confirms eligibility (the request must
-carry `event=engine_streaming`), not assumed from `force` alone, which may
-still fall back to full-buffer for hard incompatibilities (for example
-build-disabled streaming decoders or excluded content types).
+The diagnostics/decision log confirms eligibility: the request must
+carry `event=engine_streaming`. Do not infer eligibility from `force` alone.
+A forced request can still fall back to full-buffer for hard
+incompatibilities, for example build-disabled streaming decoders or excluded
+content types.
 
 The metrics endpoint runs on the NGINX host itself, so target the loopback
 address for snapshot capture:
@@ -1516,17 +1520,18 @@ curl --fail-with-body -sS -H 'Accept: text/plain; version=0.0.4' \
 Assert that `nginx_markdown_conversion_deliveries_total{engine="streaming"}`
 increases by exactly one between the two snapshots for that single request.
 **This assertion is valid only when the instance has no concurrent traffic
-during the measurement window** — no other conversion requests (including
-scheduled crawlers, health probes, or other tenants on a shared instance). With
-concurrent traffic, the cumulative counter cannot attribute deliveries to this
-request. Use request-correlated evidence instead: issue the probe on a **unique
-path** — embed the random token as a path segment (for example `/probe/<uuid>/`)
-so the decision-log entry's URI field (which records the parsed request path and
-never the query string) identifies exactly this request. A generated request
-header only helps if a decision-log field records it, which the schema does not
-do today. A query parameter is equally unusable because the decision log never
-prints query args. The unique path segment is the correlation key since
-unrelated requests never share it.
+during the measurement window.** Concurrent requests include scheduled
+crawlers, health probes, and other tenants on a shared instance.
+
+With concurrent traffic, the cumulative counter cannot attribute deliveries to
+this request. Use request-correlated evidence instead. Issue the probe on a
+**unique path**, and embed the random token as a path segment (for example
+`/probe/<uuid>/`). The decision-log entry's URI field records the parsed
+request path and never the query string. It identifies exactly this request.
+A generated request header only helps if a decision-log field records it. The
+schema does not do that today. A query parameter is equally unusable because
+the decision log never prints query args. The unique path segment is the
+correlation key: unrelated requests never share it.
 
 Confirm the probe-path decision-log entry for the delivered engine. Note that
 `streaming_events_total` has no URI/path label. It cannot scope to a probe path.
@@ -1571,9 +1576,9 @@ location /docs {
 
 Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload to
 drain. The diagnostics in-flight field returns to zero when the request
-population is quiescent. It is **supplemental evidence only, not proof**: it
-shows that no request is currently mid-conversion, while new requests admitted
-after the reload keep it at or above one while they convert. Treat in-flight
+population is quiescent. It is **supplemental evidence only, not proof**. It
+shows that no request is currently mid-conversion. New requests admitted after
+the reload keep the field at or above one while they convert. Treat in-flight
 values and conversion-counter deltas as supporting signals. The decisive signal
 is the diagnostics/error log showing the pre-reload requests reaching terminal.
 Record a baseline immediately before the reload, then compare **deltas after

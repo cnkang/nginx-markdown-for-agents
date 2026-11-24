@@ -83,8 +83,8 @@ The project uses alternative budget enforcement strategies described below.
 ## 2. Alternative Budget Enforcement Strategy
 
 Since the parser has no mid-parse interruption mechanism, the converter enforces
-resource limits through a combination of **pre-checks** (before parsing)
-and **cooperative checkpoints** (during DOM traversal, after parsing).
+resource limits through **pre-checks** (before parsing). It also uses
+**cooperative checkpoints** during DOM traversal, after parsing.
 
 ### 2.1 Input Size Limit (Pre-parse Gate)
 
@@ -100,17 +100,18 @@ limit are never passed to the Rust converter.
 - **Enforcement point**: C body filter, before FFI call
 
 **Dual-role contract**: `conversion_memory` is not only the C-side input
-admission cap.  The same configured value feeds the Rust converter as
-the full-buffer **generated-output budget** (`output_budget`), and
-transient scratch allocations (normalizer buffers, table containers,
-working-set reservations) also draw against it.  A conversion
-that would grow the generated Markdown or its transient working set past
-this value aborts with a controlled `MemoryLimit` error instead of
-exceeding the configured peak.  `parser_budget` remains the independent
-bound for the Rust parser's DOM/working-set allocations.
+admission cap. The same configured value feeds the Rust converter as
+the full-buffer **generated-output budget** (`output_budget`). Transient
+scratch allocations (normalizer buffers, table containers, working-set
+reservations) also draw against it. A conversion that would grow the
+generated Markdown or its transient working set past this value aborts
+with a controlled `MemoryLimit` error. This prevents exceeding the
+configured peak. `parser_budget` remains the independent bound for the
+Rust parser's DOM/working-set allocations.
 
-This is the primary defense for the full-buffer path: since `parse_document`
-has no interruption mechanism, limiting input size bounds the worst-case parse time. The size gate caps the parse window.
+This is the primary defense for the full-buffer path. `parse_document` has
+no interruption mechanism, so limiting input size bounds the worst-case
+parse time. The size gate caps the parse window.
 
 ### 2.2 Parser Memory Budget
 
@@ -163,7 +164,8 @@ parser-working-set ceiling. It does not accumulate all bytes ever received.
 - **Default**: 10 seconds
 - **Enforcement**: Cooperative timeout via `ConversionContext`
 - **Error code**: `ERROR_PARSE_TIMEOUT` (10)
-- **Reason code**: `timeout` (the public lowercase value shared by the metric label)
+- **Reason code**: `timeout`. This is the public lowercase value shared
+  by the metric label.
 - **Fail-open behavior**: Pass-through original content
 
 #### How It Works
@@ -182,8 +184,8 @@ Instead:
    converter captures `parse_start` immediately before the pre-parse checks. The
    post-parse measurement includes the pre-parse checks themselves plus the
    parse call. It then checks `conversion_timeout` from `conversion_start`.
-   These two parser anchors are intentional: the pre-parse check covers work
-   before parsing, while the post-parse check measures the parse call plus the
+   These two parser anchors are intentional. The pre-parse check covers work
+   before parsing. The post-parse check measures the parse call plus the
    pre-parse checks that ran after the converter captured `parse_start`.
 3. **During DOM traversal**: The converter gives `ConversionContext` the
    remaining overall time as `traversal_budget`. Every 100 DOM nodes,
@@ -195,12 +197,13 @@ Instead:
 
 At both parser-boundary checkpoints, the parser check runs before the overall
 check. If elapsed time exceeds both deadlines at the same checkpoint, the
-converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is call-order
-precedence, not a minimum or an "earlier of" calculation. When operators leave
-`conversion_timeout` unset, the NGINX merge fills the 30-second default. The
-overall deadline stays active. The NGINX merge also fills `parser_timeout` from
-its 10-second default (NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT), so
-parser checkpoints are ACTIVE whenever the merged value is nonzero.
+converter reports the parser timeout (`ERROR_PARSE_TIMEOUT`). This is
+call-order precedence, not a minimum or an "earlier of" calculation. When
+operators leave `conversion_timeout` unset, the NGINX merge fills the
+30-second default. The overall deadline stays active. The NGINX merge also
+fills `parser_timeout` from its 10-second default
+(NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT). Parser checkpoints are
+ACTIVE whenever the merged value is nonzero.
 
 Whether it came from the default or from an explicit `parser_timeout`. An
 explicit nonzero `parser_timeout` overrides the default. (An explicit
@@ -246,7 +249,7 @@ Deep nesting stays bounded by the streaming pipeline's `state_stack` budget:
 - **Effect**: Documents with extreme nesting depth exhaust the state stack
   budget and trigger `BudgetExceeded`. The retained heap bytes of link hrefs,
   image src/alt text, and code-language identifiers count against the same
-  budget, so deeply nested links with large hrefs are also bounded
+  budget. This also bounds deeply nested links with large hrefs.
 - **Enforcement**: `MemoryBudget::check_state_stack()` on every push
 - **Accounting**: the checker charges each stack slot at 64 bytes plus
   `StructuralContext::retained_heap_bytes()` for its variable-sized String
@@ -276,10 +279,10 @@ pub fn increment_and_check(&mut self) -> Result<(), ConversionError> {
 ```
 
 Currently, node count drives **checkpoint frequency** (timeout checks
-every 100 nodes) rather than serving as an independent hard limit. A future version
-may add a configurable `max_node_count` directive if operational experience
-shows that node count is a better predictor of resource exhaustion than
-input size or elapsed time.
+every 100 nodes) rather than serving as an independent hard limit. A future
+version may add a configurable `max_node_count` directive. This may happen
+if operational experience shows that node count predicts resource exhaustion
+better than input size or elapsed time.
 
 ---
 
@@ -329,26 +332,27 @@ Request arrives
 ```
 
 The failure branches use the canonical lowercase codes from
-[DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
+[DECISION_CHAIN.md](DECISION_CHAIN.md). The **primary outcome** is
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`). The **failure category** (`category=`
 field of the decision log) is the coarse `resource_limit` for every
-resource failure — memory budgets, input-size overruns, and deadline
+resource failure. Memory budgets, input-size overruns, and deadline
 timeouts all classify as `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` in
 the C error classification. The **reason** (`reason` label on
 `nginx_markdown_requests_total`, also `reason=` in the decision log)
-is the specific canonical key recorded for that failure:
-`memory_budget_exceeded` for a `conversion_memory` overrun (full-buffer
-and streaming), `budget_exceeded` for a parser working-set failure,
-and `timeout` for a deadline failure. A `conversion_memory` failure
-with a known size (Content-Length present) is an eligibility cap: the
+is the specific canonical key recorded for that failure.
+`memory_budget_exceeded` identifies a `conversion_memory` overrun
+(full-buffer and streaming). `budget_exceeded` identifies a parser
+working-set failure. `timeout` identifies a deadline failure. A
+`conversion_memory` failure
+with a known size (Content-Length present) is an eligibility cap. The
 request becomes `not_eligible` (reason `not_eligible`, category
-omitted) before any FFI conversion attempt, and the module forwards
+omitted) before any FFI conversion attempt. The module forwards
 the original response without evaluating `markdown_error_policy`
 (prechecked passthrough). Only a failure detected while buffering an
 unknown-size body (or any conversion/body-buffer failure) enters the
 error policy. The outcome appears in the `outcome` label. All labels
-are lowercase canonical values — the internal converter constants
+are lowercase canonical values. The internal converter constants
 (`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not the public labels.
 
 ### Limit Priority
@@ -390,7 +394,7 @@ passthrough) regardless of the error policy.
 **Post-commit failures** (after response headers are sent):
 
 These include timeout or budget failures during DOM traversal, output
-normalization, or streaming output production after the module has already
+normalization, or streaming output production. The module may already have
 committed headers and begun sending the converted body. At this point the
 module cannot roll back to the original content because headers are already
 on the wire. The module applies the protocol-safe finish-or-abort contract:
@@ -437,10 +441,10 @@ elapsed, the conversion reports `ERROR_TIMEOUT`. If the parser deadline has
 elapsed, it reports `ERROR_PARSE_TIMEOUT`, including when both deadlines have
 expired. The pre-parse parser check uses `conversion_start`, and the post-parse
 parser check uses `parse_start`. Subsequent traversal and output checks use only
-the remaining overall deadline. At the FFI boundary, a zero `conversion_timeout`
-would disable only the overall deadline, but NGINX config validation rejects an
-explicit zero and the merge fills the 30-second default when operators omit the
-key.
+the remaining overall deadline. At the FFI boundary, a zero
+`conversion_timeout` would disable only the overall deadline. NGINX config
+validation rejects an explicit zero. The merge fills the 30-second default
+when operators omit the key.
 
 A nonzero `parser_timeout` still produces `ERROR_PARSE_TIMEOUT` at a parser
 checkpoint.
@@ -476,8 +480,9 @@ For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
    memory budget enforcement for the full-buffer path.
 
 5. **html5ever fork with abort support**: If operational experience shows
-   that input-size bounding is insufficient, a fork of html5ever with a
-   `TokenSinkResult::Abort` variant could enable true mid-parse cancellation.
+   that input-size bounding is insufficient, a fork of html5ever could add
+   a `TokenSinkResult::Abort` variant. This could enable true mid-parse
+   cancellation.
 
 ---
 

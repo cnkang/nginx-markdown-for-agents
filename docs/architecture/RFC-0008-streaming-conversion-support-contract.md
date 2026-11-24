@@ -19,19 +19,19 @@
 
 The 0.8.0 release implemented RFC-0008, shipping the true streaming contract,
 fallback semantics, and support matrix source of truth as specified in this
-document. The 0.8.1 patch release added further hardening: streaming header
-commit atomicity (Rule 39 rollback semantics), FFI streaming finish invalid
-input handle ownership / cleanup contract, Content-Type OWS / HTAB compliance,
-and full-buffer backpressure NGX_AGAIN resume tail duplication fix.
+document. The 0.8.1 patch release added further hardening. It added streaming
+header commit atomicity (Rule 39 rollback semantics) and FFI streaming finish
+invalid input handle ownership / cleanup contract. It also added Content-Type
+OWS / HTAB compliance and fixed full-buffer backpressure NGX_AGAIN resume tail duplication.
 
 ---
 
 ## 1. True Streaming Definition
 
-In 0.8.0, "true streaming conversion" means: the module, upon receiving an
-upstream response buffer chain in the NGINX response body filter, can parse HTML
-incrementally, maintain conversion state, and produce Markdown output **without
-buffering the entire upstream response body**.
+In 0.8.0, "true streaming conversion" means the module can parse HTML
+incrementally. It does this upon receiving an upstream response buffer chain
+in the NGINX response body filter. It maintains conversion state and produces Markdown output
+**without buffering the entire upstream response body**.
 
 True streaming MUST satisfy ALL of the following conditions simultaneously.
 
@@ -142,7 +142,7 @@ policy other than `auto`/`force` (`off`) is not a streaming candidate: the
 module routes that response to the bounded full-buffer engine. A response
 that matches `markdown_stream_excluded_types` fails eligibility and is never
 converted at all. It never reaches the path selector. Response size is not
-part of the decision and there is no internal candidate boundary: the module
+part of the decision and there is no internal candidate boundary. The module
 treats an unknown-length response and a response with a known `Content-Length`
 alike.
 
@@ -181,8 +181,8 @@ checked in this order:
 
 - a capability fallback (`ERROR_STREAMING_FALLBACK`) returns the response to the
   bounded full-buffer engine regardless of the configured error policy
-- a header-snapshot rollback failure also fails closed regardless of policy: the
-  module aborts the streaming handle and rejects the response, because it can no
+- a header-snapshot rollback failure also fails closed regardless of policy.
+  The module aborts the streaming handle and rejects the response, because it can no
   longer restore the header state
 - every other pre-commit failure follows `markdown_error_policy`: `pass` fails
   open with the original HTML, `fail_closed` rejects the response
@@ -198,8 +198,8 @@ component receives a shared pool, and the value is not one combined total.
 
 The replay window holds raw upstream HTML bytes before the module
 commits to Markdown output. If the streaming parser determines during
-the pre-commit phase that the response is not convertible, the module
-replays these raw bytes and continues as a passthrough.
+the pre-commit phase that the response is not convertible, it replays these
+raw bytes and continues as a passthrough.
 
 This is NOT a full-response buffer. It is the replay portion of the shared
 budget within which the module can still safely fall back to original HTML.
@@ -306,9 +306,9 @@ committed downstream response headers.
 If downstream response headers or Markdown body bytes have already been sent,
 the response has transitioned to committed state (see §3.4).
 
-If the raw replay buffer can no longer cover all upstream bytes read so far
-but the module has not yet committed headers, HTML passthrough fallback is no
-longer available. Full-buffer conversion may run only when a complete body
+If the raw replay buffer can no longer cover all upstream bytes read so far,
+HTML passthrough fallback is no longer available. This applies if the module
+has not yet committed headers. Full-buffer conversion may run only when a complete body
 buffer retains every upstream byte read so far and remains within its
 configured resource limits. Otherwise the module MUST continue safe streaming
 conversion or apply `markdown_error_policy` before committing headers.
@@ -326,7 +326,7 @@ conversion or apply `markdown_error_policy` before committing headers.
 Original-HTML passthrough is available **only while the replay buffer still
 covers every upstream byte read so far** (see §3.1). When replay is
 incomplete and headers are not yet committed, the module MUST NOT pass
-through: it must continue safe streaming conversion or apply
+through. It must continue safe streaming conversion or apply
 `markdown_error_policy fail_closed` before committing headers.
 
 #### `markdown_error_policy fail_closed`
@@ -337,8 +337,8 @@ through: it must continue safe streaming conversion or apply
 
 ### 3.2 Full-buffer Fallback
 
-The following scenarios MUST NOT use streaming and MUST automatically switch to
-full-buffer conversion, provided the response remains within configured
+The following scenarios MUST NOT use streaming. They MUST automatically switch
+to full-buffer conversion, provided the response remains within configured
 full-buffer resource limits (for example `markdown_limits conversion_memory=`
 and the memory budget):
 
@@ -378,11 +378,11 @@ the parser allowance.
   not eligible for conversion is never converted. It is not a fallback case
   either.
 
-If the response would exceed the full-buffer **input-size** limit
-(`markdown_limits conversion_memory=`) **and the size is known at header time**
-(Content-Length present), the eligibility gate rejects it **before any
-conversion attempt**: the module records the request as `not_eligible` (reason
-`not_eligible`) and does **not** increment
+The eligibility gate checks whether the response would exceed the full-buffer
+**input-size** limit (`markdown_limits conversion_memory=`). It rejects that
+response **before any conversion attempt** if its size is known at header time
+(Content-Length present). The module records the request as `not_eligible` (reason
+`not_eligible`). It does **not** increment
 `nginx_markdown_conversion_attempts_total` nor assign `engine="full_buffer"`,
 because conversion never starts. The module forwards the original response
 without evaluating `markdown_error_policy` (prechecked passthrough).
@@ -391,10 +391,10 @@ Generated-output, transient-working-set, and `parser_budget` failures are
 cases go through `markdown_error_policy` like any other conversion failure.
 
 When the size is **not known at header time** (chunked or no
-Content-Length), the request enters the buffering pipeline and the body
-filter enforces the limit. Exceeding it there counts as an attempted
-conversion that failed (increments `conversion_attempts_total` and the
-matching failure counter, then applies `markdown_error_policy`).
+Content-Length), the request enters the buffering pipeline. The body filter
+enforces the limit. Exceeding it there counts as an attempted conversion that
+failed (increments `conversion_attempts_total` and the matching failure
+counter, then applies `markdown_error_policy`).
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 
@@ -482,11 +482,11 @@ If the module selects true streaming:
   `content_length` header where applicable).
 - Chunked downstream follows standard NGINX output behavior.
 - The module MUST NOT generate output-derived ETag before streaming commit.
-- If the module cannot compute the exact Markdown-variant ETag for the
-  response, it MUST remove the upstream ETag from the outgoing headers for
-  this response. The module MUST NOT weaken the upstream ETag (for example
-  by downgrading it to weak semantics) and MUST NOT reuse the upstream HTML
-  validator: any retained ETag must derive from the converted Markdown
+- If the module cannot compute the exact Markdown-variant ETag, it MUST remove
+  the upstream ETag from the outgoing headers for this response. The module MUST
+  NOT weaken the upstream ETag (for example
+  by downgrading it to weak semantics). It MUST NOT reuse the upstream HTML
+  validator. Any retained ETag must derive from the converted Markdown
   bytes, or the validator removes the ETag entirely.
 
 ---

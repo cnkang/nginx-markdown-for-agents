@@ -108,11 +108,12 @@ structures in C.
 
 ### 4. NGINX Stub Compatibility
 
-**Why C:** The C unit test suite runs against a minimal NGINX stub that
+**Why C:** The C unit test suite runs against a minimal NGINX stub. The stub
 provides just enough of the NGINX API surface to exercise the module without a
 full NGINX binary. The stub itself is a C artifact. Tests that validate the
-stub's compatibility with the real NGINX API — or that serve as the minimal
-smoke check that the test harness itself is functional — must remain in C.
+stub's compatibility with the real NGINX API must remain in C. Tests that serve
+as the minimal smoke check that the test harness itself is functional must
+also remain in C.
 
 **Concrete examples:**
 
@@ -129,11 +130,11 @@ smoke check that the test harness itself is functional — must remain in C.
 library. The ABI boundary — the `#[repr(C)]` structs, function signatures, and
 memory ownership contracts defined in `markdown_converter.h` — must validate
 from the C side. This includes verifying that the header compiles
-cleanly, that struct layouts match expectations, and that the C module correctly
-handles all FFI error codes and result fields. The C-compilation requirement
-here covers only `markdown_converter.h` compatibility and the C
-module's handling of FFI error codes and result fields — it does not require
-compiling Rust code from the C side. These checks require C
+cleanly, and that struct layouts match expectations. It also includes verifying
+that the C module correctly handles all FFI error codes and result fields. The
+C-compilation requirement here covers only `markdown_converter.h` compatibility
+and the C module's handling of FFI error codes and result fields. It does not
+require compiling Rust code from the C side. These checks require C
 compilation. Rust cannot express them without a circular dependency.
 
 **Concrete examples:**
@@ -148,8 +149,8 @@ compilation. Rust cannot express them without a circular dependency.
 ### 6. Metrics Internals Tied to C Structures
 
 **Why C:** The metrics subsystem is built on NGINX shared memory zones
-(`ngx_shm_zone_t`), NGINX atomic types (`ngx_atomic_t`), and a C struct
-(`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The frozen
+(`ngx_shm_zone_t`) and NGINX atomic types (`ngx_atomic_t`). It also uses a C
+struct (`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The frozen
 metrics format selection is Prometheus-only, and the endpoint renders that
 Prometheus text directly from the C structures. Testing metrics correctness —
 counter increments, snapshot isolation, Prometheus rendering, and SHM layout
@@ -243,8 +244,8 @@ If the answer to any of these is yes, the test belongs in C.
 
 A test may use the Rust E2E harness when it validates **product/runtime
 behavior**. That is, observable HTTP behavior that the test verifies through
-real HTTP requests and responses against a running NGINX instance, without
-needing to inspect internal C structures.
+real HTTP requests and responses against a running NGINX instance. The test
+does not need to inspect internal C structures.
 
 Ask: can the test state entirely as:
 
