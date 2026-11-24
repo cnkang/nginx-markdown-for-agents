@@ -32,8 +32,8 @@ its generator.
 
 The active Brotli streaming E2E scenario (`tools/e2e-harness`, scenario
 `brotli-streaming`) and the C unit tests build their compressed payloads in
-memory, so no test reads these files from disk. The set below stays available
-for manual inspection and future fixture-based coverage.
+memory. As a result, no test reads these files from disk. The set below stays
+available for manual inspection and future fixture-based coverage.
 
 ## Regeneration
 

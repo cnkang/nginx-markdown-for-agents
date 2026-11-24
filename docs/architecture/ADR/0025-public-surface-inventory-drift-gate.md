@@ -23,9 +23,9 @@ or invoking a local specification adapter.
 Maintain `docs/harness/public-surface-inventory.json` as the repository-owned
 declaration of the compatibility surfaces that are currently tracked. The
 fail-closed `tools/harness/detect_public_surface_drift.py` extractor reads the
-live C and Rust source metadata, checks the generated FFI header ABI, and
-compares metadata and names for directives, OTel controls, metrics, reason
-codes, and FFI exports.
+live C and Rust source metadata and checks the generated FFI header ABI. It
+also compares metadata and names for directives, OTel controls, metrics,
+reason codes, and FFI exports.
 
 This is a **source metadata and ABI drift gate**, not a runtime behavior
 contract. The extractor reads directive defaults, syntax, status, and migration

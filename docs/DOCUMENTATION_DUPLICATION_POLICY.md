@@ -25,9 +25,9 @@ The repository follows a **single-source documentation policy**.
 2. Update canonical docs in `docs/` directly.
 3. Keep `docs/archive/` for historical notes only (gitignored local archive).
 4. Use tooling checks before finishing documentation changes.
-5. **Current indexes MUST NOT link a historical document as if it were
-   active guidance.** Historical migration guides stay reachable from
-   current guides only as clearly-labeled historical references.
+5. **Current indexes MUST NOT link to historical documents as active
+   guidance**. Historical migration guides remain reachable from current
+   guides only as clearly labeled historical references.
 6. **One canonical document per volatile contract.** Configuration syntax,
    metrics families, schemas, and defaults have exactly one source of truth.
    Other documents link to it.

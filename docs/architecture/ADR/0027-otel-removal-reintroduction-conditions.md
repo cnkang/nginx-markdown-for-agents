@@ -61,15 +61,16 @@ conditions are met:
    (for example `ngx_otel_module`) reaches stable release status, providing
    standardized span context propagation without per-module reimplementation.
 
-2. **Complete feature scope**: The reintroduced implementation must cover at
-   minimum: span creation, W3C context propagation, configurable export
-   endpoint, export timeout, retry with bounded buffering, and graceful
-   degradation on collector unavailability.
+2. **Complete feature scope**: The reintroduced implementation must cover
+   span creation and W3C context propagation at minimum. The minimum scope also
+   includes a configurable export endpoint, export timeout, retry with bounded
+   buffering, and graceful degradation on collector unavailability.
 
-3. **Production validation**: The implementation must pass a minimum 7-day
-   production soak test demonstrating: no memory leaks, no request-path
-   latency regression (p99 < 1ms overhead), graceful behavior under collector
-   outage, and correct span correlation across distributed traces.
+3. **Production validation**: The implementation must pass a production soak
+   test of at least 7 days. The test must show no memory leaks and no
+   request-path latency regression (p99 < 1ms overhead). It must also show
+   graceful behavior under collector outage and correct span correlation across
+   distributed traces.
 
 4. **No request-path blocking**: OTel export must never block the NGINX event
    loop. Subrequest-based export or async buffered export are acceptable.

@@ -73,9 +73,9 @@ Rollback requires only an NGINX configuration edit and a graceful reload. Specif
 The `nginx -s reload` command performs a graceful reload. NGINX re-reads the
 configuration and spawns new worker processes with the updated configuration.
 The new workers handle new connections (and new requests that arrive on them)
-using the updated configuration. Keep-alive connections already open before
-the reload can remain served by the old workers until
-they drain and close, so in-flight requests complete on the old configuration.
+using the updated configuration. The old workers can continue to serve
+keep-alive connections that were open before the reload until they drain and
+close. In-flight requests complete on the old configuration.
 Requests that arrive on those pre-existing keep-alive connections may
 therefore continue to use the previous configuration until the connection
 closes or the old worker exits.
@@ -478,10 +478,10 @@ fi
 
 For Method C (restoring fail-open), trigger a known conversion failure first and
 confirm that the module returns the original HTML. Then verify the
-corresponding decision-log entries after the old workers drain. Limit the
-log inspection to the entries written by the triggering request: record the
-log byte offset before the request and read only the bytes appended after
-it, instead of searching the whole log with a generic tail:
+corresponding decision-log entries after the old workers drain. Limit the log
+inspection to entries from the triggering request. Record the log byte offset
+before the request. Read only the bytes that follow that offset instead of
+searching the whole log with a generic tail:
 
 ```bash
 # Record the offset so verification covers only the triggered request.
@@ -499,8 +499,8 @@ tail -c +"$((LOG_OFFSET + 1))" /var/log/nginx/error.log \
 
 The offset excludes earlier history but does not identify a single request.
 On a host with concurrent Markdown traffic, unrelated requests can satisfy
-the check. Trigger the request on a uniquely named path (for example
-`/known-failing-path/<uuid>`) and match that path in the grep, or
+the check. You can trigger the request on a uniquely named path (for example
+`/known-failing-path/<uuid>`) and match that path in the grep. Alternatively,
 quiesce competing traffic for the duration of the verification.
 
 ### 2. Confirm Metrics Stop Incrementing
@@ -714,7 +714,7 @@ All config-based rollbacks take effect for new requests immediately after
 `nginx -s reload`. In-flight requests complete with their existing
 configuration. Requests that arrive on keep-alive connections already open
 before the reload may continue on the old workers' configuration until those
-connections drain or close (see the reload semantics above).
+connections drain or close. See the reload semantics above.
 
 ---
 

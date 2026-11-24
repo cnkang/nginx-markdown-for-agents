@@ -43,7 +43,12 @@ Each sub-spec records its evaluation as a Markdown table in its completion artif
    covers any failure that could corrupt evidence, break the release artifact
    chain, or violate a hard contract. Consistent with the Go/No-Go template's
    eligibility definition.
-6. The sub-spec is complete **only when all six checkpoints pass** (Requirement 5.2). A single ❌ means the sub-spec is not complete: the owner either fixes the gap and re-evaluates, or escalates only an eligible non-critical, non-safety exception to the Go/No-Go review. The team must not waive critical or safety failures. The team archives the evaluation as part of the 0.4.0 release record (Requirement 5.3).
+6. The sub-spec is complete **only when all six checkpoints pass**
+   (Requirement 5.2). A single ❌ means the sub-spec is not complete. The owner
+   either fixes the gap and re-evaluates or escalates only an eligible
+   non-critical, non-safety exception to the Go/No-Go review. The team must not
+   waive critical or safety failures. The team archives the evaluation as part
+   of the 0.4.0 release record (Requirement 5.3).
 
 ## Document Updates
 

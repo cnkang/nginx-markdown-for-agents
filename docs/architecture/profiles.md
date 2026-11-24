@@ -20,10 +20,10 @@
 
 ## Design Rationale
 
-The module exposes 50+ configuration directives. While this granularity is
-useful for advanced operators, it creates a high-friction onboarding experience
-and increases the risk of invalid combinations (such as enabling full ETag
-generation alongside forced streaming).
+The module exposes 50+ configuration directives. This granularity helps
+advanced operators but makes onboarding harder. It also increases the risk of
+invalid combinations, such as enabling full ETag generation alongside forced
+streaming.
 
 Profiles address this by providing named, tested combinations of defaults that
 cover the most common deployment patterns. A single `markdown_profile` directive

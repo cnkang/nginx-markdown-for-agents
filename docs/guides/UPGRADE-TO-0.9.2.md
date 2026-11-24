@@ -11,11 +11,11 @@
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 0.9.2 is a **breaking release**. The release freezes 20 active directives. The
-seven removed names — `markdown_dynamic_config`, `markdown_dynamic_config_path`,
-`markdown_dynconf_dry_run`, `markdown_prune_selectors`,
-`markdown_prune_protection_selectors`, `markdown_profile`, and
-`markdown_streaming_zero_copy` — are no longer registered, so `nginx -t` fails
-them with NGINX's standard `unknown directive` error, and
+release no longer registers these seven names: `markdown_dynamic_config`,
+`markdown_dynamic_config_path`, `markdown_dynconf_dry_run`,
+`markdown_prune_selectors`, `markdown_prune_protection_selectors`,
+`markdown_profile`, and `markdown_streaming_zero_copy`. As a result, `nginx -t`
+fails with NGINX's standard `unknown directive` error for those names.
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) names the replacement for each. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
 [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
@@ -331,12 +331,12 @@ NGINX, apply the 0.9.2 migration:
 # tree (${NGINX_CONF_DIR}) before the module swap.
 ```
 
-Validate the migrated configuration with the staged 0.9.2 module BEFORE stopping
-NGINX: back up the running module first (see the source-build sequence below),
-then run `nginx -t` against a temporary configuration whose `load_module` entry
-points to the staged `.so`. A plain `sudo nginx -t` would still load the ACTIVE
-(0.9.1) module. It cannot prove the migrated syntax is valid under the 0.9.2
-binary:
+Validate the migrated configuration with the staged 0.9.2 module BEFORE
+stopping NGINX. First, back up the running module (see the source-build
+sequence below). Then run `nginx -t` against a temporary configuration whose
+`load_module` entry points to the staged `.so`. A plain `sudo nginx -t` would
+still load the ACTIVE (0.9.1) module. It cannot prove the migrated syntax is
+valid under the 0.9.2 binary:
 
 ```bash
 STAGED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nginx-0.9.2-staged-XXXXXX")"
@@ -1087,7 +1087,7 @@ replacement.
 | FFI exports | 36 | 38 |
 
 A 0.9.1 module linked against the 0.9.2 archive (or the reverse) fails the
-four-part handshake at preconfiguration: the numeric ABI version, the
+four-part handshake at preconfiguration. The numeric ABI version, the
 generated-header hash, the exported-symbol-set hash, and the struct-layout
 fingerprint must all agree. The failure appears at `nginx -t` and NGINX refuses
 to start, so it never reaches request handling.

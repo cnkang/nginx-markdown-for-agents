@@ -1007,7 +1007,8 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
 
 > If your NGINX uses a custom `--conf-path` or `--modules-path`, replace the default paths below with the values from `nginx -V`.
 
-1. Determine your modules directory from `nginx -V` and verify the module file exists:
+1. Determine your modules directory from `nginx -V`.
+   Verify that the module file exists in that directory.
    ```bash
    # Find the modules path (varies by platform)
    MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')
@@ -1160,7 +1161,8 @@ The user installed a glibc-linked binary on a musl-based system (for example Alp
    ```bash
    apk info musl 2>/dev/null && echo "musl" || echo "not musl"
    ```
-3. Verify the installed module matches your libc by inspecting its dynamic dependencies:
+3. Inspect the installed module's dynamic dependencies.
+   Use them to verify that the module matches your libc.
    ```bash
    # Use the modules path from nginx -V (see SOP 1 step 1 for multi-path probe)
    MODULES_PATH=$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')
@@ -1385,7 +1387,8 @@ The upstream server sends a compressed response (gzip, brotli, or deflate). The 
    ```bash
    curl -sD - -o /dev/null -H "Accept-Encoding: gzip" http://localhost/path/to/page | grep -i content-encoding
    ```
-2. As a workaround, disable upstream compression by stripping the `Accept-Encoding` header in the NGINX proxy configuration:
+2. As a workaround, disable upstream compression.
+   Strip the `Accept-Encoding` header in the NGINX proxy configuration.
    ```nginx
    location / {
        proxy_set_header Accept-Encoding "";

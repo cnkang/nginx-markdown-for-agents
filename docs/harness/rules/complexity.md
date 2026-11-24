@@ -27,7 +27,7 @@ Required:
   The detector is dependency-free and approximates SonarCloud's Python
   cognitive-complexity rule for local harness code.
 - `make complexity-check` runs the local detector over both `tools/harness`
-  and `tools/release/gates`; pass both paths explicitly when invoking the same
+  and `tools/release/gates`. Pass both paths explicitly when invoking the same
   scope directly:
   ```sh
   PYTHONPATH=. python3 tools/harness/detect_python_complexity.py \
@@ -43,9 +43,9 @@ Required:
 
 ### Complexity Check Harness (`make complexity-check`)
 
-A unified complexity check harness runs `lizard` (CCN, function length, parameter
-count) on C, Rust, and Python source, `complexipy` (cognitive complexity) on
-Python tooling, and `shellcheck` on shell scripts.
+A unified complexity check harness runs `lizard` (CCN, function length,
+parameter count) on C, Rust, and Python source. It runs `complexipy` (cognitive
+complexity) on Python tooling and `shellcheck` on shell scripts.
 
 **What it checks:**
 - C: Cyclomatic Complexity (CCN), function length, parameter count
@@ -102,8 +102,8 @@ apt install shellcheck    # Debian/Ubuntu
 
 **Shell note:** Shell scripts get checked with `shellcheck` for static issues
 and maintainability. Cognitive Complexity is not a hard metric for shell
-scripts — there is no reliable tool, and shell scripts in this project are
-primarily orchestration glue, not core logic.
+scripts because no reliable tool measures it for shell. Also, shell scripts in
+this project are primarily orchestration glue, not core logic.
 
 Verification:
 - `make complexity-check`
@@ -114,13 +114,13 @@ Verification:
 (lizard CCN, `make complexity-check`) and SonarCloud use different
 metrics.  Lizard counts cyclomatic complexity per function.  SonarCloud
 additionally reports cognitive complexity and code smells with its own
-per-language thresholds.  The 0.9.2 pre-freeze window remediated several
+per-language thresholds. The 0.9.2 pre-freeze window remediated several
 SonarCloud complexity findings (`e3cbf06b`, `c8c93300`, `8fbf2e7e`,
-`0e32598a`) that the local gate had passed, because nested control flow
-raises cognitive complexity faster than cyclomatic complexity.  The team
-accepts this divergence: SonarCloud cognitive complexity is not locally
-reproducible, and forcing numeric parity would either duplicate Sonar or
-weaken the local gate.  Practical contract: keep local gates clean at
-write time.  Treat SonarCloud complexity findings that arrive later as
-triage items under Rule 21 (fix by extracting helpers, not by
-suppression), and fold any recurring shape back into this rule.
+`0e32598a`) that the local gate had passed. Nested control flow explains the
+difference: it raises cognitive complexity faster than cyclomatic complexity.
+The team accepts this divergence: SonarCloud cognitive complexity is not
+locally reproducible, and forcing numeric parity would either duplicate Sonar
+or weaken the local gate. Practical contract: keep local gates clean at
+write time. Treat SonarCloud complexity findings that arrive later as triage
+items under Rule 21. Fix them by extracting helpers, not by suppression. Fold
+any recurring shape back into this rule.

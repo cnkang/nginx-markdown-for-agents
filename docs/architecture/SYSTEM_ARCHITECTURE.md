@@ -248,17 +248,17 @@ full-buffer and streaming FFI entrypoints.
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `off`. Unset and `off` select bounded
 full-buffer conversion. Explicit `auto` prefers streaming for every response
-that clears the hard compatibility gates (HEAD, 304, full conditional
-validation, excluded content types, and `markdown_front_matter on`, which
-requires the full-buffer engine because the module assembles the front matter
-from the completed metadata set). The module enforces the streaming budget at run time,
-not during selection, and a response that exceeds it follows the configured error
-handling rather than being re-routed. The full-buffer engine is the fallback in
-two cases only: a response that the selection step keeps off the streaming path,
-and a capability fallback while streaming. A response that is not eligible for
-conversion passes through unchanged. The selection follows
-the policy and those gates only: no size threshold takes part in it, and no
-operator-configured or internal candidate boundary exists. The v0.6.x
+that clears the hard compatibility gates. These gates cover HEAD, 304, full
+conditional validation, excluded content types, and `markdown_front_matter on`.
+Front matter requires the full-buffer engine because the module assembles it
+from the completed metadata set. The module enforces the streaming budget at
+run time, not during selection. A response that exceeds the budget follows the
+configured error handling rather than switching paths. The full-buffer engine
+serves as a fallback in only two cases. Selection can keep a response off the
+streaming path, or a capability fallback can occur while streaming. A response
+that is not eligible for conversion passes through unchanged. The selection
+follows the policy and those gates only: no size threshold takes part in it,
+and no operator-configured or internal candidate boundary exists. The v0.6.x
 `markdown_streaming_auto_threshold` directive and the v0.9.2-removed
 `markdown_stream_threshold` directive have no replacement.
 
@@ -276,9 +276,9 @@ that prevent a safe finish abort the response.
 ### Streaming FFI Contract
 The C side passes streaming chunks, EOF state, flush thresholds, and budget
 limits through the streaming converter ABI. Rust reports structured streaming
-events and errors back to C so the module can preserve NGINX return-code
-semantics, apply fallback policy before commit, and update metrics only on the
-correct success or failure path.
+events and errors back to C. This lets the module preserve NGINX return-code
+semantics and apply fallback policy before commit. It also lets the module
+update metrics only on the correct success or failure path.
 
 ### Observability and Release Gate
 The module exposes streaming decisions, fallbacks, and post-commit failures

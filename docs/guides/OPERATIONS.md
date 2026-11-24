@@ -934,11 +934,11 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 Every request that enters the module's decision chain receives a canonical
 reason code that explains the outcome. These reason codes appear in decision
 log entries using the `reason=` field. Prometheus metrics carry a bounded
-`reason` label with ten values, so the log field and the metric label are not
-one-to-one: several reason codes fold into one metric label (for example
-`skipped_accept_reject` counts under `skipped_accept`). Correlate a log entry
-with the `outcome` label, and use the log `reason=` value for the specific
-cause. Streaming path transitions use a separate
+`reason` label with ten values. The log field and the metric label are not
+one-to-one because several reason codes fold into one metric label. For
+example, `skipped_accept_reject` counts under `skipped_accept`. Correlate a
+log entry with the `outcome` label, and use the log `reason=` value for the
+specific cause. Streaming path transitions use a separate
 bounded `event=` field. They are not a second reason-code taxonomy. The
 request-level outcome classifications (`converted`, `failed_open`,
 `failed_closed`, `aborted`, `skipped`) appear in `nginx_markdown_requests_total` as

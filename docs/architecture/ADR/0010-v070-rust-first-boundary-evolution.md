@@ -17,14 +17,14 @@ construction, and reason-code/metrics normalization. These are all pure logic
 with no dependency on NGINX APIs, making them natural candidates for Rust
 ownership.
 
-At the same time, runtime correctness fixes (bounded decompression, replay
-buffer hardening, output ordering) highlighted that the FFI boundary needs
-stronger contracts: explicit struct initialization helpers, CI-enforced header
-drift checks, and layout tests.
+At the same time, runtime correctness fixes highlighted the need for stronger
+FFI boundary contracts. The fixes addressed bounded decompression, replay
+buffer hardening, and output ordering. The contracts need explicit struct
+initialization helpers, CI-enforced header drift checks, and layout tests.
 
-The project must decide whether to continue implementing new pure logic in C
-(closer to NGINX) or adopt a deliberate "Rust-first" strategy for logic that
-does not require NGINX API access.
+The project must decide how to implement new pure logic. One option is to
+continue implementing it in C, closer to NGINX. The alternative is a deliberate
+"Rust-first" strategy for logic that does not require NGINX API access.
 
 ## Decision
 

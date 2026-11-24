@@ -63,9 +63,9 @@ Currently configured platforms:
 3. Include justification in the PR description (for example CI noise analysis,
    workload characteristic change).
 
-To add thresholds for a new platform, add a new key under `platforms`
-matching the platform's `uname`-style identifier (`<os>-<arch>`, for example
-`darwin-arm64` for Apple Silicon macOS).
+To add thresholds for a new platform, add a new key under `platforms`.
+Use the platform's `uname`-style identifier (`<os>-<arch>`), for example
+`darwin-arm64` for Apple Silicon macOS.
 
 ## CI Noise Mitigation
 

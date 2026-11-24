@@ -31,7 +31,7 @@ For background on the existing request lifecycle and buffering model, see:
 
 -  **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
   conversion. `auto` prefers streaming for every response that clears the hard
-  eligibility gates and falls back to bounded full-buffer only when a response
+  eligibility gates. It falls back to bounded full-buffer only when a response
   stays eligible for conversion but cannot stream. A response that is not
   eligible for conversion passes through unchanged. `force` requests streaming
   after the same gates
@@ -72,9 +72,9 @@ eligible for conversion and falls back to bounded full-buffer handling.
 No changes. The module buffers the complete response body, optionally
 decompresses it, resolves conditional requests, then calls `markdown_convert()`
 through FFI. This full-buffer Rust path remains available when the module
-selects full-buffer processing (`markdown_streaming off`), when `auto` decides
-that streaming is not suitable, or when a codec/cache-validation gate requires
-it.
+selects full-buffer processing (`markdown_streaming off`). It also remains
+available when `auto` decides that streaming is not suitable or when a
+codec/cache-validation gate requires it.
 
 ### Active Streaming Path
 
@@ -246,8 +246,8 @@ impl IncrementalConverter {
 
 That interface is a historical record only. No 0.9.2 build defines or links
 it. The same release removed the `llm_adapter` Rust module together with its
-temporary FFI fields `llm_provider` and `chars_per_token_fixed`, so token
-estimation now uses the fixed built-in 4.0 chars/token heuristic.
+temporary FFI fields `llm_provider` and `chars_per_token_fixed`. Token
+estimation therefore uses the fixed built-in 4.0 chars/token heuristic.
 
 ### State Machine
 

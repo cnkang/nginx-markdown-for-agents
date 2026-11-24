@@ -172,15 +172,15 @@ The detector records the declared charset and honors it during decoding.
 `decode_html_to_utf8` in `parser.rs` keeps UTF-8 input borrowed (zero-copy)
 and transcodes any other `encoding_rs`-supported charset (for example
 ISO-8859-1, Windows-1252, Shift_JIS) into owned UTF-8 before HTML parsing.
-Invalid UTF-8 bytes in a UTF-8-declared response, a charset label in the
-Content-Type declaration that no supported encoding matches, or a byte
-sequence invalid for the declared charset make the conversion fail with
-`ConversionError::EncodingError`. The
+Invalid UTF-8 bytes in a UTF-8-declared response cause
+`ConversionError::EncodingError`. Conversion also fails with this error if
+no supported encoding matches the Content-Type charset label. A byte
+sequence invalid for the declared charset also causes this error. The
 configured `markdown_error_policy` then decides whether the request fails
-closed or the module serves the original HTML. An unsupported label in the HTML meta tag does not
-fail the conversion: the cascade skips it and continues. `encoding_rs`
-labels that map to UTF-8 internally (for example `utf8` aliases) stay on the
-borrowed path.
+closed or the module serves the original HTML. An unsupported label in the
+HTML meta tag does not fail the conversion: the cascade skips it and
+continues. `encoding_rs` labels that map to UTF-8 internally (for example
+`utf8` aliases) stay on the borrowed path.
 
 ### Performance Considerations
 
@@ -207,13 +207,13 @@ When the NGINX C module calls the Rust converter:
 ### Content-Type Parameter Parsing
 
 The Content-Type charset parameter parser uses a strict parameter-boundary
-scan: it treats a parameter as the charset declaration only when its name
-equals `charset` (case-insensitive, optional whitespace around `=`, quoted or
-bare value). Names that merely contain `charset` as a substring — for example
-`x-charset`, `notcharset`, or a `charset=` sequence inside another parameter's
-quoted value — never hijack detection because the parser ignores them. When
-the parameter name `charset` appears more than once, the first declaration
-wins.
+scan. It treats a parameter as the charset declaration only when its name
+equals `charset`, ignoring case. The parser accepts optional whitespace
+around `=` and a quoted or bare value. The parser ignores names that merely
+contain `charset` as a substring, such as `x-charset` and `notcharset`. It also
+ignores a `charset=` sequence inside another parameter's quoted value. These
+strings never hijack detection. When the parameter name `charset` appears
+more than once, the first declaration wins.
 
 ### Error Handling
 
@@ -231,13 +231,13 @@ Parsing a body fails in four scenarios:
 Missing or malformed charset parameters fall back down the cascade
 (Content-Type parameter, then HTML meta tag, then UTF-8 default). The cascade
 skips an unsupported label in the HTML meta tag and continues. This UTF-8
-fallback applies only while a usable charset parameter is missing or
-malformed: when the Content-Type declares a charset label that no supported
-encoding matches, the conversion fails with `ConversionError::EncodingError`
-instead of falling back. Charset detection itself never fails: it always
-returns a charset, defaulting to UTF-8. The parser then requires the body
-bytes to be valid for that charset: input that does not decode under the
-declared charset fails the conversion with `ConversionError::EncodingError`.
+fallback applies only when the charset parameter is missing or malformed. If
+no supported encoding matches the Content-Type charset label, conversion
+fails with `ConversionError::EncodingError` instead of falling back. Charset
+detection itself never fails: it always returns a charset, defaulting to
+UTF-8. The parser then requires the body bytes to be valid for that charset.
+Input that does not decode under the declared charset fails the conversion
+with `ConversionError::EncodingError`.
 
 ## Dependencies
 

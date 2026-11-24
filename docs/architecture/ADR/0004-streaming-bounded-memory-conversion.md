@@ -4,11 +4,11 @@
 
 Historical baseline (v0.8.0). The bounded streaming engine described here is
 the active second engine in current releases. See
-[ADR-0011](./0011-true-streaming-contract.md) and the streaming
-configuration guide for the current defaults and policy (`markdown_streaming
-off` by default, so bounded full-buffer stays the engine unless an operator
-writes `markdown_streaming auto` or `force` explicitly, and the per-request
-streaming memory budget is independent of total document size).
+[ADR-0011](./0011-true-streaming-contract.md) and the streaming configuration
+guide for the current defaults and policy. The default is `markdown_streaming
+off`. Therefore, bounded full-buffer stays the engine unless an operator
+writes `markdown_streaming auto` or `force` explicitly. The per-request
+streaming memory budget is independent of total document size.
 
 ## Context (historical — as of the v0.8.0 baseline)
 

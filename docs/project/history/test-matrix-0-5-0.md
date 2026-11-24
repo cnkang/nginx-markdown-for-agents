@@ -46,14 +46,15 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 ## Aggregate Coverage Status
 
-The required coverage set is the complete Cartesian product of the listed
-dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
-conversion engines x 6 conversion paths = 288 tuples. Six of them — the
-Extra-Large full-buffer convert tuples (TM-037, TM-085, TM-133, TM-181, TM-229,
-TM-277) — hit the size-limit rejection path by design: the module rejects inputs
-at or above the conversion ceiling, so this document excludes them from the
-required set. A further 24 full-buffer/fallback tuples are unreachable: fallback
-is a streaming-to-full-buffer transition. A request whose initial engine is
+The complete Cartesian product of the listed dimensions defines the initial
+coverage set. It contains 288 tuples. The calculation is 2 platforms x 3 NGINX
+versions x 4 response size tiers x 2 conversion engines x 6 conversion paths.
+Six tuples hit the size-limit rejection path by design. These are the Extra-Large
+full-buffer convert tuples (TM-037, TM-085, TM-133, TM-181, TM-229, TM-277). The
+module rejects inputs at or above the conversion ceiling. Thus, this document
+excludes those six tuples from the required set. A further 24
+full-buffer/fallback tuples are unreachable: fallback is a
+streaming-to-full-buffer transition. A request whose initial engine is
 full-buffer can never take the fallback path. This document excludes those 24
 tuples for the same reason it excludes the Extra-Large convert rows, leaving 258
 required tuples. The fallback and fail-open paths are separate coverage

@@ -28,11 +28,11 @@
 
 The 0.9.1 release introduces three performance optimizations to the NGINX
 Markdown filter module. Two of them (zero-copy output and streaming
-decompression) roll back with a configuration change and a graceful reload —
-no binary rebuild, no NGINX restart, and no downtime. The third
-(full-buffer copy reduction) is an internal implementation detail with no
-operator toggle. Rolling it back requires a code revert, a binary rebuild,
-and an NGINX restart.
+decompression) roll back with a configuration change and a graceful reload.
+This rollback needs no binary rebuild or NGINX restart and causes no downtime.
+The third (full-buffer copy reduction) is an internal implementation detail
+with no operator toggle. Rolling it back requires a code revert, a binary
+rebuild, and an NGINX restart.
 
 ### Key Principle
 
@@ -260,9 +260,9 @@ Streaming decompression requires ALL FOUR conditions to be met:
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
 changes the streaming engine selection. The `balanced` profile uses
 `streaming_policy: auto` (threshold-based), and `strict_cache` forces
-`streaming_policy: off`. Either change means condition (2) is no longer
-guaranteed for all requests, so streaming decompression is automatically
-disabled for requests that no longer select the streaming path.
+`streaming_policy: off`. Neither change guarantees condition (2) for all
+requests. As a result, the module automatically disables streaming
+decompression for requests that no longer select the streaming path.
 
 Setting `auto_decompress off` directly breaks condition (1), disabling all
 decompression routing (compressed responses pass through unconverted).
@@ -299,11 +299,10 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
    make build
    ```
 
-3. Derive the modules directory from the installed NGINX build (RPM
-   packages use /usr/lib64/nginx/modules, Debian packages
-   /usr/lib/nginx/modules), back up the current module, stage the new
-   one, then atomically replace the binary and perform a complete
-   restart:
+3. Derive the modules directory from the installed NGINX build. RPM packages
+   use /usr/lib64/nginx/modules. Debian packages use /usr/lib/nginx/modules.
+   Back up the current module and stage the new one. Then atomically replace
+   the binary and perform a complete restart:
    ```bash
    MODULES_DIR="$(nginx -V 2>&1 | sed -nE 's/.*--modules-path=([^ ]+).*/\1/p')"
    if [ -z "$MODULES_DIR" ]; then

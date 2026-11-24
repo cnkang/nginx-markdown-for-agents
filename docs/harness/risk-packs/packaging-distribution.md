@@ -65,11 +65,11 @@ or packaging documentation.
   paths as nFPM packages and must run `check_install_layout.sh` against their
   generated packages before upload.  They must validate package version inputs
   before using them in generated paths or metadata.
-- Package dependencies must be satisfiable by the target package manager. Exact
-  constraints must use distro-resolvable EVRs (Epoch-Version-Release) for RPM
-  metadata and Debian version strings (including any release suffixes/epochs)
-  for DEB metadata, not naked upstream source versions when release suffixes or
-  epochs appear.
+- Package dependencies must be satisfiable by the target package manager.
+  Exact constraints must use distro-resolvable EVRs (Epoch-Version-Release)
+  for RPM metadata and Debian version strings for DEB metadata. Include any
+  Debian release suffixes or epochs. Do not use bare upstream source versions
+  when release suffixes or epochs appear.
 - RPM smoke tests must derive nginx.org repository family from the target
   distribution instead of assuming CentOS-compatible paths for every RPM image.
 - Release package build environments must use a glibc baseline compatible with
@@ -81,10 +81,10 @@ or packaging documentation.
 - Containerized package workflows that use Bash syntax must set
   `defaults.run.shell: bash` or equivalent step-level shells.
 - Helm chart defaults must render a pod that can start under the chart's
-  default security context.  Local K8s smoke tests that use stock NGINX images
-  must disable module directives, run Helm/kubectl against the intended kind
-  context, count structured pod fields without collapsed jsonpath output, and
-  preserve pre-existing clusters.
+  default security context. Local K8s smoke tests that use stock NGINX images
+  must disable module directives and run Helm/kubectl against the intended
+  kind context. These tests must count structured pod fields without collapsed
+  jsonpath output and preserve pre-existing clusters.
 - Helm chart defaults must also remain renderable with stock images and no
   module directives. Any module directive family, including metrics directives,
   must require module enablement plus an explicit in-container module path.

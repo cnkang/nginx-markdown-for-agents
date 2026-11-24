@@ -125,7 +125,7 @@ The decompressor implements a two-layer error model:
 | `brotli_budget_exceeded` | Cumulative output exceeds `markdown_limits decompressed_size=` |
 
 The ALLOCATION and INTERNAL origins (Layer 1 rows above) log
-`class=allocation`/`class=internal` with `category=system` and map to the
+`class=allocation`/`class=internal` with `category=system`. Both map to the
 canonical `decompression_error` reason in the reason registry (allowed origin
 `internal`). They never report corrupt input (the `format` origin).
 

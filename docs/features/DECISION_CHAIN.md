@@ -98,14 +98,14 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 
 ### Accept negotiation outcomes
 
-Checks 2–5 and 7 collapse to the canonical `not_eligible` reason when they
-reject a request, and the size check (6) reports `not_eligible` as well
-(the size gate is an eligibility decision, not a conversion failure).
-Accept negotiation is the other exception: when the request is otherwise
-eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
-reason codes (this is the one eligibility branch that preserves sub-case
-granularity, because the failure cause is operationally meaningful for content
-negotiation):
+Checks 2–5 and 7 report the canonical `not_eligible` reason when they reject
+a request. The size check (6) also reports `not_eligible`. The size gate makes
+an eligibility decision and does not report a conversion failure.
+Accept negotiation is the other exception. It is the only eligibility branch
+that distinguishes failure sub-cases because the cause is operationally
+meaningful for content negotiation. If an otherwise eligible request's
+`Accept` header does not resolve in favor of Markdown, the module emits one
+of three distinct skip reason codes:
 
 | Condition | Reason Code |
 |-----------|-------------|
@@ -140,10 +140,10 @@ Conversion succeeded. The client receives the Markdown representation of the HTM
 
 The module attempted conversion but failed before it committed the response
 (HTML parse error, timeout, resource limit, decompression error, or internal/
-system error). Because `markdown_error_policy` is set to `pass` (the default),
-the module replays the original upstream representation unchanged — its
-encoding and headers included — rather than a regenerated HTML variant. The
-reason code is `failed_open` and the request state becomes FAILED.
+system error). With `markdown_error_policy` at `pass` (the default), the
+module replays the original upstream representation with its encoding and
+headers unchanged. It does not regenerate an HTML variant. The reason code is
+`failed_open` and the request state becomes FAILED.
 
 This is the recommended configuration for production rollouts. Conversion
 failures before commit do not break client responses.
@@ -157,9 +157,9 @@ through the `fail_closed` policy value) and recording the `failed_closed`
 outcome. The module cannot honor a pass policy without the original content.
 This exception GOVERNS over the `pass` policy (see ADR-0012).
 
-If a streaming conversion fails after downstream filters have already accepted
-headers or Markdown bytes, the original HTML is no longer available for replay
-and the headers/body cannot be rewritten. The module records the
+If a streaming conversion fails after downstream filters already accept
+headers or Markdown bytes, the original HTML is no longer available for
+replay. The module also cannot rewrite the headers or body. It records the
 `streaming_mid_flight_error` sub-classification and completes through its
 protocol-safe finish or abort path. The client may receive a truncated Markdown
 response. This post-commit case is intentionally not described as an

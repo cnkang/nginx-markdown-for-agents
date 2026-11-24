@@ -11,15 +11,15 @@ The three optimization groups are:
 
 1. **Noise Region Early Pruning** — Skips child-node traversal for elements
    that produce no meaningful Markdown output (`<script>`, `<style>`,
-   `<noscript>`), with experimental support for semantic noise regions
-   (`<nav>`, `<footer>`, `<aside>`) behind a compile-time feature flag.
+   `<noscript>`). A compile-time feature flag enables experimental support for
+   semantic noise regions (`<nav>`, `<footer>`, `<aside>`).
 2. **Simple Structure Fast Path** — Pre-scans the DOM to detect structurally
    simple documents and enables branch elimination during traversal for
    qualifying pages.
-3. **Large Response Path Optimization** — Pre-allocates the output buffer based
-   on input size and replaces the two-pass normalize-then-copy with a
-   single-pass fused normalizer for documents exceeding the large-body
-   threshold.
+3. **Large Response Path Optimization** — For documents exceeding the
+   large-body threshold, this optimization pre-allocates the output buffer
+   based on input size. It replaces the two-pass normalize-then-copy with a
+   single-pass fused normalizer.
 
 All optimizations are evidence-gated: each group must demonstrate measurable
 benefit in the benchmark corpus and pass a corpus diff before merging.
@@ -57,8 +57,8 @@ Current commit: `feat/10-parser-path-optimization` HEAD.
 Stage breakdown (medium, current): parse 76.7 %, convert 20.7 %, etag 2.6 %.
 
 The optimizations show measurable benefit at tail latencies (p95/p99) across
-all tiers, with the largest improvement on the large (~1 MB) tier where the
-fused normalizer and pre-allocation changes have the most impact. Median
+all tiers. The large (~1 MB) tier shows the largest improvement because the
+fused normalizer and pre-allocation changes have the most impact there. Median
 latency is within noise for small/medium tiers and shows a 2 % improvement for
 the large tier.
 
@@ -73,9 +73,10 @@ fixture-to-hash mappings. Each revision records its fixture path together with
 that fixture's output hash. A hash landing on a different fixture counts as a
 diff even when the two hash sets are equal.
 
-Method: build each revision in an isolated worktree (or restore every relevant
-build input before each build), including the Rust source, `Cargo.toml`,
-`Cargo.lock`, build scripts, feature definitions, and fixtures. Then run `cargo
+Method: build each revision in an isolated worktree, or restore every relevant
+build input before each build. The inputs include the Rust source,
+`Cargo.toml`, `Cargo.lock`, build scripts, feature definitions, and fixtures.
+Then run `cargo
 build` and convert each fixture through `MarkdownConverter::new().convert()`.
 Compute `blake3::hash(output)` and compare the fixture-to-hash mappings between
 revisions. The full artifact lives at
@@ -255,9 +256,8 @@ showed a clear benefit with acceptable false-kill risk.
 ### What it does
 
 Before traversal begins, the converter performs a lightweight pre-scan of the
-DOM tree. If every element node uses a tag in the allowed set and the maximum
-nesting depth stays below the threshold, the document qualifies for the fast
-path.
+DOM tree. To qualify for the fast path, every element node must use a tag in
+the allowed set. The maximum nesting depth must also stay below the threshold.
 
 The fast path is a qualification gate, not a separate converter. Qualifying
 documents use the same `traverse_node` code path. The converter can eliminate
@@ -294,10 +294,11 @@ always allowed.
 
 ### Disqualifying elements (examples)
 
-Tables (`table`, `thead`, `tbody`, `tr`, `td`, `th`), forms (`form`, `input`,
-`select`, `textarea`, `button`), and embedded content (`iframe`, `object`,
-`embed`) disqualify a document from the fast path. Media (`video`, `audio`,
-`source`, `track`, `area`, `map`) also disqualify it.
+Fast-path disqualifiers include tables (`table`, `thead`, `tbody`, `tr`,
+`td`, `th`), forms (`form`, `input`, `select`, `textarea`, `button`), and
+embedded content (`iframe`, `object`, `embed`).
+Media (`video`, `audio`, `source`, `track`, `area`, `map`) also disqualify a
+document.
 
 ### Depth threshold
 

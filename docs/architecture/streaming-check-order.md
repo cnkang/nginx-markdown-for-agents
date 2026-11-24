@@ -118,9 +118,10 @@ the request passes through without ever reaching the streaming path selector.
   before the selector runs.
 - **Ordering**: The default content-type allowlist rejects these JSON types at
   step 4. If a user explicitly allows one with `markdown_content_types` and does
-  not add it to `markdown_stream_excluded_types`, eligibility passes and the
-  selector routes the response to full-buffer conversion. The response is not
-  passed through unchanged and it never uses the streaming engine.
+  not add it to `markdown_stream_excluded_types`, the response passes
+  eligibility. The selector then routes the response to full-buffer conversion.
+  The response is not passed through unchanged and it never uses the streaming
+  engine.
 - **Verdict**: CONFIRMED -- the default allowlist excludes them implicitly
   before streaming. The selector keeps them on the full-buffer path when a user
   explicitly allows them.
@@ -244,10 +245,10 @@ Verified in `components/nginx-module/src/ngx_http_markdown_eligibility.c` (lines
 
 ### Existing Test Coverage
 
-`streaming_config_contract_test.c` provides comprehensive coverage including
+`streaming_config_contract_test.c` provides comprehensive coverage. It covers
 all three hard-coded types, case variations, Content-Type parameters, trailing
-whitespace, partial match rejection, NULL/empty inputs, and user-configured
-exclusions alongside hard exclusions.
+whitespace, partial match rejection, and NULL/empty inputs. It also covers
+user-configured exclusions alongside hard exclusions.
 
 **Conclusion**: No gaps found. The function satisfies Requirements 4 (AC 1-4)
 as documented in the eligibility audit.

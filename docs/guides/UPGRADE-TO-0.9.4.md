@@ -3,9 +3,9 @@
 v0.9.4 is the published compatibility maintenance release. Download its
 signed assets and checksums from the [v0.9.4 GitHub release](https://github.com/cnkang/nginx-markdown-for-agents/releases/tag/v0.9.4).
 
-The release is non-breaking: it keeps all 20 active directives and
-their defaults, the HTTP representation, metrics and diagnostics, reason
-codes, and FFI ABI version 3.
+The release is non-breaking. It keeps all 20 active directives and their
+defaults, the HTTP representation, metrics and diagnostics, reason codes, and
+FFI ABI version 3.
 
 ## Choose the matching artifact
 

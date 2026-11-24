@@ -64,13 +64,12 @@ See the [0.9.4 release notes](../releases/0.9.4-release-notes.md) and the
 
 **Status:** Stable release, published 2026-10-08. 0.9.1 was the previous
 release (2026-07-29).
-0.9.2 is the final pre-1.0 breaking release: the public
-configuration surface shrank to 20 active directives with the seven
-highlighted retired names (a subset of the removal inventory) dropped from
-the command table, the retired profile/conflict FFI snapshots are gone, and
-the bundled FFI ABI sits at version 3. See the removal inventory in the
-[0.9.2 release notes](../releases/0.9.2-release-notes.md). Use the v0.9.2 tag,
-package assets, and checksums from the release.
+0.9.2 is the final pre-1.0 breaking release. The public configuration surface
+shrank to 20 active directives. The command table dropped the seven highlighted
+retired names, a subset of the removal inventory. The retired profile/conflict
+FFI snapshots are gone. The bundled FFI ABI sits at version 3. See the removal
+inventory in the [0.9.2 release notes](../releases/0.9.2-release-notes.md). Use
+the v0.9.2 tag, package assets, and checksums from the release.
 
 #### 0.9.2 (previous release)
 
@@ -256,19 +255,20 @@ The 0.9.x release line is the current maintained line. The current release is
 0.9.2 contracts. 0.9.3 was the previous release (2026-11-02). The project
 released v0.9.2 on 2026-10-08.
 
-0.9.2 is a breaking surface-freeze release that consolidates the configuration
-surface to the 20-directive active contract (removing profile presets, dynconf,
-custom selectors, and per-path metrics), freezes the observability surface (ten
-v1 metric families, reason registry, diagnostics JSON v3), advances the bundled
-FFI boundary to ABI 3, and ships the musl dynamic-module build, on top of the
-0.9.1 streaming-decompression and zero-copy foundation.
+0.9.2 is a breaking surface-freeze release built on the 0.9.1
+streaming-decompression and zero-copy foundation. It consolidates the
+configuration surface to the 20-directive active contract. It removes profile
+presets, dynconf, custom selectors, and per-path metrics. It freezes the
+observability surface: ten v1 metric families, reason registry, and diagnostics
+JSON v3. It advances the bundled FFI boundary to ABI 3 and ships the musl
+dynamic-module build.
 
 #### 0.9.1 (previous release)
 
-Details for 0.9.1 (hybrid zero-copy streaming, streaming decompression,
-performance evidence gate, harness rules 56-62, FFI ABI v1) are in the
-[0.9.1 release notes](../releases/0.9.1-release-notes.md) and the
-[CHANGELOG](../../CHANGELOG.md).
+The [0.9.1 release notes](../releases/0.9.1-release-notes.md) and the
+[CHANGELOG](../../CHANGELOG.md) describe 0.9.1. They cover hybrid zero-copy
+streaming, streaming decompression, the performance evidence gate, harness
+rules 56-62, and FFI ABI v1.
 
 #### 0.9.0 (previous breaking release)
 

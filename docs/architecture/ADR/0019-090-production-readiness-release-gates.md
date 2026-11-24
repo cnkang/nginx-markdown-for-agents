@@ -55,13 +55,14 @@ release matrix before this capstone gate succeeds.
 | **Soft / skippable** | `test-rust-fuzz-smoke`, `verify-chunked-native-e2e-smoke` (needs `NGINX_BIN`), `coverage-c`/`coverage-rust`, sanitizer smoke, security-static, supply-chain, perf | env-gated skip with recorded evidence. The gate does not become blocking silently |
 | **Env-limited blocking** | `test-production-examples-nginx-t` (needs `NGINX_BIN`) | fails when binary absent **unless** `RELEASE_GATE_ALLOW_SKIP_MODULE=1`, mirroring the 091 module-benchmark skip contract; tag-release CI must still provide `NGINX_BIN` |
 
-Production-examples smoke is **0.9.0 blocking**. When the module-enabled
-NGINX binary is genuinely unavailable (for example local macOS without a
-module-enabled `nginx`), `RELEASE_GATE_ALLOW_SKIP_MODULE=1` records a SKIP
-and lets non-release validation proceed, tag-release CI checkouts must
-provide `NGINX_BIN` and must not rely on this escape hatch. Soft gates emit a
-summary/artifact and must not silently skip, if a soft toolchain is genuinely
-absent the gate records the skip reason rather than weakening the check. Gate
+Production-examples smoke is **0.9.0 blocking**. Local macOS without a
+module-enabled `nginx` is one example of genuine NGINX binary unavailability.
+If the module-enabled NGINX binary is genuinely unavailable,
+`RELEASE_GATE_ALLOW_SKIP_MODULE=1` records a SKIP and lets non-release
+validation proceed. Tag-release CI checkouts must provide `NGINX_BIN` and
+must not rely on this escape hatch. Soft gates emit a
+summary/artifact and must not silently skip. If a soft toolchain is genuinely
+absent, the gate records the skip reason rather than weakening the check. Gate
 validators must run in a clean checkout and must not depend on untracked local
 working directories.
 

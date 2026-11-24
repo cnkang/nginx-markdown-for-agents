@@ -97,10 +97,9 @@ a machine-readable value or count.
 2. **Keep L1 facts in sync with `docs/harness/public-surface-inventory.json`.** If the
    drift gate or `make harness-check` reports a change, update
    `config-contract.md` in the same batch.
-3. When a directive, limit, metric, reason code, or FFI surface
-   changes, update `config-contract.md`
-   AND the Document Updates table of this file in one commit (descending
-   order, newest on top).
+3. When a directive, limit, metric, reason code, or FFI surface changes,
+   update `config-contract.md` AND this file's Document Updates table in one
+   commit. Keep the table in descending order, newest on top.
 
 ## Document Updates
 

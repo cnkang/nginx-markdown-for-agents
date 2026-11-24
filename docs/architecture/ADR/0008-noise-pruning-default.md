@@ -9,10 +9,10 @@
 v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`).
 When enabled, it removes the built-in structural selectors `nav`, `footer`,
 and `aside`, which have little value for AI-agent consumption. This typically
-reduces output volume by 15–60% depending on page noise ratio. Because
-tag-name matching also removes meaningful content inside those regions (for
-example a navigation block that contains inline text), pruning is **not**
-guaranteed to touch only non-content regions.
+reduces output volume by 15–60% depending on page noise ratio. Pruning does
+**not** guarantee that it touches only non-content regions. This is because
+tag-name matching also removes meaningful content inside those regions. For
+example, it removes inline text from a navigation block.
 
 The decision below resolves v0.5.x limitations 1–3. Limitation 4 remains
 true in 0.9.2:
@@ -138,7 +138,9 @@ pub struct PruneConfig {
 4. Add `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors` directives in C
 5. Add `prune_noise`, `prune_selectors`, `prune_protection_selectors` fields to `ngx_http_markdown_conf_t`
 6. Implement protection-selector priority (protection wins over prune)
-7. Empty-output fallback (deferred, see Empty-Output Fallback above): a future line would implement it with a `prune_empty_fallback` reason code and metric outside the frozen v1 set
+7. A future line would implement the deferred empty-output fallback. See
+   Empty-Output Fallback above. It would use a `prune_empty_fallback` reason
+   code and metric outside the frozen v1 set.
 8. Update `ngx_http_markdown_prepare_conversion_options()` to set FFI fields
 9. Update `decode_options()` in Rust to read new fields
 10. Add unit tests for selector matching and protection priority (the

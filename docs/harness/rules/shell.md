@@ -80,10 +80,10 @@ Required:
   (or `-I`) instead of `-X HEAD`, and create any expected empty body artifact
   explicitly when downstream checks read a body file.
 - **Never read `$?` inside a negated conditional body** (2026-08-21,
-  `6fcf1bb9`).  Inside `if ! run_case; then rc=$?`, bash's `$?` reflects
-  the NEGATED status (always 0 when the command failed), so the branch
-  can never observe the original exit code and failure-classification
-  branches become dead.  Capture the status before branching with
+  `6fcf1bb9`). Inside `if ! run_case; then rc=$?`, bash's `$?` reflects
+  the NEGATED status (always 0 when the command failed). Thus, the branch can
+  never observe the original exit code, and failure-classification branches
+  become dead. Capture the status before branching with
   `run_case || rc=$?` (safe under `set -e`), then test `${rc}`.  The same
   applies to `while !`/`until !` bodies.
 
@@ -106,13 +106,13 @@ run_case || rc=$?
   nothing on macOS BSD grep), allowing Rule 40 violations to go undetected.
 - Verification: run the grep pipeline through an explicit conditional so
   the check fails when prohibited matches are found and succeeds when
-  none are. The gate must cover **all** prohibited regex forms — the PCRE
+  none are. The gate must cover **all** prohibited regex forms: the PCRE
   character classes `\s`, `\d`, `\w` and the BRE-only grouping syntax
-  `\(...\)` — on **any** line that feeds a regex-capable command or a
-  regex variable assignment, not only literal `grep`/`sed`/`awk` lines.
-  This includes **arbitrary variable assignments** whose value later feeds
-  a regex-capable command (for example `needle=...` assigned before
-  `grep -E "$needle"`), not just variables named `pattern=` or `regex=`:
+  `\(...\)`. Check **any** line that feeds a regex-capable command or a regex
+  variable assignment, not only literal `grep`/`sed`/`awk` lines. Check
+  **arbitrary variable assignments** whose value later feeds a regex-capable
+  command (for example `needle=...` assigned before `grep -E "$needle"`).
+  Do not restrict this check to variables named `pattern=` or `regex=`.
   ```bash
   # 0) Build a shell-only view of each detector first: skip the body of every
   #    embedded Python heredoc (<<'PY' .. PY) before running the greps. Those

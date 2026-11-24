@@ -6,15 +6,15 @@ Accepted (implemented in 0.8.0)
 
 ## Context
 
-before 0.8.0, the streaming engine operated with bounded-memory conversion but
-did not formalize a contract guaranteeing that the module can produce Markdown
+Before 0.8.0, the streaming engine operated with bounded-memory conversion.
+It had no formal contract guaranteeing that the module could produce Markdown
 output without buffering the entire upstream response body. RFC 0008 section 1
 defines "true streaming" as incremental input processing, incremental output
 emission, and bounded memory usage—all satisfied simultaneously.
 
-Establishing a formal contract enables downstream consumers (CI gates, rollout
-tooling, operator guides) to verify streaming behavior against a stable,
-machine-checkable specification rather than ad-hoc heuristics.
+A formal contract lets downstream consumers verify streaming behavior against a
+stable, machine-checkable specification instead of ad-hoc heuristics. These
+consumers include CI gates, rollout tooling, and operator guides.
 
 ## Decision
 

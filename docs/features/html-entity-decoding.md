@@ -73,8 +73,9 @@ during sanitization. They never reach the Markdown output. They do not pass
 through unchanged.
 
 Literal angle brackets in source text must be written as `&lt;` (and may be
-written as `&gt;` for `>`). The parser treats a literal `<tag>` as HTML markup, not as
-text, so callers must not use a raw opening tag when they intend literal text.
+written as `&gt;` for `>`). The parser treats a literal `<tag>` as HTML
+markup, not as text. Therefore, callers must not use a raw opening tag when
+they intend literal text.
 After parsing, code spans and fenced code blocks preserve the decoded
 characters in their code context.
 

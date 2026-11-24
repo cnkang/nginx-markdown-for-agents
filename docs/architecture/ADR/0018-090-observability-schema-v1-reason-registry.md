@@ -53,20 +53,21 @@ untrusted header values.
 
 ### Response header stability contract
 
-Frozen response-header behavior: `Content-Type: text/markdown` on conversion,
-`Vary: Accept` (deduped), `Content-Length` invalidated for streaming,
-`Last-Modified` preserved from source except in the converted-representation
-paths documented in ADR-0017 (streaming clears the source `Last-Modified`,
-and a 304 of a converted response clears it as well, `last_modified_time = -1`
-in the conversion decision path, because the transformed representation's
-validator must not describe the source HTML mtime). ETag only as defined by ADR-0017
+Frozen response-header behavior: Conversion sets `Content-Type: text/markdown`
+and deduplicates `Vary: Accept`. Streaming invalidates `Content-Length`. The
+module preserves the source `Last-Modified` except on the
+converted-representation paths in ADR-0017. Streaming and a 304 of a converted
+response both clear the source `Last-Modified`. The conversion decision path
+sets `last_modified_time = -1` because the transformed representation's
+validator must not describe the source HTML mtime. ETag only as defined by ADR-0017
 (full-buffer transformed ETag under `cache_validation full`, none in streaming).
 
 ### Single-source enforcement
 
-A docs-sync test asserts that the reason-code registry, Prometheus output, and
-the C diagnostics renderer stay synchronized with the canonical registry and
-its generated projections (no unvalidated parallel public list).
+A docs-sync test checks that the reason-code registry, Prometheus output, and
+the C diagnostics renderer stay in sync with the canonical registry. The test
+also checks synchronization with its generated projections. The project does
+not allow an unvalidated parallel public list.
 `python3 tools/reason-codegen/generate.py --check` and `make check-headers`
 cover generated and FFI drift.
 

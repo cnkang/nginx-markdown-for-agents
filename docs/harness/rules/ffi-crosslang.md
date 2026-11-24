@@ -31,12 +31,12 @@ Required:
   confidence and can mask stale-state regressions.
 - When C code classifies FFI error codes into semantic categories, the
   classification branch must cover **all** codes defined in the FFI header
-  that map to that category.  Do not assume a 1:1 mapping between C-local
-  codes and FFI codes — the other language may define multiple distinct
-  codes for the same semantic (for example both a general memory-limit code
-  and a streaming-specific budget code).  Before writing a classification
-  branch, grep the FFI header for all related `#define` constants and
-  confirm the branch covers the full set.  This applies equally to error
+  that map to that category. Do not assume a 1:1 mapping between C-local codes
+  and FFI codes. The other language may define multiple distinct codes for the
+  same meaning, such as a general memory-limit code and a streaming-specific
+  budget code. Before writing a classification branch, grep the FFI header
+  for all related `#define` constants and confirm the branch covers the full
+  set. This applies equally to error
   codes, feature flags, and enum values that cross the FFI boundary.
 - **Panic safety across the FFI boundary**: All non-trivial Rust FFI export
   functions (any `#[no_mangle] pub extern "C"` that performs allocation,
@@ -70,64 +70,62 @@ Required:
       result_ref.reason_code = r;
   }
   ```
-- **FFI resource ownership and Drop guards**: When an FFI export allocates
-  or holds a resource (for example `HeaderPlan`, `MarkdownConverterHandle`)
-  that a matching `*_free()` or `safe_finish()` call must release,
-  a `Drop` guard or centralized reset must manage the resource
-  within the `catch_unwind` closure.  If the function panics after
-  acquiring the resource, the Drop guard must release it so the caller
-  does not leak or double-free.  Do not rely on the C caller to clean up
-  after a failed FFI call — the C side may not know which resources the Rust
-  side acquired before the failure.
+- **FFI resource ownership and Drop guards**: An FFI export can allocate or
+  hold a resource such as `HeaderPlan` or `MarkdownConverterHandle`. If a
+  matching `*_free()` or `safe_finish()` call must release it, a `Drop` guard
+  or centralized reset must manage it within the `catch_unwind` closure.
+  If the function panics after acquiring the resource, the Drop guard must
+  release it so the caller does not leak or double-free. Do not rely on the C
+  caller to clean up after a failed FFI call. The C side may not know which
+  resources the Rust side acquired before the failure.
   When ownership is successfully transferred to C, disarm the corresponding
-  Drop guard immediately. Keep it armed through panic and error paths; it must
-  never release a resource after C has taken ownership.
+  Drop guard immediately. Keep it armed through panic and error paths. It
+  must never release a resource after C has taken ownership.
 - **FFI enum layout safety**: All enums that cross the FFI boundary must
   use an explicit `#[repr(u8)]`, `#[repr(i32)]`, or similar fixed-width
   representation.  Rust's default enum layout is implementation-defined
   and can change between compiler versions, causing silent discriminant
-  truncation when C reads the wrong width.  When exposing a new enum via
-  FFI, add a compile-time assertion (`const _: () = assert!(size_of::<E>()
-  == expected);`) or a debug guard that verifies the discriminant fits the
-  expected width.
+  truncation when C reads the wrong width. When exposing a new enum through
+  FFI, verify that the discriminant fits the expected width. Use either a
+  compile-time assertion (`const _: () = assert!(size_of::<E>()
+  == expected);`) or a debug guard.
 - **FFI handle consumption contract**: When an FFI handle (for example
   `MarkdownConverterHandle`, `HeaderPlanHandle`) passes to a
   consumption function (for example `safe_finish`, `markdown_result_free`),
   the handle becomes **consumed** and the caller must not use it again.
   After consumption, the allocator may free, zero, or reclaim the
-  underlying memory.  The C caller must not retain any pointer
-  derived from the handle (for example a pointer obtained via
-  `markdown_converter_get_result()`) across the consumption call — capture
-  needed data into local variables first, then consume the handle.  When
-  migrating an FFI interface from borrowed pointers to an opaque handle
-  model, update all C-side call sites in the same changeset: any code that
-  held a raw pointer into Rust-owned memory must switch to copying data
-  out before the consumption call.
-- **FFI failed-call consume-or-abort contract**: A *borrowed* handle
-  (one that consumption functions do not take by value) still has an
-  error contract: after any entry point on it returns a failure code, the
-  caller must stop driving it and either abort it or follow the one
-  documented fallback path — it must not re-enter the handle's normal
-  entry points hoping the failure was transient.  `markdown_streaming_feed`
-  is the reference case: any non-`ERROR_SUCCESS` return means no further
-  `feed` and never a `finalize`; after a **post-commit** failure
-  (`ERROR_POST_COMMIT`) the caller may instead close the handle with
-  `markdown_streaming_safe_finish`, and every other non-success return
-  allows only `markdown_streaming_abort` (the C layer already routes every
-  non-zero `feed` result to abort / safe-finish and clears its handle).
-  The abort path must always work.  Document this contract in the Rust
-  doc comment next to the entry point, not only here — the C caller reads
-  the generated header, which carries the doc comment.
-- **FFI poisoned-handle fail-closed guard**: A `catch_unwind` boundary
-  cannot roll back writes the panicking function already made to shared
-  state, so a handler that catches a panic while driving a long-lived
-  object must mark that object *poisoned* and refuse further work on it
-  (fail closed with `ERROR_INTERNAL`), while keeping the free/abort path
-  unconditionally available.  Do not "resume" a handle whose last call
-  panicked: the observable state may be torn.  The poison flag belongs to
-  Rust-internal state — never add it to a `#[repr(C)]` struct, since that
-  would change the ABI; an opaque handle's private fields are free to
-  grow.  Example: `StreamingConverterHandle::poisoned` blocks
+  underlying memory. The C caller must not retain any pointer derived from the
+  handle across the consumption call, including pointers obtained through
+  `markdown_converter_get_result()`. Capture the necessary data in local
+  variables before consuming the handle. When migrating an FFI interface from
+  borrowed pointers to an opaque handle model, update all C-side call sites in
+  the same changeset. Any code that held a raw pointer into Rust-owned memory
+  must copy the data out before the consumption call.
+- **FFI failed-call consume-or-abort contract**: A *borrowed* handle still
+  has an error contract. Consumption functions do not take this handle by
+  value. If any entry point returns a failure code, the caller must stop
+  driving the handle. It must either abort it or follow the one documented
+  fallback path. It must not re-enter the handle's normal entry points in the
+  hope that the failure was transient. The reference case is
+  `markdown_streaming_feed`. After any non-`ERROR_SUCCESS` return, do not call
+  `feed` again and never call `finalize`. After a **post-commit** failure
+  (`ERROR_POST_COMMIT`), the caller may instead close the handle with
+  `markdown_streaming_safe_finish`. Every other non-success return allows only
+  `markdown_streaming_abort`. The C layer already routes every non-zero `feed`
+  result to abort or safe-finish and clears its handle.
+  The abort path must always work. Document this contract in the Rust doc
+  comment next to the entry point, not only here. The C caller reads the
+  generated header, which carries the doc comment.
+- **FFI poisoned-handle fail-closed guard**: A `catch_unwind` boundary cannot
+  roll back writes the panicking function already made to shared state. A
+  handler that catches a panic while driving a long-lived object must mark
+  that object *poisoned*. It must refuse further work on that object and fail
+  closed with `ERROR_INTERNAL`. It must keep the free/abort path
+  unconditionally available. Do not "resume" a handle whose last call
+  panicked: the observable state may be torn. The poison flag belongs to
+  Rust-internal state. Never add it to a `#[repr(C)]` struct because that
+  would change the ABI. An opaque handle's private fields are free to grow.
+  Example: `StreamingConverterHandle::poisoned` blocks
   `feed`/`finalize`/`safe_finish` after a caught panic and leaves
   `markdown_streaming_abort` able to release the handle.
 
@@ -139,12 +137,12 @@ Verification:
   explaining why it is trivial enough to skip.  The detector must recognise
   both the legacy `#[no_mangle]` and the Rust 2024 `#[unsafe(no_mangle)]`
   forms, `detect_ffi_panic_safety.sh` matches both.
-- `bash tools/harness/detect_ffi_panic_safety.sh --strict` — classifies
-  every FFI export into direct_catch / delegated_catch /
-  safe_init_helper / safe_static_lookup / free_helper /
-  unsafe_business_logic / unknown and fails (exit 1) on
-  unsafe_business_logic, unknown, or free_helper_without_catch.  The
-  Makefile `harness-security-checks` target runs this in strict mode.
+- `bash tools/harness/detect_ffi_panic_safety.sh --strict` classifies every
+  FFI export as direct_catch, delegated_catch, safe_init_helper,
+  safe_static_lookup, free_helper, unsafe_business_logic, or unknown. It
+  fails (exit 1) on unsafe_business_logic, unknown, or
+  free_helper_without_catch. The Makefile `harness-security-checks` target
+  runs this in strict mode.
 - `grep -rn '#\[repr(' components/rust-converter/src/ | grep -i 'enum\|reason\|error_code'`
   — verify FFI-exposed enums have explicit repr.
 - `grep -rn 'safe_finish\|markdown_result_free\|markdown_converter_free' components/nginx-module/src/`
@@ -160,11 +158,11 @@ Verification:
   regeneration before `make copy-headers`.
 - **FFI header drift CI gate**: When `cbindgen` generates C headers,
   a CI step must regenerate the header from Rust source and compare it
-  against the checked-in copy.  If they differ, the CI step must fail
-  with "FFI header drift detected — run `make copy-headers` and commit
-  the result."  This prevents the recurring pattern of Rust source
-  changes that forget to regenerate the C header.  The `cbindgen` version
-  used in CI must pin to the same version across all workflows
+  against the checked-in copy. If the headers differ, the CI step must fail.
+  It must report this message ("FFI header drift detected — run
+  `make copy-headers` and commit the result."). This prevents the recurring
+  pattern of Rust source changes that forget to regenerate the C header. The
+  `cbindgen` version used in CI must pin to the same version across all workflows
   (for example `cbindgen 0.29.4`) to avoid version-dependent output
   differences.
 
@@ -176,10 +174,10 @@ Historical issues: 0f2247a7.
 Required:
 - Every FFI operation that accepts a key, name, or identifier parameter
   must validate that the parameter is not NULL and not zero-length before
-  processing.  This applies to all operation types including collection
-  mutation operations (for example delete-all, clear, reset) where a NULL
-  or empty key would be ambiguous or cause undefined behavior on the other
-  side of the FFI boundary.
+  processing. This applies to all operation types, including collection
+  mutation operations such as delete-all, clear, and reset. In those
+  operations, a NULL or empty key would be ambiguous or cause undefined
+  behavior on the other side of the FFI boundary.
 - When adding a new FFI operation (for example `DeleteAll`, `Clear`,
   `Reset`), verify the C-side handler explicitly checks for NULL data
   pointer and zero length on all string/buffer inputs before passing them
@@ -195,11 +193,10 @@ Required:
 - **Zero-length value boundary**: When an FFI operation receives a
   value with `value_len == 0` (but `value != NULL`), the C-side handler
   must explicitly set the target field to `NULL`/`0` rather than
-  allocating a zero-length buffer via `ngx_pnalloc(pool, 0)`.  Zero-
-  length pool allocations have implementation-defined behavior (may
-  return NULL or a non-NULL pointer) and the resulting `ngx_str_t` would
-  have `len=0` but a dangling or NULL `data` pointer.  The correct
-  pattern is:
+  allocating a zero-length buffer through `ngx_pnalloc(pool, 0)`. Zero-length
+  pool allocations have implementation-defined behavior: they may return
+  NULL or a non-NULL pointer. The resulting `ngx_str_t` would have `len=0`
+  but a dangling or NULL `data` pointer. Use this pattern.
   ```c
   if (entry->value_len == 0) {
       h->value.data = NULL;
@@ -207,9 +204,9 @@ Required:
       return NGX_OK;
   }
   ```
-  This applies to all FFI-to-C value copy paths, including header plan
-  operations (SET, MODIFY) and any new operation that copies FFI string
-  data into NGINX pool-owned structures.
+  This pattern applies to all FFI-to-C value copy paths. These paths include
+  header plan operations (SET, MODIFY) and any new operation that copies FFI
+  string data into NGINX pool-owned structures.
 
 Verification:
 - `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
@@ -239,10 +236,10 @@ Required:
   leaks intentionally so the C-side free helper manages it.
 - **Empty-result NULL convention**: pointer-returning FFI APIs must return
   `NULL` for empty results, while APIs that populate output fields must
-  assign `NULL` to the relevant field instead of returning it.  This allows
-  C free helpers to simply check `if (ptr == NULL) return;` and avoid
-  calling the allocator for empty buffers, reducing overhead and avoiding
-  implementation-defined behavior of zero-length allocations.
+  assign `NULL` to the relevant field instead of returning it. C free
+  helpers can then simply check `if (ptr == NULL) return;` and avoid
+  calling the allocator for empty buffers. This reduces overhead and avoids
+  the implementation-defined behavior of zero-length allocations.
 
 Verification:
 - `grep -rn 'as_mut_ptr' components/rust-converter/src/` — verify ownership transfer uses the `as_mut_ptr` + `mem::forget` pattern for slices.

@@ -76,9 +76,9 @@ tools/perf/run_perf_baseline.sh \
 tools/perf/run_perf_baseline.sh --update-baseline
 ```
 
-The script builds the release binary, runs benchmarks, generates a
-Measurement Report, invokes the threshold engine for a Verdict Report,
-and prints a text summary to stderr.
+The script builds the release binary, runs benchmarks, and generates a
+Measurement Report. It invokes the threshold engine for a Verdict Report and
+prints a text summary to stderr.
 
 ### 0.9.2 Release Gate Evidence
 For the 0.9.2 release, the team gathers evidence via the following targets:
@@ -90,15 +90,16 @@ For deep analysis, use:
 - `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
 
 The benchmark harness and evidence gate never execute PATH-shadowable helper
-binaries. Every external helper (`bash`, `git`, `curl`, `python3`, `ps`, `awk`,
+binaries. Every external helper passes through an approved absolute-executable
+resolver. The resolver covers `bash`, `git`, `curl`, `python3`, `ps`, `awk`,
 `cat`, `cp`, `cut`, `head`, `mkdir`, `mktemp`, `rm`, `sleep`, `tr`, `uname`,
-`wc`, `date`, and the load generator `hey`/`ab`) passes through an approved
-absolute-executable resolver that rejects candidates outside trusted system
-roots and, when running as root, candidates not owned by root or writable by
-group/other. The harness records the resolved toolchain in the benchmark
-report and the release evidence pack (`module_benchmark.toolchain` and
-`toolchain.git` respectively), so release gates consume only evidence that
-comes from the validated toolchain.
+`wc`, and `date`. It also covers the load generator `hey`/`ab`. The resolver
+rejects candidates outside trusted system roots. When running as root, it
+also rejects candidates not owned by root or writable by group/other.
+The harness records the resolved
+toolchain in the benchmark report and release evidence pack
+(`module_benchmark.toolchain` and `toolchain.git`, respectively). As a result,
+release gates consume only evidence from the validated toolchain.
 
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
 stdout and diagnostics to stderr. Redirect stdout to the intended artifact.
@@ -160,27 +161,28 @@ release-eligible baseline must be re-measured from the final candidate SHA
 with the project Rust 1.97.1 toolchain and then pass
 `make release-gates-check-092` in blocking mode.
 
-The evidence objects remain layered: `baseline_policy` carries policy
-provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
-environment plus `git_commit` and `timestamp`, and each scenario carries its
-metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
-`baseline_policy.scenario_sources` entries get checked for environment
-consistency only when supplied.
+The evidence objects remain layered. `baseline_policy` carries policy
+provenance. The top-level `module_benchmark` carries the platform, load
+generator, and NGINX environment plus `git_commit` and `timestamp`. Each
+scenario carries its metadata, `load_integrity`, `metrics`, and
+`response_correctness`. Optional `baseline_policy.scenario_sources` entries
+get checked for environment consistency only when supplied.
 
 The canonical workflow retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
 path. It validates that every scenario's `.headers`, `.body`, and `.json` files
 exist and that `.headers` and `.json` are non-empty. A zero-byte `.body` remains
 valid for bodyless responses (for example 304 or HEAD probes), and the gate
-checks its SHA-256 against the standard empty-input digest. The gate requires a
-passing probe with `curl_exit_code == 0`, verifies each body SHA-256, validates
-the complete response-correctness schema, parses the final HTTP response block
-from each `.headers` file, and requires its status, normalized headers, Markdown
-content type, and empty content encoding to match the probe JSON. It then
-requires exact finalized/probe `response_correctness` object equality and
-enforces strict boolean/integer tail and curl fields before running the
-performance evidence and release gates. The canonical upload happens only after
-those checks pass and contains the finalized JSON, raw JSON.
+checks its SHA-256 against the standard empty-input digest. The gate requires
+a passing probe with `curl_exit_code == 0`. It verifies each body SHA-256
+and validates the complete response-correctness schema. It parses the final
+HTTP response block from each `.headers` file. The parsed status, normalized
+headers, Markdown content type, and empty content encoding must match the probe
+JSON. It then requires exact finalized/probe `response_correctness` object
+equality and enforces strict boolean/integer tail and curl fields before
+running the performance evidence and release gates. The canonical upload
+happens only after those checks pass and contains the finalized JSON,
+raw JSON.
 
 This probe directory. Canonical artifacts stay retained for 30 days.
 Failure-only debug artifacts use the shorter diagnostic retention period.

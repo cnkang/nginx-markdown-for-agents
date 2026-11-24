@@ -35,16 +35,16 @@ defaults remain in the [Configuration Guide](../guides/CONFIGURATION.md).
 The source of truth is
 `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`.
 There are 20 `markdown_*` command-table entries and every one of them is an
-active parser entry. The 0.9.2 removals took the five removed directive names
-(three dynconf directives and two custom-selector directives) out of the table
-as well, so a configuration that still uses one fails `nginx -t` with nginx's
-standard unknown-directive error and the migration table below names the
-replacement path.
+active parser entry. The 0.9.2 removals also took five directive names out of
+the table: three dynconf directives and two custom-selector directives. A
+configuration that still uses one fails `nginx -t` with nginx's standard
+unknown-directive error. The migration table below names the replacement path.
 
 Context abbreviations below are `H` = `http`, `S` = `server`, and `L` =
 location. Unless a row says otherwise, active `H/S/L` values use the normal
-NGINX rule: a child inherits the parent value when unset and an explicit child
-value overrides it. `markdown_limits` inherits each key independently.
+NGINX inheritance rule. A child inherits the parent value when unset. An
+explicit child value overrides the parent value. `markdown_limits` inherits
+each key independently.
 
 ### Active stable directives
 
@@ -148,11 +148,10 @@ nginx_markdown_build_info
 `schemas/metrics-v1.registry.json` is authoritative. The versioned
 `artifacts/release/<version>/metrics-registry.json` file is only its generated
 projection. The renderer must emit exactly these families in Prometheus 0.0.4
-format. The label sets
-stay closed and bounded: outcomes/stages/reasons use the frozen taxonomy,
-engine is `full_buffer|streaming`, transition is the six-value lifecycle
-allowlist, and encoding/outcome/reason use the registry allowlists. Path, URI,
-profile, and per-path dimensions are absent.
+format. The label sets stay closed and bounded. Outcomes/stages/reasons use
+the frozen taxonomy. The engine label is `full_buffer|streaming`, and
+transition uses the six-value lifecycle allowlist. Encoding/outcome/reason use
+the registry allowlists. Path, URI, profile, and per-path dimensions are absent.
 
 ### Reason labels
 
@@ -191,8 +190,9 @@ registry through FFI.
 ```
 
 0.9.2 (LTS-R006/LTS-R023) dropped `invalid_dynconf` (former discriminant 21) and
-`degraded_snapshot` (former discriminant 22) with the dynconf subsystem and
-compacted the survivors to a contiguous 0..24 set (registry count 27 → 25).
+`degraded_snapshot` (former discriminant 22) with the dynconf subsystem. The
+release compacted the survivors to a contiguous 0..24 set (registry count
+27 → 25).
 
 Production-path evidence includes generated reason artifacts,
 `reason_code_test.c`, `reason_code_ffi_test.c`, Prometheus renderer tests,
@@ -252,10 +252,10 @@ version 2 → 3.
 
 Internal status does not weaken the safety contract. Struct layout, ownership,
 panic containment, result initialization, and generated-header drift remain
-blocking build/test concerns. It only means the project may prune or change
-those symbols in lockstep across Rust, generated headers, and C before or after
-1.0 without creating an external compatibility promise. The safety properties
-stay binding regardless.
+blocking build/test concerns. Internal status only means the project may prune
+or change those symbols before or after 1.0 without creating an external
+compatibility promise. Such changes must stay in lockstep across Rust,
+generated headers, and C. The safety properties stay binding regardless.
 
 ## Freeze Checklist
 

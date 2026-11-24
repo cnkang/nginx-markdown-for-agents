@@ -18,15 +18,16 @@ Required:
 - Do not rely on blanket lossy conversion before handling chunk-tail semantics.
 - When post-commit wrappers re-map errors, preserve original error classification/code for downstream handling and metrics.
 -  html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
-  `feed()` call, not just the first. When a BOM's lead byte (0xEF) is split into
-  `utf8_tail` by `split_utf8_tail` and reassembled at the start of the next
-  `feed()`, html5ever strips it — diverging from single-chunk conversion where
-  the same BOM is mid-stream and preserved. The streaming tokenizer must set
-  `discard_bom: false` and strip the stream-start BOM once in the converter
-  (after `utf8_tail` reassembly. A split BOM reads as a complete 3-byte unit).
-  The `bom_stripped` flag must not be set prematurely when the effective bytes
-  start with 0xEF but are shorter than 3 bytes — defer until the next chunk
-  reassembles the full sequence.
+  `feed()` call, not just the first. A BOM's lead byte (0xEF) can go into
+  `utf8_tail` when `split_utf8_tail` splits it. If that happens, the converter
+  reassembles the BOM at the start of the next `feed()`. html5ever strips
+  that BOM. In contrast, single-chunk conversion preserves the same mid-stream
+  BOM. The streaming tokenizer must set `discard_bom: false` and strip the
+  stream-start BOM once in the converter after `utf8_tail` reassembly. A split
+  BOM reads as a complete 3-byte unit.
+  If the effective bytes start with 0xEF but are shorter than 3 bytes, do not
+  set the `bom_stripped` flag yet. Wait until the next chunk reassembles the
+  full sequence.
 
 ---
 
@@ -45,9 +46,9 @@ Required:
 
 In `auto`, a failed probe leaves the build on the bounded full-buffer path
   instead of defining `NGX_HTTP_BROTLI`. Brotli streaming reuses the same
-  codec/member lifecycle invariants as gzip/deflate: the module must reject tail
-  data, detect and reject truncated final streams, guard no-progress, and keep
-  decompression accounting response-wide.
+  codec/member lifecycle invariants as gzip/deflate. The module must reject
+  tail data, detect and reject truncated final streams, guard against no
+  progress, and keep decompression accounting response-wide.
 - Codec-specific lifecycle state must survive arbitrary NGINX input chunk
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
   must not imply that compressed source input got consumed or may advance.
@@ -91,28 +92,26 @@ In `auto`, a failed probe leaves the build on the bounded full-buffer path
   `Z_OK` means inflate made progress (consumed input and/or produced
   output), `Z_BUF_ERROR` means no progress was made.  When the output
   buffer exhausts (`avail_out == 0`), both codes stay recoverable by
-  growing the buffer and retrying.  However, `Z_BUF_ERROR` with available
-  output space, remaining input, and no change in `total_out` is an
-  unexpected stall (potential format error or malformed stream) — the
-  no-progress guard must return an error immediately rather than
-  re-calling inflate with the same state (infinite loop).  `Z_OK` with
-  `avail_out > 0` simply means more data is available — loop again
-  without intervention.  Never merge the two branches into a single
-  `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` without first checking
-  `avail_out` to distinguish the recoverable stall from the
-  normal-progress case (see Rule 31: semantic-equivalence requirement
-  for duplicate consolidation).
+  growing the buffer and retrying. However, `Z_BUF_ERROR` with available output
+  space, remaining input, and no change in `total_out` indicates an unexpected
+  stall. It can indicate a format error or a malformed stream. The no-progress
+  guard must return an error immediately. Calling inflate again with the same
+  state would loop indefinitely. `Z_OK` with `avail_out > 0` simply means more
+  data is available — loop again without intervention. Never merge the two
+  branches into a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` without first
+  checking `avail_out`. That check distinguishes the recoverable stall from
+  the normal-progress case. See Rule 31 for the semantic-equivalence
+  requirement for duplicate consolidation.
 
 Verification:
 - `grep -rn 'windowBits\|Z_RAW\|inflateInit\|inflateReset\|zlib_header' components/nginx-module/src/ components/rust-converter/src/`
 - Verify streaming decompression sniffs the zlib header on the first two
   input bytes and selects `MAX_WBITS` for zlib-wrapped streams and
   `-MAX_WBITS` for raw RFC 1951 streams.
-- Verify raw RFC 1951 coverage exists for BOTH decoders: the Rust decoder
-  retries a zero-output RFC 1950 format error as raw RFC 1951, the C
-  full-buffer fallback replays a wrapped format error as raw RFC 1951
-  (including after partial output), and the C fallback covers raw deflate
-  when the zlib probe fails. Keep the
+- Verify raw RFC 1951 coverage for BOTH decoders. The Rust decoder retries a
+  zero-output RFC 1950 format error as raw RFC 1951. The C full-buffer fallback
+  replays a wrapped format error as raw RFC 1951, including after partial output.
+  The C fallback also covers raw deflate when the zlib probe fails. Keep the
   existing zlib-wrapped streaming checks unchanged.
 - Verify gzip concatenated-member tests cover one feed, a boundary between
   feeds, a boundary inside a feed, a truncated later member, and cumulative

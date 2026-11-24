@@ -18,12 +18,12 @@ Required:
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 -  When adding a new reason code string definition and accessor function, the
-  developer must add corresponding `ngx_http_markdown_log_decision()`
-  callsite(s) in the same changeset for non-failure branches, or
-  `ngx_http_markdown_log_failure_decision()` callsite(s) for failure branches
-  (the dedicated failure-path logger used by
+  developer must add corresponding logger callsites in the same changeset.
+  Add `ngx_http_markdown_log_decision()` callsites for non-failure branches.
+  For failure branches, add `ngx_http_markdown_log_failure_decision()`
+  callsites. This dedicated failure-path logger serves
   `ngx_http_markdown_handle_preaccess_failure` and every fail-open/reject
-  route). A reason code that appears but never gets emitted at runtime is a
+  route. A reason code that appears but never gets emitted at runtime is a
   contract violation. Operators and docs will reference a code that never
   appears in logs.
 - When adding a new family of reason codes (for example a `STREAMING_*`
@@ -44,11 +44,10 @@ Required:
 - Keep the public-surface inventory contract synchronized with source, not just
   by symbol name. Directive entries include classification, handler, context,
   argument contract, defaults, syntax, migration target, and removal
-  classification,
-  metric entries include type, labels, order, and bounded-cardinality policy,
-  reason entries include discriminant, variant string, metric family, C
-  accessor, and registry count. Duplicate, malformed, or symlink-escaped
-  inventory/source inputs must fail closed.  The gate is
+  classification. Metric entries include type, labels, order, and
+  bounded-cardinality policy. Reason entries include discriminant, variant
+  string, metric family, C accessor, and registry count. Duplicate, malformed,
+  or symlink-escaped inventory/source inputs must fail closed.  The gate is
   `make public-surface-drift-check` (`tools/harness/detect_public_surface_drift.py`,
   blocking step of `release-gates-check-092` and the CI
   `release-092-contract-gates` job).
@@ -65,8 +64,8 @@ Required:
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
 - When SHM-backed metrics struct layout changes, enforce a hot-reload compatibility strategy:
   add/validate a stable layout version (or magic) in
-  `ngx_http_markdown_init_metrics_zone()` OR bump the SHM zone name so old slab
-  allocations are not reattached to a new layout.
+  `ngx_http_markdown_init_metrics_zone()` OR bump the SHM zone name. This
+  prevents reattaching old slab allocations to a new layout.
 - Keep Prometheus metric families semantically non-overlapping: aggregate outcome
   series must be mutually exclusive, and detailed breakdown counters must live in
   a separate metric family/label space to avoid double-counting.
@@ -74,8 +73,9 @@ Required:
   renderers (JSON/text/Prometheus) must have at least one runtime write path
   that populates it with a real value. Do not expose a gauge or counter that is
   never assigned. A permanently-zero metric misleads operators and masks real
-  risk. If the data source (for example an FFI struct field) does not exist yet,
-  defer the metric to a future release instead of shipping a dead field.
+  risk. If the data source does not exist yet, defer the metric to a future
+  release. For example, if an FFI struct field is missing, do not ship the dead
+  metric field.
 - Metric names and HELP text must accurately describe what is actually
   measured.  If a metric carries the name `ttfb_seconds` (time-to-first-byte), the
   write site must fire at the first-byte event, not at finalize or request
@@ -92,27 +92,30 @@ Required:
   `cpu_time_ms`, `wall_time_ms`, `user_cpu_ms`), the implementation must
   actually measure that quantity.  Do not alias one metric to another with a
   misleading name (for example assigning `cpu_time_ms = ttlb_ms` and calling
-  it CPU time).  If the true measurement is unavailable, either (a) use a
-  name that accurately describes what the metric measures (for example `wall_time_ms`),
-  (b) add a comment explicitly documenting the approximation and its
-  limitations, or (c) defer the metric to a future release when the proper
-  data source is available.
-- **The module must increment counter metrics that track delivery outcomes (for
-  example `results.failopen_count`) only after the downstream delivery succeeds
-  (the downstream filter returns `NGX_OK` or `NGX_DONE`), not at the decision
-  point that initiates the delivery.**
+  it CPU time). If the true measurement is unavailable, choose one of three
+  options. The first is to use a name that accurately describes what the
+  metric measures (for example `wall_time_ms`). The second is to add a comment
+  that explicitly documents the approximation and its limitations. The third
+  is to defer the metric to a future release when the proper data source is
+  available.
+- **The module must increment delivery outcome counters (for example
+  `results.failopen_count`) only after downstream delivery succeeds. A return
+  of `NGX_OK` or `NGX_DONE` from the downstream filter indicates success.
+  Do not increment these counters at the decision point that initiates
+  delivery**.
   Separate "decision" counters (for example `streaming.precommit_failopen_total`)
-  from "delivery" counters (for example `results.failopen_count`) to prevent
-  inflating the delivery count when the downstream send later fails (header
-  forwarding error, allocation failure, backpressure).  This principle applies
-  to any counter where the decision and the outcome can diverge.
+  from "delivery" counters (for example `results.failopen_count`). This
+  prevents an inflated delivery count when the downstream send later fails
+  (header forwarding error, allocation failure, backpressure). This principle
+  applies to any counter where the decision and the outcome can diverge.
 
 ---
 
 ### 8b. Configuration–code alignment for tooling
-Historical issues: evidence targets nested under `targets` key but code read
-top-level keys, `no_regression_small_medium` in JSON but `no_regression` in
-code, `html_bytes` in Rust output but `input_bytes` in Python readers.
+Historical issues: The code read top-level keys, but the `targets` key held
+nested evidence targets. JSON used `no_regression_small_medium`, but the
+code used `no_regression`. Rust output used `html_bytes`, but Python readers
+used `input_bytes`.
 
 Required:
 - When a configuration file (JSON, TOML, YAML) defines a nested schema (for
@@ -126,11 +129,11 @@ Required:
   `max_slope` in code), use explicit fallback logic that tries both names
   with a comment explaining the discrepancy.  Prefer aligning the names
   across config and code in the same change set.
--  When a data producer (for example a Rust benchmark binary) emits a field
-  under one key name (for example `html_bytes`) and a consumer (for example a
-  Python evidence generator) reads under a different name (for example
-  `input_bytes`), the consumer must accept **both** names with a fallback chain
-  (for example `tier_data.get("html_bytes") or tier_data.get("input_bytes")`).
+-  When a data producer and consumer use different names for a field, the
+  consumer must accept **both** names with a fallback chain. For example, a
+  Rust benchmark binary can emit `html_bytes` while a Python evidence
+  generator reads `input_bytes`. An example fallback chain is
+  `tier_data.get("html_bytes") or tier_data.get("input_bytes")`.
   This is the consumer's responsibility. The producer's key name is the source
   of truth.
 - **When the harness uses combined reports** (for example `--engine both` produces a
@@ -142,9 +145,9 @@ Required:
 ---
 
 ### 8c. Benchmark averaging consistency
-Historical issues: warmup and fallback iterations included in latency/throughput
-averages but not in durations, markdown/token averages divided by `total_iters`
-while p50/p95 computed only from measured iterations.
+Historical issues: Latency/throughput averages included warmup and fallback
+iterations, but durations did not. Markdown/token averages used `total_iters`
+as the divisor, but p50/p95 used only measured iterations.
 
 Required:
 -  All per-iteration averages (latency, throughput, markdown size, token
@@ -208,9 +211,9 @@ Required:
   creates a permanently-zero gauge that misleads operators and violates
   spec contracts.
 - **General cross-boundary interface rule (applies beyond metrics)**:
-  When modifying any struct, enum, or interface that crosses a language
-  or module boundary (Rust↔C, C↔tests, core↔submodule), update **all
-  consumers and producers** in the same change set. This includes:
+  This rule applies to any struct, enum, or interface that crosses a language
+  or module boundary (Rust↔C, C↔tests, core↔submodule). When modifying one,
+  update **all consumers and producers** in the same change set. This includes:
   - FFI structs (`MarkdownResult`, `StreamingStats`, converter options)
   - Test helper type definitions that mirror production structs
   - Documentation and spec files that describe the interface contract
@@ -234,24 +237,25 @@ mismatches that are expensive to debug.
   the decision point inflates the count when the downstream send fails.  See
   Rule 8 for the concrete `failopen_count` contract and Rule 38 for the
   replay-buffer integrity requirements that motivated the separation.
-- **When a secondary code path (shadow mode, fallback, retry, diagnostic)
-  invokes the same FFI call or receives the same result struct as the
-  primary path, it must consume all spec-required fields from that result,
-  not only the fields needed for its immediate purpose.**  Before merging a
-  new code path that calls an FFI function, compare the fields it reads
-  against the fields the primary path reads and confirm every spec-required
-  field is either consumed (logged, recorded to metrics, or used in logic)
-  or explicitly documented as intentionally skipped with rationale.
+- **A secondary code path (shadow mode, fallback, retry, diagnostic) may
+  invoke the same FFI call or receive the same result struct as the primary
+  path. In either case, it must consume all spec-required fields from that
+  result, not only the fields needed for its immediate purpose**. Before
+  merging a new code path that calls an FFI function, compare the fields it
+  reads with those the primary path reads. Confirm how the new path handles
+  each spec-required field: it logs the field, records it to metrics, or uses
+  it in logic. If the path skips the field instead, confirm that the
+  documentation explicitly identifies the intentional skip and explains why.
 -  When the same metric can be written from multiple code paths (primary path,
   retry/resume path, fallback path), all paths must apply the **same** success
   condition. Do not weaken the guard in a secondary path. If the primary path
   requires `rc == OK`, the resume path must also require `rc == OK`, not merely
   `rc != ERROR`.
 - In NGINX filter context specifically, split the meaning of `NGX_AGAIN` by
-  filter phase.  In the header chain, `NGX_AGAIN` means the write filter
-  accepted the header block: the headers crossed the module boundary, so
-  publish the commit latches and defer success-only delivery gauges to the
-  resume path (see Rule 72 for the canonical latch contract).  In the body
+  filter phase. In the header chain, `NGX_AGAIN` means the write filter
+  accepted the header block. The headers have crossed the module boundary, so
+  publish the commit latches. Defer success-only delivery gauges to the resume
+  path (see Rule 72 for the canonical latch contract).  In the body
   chain, `NGX_AGAIN` means suspend/backpressure — bytes not yet delivered —
   and never latches terminal delivery.  Header acceptance is not downstream
   delivery: an accepted header block confirms only that the headers crossed
@@ -267,10 +271,10 @@ mismatches that are expensive to debug.
   defer, everything else → failure), then apply the matching side-effects
   on every path.  Asymmetric metric treatment causes "observed success but
   actual failure" drift that is expensive to debug in production.
--  **When the code uses a deferred-state latch (flag, buffer, or pending marker)
-  to bridge `NGX_AGAIN` across calls, every function that can encounter
-  `NGX_AGAIN` for the same logical operation must set that latch.** Do not
-  assume "only the first caller can hit backpressure". Any function that
+-  **The code can use a deferred-state latch (flag, buffer, or pending marker)
+  to bridge `NGX_AGAIN` across calls. When it does, every function that can
+  encounter `NGX_AGAIN` for the same logical operation must set that latch**.
+  Do not assume "only the first caller can hit backpressure". Any function that
   performs downstream send can receive `NGX_AGAIN` and must participate in the
   deferral protocol. Grep for all call sites that perform the same send/output
   operation and confirm each one sets the latch on `NGX_AGAIN`.
@@ -281,9 +285,9 @@ mismatches that are expensive to debug.
   branch, before recording failure metrics.
 -  **Gauge metrics should update unconditionally on every successful sample**,
   not guarded by value-range conditions (for example `> 0`). A gauge represents
-  "the most recent sample". Skipping the update because the value is zero or
-  empty causes the gauge to retain a stale value from a previous request, which
-  misleads operators and dashboards. If distinguishing "no sample" from "sample
+  "the most recent sample". Skipping the update for a zero or empty value
+  leaves the gauge with a stale value from a previous request. This misleads
+  operators and dashboards. If distinguishing "no sample" from "sample
   is zero" becomes necessary, add a separate validity flag or sentinel metric
   rather than skipping the write.
 - When a bug fix extends a classification branch to cover additional values
@@ -291,12 +295,12 @@ mismatches that are expensive to debug.
   exercise each newly covered value individually.  Without per-value test
   coverage, the fix can silently regress when the branch condition is later
   modified.
--  **Format string argument matching**: when adding new metric fields to the
-  Prometheus v1 renderer that uses `ngx_snprintf` or `ngx_slprintf`, manually
-  verify that the number and types of format specifiers (`%V`, `%uA`, `%uz`,
-  `%O`, `%i`, `%T`, and so on) exactly match the argument list. `ngx_snprintf`
-  does not perform compile-time type checking. A mismatch silently produces
-  corrupted output or reads garbage from the stack. After adding fields, count
+-  **Format string argument matching**: The Prometheus v1 renderer uses
+  `ngx_snprintf` or `ngx_slprintf`. When adding new metric fields, manually
+  verify that the format specifiers and arguments match exactly in number and
+  type. Format specifiers include `%V`, `%uA`, `%uz`, `%O`, `%i`, `%T`, and
+  others. `ngx_snprintf` does not perform compile-time type checking. A
+  mismatch silently produces corrupted output or reads garbage from the stack. After adding fields, count
   specifiers and arguments side-by-side. Prefer extracting per-metric
   `ngx_snprintf` calls over monolithic format strings when the argument list
   exceeds 10 items.
@@ -314,10 +318,10 @@ mismatches that are expensive to debug.
 
 ### Rule 67 — v1 terminal-outcome conservation in the metrics renderer
 
-Historical issues: terminal-outcome conservation regressed repeatedly —
-mutually-exclusive terminal outcomes, conservation across backpressure
-resume, and latency-bucket population all drifted at different times
-because the renderer arithmetic had no standing guard.
+Historical issues: Terminal-outcome conservation regressed repeatedly.
+Mutually-exclusive terminal outcomes, conservation across backpressure resume,
+and latency-bucket population all drifted at different times. The drift
+occurred because the renderer arithmetic had no standing guard.
 
 Required:
 - `ngx_http_markdown_metrics_to_v1` must partition the conversion-failure

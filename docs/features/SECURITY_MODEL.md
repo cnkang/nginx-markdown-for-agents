@@ -155,8 +155,8 @@ pub fn is_event_handler(&self, attr_name: &str) -> bool {
 
 This is an output-sanitization denylist, not an exhaustive URL allowlist. The
 converter never dereferences link destinations or makes server-side network
-requests, so other non-dangerous application schemes such as `mailto:`,
-`tel:`, and `ftp:` may remain in Markdown. Consumers that render or fetch the
+requests. Other non-dangerous application schemes such as `mailto:`, `tel:`,
+and `ftp:` can therefore remain in Markdown. Consumers that render or fetch the
 converted Markdown must apply their own scheme allowlist if their boundary
 requires one.
 

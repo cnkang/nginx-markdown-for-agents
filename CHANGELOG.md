@@ -131,10 +131,11 @@ reason-code registry, and the FFI ABI version 3 also do not change.
 
 ## [0.9.2] - 2026-10-08
 
-Maintenance and hardening release. Fixes diagnostics and reason-code mapping
-gaps, records the removal and historical disposition of the experimental OTel
-surface, removes the runtime dynconf subsystem, and establishes
-a public surface source metadata and ABI drift gate for release integrity.
+Maintenance and hardening release. This release fixes diagnostics and
+reason-code mapping gaps. It records the removal and historical disposition of
+the experimental OTel surface. It removes the runtime dynconf subsystem. For
+release integrity, it establishes a public surface source metadata and ABI
+drift gate.
 
 ### Breaking Changes
 
@@ -178,20 +179,21 @@ before/after examples.
   `parser_timeout=`, `parser_budget=`, and `decompressed_size=`.
 -  **Rust API removals: LLM adapter and the incremental API.** The release
   deletes the `llm_adapter` module and its provider abstraction, so token
-  estimation uses the fixed built-in ratio instead of a per-provider table. The
-  release also deletes the `incremental` feature and the whole
-  `IncrementalConverter` surface, covering the Rust type, the
+  estimation uses the fixed built-in ratio instead of a per-provider table.
+  The release also deletes the `incremental` feature and the whole
+  `IncrementalConverter` surface. This removes the Rust type, the
   `markdown_incremental_new`, `markdown_incremental_feed`,
   `markdown_incremental_finalize`, and `markdown_incremental_free` FFI exports,
   and the `markdown_large_body_threshold` routing directive. The `streaming`
   feature is now the only processing-path feature. Its default feature list no
   longer contains `incremental`.
 -  **FFI/ABI break.** The bundled Rust/C boundary moves from ABI version 1 to
-  ABI version 3. `MarkdownOptions` shrank from 128 to 96 bytes with the
-  custom-selector and LLM-provider fields gone, `FFIDynconfResult` and its three
-  exports are gone, and the export set is 38 symbols. The module validates the
-  full four-part ABI handshake at preconfiguration. A mismatched pair refuses to
-  start. Rebuild any external FFI consumer against the 0.9.2 header.
+  ABI version 3. `MarkdownOptions` shrank from 128 to 96 bytes with the removal
+  of the custom-selector and LLM-provider fields. The release removes
+  `FFIDynconfResult` and its three exports. The export set is 38 symbols.
+  The module validates the full four-part ABI handshake at preconfiguration.
+  A mismatched pair refuses to start. Rebuild any external FFI consumer against
+  the 0.9.2 header.
 - **Profile presets removed.** The release removes `balanced`, `strict_cache`,
   and `streaming_first`. Use explicit directives to configure limits.
 - **OTel subsystem removed.** The experimental `markdown_otel` /
@@ -236,29 +238,29 @@ before/after examples.
   The probe disables debug output to avoid macOS `dsymutil` errors on
   `/dev/null`. Module builds retain their configured debug flags.
 - The module now suppresses upstream response trailers after an
-  HTML-to-Markdown representation change. `headers_out.trailers` is an independent list
-  that HTTP/2/3 and chunked encodings emit without an HTTP/1.1 `Trailer`
-  declaration, so invalidating only the declaration left real trailers
-  (Content-Digest, Repr-Digest, ...) propagating with the Markdown body.
+  HTML-to-Markdown representation change. HTTP/2/3 and chunked encodings emit
+  the independent `headers_out.trailers` list without an HTTP/1.1 `Trailer`
+  declaration. Invalidating only the declaration thus left actual trailers,
+  such as Content-Digest and Repr-Digest, propagating with the Markdown body.
   All conversion paths (full-buffer, streaming, 304, HEAD) now clear the
   trailer list (`ngx_http_markdown_clear_trailers`).
 -  DEB/RPM packages now require the EXACT NGINX version that builds them. The
-  `preinstall.sh` script rejects any full-version difference (including a patch
-  release) as fatal, the DEB dependency metadata keeps the pinned version
-  installable across distro revisions while refusing any next-patch NGINX
-  upgrade (`nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`), the RPM dependency
-  enforces the pin through an epoch-flexible floor (`nginx >= X.Y.Z`) plus the
-  install-time exact-version guard, and the project no longer makes the
-  misleading "--with-compat same-minor compatibility" claim. NGINX's dynamic
-  module loader rejects a version mismatch before signature checks. The previous
-  branch-scoped tolerance produced packages that installed but failed to load.
+  `preinstall.sh` script rejects any full-version difference as fatal, including
+  a patch release. The DEB dependency metadata keeps the pinned version
+  installable across distro revisions. It refuses any next-patch NGINX upgrade
+  (`nginx (>= X.Y.Z)` plus `nginx (<< X.Y.Z+1)`). The RPM dependency enforces
+  the pin through an epoch-flexible floor (`nginx >= X.Y.Z`) plus the
+  install-time exact-version guard. The project no longer makes the misleading
+  "--with-compat same-minor compatibility" claim. NGINX's dynamic module loader
+  rejects a version mismatch before signature checks. The previous branch-scoped
+  tolerance produced packages that installed but failed to load.
 -  DEB enablement for nginx.org builds now uses a main-context `load_module`
   directive. The previous guidance told users to symlink into
   `/etc/nginx/modules-enabled/`, which the nginx.org default `nginx.conf` never
   includes. The module was silently never loaded. The install smoke test now
   verifies real module loadability (`load_module` + `markdown_filter on` +
-  `nginx -t`), and `preremove.sh` only removes a symlink whose target is exactly
-  this module's config file (operator-owned regular files are never deleted).
+  `nginx -t`). `preremove.sh` only removes a symlink whose target is exactly
+  this module's config file. It never deletes operator-owned regular files.
 - Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
   entry. The diagnostics endpoint now returns the complete mapping.
 - C reason code constants were missing the decompression error series
@@ -268,10 +270,11 @@ before/after examples.
   decision-reason helper now matches the registry (`converted`), completing
   the lowercase renaming.
 -  Decompression (deflate): the full-buffer decoder replays a zlib-wrapped RFC
-  1950 format error as raw RFC 1951 from the start, while the streaming decoder
-  commits to the framing implied by the first two bytes and, for a misclassified
-  stream, fails with a decompression error that follows the configured
-  `markdown_error_policy` (only the pass policy forwards the original response).
+  1950 format error as raw RFC 1951 from the start. The streaming decoder
+  instead commits to the framing implied by the first two bytes. For a
+  misclassified stream, it fails with a decompression error that follows the
+  configured `markdown_error_policy`. Only the pass policy forwards the
+  original response.
   Streaming cannot replay committed bytes. The divergence is deliberate, and
   tests pin it on both paths.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
@@ -280,24 +283,24 @@ before/after examples.
   `reason="bypass_no_transform"`. Operators must update dashboards that use
   the previous label value.
 - Converted responses no longer carry the source HTML `Last-Modified` as a
-  weak validator. The Markdown-derived strong ETag is the sole validator:
-  200/streaming/full-buffer responses strip the upstream `Last-Modified`,
-  `Trailer`, and representation-digest headers (`Content-MD5`, `Digest`,
-  `Content-Digest`, `Repr-Digest`, upstream `X-Markdown-Tokens`), and 304
-  responses no longer restore the source mtime. Conditional requests
-  (`ims_only`) still accept `If-Modified-Since` for eligibility decisions.
+  weak validator. The Markdown-derived strong ETag is the sole validator.
+  The module strips the upstream `Last-Modified`, `Trailer`, and
+  representation-digest headers (`Content-MD5`, `Digest`, `Content-Digest`,
+  `Repr-Digest`, upstream `X-Markdown-Tokens`) from 200/streaming/full-buffer
+  responses. It no longer restores the source mtime for 304 responses.
+  Conditional requests (`ims_only`) still accept `If-Modified-Since` for
+  eligibility decisions.
   The response validator surface is what changed.
 - HEAD requests now describe the Markdown representation a GET would
   select: the module rewrites the upstream headers to
   `Content-Type: text/markdown; charset=utf-8` with `Vary: Accept` and
   strips source-HTML metadata (`Content-Encoding`, `Last-Modified`,
-  `Accept-Ranges`, digest headers, `Trailer`). Body-derived fields
-  (`Content-Length`, `ETag`) receive no fabricated values: a
-  proxied HEAD carries no body, so committing an empty-input ETag or
-  `Content-Length: 0` would contradict the GET representation of the
-  same URL (Rust contract scenarios 07/08). This supersedes the
-  previous fail-open behavior that forwarded the upstream HTML headers
-  unchanged.
+  `Accept-Ranges`, digest headers, `Trailer`). The module does not fabricate
+  body-derived fields (`Content-Length`, `ETag`) because a proxied HEAD
+  carries no body. An empty-input ETag or `Content-Length: 0` would contradict
+  the GET representation of the same URL (Rust contract scenarios 07/08).
+  This supersedes the previous fail-open behavior that forwarded the upstream
+  HTML headers unchanged.
 
 ### Added
 
@@ -318,10 +321,11 @@ before/after examples.
   candidate-bound blocking contract. Focused 0.7.0/0.8.0 compatibility checks
   remain as regression inputs. The obsolete 0.9.0/0.9.1 wrapper chain is gone.
 -  Harness and docs gates close four drift gaps. The scratch-file detector reads
-  Git path output as NUL-delimited bytes, so a non-UTF-8 tracked name no longer
-  aborts the scan, and a malformed allowlist entry now fails the check instead
-  of silently dropping its exemption. The Document Updates ordering check covers
-  every table in the section. A second table can no longer carry any row order.
+  Git path output as NUL-delimited bytes. Thus, a non-UTF-8 tracked name no
+  longer aborts the scan. A malformed allowlist entry now fails the check
+  instead of silently dropping its exemption. The Document Updates ordering
+  check covers every table in the section. A second table can no longer carry
+  any row order.
   The notices checker validates direct `[dev-dependencies]` crates against the
   resolved lock versions, and the notices file lists those crates.
 
@@ -348,10 +352,11 @@ performance readiness and release evidence, this release closes toolchain and
 public-contract debt before the v1.0 compatibility freeze.
 
 The project released v0.9.0 intending it to be the last breaking release
-before v1.0. The project deliberately extended the freeze through v0.9.1
-because v1.0 had not shipped, adoption remained limited, and the final
-toolchain, dependency, configuration, and ABI audit found cleanup worth
-completing before the long-lived contract begins.
+before v1.0. The project deliberately extended the freeze through v0.9.1.
+The project had not shipped v1.0, and adoption remained limited. Another
+reason for the extension was the final toolchain, dependency, configuration,
+and ABI audit. It found cleanup worth completing before the long-lived
+contract begins.
 
 ### Breaking Changes
 
@@ -375,13 +380,14 @@ completing before the long-lived contract begins.
   fail `nginx -t` with a `commonmark`/`gfm` migration hint. They were
   experimental selectors that never produced distinct output formats.
 - **Bundled Rust/C FFI baseline reset to ABI 1.** The internal coordinated
-  boundary removes the duplicate streaming engine byte, the unimplemented
-  flavor discriminants, the reserved `FFIConditionalResult` shape and its
-  superseded conditional helper, the superseded simple base-URL builder, and
-  15 exports with no production C consumer. The removed set covers dead
-  decision/error-policy wrappers, standalone URL checks, Rust diagnostics
-  accessors, redundant init helpers, NULL-only constructors, and duplicate
-  streaming finish/free/reason paths. Production constructors use the
+  boundary removes the duplicate streaming engine byte and the unimplemented
+  flavor discriminants. It also removes the reserved `FFIConditionalResult`
+  shape and its superseded conditional helper, along with the superseded simple
+  base-URL builder. It removes 15 exports with no production C consumer. The
+  removed set covers dead decision/error-policy wrappers, standalone URL
+  checks, Rust diagnostics accessors, redundant init helpers, NULL-only
+  constructors, and duplicate streaming finish/free/reason paths. Production
+  constructors use the
   `_new_with_code` variants so failures remain classifiable.
   NGINX now validates `markdown_abi_version()` during preconfiguration and
   refuses startup if the linked Rust archive and generated C header disagree.
@@ -419,12 +425,12 @@ completing before the long-lived contract begins.
 -  Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally through the streaming path (same as gzip/deflate)
   under `streaming_first` with `markdown_auto_decompress on` and
-  `markdown_cache_validation` not `full`. Hardened with trailing-data rejection
-  (RFC 7932 single-stream enforcement), truncation detection, no-progress guard,
-  typed error propagation, three-way error classification
-  (format/allocation/internal), exact-budget completion probes, and per-call
-  failure-origin lifecycle. Build dependency: official release builds now depend
-  on `libbrotlidec` for Brotli streaming. Configure option:
+  `markdown_cache_validation` not `full`. Hardening adds trailing-data
+  rejection (RFC 7932 single-stream enforcement), truncation detection, and a
+  no-progress guard. It also adds typed error propagation, three-way error
+  classification (format/allocation/internal), exact-budget completion probes,
+  and a per-call failure-origin lifecycle. Build dependency: official release
+  builds now depend on `libbrotlidec` for Brotli streaming. Configure option:
   `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` (default auto). No new public
   directives or ABI surface. Identical budget, error policy, and observability
   semantics as gzip/deflate streaming paths.
@@ -486,9 +492,9 @@ ADR-0024 documents the decision.
   with zero current and zero baseline violations across C, Rust, Python, and
   shell checks.
 - Performance evidence provenance: the canonical 0.9.1 baseline now records
-  all eight native NGINX 1.24.0 scenarios, including Brotli streaming, and
-  binds verbatim evidence to the exact source commit, workflow run/attempt,
-  UTC timestamp, and retained raw-artifact digest. The baseline retains the
+  all eight native NGINX 1.24.0 scenarios, including Brotli streaming. It binds
+  verbatim evidence to the exact source commit, workflow run/attempt, UTC
+  timestamp, and retained raw-artifact digest. The baseline retains the
   former historical exception only as an immutable audit record. The baseline
   records the measured `plain-small` latency p50 as
   9 ms without normalization.
@@ -627,9 +633,9 @@ and 0.8.x release gate validation.
 - **Release manifest integrity validation** — `validate-release-manifest.py`
   now parses `SHA256SUMS` and verifies package plus manifest digests instead
   of only checking filename presence. Non-tag workflow manifests now declare
-  unsigned checksum-only integrity explicitly, and `workflow_dispatch` package
-  runs can omit the optional version input by falling back to the checked-in
-  package version.
+  unsigned checksum-only integrity explicitly. If a `workflow_dispatch` package
+  run omits the optional version input, it falls back to the checked-in package
+  version.
 
 ### Verified
 
@@ -646,10 +652,10 @@ and 0.8.x release gate validation.
 
 ## [0.8.2] - 2026-06-25
 
-Patch release for the 0.8.x line: streaming decompression hardening, FFI
-panic safety, implied-closure correctness, decompression budget enforcement,
-harness detector improvements, C module deduplication, and release-line
-documentation closeout.
+This 0.8.x patch release hardens streaming decompression and improves FFI
+panic safety, implied-closure correctness, and decompression budget enforcement.
+It also improves harness detectors, deduplicates C module code, and closes out
+release-line documentation.
 
 ### Added
 
@@ -711,12 +717,13 @@ documentation closeout.
 - Updated `THIRD-PARTY-NOTICES` with current dependency versions.
 - Clarified header plan safety contract in C headers.
 -  **C module deduplication**: extracted shared helpers across five C source
-  files. `fill_str_from_rust` in `reason_ffi.c`, `decomp_collect_input`,
-  `decomp_build_output_chain`, and `decomp_alloc_output` in `decompression.c`,
-  `for_each_header_named` iterator with visitor pattern and four helpers in
-  `header_plan.c`, `for_each_cache_control_header` iterator in `auth.c`,
-  `send_chain`, `acquire_terminal_buf`, `handle_send_result` in
-  `stream_postcommit.c` (Rule 31).
+  files. In `reason_ffi.c`, this extracted `fill_str_from_rust`. In
+  `decompression.c`, it extracted `decomp_collect_input`,
+  `decomp_build_output_chain`, and `decomp_alloc_output`. In `header_plan.c`,
+  it extracted the `for_each_header_named` iterator with a visitor pattern and
+  four helpers. In `auth.c`, it extracted the `for_each_cache_control_header`
+  iterator. In `stream_postcommit.c`, it extracted `send_chain`,
+  `acquire_terminal_buf`, and `handle_send_result` (Rule 31).
 - Parameterized postcommit send-result helper with an explicit action context.
 - Extracted brotli finish buffer-expansion helper for switch statement
   consistency.
@@ -790,12 +797,13 @@ documentation closeout.
 
 ### Tests
 
-- Added stream commit multipart header-list rollback regression tests covering
-  cross-part `orig_nelts` semantics (Rule 39 / Rule 40): Vary in part2
-  restoration, target and non-target headers in part2, cross-header rollback
-  across parts (ETag failure rolls back Vary in p1 and ETag in p2), new-push
-  entry invalidation, Cache-Control failure cross-part rollback, and explicit
-  `orig_nelts` cross-part linear count verification.
+- Added stream commit multipart header-list rollback regression tests for
+  cross-part `orig_nelts` semantics (Rule 39 / Rule 40). Tests cover Vary
+  restoration in part2, target and non-target headers in part2, and new-push
+  entry invalidation. They cover cross-header rollback across parts: ETag
+  failure rolls back Vary in p1 and ETag in p2. They also cover Cache-Control
+  failure cross-part rollback and explicitly verify the cross-part linear count
+  for `orig_nelts`.
 - Added regression tests for implied closure on Skip decision and streaming
   language prefix handling.
 - Added metadata traversal timeout regression test.
@@ -812,9 +820,10 @@ documentation closeout.
 
 ## [0.8.1] - 2026-06-20
 
-Maintenance, stability, and security-hardening release on top of 0.8.0:
-streaming header commit atomicity (Rule 39), FFI handle ownership correctness,
-HTTP OWS compliance, and performance/coverage tooling hardening.
+Maintenance, stability, and security-hardening release on top of 0.8.0.
+It improves streaming header commit atomicity (Rule 39), FFI handle ownership
+correctness, and HTTP OWS compliance. It also hardens performance/coverage
+tooling.
 
 ### Fixed
 
@@ -825,9 +834,9 @@ HTTP OWS compliance, and performance/coverage tooling hardening.
   the fallback/full-buffer path. Rollback restores original `hash`/`value`
   for modified entries, invalidates newly pushed entries (`hash=0`), and
   restores the typed `etag` pointer. No use-after-free or double-free under
-  the request-pool memory model. Snapshot collection now fails before any
-  Phase 1 mutation when a header exceeds the fixed snapshot capacity, rather
-  than silently leaving entries outside the rollback set.
+  the request-pool memory model. If a header exceeds the fixed snapshot
+  capacity, snapshot collection now fails before any Phase 1 mutation.
+  It no longer silently leaves entries outside the rollback set.
 - **Corrected FFI cleanup contract**: when
   `markdown_streaming_safe_finish` returns `ERROR_INVALID_INPUT` (validation
   failure), the handle is no longer consumed by Rust. The NGINX C module now
@@ -1056,10 +1065,11 @@ configuration directives.
 
 ## [0.7.0] - 2026-06-03
 
-P0 runtime correctness fixes, Rust-first architecture modules, independent
-decompression budget, Accept header negotiation, parse timeout/budget,
-FFI ABI layout verification, DEB/RPM packaging, Kubernetes deployment,
-dynconf dry-run/rollback, and runtime diagnostics.
+This release includes P0 runtime correctness fixes and Rust-first architecture
+modules. It adds an independent decompression budget, Accept header
+negotiation, parse timeout/budget, and FFI ABI layout verification. It also
+includes DEB/RPM packaging, Kubernetes deployment, dynconf dry-run/rollback,
+and runtime diagnostics.
 
 ### Added
 
@@ -1193,9 +1203,9 @@ dynconf dry-run/rollback, and runtime diagnostics.
 ## [0.6.3] - 2026-05-14
 
 This release closes the Rust-first E2E migration scope for the first scenario
-batch, aligns harness governance with migrated execution surfaces, removes
-stale Python E2E spec files, and includes the final mainline security/test
-hardening fixes before the v0.6.3 tag.
+batch. It aligns harness governance with migrated execution surfaces and
+removes stale Python E2E spec files. It also includes the final mainline
+security/test hardening fixes before the v0.6.3 tag.
 
 ### Added
 - Rust E2E harness migration artifacts and documentation for 0.6.3:
@@ -1288,8 +1298,8 @@ version-bearing surfaces to 0.6.2.
 ## [0.6.1] - 2026-05-06
 
 This release hardens the harness rule surface with five new defect-prevention
-rules (27–31) extracted from 14-day fix-commit analysis, adds an output-safety
-risk pack, and introduces the two-phase dynconf snapshot model.
+rules (27–31) from a 14-day fix-commit analysis. It adds an output-safety
+risk pack and introduces the two-phase dynconf snapshot model.
 
 ### Added
 - **Harness Rules 27–31** in AGENTS.md:
@@ -1348,8 +1358,8 @@ risk pack, and introduces the two-phase dynconf snapshot model.
 
 This release upgrades nginx-markdown-for-agents from a feature-complete opt-in
 system to a production-ready default-enabled system. The project now uses the
-streaming engine as the default conversion path (auto mode), enables noise
-pruning out-of-the-box, and simplifies configuration with a unified memory
+streaming engine as the default conversion path (auto mode). It enables noise
+pruning out-of-the-box and simplifies configuration with a unified memory
 budget.
 
 ### Added
@@ -1560,9 +1570,9 @@ release-gate/documentation synchronization.
   `markdown_streaming_finalize()`.
 - Fixed C unit tests so merge-conf and header-update assertions verify
   production writes rather than initial zeroed state.
-- Fixed release-gate validator fragility: JSON top-level type errors now fail
-  cleanly, changelog detection requires a real release heading, missing
-  `tomllib`/`tomli` causes a hard failure with installation guidance, and the
+- Fixed release-gate validator fragility. JSON top-level type errors now fail
+  cleanly, and changelog detection requires a real release heading. Missing
+  `tomllib`/`tomli` causes a hard failure with installation guidance. The
   validator reports missing `bash` before subprocess execution.
 - Fixed build and release helper diagnostics from the post-0.5.0 patch work,
   including curl/python failure tolerance, stderr routing, and release-version
@@ -1641,8 +1651,8 @@ streaming, plus the harness and release-gate surfaces needed to operate it.
   conversion-option wiring, and macro/unused-parameter hygiene without changing
   runtime conversion semantics.
 - Refreshed the release-binaries matrix to track nginx.org stable/mainline
-  releases directly, so `0.5.0` now publishes binaries for nginx `1.29.8`
-  and `1.30.0`, and added a release-event freshness gate so future published
+  releases directly. As a result, `0.5.0` now publishes binaries for nginx
+  `1.29.8` and `1.30.0`. Added a release-event freshness gate so future published
   binaries cannot silently lag behind the official nginx download page.
 - Updated harness optional-skill documentation to avoid hard local-link
   dependency in docs checks. The skill remains documented as an optional

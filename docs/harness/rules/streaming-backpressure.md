@@ -14,10 +14,10 @@ Historical issues: `5649890`, `23165d9`, `cfd4bd8`, `f97be3f`.
 Required:
 - Determine ownership at the filter boundary before handling `NGX_AGAIN`.
   Persist and resubmit a chain only while this module still owns the unsent
-  data.  If a downstream filter such as the NGINX copy filter has retained
-  the chain, keep only a request-lifetime anchor/pending latch and resume the
-  downstream filter with `NULL`, resubmitting the original chain duplicates
-  its unsent tail.
+  data. A downstream filter such as the NGINX copy filter can retain the
+  chain. In that case, keep only a request-lifetime anchor/pending latch and
+  resume the downstream filter with `NULL`. Resubmitting the original chain
+  duplicates its unsent tail.
 - On resume, preserve the pending latch and buffered flag while downstream
   returns `NGX_AGAIN`, clear both on terminal success or failure.
 - Never overwrite pending output with terminal empty `last_buf` while data is still pending.
@@ -39,7 +39,11 @@ Required:
 - Use semantically correct return codes in fail-open branches (`NGX_DECLINED` where needed), so caller behavior matches control intent.
 - Do not advance buffer positions for unconsumed data when handing chain to next filter unchanged.
 - If a fail-open branch invokes next header filter, mark header-forwarded state before the call to avoid double header emission.
-- When fail-open involves replay-buffer data integrity (init/append failure, passthrough after `precommit_error`, duplicate finalize on terminal buffer), apply Rule 38 in addition to this rule. Rule 38 subsumes the streaming-specific replay buffer contract; this rule covers the general fail-open return-code and pointer-advancement discipline.
+- When fail-open involves replay-buffer data integrity (init/append failure,
+  passthrough after `precommit_error`, duplicate finalize on terminal buffer),
+  apply Rule 38 in addition to this rule. Rule 38 subsumes the
+  streaming-specific replay buffer contract. This rule
+  covers the general fail-open return-code and pointer-advancement discipline.
 
 ---
 
@@ -75,13 +79,13 @@ Required:
   `results.failopen_count` tracks successful deliveries.  This separation
   prevents inflating the delivery count when passthrough later fails (for
   example header forwarding error, allocation failure).
-  This contract applies uniformly to EVERY fail-open path in the module:
-  streaming pre-commit (`send_failopen_chain` / `resume_pending`),
-  full-buffer reject_or_fail_open_buffered_response,
-  buffer-init failure (`handle_buffer_init_failure`),
-  buffer-append failure (`handle_buffer_append_failure`), and the header
-  filter fail-open paths (unsupported compression, ctx-alloc failure,
-  inflight overload, inflight cleanup-alloc failure).  The decision to
+  This contract applies uniformly to EVERY fail-open path in the module.
+  It covers streaming pre-commit (`send_failopen_chain` / `resume_pending`)
+  and full-buffer reject_or_fail_open_buffered_response. It also covers
+  buffer-init failure (`handle_buffer_init_failure`) and buffer-append
+  failure (`handle_buffer_append_failure`). Header filter fail-open paths
+  include unsupported compression, ctx-alloc failure, inflight overload,
+  and inflight cleanup-alloc failure.  The decision to
   fail-open gets recorded separately via `log_decision()` /
   `log_failure_decision()` at the decision point. The module must leave the
   delivery counter unchanged until the downstream filter returns.
@@ -111,10 +115,9 @@ Required:
   latch terminal-sent flags (for example `main_terminal_sent`,
   `terminal_buf_sent`).  `NGX_AGAIN` means the downstream filter has
   suspended processing — the output was **not** accepted, and the
-  current buffer is still pending.  Latching a terminal flag on
-  `NGX_AGAIN` causes the resume path to skip the buffered output,
-  silently dropping the terminal buffer and leaving the client with an
-  incomplete response.
+  current buffer is still pending. Latching a terminal flag on `NGX_AGAIN`
+  causes the resume path to skip the buffered output. This silently drops
+  the terminal buffer and leaves the client with an incomplete response.
 - The correct pattern is:
   ```c
   rc = ngx_http_output_filter(r, out);
@@ -151,19 +154,19 @@ has_private ordering).
 Required:
 - When the streaming two-phase commit applies auth `Cache-Control`
   headers (for example `stream_commit_apply_auth_cache_control`), the
-  function must handle commit failures gracefully: if setting a header
-  fails, the commit must abort and route through `precommit_error`
-  rather than continuing with partial auth headers.
+  function must handle commit failures gracefully. If setting a header
+  fails, the commit must abort and route through `precommit_error` rather
+  than continue with partial auth headers.
 - When processing `Cache-Control` response headers for auth cache
   decisions, iterate **all** `Cache-Control` entries (full
   `ngx_list_part_t` chain, per Rule 28), not just the first one.  Some
   upstreams send multiple `Cache-Control` headers (for example
   `public` and `private` separately).
 - When aggregating `public` vs `private` flags across multiple
-  `Cache-Control` headers, check `any_public` before `has_private`:
-  if any header says `public` and a later header says `private`, the
-  response is still cacheable as `public` for auth purposes unless
-  `private` explicitly overrides.  Checking `has_private` first
+  `Cache-Control` headers, check `any_public` before `has_private`. If any
+  header says `public` and a later header says `private`, the response is
+  still cacheable as `public` for auth purposes unless `private` explicitly
+  overrides.  Checking `has_private` first
   causes a false negative when `public` appears after `private`.
 - The `r` parameter in `stream_commit_apply_auth_cache_control` should
   be `const`-qualified when the function only reads from `r` (per
@@ -203,8 +206,8 @@ Verification:
 - Identify minimum verification commands before writing code.
 - When remediating SonarCloud findings for a PR, fetch findings from
   `api/issues/search` with explicit `componentKeys`, `pullRequest`,
-  and `statuses=OPEN,CONFIRMED`; do not rely solely on dashboard
-  "top issues" summaries, which may include already-closed items.
+  and `statuses=OPEN,CONFIRMED`. Do not rely solely on dashboard "top issues"
+  summaries, which may include already-closed items.
 
 ### Before writing or modifying any code (mandatory pre-output checklist)
 
@@ -217,7 +220,9 @@ items by file type:
 
 #### C module code (`components/nginx-module/src/`)
 1. No dead stores — every assignment is read before the next write to the same variable. (Rule 16)
-2. No cognitive-complexity blowup — if adding branches/loops to an existing function, estimate whether the addition stays within the threshold, extract a helper proactively if it would exceed. (Rule 17)
+2. No cognitive-complexity blowup. When adding branches/loops to an existing
+   function, estimate whether the addition stays within the threshold. Extract
+   a helper proactively if the addition would exceed the threshold. (Rule 17)
 3. No blocking calls, no raw malloc/free, no global mutable state. (Baseline)
 4. Return codes (`NGX_OK`, `NGX_AGAIN`, `NGX_DECLINED`, `NGX_ERROR`, `NGX_DONE`) used with correct semantics. (Baseline, Rule 2)
 5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering stay preserved. (Rule 1)
@@ -228,18 +233,45 @@ items by file type:
 6. Memory budgets enforced on every allocation path, auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. **No unguarded operations on values that may be NULL/uninitialized/invalid** — this includes dereference, relational comparison (`>`, `<`), arithmetic, or field access through pointers. Use explicit guards or boolean flags set at the production site. (Baseline C style)
-9. FFI surface: if Rust structs/options/error codes change, all C headers, call sites, tests, and docs updated in the same change set. When adding a new field to an FFI struct (for example `MarkdownResult`), verify: (a) both public C header copies include the field, (b) the field is read into a local variable **before** any `*_free()` call, (c) the field gets used in the correct lifecycle window (before the struct gets released). (Rule 15)
+9. FFI surface: if Rust structs/options/error codes change, all C headers,
+   call sites, tests, and docs updated in the same change set. When adding a
+   new field to an FFI struct (for example `MarkdownResult`), verify that
+   both public C header copies include it. Verify that the code reads the
+   field into a local variable
+   **before** any `*_free()` call. Verify that the code uses the field in the
+   correct lifecycle window, before it releases the struct. (Rule 15)
 10. New metrics: every field added to the metrics struct has a runtime write site (not just snapshot copy). New reason codes have `log_decision()` callsites. Gauge names match the actual measurement event. Observability writes fire after the event succeeds, not before the attempt. `NGX_AGAIN` is not success — defer gauge writes to the resume/drain path. Cross-boundary metrics: verify the complete producer→consumer chain (producer populates → FFI exposes → C consumes → all renderers emit). When adding fields to the SHM-backed metrics struct, bump the SHM zone version name to prevent hot-reload layout mismatch. Metric unit suffixes (`_ms`, `_us`, `_bytes`) must match the actual resolution of the data source. (Rules 8, 23)
 11. FFI error code classification: when branching on error codes, cover all FFI-defined codes for the semantic category — grep `markdown_converter.h` for `ERROR_*` to confirm completeness. (Rule 15)
-12. Multi-path observability symmetry: when adding or modifying a function with multiple exit paths (for example immediate success, backpressure-defer, resume-failure), confirm that every exit path applies symmetric success/failure metrics and reason codes. Classify return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` → defer, else → failure) on every path. Gauge updates are unconditional on successful samples. (Rule 23)
-13. Deferred-state latch completeness: when adding a latch/flag to handle `NGX_AGAIN` deferral, grep for ALL functions that perform the same send/output operation and confirm each one sets the latch on `NGX_AGAIN`, not just the initial caller. Clear the latch on both success AND failure resume paths. (Rule 23)
-14. Forward declarations must match definitions: when changing a function's signature (parameters, return type), update both the forward declaration and the definition in the same change set. Mismatches cause silent type errors in C.
+12. Multi-path observability symmetry: when adding or modifying a function
+    with multiple exit paths, check every exit path. Examples include immediate
+    success, backpressure-defer, and resume-failure. Confirm that each exit path
+    applies symmetric success/failure metrics and reason codes. Classify
+    return codes consistently (`NGX_OK/NGX_DONE` → success, `NGX_AGAIN` → defer,
+    else → failure) on every path. Gauge updates are unconditional on
+    successful samples. (Rule 23)
+13. Deferred-state latch completeness: when adding a latch/flag to handle
+    `NGX_AGAIN` deferral, grep for ALL functions that perform the same
+    send/output operation. Confirm that each function sets the latch on
+    `NGX_AGAIN`, not just the initial caller. Clear the latch on both success
+    AND failure resume paths. (Rule 23)
+14. Forward declarations must match definitions. When changing a function's
+    signature (parameters, return type), update both the forward declaration
+    and the definition in the same change set. Mismatches cause silent type
+    errors in C.
 15. C99 safety baseline: no implicit declarations, no unchecked narrowing conversions. Any required narrowing cast must have a preceding bounds check and explicit overflow failure path. (Rule 24)
 16. Const-correctness: pointer parameters that are only read through must be `const`-qualified. No const-dropping casts in read-only paths. When changing a parameter's const qualification, update forward declarations and header prototypes in the same change set. (Rule 24)
 17. No macro-shadow declarations: do not declare functions/variables with names that are NGINX macros (`ngx_log_error`, `ngx_memzero`, `ngx_str_set`, and so on). Validate against canonical headers and preserve exact signature parity (including `const`) when adding forward declarations. (Rule 24)
-18. Reason-code classification coverage: when adding a new family of reason codes (for example `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`), update every function that classifies reason codes by string pattern (prefix match, substring). Prefix-based classifiers silently miss new namespaces whose failure codes do not share the existing prefix. Grep for all reason-code classification call sites and confirm each handles the new namespace. (Rule 7)
+18. Reason-code classification coverage: when adding a new reason-code family,
+    update every function that classifies reason codes by string pattern.
+    This includes prefix and substring matches. An example of a new family
+    is `STREAMING_*` alongside `ELIGIBLE_*`/`FAIL_*`. Prefix-based classifiers
+    silently miss new namespaces whose failure codes do not share the existing
+    prefix. Grep for all reason-code classification call sites and confirm
+    each handles the new namespace. (Rule 7)
 19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
-20. Coverage: if this change adds or modifies production code paths, verify that aggregate e2e or unit test coverage does not regress below 80% (90% for critical paths). (Rule 25)
+20. Coverage: if the change adds or modifies production paths, verify that
+    aggregate e2e or unit test coverage does not regress below 80%. The
+    threshold for critical paths is 90%. (Rule 25)
 21. Naming and documentation: every new or modified function has a block comment (purpose, parameters, return values). Variables and types use descriptive names. Complex logic has inline comments explaining *why*. (Rule 26)
 22. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw string interpolation in Markdown link labels `[...]` or destinations `(...)` / `<...>`. URL values must reject percent-encoded control characters before scheme validation. The module must validate forwarded header values (first-hop extraction, control char rejection, IPv6 bracket validation, fallback to server name). (Rule 27)
 23. Full `ngx_list_part_t` chain iteration: any function iterating `ngx_list_t` must traverse the full `part → part->next` chain, not only the first part. When aggregating flags from multiple headers of the same name, check the aggregated result before branching on per-header flags. (Rule 28)
@@ -247,8 +279,20 @@ items by file type:
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
 27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`, `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
-28. Fail-open replay buffer integrity: if the change touches fail-open or streaming pre-commit paths, verify (a) replay buffer init failure triggers `precommit_error`, (b) replay buffer append failure triggers `precommit_error` (not just a warning), (c) `failopen_completed` flag prevents duplicate `finalize_request` after terminal-buffer passthrough, (d) `results.failopen_count` increments only after downstream returns `NGX_OK` or `NGX_DONE` (not at the decision point, and not on earlier return codes). (Rule 38)
-29. NGX_DONE terminal semantics: after `ngx_http_finalize_request()`, the function must return immediately. Callers receiving `NGX_DONE` must treat it as terminal success — no further filter calls or body sends. Multi-step header modifications must be atomic (abort on first failure). Fixed-capacity rollback snapshots must fail before mutation when capacity gets exceeded; they must never silently omit mutable entries. (Rule 39)
+28. Fail-open replay buffer integrity: apply these checks if the change
+    touches fail-open or streaming pre-commit paths. Verify that replay
+    buffer init failure triggers `precommit_error`. Verify that replay buffer
+    append failure triggers `precommit_error`, not just a warning. Verify
+    that the `failopen_completed` flag prevents duplicate `finalize_request`
+    after terminal-buffer passthrough. Verify that `results.failopen_count`
+    increments only after downstream returns `NGX_OK` or `NGX_DONE`. It must
+    not increment at the decision point or on earlier return codes. (Rule 38)
+29. NGX_DONE terminal semantics: after `ngx_http_finalize_request()`, the
+    function must return immediately. Callers receiving `NGX_DONE` must treat
+    it as terminal success — no further filter calls or body sends. Multi-step
+    header modifications must be atomic (abort on first failure). Fixed-capacity
+    rollback snapshots must fail before mutation if the entries exceed capacity.
+    They must never silently omit mutable entries. (Rule 39)
 30. Invalidated header filtering: all header lookup/iteration functions must skip entries where `hash == 0`. NGINX marks deleted headers by zeroing hash, reading such entries returns stale data. (Rule 40)
 31. Format string argument matching: when adding metrics to the Prometheus v1 renderer using `ngx_snprintf`, verify specifier count and types match the argument list exactly. (Rule 8)
 
@@ -260,8 +304,17 @@ items by file type:
 5. Parameterized loops must consume the parameter value in the exercised path, avoid no-op parameterization. (Rule 14)
 6. Where available, call shared test helpers that mirror production routing semantics instead of duplicating inline branch logic. (Rule 14)
 7. Regression tests for error-code classification must exercise a routing stub mirroring production logic, not manually increment and assert local counters. (Rule 14)
-8. Tests that verify side-effects (counter increments, reason codes, state transitions) must drive the outcome through an `rc` value or flag that flows through the same `if`/`switch` condition as production. Direct mutation (`m.counter++`) then assert proves nothing about production branching. (Rule 14)
-9. Tests for deferred-state latch mechanisms (backpressure `NGX_AGAIN` → resume) must cover the full multi-step lifecycle: set phase (latch = 1), drain-success phase (metrics recorded, latch cleared), and drain-failure phase (latch cleared, failure metrics recorded). Single-step assertions on one phase cannot catch latch lifecycle bugs. (Rule 14)
+8. Tests that verify side-effects must drive the outcome through an `rc`
+   value or flag. That value or flag must flow through the same `if`/`switch`
+   condition as production. Example side-effects include counter increments,
+   reason codes, and state transitions. Direct mutation (`m.counter++`) then
+   assert proves nothing about production branching. (Rule 14)
+9. Tests for deferred-state latch mechanisms (backpressure `NGX_AGAIN` →
+   resume) must cover the full multi-step lifecycle. In the set phase, set
+   latch = 1. In the drain-success phase, record metrics and clear the
+   latch. In the drain-failure phase, clear the latch and record failure
+   metrics. Single-step assertions on one phase cannot catch latch lifecycle
+   bugs. (Rule 14)
 
 #### Rust code (`components/rust-converter/`)
 1. `cargo fmt` and `cargo clippy` clean. (Baseline)
@@ -273,15 +326,38 @@ items by file type:
 7. Doc comments must not have blank lines between `///` lines. (Rule 22)
 8. Doctests follow visibility layering: public API uses `no_run` with full `nginx_markdown_converter::...` imports, internal types use `ignore`, end markers are plain ```. (Rule 22)
 9. No identity multiplications (`1 * N`) in size constants — use literals or underscored forms. (Rule 22)
-10. **FFI struct initialization**: when creating a zeroed/empty FFI struct (for example `MarkdownResult`), **prefer existing helper functions** (`empty_result()`, `zeroed_result()`, and so on) over writing literal `StructName { ... }` initializations. Only use literal initialization when the struct needs non-zero/default values, and in that case ensure all fields are present. (Rule 15)
-11. **FFI struct field additions**: when adding a field to any `#[repr(C)]` FFI struct (for example `MarkdownResult`), update (a) the Rust struct definition, (b) both public C header copies, (c) **all** struct literal initialization sites across `tests/` and `examples/` (grep for `StructName {`), (d) associated `reset_*()`/`free_*()` cleanup functions to zero the new field, and (e) any test helper constructors (`empty_result()`, `zeroed_result()`). (Rule 15)
+10. **FFI struct initialization**: for a zeroed/empty FFI struct such as
+    `MarkdownResult`, **prefer existing helper functions** such as
+    `empty_result()` and `zeroed_result()`. Prefer them over literal
+    `StructName { ... }` initializations. Only use literal initialization
+    when the struct needs non-zero/default values, and in that case ensure all
+    fields are present. (Rule 15)
+11. **FFI struct field additions**: when adding a field to any `#[repr(C)]`
+    FFI struct (for example `MarkdownResult`), update the Rust struct
+    definition and both public C header copies. Update **all** struct
+    literal initialization sites across `tests/` and `examples/`. Grep for
+    `StructName {` to find the sites. Update the associated
+    `reset_*()`/`free_*()` cleanup functions to zero the new field. Update any
+    test helper constructors (`empty_result()`, `zeroed_result()`). (Rule 15)
 12. **Lifecycle ordering**: when reading data from a foreign-owned struct (FFI result, allocator-owned buffer), capture fields to local variables **before** calling the associated free/release function. Do not access struct fields after `*_free()` — the memory may get invalidated or zeroed. (Rule 15)
 13. Depth/stack state must be explicit and name-aware: do not model HTML/XML nesting safety with blind counter decrement on every end-tag. Track open elements explicitly (stack or equivalent) so mismatched/stray end-tags cannot reduce depth and bypass limits. (Rules 5, 14)
 14. Dangerous-element classification must separate container vs void semantics when skip-mode state comes into play. Void dangerous elements (for example `<link>`, `<base>`) should behave as one-shot skips, not by entering persistent skip-depth that expects a closing tag.
 15. Dangerous URL detection must reject control characters (including NUL) before scheme checks, scheme-prefix matching alone is insufficient for obfuscated payloads.
-16. **Benchmark averaging consistency**: all per-iteration averages (latency, throughput, markdown size, token estimates, flush count) must use the same denominator — the count of measured iterations (non-warmup, non-error, non-fallback). For every derived metric, keep numerator and sample count under the same inclusion predicate, and do not mix counter granularities (chunk-level vs iteration-level) in one aggregate without normalization. (Rule 8c)
+16. **Benchmark averaging consistency**: all per-iteration averages must use
+    the same denominator. This applies to latency, throughput, markdown
+    size, token estimates, and flush count. The denominator is the count of
+    measured iterations (non-warmup, non-error, non-fallback). For every
+    derived metric, keep numerator and sample count under the same inclusion
+    predicate. Do not mix counter granularities (chunk-level vs
+    iteration-level) in one aggregate without normalization. (Rule 8c)
 17. **Metric naming accuracy**: when a metric field name implies specific semantics (for example `cpu_time_ms`), the implementation must actually measure that quantity. If approximating with a different measurement (for example wall-clock TTLB), add a comment documenting the approximation or rename the field. (Rule 8)
-18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or `ref mut` binding modifiers when matching on a reference type (`&T`, `&Option<T>`, `&Vec<T>`, and so on). Rust 2024 edition treats this as an error because the reference already implies borrowing. Use `ref` only when matching on an owned value where you need to borrow without moving. Before writing `if let Some(ref x) = expr`, check whether `expr` is a reference — if so, drop the `ref`.
+18. **Rust 2024 edition pattern binding**: do not use explicit `ref` or
+    `ref mut` binding modifiers when matching on a reference type. Examples
+    of reference types include `&T`, `&Option<T>`, and `&Vec<T>`. Rust 2024
+    edition treats this as an error because the reference already implies
+    borrowing. Use `ref` only when matching on an owned value where you need
+    to borrow without moving. Before writing `if let Some(ref x) = expr`,
+    check whether `expr` is a reference — if so, drop the `ref`.
 19. Coverage: if this change adds or modifies production code, verify that `cargo llvm-cov` aggregate coverage does not regress below 80% (90% for critical paths). (Rule 25)
 20. Naming and documentation: every new or modified public function has `///` doc comments (purpose, arguments, returns, safety for unsafe). Internal helpers have `//` comments. Document types and fields. (Rule 26)
 21. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw `write!`/`format!` that interpolates unescaped text in Markdown link labels `[...]` or destinations `(...)` / `<...>`. Use `chars()` not `bytes()` for escaping. URL values must reject percent-encoded control characters before scheme validation. (Rule 27)
@@ -311,13 +387,12 @@ items by file type:
    verify the actual nesting structure matches what the code expects.  Test
    with the production config file, not only hand-crafted flat fixtures.
    (Rule 8b)
-4. **Consumer key compatibility**: when reading data from a producer that
-   may use different key names (for example `html_bytes` vs `input_bytes`),
-   accept both names with a fallback chain. (Rule 8b)
-5. **Combined report handling**: when a single JSON serves as both
-   full-buffer and streaming report (for example `--engine both`), read
-   streaming metrics from `streaming_metrics` first, fallback to `tiers`.
-   (Rule 8b)
+4. **Consumer key compatibility**: a producer may use different key names,
+   such as `html_bytes` vs `input_bytes`. When reading its data, accept both
+   names with a fallback chain. (Rule 8b)
+5. **Combined report handling**: a single JSON can serve as both full-buffer
+   and streaming report (for example `--engine both`). Read streaming metrics
+   from `streaming_metrics` first. Fall back to `tiers`. (Rule 8b)
 6. Release-gate/tooling functions stay below the Python cognitive complexity
    threshold, extract independent validation steps before adding branches.
    (Rule 17)
@@ -336,7 +411,9 @@ items by file type:
 6. All C code examples and C-style guidance in docs/README/steering must use
    C99-or-newer forms and must not introduce pre-C99 syntax.
 7. Code examples in documentation must use meaningful names and include comments explaining non-obvious logic, matching the same standards as production code. (Rule 26)
-8. Markdown escaping and link-destination examples in docs must use escaped forms; never show raw interpolation of untrusted text in link labels or destinations. (Rule 27)
+8. Markdown escaping and link-destination examples in docs must use escaped
+   forms. Never show raw interpolation of untrusted text in link labels or
+   destinations. (Rule 27)
 
 **If the change would violate any item, redesign it before writing.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles. Redesign keeps the output clean.
 
@@ -393,47 +470,46 @@ If full suite is too heavy for current scope, run the narrowest relevant target 
 After completing any bug fix, review finding remediation, or multi-round code
 review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
 
-1. **Pattern extraction**: For each fix, ask: "Is this a one-off typo, or does
-   it represent a class of mistakes that could recur in different code?"  If
-   the latter, extract a generalizable rule.
+1. **Pattern extraction**: Examine each fix. Does it correct a one-off typo?
+   If the mistake belongs to a class that could recur in different code,
+   extract a generalizable rule.
 2. **Generalize, do not enumerate**: Rules should describe the *principle* behind
    the violation, not just the specific instance.  Bad: "check
-   `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`."  Good: "when
+   `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`." Good: "When
    classifying values into semantic categories across language boundaries,
-   cover all source-defined values that map to the category, not just the
-   locally-familiar ones."
-3. **Over-specificity review**: When adding or updating a rule, re-read it and
-   ask: "Would this rule prevent the same class of mistake if it occurred in
-   a different file, a different subsystem, or with different variable names?"
-   If not, the rule is too narrow.  Rewrite it to capture the structural
-   pattern (for example "all write paths for the same metric must apply the
-   same success guard") rather than the surface detail (for example "the
-   `resume_pending` TTFB latch must check `rc == NGX_OK`").  A rule that
-   only prevents re-introducing the same bug in the same
-   function is nearly worthless — the value is in preventing the analogous
-   mistake elsewhere.
-4. **Recurring pattern escalation**: If the same class of mistake appears in
-   two or more review rounds (even in different forms), treat it as a
-   systemic gap.  Strengthen the existing rule or add a new one — do not
-   rely on the agent "remembering" the previous fix.
-5. **Consistency audit**: When adding a guard condition in one code path (for
-   example a success check before writing a metric), scan all other paths
-   that perform the same write and apply the same guard.  A rule that says
-   "do X in path A" implicitly requires "do X in every path that does the
-   same thing."
+   cover all source-defined values that map to the category. Do not stop
+   at the locally-familiar ones."
+3. **Over-specificity review**: Re-read each rule you add or update. Would it
+   prevent the same class of mistake in a different file or subsystem, or
+   with different variable names? If not, the rule is too narrow. Rewrite it
+   to capture the structural pattern rather than the surface detail. Example
+   pattern: all write paths for the same metric must apply the same success
+   guard. Example detail: the `resume_pending` TTFB latch must check
+   `rc == NGX_OK`. A rule that only prevents re-introducing the same bug in
+   the same function is nearly worthless. The value is in preventing the
+   analogous mistake elsewhere.
+4. **Recurring pattern escalation**: Treat the same class of mistake as a
+   systemic gap if it appears in two or more review rounds. This applies even
+   if it appears in different forms. Strengthen the existing rule or add
+   a new one — do not rely on the agent "remembering" the previous fix.
+5. **Consistency audit**: When adding a guard condition in one code path,
+   scan all other paths that perform the same write. Apply the same guard
+   to those paths. A guard can be a success check before writing a metric.
+   A rule that says "do X in path A" implicitly requires "do X in every
+   path that does the same thing."
 6. **Checklist sync**: If you add a new rule or strengthen an existing rule,
-   update the corresponding pre-output checklist item(s) so the checklist
-   enforces the rule at write time, not at review time.
+   update the corresponding pre-output checklist item(s). The checklist
+   must enforce the rule at write time, not at review time.
 7. **Scope**: Only add rules that are actionable and verifiable before code
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does
    failure look like?"
 
 ### 64. NGX_AGAIN call-site audit (known-API registry)
-Historical issues: NGX_AGAIN truncation recurred across review rounds — feed
-path, `handle_success_output`, full-buffer header `NGX_AGAIN`, buffered
-fail-open, and replay-exhaustion all silently dropped the body when a
-known NGX_AGAIN-returning API was handled like an error.
+Historical issues: NGX_AGAIN truncation recurred across review rounds. When
+code treated a known NGX_AGAIN-returning API as an error, it silently dropped
+the body. This affected the feed path, `handle_success_output`, full-buffer
+header `NGX_AGAIN`, buffered fail-open, and replay-exhaustion.
 
 Required:
 - Every call to a known NGX_AGAIN-returning API must branch `NGX_AGAIN`
@@ -453,9 +529,9 @@ Required:
   ```
 - A new function that may return `NGX_AGAIN` must register in
   `detect_ngx_again_call_sites.sh` `NGX_AGAIN_APIS` so every call site is
-  audited; the detector's known-API list is the single registry.
+  audited. The detector's known-API list is the single registry.
 - Header-chain `NGX_AGAIN` means "headers accepted" (write filter queued
-  them); continue body output and do not re-drive the header chain.
+  them). Continue body output and do not re-drive the header chain.
 - Buffer/body-path `NGX_AGAIN` means suspend-and-resume: preserve pending
   state and resume later, never free or advance past unconsumed data.
 
@@ -469,13 +545,12 @@ Verification:
 
 ### 72. Header-chain NGX_AGAIN publishes commit latches (canonical model)
 
-Rule 64 states the semantics; this rule locks the latch contract.  A
+Rule 64 states the semantics. This rule locks the latch contract. A
 header-chain `NGX_AGAIN` from `ngx_http_next_header_filter` means the write
-filter queued the header block — the headers are ACCEPTED and the header
-filter chain is invoked at most once per request.  Any code that rolls back
-commit latches on header `NGX_AGAIN` and re-invokes the downstream header
-chain on resume re-runs intermediate header filters (for example gzip)
-that are not idempotent.
+filter queued the header block. The headers are ACCEPTED. The module invokes
+the header filter chain at most once per request. Code that rolls back commit
+latches on header `NGX_AGAIN` and re-invokes the downstream header chain on
+resume re-runs non-idempotent intermediate header filters, such as gzip.
 
 Required:
 - On header-chain `NGX_AGAIN`, publish **only** the delivery latches
@@ -484,7 +559,7 @@ Required:
   metrics (delivery gauges and counters) until resume/drain yields `NGX_OK`
   or `NGX_DONE`, so a backpressured request never records a delivery it has
   not completed.
-- Never re-invoke `ngx_http_next_header_filter` for the same request; a
+- Never re-invoke `ngx_http_next_header_filter` for the same request. A
   write-event resume is a pure body-filter re-entry
   (`ngx_http_next_body_filter(r, NULL)` or equivalent) that drains
   deferred output.
@@ -511,8 +586,8 @@ Verification:
 When a task asks for broad recent Git analysis plus actual harness/steering
 remediation:
 
-1. Collect local and remote refs for the requested time window, deduplicate by
-   commit SHA, classify titles by changed surface, and deep-check high-risk
+1. Collect local and remote refs for the requested time window. Deduplicate
+   by commit SHA and classify titles by changed surface. Deep-check high-risk
    diffs before changing rules.
 2. Write a report under `docs/project/` with stable finding IDs, priority,
    evidence, recommended fix, and verification method.

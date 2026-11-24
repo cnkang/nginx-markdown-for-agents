@@ -52,15 +52,15 @@ Required:
 - Forward declarations must not shadow or redeclare NGINX macro identifiers
   (for example `ngx_log_error`, `ngx_memzero`, `ngx_str_set`). Before adding a
   declaration in impl headers, confirm the symbol is not a macro in NGINX
-  headers. If a callable API becomes needed, declare the underlying function symbol
-  (for example `ngx_log_error_core`) and keep signature parity with the
-  canonical declaration in the owning header, including `const` qualifiers.
+  headers. If a callable API becomes necessary, declare the underlying
+  function symbol (for example `ngx_log_error_core`). Match the canonical
+  signature in the owning header, including `const` qualifiers.
 - **Forward declaration ordering**: Forward declarations must appear
   **after** all type definitions (typedefs, struct definitions, enum
-  definitions) that the declaration references.  A forward declaration
-  that names a type defined later in the same header causes a
-  compilation error (unknown type) or, with some compilers, an implicit
-  `int` fallback.  When adding a forward declaration, scan the header
+  definitions) that the declaration references. If a forward declaration
+  names a type that the same header defines later, compilation fails with
+  an unknown-type error. Some compilers instead fall back to an implicit
+  `int`. When adding a forward declaration, scan the header
   for the typedef it depends on and place the declaration below it.
   Forward declarations belong at file scope in the impl header, not
   inside function bodies or local blocks.
@@ -73,13 +73,12 @@ Required:
   safe and makes future audits impossible.  Valid reasons include:
   ``NGINX callback signature``, ``ngx_str_t.data is u_char* per NGINX
   API``, ``zlib z_stream.next_in requires Bytef* without ZLIB_CONST``,
-  ``callback typedef dictates parameter type``.  The contract may be an
-  external API contract (for example the zlib C API) or an NGINX API
-  contract — both cover mandated casts that no const-qualification of
-  the parameter can resolve.  NOSONAR must not apply
-  to non-callback const issues that qualifying the parameter fixes
-  — it is only for cases where the external/NGINX API contract
-  prevents the fix.
+  ``callback typedef dictates parameter type``. The contract can come from an
+  external API (for example the zlib C API) or an NGINX API. Both cover
+  mandated casts that no const-qualification of the parameter can resolve.
+  NOSONAR must not apply to non-callback const issues that qualifying the
+  parameter fixes. Use it only when the external/NGINX API contract prevents
+  the fix.
 - Treat static-analysis findings that imply undefined behavior, data truncation,
   or invalid memory access risk as correctness/security issues and fix them in
   code, do not defer as cosmetic cleanup.

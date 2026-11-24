@@ -7,7 +7,7 @@ artifacts. Operators installing a published package should use the
 ## Overview
 
 This document defines the distribution strategy for the NGINX Markdown Filter
-Module binary packages (DEB and RPM), including artifact naming conventions,
+Module binary packages (DEB and RPM). It covers artifact naming conventions,
 integrity verification through SHA256SUMS, and GPG signature verification.
 
 ## Distribution Channels
@@ -19,9 +19,10 @@ integrity verification through SHA256SUMS, and GPG signature verification.
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
 The project intentionally tracks APT/YUM repository publishing as a future
-distribution step. Until the project publishes a real repository and signing key, installation docs
-must point users to GitHub Release package artifacts rather than bare
-`apt-get install` or `yum install` commands.
+distribution step. Until the project publishes a real repository and signing
+key, installation docs must point users to GitHub Release package artifacts.
+Those docs must not point users to bare `apt-get install` or `yum install`
+commands during that period.
 
 The release matrix describes the package build and validation targets. It does
 not prove that a particular tag has public package assets. Before using a
@@ -193,9 +194,10 @@ f9a0b1c2...  release-manifest.json
 
 ## Release Manifest
 
-Every release includes a `release-manifest.json` providing structured metadata
-about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
-source archive hash (for tag releases), and GitHub Actions workflow metadata.
+Every release includes a `release-manifest.json` with structured metadata
+about the release. It lists the git tag, commit SHA, and package filenames
+with SHA-256 hashes. It also includes the source archive hash (for tag
+releases) and GitHub Actions workflow metadata.
 
 The `integrity-checksums` CI job of `release-packages.yml` generates the
 manifest and includes it

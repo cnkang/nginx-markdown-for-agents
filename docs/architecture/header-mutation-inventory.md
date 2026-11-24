@@ -7,10 +7,10 @@
 
 This document records the response-header mutation contract for the
 NGINX module: which paths route through the atomic `HeaderPlan`, and which
-count as documented exceptions. Any new `r->headers_out` direct write that is
-not routed through `HeaderPlan` must enter the Exception Table with
-justification (and, for non-trivial cases, an architecture decision
-record under `docs/architecture/ADR/`).
+count as documented exceptions. Any new direct write to `r->headers_out` that
+bypasses `HeaderPlan` must enter the Exception Table with justification.
+Non-trivial cases also require an architecture decision record under
+`docs/architecture/ADR/`.
 
 ---
 
@@ -28,10 +28,10 @@ explicit phases:
 - **prepare** — performs every fallible step: pool allocation, key/value
   string copies, header lookups, list-capacity checks, and per-operation
   validation. It records a `prepared` operation array. It MUST NOT mutate
-  any pre-existing `r->headers_out` field. The sole write it performs is
-  initializing a freshly pushed list slot to the inert state (`hash == 0`)
-  so that an aborted prepare is observably equivalent to a no-op (the
-  invalidated-header filter rule drops `hash == 0` entries everywhere).
+  any pre-existing `r->headers_out` field. Its sole write initializes a
+  freshly pushed list slot to the inert state (`hash == 0`). The
+  invalidated-header filter rule drops `hash == 0` entries everywhere, so an
+  aborted prepare is observably equivalent to a no-op.
 - **commit** — applies the already-prepared mutations using pointer/scalar
   assignment only. It performs **no allocation**, no lookup, and no
   validation, and therefore has **no failure path**: once prepare

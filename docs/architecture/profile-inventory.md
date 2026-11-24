@@ -162,9 +162,9 @@ from static NGINX configuration and the request filter variable.
 the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
 0.9.2: token estimation uses a fixed deterministic heuristic with a built-in 4.0
 chars/token default, no provider brands. No temporary FFI fields survive on
-either side of the boundary: `MarkdownOptions` has no chars-per-token input, and
-no `llm_provider` or `chars_per_token_fixed` field exists in the Rust ABI
-structs. The internal `DecodedOptions` keeps the value for diagnostics only. It
+either side of the boundary. `MarkdownOptions` has no chars-per-token input.
+The Rust ABI structs have no `llm_provider` or `chars_per_token_fixed` field.
+The internal `DecodedOptions` keeps the value for diagnostics only. It
 always resolves to the built-in `DEFAULT_CHARS_PER_TOKEN` of 4.0.
 
 ---

@@ -233,10 +233,10 @@ rm -f "$key_file"
 gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 ```
 
-**Canonical release verification**: for the published release, download the
-exact versioned GitHub Release artifact first, verify the release signature
-over `SHA256SUMS.asc`, then check the downloaded artifacts against the
-checksums file — all in the same directory. The example below uses the
+**Canonical release verification**: For the published release, first download
+the exact versioned GitHub Release artifact. Verify the release signature over
+`SHA256SUMS.asc`. Then check the downloaded artifacts against the checksums
+file. Do all these steps in the same directory. The example below uses the
 published v0.9.4 release assets. Asset names follow the canonical
 `nginx-module-markdown-for-agents_<ver>_nginx-<nginx-ver>_<arch>.deb` form —
 list the exact names with `gh release view v0.9.4 --json assets`:

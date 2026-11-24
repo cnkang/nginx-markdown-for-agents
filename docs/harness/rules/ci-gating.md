@@ -23,14 +23,15 @@ Required:
 - Baseline/bootstrap modes must not upload/compare artifacts incorrectly.
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
 -  **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow run
-  block must define each `$VAR` it references in scope — the same step's `env:`,
-  the job's `env:`, the workflow's `env:`, an earlier `GITHUB_ENV` export in the
-  same job, or a shell assignment inside the run block itself. Shell assignments
-  and `GITHUB_ENV` exports must appear BEFORE the variable's first reference
-  within the same run block. The detector rejects a use-before-assignment case
-  such as reading `MATRIX_ARCH` above the line that assigns it. A step-local
-  `env:` entry is invisible to later steps. `MATRIX_ARCH` was read as empty by
-  the glibc tarball step and always took the unsupported-architecture branch.
+  block must define each `$VAR` it references in scope. Use the same step's
+  `env:`, the job's `env:`, or the workflow's `env:`. Other options are an
+  earlier `GITHUB_ENV` export in the same job or a shell assignment inside the
+  run block itself. Shell assignments and `GITHUB_ENV` exports must appear
+  BEFORE the variable's first reference within the same run block. The detector
+  rejects a use-before-assignment case such as reading `MATRIX_ARCH` above the
+  line that assigns it. A step-local `env:` entry is invisible to later steps.
+  `MATRIX_ARCH` was read as empty by the glibc tarball step and always took
+  the unsupported-architecture branch.
   Empty collections that drive matrix expansion must fail the prepare step
   explicitly (`deb19efd`) rather than silently producing zero jobs.
 
@@ -262,11 +263,12 @@ Verification: `PYTHONPATH=. python3
   `docker buildx build`, image pushes, curl downloads, apt, apk and dnf
   fetches, and cargo fetch. The helper allows at most 3 attempts with
   backoff. It retries only when the last 40 output lines show a transient
-  class: HTTP 5xx or 429, a timeout, a reset or refused connection, a TLS
-  handshake error, a DNS failure, or a registry `unexpected status`,
-  `toomanyrequests` or EOF error. Any other failure returns the command's own
-  exit code on the first attempt. Never wrap a compile, test, verifier or
-  validation command, and never add a whole-job auto-rerun.
+  error. The helper recognizes these transient errors: HTTP 5xx or 429, a
+  timeout, a reset or refused connection, a TLS handshake error, or a DNS
+  failure. It also recognizes a registry `unexpected status`, `toomanyrequests`
+  or EOF error. Any other failure returns the command's own exit code on the
+  first attempt. Never wrap a compile, test, verifier or validation command,
+  and never add a whole-job auto-rerun.
   `tools/ci/test_retry_transient.py` pins this behavior.
 
 Verification:
@@ -295,10 +297,10 @@ Verification:
 ### Rule 66 — local GCC parity gate for C test/module changes
 
 - C module and C unit-test changes must pass the unit suite under real GCC
-  before push.  Local `gcc` on macOS is an Apple clang alias, which masks two
-  CI-only failure classes: GCC `-Werror` hard errors on
-  incompatible-pointer-types (clang only warns) and uninitialized-stack
-  crashes that reproduce only at GCC `-O0` (clang and `-O2` pass by chance).
+  before push. Local `gcc` on macOS is an Apple clang alias that masks two
+  CI-only failure classes. GCC reports hard errors on incompatible-pointer-types
+  with `-Werror`, but clang only warns. Uninitialized-stack crashes reproduce
+  only at GCC `-O0`. Clang and `-O2` pass by chance.
 - The gate runs the same unit suite in an Ubuntu container with GCC:
   `make test-c-unit-gcc`.  Clean container artifacts afterwards
   (`make clean` in `components/nginx-module/tests`), because Linux ELF

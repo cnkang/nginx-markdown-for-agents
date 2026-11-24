@@ -8,11 +8,11 @@ Accepted (0.9.0 contract freeze)
 
 0.9.0 is the **Production Readiness Breaking Release** before 1.0.0. The 0.8.x
 configuration surface accreted dozens of directives with overlapping
-responsibilities: seven `markdown_stream_*` knobs, two error directives
-(`markdown_on_error` + `markdown_streaming_on_error`), a boolean trust model
-(`markdown_trust_forwarded_headers`), and split conditional/ETag directives
-(`markdown_conditional_requests` + `markdown_etag`). This sprawl is not a stable
-1.0 contract.
+responsibilities. These include seven `markdown_stream_*` knobs and two error
+directives (`markdown_on_error` + `markdown_streaming_on_error`). They also
+include a boolean trust model (`markdown_trust_forwarded_headers`) and split
+conditional/ETag directives (`markdown_conditional_requests` + `markdown_etag`).
+This sprawl is not a stable 1.0 contract.
 
 0.9.0 collapses these into a small, auditable Config V2 grammar. Because 0.9.0
 is explicitly breaking, **no alias compatibility** exists: removed directives
@@ -50,10 +50,10 @@ the 0.9.0 migration contract.
 ### Reject-only legacy stubs (no aliases)
 
 Every directive removed as part of the 0.9.0 migration contract keeps a parser
-entry whose **only** behavior is
-`NGX_CONF_ERROR` + a migration hint pointing at the replacement and the 0.9.0
-migration guide (`docs/guides/MIGRATION-0.9.0.md`). There are **no transition
-aliases** in 0.9.0. Canonical error shape:
+entry. Its **only** behavior is `NGX_CONF_ERROR` plus a migration hint. The hint
+points at the replacement and the 0.9.0 migration guide
+(`docs/guides/MIGRATION-0.9.0.md`). There are **no transition aliases** in
+0.9.0. Canonical error shape:
 
 ```
 nginx: [emerg] "markdown_trust_forwarded_headers" directive has been removed in
@@ -81,9 +81,9 @@ validation boundary.
   (streaming cannot generate a strong ETag for chunked output, headers commit
   before the transformed body is known — see ADR-0017).
 - `markdown_cache_validation full` + `markdown_streaming auto` → **runtime
-  warning** (not an `nginx -t` configuration error): the header-filter phase
-  detects the conflict at request time, blocks streaming for that request, and
-  uses full-buffer conversion with full validation, emitting reason code
+  warning**, not an `nginx -t` configuration error. The header-filter phase
+  detects the conflict at request time and blocks streaming for that request.
+  It uses full-buffer conversion with full validation and emits reason code
   `streaming_block_full_cache_validation` (ADR-0018).
 - `markdown_accept force` + `markdown_auth_policy deny` → **warning** (dangerous).
 

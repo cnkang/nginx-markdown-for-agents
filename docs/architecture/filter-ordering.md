@@ -12,10 +12,10 @@
 
 ## 1. NGINX Filter Chain Model
 
-NGINX executes response filters as a singly-linked chain.  Each filter
-module registers itself during `postconfiguration` by saving the current
-`ngx_http_top_*_filter` into a module-static `next_*_filter` and then
-installing its own handler as the new top:
+NGINX executes response filters as a singly-linked chain. Each filter module
+registers itself during `postconfiguration`. It saves the current
+`ngx_http_top_*_filter` into a module-static `next_*_filter`. It then installs
+its own handler as the new top:
 
 ```c
 ngx_http_next_header_filter = ngx_http_top_header_filter;
@@ -38,18 +38,18 @@ register runs **first** when a response flows through the chain.
 
 `gunzip` is not part of the default NGINX build: it requires
 `--with-http_gunzip_module` at configure time. The repository CI build script
-enables it explicitly (`tools/ci/verify_real_nginx_ims.sh`), and the E2E
-filter-ordering test lists gunzip as a fixture prerequisite that the test
-configuration switches on (`tests/e2e/filter_ordering_test.sh`).
+(`tools/ci/verify_real_nginx_ims.sh`) enables it explicitly. The E2E
+filter-ordering test (`tests/e2e/filter_ordering_test.sh`) lists gunzip as a
+fixture prerequisite. The test configuration switches it on.
 When the module is absent from the build, the registration table and the
 runtime chain below simply omit it.
 
 Because each module prepends itself, the **runtime** chain is the reverse of the
 registration order: `markdown_filter` → `brotli` → `gunzip` → `gzip`. `gunzip`
-is conditional: it decompresses only gzip-encoded upstream responses, and only
-when the client does not accept gzip (when the client accepts gzip, gunzip
-passes the content through untouched so the gzip filter can re-compress the
-converted output). `brotli` and `gzip` do not stack: the response receives a
+decompresses only gzip-encoded upstream responses and only when the client
+does not accept gzip. When the client accepts gzip, gunzip passes the content
+through untouched so the gzip filter can re-compress the converted output.
+`brotli` and `gzip` do not stack: the response receives a
 single `Content-Encoding`. Whichever compression filter runs first for the
 negotiated encoding.
 
@@ -142,7 +142,7 @@ This external path is separate from the normal chain above. Operators must
 verify the effective order for their NGINX build and set
 `markdown_auto_decompress off` to prevent double decompression. An external
 `gunzip` that runs after Markdown is not a supported replacement for the
-built-in path: it cannot supply plain HTML to the converter and may compress
+built-in path. It cannot supply plain HTML to the converter and may compress
 or decompress the wrong representation.
 
 ---
@@ -205,11 +205,11 @@ ordering.
 
 **Key invariant:** If the Brotli filter module (`ngx_brotli`) loads, it must be
 downstream of the Markdown body filter so that it compresses the **converted
-Markdown** output. Markdown's built-in
-decompression handles upstream Brotli regardless of whether the Brotli
-filter is present, because the Brotli filter is a **compressor** (response
-out), not a **decompressor** (response in).  Upstream Brotli
-decompression is always handled by markdown's `auto_decompress`.
+Markdown** output. Markdown's built-in decompression handles upstream Brotli
+regardless of whether the Brotli filter is present. This is because the Brotli
+filter is a **compressor** (response out), not a **decompressor** (response in).
+Upstream Brotli decompression is always handled by markdown's
+`auto_decompress`.
 
 ### 2.4 markdown + proxy_cache
 
@@ -223,14 +223,15 @@ decompression is always handled by markdown's `auto_decompress`.
 The upstream HTML as received, before the markdown body filter (and other output
 filters) transform it. A cache hit replays those stored bytes through the same
 filter chain. The markdown filter runs again on every request. The cache never
-serves Markdown without re-conversion. Because the cached body is the original
-HTML, the response still varies by the same request properties (such as `Accept`
-and any bot-targeting variables) as a non-cached response.
+serves Markdown without re-conversion. The cached body is the original HTML.
+As a result, the response still varies by the same request properties as a
+non-cached response. These include `Accept` and any bot-targeting variables.
 
 Include those properties in `proxy_cache_key` **only when the upstream response
-or another cache rule actually varies on them** (for example when
-`markdown_accept` or bot-targeting routing is active). An unconditional `Accept`
-in the key is unnecessary when the upstream never varies on it (see
+or another cache rule actually varies on them**. For example, variation can
+occur when `markdown_accept` or bot-targeting routing is active. An
+unconditional `Accept` in the key is unnecessary when the upstream never varies
+on it (see
 [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)).
 
 **cache_validation interaction (Requirement 15.3):**

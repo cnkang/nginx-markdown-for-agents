@@ -68,11 +68,12 @@ omits it when the new representation length is not known.
 
 ### Streaming vs full-buffer header matrix
 
--  **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
-  (headers commit before the transformed body is known), `If-None-Match` not
-  supported, and the converted representation clears the source `Last-Modified`
-  (`last_modified_time = -1`), so `If-Modified-Since` never validates a
-  converted response. Source IMS applies to pass-through responses only.
+-  **Streaming**: deletes/omits `Content-Length` and generates **no** ordinary
+  ETag because headers commit before the transformed body is known. Streaming
+  does not support `If-None-Match`. The converted representation clears the
+  source `Last-Modified` (`last_modified_time = -1`). Thus `If-Modified-Since`
+  never validates a converted response. Source IMS applies to pass-through
+  responses only.
 - **Full-buffer**: when `markdown_cache_validation full` and a transformed
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
@@ -93,12 +94,12 @@ These paths build a complete response from scratch. There is no upstream
 
 **Post-commit terminal exception (separate category):**
 `stream_postcommit.c` does not synthesize a full response and is therefore
-not a Category 1 exception. It is a distinct post-commit terminal category:
-after headers are already committed, the streaming post-commit error path
-may send a terminal closing chain (empty `last_buf` or safe-finish closing
-bytes) over the already-committed response. It MUST NOT synthesize a new
-error body, MUST NOT replay the original content, MUST NOT replace the
-status, and MUST NOT call `ngx_http_send_header()` a second time.
+not a Category 1 exception. It is a distinct post-commit terminal category.
+After headers commit, the streaming post-commit error path may send a terminal
+closing chain (empty `last_buf` or safe-finish closing bytes) over that
+response.
+It MUST NOT synthesize a new error body or replay the original content. It
+MUST NOT replace the status or call `ngx_http_send_header()` a second time.
 Pre-commit errors never enter this path — they follow
 `markdown_error_policy` instead.
 
@@ -135,13 +136,13 @@ directly affect wire-level correctness:
 - Content-Length (delete-all — stale original invalidated atomically)
 
 The following **post-plan operations** execute after the plan commits
-successfully. They are **pre-send best-effort with hard abort**: a failure in
+successfully. They are **pre-send best-effort with hard abort**. A failure in
 any of them returns `NGX_ERROR` before the module calls
-`ngx_http_send_header()`, so no partially-mutated headers reach the wire.
+`ngx_http_send_header()`. Thus no partially-mutated headers reach the wire.
 However, they fall outside the plan's rollback guarantee. A failure here leaves
-the already-committed core mutations in place (which is safe:
-Content-Type/Content-Encoding/old Content-Length are already correct, and the
-request will error out before headers are sent).
+the already-committed core mutations in place. This is safe because
+Content-Type/Content-Encoding/old Content-Length are already correct and the
+request fails before the module sends headers.
 
 | Post-plan operation | Failure handling |
 |---------------------|------------------|
@@ -157,14 +158,13 @@ request will error out before headers are sent).
 mutations covered by HeaderPlan (Content-Type, Content-Encoding, and
 Content-Length). Expanding the plan to cover these post-plan operations would
 require adding ETag set/clear, Vary add, and token header to the Rust
-`markdown_build_header_plan` FFI, increasing the FFI surface and coupling Rust
-to NGINX-specific list-push semantics. The current design keeps Rust
+`markdown_build_header_plan` FFI. This would increase the FFI surface and
+couple Rust to NGINX-specific list-push semantics. The current design keeps Rust
 plan-building pure (core wire-critical mutations only) and handles
 NGINX-lifecycle-specific header operations (ETag, Vary, token, and
-authentication headers) in C post-plan. This is a pragmatic
-0.9.0 contract, if future requirements demand full atomicity for these
-operations, they should migrate into the Rust plan with corresponding FFI
-expansion.
+authentication headers) in C post-plan. This is a pragmatic 0.9.0 contract. If
+future requirements demand full atomicity for these operations, they should
+migrate into the Rust plan with corresponding FFI expansion.
 
 ## Consequences
 

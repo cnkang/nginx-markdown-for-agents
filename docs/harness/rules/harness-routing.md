@@ -27,12 +27,12 @@ Required:
   the same changeset.
 
 Verification:
-- `python3 tools/harness/check_harness_sync.py` — validates
-  `docs/harness/routing-manifest.md` and the corresponding risk-pack docs
-  stay synchronized with `docs/harness/routing-manifest.json` updates
-  (manifest-structure / manifest-command-reachability / risk-pack-contract
-  checks), reusing the existing synchronization checker from the harness
-  verification family.
+- `python3 tools/harness/check_harness_sync.py` checks that
+  `docs/harness/routing-manifest.md` and the corresponding risk-pack docs stay
+  synchronized with `docs/harness/routing-manifest.json` updates. It reuses
+  the existing synchronization checker from the harness verification family
+  for manifest-structure, manifest-command-reachability, and risk-pack-contract
+  checks.
 - `python3 skills/nginx-markdown-harness-maintenance/scripts/harness_route.py --from-git --base main`
 - `make harness-security-checks`
 - `PYTHONPATH=. pytest -q tools/perf/tests`
