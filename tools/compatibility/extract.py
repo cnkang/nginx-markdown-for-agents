@@ -413,9 +413,14 @@ def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
 def _collect_series(
     joined: str, families: Dict[str, str]
 ) -> Tuple[Dict[str, set], Dict[str, List[List[str]]]]:
-    """Collect emitted series and label sets per family."""
+    """Collect emitted series and label sets per family and component.
+
+    Label sets are recorded per histogram component and sorted, so reordering
+    the renderer's ``_bucket`` and ``_count`` lines leaves the contract
+    unchanged while an added or removed label set still differs.
+    """
     raw_series: Dict[str, set] = {name: set() for name in families}
-    labels: Dict[str, List[List[str]]] = {name: [] for name in families}
+    label_sets: Dict[str, set] = {name: set() for name in families}
     sample_families = _sample_family_map(families)
     for match in re.finditer(r"(nginx_markdown_[a-z0-9_]+)\{([^{}]*)\}", joined):
         resolved = sample_families.get(match.group(1))
@@ -425,13 +430,23 @@ def _collect_series(
         pairs = _parse_label_pairs(match.group(2))
         if not pairs:
             continue
-        label_names = sorted(name for name, _ in pairs)
+        marker = ["@component={}".format(component)] if component else []
+        label_sets[family].add(
+            tuple(marker + sorted(name for name, _ in pairs))
+        )
         raw_series[family].add(
             (component, tuple(name + "=" + value for name, value in pairs))
         )
-        if label_names not in labels[family]:
-            labels[family].append(label_names)
+    labels = {
+        name: [list(label_set) for label_set in sorted(label_sets[name])]
+        for name in families
+    }
     return raw_series, labels
+
+
+# A sample name ends at a space or a tab.  The renderer source spells a tab as
+# the two-character C escape, and a literal tab is also accepted.
+_SAMPLE_NAME_END_RE = re.compile(r"[ \t]|\\t")
 
 
 def _unlabelled_samples(joined: str, families: Dict[str, str]) -> List[str]:
@@ -440,10 +455,10 @@ def _unlabelled_samples(joined: str, families: Dict[str, str]) -> List[str]:
     sample_families = _sample_family_map(families)
     for chunk in joined.split("\\n"):
         text = chunk.lstrip('" \t')
-        sample, separator, _value = text.partition(" ")
-        if not separator:
+        separator = _SAMPLE_NAME_END_RE.search(text)
+        if separator is None:
             continue
-        resolved = sample_families.get(sample)
+        resolved = sample_families.get(text[: separator.start()])
         if resolved is None:
             continue
         family, component = resolved

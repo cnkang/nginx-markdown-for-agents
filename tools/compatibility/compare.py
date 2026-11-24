@@ -352,6 +352,11 @@ def _compare_metric_family(
             )
 
 
+def _label_set_identity(label_sets: Optional[List[List[str]]]) -> set:
+    """Return emitted label sets independent of the order samples appear in."""
+    return {tuple(label_set) for label_set in label_sets or []}
+
+
 def _compare_emitted(
     result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
 ) -> None:
@@ -386,7 +391,9 @@ def _compare_emitted(
                 old["families"][name],
                 new["families"][name],
             )
-        if old["label_sets"].get(name) != new["label_sets"].get(name):
+        if _label_set_identity(old["label_sets"].get(name)) != _label_set_identity(
+            new["label_sets"].get(name)
+        ):
             result.add(
                 "metrics",
                 BREAKING,
