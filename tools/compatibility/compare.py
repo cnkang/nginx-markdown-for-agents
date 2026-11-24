@@ -152,7 +152,7 @@ def _json_equality_key(value: Any) -> Any:
     and 1.0 share one key, and arrays and objects compare by content.
     """
     if value is None:
-        return ("null",)
+        return ("null", None)
     if isinstance(value, bool):
         return ("boolean", value)
     if isinstance(value, (int, float)):
