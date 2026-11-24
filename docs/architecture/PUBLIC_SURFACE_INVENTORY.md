@@ -11,8 +11,9 @@ The drift gate proves that the implementation agrees with this inventory.
 Because one change can edit both, `make compatibility-contract-check`
 additionally compares the candidate against frozen manifests of the published
 release tags under `tools/compatibility/contracts/`. That gate reports a
-breaking, review, or unverified finding when a published contract moves, and it
-fails closed when an anchor is missing or the extractor cannot reproduce it.
+breaking, review, or unverified finding when a published contract moves. It
+fails closed when an anchor is missing, or when the extractor cannot reproduce
+one.
 
 The extraction and drift-check decision appears in
 [ADR-0025](ADR/0025-public-surface-inventory-drift-gate.md).

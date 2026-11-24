@@ -115,16 +115,16 @@ satisfies the contract a previous stable release published. One change can edit
 both the source and its inventory. They can still look consistent while a
 contract breaks.
 
-The repository now carries that gate.  `make compatibility-contract-check`
+The repository now carries that gate. `make compatibility-contract-check`
 compares a candidate against frozen manifests of the published release tags.
 The manifests live in `tools/compatibility/contracts/`, and the extractor that
-produces them lives in `tools/compatibility/`.  The gate covers:
+produces them lives in `tools/compatibility/`. The gate covers:
 
 - directives,
 - metrics, both the declared registry and the emitted wire set,
 - reason-code discriminants and their stable metadata,
 - diagnostics compatibility rules,
-- the behavioural HTTP contract, bound to the tests that execute it,
+- the behavioral HTTP contract, bound to the tests that execute it,
 - the package identity, install layout, and support tiers, and
 - the FFI ABI and versioning policy.
 
