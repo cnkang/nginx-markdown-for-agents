@@ -1549,3 +1549,49 @@ def test_array_item_enums_are_projected_and_compared():
     assert _compare_build(both, child(["on", "off", "auto"])) == {
         "diagnostics:enum-widened:build.features[]": ADDITIVE
     }
+
+
+def _diagnostics_surface(*fields) -> dict:
+    """Return a minimal diagnostics surface around the given fields."""
+    return {
+        "schema_version": 3,
+        "type": "object",
+        "additional_properties": False,
+        "required": [],
+        "fields": list(fields),
+    }
+
+
+def _diagnostics_verdicts(baseline: dict, candidate: dict) -> dict:
+    """Compare two diagnostics surfaces and map finding ids to verdicts."""
+    result = Comparison(baseline_label="a", candidate_label="b")
+    compare_diagnostics(result, baseline, candidate)
+    return {finding.finding_id: finding.verdict for finding in result.findings}
+
+
+def test_enum_comparison_follows_json_schema_equality():
+    """Enums compare by JSON value, including compound members."""
+    def surface(top, child):
+        return _diagnostics_surface(
+            {"name": "state", "type": None, "nullable": False, "enum": top},
+            {
+                "name": "box",
+                "type": "object",
+                "nullable": False,
+                "additional_properties": False,
+                "required_children": [],
+                "properties": [{"name": "mode", "type": None, "enum": child}],
+            },
+        )
+
+    compound = [None, "on", 1, True, [1, 2], {"a": 1, "b": [None]}]
+    reordered = [{"b": [None], "a": 1.0}, [1.0, 2], True, 1.0, "on", None]
+
+    assert _diagnostics_verdicts(
+        surface(compound, compound), surface(reordered, reordered)
+    ) == {}
+    assert _diagnostics_verdicts(surface([1], [1]), surface([True], [True])) == {
+        "diagnostics:enum-narrowed:state": BREAKING,
+        "diagnostics:enum-widened:state": ADDITIVE,
+        "diagnostics:child-enum-narrowed:box:mode": BREAKING,
+    }
