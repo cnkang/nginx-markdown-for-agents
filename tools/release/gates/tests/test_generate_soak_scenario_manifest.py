@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.lib.path_validation import validate_read_path
 from tools.release.gates import generate_soak_scenario_manifest as generator
 
 ROOT = Path(generator.__file__).resolve().parents[3]
@@ -65,7 +66,11 @@ def test_build_manifest_rejects_missing_scenario_memory() -> None:
 
 
 def test_output_path_is_version_scoped() -> None:
-    with (ROOT / "components/rust-converter/Cargo.toml").open("rb") as handle:
+    manifest_path = validate_read_path(
+        ROOT / "components/rust-converter/Cargo.toml",
+        purpose="test fixture manifest",
+    )
+    with manifest_path.open("rb") as handle:
         cargo_version = tomllib.load(handle)["package"]["version"]
     assert generator.DEFAULT_VERSION == cargo_version
     output = generator._output_path(generator.DEFAULT_VERSION)
