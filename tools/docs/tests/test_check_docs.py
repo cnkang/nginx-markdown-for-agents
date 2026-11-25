@@ -687,6 +687,12 @@ def test_latest_dated_changelog_version_detects_released_line():
     ) == (None, [])
 
 
+def test_version_heading_prefix_requires_ascii_digit():
+    heading = "## [１.2.3] - Unreleased"
+
+    assert docs_checker.VERSION_HEADING_PREFIX_RE.match(heading) is None
+
+
 def test_latest_dated_changelog_version_rejects_impossible_dates():
     version, errors = docs_checker._latest_dated_changelog_version(
         "## [1.2.3] - 2026-99-99\n"
@@ -993,12 +999,31 @@ def test_prerelease_claim_ignores_other_release_in_candidate_heading(
     assert failures == []
 
 
+def test_candidate_stable_claim_is_not_exempted_by_another_stable_release():
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{version} is a stable release; 0.9.9 is a stable release.\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
+
+
 
 @pytest.mark.parametrize(
     ("claim", "should_fail"),
     [
         ("{version} is unreleased.", True),
         ("{version} has not been published.", True),
+        ("{version} hasn't been published.", True),
+        ("{version} hasn’t been released.", True),
+        ("{version} is published; it is awaiting publication.", True),
         ("Publication of {version} is pending.", True),
         ("Publication of {version} remains pending.", True),
         ("Security review for {version} remains pending.", False),
@@ -1065,6 +1090,8 @@ def test_prerelease_claim_checks_named_unpublished_candidate(
     ("claim", "should_fail"),
     [
         ("This release is not yet published.", True),
+        ("it is awaiting publication.", True),
+        ("The installation guide is awaiting publication.", False),
         ("1.1.0 is unreleased.", False),
         ("{version} is tagged but not yet published.", True),
         ("{version} is published, and 1.1.0 is unreleased.", False),
@@ -1251,11 +1278,21 @@ def test_release_notes_status_accepts_prerelease_candidate(tmp_path):
     assert docs_checker._release_notes_status_failures(notes, "1.0.0-rc.1") == []
 
 
-def test_release_notes_status_rejects_unpublished_prerelease(tmp_path):
+@pytest.mark.parametrize(
+    "unpublished_wording",
+    [
+        "Not yet published.",
+        "Hasn't been published.",
+        "Hasn’t been released.",
+    ],
+)
+def test_release_notes_status_rejects_unpublished_prerelease(
+    tmp_path, unpublished_wording
+):
     notes = tmp_path / "1.0.0-rc.1-release-notes.md"
     notes.write_text(
         "# Release Notes: 1.0.0-rc.1\n\n"
-        "**Status**: Release candidate. Not yet published.\n",
+        f"**Status**: Release candidate. {unpublished_wording}\n",
         encoding="utf-8",
     )
 

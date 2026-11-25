@@ -82,6 +82,28 @@ def test_finalized_prerelease_rejects_stable_status(tmp_path: Path) -> None:
     assert any("cannot be marked stable" in error for error in errors), errors
 
 
+def test_finalized_prerelease_accepts_negated_stable_status(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, date)
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        f"**Status:** Release candidate, published {date}; "
+        "not a stable release.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "releases" / f"{version}-release-notes.md").write_text(
+        f"# Release Notes: {version}\n"
+        f"**Date**: {date}\n"
+        "**Status**: Release candidate, not a stable release.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
+
+
 def test_finalized_prerelease_requires_a_date(tmp_path: Path) -> None:
     """A published prerelease needs a dated changelog heading."""
     _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
@@ -119,6 +141,8 @@ def test_finalized_prerelease_rejects_pending_status(tmp_path: Path) -> None:
         "awaiting release",
         "unreleased",
         "has not been published",
+        "hasn't been published",
+        "hasn’t been released",
     ],
 )
 def test_finalized_prerelease_rejects_pending_publication_wording(
@@ -234,6 +258,41 @@ def test_finalized_prerelease_rejects_duplicate_sections(tmp_path: Path) -> None
     errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
 
     assert any("must occur exactly once" in error for error in errors), errors
+
+
+def test_finalized_prerelease_rejects_duplicate_release_note_status_fields(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.write_text(
+        notes.read_text(encoding="utf-8")
+        + "**Status**: Release candidate.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("exactly one Status field" in error for error in errors), errors
+
+
+def test_finalized_prerelease_ignores_fenced_release_note_status(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, date)
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.write_text(
+        f"# Release Notes: {version}\n"
+        f"**Date**: {date}\n"
+        "```\n**Status**: Not yet published.\n```\n"
+        "**Status**: Release candidate.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
 
 
 def test_finalized_prerelease_ignores_fenced_project_status(tmp_path: Path) -> None:

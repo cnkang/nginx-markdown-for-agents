@@ -16,6 +16,10 @@ from lib.semver import SEMVER_PATTERN  # noqa: E402
 
 # Repository-relative directory holding the per-version release notes.
 RELEASE_NOTES_DIR = ("docs", "releases")
+_STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
+_NEGATED_STABLE_RELEASE_RE = re.compile(
+    r"\bnot\s+(?:a\s+)?stable release\b", re.IGNORECASE
+)
 
 
 def _validate_changelog(
@@ -151,6 +155,16 @@ def _release_note_field(text: str, field: str) -> str | None:
     return None
 
 
+def _release_note_fields(text: str, field: str) -> list[str]:
+    """Return all unfenced markdown release-note field values."""
+    prefix = f"**{field}**:"
+    return [
+        line[len(prefix):].strip()
+        for line in _unfenced_lines(text)
+        if line.startswith(prefix)
+    ]
+
+
 def _validate_release_notes(
     path: Path,
     version: str,
@@ -182,12 +196,14 @@ def _validate_release_notes(
 def _prerelease_status_errors(value: str, path: Path) -> list[str]:
     """Require a published candidate status without a stable claim."""
     normalized = " ".join(value.split())
-    if re.search(r"\bstable release\b", normalized, re.IGNORECASE):
+    unnegated_status = _NEGATED_STABLE_RELEASE_RE.sub("", normalized)
+    if _STABLE_RELEASE_CLAIM_RE.search(unnegated_status) is not None:
         return [f"{path}: a prerelease cannot be marked stable"]
     unpublished_statuses = re.finditer(
         r"\b(?:"
         r"not\s+(?:yet\s+)?(?:published|released)"
-        r"|(?:has|have|had)\s+not\s+(?:yet\s+)?been\s+(?:published|released)"
+        r"|(?:has|have|had)(?:\s+not|n['’]t)\s+"
+        r"(?:yet\s+)?been\s+(?:published|released)"
         r"|unpublished|unreleased"
         r"|(?<!no )pending\s+publication"
         r"|(?<!no )pending\s+release(?!\s+(?:blockers?|feedback)\b)"
@@ -277,7 +293,7 @@ def _validate_prerelease_notes(
     ) is None:
         errors.append(f"{path}: missing '# Release Notes: {version}' title")
     notes_date = _release_note_field(text, "Date")
-    notes_status = _release_note_field(text, "Status")
+    status_fields = _release_note_fields(text, "Status")
     if notes_date is None:
         errors.append(f"{path}: missing release date")
     elif release_date is not None and notes_date != release_date:
@@ -285,10 +301,15 @@ def _validate_prerelease_notes(
             f"{path}: date {notes_date!r} does not match CHANGELOG date "
             f"{release_date!r}"
         )
-    if notes_status is None:
+    if not status_fields:
         errors.append(f"{path}: missing release status")
     else:
-        errors.extend(_prerelease_status_errors(notes_status, path))
+        if len(status_fields) > 1:
+            errors.append(
+                f"{path}: release notes must contain exactly one Status field"
+            )
+        else:
+            errors.extend(_prerelease_status_errors(status_fields[0], path))
     return errors
 
 
