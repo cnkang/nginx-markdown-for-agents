@@ -515,10 +515,10 @@ def _compare_emitted(
             )
 
 
-def compare_metrics(
+def _compare_metric_header(
     result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
 ) -> None:
-    """Compare the declared metrics registry and the emitted wire set."""
+    """Compare registry-level scalars and the forbidden-label set."""
     old_schema = baseline.get("registry_schema_version")
     new_schema = candidate.get("registry_schema_version")
     if old_schema != new_schema:
@@ -570,6 +570,12 @@ def compare_metrics(
             baseline.get("forbidden_labels"),
             candidate.get("forbidden_labels"),
         )
+
+
+def _compare_declared_families(
+    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+) -> None:
+    """Compare the families the registry declares."""
     old_map = _by_name(baseline["families"])
     new_map = _by_name(candidate["families"])
     for name in sorted(set(old_map) - set(new_map)):
@@ -592,6 +598,14 @@ def compare_metrics(
         )
     for name in sorted(set(old_map) & set(new_map)):
         _compare_metric_family(result, name, old_map[name], new_map[name])
+
+
+def compare_metrics(
+    result: Comparison, baseline: Dict[str, Any], candidate: Dict[str, Any]
+) -> None:
+    """Compare the declared metrics registry and the emitted wire set."""
+    _compare_metric_header(result, baseline, candidate)
+    _compare_declared_families(result, baseline, candidate)
     _compare_emitted(result, baseline, candidate)
     _compare_unlabelled_samples(result, baseline, candidate)
 
@@ -1601,15 +1615,15 @@ _APPROVAL_FIELDS = (
 
 def _approval_key(entry: Dict[str, Any], approval_path: str) -> tuple:
     """Validate one approval and return its matching key."""
-    for field in _APPROVAL_FIELDS:
-        value = entry.get(field)
+    for approval_field in _APPROVAL_FIELDS:
+        value = entry.get(approval_field)
         if not value:
             raise ValueError(
-                f"approval in {approval_path} is missing {field}"
+                f"approval in {approval_path} is missing {approval_field}"
             )
         if not isinstance(value, str):
             raise ValueError(
-                f"approval in {approval_path} has a non-string {field}"
+                f"approval in {approval_path} has a non-string {approval_field}"
             )
     return (entry["finding_id"], entry["evidence_fingerprint"])
 
