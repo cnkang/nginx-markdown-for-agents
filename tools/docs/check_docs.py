@@ -410,7 +410,7 @@ def check_release_status_consistency(
 
     status = section_match["body"]
     errors: list[str] = []
-    if re.search(r"\bstable release\b", status, re.IGNORECASE):
+    if _STABLE_RELEASE_CLAIM_RE.search(status):
         errors.append(
             f"{project_status_path}: unreleased {version} cannot be marked stable"
         )
@@ -950,7 +950,7 @@ def _version_order_key(version: str) -> tuple:
     core, _, prerelease = version.partition("-")
     major, minor, patch = (int(part) for part in core.split("."))
     if not prerelease:
-        return (major, minor, patch, 1)
+        return (major, minor, patch, 1, ())
     identifiers = tuple(
         (0, int(identifier), "") if identifier.isdigit() else (1, 0, identifier)
         for identifier in prerelease.split(".")
@@ -1087,6 +1087,7 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
 
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
+_STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
 _STALE_RELEASE_CLAIM_RE = re.compile(
     r"(?:release|development)[- ]candidate"
     r"|not (?:yet )?(?:published|released)"
@@ -1213,7 +1214,7 @@ def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
     for block, context_version in _contextual_blocks(text, history, version_pattern):
         if not context_version and not version_pattern.search(block):
             continue
-        if re.search(r"\bstable release\b", block, re.IGNORECASE):
+        if _STABLE_RELEASE_CLAIM_RE.search(block):
             failures.append(
                 f"{rel}: prerelease {version} described as a stable release "
                 f"in: {block[:80]!r}"
@@ -1250,7 +1251,7 @@ def _prerelease_notes_failures(
         failures.append(f"{rel}: missing release status for released {version}")
     else:
         value = " ".join(status["value"].split())
-        if re.search(r"\bstable release\b", value, re.IGNORECASE):
+        if _STABLE_RELEASE_CLAIM_RE.search(value):
             failures.append(f"{rel}: prerelease {version} cannot claim a stable status")
         elif re.match(
             r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
