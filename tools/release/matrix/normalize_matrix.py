@@ -49,7 +49,10 @@ _CARGO_MANIFEST = (
 def _release_version() -> str:
     """Read the active release identity from the Rust package manifest."""
     try:
-        with _CARGO_MANIFEST.open("rb") as handle:
+        manifest_path = validate_read_path(
+            _CARGO_MANIFEST, purpose="release identity manifest"
+        )
+        with manifest_path.open("rb") as handle:
             version = tomllib.load(handle)["package"]["version"]
     except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
         raise RuntimeError(f"cannot read release version: {exc}") from exc
