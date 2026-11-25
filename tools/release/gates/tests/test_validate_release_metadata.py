@@ -41,6 +41,59 @@ def _write_release_surfaces(root: Path, *, finalized: bool) -> None:
     )
 
 
+def _write_prerelease_surfaces(root: Path, version: str, date: str) -> None:
+    """Write a published prerelease metadata fixture."""
+    (root / "docs" / "project").mkdir(parents=True)
+    (root / "docs" / "releases").mkdir(parents=True)
+    (root / "CHANGELOG.md").write_text(
+        f"## [{version}] - {date}\n", encoding="utf-8"
+    )
+    (root / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        f"**Status:** Release candidate, published {date}.\n",
+        encoding="utf-8",
+    )
+    (root / "docs" / "releases" / f"{version}-release-notes.md").write_text(
+        f"# Release Notes: {version}\n"
+        f"**Date**: {date}\n**Status**: Release candidate\n",
+        encoding="utf-8",
+    )
+
+
+def test_finalized_prerelease_metadata_passes(tmp_path: Path) -> None:
+    """A published release candidate passes the final phase as a prerelease."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+
+    assert validate_release_metadata(tmp_path, "1.0.0-rc.1") == []
+
+
+def test_finalized_prerelease_rejects_stable_status(tmp_path: Path) -> None:
+    """A prerelease cannot claim a stable release status."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+    notes = tmp_path / "docs" / "releases" / "1.0.0-rc.1-release-notes.md"
+    notes.write_text(
+        "# Release Notes: 1.0.0-rc.1\n"
+        "**Date**: 2026-12-01\n**Status**: Stable release\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
+
+    assert any("cannot be marked stable" in error for error in errors), errors
+
+
+def test_finalized_prerelease_requires_a_date(tmp_path: Path) -> None:
+    """A published prerelease needs a dated changelog heading."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [1.0.0-rc.1] - Unreleased\n", encoding="utf-8"
+    )
+
+    errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
+
+    assert any("still Unreleased" in error for error in errors), errors
+
+
 def test_release_notes_directory_matches_repository_layout() -> None:
     """The declared notes directory must exist in the real repository.
 

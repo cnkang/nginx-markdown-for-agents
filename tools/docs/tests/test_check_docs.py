@@ -847,6 +847,48 @@ def test_latest_dated_changelog_version_validates_all_dated_headings():
     assert any("invalid release date" in error for error in errors)
 
 
+def test_prerelease_surface_check_accepts_candidate_status(tmp_path):
+    version = "1.0.0-rc.1"
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.parent.mkdir(parents=True)
+    notes.write_text(
+        f"# Release Notes: {version}\n"
+        "**Date**: 2026-12-01\n"
+        "**Status**: Release candidate. Published 2026-12-01.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        f"The {version} release candidate is published.\n", encoding="utf-8"
+    )
+
+    errors = docs_checker.check_prerelease_release_surfaces(
+        tmp_path, version, "2026-12-01", ("README.md",)
+    )
+
+    assert errors == []
+
+
+def test_prerelease_surface_check_rejects_stable_claim(tmp_path):
+    version = "1.0.0-rc.1"
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.parent.mkdir(parents=True)
+    notes.write_text(
+        f"# Release Notes: {version}\n"
+        "**Date**: 2026-12-01\n"
+        "**Status**: Release candidate\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        f"The {version} release is a stable release.\n", encoding="utf-8"
+    )
+
+    errors = docs_checker.check_prerelease_release_surfaces(
+        tmp_path, version, "2026-12-01", ("README.md",)
+    )
+
+    assert any("described as a stable release" in error for error in errors), errors
+
+
 def test_stable_surface_check_scans_changelog_prose(tmp_path):
     _write_stable_notes(tmp_path, "9.9.9")
     (tmp_path / "CHANGELOG.md").write_text(

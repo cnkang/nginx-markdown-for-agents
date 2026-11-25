@@ -179,6 +179,85 @@ def _validate_release_notes(
     return errors
 
 
+def _prerelease_status_errors(value: str, path: Path) -> list[str]:
+    """Require a candidate status without a stable claim."""
+    normalized = " ".join(value.split())
+    if re.search(r"\bstable release\b", normalized, re.IGNORECASE):
+        return [f"{path}: a prerelease cannot be marked stable"]
+    if re.match(
+        r"^(?:Release candidate|Pre-release)(?:[.,]|$)",
+        normalized,
+        re.IGNORECASE,
+    ) is None:
+        return [f"{path}: prerelease status must identify a release candidate"]
+    return []
+
+
+def _validate_prerelease_project_status(
+    path: Path,
+    version: str,
+    text: str,
+    release_date: str | None,
+) -> list[str]:
+    """Validate the current release line for a published prerelease."""
+    match = re.search(
+        rf"^### Current Release Line {re.escape(version)}\s*$"
+        rf"(?P<body>.*?)(?=^### |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        return [f"{path}: missing current release line {version}"]
+    body = match.group("body")
+    status_matches = re.findall(
+        r"^\*\*Status:\*\*(?P<value>.*)$",
+        body,
+        re.MULTILINE,
+    )
+    if not status_matches:
+        return [f"{path}: missing **Status:** line for {version}"]
+    if len(status_matches) > 1:
+        return [
+            f"{path}: {version} section must contain exactly one Status field"
+        ]
+    errors = _prerelease_status_errors(status_matches[0], path)
+    if release_date is not None and release_date not in body:
+        errors.append(
+            f"{path}: publication date {release_date} missing from the "
+            f"{version} section"
+        )
+    return errors
+
+
+def _validate_prerelease_notes(
+    path: Path,
+    version: str,
+    release_date: str | None,
+    text: str,
+) -> list[str]:
+    """Validate release-note date and candidate status for a prerelease."""
+    errors: list[str] = []
+    unfenced = "\n".join(_unfenced_lines(text))
+    if re.search(
+        rf"^# Release Notes: {re.escape(version)}\s*$", unfenced, re.MULTILINE
+    ) is None:
+        errors.append(f"{path}: missing '# Release Notes: {version}' title")
+    notes_date = _release_note_field(text, "Date")
+    notes_status = _release_note_field(text, "Status")
+    if notes_date is None:
+        errors.append(f"{path}: missing release date")
+    elif release_date is not None and notes_date != release_date:
+        errors.append(
+            f"{path}: date {notes_date!r} does not match CHANGELOG date "
+            f"{release_date!r}"
+        )
+    if notes_status is None:
+        errors.append(f"{path}: missing release status")
+    else:
+        errors.extend(_prerelease_status_errors(notes_status, path))
+    return errors
+
+
 def _candidate_status_errors(value: str | None, path: Path) -> list[str]:
     """Require a pending status without positive publication or stable claims."""
     if value is None or re.match(
@@ -274,7 +353,9 @@ def validate_release_metadata(repo_root: Path, version: str, phase: str = "final
 
     Candidate phase validates pending metadata for artifact-only dispatch.
     Final phase requires published metadata, so a tag cannot publish
-    documentation that still describes a pending release.
+    documentation that still describes a pending release.  A prerelease
+    identity keeps the candidate status in the final phase: the release is
+    published, but it is not a stable release.
     """
     changelog_path = repo_root / "CHANGELOG.md"
     project_status_path = repo_root / "docs" / "project" / "PROJECT_STATUS.md"
@@ -297,6 +378,18 @@ def validate_release_metadata(repo_root: Path, version: str, phase: str = "final
         return [f"unknown release metadata phase: {phase}"]
     errors, release_date = _validate_changelog(changelog_path, version, changelog)
     concrete_date = release_date if release_date != "Unreleased" else None
+    if "-" in version:
+        errors.extend(
+            _validate_prerelease_project_status(
+                project_status_path, version, project_status, concrete_date
+            )
+        )
+        errors.extend(
+            _validate_prerelease_notes(
+                release_notes_path, version, release_date, release_notes
+            )
+        )
+        return errors
     errors.extend(
         _validate_project_status(
             project_status_path, version, project_status, concrete_date

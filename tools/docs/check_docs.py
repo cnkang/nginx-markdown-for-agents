@@ -1192,6 +1192,96 @@ def _stable_claim_failures(rel: str, version: str, text: str) -> list[str]:
     return failures
 
 
+def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
+    """Flag a stable-release claim in blocks that mention a prerelease."""
+    failures: list[str] = []
+    version_pattern = _release_version_pattern(version)
+    text = _without_fenced_blocks(text)
+    history = set(_document_update_table_lines(text))
+    for block, context_version in _contextual_blocks(text, history, version_pattern):
+        if not context_version and not version_pattern.search(block):
+            continue
+        if re.search(r"\bstable release\b", block, re.IGNORECASE):
+            failures.append(
+                f"{rel}: prerelease {version} described as a stable release "
+                f"in: {block[:80]!r}"
+            )
+    return failures
+
+
+def _first_dated_changelog_entry(changelog: str) -> tuple[str, str] | None:
+    """Return (version, date) for the newest dated changelog entry."""
+    match = DATED_CHANGELOG_RE.search(_without_fenced_blocks(changelog))
+    if match is None:
+        return None
+    return match.group("version"), match.group("date")
+
+
+def _prerelease_notes_failures(
+    path: Path, version: str, release_date: str | None
+) -> list[str]:
+    """Require a dated candidate status for a published prerelease."""
+    rel = f"docs/releases/{version}-release-notes.md"
+    if not path.is_file():
+        return [f"{rel}: missing release notes for released {version}"]
+    text = _without_fenced_blocks(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    failures: list[str] = []
+    if re.search(rf"^# Release Notes: {re.escape(version)}\s*$", text, re.MULTILINE) is None:
+        failures.append(f"{rel}: missing '# Release Notes: {version}' title")
+    status = re.search(r"^\*\*Status\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if status is None:
+        failures.append(f"{rel}: missing release status for released {version}")
+    else:
+        value = " ".join(status["value"].split())
+        if re.search(r"\bstable release\b", value, re.IGNORECASE):
+            failures.append(f"{rel}: prerelease {version} cannot claim a stable status")
+        elif re.match(
+            r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
+        ) is None:
+            failures.append(
+                f"{rel}: prerelease {version} carries status {status['value']!r}"
+            )
+    declared = re.search(r"^\*\*Date\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if declared is None:
+        failures.append(f"{rel}: missing release date for released {version}")
+    elif release_date is not None and declared["value"].strip() != release_date:
+        failures.append(
+            f"{rel}: date {declared['value'].strip()!r} does not match "
+            f"CHANGELOG date {release_date!r}"
+        )
+    return failures
+
+
+def check_prerelease_release_surfaces(
+    root: Path,
+    version: str,
+    release_date: str | None,
+    surface_rel_paths: tuple[str, ...] = RELEASE_SURFACE_FILES,
+) -> list[str]:
+    """Check a published prerelease without demanding a stable status."""
+    failures: list[str] = []
+    notes_rel = f"docs/releases/{version}-release-notes.md"
+    for template in surface_rel_paths:
+        rel = template.format(version=version)
+        if rel == notes_rel:
+            continue
+        path = root / rel
+        if not path.is_file():
+            failures.append(f"{rel}: missing release surface for {version}")
+            continue
+        failures.extend(
+            _prerelease_claim_failures(
+                rel, version, path.read_text(encoding="utf-8", errors="ignore")
+            )
+        )
+    failures.extend(
+        _prerelease_notes_failures(root / notes_rel, version, release_date)
+    )
+    return failures
+
+
 def _stable_surface_check(
     changelog: str,
     root: Path,
@@ -1206,6 +1296,12 @@ def _stable_surface_check(
         return False, parse_errors
     if stable_version is None:
         return False, []
+    if "-" in stable_version:
+        entry = _first_dated_changelog_entry(changelog)
+        release_date = entry[1] if entry is not None else None
+        return True, check_prerelease_release_surfaces(
+            root, stable_version, release_date
+        )
     return True, check_stable_release_surfaces(root, stable_version)
 
 
@@ -2127,13 +2223,18 @@ def check_release_state_contract(
     if published_version is None:
         return []
     failures: list[str] = []
+    claim_check = (
+        _prerelease_claim_failures
+        if "-" in published_version
+        else _stable_claim_failures
+    )
     for template in surface_rel_paths:
         rel = template.format(version=published_version)
         path = root / rel
         if not path.is_file():
             continue
         failures.extend(
-            _stable_claim_failures(
+            claim_check(
                 rel,
                 published_version,
                 path.read_text(encoding="utf-8", errors="ignore"),
