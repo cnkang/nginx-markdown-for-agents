@@ -13,11 +13,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SCOPE = REPO_ROOT / "release" / "scope" / "short-soak-scope.json"
-DEFAULT_VERSION = "0.9.4"
+DEFAULT_VERSION = "1.0.0-rc.1"
 MANIFEST_NAME = "short-soak-scenario-manifest.json"
 SCENARIO_IDS = ("small", "medium", "large")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 UTC_TIMESTAMP_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
@@ -29,6 +28,7 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.semver import SEMVER_PATTERN  # noqa: E402
 
 
 def _load_json(path: Path) -> dict:
@@ -108,7 +108,7 @@ def build_manifest(
 
 def _output_path(version: str) -> Path:
     safe_version = validate_filename_strict(version, purpose="release version")
-    if not VERSION_RE.fullmatch(safe_version):
+    if not SEMVER_PATTERN.fullmatch(safe_version):
         raise ValueError(f"Invalid release version: {version!r}")
     expected_output = (
         REPO_ROOT / "artifacts" / "release" / safe_version / MANIFEST_NAME

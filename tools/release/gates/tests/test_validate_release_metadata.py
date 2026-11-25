@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -205,23 +206,44 @@ def test_fenced_changelog_heading_cannot_satisfy_the_gate(tmp_path: Path) -> Non
     assert any("missing release heading" in error for error in errors), errors
 
 
-def test_version_argument_must_be_a_plain_version() -> None:
-    import subprocess
-    import sys as _sys
-
+@pytest.mark.parametrize(
+    "version",
+    ["../../x", "1.0", "1.0.0+build", "01.0.0", "1.0.0-"],
+)
+def test_version_argument_rejects_non_release_identities(version: str) -> None:
     result = subprocess.run(
         [
-            _sys.executable,
+            sys.executable,
             "tools/release/gates/validate_release_metadata.py",
             "--version",
-            "../../x",
+            version,
         ],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parents[4]),
     )
     assert result.returncode == 1
-    assert "--version must look like X.Y.Z" in result.stderr
+    assert "--version must be a SemVer release identity" in result.stderr
+
+
+def test_version_argument_accepts_a_prerelease_identity(tmp_path: Path) -> None:
+    """A prerelease identity passes the argument gate and fails only on metadata."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/release/gates/validate_release_metadata.py",
+            "--version",
+            "1.0.0-rc.1",
+            "--repo-root",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[4]),
+    )
+    assert result.returncode == 1
+    assert "--version must be a SemVer release identity" not in result.stderr
+    assert "required release metadata file not found" in result.stderr
 
 
 def test_fence_close_with_trailing_text_does_not_close() -> None:

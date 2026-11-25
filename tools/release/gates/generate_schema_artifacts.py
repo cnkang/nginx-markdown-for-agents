@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import tomllib
 from pathlib import Path
@@ -38,6 +37,7 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.semver import SEMVER_PATTERN  # noqa: E402
 
 CARGO_TOML_PATH = SOURCE_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
@@ -68,8 +68,6 @@ RENDERER_PATH = (
 )
 DIAGNOSTICS_SCHEMA_PATH = SOURCE_ROOT / "schemas" / "diagnostics.schema.json"
 METRICS_CONTRACT_PATH = SOURCE_ROOT / "schemas" / "metrics-v1.registry.json"
-
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _read_text(path: Path) -> str:
@@ -152,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Compare artifacts without modifying files")
     args = parser.parse_args(argv)
 
-    if VERSION_PATTERN.fullmatch(args.version) is None:
-        parser.error("--version must use MAJOR.MINOR.PATCH")
+    if SEMVER_PATTERN.fullmatch(args.version) is None:
+        parser.error("--version must be a SemVer release identity")
 
     artifact_root = REPO_ROOT / "artifacts" / "release"
     artifact_dir = validate_write_path_within_root(

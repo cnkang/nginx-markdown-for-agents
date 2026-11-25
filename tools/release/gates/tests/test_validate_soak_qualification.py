@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import tomllib
 import types
 from pathlib import Path
 
@@ -19,7 +20,9 @@ MANIFEST = FIXTURE_DIR / "soak-qualification-manifest.json"
 
 def test_default_artifact_paths_follow_current_release_version() -> None:
     version = validator.DEFAULT_RELEASE_VERSION
-    assert version == "0.9.4"
+    with (REPO_ROOT / "components/rust-converter/Cargo.toml").open("rb") as handle:
+        cargo_version = tomllib.load(handle)["package"]["version"]
+    assert version == cargo_version
     assert validator.DEFAULT_MANIFEST == (
         REPO_ROOT
         / "artifacts"

@@ -9,6 +9,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+from lib.semver import SEMVER_PATTERN  # noqa: E402
+
 # Repository-relative directory holding the per-version release notes.
 RELEASE_NOTES_DIR = ("docs", "releases")
 
@@ -325,9 +330,10 @@ def main() -> int:
         help="Repository root (default: detected from this script)",
     )
     args = parser.parse_args()
-    if re.fullmatch(r"\d+\.\d+\.\d+", args.version) is None:
+    if SEMVER_PATTERN.fullmatch(args.version) is None:
         print(
-            f"ERROR: --version must look like X.Y.Z, got {args.version!r}",
+            f"ERROR: --version must be a SemVer release identity, "
+            f"got {args.version!r}",
             file=sys.stderr,
         )
         return 1

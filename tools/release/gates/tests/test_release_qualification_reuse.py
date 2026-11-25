@@ -158,6 +158,15 @@ def test_release_version_rejects_non_ascii_digits() -> None:
         reuse._require_version("٠.9.4")
 
 
+def test_release_version_accepts_a_prerelease_identity() -> None:
+    assert reuse._require_version("1.0.0-rc.1") == "1.0.0-rc.1"
+
+
+def test_release_version_rejects_build_metadata() -> None:
+    with pytest.raises(reuse.QualificationReuseError, match="malformed"):
+        reuse._require_version("1.0.0+build")
+
+
 def test_read_json_rejects_paths_outside_trusted_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

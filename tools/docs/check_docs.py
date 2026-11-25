@@ -50,18 +50,22 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
     r"\bmarkdown_trusted_proxies\s+(?:on|true|yes)\s*;",
     re.IGNORECASE,
 )
+_CHANGELOG_VERSION = (
+    r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 UNRELEASED_CHANGELOG_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>" + _CHANGELOG_VERSION + r")\]"
+    r"[ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
     re.MULTILINE,
 )
 
 DATED_CHANGELOG_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*"
-    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>" + _CHANGELOG_VERSION + r")\]"
+    r"[ \t]*-[ \t]*(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
     re.MULTILINE,
 )
 VERSION_HEADING_PREFIX_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]", re.MULTILINE
+    r"^ {0,3}##[ \t]+\[" + _CHANGELOG_VERSION + r"\]", re.MULTILINE
 )
 
 

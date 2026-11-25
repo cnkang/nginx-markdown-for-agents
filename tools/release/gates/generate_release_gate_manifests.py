@@ -47,6 +47,7 @@ from tools.lib.path_validation import (  # noqa: E402
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
+from tools.lib.semver import is_release_version  # noqa: E402
 
 _CARGO_MANIFEST = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 FUZZ_CORPUS_RELATIVE_ROOT = PurePosixPath(
@@ -61,14 +62,12 @@ def _release_version() -> str:
         raise ValueError(f"unable to read active release version: {exc}") from exc
     package = document.get("package")
     version = package.get("version") if isinstance(package, dict) else None
-    if not isinstance(version, str) or re.fullmatch(
-        _SEMVER_PATTERN, version
-    ) is None:
-        raise ValueError("Cargo package version must be MAJOR.MINOR.PATCH")
+    if not isinstance(version, str) or not is_release_version(version):
+        raise ValueError(
+            "Cargo package version must be a SemVer release identity"
+        )
     return version
 
-
-_SEMVER_PATTERN = r"\d+\.\d+\.\d+"
 
 FUZZ_QUALIFICATION_RECORD_NAME = "fuzz-qualification-record.json"
 SOAK_QUALIFICATION_RECORD_NAME = "soak-qualification-record.json"
