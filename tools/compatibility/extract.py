@@ -474,19 +474,34 @@ def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
     return samples
 
 
+def _consume_escape(joined: str, index: int) -> Tuple[int, bool]:
+    """Consume one backslash run and report whether it ends a quoted value.
+
+    A single backslash before a quote makes that quote a value delimiter.  A
+    longer run is an escaped backslash followed by a quote character, which
+    stays inside the value.
+    """
+    run = 1
+    while joined.startswith("\\", index + run):
+        run += 1
+    if not joined.startswith('"', index + run):
+        return index + run, False
+    return index + run + 1, run == 1
+
+
 def _sample_body(joined: str, start: int, name: str) -> str:
     """Return a sample's label body up to the brace outside its values.
 
-    The renderer source spells a quote as a backslash followed by a quote, so
-    the scan tracks that pair.  A brace inside a quoted value stays part of
-    the sample instead of ending it early.
+    The renderer source spells a quote as ``\\"`` and a literal backslash as a
+    doubled one, so only a single-backslash quote delimits a value.  A brace
+    inside a quoted value stays part of the sample instead of ending it early.
     """
     index = start
     quoted = False
     while index < len(joined):
-        if joined.startswith('\\"', index):
-            quoted = not quoted
-            index += 2
+        if joined[index] == "\\":
+            index, delimiter = _consume_escape(joined, index)
+            quoted = quoted != delimiter
             continue
         if joined[index] == "}" and not quoted:
             return joined[start:index]

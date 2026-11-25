@@ -843,6 +843,16 @@ def test_metrics_label_values_may_contain_quoted_braces():
         _collect_series(family + r'{features=\"a} 1', {family: "gauge"})
 
 
+def test_metrics_label_values_may_contain_escaped_quotes():
+    """A C-escaped quote inside a value does not end the sample early."""
+    family = "nginx_markdown_build_info"
+    emitted = family + r'{features=\"a\\\"b\",version=\"1.0\"} 1' + "\n"
+    series, labels = _collect_series(emitted, {family: "gauge"})
+
+    assert series[family] == {(None, (r'features=a\"b', "version=1.0"))}
+    assert labels[family] == [["features", "version"]]
+
+
 def test_metrics_histogram_samples_and_label_order_are_preserved():
     """Histogram components are identified and label order is canonical."""
     family = "nginx_markdown_latency"
