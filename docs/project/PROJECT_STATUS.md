@@ -520,6 +520,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.0.0-rc.1 | 2026-11-25 | Hermes | Recorded the candidate identity, the release-time validator changes, and the repository settings evidence |
 | 1.0.0 | 2026-11-23 | Kang | Added the cross-release compatibility contract gate, its frozen v0.9.2 and v0.9.4 anchors, and the prerelease package version mapping |
 | 0.9.4 | 2026-11-22 | Codex | Recorded v0.9.4 release status and synchronized release documentation |
 | 0.9.4 | 2026-11-20 | Codex | Prepared an unpublished compatibility candidate; evidence remains pending |

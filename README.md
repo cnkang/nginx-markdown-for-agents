@@ -377,6 +377,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 1.0.0-rc.1 | 2026-11-25 | Recorded the candidate identity and the release-state documents for the 1.0 line. |
 | 0.9.4 | 2026-11-23 | Added same-SHA release preflight qualification reuse guidance. |
 | 0.9.2 | 2026-10-08 | Unified the release date to 2026-10-08 and the published release status, and added the Ubuntu 26.04 default-repository NGINX 1.28.3 support rows |
 | 0.9.2 | 2026-10-03 | Update release target, simplify migration guidance, and document complete validation |

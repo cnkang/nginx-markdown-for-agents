@@ -182,6 +182,7 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.0.0-rc.1 | 2026-11-25 | Hermes | Recorded the candidate identity and the verified repository release settings |
 | 0.9.4 | 2026-11-22 | Codex | Recorded the published compatibility release and updated current release guidance |
 | 0.9.3 | 2026-11-02 | Hermes | Wrote the published release state and set the release date |
 | 0.9.3 | 2026-10-31 | Codex | Clarified asset availability before and after publication |

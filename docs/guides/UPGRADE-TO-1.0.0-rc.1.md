@@ -30,8 +30,9 @@ The candidate maps the release identity to a Debian and RPM package version.
 | RPM version | `1.0.0~bdudfaababfa` |
 | RPM release | `nginx1.28.3.1` |
 
-The tilde keeps the candidate below the final `1.0.0` package. A stable v0.9.4
-package remains above the candidate in the upgrade path that ends at `1.0.0`.
+The tilde keeps the candidate below the final `1.0.0` package and above the
+published v0.9.4 package. An upgrade from v0.9.4 to the candidate moves forward
+in package order.
 
 ## Install the candidate
 
