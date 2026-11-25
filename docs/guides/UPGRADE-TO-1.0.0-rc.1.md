@@ -1,8 +1,9 @@
 # Upgrade to 1.0.0-rc.1
 
 The 1.0.0-rc.1 candidate is not yet published. v0.9.4 remains the latest public
-stable release. Use this guide only after the candidate publishes, or use the
-artifact-only rehearsal output for testing.
+stable release. Use this guide only after the candidate publishes. A rehearsal
+dispatch produces unsigned packages, so use that output for staging tests and
+verify the SHA-256 checksum only.
 
 The candidate is non-breaking against v0.9.4. It keeps all 20 active directives
 and their defaults, the HTTP representation, metrics and diagnostics, reason
@@ -38,9 +39,11 @@ in package order.
 
 1. Record the NGINX version, package origin, package revision, architecture,
    and Ubuntu ABI provide when applicable.
-2. Download the artifact, `SHA256SUMS`, and `SHA256SUMS.asc`. Verify the
-   signature and checksum as documented in
-   [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md).
+2. For a published release, download the artifact, `SHA256SUMS`, and
+   `SHA256SUMS.asc`, then verify the signature and checksum as documented in
+   [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md). For rehearsal output,
+   verify the SHA-256 checksum only. A rehearsal dispatch publishes no
+   signature.
 3. Install the package that matches the NGINX origin and exact version. Keep
    the previous module package for rollback.
 4. Test and reload NGINX:

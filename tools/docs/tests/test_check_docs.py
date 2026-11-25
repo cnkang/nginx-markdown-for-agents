@@ -703,6 +703,23 @@ def test_latest_dated_changelog_version_rejects_unknown_headings():
     assert any("unrecognized release heading" in error for error in errors)
 
 
+def test_latest_dated_changelog_version_orders_prereleases():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.0.0] - 2026-12-02\n"
+        "## [1.0.0-rc.1] - 2026-12-01\n"
+        "## [0.9.4] - 2026-11-22\n"
+    )
+    assert (version, errors) == ("1.0.0", [])
+
+
+def test_latest_dated_changelog_version_rejects_prerelease_above_final():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.0.0-rc.1] - 2026-12-01\n## [1.0.0] - 2026-12-02\n"
+    )
+    assert version == "1.0.0-rc.1"
+    assert any("descending order" in error for error in errors), errors
+
+
 def test_stable_release_surface_check_flags_stale_candidate_text(tmp_path):
     (tmp_path / "README.md").write_text(
         "v9.9.9 is a development candidate and is not yet published.\n",

@@ -927,9 +927,28 @@ def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
     return True
 
 
+def _version_order_key(version: str) -> tuple:
+    """Return a SemVer ordering key for a release heading version.
+
+    A final release sorts above any of its prereleases.  Prerelease
+    identifiers compare by SemVer rules: numeric identifiers below
+    alphanumeric ones, and a shorter identifier list below a longer one with
+    the same prefix.
+    """
+    core, _, prerelease = version.partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    if not prerelease:
+        return (major, minor, patch, 1)
+    identifiers = tuple(
+        (0, int(identifier), "") if identifier.isdigit() else (1, 0, identifier)
+        for identifier in prerelease.split(".")
+    )
+    return (major, minor, patch, 0, identifiers)
+
+
 def _order_error(
-    previous: tuple[tuple[int, ...], str] | None,
-    current: tuple[tuple[int, ...], str],
+    previous: tuple[tuple, str] | None,
+    current: tuple[tuple, str],
     line: str,
 ) -> str | None:
     """Return a descending-order error for an out-of-order release heading."""
@@ -959,17 +978,17 @@ def _classify_changelog_heading(
 
 def _apply_dated_heading(
     version: str | None,
-    previous: tuple[tuple[int, ...], str] | None,
+    previous: tuple[tuple, str] | None,
     line: str,
     heading_version: str,
     raw_date: str,
     errors: list[str],
     assign_version: bool,
-) -> tuple[str | None, tuple[tuple[int, ...], str] | None]:
+) -> tuple[str | None, tuple[tuple, str] | None]:
     """Fold one dated heading into the running release-state scan."""
     if not _validated_date(raw_date, line, errors):
         return version, previous
-    current = (tuple(int(part) for part in heading_version.split(".")), raw_date)
+    current = (_version_order_key(heading_version), raw_date)
     order_error = _order_error(previous, current, line)
     if order_error is not None:
         errors.append(order_error)
