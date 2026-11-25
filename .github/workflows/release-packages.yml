@@ -123,7 +123,7 @@ env:
   # Projection of components/rust-converter/Cargo.toml.  The version
   # consistency gate and the 0.8.x release gate both fail when this value and
   # the manifest disagree, so a candidate commit bumps them together.
-  RELEASE_VERSION: "0.9.4"
+  RELEASE_VERSION: "1.0.0-rc.1"
   RUST_TOOLCHAIN: 1.98.1
   FUZZ_TOOLCHAIN: nightly-2026-09-21
   RUST_FEATURES: streaming,prune_noise_regions
@@ -1921,8 +1921,14 @@ jobs:
             exit 1
           fi
           bash ./packaging/scripts/validate-version.sh "${VERSION}"
+          # The artifact name carries the release identity, like the nginx.org
+          # package job.  The package metadata needs the Debian mapping, so
+          # derive it here and let the nfpm step consume it.
+          DEB_VERSION="$(python3 packaging/scripts/release_version.py \
+            --version "${VERSION}" --field deb_version)"
           echo "PKG_VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "raw_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "deb_version=${DEB_VERSION}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Install Rust toolchain
@@ -2040,6 +2046,10 @@ jobs:
           MATRIX_ARCH: ${{ matrix.arch }}
           MATRIX_REVISION: ${{ matrix.package_revision }}
           MATRIX_SUITE: ${{ matrix.suite }}
+          # The artifact name keeps the release identity.  nfpm gets the
+          # Debian mapping so the package sorts below the final release.
+          PKG_VERSION: ${{ steps.version.outputs.deb_version }}
+          RAW_VERSION: ${{ steps.version.outputs.raw_version }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -2075,7 +2085,7 @@ jobs:
             exit 1
           fi
           UBUNTU_RELEASE="1ubuntu${MATRIX_SUITE}"
-          DEB_FILENAME="nginx-module-markdown-for-agents-ubuntu_${PKG_VERSION}_ubuntu-${MATRIX_SUITE}_nginx-${MATRIX_REVISION}_${MATRIX_ARCH}.deb"
+          DEB_FILENAME="nginx-module-markdown-for-agents-ubuntu_${RAW_VERSION}_ubuntu-${MATRIX_SUITE}_nginx-${MATRIX_REVISION}_${MATRIX_ARCH}.deb"
           mkdir -p build
           cp dist/ubuntu-native/ngx_http_markdown_filter_module.so \
             build/ngx_http_markdown_filter_module.so

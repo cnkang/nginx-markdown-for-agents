@@ -73,9 +73,9 @@ DESTDIR ?=
 # regression CI reports as new looks clean locally.  Default to the merge base
 # with the main branch, which is what CI compares against.
 STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
-SCHEMA_RELEASE_VERSION ?= 0.9.4
+SCHEMA_RELEASE_VERSION ?= 1.0.0-rc.1
 # Current release line for generated artifacts and evidence paths.
-RELEASE_LINE ?= 0.9.4
+RELEASE_LINE ?= 1.0.0-rc.1
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents

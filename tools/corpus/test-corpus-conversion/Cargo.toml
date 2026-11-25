@@ -7,4 +7,4 @@ license = "BSD-2-Clause"
 publish = false
 
 [dependencies]
-nginx-markdown-converter = { version = "0.9.4", path = "../../../components/rust-converter" }
+nginx-markdown-converter = { version = "1.0.0-rc.1", path = "../../../components/rust-converter" }

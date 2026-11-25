@@ -209,6 +209,13 @@ artifacts/release/0.9.3/*
 !artifacts/release/0.9.3/official-build-feature-manifest.json
 !artifacts/release/0.9.3/metrics-registry.json
 !artifacts/release/0.9.3/diagnostics-field-contract.json
+!artifacts/release/1.0.0-rc.1/
+artifacts/release/1.0.0-rc.1/*
+!artifacts/release/1.0.0-rc.1/reason-registry-report.json
+!artifacts/release/1.0.0-rc.1/generated-reason-artifacts.json
+!artifacts/release/1.0.0-rc.1/official-build-feature-manifest.json
+!artifacts/release/1.0.0-rc.1/metrics-registry.json
+!artifacts/release/1.0.0-rc.1/diagnostics-field-contract.json
 
 # Perf harness build cache (rustup toolchain, NGINX binary, module .so)
 .perf-cache/
