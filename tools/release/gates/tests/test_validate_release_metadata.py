@@ -116,6 +116,23 @@ def test_finalized_prerelease_requires_a_date(tmp_path: Path) -> None:
     assert any("still Unreleased" in error for error in errors), errors
 
 
+def test_finalized_prerelease_matches_changelog_date_in_publication_statement(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        "**Status:** Release candidate, published 2026-11-30.\n"
+        "The changelog date is 2026-12-01.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("publication statement" in error for error in errors), errors
+
+
 def test_finalized_prerelease_rejects_pending_status(tmp_path: Path) -> None:
     """A tagged prerelease cannot still describe itself as unpublished."""
     _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")

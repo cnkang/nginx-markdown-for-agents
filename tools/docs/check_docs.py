@@ -981,7 +981,18 @@ def _classify_changelog_heading(
     dated = _dated_heading(line)
     if dated is not None:
         return ("dated", dated[0], dated[1])
-    if UNRELEASED_CHANGELOG_RE.match(line) is not None:
+    malformed_dated = DATED_CHANGELOG_RE.match(line)
+    if malformed_dated is not None:
+        return (
+            "bad",
+            malformed_dated.group("version"),
+            malformed_dated.group("date"),
+        )
+    unreleased = UNRELEASED_CHANGELOG_RE.match(line)
+    if unreleased is not None:
+        unreleased_version = unreleased.group("version")
+        if not is_release_version(unreleased_version):
+            return ("bad", unreleased_version, None)
         return ("unreleased", None, None)
     if VERSION_HEADING_PREFIX_RE.match(line) is not None:
         return ("bad", None, None)
@@ -1032,9 +1043,16 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
         first_seen = True
         kind, heading_version, raw_date = heading
         if kind == "bad":
-            errors.append(
-                f"{CHANGELOG_FILENAME}: unrecognized release heading {line!r}"
-            )
+            if heading_version is None:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: unrecognized release heading "
+                    f"{line!r}"
+                )
+            else:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: invalid release identity "
+                    f"{heading_version!r} in heading {line!r}"
+                )
         elif kind == "dated":
             version, previous = _apply_dated_heading(
                 version,
@@ -1089,7 +1107,7 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
 # version must not carry these claims next to its version string.
 _STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
 _STABLE_RELEASE_VERSION_LINK_RE = re.compile(
-    r"(?:\b(?:is|was|remains|stays|which|that|of|for|a|an|the|release|version|"
+    r"(?:\b(?:is|was|remains|stays|which|that|of|a|an|the|release|version|"
     r"candidate|current|currently|latest|number|stable|published|released)\b"
     r"|[\s,\x60])*",
     re.IGNORECASE,
@@ -1346,7 +1364,7 @@ def _stable_release_claim_links_other_version(
 def _stable_claims_all_name_other_releases(
     claim: str, candidate_version: re.Pattern[str]
 ) -> bool:
-    """Return whether every stable-release claim names another version."""
+    """Return whether every stable-release claim describes another version."""
     unnegated_claim = _NEGATED_STABLE_RELEASE_RE.sub(
         lambda match: " " * len(match.group(0)),
         claim,
@@ -1431,6 +1449,18 @@ def _following_status_version_candidate(
     return None
 
 
+def _version_is_non_release_qualifier(clause: str, version_start: int) -> bool:
+    """Return whether a version follows ``for`` a non-release subject."""
+    prefix = clause[:version_start].rstrip()
+    qualifier = re.search(r"\bfor\s*$", prefix, re.IGNORECASE)
+    if qualifier is None:
+        return False
+    subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
+    return subject is not None and _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+        subject["subject"].strip()
+    ) is None
+
+
 def _unpublished_status_names_candidate(
     clause: str,
     status: re.Match[str],
@@ -1470,6 +1500,14 @@ def _unpublished_status_names_candidate(
         if result is not None:
             return result
     if preceding:
+        preceding_version = versions[preceding[-1]]
+        if (
+            version_pattern.fullmatch(preceding_version[2]) is not None
+            and _version_is_non_release_qualifier(
+                clause, preceding_version[0]
+            )
+        ):
+            return False
         return _version_group_names_candidate(
             clause, versions, preceding[-1], -1, version_pattern
         )
@@ -2092,13 +2130,20 @@ def _first_dated_changelog_version(changelog: str) -> str | None:
 
     The first dated heading is the released one: an unreleased entry above it
     belongs to the pending line, and that line has no publication date yet.
+    Any malformed dated identity makes the lookup fail closed.
     """
     text = _without_fenced_blocks(changelog)
+    version: str | None = None
     for match in MARKDOWN_HEADING_LINE_RE.finditer(text):
         dated = DATED_CHANGELOG_RE.match(match.group(0))
-        if dated is not None:
-            return dated.group("version")
-    return None
+        if dated is None:
+            continue
+        heading_version = dated.group("version")
+        if not is_release_version(heading_version):
+            return None
+        if version is None:
+            version = heading_version
+    return version
 
 
 def _is_conditional_publication_block(block: str) -> bool:

@@ -271,10 +271,18 @@ def _validate_prerelease_project_status(
             f"{path}: {version} section must contain exactly one Status field"
         ]
     errors = _prerelease_status_errors(status_matches[0], path)
-    if release_date is not None and release_date not in body:
+    publication_date = re.search(
+        r"\bpublished(?:\s+on)?\s+(?P<date>\d{4}-\d{2}-\d{2})\b",
+        status_matches[0],
+        re.IGNORECASE,
+    )
+    if release_date is not None and (
+        publication_date is None
+        or publication_date.group("date") != release_date
+    ):
         errors.append(
-            f"{path}: publication date {release_date} missing from the "
-            f"{version} section"
+            f"{path}: publication date {release_date} is missing or mismatched "
+            f"in the {version} publication statement"
         )
     return errors
 

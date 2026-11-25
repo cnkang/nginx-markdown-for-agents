@@ -728,7 +728,43 @@ def test_latest_dated_changelog_version_rejects_leading_zero_versions():
         "## [01.0.0] - 2026-01-01\n"
     )
     assert version is None
-    assert any("unrecognized release heading" in error for error in errors)
+    assert any("invalid release identity" in error for error in errors)
+
+
+def test_latest_dated_changelog_version_rejects_invalid_older_identity():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [1.2.3] - 2026-01-02\n"
+        "## [01.2.2] - 2026-01-01\n"
+    )
+
+    assert version == "1.2.3"
+    assert any("invalid release identity '01.2.2'" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("changelog", "expected"),
+    [
+        (
+            "## [1.0.0-rc.1] - 2026-01-02\n"
+            "## [1.0.0] - 2026-01-01\n",
+            "1.0.0-rc.1",
+        ),
+        (
+            "## [01.0.0] - 2026-01-02\n"
+            "## [0.9.9] - 2026-01-01\n",
+            None,
+        ),
+        (
+            "## [1.0.0] - 2026-01-02\n"
+            "## [01.0.0] - 2026-01-01\n",
+            None,
+        ),
+    ],
+)
+def test_first_dated_changelog_version_validates_all_identities(
+    changelog, expected
+):
+    assert docs_checker._first_dated_changelog_version(changelog) == expected
 
 
 def test_unreleased_heading_rejects_invalid_prerelease_identity():
@@ -1013,6 +1049,55 @@ def test_candidate_stable_claim_is_not_exempted_by_another_stable_release():
     assert any(
         "described as a stable release" in failure for failure in failures
     ), failures
+
+
+@pytest.mark.parametrize(
+    ("claim", "should_fail"),
+    [
+        (
+            "The {version} release is a stable release for 0.9.9 users.",
+            True,
+        ),
+        (
+            "The 0.9.9 release is a stable release for {version} users.",
+            False,
+        ),
+    ],
+)
+def test_prerelease_claim_resolves_stable_release_subject(
+    claim, should_fail
+):
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{claim.format(version=version)}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert bool(failures) is should_fail, failures
+
+
+@pytest.mark.parametrize(
+    ("claim", "should_fail"),
+    [
+        ("The installation guide for {version} is not yet published.", False),
+        ("The release {version} is not yet published.", True),
+    ],
+)
+def test_prerelease_claim_distinguishes_version_subject_from_qualifier(
+    claim, should_fail
+):
+    version = "1.0.0-rc.1"
+    text = f"## Release {version}\n\n{claim.format(version=version)}\n"
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert bool(failures) is should_fail, failures
 
 
 
