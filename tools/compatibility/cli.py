@@ -708,7 +708,7 @@ def extract_command(args: argparse.Namespace) -> int:
     payload = dump_manifest(manifest)
     if args.out:
         target = validate_write_path_within_root(
-            args.out, os.getcwd(), purpose="manifest"
+            args.out, repo_root, purpose="manifest"
         )
         with open(target, "w", encoding="utf-8") as handle:
             handle.write(payload)

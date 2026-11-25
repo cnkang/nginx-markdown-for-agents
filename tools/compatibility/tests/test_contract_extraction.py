@@ -31,6 +31,7 @@ from tools.compatibility.compare import (
     compare_diagnostics,
 )
 from tools.compatibility.extract import (
+    CONFIG_MERGE_SOURCES,
     _collect_series,
     _nfpm_contract,
     _schema_field,
@@ -303,6 +304,41 @@ def test_compare_reports_a_changed_fixed_metric_value():
         finding.finding_id
         for finding in _synthetic_pair("metrics", baseline, dropped).findings
     }
+
+
+@pytest.mark.parametrize(
+    ("candidate_labels", "finding_id", "verdict"),
+    [
+        (
+            ["address", "user"],
+            "metrics:forbidden-labels-expanded",
+            ADDITIVE,
+        ),
+        (
+            [],
+            "metrics:forbidden-labels-narrowed",
+            BREAKING,
+        ),
+    ],
+)
+def test_compare_reports_forbidden_label_policy_changes(
+    candidate_labels, finding_id, verdict
+):
+    """Both additions and removals change the frozen label policy."""
+    baseline = {
+        "forbidden_labels": ["address"],
+        "families": [],
+        "emitted": {"families": {}, "label_sets": {}, "series": {}},
+    }
+    candidate = json.loads(json.dumps(baseline))
+    candidate["forbidden_labels"] = candidate_labels
+
+    findings = {
+        finding.finding_id: finding.verdict
+        for finding in _synthetic_pair("metrics", baseline, candidate).findings
+    }
+
+    assert findings[finding_id] == verdict
 
 
 def test_compare_reports_a_directive_block_form_change():
@@ -1088,6 +1124,33 @@ def test_directive_runtime_default_source_change_requires_review():
     )
 
 
+def test_compatibility_workflow_watches_runtime_default_sources():
+    """The contract gate runs when any hashed runtime-default source changes."""
+    workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    lines = workflow.splitlines()
+    filter_start = next(
+        index
+        for index, line in enumerate(lines)
+        if line.strip() == "compatibility_contract:"
+    )
+    filter_indent = len(lines[filter_start]) - len(lines[filter_start].lstrip())
+    filter_lines = []
+    for line in lines[filter_start + 1 :]:
+        indentation = len(line) - len(line.lstrip())
+        if line.strip() and indentation <= filter_indent:
+            break
+        filter_lines.append(line)
+    watched_paths = {
+        line.strip()[3:-1]
+        for line in filter_lines
+        if line.strip().startswith("- '") and line.strip().endswith("'")
+    }
+
+    assert set(CONFIG_MERGE_SOURCES) <= watched_paths
+
+
 def test_http_rebinding_fingerprint_includes_test_digests():
     """A binding finding carries both path-to-digest maps as its evidence."""
     result = Comparison(baseline_label="a", candidate_label="b")
@@ -1447,6 +1510,38 @@ def test_report_destination_must_stay_inside_the_repository(tmp_path):
     args = Namespace(json_report=str(tmp_path.parent / "outside.json"))
     with pytest.raises(ContractError, match="escapes root"):
         cli._report_destination(args, str(tmp_path))
+
+
+def test_extract_output_is_confined_to_the_repository_root(monkeypatch, tmp_path):
+    """Extract output uses the selected repository as its write boundary."""
+    from argparse import Namespace
+
+    from tools.compatibility import cli
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    invocation_dir = tmp_path / "outside"
+    invocation_dir.mkdir()
+    output_path = repo_root / "manifest.json"
+    monkeypatch.chdir(invocation_dir)
+    monkeypatch.setattr(cli, "resolve_tag", lambda _root, _tag: object())
+    monkeypatch.setattr(cli, "_tag_product_version", lambda _tag: "0.9.4")
+    monkeypatch.setattr(
+        cli,
+        "build_manifest",
+        lambda _root, _revision, _version: {"contract_digest": "test"},
+    )
+    monkeypatch.setattr(cli, "dump_manifest", lambda _manifest: "{}\n")
+    args = Namespace(
+        repo_root=str(repo_root),
+        index=None,
+        rev="v0.9.4",
+        product_version="",
+        out=str(output_path),
+    )
+
+    assert cli.extract_command(args) == 0
+    assert output_path.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_check_rejects_an_aliased_report_before_comparing(tmp_path, monkeypatch):
