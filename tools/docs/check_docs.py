@@ -66,7 +66,7 @@ DATED_CHANGELOG_RE = re.compile(
     re.MULTILINE,
 )
 VERSION_HEADING_PREFIX_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[" + _CHANGELOG_VERSION + r"\]", re.MULTILINE
+    r"^ {0,3}##[ \t]+\[(?:[vV]?[0-9])[^\]\r\n]*\]", re.MULTILINE
 )
 
 
@@ -1088,6 +1088,21 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
 _STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
+_STABLE_RELEASE_VERSION_LINK_RE = re.compile(
+    r"(?:\b(?:is|was|remains|stays|which|that|of|for|a|an|the|release|version|"
+    r"candidate|current|currently|latest|number|stable|published|released)\b"
+    r"|[\s,\x60])*",
+    re.IGNORECASE,
+)
+_STABLE_RELEASE_LINK_COMMA_SUFFIX_RE = re.compile(
+    r"[^,]*,\s*(?:(?:a|an)|(?:which|that)\s+"
+    r"(?:is|was|remains|stays)\s+(?:(?:a|an)\s+)?)\s*",
+    re.IGNORECASE,
+)
+_STABLE_RELEASE_COMPARISON_PREFIX_RE = re.compile(
+    r"\b(?:unlike|compared\s+(?:with|to)|in\s+contrast\s+to)\s*$",
+    re.IGNORECASE,
+)
 _NEGATED_STABLE_RELEASE_RE = re.compile(
     r"\bnot\s+(?:a\s+)?stable release\b", re.IGNORECASE
 )
@@ -1220,6 +1235,65 @@ def _stable_claim_failures(rel: str, version: str, text: str) -> list[str]:
     return failures
 
 
+def _stable_release_version_link_keeps_subject(
+    link: str,
+    version_before_claim: bool,
+    text_before_version: str,
+) -> bool:
+    """Return whether punctuation keeps a version link with its claim."""
+    if "," not in link:
+        return True
+    if not version_before_claim:
+        return False
+    if _STABLE_RELEASE_COMPARISON_PREFIX_RE.search(text_before_version):
+        return False
+    return _STABLE_RELEASE_LINK_COMMA_SUFFIX_RE.fullmatch(link) is not None
+
+
+def _stable_release_claim_links_other_version(
+    claim: str,
+    stable_claim: re.Match[str],
+    versions: list[tuple[int, int, str]],
+) -> bool:
+    """Return whether a stable-release claim links to another version."""
+    for start, end, _version in versions:
+        if end <= stable_claim.start():
+            link = claim[end : stable_claim.start()]
+            version_before_claim = True
+        elif stable_claim.end() <= start:
+            link = claim[stable_claim.end() : start]
+            version_before_claim = False
+        else:
+            continue
+        if not _stable_release_version_link_keeps_subject(
+            link, version_before_claim, claim[:start]
+        ):
+            continue
+        if _STABLE_RELEASE_CLAIM_RE.search(link) is not None:
+            continue
+        if _STABLE_RELEASE_VERSION_LINK_RE.fullmatch(link) is not None:
+            return True
+    return False
+
+
+def _stable_claims_all_name_other_releases(claim: str) -> bool:
+    """Return whether every stable-release claim names another version."""
+    unnegated_claim = _NEGATED_STABLE_RELEASE_RE.sub(
+        lambda match: " " * len(match.group(0)),
+        claim,
+    )
+    versions = _version_tokens(claim)
+    stable_claims = list(
+        _STABLE_RELEASE_CLAIM_RE.finditer(unnegated_claim)
+    )
+    return bool(stable_claims) and all(
+        _stable_release_claim_links_other_version(
+            claim, stable_claim, versions
+        )
+        for stable_claim in stable_claims
+    )
+
+
 def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
     """Flag a stable-release claim in blocks that mention a prerelease."""
     failures: list[str] = []
@@ -1227,12 +1301,23 @@ def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
     text = _without_fenced_blocks(text)
     history = set(_document_update_table_lines(text))
     for block, context_version in _contextual_blocks(text, history, version_pattern):
-        if not context_version and not version_pattern.search(block):
-            continue
-        if _has_stable_release_claim(block):
+        block_context = (
+            context_version or version_pattern.search(block) is not None
+        )
+        for claim in _split_sentences_protected(block):
+            if not _has_stable_release_claim(claim):
+                continue
+            claim_names_candidate = version_pattern.search(claim) is not None
+            if (
+                not claim_names_candidate
+                and _stable_claims_all_name_other_releases(claim)
+            ):
+                continue
+            if not claim_names_candidate and not block_context:
+                continue
             failures.append(
                 f"{rel}: prerelease {version} described as a stable release "
-                f"in: {block[:80]!r}"
+                f"in: {claim[:80]!r}"
             )
     return failures
 

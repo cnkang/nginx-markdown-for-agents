@@ -185,7 +185,16 @@ def _prerelease_status_errors(value: str, path: Path) -> list[str]:
     if re.search(r"\bstable release\b", normalized, re.IGNORECASE):
         return [f"{path}: a prerelease cannot be marked stable"]
     if re.search(
-        r"\bnot\s+(?:yet\s+)?(?:published|released)\b|\bunpublished\b",
+        r"\b(?:"
+        r"not\s+(?:yet\s+)?(?:published|released)"
+        r"|(?:has|have|had)\s+not\s+(?:yet\s+)?been\s+(?:published|released)"
+        r"|unpublished|unreleased"
+        r"|(?<!no )pending\s+publication"
+        r"|(?<!no )pending\s+release(?!\s+blockers?\b)"
+        r"|(?<!no )(?:publication|release)\s+(?:is\s+)?pending"
+        r"|awaiting\s+publication"
+        r"|awaiting\s+release(?!\s+feedback\b)"
+        r")\b",
         normalized,
         re.IGNORECASE,
     ):

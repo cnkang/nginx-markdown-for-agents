@@ -703,6 +703,20 @@ def test_latest_dated_changelog_version_rejects_unknown_headings():
     assert any("unrecognized release heading" in error for error in errors)
 
 
+def test_latest_dated_changelog_version_rejects_malformed_candidate_heading():
+    changelog = (
+        "## [1.0.0-rc..1] - Unreleased\n"
+        "## [0.9.9] - 2026-01-01\n"
+    )
+
+    version, errors = docs_checker._latest_dated_changelog_version(changelog)
+
+    assert version is None
+    assert any(
+        "unrecognized release heading" in error for error in errors
+    )
+
+
 def test_latest_dated_changelog_version_rejects_leading_zero_versions():
     version, errors = docs_checker._latest_dated_changelog_version(
         "## [01.0.0] - 2026-01-01\n"
@@ -895,7 +909,8 @@ def test_prerelease_surface_check_rejects_stable_claim(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "README.md").write_text(
-        f"The {version} release is a stable release.\n", encoding="utf-8"
+        f"The {version} release replaces 0.9.9 as the stable release.\n",
+        encoding="utf-8",
     )
 
     errors = docs_checker.check_prerelease_release_surfaces(
@@ -903,6 +918,167 @@ def test_prerelease_surface_check_rejects_stable_claim(tmp_path):
     )
 
     assert any("described as a stable release" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "other_release_claim",
+    [
+        "The 0.9.9 release is a stable release.",
+        "1.9.0 is a stable release.",
+        "The \x600.9.9\x60 release is a stable release.",
+        "0.9.9, a stable release.",
+    ],
+)
+def test_prerelease_claim_ignores_other_release_in_candidate_heading(
+    other_release_claim,
+):
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{other_release_claim}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert failures == []
+
+
+
+@pytest.mark.parametrize(
+    "separator,candidate_claim",
+    [
+        ("; ", "this candidate is a stable release."),
+        (", ", "the current candidate is a stable release."),
+    ],
+)
+def test_prerelease_claim_keeps_candidate_claim_after_other_release_claim(
+    separator, candidate_claim
+):
+    version = "2.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"1.0.0 is a stable release{separator}"
+        f"{candidate_claim}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "0.9.9 was released, the current version is a stable release.",
+        "0.9.9 was released: the current candidate is a stable release.",
+        "The current candidate is a stable release, the 0.9.9 release is not.",
+        "This is a stable release as was 1.0.0.",
+        "Unlike 0.9.9, the stable release is this candidate.",
+        "Unlike 0.9.9, a stable release is this candidate.",
+    ],
+)
+def test_prerelease_claim_does_not_link_across_clause_boundary(claim):
+    version = "2.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{claim}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "We still support 0.9.9, which is a stable release.",
+        "We still support 0.9.9, that is a stable release.",
+    ],
+)
+def test_prerelease_claim_ignores_other_release_relative_clause(claim):
+    version = "2.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{claim}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert failures == []
+
+
+
+def test_prerelease_claim_keeps_candidate_context_across_semicolon():
+    version = "2.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        "The current version is a stable release; "
+        "1.9.0 was released.\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
+
+
+
+def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
+    version = "1.0.0-rc.1"
+    text = (
+        f"Version {version} is available. "
+        "This version is a stable release.\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
+
+
+
+@pytest.mark.parametrize(
+    "dependency_claim",
+    [
+        "This is a stable release. It requires nginx 1.26.0.",
+        "This is a stable release requiring nginx 1.26.0.",
+    ],
+)
+def test_prerelease_claim_uses_heading_context_with_dependency_version(
+    dependency_claim,
+):
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"{dependency_claim}\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any(
+        "described as a stable release" in failure for failure in failures
+    ), failures
 
 
 def test_prerelease_surface_check_allows_negated_stable_claim(tmp_path):

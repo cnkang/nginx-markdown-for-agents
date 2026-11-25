@@ -108,6 +108,81 @@ def test_finalized_prerelease_rejects_pending_status(tmp_path: Path) -> None:
     assert any("must describe a published release" in error for error in errors), errors
 
 
+@pytest.mark.parametrize(
+    "pending_wording",
+    [
+        "publication pending",
+        "pending publication",
+        "pending release",
+        "awaiting publication",
+        "awaiting release",
+        "unreleased",
+        "has not been published",
+    ],
+)
+def test_finalized_prerelease_rejects_pending_publication_wording(
+    tmp_path: Path, pending_wording: str
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        f"**Status:** Release candidate, {pending_wording}.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any(
+        "must describe a published release" in error for error in errors
+    ), errors
+
+
+def test_finalized_prerelease_accepts_published_status_awaiting_release_feedback(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        "**Status:** Release candidate, published 2026-12-01; "
+        "awaiting release feedback.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
+
+
+def test_finalized_prerelease_accepts_no_pending_release_blockers(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        "**Status:** Release candidate, published 2026-12-01; "
+        "no pending release blockers.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
+
+
+def test_finalized_prerelease_accepts_no_pending_publication_tasks(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        "**Status:** Release candidate, published 2026-12-01; "
+        "no pending publication tasks remain.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
+
+
 def test_finalized_prerelease_rejects_duplicate_sections(tmp_path: Path) -> None:
     """A second matching project-status section fails the final phase."""
     _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
