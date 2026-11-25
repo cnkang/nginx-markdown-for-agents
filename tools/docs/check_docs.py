@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
+from tools.lib.semver import is_release_version  # noqa: E402
 ARCHIVE_SEGMENT = "docs/archive/"
 README_FILENAME = "README.md"
 CHANGELOG_FILENAME = "CHANGELOG.md"
@@ -350,6 +351,12 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
             found = valid.group("version")
+            if not is_release_version(found):
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: malformed unreleased heading "
+                    f"{line.strip()!r}; invalid release identity {found!r}"
+                )
+                continue
             if version is None:
                 version = found
             elif found == version:
@@ -912,7 +919,12 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
 def _dated_heading(line: str) -> tuple[str, str] | None:
     """Return (version, date) for a dated release heading."""
     dated = DATED_CHANGELOG_RE.match(line)
-    return None if dated is None else (dated.group("version"), dated.group("date"))
+    if dated is None:
+        return None
+    version = dated.group("version")
+    if not is_release_version(version):
+        return None
+    return version, dated.group("date")
 
 
 def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
@@ -1214,7 +1226,10 @@ def _first_dated_changelog_entry(changelog: str) -> tuple[str, str] | None:
     match = DATED_CHANGELOG_RE.search(_without_fenced_blocks(changelog))
     if match is None:
         return None
-    return match.group("version"), match.group("date")
+    version = match.group("version")
+    if not is_release_version(version):
+        return None
+    return version, match.group("date")
 
 
 def _prerelease_notes_failures(

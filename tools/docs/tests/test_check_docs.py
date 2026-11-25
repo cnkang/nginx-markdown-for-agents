@@ -703,6 +703,22 @@ def test_latest_dated_changelog_version_rejects_unknown_headings():
     assert any("unrecognized release heading" in error for error in errors)
 
 
+def test_latest_dated_changelog_version_rejects_leading_zero_versions():
+    version, errors = docs_checker._latest_dated_changelog_version(
+        "## [01.0.0] - 2026-01-01\n"
+    )
+    assert version is None
+    assert any("unrecognized release heading" in error for error in errors)
+
+
+def test_unreleased_heading_rejects_invalid_prerelease_identity():
+    version, errors = docs_checker._find_unreleased_changelog_line(
+        "## [1.0.0-rc.01] - Unreleased\n"
+    )
+    assert version is None
+    assert any("invalid release identity" in error for error in errors)
+
+
 def test_latest_dated_changelog_version_orders_prereleases():
     version, errors = docs_checker._latest_dated_changelog_version(
         "## [1.0.0] - 2026-12-02\n"
