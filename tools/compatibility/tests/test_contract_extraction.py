@@ -853,6 +853,18 @@ def test_metrics_label_values_may_contain_escaped_quotes():
     assert labels[family] == [["features", "version"]]
 
 
+def test_metrics_label_values_may_end_with_a_literal_backslash():
+    """A value ending in a backslash keeps its closing quote and brace."""
+    family = "nginx_markdown_build_info"
+    # The output value is a\ (two output backslashes) plus its closing quote,
+    # which C-encodes to five backslashes before that quote.
+    emitted = family + r'{features=\"a\\\\\",version=\"1.0\"} 1' + "\n"
+    series, labels = _collect_series(emitted, {family: "gauge"})
+
+    assert series[family] == {(None, (r'features=a\\', "version=1.0"))}
+    assert labels[family] == [["features", "version"]]
+
+
 def test_metrics_histogram_samples_and_label_order_are_preserved():
     """Histogram components are identified and label order is canonical."""
     family = "nginx_markdown_latency"

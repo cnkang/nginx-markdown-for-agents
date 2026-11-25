@@ -477,16 +477,17 @@ def _sample_family_map(families: Dict[str, str]) -> Dict[str, tuple]:
 def _consume_escape(joined: str, index: int) -> Tuple[int, bool]:
     """Consume one backslash run and report whether it ends a quoted value.
 
-    A single backslash before a quote makes that quote a value delimiter.  A
-    longer run is an escaped backslash followed by a quote character, which
-    stays inside the value.
+    The source is C-encoded twice over: a value quote is ``\\"`` and an output
+    backslash is ``\\\\``.  A run of ``4n + 1`` backslashes therefore ends the
+    value, while a run of ``4n + 3`` is an escaped backslash plus a quote
+    character that stays inside it.
     """
     run = 1
     while joined.startswith("\\", index + run):
         run += 1
     if not joined.startswith('"', index + run):
         return index + run, False
-    return index + run + 1, run == 1
+    return index + run + 1, run % 4 == 1
 
 
 def _sample_body(joined: str, start: int, name: str) -> str:
