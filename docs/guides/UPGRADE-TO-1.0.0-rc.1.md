@@ -64,6 +64,9 @@ Build and install the module with the manual source build procedure in
 [INSTALLATION.md](INSTALLATION.md#6-secondary-manual-source-build). Use the
 same NGINX source and configure arguments as the running server.
 
+After you clone the repository, check out the `v1.0.0-rc.1` tag before you
+build. The default branch can move to a later candidate.
+
 Keep the current module file before the install.
 
 ```bash

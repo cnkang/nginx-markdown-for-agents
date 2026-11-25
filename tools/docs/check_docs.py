@@ -410,7 +410,7 @@ def check_release_status_consistency(
 
     status = section_match["body"]
     errors: list[str] = []
-    if _STABLE_RELEASE_CLAIM_RE.search(status):
+    if _has_stable_release_claim(status):
         errors.append(
             f"{project_status_path}: unreleased {version} cannot be marked stable"
         )
@@ -1088,6 +1088,21 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
 _STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
+_NEGATED_STABLE_RELEASE_RE = re.compile(
+    r"\bnot\s+(?:a\s+)?stable release\b", re.IGNORECASE
+)
+
+
+def _has_stable_release_claim(text: str) -> bool:
+    """Return whether text claims a stable release without a negation."""
+    return (
+        _STABLE_RELEASE_CLAIM_RE.search(
+            _NEGATED_STABLE_RELEASE_RE.sub("", text)
+        )
+        is not None
+    )
+
+
 _STALE_RELEASE_CLAIM_RE = re.compile(
     r"(?:release|development)[- ]candidate"
     r"|not (?:yet )?(?:published|released)"
@@ -1214,7 +1229,7 @@ def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
     for block, context_version in _contextual_blocks(text, history, version_pattern):
         if not context_version and not version_pattern.search(block):
             continue
-        if _STABLE_RELEASE_CLAIM_RE.search(block):
+        if _has_stable_release_claim(block):
             failures.append(
                 f"{rel}: prerelease {version} described as a stable release "
                 f"in: {block[:80]!r}"
@@ -1251,7 +1266,7 @@ def _prerelease_notes_failures(
         failures.append(f"{rel}: missing release status for released {version}")
     else:
         value = " ".join(status["value"].split())
-        if _STABLE_RELEASE_CLAIM_RE.search(value):
+        if _has_stable_release_claim(value):
             failures.append(f"{rel}: prerelease {version} cannot claim a stable status")
         elif re.match(
             r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
@@ -1322,7 +1337,7 @@ def _stable_surface_check(
 
 
 def _release_notes_status_failures(path: Path, version: str) -> list[str]:
-    """Require the release notes of a released version to carry a stable status."""
+    """Require a stable or candidate status that matches the release line."""
     rel = f"docs/releases/{version}-release-notes.md"
     if not path.is_file():
         return [f"{rel}: missing release notes for released {version}"]
@@ -1333,6 +1348,12 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
     if status is None:
         return [f"{rel}: missing release status for released {version}"]
     value = " ".join(status["value"].split()).casefold()
+    if "-" in version:
+        if re.search(r"\bstable release\b", value):
+            return [f"{rel}: prerelease {version} cannot carry a stable status"]
+        if re.match(r"^(?:release candidate|pre-release)(?:[.,]|$)", value) is None:
+            return [f"{rel}: released {version} carries status {status['value']!r}"]
+        return []
     if value != "stable release":
         return [f"{rel}: released {version} carries status {status['value']!r}"]
     return []

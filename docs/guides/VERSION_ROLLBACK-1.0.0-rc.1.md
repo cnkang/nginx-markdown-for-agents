@@ -21,14 +21,18 @@ cache that the next upgrade can clear.
 ## Rollback steps
 
 1. Stop new traffic to the node or remove it from the load balancer.
-2. Simulate the package transaction and confirm the package manager retains
+2. Compare the installed NGINX package with the recorded revision. If NGINX
+   changed during the candidate test, restore the recorded NGINX package
+   first. The saved module package refuses an install when the NGINX version
+   differs.
+3. Simulate the package transaction and confirm the package manager retains
    the intended NGINX package.
 
    ```bash
    apt-get -s install --allow-downgrades ./<previous-module-package>.deb
    ```
 
-3. Review the transaction, then install the saved module package.
+4. Review the transaction, then install the saved module package.
 
    ```bash
    sudo apt-get install --allow-downgrades ./<previous-module-package>.deb
@@ -37,7 +41,7 @@ cache that the next upgrade can clear.
    On an RPM system, use the matching `dnf downgrade` command for the recorded
    package, or `rpm -U --oldpackage <previous-module-package>.rpm`.
 
-4. Confirm the installed module package version.
+5. Confirm the installed module package version.
 
    ```bash
    dpkg-query -W -f='${Package} ${Version}\n' \
@@ -47,21 +51,24 @@ cache that the next upgrade can clear.
 
    On an RPM system, use `rpm -q --qf '%{VERSION}-%{RELEASE}\n' nginx-module-markdown-for-agents`.
 
-5. Test and reload NGINX.
+6. Test the configuration, then restart NGINX.
 
    ```bash
    sudo nginx -t
-   sudo systemctl reload-or-restart nginx
+   sudo systemctl restart nginx
    ```
 
-6. Send one HTML request and one `Accept: text/markdown` request. Confirm each
+   A reload keeps the running master process and its module mapping. A restart
+   loads the restored package.
+
+7. Send one HTML request and one `Accept: text/markdown` request. Confirm each
    response matches the previous release behavior.
-7. Run `nginx-markdown-doctor --json` and review any failed check.
-8. Return the node to service after the checks pass.
+8. Run `nginx-markdown-doctor --json` and review any failed check.
+9. Return the node to service after the checks pass.
 
 ## Failure handling
 
 A matching NGINX version alone does not prove that a module can load. If the
-previous package fails to load, restore the recorded NGINX package revision as
-well. Keep the configuration unchanged during the rollback so a configuration
-error cannot hide a module mismatch.
+restored module still fails to load, confirm the NGINX package matches the
+recorded revision and restore it if needed. Keep the configuration unchanged
+during the rollback so a configuration error cannot hide a module mismatch.
