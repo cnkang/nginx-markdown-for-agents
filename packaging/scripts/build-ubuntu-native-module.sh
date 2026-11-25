@@ -296,17 +296,17 @@ if [[ "${RELEASE_IDENTITY}" == "yes" ]]; then
     if [[ ! "${RELEASE_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
         die "cannot resolve the source commit for a release build"
     fi
-    RELEASE_MANIFEST="$(sed -n 's/^RELEASE_VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
-        "${REPO_ROOT}/tools/release/matrix/normalize_matrix.py" | head -n 1)"
-    if [[ ! "${RELEASE_MANIFEST}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        die "cannot resolve the release line for the feature manifest"
+    RELEASE_MANIFEST="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "${REPO_ROOT}/components/rust-converter/Cargo.toml" | head -n 1)"
+    if ! printf '%s' "${RELEASE_MANIFEST}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+        die "cannot resolve the release identity from components/rust-converter/Cargo.toml"
     fi
     FEATURE_MANIFEST="${REPO_ROOT}/artifacts/release/${RELEASE_MANIFEST}/official-build-feature-manifest.json"
     [[ -f "${FEATURE_MANIFEST}" ]] || die "feature manifest not found: ${FEATURE_MANIFEST}"
     export NGX_MARKDOWN_BUILD_KIND=release
     export NGX_MARKDOWN_SOURCE_SHA="${RELEASE_SOURCE_SHA}"
     export NGX_MARKDOWN_RUST_VERSION="${RUST_VERSION}"
-    export NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST="$(
+    NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST="$(
         python3 - "${FEATURE_MANIFEST}" <<'PY'
 import hashlib
 import json
@@ -317,6 +317,7 @@ raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
 print("sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
 PY
     )"
+    export NGX_MARKDOWN_FEATURE_MANIFEST_DIGEST
     info "release identity ${RELEASE_SOURCE_SHA} rust ${RUST_VERSION}"
 fi
 

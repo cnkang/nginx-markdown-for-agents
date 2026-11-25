@@ -180,10 +180,18 @@ def _validate_release_notes(
 
 
 def _prerelease_status_errors(value: str, path: Path) -> list[str]:
-    """Require a candidate status without a stable claim."""
+    """Require a published candidate status without a stable claim."""
     normalized = " ".join(value.split())
     if re.search(r"\bstable release\b", normalized, re.IGNORECASE):
         return [f"{path}: a prerelease cannot be marked stable"]
+    if re.search(
+        r"\bnot\s+(?:yet\s+)?(?:published|released)\b|\bunpublished\b",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return [
+            f"{path}: final prerelease status must describe a published release"
+        ]
     if re.match(
         r"^(?:Release candidate|Pre-release)(?:[.,]|$)",
         normalized,
@@ -200,15 +208,22 @@ def _validate_prerelease_project_status(
     release_date: str | None,
 ) -> list[str]:
     """Validate the current release line for a published prerelease."""
-    match = re.search(
-        rf"^### Current Release Line {re.escape(version)}\s*$"
-        rf"(?P<body>.*?)(?=^### |\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
+    prose = "\n".join(_unfenced_lines(text))
+    sections = list(
+        re.finditer(
+            rf"^### Current Release Line {re.escape(version)}\s*$"
+            rf"(?P<body>.*?)(?=^### |\Z)",
+            prose,
+            re.MULTILINE | re.DOTALL,
+        )
     )
-    if match is None:
+    if not sections:
         return [f"{path}: missing current release line {version}"]
-    body = match.group("body")
+    if len(sections) > 1:
+        return [
+            f"{path}: {version} section must occur exactly once"
+        ]
+    body = sections[0].group("body")
     status_matches = re.findall(
         r"^\*\*Status:\*\*(?P<value>.*)$",
         body,

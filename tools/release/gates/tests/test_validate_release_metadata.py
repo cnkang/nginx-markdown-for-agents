@@ -94,6 +94,50 @@ def test_finalized_prerelease_requires_a_date(tmp_path: Path) -> None:
     assert any("still Unreleased" in error for error in errors), errors
 
 
+def test_finalized_prerelease_rejects_pending_status(tmp_path: Path) -> None:
+    """A tagged prerelease cannot still describe itself as unpublished."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        "### Current Release Line 1.0.0-rc.1\n\n"
+        "**Status:** Release candidate, not yet published.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
+
+    assert any("must describe a published release" in error for error in errors), errors
+
+
+def test_finalized_prerelease_rejects_duplicate_sections(tmp_path: Path) -> None:
+    """A second matching project-status section fails the final phase."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+    status_path = tmp_path / "docs" / "project" / "PROJECT_STATUS.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8")
+        + "\n### Current Release Line 1.0.0-rc.1\n\n"
+        "**Status:** Stable release, published 2026-12-01.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
+
+    assert any("must occur exactly once" in error for error in errors), errors
+
+
+def test_finalized_prerelease_ignores_fenced_project_status(tmp_path: Path) -> None:
+    """A fenced example cannot satisfy the project-status section check."""
+    _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        "```\n### Current Release Line 1.0.0-rc.1\n\n"
+        "**Status:** Release candidate, published 2026-12-01.\n```\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, "1.0.0-rc.1")
+
+    assert any("missing current release line" in error for error in errors), errors
+
+
 def test_release_notes_directory_matches_repository_layout() -> None:
     """The declared notes directory must exist in the real repository.
 

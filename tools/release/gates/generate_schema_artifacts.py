@@ -50,7 +50,7 @@ def _default_version() -> str:
         version = cargo.get("package", {}).get("version", "")
         if isinstance(version, str) and version:
             return release_core(version)
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):
         # Keep the release fallback when package metadata is unavailable or
         # malformed.
         return "0.9.2"

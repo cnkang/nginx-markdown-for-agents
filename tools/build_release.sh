@@ -133,9 +133,9 @@ if [[ -z "${RUST_VERSION}" ]]; then
     exit 1
 fi
 
-RELEASE_VERSION="$(sed -n 's/^RELEASE_VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' tools/release/matrix/normalize_matrix.py | head -n 1)"
-if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Unable to resolve the release artifact version from normalize_matrix.py." >&2
+RELEASE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' components/rust-converter/Cargo.toml | head -n 1)"
+if ! printf '%s' "${RELEASE_VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    echo "Unable to resolve the release identity from components/rust-converter/Cargo.toml." >&2
     exit 1
 fi
 export RELEASE_VERSION
