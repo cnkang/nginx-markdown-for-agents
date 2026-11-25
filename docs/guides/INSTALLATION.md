@@ -4,7 +4,8 @@
 > [PACKAGE_INSTALLATION.md](PACKAGE_INSTALLATION.md).
 
 The current compatibility maintenance release is v0.9.4, published
-2026-11-22. Use its signed release assets and checksums.
+2026-11-22. Use its signed release assets and checksums. The 1.0.0-rc.1
+candidate is not yet published.
 
 ## Table of Contents
 

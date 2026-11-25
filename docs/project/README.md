@@ -1,6 +1,7 @@
 # Project Documentation
 
 > The project published v0.9.4 on 2026-11-22. Use release-tag downloads.
+> The 1.0.0-rc.1 candidate is not yet published.
 > v0.9.3 was the previous release (2026-11-02). v0.9.2 remains the final
 > planned breaking release before v1.0.
 

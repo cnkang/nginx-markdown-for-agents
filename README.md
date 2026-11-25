@@ -12,6 +12,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > the 20 active directives and their defaults, HTTP representation, metrics,
 > diagnostics, reason codes, and FFI ABI version 3 unchanged. v0.9.2 is the
 > final planned breaking release before v1.0. Use release-tag downloads.
+> The 1.0.0-rc.1 candidate is not yet published.
 
 > Release publication requires CI build, load, and request evidence for each
 > `verified` compatibility row, bound to the approved release commit and its

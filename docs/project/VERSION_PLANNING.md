@@ -16,8 +16,9 @@ compatibility or release scope.
 - v0.9.2 was the previous published release (2026-10-08). It consolidates the
   v0.9.1 baseline and resets compatibility.
 - v0.9.1 was the published stable release before v0.9.2 (2026-07-29).
-- Repository metadata targets 0.9.4. Use the v0.9.4 tag, assets, and
-  checksums for the current release.
+- Repository metadata targets the `1.0.0-rc.1` candidate. The v0.9.4 tag,
+  assets, and checksums remain the current published release until the project
+  publishes the 1.0 release. The 1.0.0-rc.1 candidate is not yet published.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 - v0.9.3 is a controlled compatibility maintenance exception. It is not a
   second breaking release. It does not reopen the v0.9.2 contract. Its scope is

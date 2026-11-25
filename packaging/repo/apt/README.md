@@ -1,6 +1,7 @@
 # nginx-markdown-for-agents APT Repository
 
 > v0.9.4 was published on 2026-11-22. Use release-tag downloads.
+> The 1.0.0-rc.1 candidate is not yet published.
 > v0.9.3 was the previous release (2026-11-02).
 
 Use the v0.9.4 GitHub Release DEB artifacts as the source for this

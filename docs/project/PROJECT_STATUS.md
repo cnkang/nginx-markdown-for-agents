@@ -33,7 +33,8 @@ harness maintenance.
 
 ### 1.0 Preparation
 
-**Status:** in progress. Two capabilities landed for the 1.0 line.
+**Status:** in progress. The candidate branch carries the `1.0.0-rc.1`
+identity. Two capabilities landed for the 1.0 line.
 
 - `make compatibility-contract-check` compares a candidate against frozen
   manifests of the published release tags. It catches a breaking change that a
@@ -47,6 +48,19 @@ The Week 1 record is in
 verdict is in
 [1.0.0-rc1-readiness.md](../development/1.0.0-rc1-readiness.md). No 1.0 tag or
 release exists.
+
+### Current Release Line 1.0.0-rc.1
+
+**Status:** Release candidate. Not yet published.
+
+The 1.0.0-rc.1 candidate is not yet published. v0.9.4 remains the current
+published release.
+
+The 1.0.0-rc.1 candidate freezes the public contract against the published
+v0.9.2 and v0.9.4 releases. It carries the release identity and packaging path
+for a prerelease. Release-time evidence, the protected signing rehearsal, and
+the approved candidate SHA remain open. The release notes are
+[1.0.0-rc.1-release-notes.md](../releases/1.0.0-rc.1-release-notes.md).
 
 ### Current Release Line 0.9.3
 

@@ -5,6 +5,38 @@ This file documents all notable changes to the project.
 This file follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.1] - Unreleased
+
+First release candidate for the 1.0 line. The candidate freezes the public
+contract against the published 0.9.2 and 0.9.4 releases and adds the release
+identity and packaging path for a prerelease.
+
+### Added
+
+- The `make compatibility-contract-check` gate compares a candidate against
+  frozen manifests of published releases. It reads directives, metrics,
+  reason codes, diagnostics, the HTTP contract, packaging, and the FFI ABI.
+  A missing anchor, a digest mismatch, or an unparseable source fails the
+  gate. A documented delta list records every accepted historical change.
+- Negative fixtures under `tools/compatibility/tests/` edit one contract
+  input at a time in an isolated worktree. One fixture edits the
+  implementation and the current inventory together, and the gate still
+  fails.
+- `packaging/scripts/release_version.py` maps one SemVer release identity onto
+  the Debian and RPM package versions. The mapping keeps a prerelease below
+  its final release in both families.
+
+### Changed
+
+- The release identity is `1.0.0-rc.1`. The package manifest, the Helm chart,
+  the Makefile defaults, and the release workflow carry the same value.
+- Release-time validators accept a SemVer prerelease identity. Schema
+  artifacts, qualification records, and reason-code artifacts follow the
+  same identity.
+- The Ubuntu-native package job maps the release identity before it builds
+  package metadata. The package therefore keeps Debian ordering for a
+  prerelease.
+
 ## [0.9.4] - 2026-11-22
 
 Compatibility maintenance release for current NGINX builds and Ubuntu
