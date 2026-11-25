@@ -66,7 +66,7 @@ DATED_CHANGELOG_RE = re.compile(
     re.MULTILINE,
 )
 VERSION_HEADING_PREFIX_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[(?:[vV]?[0-9])[^\]\r\n]*\]", re.MULTILINE
+    r"^ {0,3}##[ \t]+\[[vV]?[0-9][^\]\r\n]*\]", re.MULTILINE
 )
 
 
@@ -1132,6 +1132,56 @@ _STALE_RELEASE_CLAIM_RE = re.compile(
     r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
     re.IGNORECASE,
 )
+_UNPUBLISHED_RELEASE_CLAIM_RE = re.compile(
+    r"(?:"
+    r"\bnot\s+(?:yet\s+)?(?:published|released)\b"
+    r"|\b(?:has|have|had)\s+not\s+(?:yet\s+)?been\s+"
+    r"(?:published|released)\b"
+    r"|\b(?:unpublished|unreleased)\b"
+    r"|尚未发布"
+    r"|(?<!no )pending\s+publication\b"
+    r"|(?<!no )pending\s+release(?!\s+(?:feedback|blockers?)\b)"
+    r"|(?<!no )(?:publication|release)"
+    r"(?:\s+(?:(?:of|version)\s+)?`?[vV]?[0-9][A-Za-z0-9.+-]*`?"
+    r"(?:(?:,\s*(?:and\s+)?|\s+(?:and|or)\s+)"
+    r"`?[vV]?[0-9][A-Za-z0-9.+-]*`?)*)?"
+    r"\s+(?:(?:is|are|remains?|stays?)\s+)?pending(?!\s+feedback\b)\b"
+    r"|\bawaiting\s+publication\b"
+    r"|\bawaiting\s+release(?!\s+feedback\b)"
+    r")",
+    re.IGNORECASE,
+)
+_RELEASE_CLAUSE_BREAK_RE = re.compile(
+    r";|\b(?:but|while|whereas|although|though)\b",
+    re.IGNORECASE,
+)
+_VERSION_LIST_SEPARATOR_RE = re.compile(
+    r"(?:\s*,\s*(?:and\s+)?|\s+(?:and|or)\s+)"
+    r"(?:(?:candidate|release|version)\s+)?",
+    re.IGNORECASE,
+)
+_CLAUSE_SUBJECT_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|remains?|stays?|supersedes|"
+    r"replaces|precedes|follows|tagged|published|released|unreleased|"
+    r"unpublished|available|pending)\b",
+    re.IGNORECASE,
+)
+_COORDINATED_PREDICATE_RE = re.compile(
+    r"\band\s+(?=(?:is|are|was|were|has|have|had|remains?|stays?|"
+    r"still|not|unpublished|unreleased|awaiting|pending)\b)",
+    re.IGNORECASE,
+)
+_POSITIVE_UNPUBLISHED_STATUS_RE = re.compile(
+    r"(?:\bnot\s+(?:yet\s+)?(?:published|released)\b"
+    r"|\b(?:has|have|had)\s+not\s+(?:yet\s+)?been\s+"
+    r"(?:published|released)\b)",
+    re.IGNORECASE,
+)
+_NEGATED_UNPUBLISHED_STATUS_PREFIX_RE = re.compile(
+    r"\b(?:not(?:\s+yet)?|never|no\s+(?:longer|more)|"
+    r"(?:is|are|was|were|has|have|had)n['’]t)\s+$",
+    re.IGNORECASE,
+)
 
 
 def _push_heading(stack: list[tuple[int, bool]], level: int, mentions: bool) -> bool:
@@ -1294,8 +1344,184 @@ def _stable_claims_all_name_other_releases(claim: str) -> bool:
     )
 
 
+def _unpublished_status_names_candidate(
+    clause: str,
+    status: re.Match[str],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Return whether a status clause names the candidate as its subject."""
+    coordinated_predicates = [
+        match
+        for match in _COORDINATED_PREDICATE_RE.finditer(
+            clause[: status.start()]
+        )
+        if not _version_tokens(clause[match.end() : status.start()])
+    ]
+    if coordinated_predicates:
+        subject = _candidate_in_trailing_subject_group(
+            clause[: coordinated_predicates[-1].start()], version_pattern
+        )
+        if subject is not None:
+            return subject
+
+    versions = _version_tokens(clause)
+    overlapping = [
+        index
+        for index, version in enumerate(versions)
+        if version[0] < status.end() and version[1] > status.start()
+    ]
+    if overlapping:
+        return any(
+            version_pattern.fullmatch(versions[index][2]) is not None
+            for index in overlapping
+        )
+    following = [
+        index for index, version in enumerate(versions)
+        if version[0] >= status.end()
+    ]
+    preceding = [
+        index for index, version in enumerate(versions)
+        if version[1] <= status.start()
+    ]
+    if following:
+        gap = (
+            clause[status.end() : versions[following[0]][0]]
+            .replace("`", "")
+            .strip()
+            .lower()
+        )
+        direct_version = gap in {
+            "", "version", "versions", "release", "releases",
+            "candidate", "candidates", "of", "for",
+        }
+        version_list = gap in {
+            "", ":", ",", "version", "versions", "versions are",
+            "version is", "release", "releases", "releases are",
+            "release is", "candidate", "candidates",
+        }
+        if direct_version or (not preceding and version_list):
+            return _version_group_names_candidate(
+                clause, versions, following[0], 1, version_pattern
+            )
+    if preceding:
+        return _version_group_names_candidate(
+            clause, versions, preceding[-1], -1, version_pattern
+        )
+    if following:
+        return _version_group_names_candidate(
+            clause, versions, following[0], 1, version_pattern
+        )
+    return None
+
+
+def _unpublished_status_is_negated(
+    text: str, status: re.Match[str]
+) -> bool:
+    """Return whether text explicitly negates a pending status phrase."""
+    if _POSITIVE_UNPUBLISHED_STATUS_RE.fullmatch(status.group(0)):
+        return False
+    return (
+        _NEGATED_UNPUBLISHED_STATUS_PREFIX_RE.search(text[: status.start()])
+        is not None
+    )
+
+
+def _has_unpublished_release_status(text: str) -> bool:
+    """Return whether text contains an affirmative unpublished status."""
+    return any(
+        not _unpublished_status_is_negated(text, status)
+        for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(text)
+    )
+
+
+def _version_group_names_candidate(
+    clause: str,
+    versions: list[tuple[int, int, str]],
+    start: int,
+    direction: int,
+    version_pattern: re.Pattern[str],
+) -> bool:
+    """Return whether a coordinated subject group contains the candidate."""
+    group = [versions[start]]
+    index = start
+    while 0 <= index + direction < len(versions):
+        next_index = index + direction
+        left, right = sorted((versions[index], versions[next_index]))
+        separator = clause[left[1] : right[0]].replace("`", "")
+        if _VERSION_LIST_SEPARATOR_RE.fullmatch(separator) is None:
+            break
+        group.append(versions[next_index])
+        index = next_index
+    return any(
+        version_pattern.fullmatch(version[2]) is not None for version in group
+    )
+
+
+def _candidate_in_trailing_subject_group(
+    clause: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Return whether a clause's last coordinated subject includes candidate."""
+    versions = _version_tokens(clause)
+    if not versions:
+        return None
+    subject_indexes = [
+        index
+        for index, version in enumerate(versions)
+        if _CLAUSE_SUBJECT_VERB_RE.search(
+            clause[
+                version[1] : (
+                    versions[index + 1][0]
+                    if index + 1 < len(versions)
+                    else len(clause)
+                )
+            ]
+        )
+    ]
+    subject_index = (
+        subject_indexes[-1] if subject_indexes else len(versions) - 1
+    )
+    return _version_group_names_candidate(
+        clause, versions, subject_index, -1, version_pattern
+    )
+
+
+def _prerelease_claim_names_unpublished_version(
+    claim: str, version_pattern: re.Pattern[str], block_context: bool
+) -> bool:
+    """Return whether stale wording identifies the candidate release."""
+    candidate_context: bool | None = None
+    for clause in _RELEASE_CLAUSE_BREAK_RE.split(claim):
+        clause_names_other_version = any(
+            version_pattern.fullmatch(token[2]) is None
+            for token in _version_tokens(clause)
+        )
+        for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(clause):
+            if _unpublished_status_is_negated(clause, status):
+                continue
+            status_names_candidate = _unpublished_status_names_candidate(
+                clause, status, version_pattern
+            )
+            if status_names_candidate is True:
+                return True
+            if status_names_candidate is None and candidate_context is True:
+                return True
+            if (
+                status_names_candidate is None
+                and block_context
+                and not clause_names_other_version
+                and candidate_context is not False
+            ):
+                return True
+        clause_context = _candidate_in_trailing_subject_group(
+            clause, version_pattern
+        )
+        if clause_context is not None:
+            candidate_context = clause_context
+    return False
+
+
 def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
-    """Flag a stable-release claim in blocks that mention a prerelease."""
+    """Flag stable or unpublished claims about a prerelease."""
     failures: list[str] = []
     version_pattern = _release_version_pattern(version)
     text = _without_fenced_blocks(text)
@@ -1305,14 +1531,19 @@ def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
             context_version or version_pattern.search(block) is not None
         )
         for claim in _split_sentences_protected(block):
+            if _prerelease_claim_names_unpublished_version(
+                claim, version_pattern, block_context
+            ):
+                failures.append(
+                    f"{rel}: prerelease {version} described as unpublished "
+                    f"or pending in: {claim[:80]!r}"
+                )
+                continue
             if not _has_stable_release_claim(claim):
                 continue
-            claim_names_candidate = version_pattern.search(claim) is not None
-            if (
-                not claim_names_candidate
-                and _stable_claims_all_name_other_releases(claim)
-            ):
+            if _stable_claims_all_name_other_releases(claim):
                 continue
+            claim_names_candidate = version_pattern.search(claim) is not None
             if not claim_names_candidate and not block_context:
                 continue
             failures.append(
@@ -1351,7 +1582,12 @@ def _prerelease_notes_failures(
         failures.append(f"{rel}: missing release status for released {version}")
     else:
         value = " ".join(status["value"].split())
-        if _has_stable_release_claim(value):
+        if _has_unpublished_release_status(value):
+            failures.append(
+                f"{rel}: prerelease {version} described as unpublished "
+                "or pending in release notes status"
+            )
+        elif _has_stable_release_claim(value):
             failures.append(f"{rel}: prerelease {version} cannot claim a stable status")
         elif re.match(
             r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
@@ -1434,6 +1670,10 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
         return [f"{rel}: missing release status for released {version}"]
     value = " ".join(status["value"].split()).casefold()
     if "-" in version:
+        if _has_unpublished_release_status(value):
+            return [
+                f"{rel}: prerelease {version} cannot be marked unpublished"
+            ]
         if re.search(r"\bstable release\b", value):
             return [f"{rel}: prerelease {version} cannot carry a stable status"]
         if re.match(r"^(?:release candidate|pre-release)(?:[.,]|$)", value) is None:
@@ -1860,7 +2100,7 @@ def _completion_claim_is_nonaffirmative(
 def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
 ) -> tuple[int, int, str] | None:
-    """Return the version token closest to a completion verb."""
+    """Return the version token closest to the claim match."""
     if versions := _version_tokens(window):
         return min(versions, key=lambda token: abs(token[0] - claim.start()))
     else:

@@ -184,19 +184,29 @@ def _prerelease_status_errors(value: str, path: Path) -> list[str]:
     normalized = " ".join(value.split())
     if re.search(r"\bstable release\b", normalized, re.IGNORECASE):
         return [f"{path}: a prerelease cannot be marked stable"]
-    if re.search(
+    unpublished_statuses = re.finditer(
         r"\b(?:"
         r"not\s+(?:yet\s+)?(?:published|released)"
         r"|(?:has|have|had)\s+not\s+(?:yet\s+)?been\s+(?:published|released)"
         r"|unpublished|unreleased"
         r"|(?<!no )pending\s+publication"
-        r"|(?<!no )pending\s+release(?!\s+blockers?\b)"
-        r"|(?<!no )(?:publication|release)\s+(?:is\s+)?pending"
+        r"|(?<!no )pending\s+release(?!\s+(?:blockers?|feedback)\b)"
+        r"|(?<!no )(?:publication|release)"
+        r"\s+(?:(?:is|are|remains?|stays?)\s+)?pending"
         r"|awaiting\s+publication"
         r"|awaiting\s+release(?!\s+feedback\b)"
         r")\b",
         normalized,
         re.IGNORECASE,
+    )
+    if any(
+        re.search(
+            r"\b(?:not(?:\s+yet)?|never|no\s+(?:longer|more)|"
+            r"(?:is|are|was|were|has|have|had)n['’]t)\s+$",
+            normalized[: status.start()],
+            re.IGNORECASE,
+        ) is None
+        for status in unpublished_statuses
     ):
         return [
             f"{path}: final prerelease status must describe a published release"
