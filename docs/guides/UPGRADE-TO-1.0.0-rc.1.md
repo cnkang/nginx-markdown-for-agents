@@ -55,4 +55,25 @@ in package order.
    still receives HTML.
 6. Run `nginx-markdown-doctor --json` and review any failed or skipped check.
 
+## Source-built NGINX
+
+Build and install the module with the manual source build procedure in
+[INSTALLATION.md](INSTALLATION.md#6-secondary-manual-source-build). Use the
+same NGINX source and configure arguments as the running server.
+
+Keep the current module file before the install.
+
+```bash
+sudo cp <modules-path>/ngx_http_markdown_filter_module.so \
+  <backup-path>/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1
+```
+
+Install the new module, test the configuration, then reload NGINX. To roll
+back, restore the saved file, test the configuration, and reload again.
+
+```bash
+sudo nginx -t
+sudo systemctl reload-or-restart nginx
+```
+
 Do not treat a skipped check or missing evidence as a pass.

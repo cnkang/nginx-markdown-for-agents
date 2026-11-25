@@ -76,6 +76,10 @@ STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-b
 SCHEMA_RELEASE_VERSION ?= 1.0.0-rc.1
 # Current release line for generated artifacts and evidence paths.
 RELEASE_LINE ?= 1.0.0-rc.1
+# Directory the local gate reads compatibility records from.  A rehearsal can
+# download its records outside the repository and pass that path here, so the
+# approved candidate commit never changes to carry evidence.
+CANDIDATE_EVIDENCE_DIR ?= docs/evidence/$(RELEASE_LINE)/compat
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -1609,13 +1613,14 @@ release-matrix-check:
 # compatibility-evidence-check: Validate every compatibility evidence record
 # and bind each verified matrix row to a record. Fail-closed on a missing
 # record, a malformed record, or a record with a failed or skipped test.
-# Pass CANDIDATE_SHA=<sha> to require every record to name that commit.
+# Pass CANDIDATE_SHA=<sha> to require every record to name that commit, and
+# CANDIDATE_EVIDENCE_DIR=<path> to read a downloaded rehearsal directory.
 # Classification: BLOCKING
 .PHONY: compatibility-evidence-check
 compatibility-evidence-check:
 	@echo "=== Compatibility Evidence Check ==="
 	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
-		--evidence-dir "docs/evidence/$(RELEASE_LINE)/compat" \
+		--evidence-dir "$(CANDIDATE_EVIDENCE_DIR)" \
 		$(if $(CANDIDATE_SHA),--candidate-sha "$(CANDIDATE_SHA)",)
 	PYTHONPATH=. python3 -m pytest \
 		tools/release/matrix/tests/test_evidence_contract.py \

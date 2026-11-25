@@ -37,11 +37,15 @@ cache that the next upgrade can clear.
    On an RPM system, use the matching `dnf downgrade` command for the recorded
    package, or `rpm -U --oldpackage <previous-module-package>.rpm`.
 
-4. Confirm the installed module version.
+4. Confirm the installed module package version.
 
    ```bash
-   nginx -V 2>&1 | tr ' ' '\n' | grep ngx_http_markdown
+   dpkg-query -W -f='${Package} ${Version}\n' \
+     nginx-module-markdown-for-agents \
+     nginx-module-markdown-for-agents-ubuntu 2>/dev/null
    ```
+
+   On an RPM system, use `rpm -q --qf '%{VERSION}-%{RELEASE}\n' nginx-module-markdown-for-agents`.
 
 5. Test and reload NGINX.
 

@@ -1888,9 +1888,10 @@ jobs:
         run: |
           apt-get update -qq
           # curl is required later by the verified Rust installer; install it
-          # here so the first step that needs it can run.
+          # here so the first step that needs it can run.  The release identity
+          # mapper runs before the build step, so python3 must be present too.
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            --no-install-recommends ca-certificates curl git
+            --no-install-recommends ca-certificates curl git python3
         shell: bash
 
       - name: Checkout
