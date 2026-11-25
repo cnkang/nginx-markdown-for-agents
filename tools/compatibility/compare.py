@@ -550,12 +550,23 @@ def compare_metrics(
                 baseline.get(key),
                 candidate.get(key),
             )
-    if set(baseline.get("forbidden_labels") or []) - set(candidate.get("forbidden_labels") or []):
+    old_forbidden = set(baseline.get("forbidden_labels") or [])
+    new_forbidden = set(candidate.get("forbidden_labels") or [])
+    if old_forbidden - new_forbidden:
         result.add(
             "metrics",
             BREAKING,
             "forbidden-labels-narrowed",
             "a label dimension that must stay absent is no longer forbidden",
+            baseline.get("forbidden_labels"),
+            candidate.get("forbidden_labels"),
+        )
+    if new_forbidden - old_forbidden:
+        result.add(
+            "metrics",
+            ADDITIVE,
+            "forbidden-labels-expanded",
+            "a label dimension is newly required to stay absent",
             baseline.get("forbidden_labels"),
             candidate.get("forbidden_labels"),
         )
