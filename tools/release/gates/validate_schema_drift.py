@@ -20,10 +20,10 @@ if str(REPO_ROOT) not in sys.path:
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 from lib.path_validation import validate_read_path  # noqa: E402
-from lib.semver import SEMVER_PATTERN  # noqa: E402
+from lib.semver import is_numeric_line  # noqa: E402
 
 
-DEFAULT_VERSION = "1.0.0-rc.1"
+DEFAULT_VERSION = "1.0.0"
 
 # Release artifact paths.  configure_release_version updates these for the
 # CLI-selected version while preserving simple function-level test hooks.
@@ -60,8 +60,8 @@ def configure_release_version(version: str) -> None:
     global DIAGNOSTICS_FIELD_CONTRACT
     global RELEASE_ARTIFACTS
 
-    if SEMVER_PATTERN.fullmatch(version) is None:
-        raise ValueError("version must be a SemVer release identity")
+    if not is_numeric_line(version):
+        raise ValueError("version must use MAJOR.MINOR.PATCH for a schema line")
     CURRENT_VERSION = version
     RELEASE_ARTIFACT_DIR = REPO_ROOT / "artifacts" / "release" / version
     METRICS_REGISTRY = RELEASE_ARTIFACT_DIR / "metrics-registry.json"
@@ -283,8 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=DEFAULT_VERSION)
     args = parser.parse_args(argv)
-    if SEMVER_PATTERN.fullmatch(args.version) is None:
-        parser.error("--version must be a SemVer release identity")
+    if not is_numeric_line(args.version):
+        parser.error("--version must use MAJOR.MINOR.PATCH for a schema line")
     configure_release_version(args.version)
 
     all_errors = []

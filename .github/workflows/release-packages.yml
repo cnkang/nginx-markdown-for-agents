@@ -124,6 +124,8 @@ env:
   # consistency gate and the 0.8.x release gate both fail when this value and
   # the manifest disagree, so a candidate commit bumps them together.
   RELEASE_VERSION: "1.0.0-rc.1"
+  # Numeric schema artifact line; shared by the candidate and the final release.
+  SCHEMA_RELEASE_VERSION: "1.0.0"
   RUST_TOOLCHAIN: 1.98.1
   FUZZ_TOOLCHAIN: nightly-2026-09-21
   RUST_FEATURES: streaming,prune_noise_regions
@@ -2754,7 +2756,7 @@ jobs:
           python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
           python3 tools/release/gates/validate_schema_drift.py \
-            --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
+            --version "${SCHEMA_RELEASE_VERSION}"
           python3 tools/reason-codegen/generate.py --check
           python3 tools/release/gates/validate_package_metadata.py
           python3 tools/release/gates/validate_k8s_manifests.py

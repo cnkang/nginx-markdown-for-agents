@@ -73,7 +73,9 @@ DESTDIR ?=
 # regression CI reports as new looks clean locally.  Default to the merge base
 # with the main branch, which is what CI compares against.
 STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
-SCHEMA_RELEASE_VERSION ?= 1.0.0-rc.1
+# Numeric schema artifact line.  A prerelease candidate and its final release
+# share one schema snapshot, so this stays on MAJOR.MINOR.PATCH.
+SCHEMA_RELEASE_VERSION ?= 1.0.0
 # Current release line for generated artifacts and evidence paths.
 RELEASE_LINE ?= 1.0.0-rc.1
 # Directory the local gate reads compatibility records from.  A rehearsal can
@@ -1570,7 +1572,7 @@ release-gates-check-094: release-matrix-check
 		artifacts/release/$(RELEASE_LINE)/generated-reason-artifacts.json
 	@echo "  [5/8] Public surface and schema drift"
 	$(MAKE) public-surface-drift-check
-	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(RELEASE_LINE)
+	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(SCHEMA_RELEASE_VERSION)
 	@echo "  [6/8] Cross-release compatibility contract"
 	$(MAKE) compatibility-contract-check
 	$(MAKE) compatibility-contract-tests
