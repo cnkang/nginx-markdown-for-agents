@@ -1450,15 +1450,47 @@ def _following_status_version_candidate(
 
 
 def _version_is_non_release_qualifier(clause: str, version_start: int) -> bool:
-    """Return whether a version follows ``for`` a non-release subject."""
+    """Return whether a version token belongs to an artifact qualifier."""
     prefix = clause[:version_start].rstrip()
-    qualifier = re.search(r"\bfor\s*$", prefix, re.IGNORECASE)
-    if qualifier is None:
+    qualifier = re.search(
+        r"\b(?:for|with|against|on|under|using)\s*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    if qualifier is not None:
+        subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
+        return subject is not None and _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+            subject["subject"].strip()
+        ) is None
+    comma = prefix.rfind(",")
+    if comma < 0 or not _version_tokens(prefix[:comma]):
         return False
-    subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
-    return subject is not None and _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
-        subject["subject"].strip()
-    ) is None
+    return re.search(
+        r"\b(?:for|with|against|on|under|using|targeting|running|requiring)\b",
+        prefix[comma + 1 :],
+        re.IGNORECASE,
+    ) is not None
+
+
+def _preceding_status_version_candidate(
+    clause: str,
+    versions: list[tuple[int, int, str]],
+    preceding: list[int],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Resolve the release subject while skipping version qualifiers."""
+    found_qualifier = False
+    for preceding_index in reversed(preceding):
+        preceding_version = versions[preceding_index]
+        if _version_is_non_release_qualifier(
+            clause, preceding_version[0]
+        ):
+            found_qualifier = True
+            continue
+        return _version_group_names_candidate(
+            clause, versions, preceding_index, -1, version_pattern
+        )
+    return False if found_qualifier else None
 
 
 def _unpublished_status_names_candidate(
@@ -1500,16 +1532,8 @@ def _unpublished_status_names_candidate(
         if result is not None:
             return result
     if preceding:
-        preceding_version = versions[preceding[-1]]
-        if (
-            version_pattern.fullmatch(preceding_version[2]) is not None
-            and _version_is_non_release_qualifier(
-                clause, preceding_version[0]
-            )
-        ):
-            return False
-        return _version_group_names_candidate(
-            clause, versions, preceding[-1], -1, version_pattern
+        return _preceding_status_version_candidate(
+            clause, versions, preceding, version_pattern
         )
     if following:
         return _version_group_names_candidate(
@@ -1593,13 +1617,23 @@ def _version_group_names_candidate(
     version_pattern: re.Pattern[str],
 ) -> bool:
     """Return whether a coordinated subject group contains the candidate."""
+    if (
+        version_pattern.fullmatch(versions[start][2]) is not None
+        and _version_is_non_release_qualifier(clause, versions[start][0])
+    ):
+        return False
     group = [versions[start]]
     index = start
     while 0 <= index + direction < len(versions):
         next_index = index + direction
         left, right = sorted((versions[index], versions[next_index]))
         separator = clause[left[1] : right[0]].replace("`", "")
-        if _VERSION_LIST_SEPARATOR_RE.fullmatch(separator) is None:
+        if (
+            _VERSION_LIST_SEPARATOR_RE.fullmatch(separator) is None
+            or _version_is_non_release_qualifier(
+                clause, versions[next_index][0]
+            )
+        ):
             break
         group.append(versions[next_index])
         index = next_index
@@ -1614,7 +1648,18 @@ def _candidate_in_trailing_subject_group(
     """Return whether a clause's last coordinated subject includes candidate."""
     versions = _version_tokens(clause)
     if not versions:
-        return None
+        subject_verb = _CLAUSE_SUBJECT_VERB_RE.search(clause)
+        if subject_verb is None:
+            return None
+        subject = clause[: subject_verb.start()].strip(" \t,:;")
+        subject = re.sub(
+            r"^(?:(?:and|but|so|then)\s+)+", "", subject, flags=re.IGNORECASE
+        )
+        if not subject or subject.casefold() in {
+            "it", "this", "that", "these", "those"
+        }:
+            return None
+        return _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None
     subject_indexes = [
         index
         for index, version in enumerate(versions)
@@ -1828,7 +1873,7 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
             return [
                 f"{rel}: prerelease {version} cannot be marked unpublished"
             ]
-        if re.search(r"\bstable release\b", value):
+        if _has_stable_release_claim(value):
             return [f"{rel}: prerelease {version} cannot carry a stable status"]
         if re.match(r"^(?:release candidate|pre-release)(?:[.,]|$)", value) is None:
             return [f"{rel}: released {version} carries status {status['value']!r}"]
@@ -2097,6 +2142,16 @@ _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "al.", "et al.")
 # Placeholder for protected abbreviations during sentence splitting.
 _ABBR_PLACEHOLDER = "\uE000"  # Private use area, won't appear in docs
 
+
+def _protect_version_periods(text: str) -> str:
+    """Replace periods inside complete version tokens with placeholders."""
+    protected = list(text)
+    for start, end, _version in _version_tokens(text):
+        for index in range(start, end):
+            if protected[index] == ".":
+                protected[index] = _ABBR_PLACEHOLDER
+    return "".join(protected)
+
 def _protect_abbreviations(text: str) -> str:
     """Replace known abbreviations with placeholders to prevent false splits."""
     for abbr in sorted(_ABBREVIATIONS, key=len, reverse=True):
@@ -2115,7 +2170,7 @@ def _restore_abbreviations(text: str) -> str:
 
 # Sentence splitting must handle missing space after period (common in prose).
 # Split on punctuation plus whitespace, or punctuation plus an uppercase letter.
-# Known whole-word abbreviations are protected to prevent false splits.
+# Complete version tokens and known abbreviations are protected before splitting.
 _SENTENCE_SPLIT_RE = re.compile(
     r"(?<=[.!?])(?:\s+|(?=[A-Z]))",
 )
@@ -2163,8 +2218,8 @@ def _is_conditional_publication_block(block: str) -> bool:
 
 
 def _split_sentences_protected(text: str) -> list[str]:
-    """Split text into sentences while protecting known abbreviations."""
-    protected = _protect_abbreviations(text)
+    """Split sentences while protecting version tokens and abbreviations."""
+    protected = _protect_abbreviations(_protect_version_periods(text))
     return [_restore_abbreviations(s) for s in _SENTENCE_SPLIT_RE.split(protected)]
 
 

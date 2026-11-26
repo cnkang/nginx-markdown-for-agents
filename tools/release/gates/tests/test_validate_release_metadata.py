@@ -133,6 +133,26 @@ def test_finalized_prerelease_matches_changelog_date_in_publication_statement(
     assert any("publication statement" in error for error in errors), errors
 
 
+@pytest.mark.parametrize(
+    "future_wording", ["to be published", "will have been published"]
+)
+def test_finalized_prerelease_rejects_future_publication_statement(
+    tmp_path: Path, future_wording: str
+) -> None:
+    version = "1.0.0-rc.1"
+    date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, date)
+    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+        f"### Current Release Line {version}\n\n"
+        f"**Status:** Release candidate, {future_wording} {date}.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("publication statement" in error for error in errors), errors
+
+
 def test_finalized_prerelease_rejects_pending_status(tmp_path: Path) -> None:
     """A tagged prerelease cannot still describe itself as unpublished."""
     _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
@@ -292,6 +312,41 @@ def test_finalized_prerelease_rejects_duplicate_release_note_status_fields(
     errors = validate_release_metadata(tmp_path, version)
 
     assert any("exactly one Status field" in error for error in errors), errors
+
+
+def test_finalized_prerelease_rejects_duplicate_release_note_date_fields(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.write_text(
+        notes.read_text(encoding="utf-8") + "**Date**: 2026-12-02\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("exactly one Date field" in error for error in errors), errors
+
+
+def test_finalized_prerelease_checks_publication_date_in_release_note_status(
+    tmp_path: Path,
+) -> None:
+    version = "1.0.0-rc.1"
+    date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, date)
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.write_text(
+        f"# Release Notes: {version}\n"
+        f"**Date**: {date}\n"
+        "**Status**: Release candidate, published 2026-11-30.\n",
+        encoding="utf-8",
+    )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("publication statement date" in error for error in errors), errors
 
 
 def test_finalized_prerelease_ignores_fenced_release_note_status(

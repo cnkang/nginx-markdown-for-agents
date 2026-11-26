@@ -46,11 +46,11 @@ in package order.
    signature.
 3. Install the package that matches the NGINX origin and exact version. Keep
    the previous module package for rollback.
-4. Test and reload NGINX:
+4. Test the configuration and restart NGINX to load the installed module:
 
    ```bash
    sudo nginx -t
-   sudo systemctl reload-or-restart nginx
+   sudo systemctl restart nginx
    ```
 
 5. Send a request with `Accept: text/markdown` and confirm the response has
@@ -60,26 +60,35 @@ in package order.
 
 ## Source-built NGINX
 
-Build and install the module with the manual source build procedure in
-[INSTALLATION.md](INSTALLATION.md#6-secondary-manual-source-build). Use the
-same NGINX source and configure arguments as the running server.
-
 After you clone the repository, check out the `v1.0.0-rc.1` tag before you
 build. The default branch can move to a later candidate.
 
-Keep the current module file before the install.
+Back up the current module file before following the manual build and install
+procedure, which installs the candidate module.
 
 ```bash
 sudo cp <modules-path>/ngx_http_markdown_filter_module.so \
   <backup-path>/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1
 ```
 
-Install the new module, test the configuration, then reload NGINX. To roll
-back, restore the saved file, test the configuration, and reload again.
+Build and install the module with the manual source build procedure in
+[INSTALLATION.md](INSTALLATION.md#6-secondary-manual-source-build). Use the
+same NGINX source and configure arguments as the running server. Test the
+configuration and restart NGINX to load the new module.
 
 ```bash
 sudo nginx -t
-sudo systemctl reload-or-restart nginx
+sudo systemctl restart nginx
+```
+
+To roll back, restore the saved module, test the configuration, and restart
+NGINX to load the previous module:
+
+```bash
+sudo cp <backup-path>/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1 \
+  <modules-path>/ngx_http_markdown_filter_module.so
+sudo nginx -t
+sudo systemctl restart nginx
 ```
 
 Do not treat a skipped check or missing evidence as a pass.

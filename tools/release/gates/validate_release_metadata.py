@@ -193,12 +193,45 @@ def _validate_release_notes(
     return errors
 
 
-def _prerelease_status_errors(value: str, path: Path) -> list[str]:
+_FUTURE_PUBLICATION_PREFIX = (
+    r"\b(?:to|will|shall|may|might|can|could|should|must|due\s+to|"
+    r"going\s+to|about\s+to|expected\s+to|scheduled\s+to|planned\s+to)"
+    r"\s+(?:have\s+)?(?:be(?:en)?\s+)?"
+)
+_FUTURE_PUBLICATION_PREFIX_RE = re.compile(
+    _FUTURE_PUBLICATION_PREFIX + r"$", re.IGNORECASE
+)
+_FUTURE_PUBLICATION_RE = re.compile(
+    _FUTURE_PUBLICATION_PREFIX + r"(?:published|released)\b",
+    re.IGNORECASE,
+)
+_PUBLISHED_DATE_RE = re.compile(
+    r"\bpublished(?:\s+on)?\s+(?P<date>\d{4}-\d{2}-\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def _published_dates(value: str) -> list[str]:
+    """Return dates stated as completed publication dates."""
+    return [
+        match["date"]
+        for match in _PUBLISHED_DATE_RE.finditer(value)
+        if _FUTURE_PUBLICATION_PREFIX_RE.search(value[: match.start()]) is None
+    ]
+
+
+def _prerelease_status_errors(
+    value: str, path: Path, release_date: str | None = None
+) -> list[str]:
     """Require a published candidate status without a stable claim."""
     normalized = " ".join(value.split())
     unnegated_status = _NEGATED_STABLE_RELEASE_RE.sub("", normalized)
     if _STABLE_RELEASE_CLAIM_RE.search(unnegated_status) is not None:
         return [f"{path}: a prerelease cannot be marked stable"]
+    if _FUTURE_PUBLICATION_RE.search(normalized) is not None:
+        return [
+            f"{path}: final prerelease status must describe a published release"
+        ]
     unpublished_statuses = re.finditer(
         r"\b(?:"
         r"not\s+(?:yet\s+)?(?:published|released)"
@@ -233,6 +266,15 @@ def _prerelease_status_errors(value: str, path: Path) -> list[str]:
         re.IGNORECASE,
     ) is None:
         return [f"{path}: prerelease status must identify a release candidate"]
+    if release_date is not None:
+        mismatched_dates = [
+            date for date in _published_dates(normalized) if date != release_date
+        ]
+        if mismatched_dates:
+            return [
+                f"{path}: publication statement date {mismatched_dates[0]!r} "
+                f"does not match CHANGELOG date {release_date!r}"
+            ]
     return []
 
 
@@ -270,16 +312,10 @@ def _validate_prerelease_project_status(
         return [
             f"{path}: {version} section must contain exactly one Status field"
         ]
-    errors = _prerelease_status_errors(status_matches[0], path)
-    publication_date = re.search(
-        r"\bpublished(?:\s+on)?\s+(?P<date>\d{4}-\d{2}-\d{2})\b",
-        status_matches[0],
-        re.IGNORECASE,
+    errors = _prerelease_status_errors(
+        status_matches[0], path, release_date
     )
-    if release_date is not None and (
-        publication_date is None
-        or publication_date.group("date") != release_date
-    ):
+    if release_date is not None and not _published_dates(status_matches[0]):
         errors.append(
             f"{path}: publication date {release_date} is missing or mismatched "
             f"in the {version} publication statement"
@@ -300,13 +336,15 @@ def _validate_prerelease_notes(
         rf"^# Release Notes: {re.escape(version)}\s*$", unfenced, re.MULTILINE
     ) is None:
         errors.append(f"{path}: missing '# Release Notes: {version}' title")
-    notes_date = _release_note_field(text, "Date")
+    date_fields = _release_note_fields(text, "Date")
     status_fields = _release_note_fields(text, "Status")
-    if notes_date is None:
+    if not date_fields:
         errors.append(f"{path}: missing release date")
-    elif release_date is not None and notes_date != release_date:
+    elif len(date_fields) > 1:
+        errors.append(f"{path}: release notes must contain exactly one Date field")
+    elif release_date is not None and date_fields[0] != release_date:
         errors.append(
-            f"{path}: date {notes_date!r} does not match CHANGELOG date "
+            f"{path}: date {date_fields[0]!r} does not match CHANGELOG date "
             f"{release_date!r}"
         )
     if not status_fields:
@@ -317,7 +355,9 @@ def _validate_prerelease_notes(
                 f"{path}: release notes must contain exactly one Status field"
             )
         else:
-            errors.extend(_prerelease_status_errors(status_fields[0], path))
+            errors.extend(
+                _prerelease_status_errors(status_fields[0], path, release_date)
+            )
     return errors
 
 

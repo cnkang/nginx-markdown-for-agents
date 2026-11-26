@@ -1100,6 +1100,34 @@ def test_prerelease_claim_distinguishes_version_subject_from_qualifier(
     assert bool(failures) is should_fail, failures
 
 
+@pytest.mark.parametrize(
+    ("claim", "should_fail"),
+    [
+        (
+            "The release {version}, built for NGINX 1.28.3, "
+            "is not yet published.",
+            True,
+        ),
+        (
+            "The installation guide for {version}, built for NGINX 1.28.3, "
+            "is not yet published.",
+            False,
+        ),
+    ],
+)
+def test_prerelease_claim_resolves_subject_before_product_version_qualifier(
+    claim, should_fail
+):
+    version = "1.0.0-rc.1"
+    text = f"## Release {version}\n\n{claim.format(version=version)}\n"
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert bool(failures) is should_fail, failures
+
+
 
 @pytest.mark.parametrize(
     ("claim", "should_fail"),
@@ -1305,6 +1333,30 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     ), failures
 
 
+@pytest.mark.parametrize(
+    ("claim", "should_fail"),
+    [
+        ("{version} is tagged; it is not yet published.", True),
+        (
+            "{version} is tagged; the release matrix is published; "
+            "it is not yet published.",
+            False,
+        ),
+    ],
+)
+def test_prerelease_claim_updates_context_for_unversioned_subjects(
+    claim, should_fail
+):
+    version = "1.0.0-rc.1"
+    text = f"## Release {version}\n\n{claim.format(version=version)}\n"
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert bool(failures) is should_fail, failures
+
+
 
 @pytest.mark.parametrize(
     "dependency_claim",
@@ -1360,7 +1412,9 @@ def test_release_notes_status_accepts_prerelease_candidate(tmp_path):
         encoding="utf-8",
     )
 
-    assert docs_checker._release_notes_status_failures(notes, "1.0.0-rc.1") == []
+    assert docs_checker._release_notes_status_failures(
+        notes, "1.0.0-rc.1"
+    ) == []
 
 
 @pytest.mark.parametrize(
@@ -1396,6 +1450,17 @@ def test_release_notes_status_rejects_prerelease_stable_claim(tmp_path):
     errors = docs_checker._release_notes_status_failures(notes, "1.0.0-rc.1")
 
     assert any("cannot carry a stable status" in error for error in errors), errors
+
+
+def test_release_notes_status_accepts_negated_prerelease_stable_claim(tmp_path):
+    notes = tmp_path / "1.0.0-rc.1-release-notes.md"
+    notes.write_text(
+        "# Release Notes: 1.0.0-rc.1\n\n"
+        "**Status**: Release candidate, not a stable release.\n",
+        encoding="utf-8",
+    )
+
+    assert docs_checker._release_notes_status_failures(notes, "1.0.0-rc.1") == []
 
 
 def test_stable_surface_check_scans_changelog_prose(tmp_path):
@@ -2238,6 +2303,9 @@ def test_sentence_splitting_protects_only_whole_abbreviations():
     assert docs_checker._split_sentences_protected(
         "One sentence.next clause."
     ) == ["One sentence.next clause."]
+    assert docs_checker._split_sentences_protected(
+        "Candidate 1.0.0-rc.BETA.1. Next."
+    ) == ["Candidate 1.0.0-rc.BETA.1.", "Next."]
 
 
 def test_release_version_tokens_accept_cjk_adjacent_text():

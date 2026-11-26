@@ -31,8 +31,9 @@ identity and packaging path for a prerelease.
 - The release identity is `1.0.0-rc.1`. The package manifest, the Helm chart,
   the Makefile defaults, and the release workflow carry the same value.
 - Release-time validators accept a SemVer prerelease identity. Schema
-  artifacts, qualification records, and reason-code artifacts follow the
-  same identity.
+  artifacts use numeric version 1.0.0, and schema tools reject prerelease
+  arguments. Qualification records and reason-code artifacts use the candidate
+  identity.
 - The Ubuntu-native package job maps the release identity before it builds
   package metadata. The package therefore keeps Debian ordering for a
   prerelease.
