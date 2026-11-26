@@ -15,37 +15,81 @@ Record these values for the running server.
 - Architecture and libc.
 - Ubuntu ABI provide when the module comes from the Ubuntu archive.
 
-Keep the previous module package in a local path. Do not rely on a package
-cache that the next upgrade can clear.
+Save the previous module package and the recorded NGINX packages outside the
+package cache. Keep the matching packages if your distribution splits NGINX
+across several packages.
 
 ## Rollback steps
 
 1. Stop new traffic to the node or remove it from the load balancer.
-2. Compare the installed NGINX package with the recorded revision. If NGINX
-   changed during the candidate test, restore the recorded NGINX package
-   first. The saved module package refuses an install when the NGINX version
-   differs.
-3. Simulate the package transaction and confirm the package manager retains
-   the intended NGINX package.
+2. Compare the installed NGINX package with the recorded revision. If the
+   revision matches, go to step 3. Otherwise remove the candidate module
+   before you restore NGINX. The candidate can require the newer NGINX ABI.
+
+   Back up the active configuration. Temporarily disable the Markdown module
+   load and its directives, test the configuration, and stop NGINX.
 
    ```bash
-   apt-get -s install --allow-downgrades ./<previous-module-package>.deb
+   sudo nginx -t && sudo systemctl stop nginx
+   ```
+
+   Set `MODULE_PACKAGE` to the installed module package name. Use
+   `nginx-module-markdown-for-agents` for nginx.org packages or
+   `nginx-module-markdown-for-agents-ubuntu` for Ubuntu archive builds.
+   Set `NGINX_DEBS` or `NGINX_RPMS` to a Bash array of local package paths
+   for the recorded NGINX revision. Use absolute paths or start each path with
+   `./`.
+
+   Run each pair in order. Review each simulation before running the matching
+   change. Proceed only if the simulation succeeds and shows the intended
+   changes.
+
+   On DEB systems:
+
+   ```bash
+   sudo apt-get -s remove "$MODULE_PACKAGE"
+   sudo apt-get remove "$MODULE_PACKAGE"
+
+   sudo apt-get -s install --allow-downgrades "${NGINX_DEBS[@]}"
+   sudo apt-get install --allow-downgrades "${NGINX_DEBS[@]}"
+   ```
+
+   On RPM systems:
+
+   ```bash
+   sudo rpm -e --test "$MODULE_PACKAGE"
+   sudo rpm -e "$MODULE_PACKAGE"
+
+   sudo rpm -U --test --oldpackage "${NGINX_RPMS[@]}"
+   sudo rpm -U --oldpackage "${NGINX_RPMS[@]}"
+   ```
+
+3. Confirm NGINX matches the recorded revision. Set `MODULE_DEB` or
+   `MODULE_RPM` to the local path of the previous module package. Simulate
+   the module transaction and confirm it leaves the NGINX revision in place.
+   Use an absolute path or start the path with `./`.
+
+   ```bash
+   sudo apt-get -s install --allow-downgrades "$MODULE_DEB"
    ```
 
    On an RPM system, simulate installing the previous module package with:
 
    ```bash
-   sudo rpm -U --test --oldpackage ./<previous-module-package>.rpm
+   sudo rpm -U --test --oldpackage "$MODULE_RPM"
    ```
 
 4. Review the transaction, then install the saved module package.
 
    ```bash
-   sudo apt-get install --allow-downgrades ./<previous-module-package>.deb
+   sudo apt-get install --allow-downgrades "$MODULE_DEB"
    ```
 
-   On an RPM system, use the matching `dnf downgrade` command for the recorded
-   package, or `rpm -U --oldpackage <previous-module-package>.rpm`.
+   On an RPM system:
+
+   ```bash
+   sudo rpm -U --oldpackage "$MODULE_RPM"
+   ```
 
 5. Confirm the installed module package version.
 
@@ -57,11 +101,11 @@ cache that the next upgrade can clear.
 
    On an RPM system, use `rpm -q --qf '%{VERSION}-%{RELEASE}\n' nginx-module-markdown-for-agents`.
 
-6. Test the configuration, then restart NGINX.
+6. Restore any configuration you changed in step 2. Test the configuration,
+   then restart NGINX.
 
    ```bash
-   sudo nginx -t
-   sudo systemctl restart nginx
+   sudo nginx -t && sudo systemctl restart nginx
    ```
 
    A reload keeps the running master process and its module mapping. A restart
@@ -76,5 +120,4 @@ cache that the next upgrade can clear.
 
 A matching NGINX version alone does not prove that a module can load. If the
 restored module still fails to load, confirm the NGINX package matches the
-recorded revision and restore it if needed. Keep the configuration unchanged
-during the rollback so a configuration error cannot hide a module mismatch.
+recorded revision. Follow step 2 if the revision differs.

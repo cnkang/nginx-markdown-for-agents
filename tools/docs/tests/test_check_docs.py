@@ -1035,6 +1035,8 @@ def test_prerelease_surface_check_rejects_stable_claim(tmp_path):
         "1.9.0 is a stable release.",
         "The \x600.9.9\x60 release is a stable release.",
         "0.9.9, a stable release.",
+        "NGINX 1.28.0, a stable release.",
+        "The release is a stable release of version 0.9.4.",
         "1.0.0-rc.1 is a release candidate; 0.9.9 is a stable release.",
     ],
 )
@@ -1383,12 +1385,23 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     ), failures
 
 
-def test_candidate_stable_subject_overrides_inherited_other_subject_context():
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "The release candidate is a stable release.",
+        "The release candidate for NGINX 1.28.0 is a stable release.",
+        "The release candidate replaces 1.28.0 as the stable release.",
+        "The upgrade guide says **the release candidate** is a stable release.",
+        "The installation guide is available and {version} is a stable release.",
+        "The guide is available and {version} is tagged and remains a stable release.",
+    ],
+)
+def test_candidate_stable_subject_overrides_inherited_other_subject_context(claim):
     version = "1.0.0-rc.1"
     text = (
         f"## Release {version}\n\n"
         "The installation guide is available. "
-        "The release candidate is a stable release.\n"
+        f"{claim.format(version=version)}\n"
     )
 
     failures = docs_checker._prerelease_claim_failures(
@@ -1398,11 +1411,20 @@ def test_candidate_stable_subject_overrides_inherited_other_subject_context():
     assert any("described as a stable release" in failure for failure in failures)
 
 
-def test_prerelease_stable_claim_respects_resolved_other_subject():
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "The installation guide for {version}",
+        "The {version} installation guide",
+        "The **{version} installation guide**",
+        "The installation guide for release candidate {version}",
+    ],
+)
+def test_prerelease_stable_claim_respects_resolved_other_subject(subject):
     version = "1.0.0-rc.1"
     text = (
         f"## Release notes for {version}\n\n"
-        f"The installation guide for {version} is a stable release.\n"
+        f"{subject.format(version=version)} is a stable release.\n"
     )
 
     assert docs_checker._prerelease_claim_failures(

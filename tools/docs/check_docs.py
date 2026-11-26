@@ -1352,6 +1352,12 @@ def _stable_release_claim_links_other_version(
     for start, end, version in versions:
         if candidate_version.fullmatch(version) is not None:
             continue
+        if re.search(
+            r"\b(?:for|with|against|on|under|using)\s+nginx\s+(?:version\s+)?`?$",
+            claim[:start],
+            re.IGNORECASE,
+        ):
+            continue
         if end <= stable_claim.start():
             link = claim[end : stable_claim.start()]
             version_before_claim = True
@@ -1804,6 +1810,52 @@ def _prerelease_claim_names_unpublished_version(
     return False, candidate_context
 
 
+def _stable_predicate_prefix(prefix: str) -> str:
+    """Find the clause introducing the stable predicate."""
+    prefix = re.split(
+        r"\s(?:says|states|claims|reports)\s+(?:that\s+)?",
+        prefix,
+        flags=re.IGNORECASE,
+    )[-1]
+    parts = re.split(r"\sand\s+", prefix, flags=re.IGNORECASE)
+    clause_start = 0
+    seen_predicate = False
+    for index, part in enumerate(parts):
+        predicate = _CLAUSE_SUBJECT_VERB_RE.search(part)
+        if predicate is None:
+            continue
+        if seen_predicate and part[: predicate.start()].strip():
+            clause_start = index
+        seen_predicate = True
+    return " and ".join(parts[clause_start:])
+
+
+def _stable_claim_prefix_subject(
+    prefix: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Resolve the subject before checking versions elsewhere in the clause."""
+    prefix = _stable_predicate_prefix(prefix)
+    predicate = _CLAUSE_SUBJECT_VERB_RE.search(prefix)
+    if predicate is not None:
+        subject = prefix[: predicate.start()].strip()
+        head, *qualifier = re.split(
+            r"\s(?:for|with|against|on|under|using)\s+",
+            subject,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        head = re.sub(r"[*_`]", "", head).strip()
+        if re.search(r"\bguide$", head, re.IGNORECASE):
+            return False
+        if (
+            _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(head)
+            and head.casefold() != "it"
+            and (not qualifier or re.match(r"nginx\b", qualifier[0], re.IGNORECASE))
+        ):
+            return True
+    return _candidate_in_trailing_subject_group(prefix, version_pattern)
+
+
 def _stable_claim_subject_context(
     claim: str, version_pattern: re.Pattern[str]
 ) -> bool | None:
@@ -1821,7 +1873,7 @@ def _stable_claim_subject_context(
             clause_breaks[-1].end() if clause_breaks else 0,
         )
         contexts.append(
-            _candidate_in_trailing_subject_group(
+            _stable_claim_prefix_subject(
                 prefix[start:], version_pattern
             )
         )

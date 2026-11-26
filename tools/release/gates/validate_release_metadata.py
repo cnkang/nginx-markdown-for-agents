@@ -66,7 +66,7 @@ def _validate_project_status(
     project_match = re.search(
         rf"^### Current Release Line {re.escape(version)}\s*$"
         rf"(?P<body>.*?)(?=^#{{1,3}}[ \t]+|\Z)",
-        text,
+        "\n".join(_unfenced_lines(text)),
         re.MULTILINE | re.DOTALL,
     )
     if project_match is None:

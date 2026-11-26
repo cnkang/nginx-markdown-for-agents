@@ -472,6 +472,44 @@ def test_finalized_metadata_passes(tmp_path: Path) -> None:
     assert validate_release_metadata(tmp_path, "0.9.1") == []
 
 
+@pytest.mark.parametrize(
+    ("heading", "expect_duplicate_status"),
+    [
+        ("# Other release", False),
+        ("## Other release", False),
+        ("### Other release", False),
+        ("#### Details", True),
+        ("```markdown\n### Example\n```", True),
+    ],
+)
+def test_stable_project_status_heading_boundary(
+    tmp_path: Path, heading: str, expect_duplicate_status: bool
+) -> None:
+    _write_release_surfaces(tmp_path, finalized=True)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    with status_path.open("a", encoding="utf-8") as status_file:
+        status_file.write(
+            f"\n{heading}\n**Status:** Stable release, published 2026-07-28.\n"
+        )
+
+    expected = (
+        [f"{status_path}: 0.9.1 section must contain exactly one Status field"]
+        if expect_duplicate_status else []
+    )
+    assert validate_release_metadata(tmp_path, "0.9.1") == expected
+
+
+def test_fenced_project_heading_cannot_satisfy_stable_gate(tmp_path: Path) -> None:
+    _write_release_surfaces(tmp_path, finalized=True)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    text = status_path.read_text(encoding="utf-8")
+    status_path.write_text(f"```markdown\n{text}```\n", encoding="utf-8")
+
+    assert validate_release_metadata(tmp_path, "0.9.1") == [
+        f"{status_path}: missing current release line 0.9.1"
+    ]
+
+
 def test_impossible_release_date_fails_tag_gate(tmp_path: Path) -> None:
     """A syntactically valid but impossible date cannot pass the tag gate."""
     _write_release_surfaces(tmp_path, finalized=True)
