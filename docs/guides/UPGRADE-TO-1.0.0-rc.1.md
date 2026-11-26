@@ -29,7 +29,7 @@ The candidate maps the release identity to a Debian and RPM package version.
 | Release identity | `1.0.0-rc.1` |
 | Debian upstream version | `1.0.0~bdudfaababfa` |
 | RPM version | `1.0.0~bdudfaababfa` |
-| RPM release | `nginx1.28.3.1` |
+| RPM release | Target-dependent: `nginx<NGINX_VERSION>.1`, for example `nginx1.28.3.1` for NGINX 1.28.3 |
 
 The tilde keeps the candidate below the final `1.0.0` package and above the
 published v0.9.4 package. An upgrade from v0.9.4 to the candidate moves forward
