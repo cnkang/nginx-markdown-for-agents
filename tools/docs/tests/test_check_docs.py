@@ -775,6 +775,16 @@ def test_unreleased_heading_rejects_invalid_prerelease_identity():
     assert any("invalid release identity" in error for error in errors)
 
 
+def test_dated_candidate_identity_may_contain_unreleased():
+    heading = "## [1.0.0-rc.unreleased] - 2026-12-01\n"
+
+    assert docs_checker._find_unreleased_changelog_line(heading) == (None, [])
+    assert docs_checker._latest_dated_changelog_version(heading) == (
+        "1.0.0-rc.unreleased",
+        [],
+    )
+
+
 def test_latest_dated_changelog_version_orders_prereleases():
     version, errors = docs_checker._latest_dated_changelog_version(
         "## [1.0.0] - 2026-12-02\n"
@@ -1357,6 +1367,21 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     assert any(
         "described as a stable release" in failure for failure in failures
     ), failures
+
+
+def test_candidate_stable_subject_overrides_inherited_other_subject_context():
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release {version}\n\n"
+        "The installation guide is available. "
+        "The release candidate is a stable release.\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert any("described as a stable release" in failure for failure in failures)
 
 
 @pytest.mark.parametrize(

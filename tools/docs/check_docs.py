@@ -329,6 +329,14 @@ def check_operator_config_examples(files: list[Path]) -> list[str]:
     return errors
 
 
+def _changelog_heading_has_unreleased_status(line: str) -> bool:
+    """Return whether heading status text after the identity says Unreleased."""
+    _, closing_bracket, status_text = line.partition("]")
+    return bool(
+        closing_bracket and "unreleased" in status_text.casefold()
+    )
+
+
 def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[str]]:
     """Return (version, errors) for the first unreleased changelog heading.
 
@@ -372,7 +380,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
                     "section"
                 )
             continue
-        if "unreleased" in line.lower():
+        if _changelog_heading_has_unreleased_status(line):
             errors.append(
                 f"{CHANGELOG_FILENAME}: malformed unreleased heading "
                 f"{line.strip()!r}; expected "
@@ -1791,6 +1799,34 @@ def _prerelease_claim_names_unpublished_version(
     return False, candidate_context
 
 
+def _stable_claim_subject_context(
+    claim: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Resolve candidate context at each affirmative stable-release claim."""
+    unnegated = _NEGATED_STABLE_RELEASE_RE.sub(
+        lambda match: " " * len(match.group(0)), claim
+    )
+    contexts: list[bool | None] = []
+    for stable_claim in _STABLE_RELEASE_CLAIM_RE.finditer(unnegated):
+        prefix = claim[: stable_claim.start()]
+        clause_breaks = list(_RELEASE_CLAUSE_BREAK_RE.finditer(prefix))
+        start = max(
+            prefix.rfind(",") + 1,
+            prefix.rfind(":") + 1,
+            clause_breaks[-1].end() if clause_breaks else 0,
+        )
+        contexts.append(
+            _candidate_in_trailing_subject_group(
+                prefix[start:], version_pattern
+            )
+        )
+    if True in contexts:
+        return True
+    if None in contexts or not contexts:
+        return None
+    return False
+
+
 def _prerelease_claim_failure(
     rel: str,
     version: str,
@@ -1814,8 +1850,11 @@ def _prerelease_claim_failure(
         return None, candidate_context
     if _stable_claims_all_name_other_releases(claim, version_pattern):
         return None, candidate_context
-    if version_pattern.search(claim) is not None or (
-        block_context and inherited_context is not False
+    subject_context = _stable_claim_subject_context(claim, version_pattern)
+    if version_pattern.search(claim) is not None or subject_context is True or (
+        subject_context is None
+        and block_context
+        and inherited_context is not False
     ):
         return (
             f"{rel}: prerelease {version} described as a stable release "
