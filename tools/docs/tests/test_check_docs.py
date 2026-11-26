@@ -786,7 +786,7 @@ def test_latest_dated_changelog_version_orders_prereleases():
 
 def test_latest_dated_changelog_version_rejects_prerelease_above_final():
     version, errors = docs_checker._latest_dated_changelog_version(
-        "## [1.0.0-rc.1] - 2026-12-01\n## [1.0.0] - 2026-12-02\n"
+        "## [1.0.0-rc.1] - 2026-12-01\n## [1.0.0] - 2026-12-01\n"
     )
     assert version == "1.0.0-rc.1"
     assert any("descending order" in error for error in errors), errors
@@ -1049,6 +1049,27 @@ def test_candidate_stable_claim_is_not_exempted_by_another_stable_release():
     assert any(
         "described as a stable release" in failure for failure in failures
     ), failures
+
+
+def test_prerelease_claim_ignores_status_match_inside_version_token():
+    version = "1.0.0-rc.unreleased"
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, f"Candidate identity {version} is tagged.\n"
+    )
+    assert failures == []
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, f"The release {version} is pending.\n"
+    )
+    assert any("described as unpublished or pending" in item for item in failures)
+
+
+def test_prerelease_claim_does_not_split_but_inside_version_token():
+    version = "1.0.0-rc.but"
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, f"{version} is tagged but not yet published.\n"
+    )
+    assert any("described as unpublished or pending" in item for item in failures)
 
 
 @pytest.mark.parametrize(
@@ -1336,6 +1357,29 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     assert any(
         "described as a stable release" in failure for failure in failures
     ), failures
+
+
+@pytest.mark.parametrize(
+    ("subject_sentence", "should_fail"),
+    [
+        ("The installation guide for {version} has been published.", False),
+        ("The release {version} is tagged.", True),
+    ],
+)
+def test_prerelease_claim_carries_resolved_subject_across_sentences(
+    subject_sentence, should_fail
+):
+    version = "1.0.0-rc.1"
+    text = (
+        f"{subject_sentence.format(version=version)} "
+        "It is awaiting publication.\n"
+    )
+
+    failures = docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    )
+
+    assert bool(failures) is should_fail, failures
 
 
 @pytest.mark.parametrize(
@@ -1805,6 +1849,38 @@ def test_release_state_contract_accepts_canonical_pre_publication_state(tmp_path
     _write_pending_state(tmp_path)
 
     assert docs_checker.check_release_state_contract(tmp_path) == []
+
+
+def test_release_state_contract_requires_date_for_published_prerelease_baseline(
+    tmp_path,
+):
+    version = "1.0.0-rc.1"
+    changelog = (
+        "## [9.9.9] - Unreleased\n\nPending work.\n\n"
+        f"## [{version}] - 2026-12-01\n\nPublished candidate.\n"
+    )
+    _write_pending_state(tmp_path, changelog=changelog)
+    notes_path = (
+        tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    )
+    notes_path.write_text(
+        f"# Release Notes: {version}\n**Status**: Release candidate\n",
+        encoding="utf-8",
+    )
+
+    failures = docs_checker.check_release_state_contract(
+        tmp_path, surface_rel_paths=()
+    )
+    assert any("missing release date" in failure for failure in failures), failures
+
+    notes_path.write_text(
+        f"# Release Notes: {version}\n"
+        "**Date**: 2026-12-01\n**Status**: Release candidate\n",
+        encoding="utf-8",
+    )
+    assert docs_checker.check_release_state_contract(
+        tmp_path, surface_rel_paths=()
+    ) == []
 
 
 def test_release_state_contract_checks_current_unreleased_changelog_prose(

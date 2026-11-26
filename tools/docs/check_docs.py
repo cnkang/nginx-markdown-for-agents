@@ -1168,7 +1168,7 @@ _UNPUBLISHED_RELEASE_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 _RELEASE_CLAUSE_BREAK_RE = re.compile(
-    r";|\b(?:but|while|whereas|although|though)\b",
+    r";|(?<![.-])\b(?:but|while|whereas|although|though)\b",
     re.IGNORECASE,
 )
 _VERSION_LIST_SEPARATOR_RE = re.compile(
@@ -1756,11 +1756,22 @@ def _candidate_in_trailing_subject_group(
 
 
 def _prerelease_claim_names_unpublished_version(
-    claim: str, version_pattern: re.Pattern[str], block_context: bool
-) -> bool:
+    claim: str,
+    version_pattern: re.Pattern[str],
+    block_context: bool,
+    candidate_context: bool | None = None,
+) -> tuple[bool, bool | None]:
     """Return whether stale wording identifies the candidate release."""
-    candidate_context: bool | None = None
     for clause in _RELEASE_CLAUSE_BREAK_RE.split(claim):
+        version_tokens = _version_tokens(clause)
+        statuses = [
+            status
+            for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(clause)
+            if not any(
+                version[0] <= status.start() and status.end() <= version[1]
+                for version in version_tokens
+            )
+        ]
         if any(
             _unpublished_status_applies_to_candidate(
                 clause,
@@ -1769,15 +1780,15 @@ def _prerelease_claim_names_unpublished_version(
                 candidate_context,
                 block_context,
             )
-            for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(clause)
+            for status in statuses
         ):
-            return True
+            return True, candidate_context
         clause_context = _candidate_in_trailing_subject_group(
             clause, version_pattern
         )
         if clause_context is not None:
             candidate_context = clause_context
-    return False
+    return False, candidate_context
 
 
 def _prerelease_claim_failure(
@@ -1786,25 +1797,32 @@ def _prerelease_claim_failure(
     claim: str,
     version_pattern: re.Pattern[str],
     block_context: bool,
-) -> str | None:
+    candidate_context: bool | None = None,
+) -> tuple[str | None, bool | None]:
     """Return a release-claim failure, if the claim describes the candidate."""
-    if _prerelease_claim_names_unpublished_version(
-        claim, version_pattern, block_context
-    ):
+    inherited_context = candidate_context
+    unpublished, candidate_context = _prerelease_claim_names_unpublished_version(
+        claim, version_pattern, block_context, candidate_context
+    )
+    if unpublished:
         return (
             f"{rel}: prerelease {version} described as unpublished or pending "
-            f"in: {claim[:80]!r}"
+            f"in: {claim[:80]!r}",
+            candidate_context,
         )
     if not _has_stable_release_claim(claim):
-        return None
+        return None, candidate_context
     if _stable_claims_all_name_other_releases(claim, version_pattern):
-        return None
-    if version_pattern.search(claim) is not None or block_context:
+        return None, candidate_context
+    if version_pattern.search(claim) is not None or (
+        block_context and inherited_context is not False
+    ):
         return (
             f"{rel}: prerelease {version} described as a stable release "
-            f"in: {claim[:80]!r}"
+            f"in: {claim[:80]!r}",
+            candidate_context,
         )
-    return None
+    return None, candidate_context
 
 
 def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
@@ -1817,9 +1835,15 @@ def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
         block_context = (
             context_version or version_pattern.search(block) is not None
         )
+        candidate_context: bool | None = None
         for claim in _split_sentences_protected(block):
-            failure = _prerelease_claim_failure(
-                rel, version, claim, version_pattern, block_context
+            failure, candidate_context = _prerelease_claim_failure(
+                rel,
+                version,
+                claim,
+                version_pattern,
+                block_context,
+                candidate_context,
             )
             if failure is not None:
                 failures.append(failure)
@@ -2790,16 +2814,13 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
     """Require the published baseline release to stay canonical.
 
     A pending line sits on top of a real publication, so the checks confirm
-    that the published release notes still carry the stable status and the
-    changelog date that the release declared.
+    that the published release notes carry the correct release status and
+    the changelog date that the release declared.
     """
-    failures = _release_notes_status_failures(
-        root / "docs" / "releases" / f"{published_version}-release-notes.md",
-        published_version,
-    )
+    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
     changelog_path = root / CHANGELOG_FILENAME
     if not changelog_path.is_file():
-        return failures
+        return _release_notes_status_failures(notes, published_version)
     changelog = _without_fenced_blocks(
         changelog_path.read_text(encoding="utf-8", errors="ignore")
     )
@@ -2810,11 +2831,16 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
         re.MULTILINE,
     )
     if heading is None:
+        failures = _release_notes_status_failures(notes, published_version)
         failures.append(
             f"{CHANGELOG_FILENAME}: published {published_version} has no dated heading"
         )
         return failures
-    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
+    if "-" in published_version:
+        return _prerelease_notes_failures(
+            notes, published_version, heading["date"]
+        )
+    failures = _release_notes_status_failures(notes, published_version)
     if notes.is_file():
         declared = re.search(
             r"^\*\*Date\*\*:(?P<value>.*)$",

@@ -200,6 +200,34 @@ def test_finalized_prerelease_rejects_pending_publication_wording(
     ), errors
 
 
+@pytest.mark.parametrize("status_surface", ["project", "release_notes"])
+def test_finalized_prerelease_rejects_never_published_in_status_fields(
+    tmp_path: Path, status_surface: str
+) -> None:
+    version = "1.0.0-rc.1"
+    date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, date)
+    if status_surface == "project":
+        (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+            f"### Current Release Line {version}\n\n"
+            f"**Status:** Release candidate, never published on {date}.\n",
+            encoding="utf-8",
+        )
+    else:
+        (tmp_path / "docs" / "releases" / f"{version}-release-notes.md").write_text(
+            f"# Release Notes: {version}\n"
+            f"**Date**: {date}\n"
+            "**Status**: Release candidate, never published\n",
+            encoding="utf-8",
+        )
+
+    errors = validate_release_metadata(tmp_path, version)
+
+    assert any("must describe a published release" in error for error in errors), errors
+    if status_surface == "project":
+        assert any("publication date" in error and "missing or mismatched" in error for error in errors), errors
+
+
 @pytest.mark.parametrize(
     "feedback_wording",
     ["awaiting release feedback", "pending release feedback"],
@@ -254,10 +282,20 @@ def test_finalized_prerelease_rejects_later_pending_status_clause(
 ) -> None:
     version = "1.0.0-rc.1"
     _write_prerelease_surfaces(tmp_path, version, "2026-12-01")
-    (tmp_path / "docs" / "project" / "PROJECT_STATUS.md").write_text(
+    status_path = tmp_path / "docs" / "project" / "PROJECT_STATUS.md"
+    status_path.write_text(
         f"### Current Release Line {version}\n\n"
-        "**Status:** Release candidate, no longer awaiting publication; "
-        "release pending.\n",
+        "**Status:** Release candidate, published 2026-12-01; "
+        "no longer awaiting publication.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_release_metadata(tmp_path, version) == []
+
+    status_path.write_text(
+        f"### Current Release Line {version}\n\n"
+        "**Status:** Release candidate, published 2026-12-01; "
+        "no longer awaiting publication; release pending.\n",
         encoding="utf-8",
     )
 

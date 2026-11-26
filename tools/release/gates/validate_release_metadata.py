@@ -205,6 +205,12 @@ _FUTURE_PUBLICATION_RE = re.compile(
     _FUTURE_PUBLICATION_PREFIX + r"(?:published|released)\b",
     re.IGNORECASE,
 )
+_NEGATED_PUBLICATION_PREFIX_RE = re.compile(
+    r"\b(?:not(?:\s+yet)?|never)(?:\s+been)?\s+$"
+    r"|\b(?:has|have|had)\s+(?:not|n['’]t)\s+"
+    r"(?:yet\s+)?(?:been\s+)?$",
+    re.IGNORECASE,
+)
 _PUBLISHED_DATE_RE = re.compile(
     r"\bpublished(?:\s+on)?\s+(?P<date>\d{4}-\d{2}-\d{2})\b",
     re.IGNORECASE,
@@ -217,6 +223,7 @@ def _published_dates(value: str) -> list[str]:
         match["date"]
         for match in _PUBLISHED_DATE_RE.finditer(value)
         if _FUTURE_PUBLICATION_PREFIX_RE.search(value[: match.start()]) is None
+        and _NEGATED_PUBLICATION_PREFIX_RE.search(value[: match.start()]) is None
     ]
 
 
@@ -235,6 +242,7 @@ def _prerelease_status_errors(
     unpublished_statuses = re.finditer(
         r"\b(?:"
         r"not\s+(?:yet\s+)?(?:published|released)"
+        r"|never(?:\s+been)?\s+(?:published|released)"
         r"|(?:has|have|had)(?:\s+not|n['’]t)\s+"
         r"(?:yet\s+)?been\s+(?:published|released)"
         r"|unpublished|unreleased"
