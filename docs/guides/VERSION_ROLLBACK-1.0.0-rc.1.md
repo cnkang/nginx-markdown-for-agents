@@ -32,6 +32,12 @@ cache that the next upgrade can clear.
    apt-get -s install --allow-downgrades ./<previous-module-package>.deb
    ```
 
+   On an RPM system, simulate installing the previous module package with:
+
+   ```bash
+   sudo rpm -U --test --oldpackage ./<previous-module-package>.rpm
+   ```
+
 4. Review the transaction, then install the saved module package.
 
    ```bash

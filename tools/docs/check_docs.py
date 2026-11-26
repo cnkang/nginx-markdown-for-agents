@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
-from tools.lib.semver import is_release_version  # noqa: E402
+from tools.lib.semver import SEMVER_PATTERN, is_release_version  # noqa: E402
 ARCHIVE_SEGMENT = "docs/archive/"
 README_FILENAME = "README.md"
 CHANGELOG_FILENAME = "CHANGELOG.md"
@@ -53,6 +53,9 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
 )
 _CHANGELOG_VERSION = (
     r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+_RELEASE_VERSION_TOKEN = SEMVER_PATTERN.pattern[1:-1].replace(
+    r"\d", "[0-9]"
 )
 UNRELEASED_CHANGELOG_RE = re.compile(
     r"^ {0,3}##[ \t]+\[(?P<version>" + _CHANGELOG_VERSION + r")\]"
@@ -332,9 +335,10 @@ def check_operator_config_examples(files: list[Path]) -> list[str]:
 def _changelog_heading_has_unreleased_status(line: str) -> bool:
     """Return whether heading status text after the identity says Unreleased."""
     _, closing_bracket, status_text = line.partition("]")
-    return bool(
-        closing_bracket and "unreleased" in status_text.casefold()
-    )
+    if not closing_bracket:
+        separator = re.search(r"\s-\s*", line)
+        status_text = line[separator.end() :] if separator is not None else ""
+    return "unreleased" in status_text.casefold()
 
 
 def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[str]]:
@@ -1441,8 +1445,9 @@ def _following_status_version_candidate(
     )
     direct_version = gap in {
         "", "version", "versions", "release", "releases",
-        "candidate", "candidates", "of", "for",
+        "candidate", "candidates", "of",
     }
+    direct_version = direct_version or (gap == "for" and not has_preceding)
     version_list = gap in {
         "", ":", ",", "version", "versions", "versions are",
         "version is", "release", "releases", "releases are",
@@ -1851,10 +1856,12 @@ def _prerelease_claim_failure(
     if _stable_claims_all_name_other_releases(claim, version_pattern):
         return None, candidate_context
     subject_context = _stable_claim_subject_context(claim, version_pattern)
-    if version_pattern.search(claim) is not None or subject_context is True or (
-        subject_context is None
-        and block_context
-        and inherited_context is not False
+    if subject_context is False:
+        return None, candidate_context
+    if (
+        subject_context is True
+        or version_pattern.search(claim) is not None
+        or (block_context and inherited_context is not False)
     ):
         return (
             f"{rel}: prerelease {version} described as a stable release "
@@ -1911,11 +1918,13 @@ def _prerelease_notes_failures(
     failures: list[str] = []
     if re.search(rf"^# Release Notes: {re.escape(version)}\s*$", text, re.MULTILINE) is None:
         failures.append(f"{rel}: missing '# Release Notes: {version}' title")
-    status = re.search(r"^\*\*Status\*\*:(?P<value>.*)$", text, re.MULTILINE)
-    if status is None:
+    statuses = re.findall(r"^\*\*Status\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if not statuses:
         failures.append(f"{rel}: missing release status for released {version}")
+    elif len(statuses) > 1:
+        failures.append(f"{rel}: release notes must contain exactly one Status field")
     else:
-        value = " ".join(status["value"].split())
+        value = " ".join(statuses[0].split())
         if _has_unpublished_release_status(value):
             failures.append(
                 f"{rel}: prerelease {version} described as unpublished "
@@ -1927,14 +1936,16 @@ def _prerelease_notes_failures(
             r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
         ) is None:
             failures.append(
-                f"{rel}: prerelease {version} carries status {status['value']!r}"
+                f"{rel}: prerelease {version} carries status {value!r}"
             )
-    declared = re.search(r"^\*\*Date\*\*:(?P<value>.*)$", text, re.MULTILINE)
-    if declared is None:
+    dates = re.findall(r"^\*\*Date\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if not dates:
         failures.append(f"{rel}: missing release date for released {version}")
-    elif release_date is not None and declared["value"].strip() != release_date:
+    elif len(dates) > 1:
+        failures.append(f"{rel}: release notes must contain exactly one Date field")
+    elif release_date is not None and dates[0].strip() != release_date:
         failures.append(
-            f"{rel}: date {declared['value'].strip()!r} does not match "
+            f"{rel}: date {dates[0].strip()!r} does not match "
             f"CHANGELOG date {release_date!r}"
         )
     return failures
@@ -2093,7 +2104,7 @@ PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
 # download that works today.
 _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"after (?:the )?(?:publication|release)"
-    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+"
+    rf"|after (?:(?:the )?(?:v?{_RELEASE_VERSION_TOKEN}"
     r"(?: (?:release|tag))?|version|tag)|it|"
     r"this (?:version|release)|that (?:version|release))"
     r"\s+(?:is|has been|will be|gets)\s+(?:published|released)"
@@ -2415,7 +2426,7 @@ def _claim_followed_by_publication_boundary(
     after_claim = sentence[claim.end() :]
     return re.search(
         r"^\s*(?:only\s+)?(?:after\s+(?:the\s+)?(?:publication|release)\b"
-        r"|after\s+(?:(?:the\s+)?(?:v?\d+\.\d+\.\d+|version|tag|release)\s+)?"
+        rf"|after\s+(?:(?:the\s+)?(?:v?{_RELEASE_VERSION_TOKEN}|version|tag|release)\s+)?"
         r"(?:is|has been|will be|gets)\s+(?:published|released)\b"
         r"|once\s+(?:it\s+is\s+)?published\b"
         r"|following\s+(?:the\s+)?publication\b)",

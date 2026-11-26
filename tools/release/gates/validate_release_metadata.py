@@ -65,7 +65,7 @@ def _validate_project_status(
     """
     project_match = re.search(
         rf"^### Current Release Line {re.escape(version)}\s*$"
-        rf"(?P<body>.*?)(?=^### |\Z)",
+        rf"(?P<body>.*?)(?=^#{{1,3}}[ \t]+|\Z)",
         text,
         re.MULTILINE | re.DOTALL,
     )
@@ -297,7 +297,7 @@ def _validate_prerelease_project_status(
     sections = list(
         re.finditer(
             rf"^### Current Release Line {re.escape(version)}\s*$"
-            rf"(?P<body>.*?)(?=^### |\Z)",
+            rf"(?P<body>.*?)(?=^#{{1,3}}[ \t]+|\Z)",
             prose,
             re.MULTILINE | re.DOTALL,
         )
@@ -401,7 +401,7 @@ def _candidate_project_status_errors(
     project_prose = "\n".join(_unfenced_lines(project))
     sections = list(
         re.finditer(
-            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
+            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^#{{1,3}}[ \t]+|\Z)",
             project_prose,
             re.MULTILINE | re.DOTALL,
         )
@@ -444,7 +444,16 @@ def _validate_candidate_metadata(
     errors.extend(_candidate_project_status_errors(project, version, project_path))
     if f"# Release Notes: {version}" not in _unfenced_lines(notes):
         errors.append(f"{notes_path}: missing '# Release Notes: {version}' title")
-    errors.extend(_candidate_status_errors(_release_note_field(notes, "Status"), notes_path))
+    note_statuses = _release_note_fields(notes, "Status")
+    if not note_statuses:
+        errors.extend(_candidate_status_errors(None, notes_path))
+    elif len(note_statuses) > 1:
+        errors.append(
+            f"{notes_path}: candidate release notes must contain exactly one "
+            "Status field"
+        )
+    else:
+        errors.extend(_candidate_status_errors(note_statuses[0], notes_path))
     if _release_note_field(notes, "Date") is not None:
         errors.append(f"{notes_path}: candidate cannot declare a publication Date")
     target = _release_note_field(notes, "Target release date")

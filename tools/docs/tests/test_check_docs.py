@@ -775,6 +775,15 @@ def test_unreleased_heading_rejects_invalid_prerelease_identity():
     assert any("invalid release identity" in error for error in errors)
 
 
+def test_malformed_unreleased_heading_without_closing_bracket_fails():
+    version, errors = docs_checker._find_unreleased_changelog_line(
+        "## [1.0.0-rc.1 - Unreleased\n"
+    )
+
+    assert version is None
+    assert any("malformed unreleased heading" in error for error in errors)
+
+
 def test_dated_candidate_identity_may_contain_unreleased():
     heading = "## [1.0.0-rc.unreleased] - 2026-12-01\n"
 
@@ -1149,6 +1158,11 @@ def test_prerelease_claim_distinguishes_version_subject_from_qualifier(
             "is not yet published.",
             False,
         ),
+        (
+            "The release {version} is awaiting publication for NGINX 1.28.3.",
+            True,
+        ),
+        ("Unreleased versions are 1.1.0 and {version}.", True),
     ],
 )
 def test_prerelease_claim_resolves_subject_before_product_version_qualifier(
@@ -1384,6 +1398,18 @@ def test_candidate_stable_subject_overrides_inherited_other_subject_context():
     assert any("described as a stable release" in failure for failure in failures)
 
 
+def test_prerelease_stable_claim_respects_resolved_other_subject():
+    version = "1.0.0-rc.1"
+    text = (
+        f"## Release notes for {version}\n\n"
+        f"The installation guide for {version} is a stable release.\n"
+    )
+
+    assert docs_checker._prerelease_claim_failures(
+        "README.md", version, text
+    ) == []
+
+
 @pytest.mark.parametrize(
     ("subject_sentence", "should_fail"),
     [
@@ -1494,6 +1520,42 @@ def test_release_notes_status_accepts_prerelease_candidate(tmp_path):
     assert docs_checker._release_notes_status_failures(
         notes, "1.0.0-rc.1"
     ) == []
+
+
+@pytest.mark.parametrize("field", ["Date", "Status"])
+def test_prerelease_notes_require_exactly_one_unfenced_date_and_status(
+    tmp_path, field
+):
+    version = "1.0.0-rc.1"
+    release_date = "2026-12-01"
+    notes = tmp_path / "docs" / "releases" / f"{version}-release-notes.md"
+    notes.parent.mkdir(parents=True)
+    content = (
+        f"# Release Notes: {version}\n"
+        f"**Date**: {release_date}\n"
+        "**Status**: Release candidate\n"
+    )
+    notes.write_text(content, encoding="utf-8")
+    assert docs_checker._prerelease_notes_failures(
+        notes, version, release_date
+    ) == []
+
+    notes.write_text(
+        content + f"\n```text\n**{field}**: fenced duplicate\n```\n",
+        encoding="utf-8",
+    )
+    assert docs_checker._prerelease_notes_failures(
+        notes, version, release_date
+    ) == []
+
+    notes.write_text(
+        content + f"**{field}**: duplicate\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker._prerelease_notes_failures(
+        notes, version, release_date
+    )
+    assert any(f"exactly one {field} field" in error for error in errors), errors
 
 
 @pytest.mark.parametrize(
@@ -2540,12 +2602,26 @@ def test_release_state_contract_rejects_affirmative_claims_without_publication(
     "text",
     [
         "after the v9.9.9 release is published",
+        "After 1.0.0-rc.1 is published",
         "has not yet been published",
     ],
 )
 def test_publication_boundary_matches_complete_release_phrasing(text):
     """Both version-boundary and passive-negation variants are recognized."""
     assert docs_checker._PREPUBLICATION_BOUNDARY_RE.search(text) is not None
+
+
+def test_prerelease_publication_boundary_does_not_hide_unconditional_claim():
+    version = "1.0.0-rc.1"
+    conditional = docs_checker._pending_text_failures(
+        "README.md", f"After {version} is published, update the link.\n", version
+    )
+    unconditional = docs_checker._pending_text_failures(
+        "README.md", f"{version} is published.\n", version
+    )
+
+    assert conditional == []
+    assert any("without a publication boundary" in error for error in unconditional)
 
 
 def test_pending_release_version_token_rejects_prerelease_and_longer_versions():

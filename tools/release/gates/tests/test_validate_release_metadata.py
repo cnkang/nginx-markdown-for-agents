@@ -67,6 +67,38 @@ def test_finalized_prerelease_metadata_passes(tmp_path: Path) -> None:
     assert validate_release_metadata(tmp_path, "1.0.0-rc.1") == []
 
 
+@pytest.mark.parametrize(
+    ("heading", "expect_duplicate_status"),
+    [
+        ("# Other release", False),
+        ("## Other release", False),
+        ("### Other release", False),
+        ("#### Details", True),
+    ],
+)
+def test_prerelease_project_status_heading_boundary(
+    tmp_path: Path, heading: str, expect_duplicate_status: bool
+) -> None:
+    version = "1.0.0-rc.1"
+    release_date = "2026-12-01"
+    _write_prerelease_surfaces(tmp_path, version, release_date)
+    status_path = tmp_path / "docs/project/PROJECT_STATUS.md"
+    with status_path.open("a", encoding="utf-8") as status_file:
+        status_file.write(
+            f"\n{heading}\n"
+            f"**Status:** Release candidate, published {release_date}.\n"
+        )
+
+    errors = validate_release_metadata(tmp_path, version)
+    duplicate_errors = [
+        error for error in errors if "exactly one Status field" in error
+    ]
+
+    assert bool(duplicate_errors) is expect_duplicate_status, errors
+    if not expect_duplicate_status:
+        assert errors == []
+
+
 def test_finalized_prerelease_rejects_stable_status(tmp_path: Path) -> None:
     """A prerelease cannot claim a stable release status."""
     _write_prerelease_surfaces(tmp_path, "1.0.0-rc.1", "2026-12-01")
@@ -654,6 +686,26 @@ def test_candidate_metadata_passes_but_final_phase_still_rejects(tmp_path: Path)
     _write_candidate(tmp_path)
     assert validate_release_metadata(tmp_path, "0.9.1", "candidate") == []
     assert validate_release_metadata(tmp_path, "0.9.1")
+
+
+def test_candidate_metadata_rejects_duplicate_unfenced_note_status_fields(
+    tmp_path: Path,
+) -> None:
+    _write_candidate(tmp_path)
+    notes_path = tmp_path / "docs/releases/0.9.1-release-notes.md"
+    original = notes_path.read_text(encoding="utf-8")
+    notes_path.write_text(
+        original + "\n```markdown\n**Status**: fenced duplicate\n```\n",
+        encoding="utf-8",
+    )
+    assert validate_release_metadata(tmp_path, "0.9.1", "candidate") == []
+
+    notes_path.write_text(
+        original + "**Status**: Pending release.\n", encoding="utf-8"
+    )
+    errors = validate_release_metadata(tmp_path, "0.9.1", "candidate")
+
+    assert any("exactly one Status field" in error for error in errors), errors
 
 
 def test_candidate_status_must_be_on_the_same_line(tmp_path: Path) -> None:

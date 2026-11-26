@@ -81,14 +81,15 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-To roll back, restore the saved module, test the configuration, and restart
-NGINX to load the previous module:
+To roll back, stop NGINX before replacing the mapped module. Then test the
+configuration and start NGINX to load the previous module:
 
 ```bash
+sudo systemctl stop nginx
 sudo cp <backup-path>/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1 \
   <modules-path>/ngx_http_markdown_filter_module.so
 sudo nginx -t
-sudo systemctl restart nginx
+sudo systemctl start nginx
 ```
 
 Do not treat a skipped check or missing evidence as a pass.
