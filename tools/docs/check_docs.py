@@ -1472,6 +1472,40 @@ def _version_is_non_release_qualifier(clause: str, version_start: int) -> bool:
     ) is not None
 
 
+def _qualifier_follows_closed_release_subject(
+    clause: str,
+    release_version: tuple[int, int, str],
+    qualifier_version_start: int,
+) -> bool:
+    """Return whether a qualifier follows a completed, separate subject."""
+    prefix = clause[:qualifier_version_start].rstrip()
+    qualifiers = list(
+        re.finditer(
+            r"\b(?:for|with|against|on|under|using|"
+            r"targeting|running|requiring)\b",
+            prefix,
+            re.IGNORECASE,
+        )
+    )
+    if not qualifiers:
+        return False
+    qualifier = qualifiers[-1]
+    subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
+    if subject is None or _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+        subject["subject"].strip()
+    ) is not None:
+        return False
+    before_subject = clause[release_version[1] : subject.start("subject")]
+    predicates = list(_CLAUSE_SUBJECT_VERB_RE.finditer(before_subject))
+    if not predicates:
+        return False
+    return re.fullmatch(
+        r"\s*(?:,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)",
+        before_subject[predicates[-1].end() :],
+        re.IGNORECASE,
+    ) is not None
+
+
 def _preceding_status_version_candidate(
     clause: str,
     versions: list[tuple[int, int, str]],
@@ -1480,13 +1514,23 @@ def _preceding_status_version_candidate(
 ) -> bool | None:
     """Resolve the release subject while skipping version qualifiers."""
     found_qualifier = False
+    qualifier_version: tuple[int, int, str] | None = None
     for preceding_index in reversed(preceding):
         preceding_version = versions[preceding_index]
         if _version_is_non_release_qualifier(
             clause, preceding_version[0]
         ):
             found_qualifier = True
+            if qualifier_version is None:
+                qualifier_version = preceding_version
             continue
+        if (
+            qualifier_version is not None
+            and _qualifier_follows_closed_release_subject(
+                clause, preceding_version, qualifier_version[0]
+            )
+        ):
+            return None
         return _version_group_names_candidate(
             clause, versions, preceding_index, -1, version_pattern
         )
@@ -1642,24 +1686,56 @@ def _version_group_names_candidate(
     )
 
 
+def _candidate_modifier_precedes_subject_verb(
+    clause: str,
+    subject_verbs: list[re.Match[str]],
+    index: int,
+) -> bool:
+    """Return whether published/released modifies the following subject."""
+    if (
+        subject_verbs[index].group(0).casefold()
+        not in {"published", "released"}
+        or index + 1 >= len(subject_verbs)
+    ):
+        return False
+    subject = clause[: subject_verbs[index + 1].start()].strip(" \t,:;")
+    return _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None
+
+
+def _unversioned_subject_names_candidate(clause: str) -> bool | None:
+    """Resolve candidate context from an unversioned subject phrase."""
+    subject_verbs = list(_CLAUSE_SUBJECT_VERB_RE.finditer(clause))
+    if not subject_verbs:
+        return None
+    for index, subject_verb in enumerate(subject_verbs):
+        subject = clause[: subject_verb.start()].strip(" \t,:;")
+        subject = re.sub(
+            r"^(?:(?:and|but|so|then)\s+)+",
+            "",
+            subject,
+            flags=re.IGNORECASE,
+        )
+        if not subject or subject.casefold() in {
+            "it", "this", "that", "these", "those"
+        }:
+            return None
+        if _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None:
+            return True
+        if _candidate_modifier_precedes_subject_verb(
+            clause, subject_verbs, index
+        ):
+            continue
+        return False
+    return None
+
+
 def _candidate_in_trailing_subject_group(
     clause: str, version_pattern: re.Pattern[str]
 ) -> bool | None:
     """Return whether a clause's last coordinated subject includes candidate."""
     versions = _version_tokens(clause)
     if not versions:
-        subject_verb = _CLAUSE_SUBJECT_VERB_RE.search(clause)
-        if subject_verb is None:
-            return None
-        subject = clause[: subject_verb.start()].strip(" \t,:;")
-        subject = re.sub(
-            r"^(?:(?:and|but|so|then)\s+)+", "", subject, flags=re.IGNORECASE
-        )
-        if not subject or subject.casefold() in {
-            "it", "this", "that", "these", "those"
-        }:
-            return None
-        return _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None
+        return _unversioned_subject_names_candidate(clause)
     subject_indexes = [
         index
         for index, version in enumerate(versions)

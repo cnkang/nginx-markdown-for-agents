@@ -1104,6 +1104,11 @@ def test_prerelease_claim_distinguishes_version_subject_from_qualifier(
     ("claim", "should_fail"),
     [
         (
+            "The release {version} is available, and the guide for NGINX "
+            "1.28.3 is not yet published.",
+            False,
+        ),
+        (
             "The release {version}, built for NGINX 1.28.3, "
             "is not yet published.",
             True,
@@ -1337,6 +1342,11 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     ("claim", "should_fail"),
     [
         ("{version} is tagged; it is not yet published.", True),
+        (
+            "{version} is tagged; the published candidate is available; "
+            "it is not yet published.",
+            True,
+        ),
         (
             "{version} is tagged; the release matrix is published; "
             "it is not yet published.",
