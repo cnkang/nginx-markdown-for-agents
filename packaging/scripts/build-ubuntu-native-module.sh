@@ -296,9 +296,8 @@ if [[ "${RELEASE_IDENTITY}" == "yes" ]]; then
     if [[ ! "${RELEASE_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
         die "cannot resolve the source commit for a release build"
     fi
-    RELEASE_MANIFEST="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-        "${REPO_ROOT}/components/rust-converter/Cargo.toml" | head -n 1)"
-    if ! printf '%s' "${RELEASE_MANIFEST}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    if ! RELEASE_MANIFEST="$(python3 \
+        "${REPO_ROOT}/tools/release/read_release_identity.py")"; then
         die "cannot resolve the release identity from components/rust-converter/Cargo.toml"
     fi
     FEATURE_MANIFEST="${REPO_ROOT}/artifacts/release/${RELEASE_MANIFEST}/official-build-feature-manifest.json"
