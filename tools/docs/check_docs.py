@@ -922,9 +922,7 @@ def _dated_heading(line: str) -> tuple[str, str] | None:
     if dated is None:
         return None
     version = dated.group("version")
-    if not is_release_version(version):
-        return None
-    return version, dated.group("date")
+    return (version, dated.group("date")) if is_release_version(version) else None
 
 
 def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
@@ -1405,17 +1403,17 @@ def _overlapping_status_version_candidate(
     version_pattern: re.Pattern[str],
 ) -> bool | None:
     """Resolve a version token that overlaps an unpublished status."""
-    overlapping = [
+    if overlapping := [
         version
         for version in versions
         if version[0] < status.end() and version[1] > status.start()
-    ]
-    if not overlapping:
+    ]:
+        return any(
+            version_pattern.fullmatch(version[2]) is not None
+            for version in overlapping
+        )
+    else:
         return None
-    return any(
-        version_pattern.fullmatch(version[2]) is not None
-        for version in overlapping
-    )
 
 
 def _following_status_version_candidate(
@@ -1496,14 +1494,14 @@ def _qualifier_follows_closed_release_subject(
     ) is not None:
         return False
     before_subject = clause[release_version[1] : subject.start("subject")]
-    predicates = list(_CLAUSE_SUBJECT_VERB_RE.finditer(before_subject))
-    if not predicates:
+    if predicates := list(_CLAUSE_SUBJECT_VERB_RE.finditer(before_subject)):
+        return re.fullmatch(
+            r"\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+",
+            before_subject[predicates[-1].end() :],
+            re.IGNORECASE,
+        ) is not None
+    else:
         return False
-    return re.fullmatch(
-        r"\s*(?:,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)",
-        before_subject[predicates[-1].end() :],
-        re.IGNORECASE,
-    ) is not None
 
 
 def _preceding_status_version_candidate(
@@ -1834,9 +1832,7 @@ def _first_dated_changelog_entry(changelog: str) -> tuple[str, str] | None:
     if match is None:
         return None
     version = match.group("version")
-    if not is_release_version(version):
-        return None
-    return version, match.group("date")
+    return (version, match.group("date")) if is_release_version(version) else None
 
 
 def _prerelease_notes_failures(
@@ -2460,11 +2456,7 @@ def _generic_artifact_availability(
     if claim.group(0).lower() != "available":
         return False
     before = window[max(0, claim.start() - 80):claim.start()]
-    # Only the clause that carries the verb counts: an artifact subject in
-    # an earlier clause ("artifacts are checked, the release is available")
-    # says nothing about what is available.
-    clause_breaks = list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before))
-    if clause_breaks:
+    if clause_breaks := list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before)):
         before = before[clause_breaks[-1].end():]
     return _GENERIC_AVAILABILITY_OBJECT_RE.search(before) is not None
 
