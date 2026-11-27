@@ -17,10 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path  # noqa: E402
+from lib.semver import is_numeric_line  # noqa: E402
 
 
-DEFAULT_VERSION = "0.9.2"
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+DEFAULT_VERSION = "1.0.0"
 METRICS_CONTRACT = "schemas/metrics-v1.registry.json"
 METRICS_IMPLEMENTATION_SOURCES = [
     "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h",
@@ -494,8 +494,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Override the release artifact directory (primarily for tests).",
     )
     args = parser.parse_args(argv)
-    if VERSION_PATTERN.fullmatch(args.version) is None:
-        parser.error("--version must use MAJOR.MINOR.PATCH")
+    if not is_numeric_line(args.version):
+        parser.error("--version must use MAJOR.MINOR.PATCH for a schema line")
 
     repo_root = find_repo_root()
     registry = load_registry(repo_root, args.version, args.artifact_dir)

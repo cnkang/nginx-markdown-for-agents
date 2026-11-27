@@ -12,6 +12,7 @@ English | [Simplified Chinese](README_zh-CN.md)
 > the 20 active directives and their defaults, HTTP representation, metrics,
 > diagnostics, reason codes, and FFI ABI version 3 unchanged. v0.9.2 is the
 > final planned breaking release before v1.0. Use release-tag downloads.
+> The 1.0.0-rc.1 candidate is not yet published.
 
 > Release publication requires CI build, load, and request evidence for each
 > `verified` compatibility row, bound to the approved release commit and its
@@ -376,6 +377,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Change |
 |---------|------|--------|
+| 1.0.0-rc.1 | 2026-11-25 | Recorded the candidate identity and the release-state documents for the 1.0 line. |
 | 0.9.4 | 2026-11-23 | Added same-SHA release preflight qualification reuse guidance. |
 | 0.9.2 | 2026-10-08 | Unified the release date to 2026-10-08 and the published release status, and added the Ubuntu 26.04 default-repository NGINX 1.28.3 support rows |
 | 0.9.2 | 2026-10-03 | Update release target, simplify migration guidance, and document complete validation |

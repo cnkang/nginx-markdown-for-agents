@@ -28,6 +28,7 @@ from tools.lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from tools.lib.semver import is_release_version  # noqa: E402
 
 SCHEMA_VERSION = "release.qualification-bundle.v1"
 WORKFLOW_PATH = ".github/workflows/release-packages.yml"
@@ -36,7 +37,6 @@ FUZZ_RECORD = "fuzz-qualification-record.json"
 SOAK_MANIFEST = "short-soak-scenario-manifest.json"
 SOAK_RECORD = "soak-qualification-record.json"
 SHA_RE = re.compile(r"^[\da-f]{40}$", re.ASCII)
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$", re.ASCII)
 REPOSITORY_RE = re.compile(r"^[A-Za-z\d_.-]+/[A-Za-z\d_.-]+$", re.ASCII)
 CANDIDATE_SHA_LABEL = "candidate SHA"
 FUZZ_RECORD_LABEL = "fuzz record"
@@ -65,7 +65,7 @@ def _require_sha(value: object, label: str) -> str:
 
 
 def _require_version(value: object) -> str:
-    if not isinstance(value, str) or not VERSION_RE.fullmatch(value):
+    if not isinstance(value, str) or not is_release_version(value):
         raise QualificationReuseError("release version is malformed")
     return value
 

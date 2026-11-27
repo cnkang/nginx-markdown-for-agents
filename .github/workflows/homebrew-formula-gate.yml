@@ -47,7 +47,32 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read release identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(
+            sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+              components/rust-converter/Cargo.toml | head -1
+          )"
+          if [[ -z "${version}" ]]; then
+            echo "::error::Cannot derive current version from components/rust-converter/Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          case "${version}" in
+            *-*)
+              echo "stable=false" >> "$GITHUB_OUTPUT"
+              echo "The Homebrew formula applies to stable releases only; ${version} is a prerelease." >&2
+              ;;
+            *)
+              echo "stable=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
       - name: Homebrew environment
+        if: steps.identity.outputs.stable == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -73,9 +98,11 @@ jobs:
           fi
 
       - name: Audit local formula
+        if: steps.identity.outputs.stable == 'true'
         shell: bash
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
+          CURRENT_VERSION: ${{ steps.identity.outputs.version }}
         run: |
           set -euo pipefail
           make homebrew-formula-check
@@ -85,14 +112,6 @@ jobs:
           curl --proto '=https' --tlsv1.2 -fsSL \
             -o "${ARCHIVE_PATH}" "${ARCHIVE_URL}"
           ARCHIVE_SHA="$(shasum -a 256 "${ARCHIVE_PATH}" | awk '{print $1}')"
-          CURRENT_VERSION="$(
-            sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-              components/rust-converter/Cargo.toml | head -1
-          )"
-          if [[ -z "${CURRENT_VERSION}" ]]; then
-            echo "::error::Cannot derive current version from components/rust-converter/Cargo.toml" >&2
-            exit 1
-          fi
           python3 packaging/scripts/render_homebrew_formula.py \
             --source packaging/homebrew/nginx-markdown-module.rb \
             --url "${ARCHIVE_URL}" \
@@ -108,6 +127,7 @@ jobs:
           brew audit --strict codex/formula-gate/nginx-markdown-module
 
       - name: Install local formula from source
+        if: steps.identity.outputs.stable == 'true'
         shell: bash
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -124,6 +144,7 @@ jobs:
           brew install --build-from-source codex/formula-gate/nginx-markdown-module
 
       - name: Run formula test
+        if: steps.identity.outputs.stable == 'true'
         shell: bash
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"

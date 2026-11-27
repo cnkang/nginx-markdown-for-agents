@@ -33,6 +33,10 @@ PACKAGE_MANIFEST_PATH = (
     REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 )
 
+if str(REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+from lib.semver import SEMVER_PATTERN  # noqa: E402
+
 
 def _load_release_version() -> str:
     """Read and validate the active Rust package version."""
@@ -44,17 +48,13 @@ def _load_release_version() -> str:
             f"Unable to read package version from {PACKAGE_MANIFEST_PATH}"
         ) from exc
 
-    if not isinstance(version, str) or not re.fullmatch(
-        r"\d+\.\d+\.\d+", version, flags=re.ASCII
-    ):
+    if not isinstance(version, str) or SEMVER_PATTERN.fullmatch(version) is None:
         raise RuntimeError(f"Invalid package release version: {version!r}")
     return version
 
 
 RELEASE_VERSION = _load_release_version()
 
-if str(REPO_ROOT / "tools") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "tools"))
 from lib.executable_validation import resolve_approved_executable  # noqa: E402
 
 # Output paths

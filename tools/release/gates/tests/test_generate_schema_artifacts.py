@@ -241,3 +241,26 @@ def test_generator_rejects_path_escaping_version(version):
     with pytest.raises(SystemExit) as exc_info:
         gen.main(["--version", version])
     assert exc_info.value.code not in (None, 0)
+
+
+def test_generator_accepts_numeric_schema_line(tmp_path, monkeypatch):
+    """The schema generator keeps schema artifacts on a numeric line."""
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    assert gen.main(["--version", "1.0.0"]) == 0
+    artifact_dir = tmp_path / "artifacts" / "release" / "1.0.0"
+    assert (artifact_dir / "metrics-registry.json").is_file()
+    assert gen.main(["--check", "--version", "1.0.0"]) == 0
+
+
+def test_generator_rejects_prerelease_schema_line(
+    tmp_path, monkeypatch, capsys
+):
+    """A prerelease identity is not a schema artifact line."""
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        gen.main(["--version", "1.0.0-rc.1"])
+    assert exc_info.value.code not in (None, 0)
+    assert "--version must use MAJOR.MINOR.PATCH for a schema line" in (
+        capsys.readouterr().err
+    )
+    assert not (tmp_path / "artifacts" / "release" / "1.0.0-rc.1").exists()

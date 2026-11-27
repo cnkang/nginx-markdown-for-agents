@@ -13,6 +13,7 @@ from tools.release.matrix.evidence_contract import (
     validate_record,
 )
 from tools.release.matrix import record_nginx_org_evidence as composer
+from tools.release.matrix.normalize_matrix import RELEASE_VERSION
 
 COMMIT = "a" * 40
 SOURCE_SHA = "b" * 64
@@ -23,7 +24,7 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     root = tmp_path / "repo"
     (root / "packaging").mkdir(parents=True)
     (root / "tools" / "build_release").mkdir(parents=True)
-    (root / "artifacts" / "release" / "0.9.4").mkdir(parents=True)
+    (root / "artifacts" / "release" / RELEASE_VERSION).mkdir(parents=True)
     (root / "packaging" / "checksums.sha256").write_text(
         f"{SOURCE_SHA}  nginx-1.30.6\n", encoding="utf-8"
     )
@@ -37,7 +38,7 @@ def _repo(tmp_path: pathlib.Path) -> pathlib.Path:
     (root / ".github" / "workflows" / "release-packages.yml").write_text(
         "name: release\n", encoding="utf-8"
     )
-    (root / "artifacts" / "release" / "0.9.4"
+    (root / "artifacts" / "release" / RELEASE_VERSION
      / "official-build-feature-manifest.json").write_text(
         json.dumps({"prune_noise_regions": True, "streaming": True}),
         encoding="utf-8",
@@ -244,7 +245,7 @@ def test_default_builder_digest_is_unchanged(tmp_path):
             root / "tools" / "build_release" / "Dockerfile.glibc"
         ),
         "feature_manifest_sha256": _sha256_text(
-            root / "artifacts" / "release" / "0.9.4"
+            root / "artifacts" / "release" / RELEASE_VERSION
             / "official-build-feature-manifest.json"
         ),
         "libc": "glibc",

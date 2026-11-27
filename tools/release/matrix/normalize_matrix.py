@@ -26,16 +26,43 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import tomllib
 from typing import Any, Dict, List
-
-# Single source of truth for the release artifact version directory.
-# Update this when the release line changes (e.g. 0.9.3 -> 0.9.4).
-RELEASE_VERSION = "0.9.4"
 
 # Repository path-validation helper (AGENTS.md Rule 33): CLI-derived paths
 # must be validated before use.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "tools"))
 from lib.path_validation import validate_read_path  # noqa: E402
+from lib.semver import SEMVER_PATTERN  # noqa: E402
+
+# The release identity comes from the package manifest, so an artifact path
+# cannot drift from the version the release workflow reads.  A missing or
+# malformed manifest fails closed at import time.
+_CARGO_MANIFEST = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "components"
+    / "rust-converter"
+    / "Cargo.toml"
+)
+
+
+def _release_version() -> str:
+    """Read the active release identity from the Rust package manifest."""
+    try:
+        manifest_path = validate_read_path(
+            _CARGO_MANIFEST, purpose="release identity manifest"
+        )
+        with manifest_path.open("rb") as handle:
+            version = tomllib.load(handle)["package"]["version"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(f"cannot read release version: {exc}") from exc
+    if not isinstance(version, str) or SEMVER_PATTERN.fullmatch(version) is None:
+        raise RuntimeError(f"release version is not SemVer: {version!r}")
+    return version
+
+
+# Single source of truth for the release artifact version directory.
+RELEASE_VERSION = _release_version()
 
 CANONICAL_ENTRY_KEYS = [
     "nginx_version",

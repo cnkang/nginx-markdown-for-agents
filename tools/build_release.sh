@@ -121,6 +121,11 @@ esac
 
 NGINX_VERSION="$(resolve_nginx_version "$NGINX_VERSION")"
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to resolve the release identity." >&2
+    exit 1
+fi
+
 SOURCE_SHA="$(git rev-parse HEAD)"
 if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
     echo "Unable to resolve a full source commit SHA for the release build." >&2
@@ -133,17 +138,12 @@ if [[ -z "${RUST_VERSION}" ]]; then
     exit 1
 fi
 
-RELEASE_VERSION="$(sed -n 's/^RELEASE_VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' tools/release/matrix/normalize_matrix.py | head -n 1)"
-if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Unable to resolve the release artifact version from normalize_matrix.py." >&2
+RELEASE_IDENTITY_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release/read_release_identity.py"
+if ! RELEASE_VERSION="$(python3 "${RELEASE_IDENTITY_READER}")"; then
+    echo "Unable to resolve the release identity from components/rust-converter/Cargo.toml." >&2
     exit 1
 fi
 export RELEASE_VERSION
-
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 is required to build the feature manifest." >&2
-    exit 1
-fi
 
 FEATURE_MANIFEST_DIGEST="$(python3 - <<'PY'
 import hashlib

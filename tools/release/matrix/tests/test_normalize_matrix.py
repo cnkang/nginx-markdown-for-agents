@@ -9,6 +9,7 @@ Run:
 import json
 import pathlib
 import sys
+import tomllib
 
 import pytest
 
@@ -285,3 +286,14 @@ class TestCompatibilityDocument:
         entry = normalized["entries"][0]
         assert entry["image_ref"] == doc["entries"][0]["image_ref"]
         assert entry["image_digest"] == image_digest
+
+
+def test_release_version_tracks_the_cargo_package_manifest():
+    """The artifact version directory cannot drift from the package identity."""
+    repo_root = pathlib.Path(normalize_matrix.__file__).resolve().parents[3]
+    manifest = tomllib.loads(
+        (repo_root / "components/rust-converter/Cargo.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert normalize_matrix.RELEASE_VERSION == manifest["package"]["version"]

@@ -58,7 +58,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 ### Human-readable (default)
 
 ```text
-nginx-markdown-doctor v0.9.4
+nginx-markdown-doctor v1.0.0-rc.1
 ─────────────────────────────────
   ✓ [pass] nginx_version: nginx version 1.28.0 detected
   ✓ [pass] module_exists: module found at /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
@@ -80,7 +80,7 @@ Summary: 9 passed, 0 failed, 0 warnings, 0 skipped (9 total)
 ```json
 {
   "schema_version": 1,
-  "tool_version": "0.9.4",
+  "tool_version": "1.0.0-rc.1",
   "timestamp": "2026-07-01T12:00:00Z",
   "checks": [
     {
@@ -168,7 +168,7 @@ Summary: 9 passed, 0 failed, 0 warnings, 0 skipped (9 total)
     },
     "tool_version": {
       "type": "string",
-      "description": "Doctor tool version (e.g. 0.9.4)"
+      "description": "Doctor tool version (e.g. 1.0.0-rc.1)"
     },
     "timestamp": {
       "type": "string",

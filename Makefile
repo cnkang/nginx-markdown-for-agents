@@ -73,9 +73,15 @@ DESTDIR ?=
 # regression CI reports as new looks clean locally.  Default to the merge base
 # with the main branch, which is what CI compares against.
 STYLE_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null)
-SCHEMA_RELEASE_VERSION ?= 0.9.4
+# Numeric schema artifact line.  A prerelease candidate and its final release
+# share one schema snapshot, so this stays on MAJOR.MINOR.PATCH.
+SCHEMA_RELEASE_VERSION ?= 1.0.0
 # Current release line for generated artifacts and evidence paths.
-RELEASE_LINE ?= 0.9.4
+RELEASE_LINE ?= 1.0.0-rc.1
+# Directory the local gate reads compatibility records from.  A rehearsal can
+# download its records outside the repository and pass that path here, so the
+# approved candidate commit never changes to carry evidence.
+CANDIDATE_EVIDENCE_DIR ?= docs/evidence/$(RELEASE_LINE)/compat
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -1566,7 +1572,7 @@ release-gates-check-094: release-matrix-check
 		artifacts/release/$(RELEASE_LINE)/generated-reason-artifacts.json
 	@echo "  [5/8] Public surface and schema drift"
 	$(MAKE) public-surface-drift-check
-	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(RELEASE_LINE)
+	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=$(SCHEMA_RELEASE_VERSION)
 	@echo "  [6/8] Cross-release compatibility contract"
 	$(MAKE) compatibility-contract-check
 	$(MAKE) compatibility-contract-tests
@@ -1609,13 +1615,14 @@ release-matrix-check:
 # compatibility-evidence-check: Validate every compatibility evidence record
 # and bind each verified matrix row to a record. Fail-closed on a missing
 # record, a malformed record, or a record with a failed or skipped test.
-# Pass CANDIDATE_SHA=<sha> to require every record to name that commit.
+# Pass CANDIDATE_SHA=<sha> to require every record to name that commit, and
+# CANDIDATE_EVIDENCE_DIR=<path> to read a downloaded rehearsal directory.
 # Classification: BLOCKING
 .PHONY: compatibility-evidence-check
 compatibility-evidence-check:
 	@echo "=== Compatibility Evidence Check ==="
 	PYTHONPATH=. python3 tools/release/matrix/validate_compatibility_evidence.py \
-		--evidence-dir "docs/evidence/$(RELEASE_LINE)/compat" \
+		--evidence-dir "$(CANDIDATE_EVIDENCE_DIR)" \
 		$(if $(CANDIDATE_SHA),--candidate-sha "$(CANDIDATE_SHA)",)
 	PYTHONPATH=. python3 -m pytest \
 		tools/release/matrix/tests/test_evidence_contract.py \

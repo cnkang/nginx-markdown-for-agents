@@ -83,11 +83,11 @@ cannot silently introduce a floating compiler.
 
 The documentation gate also enforces release-state consistency: an
 `Unreleased` changelog entry must not appear as stable in the project
-status or release notes. The tag-only
-`tools/release/gates/validate_release_metadata.py` gate applies the inverse
-contract at publication time. The tagged version must have a concrete,
-matching date and stable status across the changelog, project status, and
-release notes.
+status or release notes. At publication time,
+`tools/release/gates/validate_release_metadata.py` requires a matching
+publication date across the changelog, project status, and release notes.
+The project status and release notes must identify stable tags as stable
+releases and prerelease tags as release candidates.
 
 ## Exclusions
 The following are intentionally NOT checked:

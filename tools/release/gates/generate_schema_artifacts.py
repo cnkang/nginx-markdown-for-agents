@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import tomllib
 from pathlib import Path
@@ -38,19 +37,20 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.semver import is_numeric_line, release_core  # noqa: E402
 
 CARGO_TOML_PATH = SOURCE_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
 
 def _default_version() -> str:
-    """Derive the default release version from the rust-converter package."""
+    """Derive the numeric release line from the rust-converter package."""
     try:
         with CARGO_TOML_PATH.open("rb") as fh:
             cargo = tomllib.load(fh)
         version = cargo.get("package", {}).get("version", "")
         if isinstance(version, str) and version:
-            return version
-    except (OSError, tomllib.TOMLDecodeError):
+            return release_core(version)
+    except (OSError, ValueError):
         # Keep the release fallback when package metadata is unavailable or
         # malformed.
         return "0.9.2"
@@ -68,8 +68,6 @@ RENDERER_PATH = (
 )
 DIAGNOSTICS_SCHEMA_PATH = SOURCE_ROOT / "schemas" / "diagnostics.schema.json"
 METRICS_CONTRACT_PATH = SOURCE_ROOT / "schemas" / "metrics-v1.registry.json"
-
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _read_text(path: Path) -> str:
@@ -152,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Compare artifacts without modifying files")
     args = parser.parse_args(argv)
 
-    if VERSION_PATTERN.fullmatch(args.version) is None:
-        parser.error("--version must use MAJOR.MINOR.PATCH")
+    if not is_numeric_line(args.version):
+        parser.error("--version must use MAJOR.MINOR.PATCH for a schema line")
 
     artifact_root = REPO_ROOT / "artifacts" / "release"
     artifact_dir = validate_write_path_within_root(

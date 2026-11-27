@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 from tools.lib.executable_validation import (  # noqa: E402
     resolve_approved_executable,
 )
+from tools.lib.semver import SEMVER_PATTERN, is_release_version  # noqa: E402
 ARCHIVE_SEGMENT = "docs/archive/"
 README_FILENAME = "README.md"
 CHANGELOG_FILENAME = "CHANGELOG.md"
@@ -50,18 +51,25 @@ BOOLEAN_TRUSTED_PROXY_RE = re.compile(
     r"\bmarkdown_trusted_proxies\s+(?:on|true|yes)\s*;",
     re.IGNORECASE,
 )
+_CHANGELOG_VERSION = (
+    r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+_RELEASE_VERSION_TOKEN = SEMVER_PATTERN.pattern[1:-1].replace(
+    r"\d", "[0-9]"
+)
 UNRELEASED_CHANGELOG_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>" + _CHANGELOG_VERSION + r")\]"
+    r"[ \t]*-[ \t]*Unreleased(?:[ \t]+candidate)?[ \t]*$",
     re.MULTILINE,
 )
 
 DATED_CHANGELOG_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[(?P<version>\d+\.\d+\.\d+)\][ \t]*-[ \t]*"
-    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
+    r"^ {0,3}##[ \t]+\[(?P<version>" + _CHANGELOG_VERSION + r")\]"
+    r"[ \t]*-[ \t]*(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
     re.MULTILINE,
 )
 VERSION_HEADING_PREFIX_RE = re.compile(
-    r"^ {0,3}##[ \t]+\[\d+\.\d+\.\d+\]", re.MULTILINE
+    r"^ {0,3}##[ \t]+\[[vV]?(?a:\d)[^\]\r\n]*\]", re.MULTILINE
 )
 
 
@@ -324,6 +332,15 @@ def check_operator_config_examples(files: list[Path]) -> list[str]:
     return errors
 
 
+def _changelog_heading_has_unreleased_status(line: str) -> bool:
+    """Return whether heading status text after the identity says Unreleased."""
+    _, closing_bracket, status_text = line.partition("]")
+    if not closing_bracket:
+        separator = re.search(r"\s-\s*", line)
+        status_text = line[separator.end() :] if separator is not None else ""
+    return "unreleased" in status_text.casefold()
+
+
 def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[str]]:
     """Return (version, errors) for the first unreleased changelog heading.
 
@@ -346,6 +363,12 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
         valid = UNRELEASED_CHANGELOG_RE.match(line)
         if valid is not None:
             found = valid.group("version")
+            if not is_release_version(found):
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: malformed unreleased heading "
+                    f"{line.strip()!r}; invalid release identity {found!r}"
+                )
+                continue
             if version is None:
                 version = found
             elif found == version:
@@ -361,7 +384,7 @@ def _find_unreleased_changelog_line(changelog: str) -> tuple[str | None, list[st
                     "section"
                 )
             continue
-        if "unreleased" in line.lower():
+        if _changelog_heading_has_unreleased_status(line):
             errors.append(
                 f"{CHANGELOG_FILENAME}: malformed unreleased heading "
                 f"{line.strip()!r}; expected "
@@ -399,7 +422,7 @@ def check_release_status_consistency(
 
     status = section_match["body"]
     errors: list[str] = []
-    if re.search(r"\bstable release\b", status, re.IGNORECASE):
+    if _has_stable_release_claim(status):
         errors.append(
             f"{project_status_path}: unreleased {version} cannot be marked stable"
         )
@@ -908,7 +931,10 @@ def _logical_blocks(content: str, history: set[str]) -> list[str]:
 def _dated_heading(line: str) -> tuple[str, str] | None:
     """Return (version, date) for a dated release heading."""
     dated = DATED_CHANGELOG_RE.match(line)
-    return None if dated is None else (dated.group("version"), dated.group("date"))
+    if dated is None:
+        return None
+    version = dated.group("version")
+    return (version, dated.group("date")) if is_release_version(version) else None
 
 
 def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
@@ -923,9 +949,28 @@ def _validated_date(raw_date: str, line: str, errors: list[str]) -> bool:
     return True
 
 
+def _version_order_key(version: str) -> tuple:
+    """Return a SemVer ordering key for a release heading version.
+
+    A final release sorts above any of its prereleases.  Prerelease
+    identifiers compare by SemVer rules: numeric identifiers below
+    alphanumeric ones, and a shorter identifier list below a longer one with
+    the same prefix.
+    """
+    core, _, prerelease = version.partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    if not prerelease:
+        return (major, minor, patch, 1, ())
+    identifiers = tuple(
+        (0, int(identifier), "") if identifier.isdigit() else (1, 0, identifier)
+        for identifier in prerelease.split(".")
+    )
+    return (major, minor, patch, 0, identifiers)
+
+
 def _order_error(
-    previous: tuple[tuple[int, ...], str] | None,
-    current: tuple[tuple[int, ...], str],
+    previous: tuple[tuple, str] | None,
+    current: tuple[tuple, str],
     line: str,
 ) -> str | None:
     """Return a descending-order error for an out-of-order release heading."""
@@ -946,7 +991,18 @@ def _classify_changelog_heading(
     dated = _dated_heading(line)
     if dated is not None:
         return ("dated", dated[0], dated[1])
-    if UNRELEASED_CHANGELOG_RE.match(line) is not None:
+    malformed_dated = DATED_CHANGELOG_RE.match(line)
+    if malformed_dated is not None:
+        return (
+            "bad",
+            malformed_dated.group("version"),
+            malformed_dated.group("date"),
+        )
+    unreleased = UNRELEASED_CHANGELOG_RE.match(line)
+    if unreleased is not None:
+        unreleased_version = unreleased.group("version")
+        if not is_release_version(unreleased_version):
+            return ("bad", unreleased_version, None)
         return ("unreleased", None, None)
     if VERSION_HEADING_PREFIX_RE.match(line) is not None:
         return ("bad", None, None)
@@ -955,17 +1011,17 @@ def _classify_changelog_heading(
 
 def _apply_dated_heading(
     version: str | None,
-    previous: tuple[tuple[int, ...], str] | None,
+    previous: tuple[tuple, str] | None,
     line: str,
     heading_version: str,
     raw_date: str,
     errors: list[str],
     assign_version: bool,
-) -> tuple[str | None, tuple[tuple[int, ...], str] | None]:
+) -> tuple[str | None, tuple[tuple, str] | None]:
     """Fold one dated heading into the running release-state scan."""
     if not _validated_date(raw_date, line, errors):
         return version, previous
-    current = (tuple(int(part) for part in heading_version.split(".")), raw_date)
+    current = (_version_order_key(heading_version), raw_date)
     order_error = _order_error(previous, current, line)
     if order_error is not None:
         errors.append(order_error)
@@ -997,9 +1053,16 @@ def _latest_dated_changelog_version(changelog: str) -> tuple[str | None, list[st
         first_seen = True
         kind, heading_version, raw_date = heading
         if kind == "bad":
-            errors.append(
-                f"{CHANGELOG_FILENAME}: unrecognized release heading {line!r}"
-            )
+            if heading_version is None:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: unrecognized release heading "
+                    f"{line!r}"
+                )
+            else:
+                errors.append(
+                    f"{CHANGELOG_FILENAME}: invalid release identity "
+                    f"{heading_version!r} in heading {line!r}"
+                )
         elif kind == "dated":
             version, previous = _apply_dated_heading(
                 version,
@@ -1052,6 +1115,37 @@ _BOUNDARY_STALE_CLAIM_RE = re.compile(
 
 # Wording that describes an unpublished or candidate state.  A released
 # version must not carry these claims next to its version string.
+_STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
+_STABLE_RELEASE_VERSION_LINK_RE = re.compile(
+    r"(?:\b(?:is|was|remains|stays|which|that|of|a|an|the|release|version|"
+    r"candidate|current|currently|latest|number|stable|published|released)\b"
+    r"|[\s,\x60])*",
+    re.IGNORECASE,
+)
+_STABLE_RELEASE_LINK_COMMA_SUFFIX_RE = re.compile(
+    r"[^,]*,\s*(?:(?:a|an)|(?:which|that)\s+"
+    r"(?:is|was|remains|stays)\s+(?:(?:a|an)\s+)?)\s*",
+    re.IGNORECASE,
+)
+_STABLE_RELEASE_COMPARISON_PREFIX_RE = re.compile(
+    r"\b(?:unlike|compared\s+(?:with|to)|in\s+contrast\s+to)\s*$",
+    re.IGNORECASE,
+)
+_NEGATED_STABLE_RELEASE_RE = re.compile(
+    r"\bnot\s+(?:a\s+)?stable release\b", re.IGNORECASE
+)
+
+
+def _has_stable_release_claim(text: str) -> bool:
+    """Return whether text claims a stable release without a negation."""
+    return (
+        _STABLE_RELEASE_CLAIM_RE.search(
+            _NEGATED_STABLE_RELEASE_RE.sub("", text)
+        )
+        is not None
+    )
+
+
 _STALE_RELEASE_CLAIM_RE = re.compile(
     r"(?:release|development)[- ]candidate"
     r"|not (?:yet )?(?:published|released)"
@@ -1064,6 +1158,70 @@ _STALE_RELEASE_CLAIM_RE = re.compile(
     r"|(?:publication|release) pending"
     r"|pending (?:publication|release)"
     r"|\b(?:is|are|remains?|stays?|still)\s+pending\b",
+    re.IGNORECASE,
+)
+_UNPUBLISHED_RELEASE_CLAIM_RE = re.compile(
+    r"(?:"
+    r"\bnot\s+(?:yet\s+)?(?:published|released)\b"
+    r"|\b(?:has|have|had)(?:\s+not|n['’]t)\s+"
+    r"(?:yet\s+)?been\s+(?:published|released)\b"
+    r"|\b(?:unpublished|unreleased)\b"
+    r"|尚未发布"
+    r"|(?<!no )pending\s+publication\b"
+    r"|(?<!no )pending\s+release(?!\s+(?:feedback|blockers?)\b)"
+    r"|(?<!no )(?:publication|release)"
+    r"(?:\s+(?:(?:of|version)\s+)?`?[vV]?[0-9][A-Za-z0-9.+-]*`?"
+    r"(?:(?:,\s*(?:and\s+)?|\s+(?:and|or)\s+)"
+    r"`?[vV]?[0-9][A-Za-z0-9.+-]*`?)*)?"
+    r"\s+(?:(?:is|are|remains?|stays?)\s+)?pending(?!\s+feedback\b)\b"
+    r"|\bawaiting\s+publication\b"
+    r"|\bawaiting\s+release(?!\s+feedback\b)"
+    r")",
+    re.IGNORECASE,
+)
+_RELEASE_CLAUSE_BREAK_RE = re.compile(
+    r";|(?<![.-])\b(?:but|while|whereas|although|though)\b",
+    re.IGNORECASE,
+)
+_VERSION_LIST_SEPARATOR_RE = re.compile(
+    r"(?:\s*,\s*(?:and\s+)?|\s+(?:and|or)\s+)"
+    r"(?:(?:candidate|release|version)\s+)?",
+    re.IGNORECASE,
+)
+_CLAUSE_SUBJECT_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|remains?|stays?|supersedes|"
+    r"replaces|precedes|follows|tagged|published|released|unreleased|"
+    r"unpublished|available|pending)\b",
+    re.IGNORECASE,
+)
+_COORDINATED_PREDICATE_RE = re.compile(
+    r"\band\s+(?=(?:is|are|was|were|has|have|had|remains?|stays?|"
+    r"still|not|unpublished|unreleased|awaiting|pending)\b)",
+    re.IGNORECASE,
+)
+_STATUS_SUBJECT_TAIL_RE = re.compile(
+    r"(?P<subject>(?<![\w’'-])"
+    r"(?!(?:is|are|was|were|has|have|had|remains?|stays?)\b)"
+    r"[A-Za-z][\w’'-]*(?:\s+[A-Za-z][\w’'-]*){0,4}?)"
+    r"(?:\s+(?:is|are|was|were|has|have|had|remains?|stays?))?\s*$",
+    re.IGNORECASE,
+)
+_CANDIDATE_STATUS_SUBJECT_RE = re.compile(
+    r"(?:(?:the|this|that|current|published|released|new|latest)\s+)*"
+    r"(?:it|release|candidate|version|pre[- ]?release|rc|beta|alpha|publication)"
+    r"(?:\s+(?:release|candidate|version|publication))?"
+    r"(?:['’]s\s+publication)?",
+    re.IGNORECASE,
+)
+_POSITIVE_UNPUBLISHED_STATUS_RE = re.compile(
+    r"(?:\bnot\s+(?:yet\s+)?(?:published|released)\b"
+    r"|\b(?:has|have|had)(?:\s+not|n['’]t)\s+"
+    r"(?:yet\s+)?been\s+(?:published|released)\b)",
+    re.IGNORECASE,
+)
+_NEGATED_UNPUBLISHED_STATUS_PREFIX_RE = re.compile(
+    r"\b(?:not(?:\s+yet)?|never|no\s+(?:longer|more)|"
+    r"(?:is|are|was|were|has|have|had)n['’]t)\s+$",
     re.IGNORECASE,
 )
 
@@ -1169,6 +1327,722 @@ def _stable_claim_failures(rel: str, version: str, text: str) -> list[str]:
     return failures
 
 
+def _stable_release_version_link_keeps_subject(
+    link: str,
+    version_before_claim: bool,
+    text_before_version: str,
+) -> bool:
+    """Return whether punctuation keeps a version link with its claim."""
+    if "," not in link:
+        return True
+    if not version_before_claim:
+        return False
+    if _STABLE_RELEASE_COMPARISON_PREFIX_RE.search(text_before_version):
+        return False
+    return _STABLE_RELEASE_LINK_COMMA_SUFFIX_RE.fullmatch(link) is not None
+
+
+def _stable_release_claim_links_other_version(
+    claim: str,
+    stable_claim: re.Match[str],
+    versions: list[tuple[int, int, str]],
+    candidate_version: re.Pattern[str],
+) -> bool:
+    """Return whether a stable-release claim links to another version."""
+    for start, end, version in versions:
+        if candidate_version.fullmatch(version) is not None:
+            continue
+        if re.search(
+            r"\b(?:for|with|against|on|under|using)\s+nginx\s+(?:version\s+)?`?$",
+            claim[:start],
+            re.IGNORECASE,
+        ):
+            continue
+        if end <= stable_claim.start():
+            link = claim[end : stable_claim.start()]
+            version_before_claim = True
+        elif stable_claim.end() <= start:
+            link = claim[stable_claim.end() : start]
+            version_before_claim = False
+        else:
+            continue
+        if not _stable_release_version_link_keeps_subject(
+            link, version_before_claim, claim[:start]
+        ):
+            continue
+        if _STABLE_RELEASE_CLAIM_RE.search(link) is not None:
+            continue
+        if _STABLE_RELEASE_VERSION_LINK_RE.fullmatch(link) is not None:
+            return True
+    return False
+
+
+def _stable_claims_all_name_other_releases(
+    claim: str, candidate_version: re.Pattern[str]
+) -> bool:
+    """Return whether every stable-release claim describes another version."""
+    unnegated_claim = _NEGATED_STABLE_RELEASE_RE.sub(
+        lambda match: " " * len(match.group(0)),
+        claim,
+    )
+    versions = _version_tokens(claim)
+    stable_claims = list(
+        _STABLE_RELEASE_CLAIM_RE.finditer(unnegated_claim)
+    )
+    return bool(stable_claims) and all(
+        _stable_release_claim_links_other_version(
+            claim, stable_claim, versions, candidate_version
+        )
+        for stable_claim in stable_claims
+    )
+
+
+def _coordinated_status_subject_candidate(
+    clause: str,
+    status: re.Match[str],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Resolve a subject carried across a coordinated predicate."""
+    before_status = clause[: status.start()]
+    for connector in _COORDINATED_PREDICATE_RE.finditer(before_status):
+        if _version_tokens(before_status[connector.end() :]):
+            continue
+        subject = _candidate_in_trailing_subject_group(
+            before_status[: connector.start()], version_pattern
+        )
+        if subject is not None:
+            return subject
+    return None
+
+
+def _overlapping_status_version_candidate(
+    versions: list[tuple[int, int, str]],
+    status: re.Match[str],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Resolve a version token that overlaps an unpublished status."""
+    if overlapping := [
+        version
+        for version in versions
+        if version[0] < status.end() and version[1] > status.start()
+    ]:
+        return any(
+            version_pattern.fullmatch(version[2]) is not None
+            for version in overlapping
+        )
+    else:
+        return None
+
+
+def _following_status_version_candidate(
+    clause: str,
+    status: re.Match[str],
+    versions: list[tuple[int, int, str]],
+    following_index: int,
+    has_preceding: bool,
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Resolve a version listed after an unpublished status phrase."""
+    gap = (
+        clause[status.end() : versions[following_index][0]]
+        .replace("`", "")
+        .strip()
+        .lower()
+    )
+    direct_version = gap in {
+        "", "version", "versions", "release", "releases",
+        "candidate", "candidates", "of",
+    }
+    direct_version = direct_version or (gap == "for" and not has_preceding)
+    version_list = gap in {
+        "", ":", ",", "version", "versions", "versions are",
+        "version is", "release", "releases", "releases are",
+        "release is", "candidate", "candidates",
+    }
+    if direct_version or (not has_preceding and version_list):
+        return _version_group_names_candidate(
+            clause, versions, following_index, 1, version_pattern
+        )
+    return None
+
+
+def _version_is_non_release_qualifier(clause: str, version_start: int) -> bool:
+    """Return whether a version token belongs to an artifact qualifier."""
+    prefix = clause[:version_start].rstrip()
+    qualifier = re.search(
+        r"\b(?:for|with|against|on|under|using)\s*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    if qualifier is not None:
+        subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
+        return subject is not None and _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+            subject["subject"].strip()
+        ) is None
+    comma = prefix.rfind(",")
+    if comma < 0 or not _version_tokens(prefix[:comma]):
+        return False
+    return re.search(
+        r"\b(?:for|with|against|on|under|using|targeting|running|requiring)\b",
+        prefix[comma + 1 :],
+        re.IGNORECASE,
+    ) is not None
+
+
+def _qualifier_follows_closed_release_subject(
+    clause: str,
+    release_version: tuple[int, int, str],
+    qualifier_version_start: int,
+) -> bool:
+    """Return whether a qualifier follows a completed, separate subject."""
+    prefix = clause[:qualifier_version_start].rstrip()
+    qualifiers = list(
+        re.finditer(
+            r"\b(?:for|with|against|on|under|using|"
+            r"targeting|running|requiring)\b",
+            prefix,
+            re.IGNORECASE,
+        )
+    )
+    if not qualifiers:
+        return False
+    qualifier = qualifiers[-1]
+    subject = _STATUS_SUBJECT_TAIL_RE.search(prefix[: qualifier.start()])
+    if subject is None or _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+        subject["subject"].strip()
+    ) is not None:
+        return False
+    before_subject = clause[release_version[1] : subject.start("subject")]
+    if predicates := list(_CLAUSE_SUBJECT_VERB_RE.finditer(before_subject)):
+        return re.fullmatch(
+            r"\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+",
+            before_subject[predicates[-1].end() :],
+            re.IGNORECASE,
+        ) is not None
+    else:
+        return False
+
+
+def _preceding_status_version_candidate(
+    clause: str,
+    versions: list[tuple[int, int, str]],
+    preceding: list[int],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Resolve the release subject while skipping version qualifiers."""
+    found_qualifier = False
+    qualifier_version: tuple[int, int, str] | None = None
+    for preceding_index in reversed(preceding):
+        preceding_version = versions[preceding_index]
+        if _version_is_non_release_qualifier(
+            clause, preceding_version[0]
+        ):
+            found_qualifier = True
+            if qualifier_version is None:
+                qualifier_version = preceding_version
+            continue
+        if (
+            qualifier_version is not None
+            and _qualifier_follows_closed_release_subject(
+                clause, preceding_version, qualifier_version[0]
+            )
+        ):
+            return None
+        return _version_group_names_candidate(
+            clause, versions, preceding_index, -1, version_pattern
+        )
+    return False if found_qualifier else None
+
+
+def _unpublished_status_names_candidate(
+    clause: str,
+    status: re.Match[str],
+    version_pattern: re.Pattern[str],
+) -> bool | None:
+    """Return whether a status clause names the candidate as its subject."""
+    coordinated = _coordinated_status_subject_candidate(
+        clause, status, version_pattern
+    )
+    if coordinated is not None:
+        return coordinated
+    versions = _version_tokens(clause)
+    overlapping = _overlapping_status_version_candidate(
+        versions, status, version_pattern
+    )
+    if overlapping is not None:
+        return overlapping
+    following = [
+        index
+        for index, version in enumerate(versions)
+        if version[0] >= status.end()
+    ]
+    preceding = [
+        index
+        for index, version in enumerate(versions)
+        if version[1] <= status.start()
+    ]
+    if following:
+        result = _following_status_version_candidate(
+            clause,
+            status,
+            versions,
+            following[0],
+            bool(preceding),
+            version_pattern,
+        )
+        if result is not None:
+            return result
+    if preceding:
+        return _preceding_status_version_candidate(
+            clause, versions, preceding, version_pattern
+        )
+    if following:
+        return _version_group_names_candidate(
+            clause, versions, following[0], 1, version_pattern
+        )
+    return None
+
+
+def _unpublished_status_is_negated(
+    text: str, status: re.Match[str]
+) -> bool:
+    """Return whether text explicitly negates a pending status phrase."""
+    if _POSITIVE_UNPUBLISHED_STATUS_RE.fullmatch(status.group(0)):
+        return False
+    return (
+        _NEGATED_UNPUBLISHED_STATUS_PREFIX_RE.search(text[: status.start()])
+        is not None
+    )
+
+
+def _has_unpublished_release_status(text: str) -> bool:
+    """Return whether text contains an affirmative unpublished status."""
+    return any(
+        not _unpublished_status_is_negated(text, status)
+        for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(text)
+    )
+
+
+def _clause_names_other_version(
+    clause: str, version_pattern: re.Pattern[str]
+) -> bool:
+    """Return whether a clause explicitly names a different version."""
+    return any(
+        version_pattern.fullmatch(token[2]) is None
+        for token in _version_tokens(clause)
+    )
+
+
+def _unpublished_status_names_other_subject(
+    clause: str, status: re.Match[str]
+) -> bool:
+    """Return whether a status clause names a non-release subject."""
+    prefix = clause[: status.start()].strip()
+    subject = _STATUS_SUBJECT_TAIL_RE.search(prefix)
+    if subject is None:
+        return False
+    return _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(
+        subject["subject"].strip()
+    ) is None
+
+
+def _unpublished_status_applies_to_candidate(
+    clause: str,
+    status: re.Match[str],
+    version_pattern: re.Pattern[str],
+    candidate_context: bool | None,
+    block_context: bool,
+) -> bool:
+    """Return whether an unpublished status refers to the candidate."""
+    if _unpublished_status_is_negated(clause, status):
+        return False
+    names_candidate = _unpublished_status_names_candidate(
+        clause, status, version_pattern
+    )
+    if names_candidate is not None:
+        return names_candidate
+    if _clause_names_other_version(clause, version_pattern):
+        return False
+    if _unpublished_status_names_other_subject(clause, status):
+        return False
+    return candidate_context is True or (
+        block_context and candidate_context is None
+    )
+
+
+def _version_group_names_candidate(
+    clause: str,
+    versions: list[tuple[int, int, str]],
+    start: int,
+    direction: int,
+    version_pattern: re.Pattern[str],
+) -> bool:
+    """Return whether a coordinated subject group contains the candidate."""
+    if (
+        version_pattern.fullmatch(versions[start][2]) is not None
+        and _version_is_non_release_qualifier(clause, versions[start][0])
+    ):
+        return False
+    group = [versions[start]]
+    index = start
+    while 0 <= index + direction < len(versions):
+        next_index = index + direction
+        left, right = sorted((versions[index], versions[next_index]))
+        separator = clause[left[1] : right[0]].replace("`", "")
+        if (
+            _VERSION_LIST_SEPARATOR_RE.fullmatch(separator) is None
+            or _version_is_non_release_qualifier(
+                clause, versions[next_index][0]
+            )
+        ):
+            break
+        group.append(versions[next_index])
+        index = next_index
+    return any(
+        version_pattern.fullmatch(version[2]) is not None for version in group
+    )
+
+
+def _candidate_modifier_precedes_subject_verb(
+    clause: str,
+    subject_verbs: list[re.Match[str]],
+    index: int,
+) -> bool:
+    """Return whether published/released modifies the following subject."""
+    if (
+        subject_verbs[index].group(0).casefold()
+        not in {"published", "released"}
+        or index + 1 >= len(subject_verbs)
+    ):
+        return False
+    subject = clause[: subject_verbs[index + 1].start()].strip(" \t,:;")
+    return _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None
+
+
+def _unversioned_subject_names_candidate(clause: str) -> bool | None:
+    """Resolve candidate context from an unversioned subject phrase."""
+    subject_verbs = list(_CLAUSE_SUBJECT_VERB_RE.finditer(clause))
+    if not subject_verbs:
+        return None
+    for index, subject_verb in enumerate(subject_verbs):
+        subject = clause[: subject_verb.start()].strip(" \t,:;")
+        subject = re.sub(
+            r"^(?:(?:and|but|so|then)\s+)+",
+            "",
+            subject,
+            flags=re.IGNORECASE,
+        )
+        if not subject or subject.casefold() in {
+            "it", "this", "that", "these", "those"
+        }:
+            return None
+        if _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(subject) is not None:
+            return True
+        if _candidate_modifier_precedes_subject_verb(
+            clause, subject_verbs, index
+        ):
+            continue
+        return False
+    return None
+
+
+def _candidate_in_trailing_subject_group(
+    clause: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Return whether a clause's last coordinated subject includes candidate."""
+    versions = _version_tokens(clause)
+    if not versions:
+        return _unversioned_subject_names_candidate(clause)
+    subject_indexes = [
+        index
+        for index, version in enumerate(versions)
+        if _CLAUSE_SUBJECT_VERB_RE.search(
+            clause[
+                version[1] : (
+                    versions[index + 1][0]
+                    if index + 1 < len(versions)
+                    else len(clause)
+                )
+            ]
+        )
+    ]
+    subject_index = (
+        subject_indexes[-1] if subject_indexes else len(versions) - 1
+    )
+    return _version_group_names_candidate(
+        clause, versions, subject_index, -1, version_pattern
+    )
+
+
+def _prerelease_claim_names_unpublished_version(
+    claim: str,
+    version_pattern: re.Pattern[str],
+    block_context: bool,
+    candidate_context: bool | None = None,
+) -> tuple[bool, bool | None]:
+    """Return whether stale wording identifies the candidate release."""
+    for clause in _RELEASE_CLAUSE_BREAK_RE.split(claim):
+        version_tokens = _version_tokens(clause)
+        statuses = [
+            status
+            for status in _UNPUBLISHED_RELEASE_CLAIM_RE.finditer(clause)
+            if not any(
+                version[0] <= status.start() and status.end() <= version[1]
+                for version in version_tokens
+            )
+        ]
+        if any(
+            _unpublished_status_applies_to_candidate(
+                clause,
+                status,
+                version_pattern,
+                candidate_context,
+                block_context,
+            )
+            for status in statuses
+        ):
+            return True, candidate_context
+        clause_context = _candidate_in_trailing_subject_group(
+            clause, version_pattern
+        )
+        if clause_context is not None:
+            candidate_context = clause_context
+    return False, candidate_context
+
+
+def _stable_predicate_prefix(prefix: str) -> str:
+    """Find the clause introducing the stable predicate."""
+    prefix = re.split(
+        r"\s(?:says|states|claims|reports|confirms)\s+(?:that\s+)?",
+        prefix,
+        flags=re.IGNORECASE,
+    )[-1]
+    parts = re.split(r"\sand\s+", prefix, flags=re.IGNORECASE)
+    clause_start = 0
+    seen_predicate = False
+    for index, part in enumerate(parts):
+        predicate = _CLAUSE_SUBJECT_VERB_RE.search(part)
+        if predicate is None:
+            continue
+        if seen_predicate and part[: predicate.start()].strip():
+            clause_start = index
+        seen_predicate = True
+    return " and ".join(parts[clause_start:])
+
+
+def _stable_claim_prefix_subject(
+    prefix: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Resolve the subject before checking versions elsewhere in the clause."""
+    prefix = _stable_predicate_prefix(prefix)
+    modifier = re.match(
+        r"\s*[*_`]*(?:(?:the|this|that|current|new|latest)\s+[*_`]*)*"
+        r"(?:published|released)[*_`]*\s+",
+        prefix,
+        re.IGNORECASE,
+    )
+    predicate = _CLAUSE_SUBJECT_VERB_RE.search(
+        prefix, modifier.end() if modifier else 0
+    )
+    if predicate is not None:
+        subject = prefix[: predicate.start()].strip()
+        head, *qualifier = re.split(
+            r"\s(?:for|with|against|on|under|using)\s+",
+            subject,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        head = re.sub(r"[*_`]", "", head).strip()
+        if re.search(r"\bguide$", head, re.IGNORECASE):
+            return False
+        if (
+            _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(head)
+            and head.casefold() != "it"
+            and (
+                not qualifier
+                or head.casefold().endswith("release candidate")
+                or re.match(r"nginx\b", qualifier[0], re.IGNORECASE)
+            )
+        ):
+            return True
+    return _candidate_in_trailing_subject_group(prefix, version_pattern)
+
+
+def _stable_claim_subject_context(
+    claim: str, version_pattern: re.Pattern[str]
+) -> bool | None:
+    """Resolve candidate context at each affirmative stable-release claim."""
+    unnegated = _NEGATED_STABLE_RELEASE_RE.sub(
+        lambda match: " " * len(match.group(0)), claim
+    )
+    contexts: list[bool | None] = []
+    for stable_claim in _STABLE_RELEASE_CLAIM_RE.finditer(unnegated):
+        prefix = claim[: stable_claim.start()]
+        clause_breaks = list(_RELEASE_CLAUSE_BREAK_RE.finditer(prefix))
+        start = max(
+            prefix.rfind(",") + 1,
+            prefix.rfind(":") + 1,
+            clause_breaks[-1].end() if clause_breaks else 0,
+        )
+        contexts.append(
+            _stable_claim_prefix_subject(
+                prefix[start:], version_pattern
+            )
+        )
+    if True in contexts:
+        return True
+    if None in contexts or not contexts:
+        return None
+    return False
+
+
+def _prerelease_claim_failure(
+    rel: str,
+    version: str,
+    claim: str,
+    version_pattern: re.Pattern[str],
+    block_context: bool,
+    candidate_context: bool | None = None,
+) -> tuple[str | None, bool | None]:
+    """Return a release-claim failure, if the claim describes the candidate."""
+    inherited_context = candidate_context
+    unpublished, candidate_context = _prerelease_claim_names_unpublished_version(
+        claim, version_pattern, block_context, candidate_context
+    )
+    if unpublished:
+        return (
+            f"{rel}: prerelease {version} described as unpublished or pending "
+            f"in: {claim[:80]!r}",
+            candidate_context,
+        )
+    if not _has_stable_release_claim(claim):
+        return None, candidate_context
+    if _stable_claims_all_name_other_releases(claim, version_pattern):
+        return None, candidate_context
+    subject_context = _stable_claim_subject_context(claim, version_pattern)
+    if subject_context is False:
+        return None, candidate_context
+    if (
+        subject_context is True
+        or version_pattern.search(claim) is not None
+        or (block_context and inherited_context is not False)
+    ):
+        return (
+            f"{rel}: prerelease {version} described as a stable release "
+            f"in: {claim[:80]!r}",
+            candidate_context,
+        )
+    return None, candidate_context
+
+
+def _prerelease_claim_failures(rel: str, version: str, text: str) -> list[str]:
+    """Flag stable or unpublished claims about a prerelease."""
+    failures: list[str] = []
+    version_pattern = _release_version_pattern(version)
+    text = _without_fenced_blocks(text)
+    history = set(_document_update_table_lines(text))
+    for block, context_version in _contextual_blocks(text, history, version_pattern):
+        block_context = (
+            context_version or version_pattern.search(block) is not None
+        )
+        candidate_context: bool | None = None
+        for claim in _split_sentences_protected(block):
+            failure, candidate_context = _prerelease_claim_failure(
+                rel,
+                version,
+                claim,
+                version_pattern,
+                block_context,
+                candidate_context,
+            )
+            if failure is not None:
+                failures.append(failure)
+    return failures
+
+
+def _first_dated_changelog_entry(changelog: str) -> tuple[str, str] | None:
+    """Return (version, date) for the newest dated changelog entry."""
+    match = DATED_CHANGELOG_RE.search(_without_fenced_blocks(changelog))
+    if match is None:
+        return None
+    version = match.group("version")
+    return (version, match.group("date")) if is_release_version(version) else None
+
+
+def _prerelease_notes_failures(
+    path: Path, version: str, release_date: str | None
+) -> list[str]:
+    """Require a dated candidate status for a published prerelease."""
+    rel = f"docs/releases/{version}-release-notes.md"
+    if not path.is_file():
+        return [f"{rel}: missing release notes for released {version}"]
+    text = _without_fenced_blocks(
+        path.read_text(encoding="utf-8", errors="ignore")
+    )
+    failures: list[str] = []
+    if re.search(rf"^# Release Notes: {re.escape(version)}\s*$", text, re.MULTILINE) is None:
+        failures.append(f"{rel}: missing '# Release Notes: {version}' title")
+    statuses = re.findall(r"^\*\*Status\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if not statuses:
+        failures.append(f"{rel}: missing release status for released {version}")
+    elif len(statuses) > 1:
+        failures.append(f"{rel}: release notes must contain exactly one Status field")
+    else:
+        value = " ".join(statuses[0].split())
+        if _has_unpublished_release_status(value):
+            failures.append(
+                f"{rel}: prerelease {version} described as unpublished "
+                "or pending in release notes status"
+            )
+        elif _has_stable_release_claim(value):
+            failures.append(f"{rel}: prerelease {version} cannot claim a stable status")
+        elif re.match(
+            r"^(?:Release candidate|Pre-release)(?:[.,]|$)", value, re.IGNORECASE
+        ) is None:
+            failures.append(
+                f"{rel}: prerelease {version} carries status {value!r}"
+            )
+    dates = re.findall(r"^\*\*Date\*\*:(?P<value>.*)$", text, re.MULTILINE)
+    if not dates:
+        failures.append(f"{rel}: missing release date for released {version}")
+    elif len(dates) > 1:
+        failures.append(f"{rel}: release notes must contain exactly one Date field")
+    elif release_date is not None and dates[0].strip() != release_date:
+        failures.append(
+            f"{rel}: date {dates[0].strip()!r} does not match "
+            f"CHANGELOG date {release_date!r}"
+        )
+    return failures
+
+
+def check_prerelease_release_surfaces(
+    root: Path,
+    version: str,
+    release_date: str | None,
+    surface_rel_paths: tuple[str, ...] = RELEASE_SURFACE_FILES,
+) -> list[str]:
+    """Check a published prerelease without demanding a stable status."""
+    failures: list[str] = []
+    notes_rel = f"docs/releases/{version}-release-notes.md"
+    for template in surface_rel_paths:
+        rel = template.format(version=version)
+        if rel == notes_rel:
+            continue
+        path = root / rel
+        if not path.is_file():
+            failures.append(f"{rel}: missing release surface for {version}")
+            continue
+        failures.extend(
+            _prerelease_claim_failures(
+                rel, version, path.read_text(encoding="utf-8", errors="ignore")
+            )
+        )
+    failures.extend(
+        _prerelease_notes_failures(root / notes_rel, version, release_date)
+    )
+    return failures
+
+
 def _stable_surface_check(
     changelog: str,
     root: Path,
@@ -1183,11 +2057,17 @@ def _stable_surface_check(
         return False, parse_errors
     if stable_version is None:
         return False, []
+    if "-" in stable_version:
+        entry = _first_dated_changelog_entry(changelog)
+        release_date = entry[1] if entry is not None else None
+        return True, check_prerelease_release_surfaces(
+            root, stable_version, release_date
+        )
     return True, check_stable_release_surfaces(root, stable_version)
 
 
 def _release_notes_status_failures(path: Path, version: str) -> list[str]:
-    """Require the release notes of a released version to carry a stable status."""
+    """Require a stable or candidate status that matches the release line."""
     rel = f"docs/releases/{version}-release-notes.md"
     if not path.is_file():
         return [f"{rel}: missing release notes for released {version}"]
@@ -1198,6 +2078,16 @@ def _release_notes_status_failures(path: Path, version: str) -> list[str]:
     if status is None:
         return [f"{rel}: missing release status for released {version}"]
     value = " ".join(status["value"].split()).casefold()
+    if "-" in version:
+        if _has_unpublished_release_status(value):
+            return [
+                f"{rel}: prerelease {version} cannot be marked unpublished"
+            ]
+        if _has_stable_release_claim(value):
+            return [f"{rel}: prerelease {version} cannot carry a stable status"]
+        if re.match(r"^(?:release candidate|pre-release)(?:[.,]|$)", value) is None:
+            return [f"{rel}: released {version} carries status {status['value']!r}"]
+        return []
     if value != "stable release":
         return [f"{rel}: released {version} carries status {status['value']!r}"]
     return []
@@ -1278,7 +2168,7 @@ PENDING_BOUNDARY_OPTIONAL_SURFACES = frozenset({
 # download that works today.
 _PREPUBLICATION_BOUNDARY_RE = re.compile(
     r"after (?:the )?(?:publication|release)"
-    r"|after (?:(?:the )?(?:v?\d+\.\d+\.\d+"
+    rf"|after (?:(?:the )?(?:v?{_RELEASE_VERSION_TOKEN}"
     r"(?: (?:release|tag))?|version|tag)|it|"
     r"this (?:version|release)|that (?:version|release))"
     r"\s+(?:is|has been|will be|gets)\s+(?:published|released)"
@@ -1462,6 +2352,16 @@ _ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "al.", "et al.")
 # Placeholder for protected abbreviations during sentence splitting.
 _ABBR_PLACEHOLDER = "\uE000"  # Private use area, won't appear in docs
 
+
+def _protect_version_periods(text: str) -> str:
+    """Replace periods inside complete version tokens with placeholders."""
+    protected = list(text)
+    for start, end, _version in _version_tokens(text):
+        for index in range(start, end):
+            if protected[index] == ".":
+                protected[index] = _ABBR_PLACEHOLDER
+    return "".join(protected)
+
 def _protect_abbreviations(text: str) -> str:
     """Replace known abbreviations with placeholders to prevent false splits."""
     for abbr in sorted(_ABBREVIATIONS, key=len, reverse=True):
@@ -1480,7 +2380,7 @@ def _restore_abbreviations(text: str) -> str:
 
 # Sentence splitting must handle missing space after period (common in prose).
 # Split on punctuation plus whitespace, or punctuation plus an uppercase letter.
-# Known whole-word abbreviations are protected to prevent false splits.
+# Complete version tokens and known abbreviations are protected before splitting.
 _SENTENCE_SPLIT_RE = re.compile(
     r"(?<=[.!?])(?:\s+|(?=[A-Z]))",
 )
@@ -1495,13 +2395,20 @@ def _first_dated_changelog_version(changelog: str) -> str | None:
 
     The first dated heading is the released one: an unreleased entry above it
     belongs to the pending line, and that line has no publication date yet.
+    Any malformed dated identity makes the lookup fail closed.
     """
     text = _without_fenced_blocks(changelog)
+    version: str | None = None
     for match in MARKDOWN_HEADING_LINE_RE.finditer(text):
         dated = DATED_CHANGELOG_RE.match(match.group(0))
-        if dated is not None:
-            return dated.group("version")
-    return None
+        if dated is None:
+            continue
+        heading_version = dated.group("version")
+        if not is_release_version(heading_version):
+            return None
+        if version is None:
+            version = heading_version
+    return version
 
 
 def _is_conditional_publication_block(block: str) -> bool:
@@ -1521,8 +2428,8 @@ def _is_conditional_publication_block(block: str) -> bool:
 
 
 def _split_sentences_protected(text: str) -> list[str]:
-    """Split text into sentences while protecting known abbreviations."""
-    protected = _protect_abbreviations(text)
+    """Split sentences while protecting version tokens and abbreviations."""
+    protected = _protect_abbreviations(_protect_version_periods(text))
     return [_restore_abbreviations(s) for s in _SENTENCE_SPLIT_RE.split(protected)]
 
 
@@ -1583,7 +2490,7 @@ def _claim_followed_by_publication_boundary(
     after_claim = sentence[claim.end() :]
     return re.search(
         r"^\s*(?:only\s+)?(?:after\s+(?:the\s+)?(?:publication|release)\b"
-        r"|after\s+(?:(?:the\s+)?(?:v?\d+\.\d+\.\d+|version|tag|release)\s+)?"
+        rf"|after\s+(?:(?:the\s+)?(?:v?{_RELEASE_VERSION_TOKEN}|version|tag|release)\s+)?"
         r"(?:is|has been|will be|gets)\s+(?:published|released)\b"
         r"|once\s+(?:it\s+is\s+)?published\b"
         r"|following\s+(?:the\s+)?publication\b)",
@@ -1619,7 +2526,7 @@ def _completion_claim_is_nonaffirmative(
 def _nearest_version_to_claim(
     window: str, claim: re.Match[str]
 ) -> tuple[int, int, str] | None:
-    """Return the version token closest to a completion verb."""
+    """Return the version token closest to the claim match."""
     if versions := _version_tokens(window):
         return min(versions, key=lambda token: abs(token[0] - claim.start()))
     else:
@@ -1687,11 +2594,7 @@ def _generic_artifact_availability(
     if claim.group(0).lower() != "available":
         return False
     before = window[max(0, claim.start() - 80):claim.start()]
-    # Only the clause that carries the verb counts: an artifact subject in
-    # an earlier clause ("artifacts are checked, the release is available")
-    # says nothing about what is available.
-    clause_breaks = list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before))
-    if clause_breaks:
+    if clause_breaks := list(_COMPLETION_CLAUSE_BREAK_RE.finditer(before)):
         before = before[clause_breaks[-1].end():]
     return _GENERIC_AVAILABILITY_OBJECT_RE.search(before) is not None
 
@@ -2025,16 +2928,13 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
     """Require the published baseline release to stay canonical.
 
     A pending line sits on top of a real publication, so the checks confirm
-    that the published release notes still carry the stable status and the
-    changelog date that the release declared.
+    that the published release notes carry the correct release status and
+    the changelog date that the release declared.
     """
-    failures = _release_notes_status_failures(
-        root / "docs" / "releases" / f"{published_version}-release-notes.md",
-        published_version,
-    )
+    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
     changelog_path = root / CHANGELOG_FILENAME
     if not changelog_path.is_file():
-        return failures
+        return _release_notes_status_failures(notes, published_version)
     changelog = _without_fenced_blocks(
         changelog_path.read_text(encoding="utf-8", errors="ignore")
     )
@@ -2045,11 +2945,16 @@ def _published_baseline_failures(root: Path, published_version: str) -> list[str
         re.MULTILINE,
     )
     if heading is None:
+        failures = _release_notes_status_failures(notes, published_version)
         failures.append(
             f"{CHANGELOG_FILENAME}: published {published_version} has no dated heading"
         )
         return failures
-    notes = root / "docs" / "releases" / f"{published_version}-release-notes.md"
+    if "-" in published_version:
+        return _prerelease_notes_failures(
+            notes, published_version, heading["date"]
+        )
+    failures = _release_notes_status_failures(notes, published_version)
     if notes.is_file():
         declared = re.search(
             r"^\*\*Date\*\*:(?P<value>.*)$",
@@ -2104,13 +3009,18 @@ def check_release_state_contract(
     if published_version is None:
         return []
     failures: list[str] = []
+    claim_check = (
+        _prerelease_claim_failures
+        if "-" in published_version
+        else _stable_claim_failures
+    )
     for template in surface_rel_paths:
         rel = template.format(version=published_version)
         path = root / rel
         if not path.is_file():
             continue
         failures.extend(
-            _stable_claim_failures(
+            claim_check(
                 rel,
                 published_version,
                 path.read_text(encoding="utf-8", errors="ignore"),

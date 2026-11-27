@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "generator": "tools/reason-codegen/generate.py",
+  "source": "components/rust-converter/reason_registry.toml",
+  "source_sha256": "aa67c062dcc8768155db2b915f7a50e511f2480bb7cf2cdb7d9453559be3207d",
+  "total_count": 25,
+  "discriminant_range": {
+    "min": 0,
+    "max": 24
+  },
+  "metric_families": [
+    "markdown_conversions_total",
+    "markdown_errors_total",
+    "markdown_failed_closed_total",
+    "markdown_failed_open_total",
+    "markdown_skipped_total"
+  ],
+  "stages": [
+    "conversion",
+    "decompression",
+    "delivery",
+    "eligibility",
+    "parsing",
+    "precommit"
+  ],
+  "outcomes": [
+    "aborted",
+    "converted",
+    "failed_closed",
+    "failed_open",
+    "skipped"
+  ]
+}

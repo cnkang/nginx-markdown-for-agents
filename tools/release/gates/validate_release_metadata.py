@@ -9,8 +9,17 @@ import sys
 from datetime import date
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+from lib.semver import SEMVER_PATTERN  # noqa: E402
+
 # Repository-relative directory holding the per-version release notes.
 RELEASE_NOTES_DIR = ("docs", "releases")
+_STABLE_RELEASE_CLAIM_RE = re.compile(r"\bstable release\b", re.IGNORECASE)
+_NEGATED_STABLE_RELEASE_RE = re.compile(
+    r"\bnot\s+(?:a\s+)?stable release\b", re.IGNORECASE
+)
 
 
 def _validate_changelog(
@@ -56,8 +65,8 @@ def _validate_project_status(
     """
     project_match = re.search(
         rf"^### Current Release Line {re.escape(version)}\s*$"
-        rf"(?P<body>.*?)(?=^### |\Z)",
-        text,
+        rf"(?P<body>.*?)(?=^#{{1,3}}[ \t]+|\Z)",
+        "\n".join(_unfenced_lines(text)),
         re.MULTILINE | re.DOTALL,
     )
     if project_match is None:
@@ -146,6 +155,16 @@ def _release_note_field(text: str, field: str) -> str | None:
     return None
 
 
+def _release_note_fields(text: str, field: str) -> list[str]:
+    """Return all unfenced markdown release-note field values."""
+    prefix = f"**{field}**:"
+    return [
+        line[len(prefix):].strip()
+        for line in _unfenced_lines(text)
+        if line.startswith(prefix)
+    ]
+
+
 def _validate_release_notes(
     path: Path,
     version: str,
@@ -171,6 +190,182 @@ def _validate_release_notes(
         errors.append(f"{path}: missing release status")
     elif notes_status.casefold() != "stable release":
         errors.append(f"{path}: {version} is not marked Stable release")
+    return errors
+
+
+_FUTURE_PUBLICATION_PREFIX = (
+    r"\b(?:to|will|shall|may|might|can|could|should|must|due\s+to|"
+    r"going\s+to|about\s+to|expected\s+to|scheduled\s+to|planned\s+to)"
+    r"\s+(?:have\s+)?(?:be(?:en)?\s+)?"
+)
+_FUTURE_PUBLICATION_PREFIX_RE = re.compile(
+    _FUTURE_PUBLICATION_PREFIX + r"$", re.IGNORECASE
+)
+_FUTURE_PUBLICATION_RE = re.compile(
+    _FUTURE_PUBLICATION_PREFIX + r"(?:published|released)\b",
+    re.IGNORECASE,
+)
+_NEGATED_PUBLICATION_PREFIX_RE = re.compile(
+    r"\b(?:not(?:\s+yet)?|never)(?:\s+been)?\s+$"
+    r"|\b(?:has|have|had)\s+(?:not|n['’]t)\s+"
+    r"(?:yet\s+)?(?:been\s+)?$",
+    re.IGNORECASE,
+)
+_PUBLISHED_DATE_RE = re.compile(
+    r"\bpublished(?:\s+on)?\s+(?P<date>\d{4}-\d{2}-\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def _published_dates(value: str) -> list[str]:
+    """Return dates stated as completed publication dates."""
+    return [
+        match["date"]
+        for match in _PUBLISHED_DATE_RE.finditer(value)
+        if _FUTURE_PUBLICATION_PREFIX_RE.search(value[: match.start()]) is None
+        and _NEGATED_PUBLICATION_PREFIX_RE.search(value[: match.start()]) is None
+    ]
+
+
+def _prerelease_status_errors(
+    value: str, path: Path, release_date: str | None = None
+) -> list[str]:
+    """Require a published candidate status without a stable claim."""
+    normalized = " ".join(value.split())
+    unnegated_status = _NEGATED_STABLE_RELEASE_RE.sub("", normalized)
+    if _STABLE_RELEASE_CLAIM_RE.search(unnegated_status) is not None:
+        return [f"{path}: a prerelease cannot be marked stable"]
+    if _FUTURE_PUBLICATION_RE.search(normalized) is not None:
+        return [
+            f"{path}: final prerelease status must describe a published release"
+        ]
+    unpublished_statuses = re.finditer(
+        r"\b(?:"
+        r"not\s+(?:yet\s+)?(?:published|released)"
+        r"|never(?:\s+been)?\s+(?:published|released)"
+        r"|(?:has|have|had)(?:\s+not|n['’]t)\s+"
+        r"(?:yet\s+)?been\s+(?:published|released)"
+        r"|unpublished|unreleased"
+        r"|(?<!no )pending\s+publication"
+        r"|(?<!no )pending\s+release(?!\s+(?:blockers?|feedback)\b)"
+        r"|(?<!no )(?:publication|release)"
+        r"\s+(?:(?:is|are|remains?|stays?)\s+)?pending"
+        r"|awaiting\s+publication"
+        r"|awaiting\s+release(?!\s+feedback\b)"
+        r")\b",
+        normalized,
+        re.IGNORECASE,
+    )
+    if any(
+        re.search(
+            r"\b(?:not(?:\s+yet)?|never|no\s+(?:longer|more)|"
+            r"(?:is|are|was|were|has|have|had)n['’]t)\s+$",
+            normalized[: status.start()],
+            re.IGNORECASE,
+        ) is None
+        for status in unpublished_statuses
+    ):
+        return [
+            f"{path}: final prerelease status must describe a published release"
+        ]
+    if re.match(
+        r"^(?:Release candidate|Pre-release)(?:[.,]|$)",
+        normalized,
+        re.IGNORECASE,
+    ) is None:
+        return [f"{path}: prerelease status must identify a release candidate"]
+    if release_date is not None:
+        mismatched_dates = [
+            date for date in _published_dates(normalized) if date != release_date
+        ]
+        if mismatched_dates:
+            return [
+                f"{path}: publication statement date {mismatched_dates[0]!r} "
+                f"does not match CHANGELOG date {release_date!r}"
+            ]
+    return []
+
+
+def _validate_prerelease_project_status(
+    path: Path,
+    version: str,
+    text: str,
+    release_date: str | None,
+) -> list[str]:
+    """Validate the current release line for a published prerelease."""
+    prose = "\n".join(_unfenced_lines(text))
+    sections = list(
+        re.finditer(
+            rf"^### Current Release Line {re.escape(version)}\s*$"
+            rf"(?P<body>.*?)(?=^#{{1,3}}[ \t]+|\Z)",
+            prose,
+            re.MULTILINE | re.DOTALL,
+        )
+    )
+    if not sections:
+        return [f"{path}: missing current release line {version}"]
+    if len(sections) > 1:
+        return [
+            f"{path}: {version} section must occur exactly once"
+        ]
+    body = sections[0].group("body")
+    status_matches = re.findall(
+        r"^\*\*Status:\*\*(?P<value>.*)$",
+        body,
+        re.MULTILINE,
+    )
+    if not status_matches:
+        return [f"{path}: missing **Status:** line for {version}"]
+    if len(status_matches) > 1:
+        return [
+            f"{path}: {version} section must contain exactly one Status field"
+        ]
+    errors = _prerelease_status_errors(
+        status_matches[0], path, release_date
+    )
+    if release_date is not None and not _published_dates(status_matches[0]):
+        errors.append(
+            f"{path}: publication date {release_date} is missing or mismatched "
+            f"in the {version} publication statement"
+        )
+    return errors
+
+
+def _validate_prerelease_notes(
+    path: Path,
+    version: str,
+    release_date: str | None,
+    text: str,
+) -> list[str]:
+    """Validate release-note date and candidate status for a prerelease."""
+    errors: list[str] = []
+    unfenced = "\n".join(_unfenced_lines(text))
+    if re.search(
+        rf"^# Release Notes: {re.escape(version)}\s*$", unfenced, re.MULTILINE
+    ) is None:
+        errors.append(f"{path}: missing '# Release Notes: {version}' title")
+    date_fields = _release_note_fields(text, "Date")
+    status_fields = _release_note_fields(text, "Status")
+    if not date_fields:
+        errors.append(f"{path}: missing release date")
+    elif len(date_fields) > 1:
+        errors.append(f"{path}: release notes must contain exactly one Date field")
+    elif release_date is not None and date_fields[0] != release_date:
+        errors.append(
+            f"{path}: date {date_fields[0]!r} does not match CHANGELOG date "
+            f"{release_date!r}"
+        )
+    if not status_fields:
+        errors.append(f"{path}: missing release status")
+    else:
+        if len(status_fields) > 1:
+            errors.append(
+                f"{path}: release notes must contain exactly one Status field"
+            )
+        else:
+            errors.extend(
+                _prerelease_status_errors(status_fields[0], path, release_date)
+            )
     return errors
 
 
@@ -206,7 +401,7 @@ def _candidate_project_status_errors(
     project_prose = "\n".join(_unfenced_lines(project))
     sections = list(
         re.finditer(
-            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^### |\Z)",
+            rf"^### Current Release Line {re.escape(version)}\s*$(.*?)(?=^#{{1,3}}[ \t]+|\Z)",
             project_prose,
             re.MULTILINE | re.DOTALL,
         )
@@ -249,7 +444,16 @@ def _validate_candidate_metadata(
     errors.extend(_candidate_project_status_errors(project, version, project_path))
     if f"# Release Notes: {version}" not in _unfenced_lines(notes):
         errors.append(f"{notes_path}: missing '# Release Notes: {version}' title")
-    errors.extend(_candidate_status_errors(_release_note_field(notes, "Status"), notes_path))
+    note_statuses = _release_note_fields(notes, "Status")
+    if not note_statuses:
+        errors.extend(_candidate_status_errors(None, notes_path))
+    elif len(note_statuses) > 1:
+        errors.append(
+            f"{notes_path}: candidate release notes must contain exactly one "
+            "Status field"
+        )
+    else:
+        errors.extend(_candidate_status_errors(note_statuses[0], notes_path))
     if _release_note_field(notes, "Date") is not None:
         errors.append(f"{notes_path}: candidate cannot declare a publication Date")
     target = _release_note_field(notes, "Target release date")
@@ -269,7 +473,9 @@ def validate_release_metadata(repo_root: Path, version: str, phase: str = "final
 
     Candidate phase validates pending metadata for artifact-only dispatch.
     Final phase requires published metadata, so a tag cannot publish
-    documentation that still describes a pending release.
+    documentation that still describes a pending release.  A prerelease
+    identity keeps the candidate status in the final phase: the release is
+    published, but it is not a stable release.
     """
     changelog_path = repo_root / "CHANGELOG.md"
     project_status_path = repo_root / "docs" / "project" / "PROJECT_STATUS.md"
@@ -292,6 +498,18 @@ def validate_release_metadata(repo_root: Path, version: str, phase: str = "final
         return [f"unknown release metadata phase: {phase}"]
     errors, release_date = _validate_changelog(changelog_path, version, changelog)
     concrete_date = release_date if release_date != "Unreleased" else None
+    if "-" in version:
+        errors.extend(
+            _validate_prerelease_project_status(
+                project_status_path, version, project_status, concrete_date
+            )
+        )
+        errors.extend(
+            _validate_prerelease_notes(
+                release_notes_path, version, release_date, release_notes
+            )
+        )
+        return errors
     errors.extend(
         _validate_project_status(
             project_status_path, version, project_status, concrete_date
@@ -325,9 +543,10 @@ def main() -> int:
         help="Repository root (default: detected from this script)",
     )
     args = parser.parse_args()
-    if re.fullmatch(r"\d+\.\d+\.\d+", args.version) is None:
+    if SEMVER_PATTERN.fullmatch(args.version) is None:
         print(
-            f"ERROR: --version must look like X.Y.Z, got {args.version!r}",
+            f"ERROR: --version must be a SemVer release identity, "
+            f"got {args.version!r}",
             file=sys.stderr,
         )
         return 1

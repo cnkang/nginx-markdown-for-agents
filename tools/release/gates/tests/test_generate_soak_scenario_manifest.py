@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from tools.lib.path_validation import validate_read_path
 from tools.release.gates import generate_soak_scenario_manifest as generator
 
 ROOT = Path(generator.__file__).resolve().parents[3]
@@ -64,10 +66,16 @@ def test_build_manifest_rejects_missing_scenario_memory() -> None:
 
 
 def test_output_path_is_version_scoped() -> None:
-    assert generator.DEFAULT_VERSION == "0.9.4"
+    manifest_path = validate_read_path(
+        ROOT / "components/rust-converter/Cargo.toml",
+        purpose="test fixture manifest",
+    )
+    with manifest_path.open("rb") as handle:
+        cargo_version = tomllib.load(handle)["package"]["version"]
+    assert generator.DEFAULT_VERSION == cargo_version
     output = generator._output_path(generator.DEFAULT_VERSION)
     assert output == ROOT / (
-        "artifacts/release/0.9.4/short-soak-scenario-manifest.json"
+        f"artifacts/release/{cargo_version}/short-soak-scenario-manifest.json"
     )
 
 
@@ -77,6 +85,13 @@ def test_output_path_rejects_untrusted_version_components() -> None:
 
     assert generator._output_path("0.9.4") == ROOT / (
         "artifacts/release/0.9.4/short-soak-scenario-manifest.json"
+    )
+
+
+def test_output_path_accepts_prerelease_identity() -> None:
+    """A prerelease release identity is a valid artifact directory name."""
+    assert generator._output_path("1.0.0-rc.1") == ROOT / (
+        "artifacts/release/1.0.0-rc.1/short-soak-scenario-manifest.json"
     )
 
 

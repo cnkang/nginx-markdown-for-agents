@@ -5,11 +5,13 @@ from __future__ import annotations
 import errno
 import json
 import os
+import tomllib
 import types
 from pathlib import Path
 
 import pytest
 
+from tools.lib.path_validation import validate_read_path
 from tools.release.gates import validate_soak_qualification as validator
 
 REPO_ROOT = Path(validator.__file__).resolve().parents[3]
@@ -19,7 +21,13 @@ MANIFEST = FIXTURE_DIR / "soak-qualification-manifest.json"
 
 def test_default_artifact_paths_follow_current_release_version() -> None:
     version = validator.DEFAULT_RELEASE_VERSION
-    assert version == "0.9.4"
+    manifest_path = validate_read_path(
+        REPO_ROOT / "components/rust-converter/Cargo.toml",
+        purpose="test fixture manifest",
+    )
+    with manifest_path.open("rb") as handle:
+        cargo_version = tomllib.load(handle)["package"]["version"]
+    assert version == cargo_version
     assert validator.DEFAULT_MANIFEST == (
         REPO_ROOT
         / "artifacts"
