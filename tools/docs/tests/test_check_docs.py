@@ -2022,7 +2022,8 @@ def test_published_prerelease_notes_require_unique_unfenced_fields(
 
     notes.write_text(canonical + duplicate, encoding="utf-8")
     failures = docs_checker._prerelease_notes_failures(notes, version, "2026-12-01")
-    assert len(failures) == 1 and f"exactly one {field} field" in failures[0], failures
+    assert len(failures) == 1, failures
+    assert f"exactly one {field} field" in failures[0]
 
 
 def test_release_state_contract_checks_current_unreleased_changelog_prose(
