@@ -77,9 +77,24 @@ new unused path on a repeat upgrade. Do not change `PRE_CANDIDATE_BACKUP`
 after the first upgrade. Set `NGINX_BIN` to the absolute path of the binary
 that the service runs.
 
-The backup command creates the file exclusively, so a repeat or concurrent
-upgrade cannot replace the pre-candidate backup. Back up the current module
-and stop NGINX before you install the candidate.
+Serialize upgrades and rollbacks for the same module. All operators must use
+the same lock directory next to the active module file. Acquire the lock
+before you back up or replace the module:
+
+```bash
+MODULE_LOCK="$MODULES_DIR/.ngx_http_markdown_filter_module.so.upgrade-lock"
+sudo mkdir "$MODULE_LOCK"
+```
+
+If `mkdir` fails, stop the procedure. If another operation holds the lock,
+wait for it to finish and acquire the lock before you retry. Keep the lock
+through backup, installation, configuration testing, and service start.
+If you find a lock after an interruption, confirm that the prior operation
+has ended and resolve any incomplete upgrade before clearing the lock.
+
+Before the first backup, confirm that the active module is the pre-candidate
+build. The backup command creates the destination exclusively. Back up the
+current module and stop NGINX before you install the candidate.
 
 ```bash
 sudo sh -c 'set -C; cat "$1" > "$2"' sh \
@@ -98,9 +113,18 @@ test the configuration with the installed NGINX binary and start NGINX.
 sudo "$NGINX_BIN" -t && sudo systemctl start nginx
 ```
 
-To roll back, stop NGINX before replacing the mapped module. Then test the
-configuration and start NGINX to load the previous module. Use the
-`PRE_CANDIDATE_BACKUP` and `NGINX_BIN` values from the upgrade:
+After the upgrade or rollback completes, release the lock with
+`sudo rmdir "$MODULE_LOCK"`.
+
+To roll back, acquire the same lock and use `PRE_CANDIDATE_BACKUP` from the
+first upgrade. If upgrades overlapped, verify that this file contains the
+pre-candidate module before you restore it. If you cannot verify it, restore
+a verified copy from a trusted pre-candidate archive to that backup path.
+Stop the rollback if you have no verified copy. A repeat upgrade's backup
+can contain the candidate.
+
+Stop NGINX before you replace the mapped module. Then test the configuration
+with `NGINX_BIN` from the upgrade and start NGINX to load the previous module:
 
 ```bash
 sudo systemctl stop nginx &&

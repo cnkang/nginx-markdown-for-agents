@@ -1390,8 +1390,11 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
     [
         "The release candidate is a stable release.",
         "The release candidate for NGINX 1.28.0 is a stable release.",
+        "The release candidate for this module is a stable release.",
+        "The published release candidate for NGINX 1.28.0 is a stable release.",
         "The release candidate replaces 1.28.0 as the stable release.",
         "The upgrade guide says **the release candidate** is a stable release.",
+        "The guide for {version} confirms that the release candidate is a stable release.",
         "The installation guide is available and {version} is a stable release.",
         "The guide is available and {version} is tagged and remains a stable release.",
     ],
@@ -1418,6 +1421,7 @@ def test_candidate_stable_subject_overrides_inherited_other_subject_context(clai
         "The {version} installation guide",
         "The **{version} installation guide**",
         "The installation guide for release candidate {version}",
+        "The published installation guide for {version}",
     ],
 )
 def test_prerelease_stable_claim_respects_resolved_other_subject(subject):
@@ -1430,6 +1434,13 @@ def test_prerelease_stable_claim_respects_resolved_other_subject(subject):
     assert docs_checker._prerelease_claim_failures(
         "README.md", version, text
     ) == []
+
+
+def test_prerelease_stable_claim_allows_a_guide_reference():
+    version = "1.0.0-rc.1"
+    text = f"The guide for {version} explains how to install the stable release."
+
+    assert docs_checker._prerelease_claim_failures("README.md", version, text) == []
 
 
 @pytest.mark.parametrize(
@@ -1990,6 +2001,28 @@ def test_release_state_contract_requires_date_for_published_prerelease_baseline(
     assert docs_checker.check_release_state_contract(
         tmp_path, surface_rel_paths=()
     ) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "second_value"),
+    [("Date", "2026-12-02"), ("Status", "Release candidate. Not yet published.")],
+)
+def test_published_prerelease_notes_require_unique_unfenced_fields(
+    tmp_path, field, second_value
+):
+    version = "1.0.0-rc.1"
+    notes = tmp_path / f"{version}-release-notes.md"
+    canonical = (
+        f"# Release Notes: {version}\n"
+        "**Date**: 2026-12-01\n**Status**: Release candidate\n"
+    )
+    duplicate = f"**{field}**: {second_value}\n"
+    notes.write_text(f"{canonical}\n```markdown\n{duplicate}```\n", encoding="utf-8")
+    assert docs_checker._prerelease_notes_failures(notes, version, "2026-12-01") == []
+
+    notes.write_text(canonical + duplicate, encoding="utf-8")
+    failures = docs_checker._prerelease_notes_failures(notes, version, "2026-12-01")
+    assert len(failures) == 1 and f"exactly one {field} field" in failures[0], failures
 
 
 def test_release_state_contract_checks_current_unreleased_changelog_prose(

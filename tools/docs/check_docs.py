@@ -1813,7 +1813,7 @@ def _prerelease_claim_names_unpublished_version(
 def _stable_predicate_prefix(prefix: str) -> str:
     """Find the clause introducing the stable predicate."""
     prefix = re.split(
-        r"\s(?:says|states|claims|reports)\s+(?:that\s+)?",
+        r"\s(?:says|states|claims|reports|confirms)\s+(?:that\s+)?",
         prefix,
         flags=re.IGNORECASE,
     )[-1]
@@ -1835,7 +1835,15 @@ def _stable_claim_prefix_subject(
 ) -> bool | None:
     """Resolve the subject before checking versions elsewhere in the clause."""
     prefix = _stable_predicate_prefix(prefix)
-    predicate = _CLAUSE_SUBJECT_VERB_RE.search(prefix)
+    modifier = re.match(
+        r"\s*[*_`]*(?:(?:the|this|that|current|new|latest)\s+)*"
+        r"(?:published|released)\s+",
+        prefix,
+        re.IGNORECASE,
+    )
+    predicate = _CLAUSE_SUBJECT_VERB_RE.search(
+        prefix, modifier.end() if modifier else 0
+    )
     if predicate is not None:
         subject = prefix[: predicate.start()].strip()
         head, *qualifier = re.split(
@@ -1850,7 +1858,11 @@ def _stable_claim_prefix_subject(
         if (
             _CANDIDATE_STATUS_SUBJECT_RE.fullmatch(head)
             and head.casefold() != "it"
-            and (not qualifier or re.match(r"nginx\b", qualifier[0], re.IGNORECASE))
+            and (
+                not qualifier
+                or head.casefold().endswith("release candidate")
+                or re.match(r"nginx\b", qualifier[0], re.IGNORECASE)
+            )
         ):
             return True
     return _candidate_in_trailing_subject_group(prefix, version_pattern)

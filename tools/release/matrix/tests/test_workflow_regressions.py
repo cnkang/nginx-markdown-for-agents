@@ -1227,6 +1227,8 @@ def test_smoke_test_writes_package_row_evidence_when_selected() -> None:
     assert step["if"] == "matrix.evidence_distro != ''"
     assert '--distro "${EVIDENCE_DISTRO}"' in step["run"]
     assert "verify-nginx-org-module.sh" in step["run"]
+    assert "dnf install -y python3 python3.11 binutils" in step["run"]
+    assert "python3.11 tools/release/matrix/record_nginx_org_evidence.py" in step["run"]
     upload = _step_by_name(steps, "Upload nginx.org package-row evidence")
     assert upload["if"] == "matrix.evidence_distro != ''"
     assert upload["with"]["name"].startswith("compat-evidence-pkg-")
