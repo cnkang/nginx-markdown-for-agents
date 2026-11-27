@@ -40,27 +40,60 @@ across several packages.
    for the recorded NGINX revision. Use absolute paths or start each path with
    `./`.
 
-   Run each pair in order. Review each simulation before running the matching
-   change. Proceed only if the simulation succeeds and shows the intended
-   changes.
+   Review each simulation before you run the matching change. Proceed only if
+   the simulation succeeds and targets the intended packages.
 
-   On DEB systems:
+   On DEB systems, simulate the module removal:
 
    ```bash
    sudo apt-get -s remove "$MODULE_PACKAGE"
-   sudo apt-get remove "$MODULE_PACKAGE"
+   ```
 
+   After the simulation shows the intended changes, remove the module:
+
+   ```bash
+   sudo apt-get remove "$MODULE_PACKAGE"
+   ```
+
+   Then simulate the NGINX downgrade:
+
+   ```bash
    sudo apt-get -s install --allow-downgrades "${NGINX_DEBS[@]}"
+   ```
+
+   After the simulation shows the intended changes, downgrade NGINX:
+
+   ```bash
    sudo apt-get install --allow-downgrades "${NGINX_DEBS[@]}"
    ```
 
-   On RPM systems:
+   On RPM systems, `rpm --test` reports conflicts and dependency problems but
+   no transaction listing. Confirm the installed module package and simulate
+   the removal:
 
    ```bash
+   rpm -q "$MODULE_PACKAGE"
    sudo rpm -e --test "$MODULE_PACKAGE"
-   sudo rpm -e "$MODULE_PACKAGE"
+   ```
 
+   After the simulation succeeds, remove the module:
+
+   ```bash
+   sudo rpm -e "$MODULE_PACKAGE"
+   ```
+
+   Confirm the installed NGINX packages and the target package files, then
+   simulate the downgrade:
+
+   ```bash
+   rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 'nginx*'
+   rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' "${NGINX_RPMS[@]}"
    sudo rpm -U --test --oldpackage "${NGINX_RPMS[@]}"
+   ```
+
+   After the simulation succeeds, downgrade NGINX:
+
+   ```bash
    sudo rpm -U --oldpackage "${NGINX_RPMS[@]}"
    ```
 

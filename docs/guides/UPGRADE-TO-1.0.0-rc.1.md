@@ -68,30 +68,45 @@ Build the module with the manual source build procedure in
 same NGINX source and configure arguments as the running server.
 
 Before the Install step, set `MODULES_DIR` and `BACKUP_DIR` to the active
-module directory and an existing backup directory. Back up the current module
+module directory and an existing backup directory. On the first upgrade, set
+`PRE_CANDIDATE_BACKUP` to an absolute path that does not exist yet, for
+example
+`PRE_CANDIDATE_BACKUP="$BACKUP_DIR/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1"`.
+Set `CURRENT_BACKUP` to `"$PRE_CANDIDATE_BACKUP"` on the first upgrade, or to a
+new unused path on a repeat upgrade. Do not change `PRE_CANDIDATE_BACKUP`
+after the first upgrade. Set `NGINX_BIN` to the absolute path of the binary
+that the service runs.
+
+The backup command creates the file exclusively, so a repeat or concurrent
+upgrade cannot replace the pre-candidate backup. Back up the current module
 and stop NGINX before you install the candidate.
 
 ```bash
-sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
-  "$BACKUP_DIR/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1" &&
+sudo sh -c 'set -C; cat "$1" > "$2"' sh \
+  "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
+  "$CURRENT_BACKUP" &&
   sudo systemctl stop nginx
 ```
+
+If the copy fails partway, remove the partial `CURRENT_BACKUP` file before
+you retry. Do not remove a valid backup when the exclusive create fails.
 
 When the backup and stop commands succeed, complete the Install step. Then
 test the configuration with the installed NGINX binary and start NGINX.
 
 ```bash
-sudo nginx -t && sudo systemctl start nginx
+sudo "$NGINX_BIN" -t && sudo systemctl start nginx
 ```
 
 To roll back, stop NGINX before replacing the mapped module. Then test the
-configuration and start NGINX to load the previous module:
+configuration and start NGINX to load the previous module. Use the
+`PRE_CANDIDATE_BACKUP` and `NGINX_BIN` values from the upgrade:
 
 ```bash
 sudo systemctl stop nginx &&
-  sudo cp "$BACKUP_DIR/ngx_http_markdown_filter_module.so.pre-1.0.0-rc.1" \
+  sudo cp "$PRE_CANDIDATE_BACKUP" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so" &&
-  sudo nginx -t && sudo systemctl start nginx
+  sudo "$NGINX_BIN" -t && sudo systemctl start nginx
 ```
 
 Do not treat a skipped check or missing evidence as a pass.
