@@ -89,6 +89,8 @@ sudo mkdir "$MODULE_LOCK"
 If `mkdir` fails, stop the procedure. If another operation holds the lock,
 wait for it to finish and acquire the lock before you retry. Keep the lock
 through backup, installation, configuration testing, and service start.
+Keep it until you decide to keep the candidate or roll back. If you roll back,
+reuse this lock and do not run `mkdir` again.
 If you find a lock after an interruption, confirm that the prior operation
 has ended and resolve any incomplete upgrade before clearing the lock.
 
@@ -113,15 +115,13 @@ test the configuration with the installed NGINX binary and start NGINX.
 sudo "$NGINX_BIN" -t && sudo systemctl start nginx
 ```
 
-After the upgrade or rollback completes, release the lock with
-`sudo rmdir "$MODULE_LOCK"`.
-
-To roll back, acquire the same lock and use `PRE_CANDIDATE_BACKUP` from the
-first upgrade. If upgrades overlapped, verify that this file contains the
+To roll back, use `PRE_CANDIDATE_BACKUP` from the first upgrade while holding
+the lock acquired above. Set `MODULE_LOCK` to the same lock path if you are in
+a new shell. If upgrades overlapped, verify that the backup contains the
 pre-candidate module before you restore it. If you cannot verify it, restore
 a verified copy from a trusted pre-candidate archive to that backup path.
-Stop the rollback if you have no verified copy. A repeat upgrade's backup
-can contain the candidate.
+Stop the rollback if you have no verified copy. A repeat upgrade's backup can
+contain the candidate.
 
 Stop NGINX before you replace the mapped module. Then test the configuration
 with `NGINX_BIN` from the upgrade and start NGINX to load the previous module:
@@ -131,6 +131,13 @@ sudo systemctl stop nginx &&
   sudo cp "$PRE_CANDIDATE_BACKUP" \
     "$MODULES_DIR/ngx_http_markdown_filter_module.so" &&
   sudo "$NGINX_BIN" -t && sudo systemctl start nginx
+```
+
+Release the lock only after the chosen module has passed the configuration
+test and NGINX has started successfully:
+
+```bash
+sudo rmdir "$MODULE_LOCK"
 ```
 
 Do not treat a skipped check or missing evidence as a pass.

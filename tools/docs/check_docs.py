@@ -1836,8 +1836,8 @@ def _stable_claim_prefix_subject(
     """Resolve the subject before checking versions elsewhere in the clause."""
     prefix = _stable_predicate_prefix(prefix)
     modifier = re.match(
-        r"\s*[*_`]*(?:(?:the|this|that|current|new|latest)\s+)*"
-        r"(?:published|released)\s+",
+        r"\s*[*_`]*(?:(?:the|this|that|current|new|latest)\s+[*_`]*)*"
+        r"(?:published|released)[*_`]*\s+",
         prefix,
         re.IGNORECASE,
     )

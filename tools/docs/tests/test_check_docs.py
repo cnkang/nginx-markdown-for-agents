@@ -1392,6 +1392,8 @@ def test_prerelease_claim_inherits_candidate_from_earlier_sentence():
         "The release candidate for NGINX 1.28.0 is a stable release.",
         "The release candidate for this module is a stable release.",
         "The published release candidate for NGINX 1.28.0 is a stable release.",
+        "The **published** release candidate for NGINX 1.28.0 is a stable release.",
+        "The __released__ candidate for NGINX 1.28.0 is a stable release.",
         "The release candidate replaces 1.28.0 as the stable release.",
         "The upgrade guide says **the release candidate** is a stable release.",
         "The guide for {version} confirms that the release candidate is a stable release.",
@@ -1422,6 +1424,7 @@ def test_candidate_stable_subject_overrides_inherited_other_subject_context(clai
         "The **{version} installation guide**",
         "The installation guide for release candidate {version}",
         "The published installation guide for {version}",
+        "The **published** installation guide for {version}",
     ],
 )
 def test_prerelease_stable_claim_respects_resolved_other_subject(subject):
